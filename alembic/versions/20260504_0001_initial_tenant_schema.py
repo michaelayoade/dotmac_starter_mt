@@ -4,7 +4,7 @@ Creates:
 - DB roles `app_admin` (offline bypass), `platform_api` (online platform routes),
   and `app_user` (tenant routes, RLS-enforced)
 - `tenants` and `tenant_domains` (NOT under RLS — platform-level)
-- `people`, `user_credentials`, and `auth_sessions` with `tenant_id` and RLS policies
+- Tenant-scoped people, auth, RBAC, and audit tables with RLS policies
 - Grants on platform_api and app_user
 
 Run as a superuser the first time so the CREATE ROLE statements succeed; subsequent
@@ -34,6 +34,8 @@ def upgrade() -> None:
     _create_tenant_domains_table()
     _create_people_table()
     _create_auth_tables()
+    _create_rbac_tables()
+    _create_audit_events_table()
     _create_current_tenant_function()
     _apply_rls()
     _grant_roles()
@@ -41,6 +43,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("auth_sessions")
+    op.drop_table("audit_events")
+    op.drop_table("person_roles")
+    op.drop_table("roles")
     op.drop_table("user_credentials")
     op.drop_table("people")
     op.drop_table("tenant_domains")
@@ -258,6 +263,113 @@ def _create_auth_tables() -> None:
     op.create_index("ix_auth_sessions_person_id", "auth_sessions", ["person_id"])
 
 
+def _create_rbac_tables() -> None:
+    op.create_table(
+        "roles",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "tenant_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tenants.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("slug", sa.String(63), nullable=False),
+        sa.Column("name", sa.String(120), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.UniqueConstraint("tenant_id", "slug", name="uq_roles_tenant_slug"),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_roles_tenant_id_id"),
+    )
+    op.create_index("ix_roles_tenant_id", "roles", ["tenant_id"])
+
+    op.create_table(
+        "person_roles",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "tenant_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tenants.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("person_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("role_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "person_id",
+            "role_id",
+            name="uq_person_roles_member",
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "person_id"],
+            ["people.tenant_id", "people.id"],
+            ondelete="CASCADE",
+            name="fk_person_roles_tenant_person",
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "role_id"],
+            ["roles.tenant_id", "roles.id"],
+            ondelete="CASCADE",
+            name="fk_person_roles_tenant_role",
+        ),
+    )
+    op.create_index("ix_person_roles_tenant_id", "person_roles", ["tenant_id"])
+    op.create_index("ix_person_roles_person_id", "person_roles", ["person_id"])
+    op.create_index("ix_person_roles_role_id", "person_roles", ["role_id"])
+
+
+def _create_audit_events_table() -> None:
+    op.create_table(
+        "audit_events",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "tenant_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tenants.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("actor_person_id", postgresql.UUID(as_uuid=True)),
+        sa.Column("action", sa.String(120), nullable=False),
+        sa.Column("entity_type", sa.String(120), nullable=False),
+        sa.Column("entity_id", sa.String(120)),
+        sa.Column(
+            "details",
+            postgresql.JSONB,
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
+    )
+    op.create_index("ix_audit_events_tenant_id", "audit_events", ["tenant_id"])
+    op.create_index("ix_audit_events_actor_person_id", "audit_events", ["actor_person_id"])
+
+
 def _create_current_tenant_function() -> None:
     """Return the current tenant setting as uuid, or NULL when unset/invalid."""
     op.execute(
@@ -280,7 +392,14 @@ def _create_current_tenant_function() -> None:
 
 def _apply_rls() -> None:
     """Enable RLS on tenant-scoped tables."""
-    for table in ("people", "user_credentials", "auth_sessions"):
+    for table in (
+        "people",
+        "user_credentials",
+        "auth_sessions",
+        "roles",
+        "person_roles",
+        "audit_events",
+    ):
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")
         op.execute(
@@ -300,10 +419,12 @@ def _grant_roles() -> None:
     op.execute("GRANT SELECT ON tenants, tenant_domains TO app_user, platform_api;")
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON "
-        "people, user_credentials, auth_sessions TO app_user;"
+        "people, user_credentials, auth_sessions, roles, person_roles TO app_user;"
     )
+    op.execute("GRANT SELECT, INSERT ON audit_events TO app_user;")
     op.execute("GRANT INSERT, UPDATE, DELETE ON tenants, tenant_domains TO platform_api;")
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON "
-        "people, user_credentials, auth_sessions TO platform_api;"
+        "people, user_credentials, auth_sessions, roles, person_roles TO platform_api;"
     )
+    op.execute("GRANT SELECT, INSERT ON audit_events TO platform_api;")

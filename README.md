@@ -14,6 +14,7 @@ for the full design.
 - `Tenant` model + `tenant_domains` for custom domain support.
 - `Person` model with `tenant_id` and per-tenant unique email.
 - Minimal JWT auth with tenant-bound credentials and sessions.
+- Minimal RBAC with tenant-scoped roles, role grants, and audit events.
 - `TenantResolverMiddleware` that parses host header → `request.state.tenant`.
 - `get_db` dependency that runs `SET LOCAL app.current_tenant` for RLS.
 - Initial Alembic migration that creates `app_user`, `platform_api`, and `app_admin`
@@ -24,8 +25,8 @@ for the full design.
 
 This is intentionally minimal. To productionize, port from `dotmac_starter`:
 
-- MFA, RBAC, password reset, account lockout, and production auth hardening
-- Billing, file uploads, notifications, scheduler, audit log
+- MFA, password reset, account lockout, and production auth hardening
+- Billing, file uploads, notifications, scheduler
 - CSRF middleware, security headers, observability
 - Frontend (Tailwind, Alpine CSP build, templates)
 - CI workflows
@@ -66,7 +67,11 @@ curl http://widgets.localhost:8001/people  # sees nothing
 ## Run the cross-tenant tests
 
 ```bash
-poetry run pytest tests/test_cross_tenant_isolation.py tests/test_auth_tenant_claim.py -v
+poetry run pytest \
+    tests/test_cross_tenant_isolation.py \
+    tests/test_auth_tenant_claim.py \
+    tests/test_rbac_audit_isolation.py \
+    -v
 ```
 
 These tests require a migrated disposable Postgres database because SQLite cannot enforce

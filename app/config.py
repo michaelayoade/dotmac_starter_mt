@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     platform_root_domain: str = "localhost"
     trusted_hosts: str = ""
     jwt_secret: str = "dev-insecure-change-me"  # noqa: S105 - rejected in production.
+    session_hash_secret: str = "dev-insecure-change-me"  # noqa: S105 - rejected in prod.
     jwt_ttl_seconds: int = 3600
 
     @property
@@ -41,4 +42,6 @@ def validate_settings(s: Settings) -> list[str]:
         errors.append("PLATFORM_ROOT_DOMAIN must be a real domain in production")
     if s.is_production and s.jwt_secret == "dev-insecure-change-me":  # noqa: S105
         errors.append("JWT_SECRET must be set in production")
+    if s.is_production and s.session_hash_secret == "dev-insecure-change-me":  # noqa: S105
+        errors.append("SESSION_HASH_SECRET must be set in production")
     return errors

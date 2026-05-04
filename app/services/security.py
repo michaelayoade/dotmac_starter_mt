@@ -73,7 +73,11 @@ def decode_access_token(token: str) -> dict[str, object] | None:
 
 
 def hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
+    return hmac.new(
+        settings.session_hash_secret.encode(),
+        token.encode(),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _encode_jwt(payload: dict[str, object]) -> str:

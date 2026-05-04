@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_tenant, require_user_auth
 from app.models.auth import AuthSession, UserCredential
 from app.models.person import Person
+from app.models.rbac import PersonRole, Role
 from app.models.tenant import Tenant
 from app.services.security import hash_password, hash_token, issue_access_token, verify_password
 
@@ -67,6 +68,7 @@ def register(
         )
         db.add(credential)
         db.flush()
+        _assign_first_user_admin(db, tenant, person)
         db.refresh(person)
     except IntegrityError as exc:
         db.rollback()
@@ -81,7 +83,9 @@ def login(
     tenant: Tenant = Depends(require_tenant),
 ) -> TokenResponse:
     credential = db.scalars(
-        select(UserCredential).where(UserCredential.email == payload.email)
+        select(UserCredential)
+        .where(UserCredential.tenant_id == tenant.id)
+        .where(UserCredential.email == payload.email)
     ).first()
     if credential is None or not verify_password(payload.password, credential.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -112,3 +116,21 @@ def _current_user_response(person: Person) -> CurrentUserResponse:
         last_name=person.last_name,
         tenant_id=person.tenant_id,
     )
+
+
+def _assign_first_user_admin(db: Session, tenant: Tenant, person: Person) -> None:
+    existing_assignment = db.scalars(
+        select(PersonRole).where(PersonRole.tenant_id == tenant.id).limit(1)
+    ).first()
+    if existing_assignment is not None:
+        return
+
+    role = db.scalars(
+        select(Role).where(Role.tenant_id == tenant.id).where(Role.slug == "admin")
+    ).first()
+    if role is None:
+        role = Role(tenant_id=tenant.id, slug="admin", name="Admin")
+        db.add(role)
+        db.flush()
+    db.add(PersonRole(tenant_id=tenant.id, person_id=person.id, role_id=role.id))
+    db.flush()
