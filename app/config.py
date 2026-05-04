@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     jwt_secret: str = "dev-insecure-change-me"  # noqa: S105 - rejected in production.
     session_hash_secret: str = "dev-insecure-change-me"  # noqa: S105 - rejected in prod.
     jwt_ttl_seconds: int = 3600
+    csrf_enabled: bool = True
+    rate_limit_enabled: bool = True
+    rate_limit_requests: int = 120
+    rate_limit_window_seconds: int = 60
+    trust_inbound_request_id: bool = False
 
     @property
     def is_production(self) -> bool:

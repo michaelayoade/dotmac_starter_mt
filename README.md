@@ -15,6 +15,7 @@ for the full design.
 - `Person` model with `tenant_id` and per-tenant unique email.
 - Minimal JWT auth with tenant-bound credentials and sessions.
 - Minimal RBAC with tenant-scoped roles, role grants, and audit events.
+- CSRF middleware, tenant-aware in-memory rate limiting, and request IDs.
 - `TenantResolverMiddleware` that parses host header → `request.state.tenant`.
 - `get_db` dependency that runs `SET LOCAL app.current_tenant` for RLS.
 - Initial Alembic migration that creates `app_user`, `platform_api`, and `app_admin`
@@ -27,7 +28,7 @@ This is intentionally minimal. To productionize, port from `dotmac_starter`:
 
 - MFA, password reset, account lockout, and production auth hardening
 - Billing, file uploads, notifications, scheduler
-- CSRF middleware, security headers, observability
+- Security headers
 - Frontend (Tailwind, Alpine CSP build, templates)
 - CI workflows
 - Production Dockerfile / compose
@@ -71,6 +72,7 @@ poetry run pytest \
     tests/test_cross_tenant_isolation.py \
     tests/test_auth_tenant_claim.py \
     tests/test_rbac_audit_isolation.py \
+    tests/test_security_middleware.py \
     -v
 ```
 
@@ -88,6 +90,16 @@ app_admin     — Alembic migrations and offline maintenance only. Bypasses RLS.
 The `DATABASE_URL` env var should use `app_user`. `PLATFORM_DATABASE_URL` should use
 `platform_api`. Migrations use `MIGRATION_DATABASE_URL` connecting as `app_admin`.
 Settings are loaded from the environment and from a local `.env` file.
+
+## Middleware Notes
+
+- Rate limiting is process-local in this skeleton. It is keyed by
+  `tenant_id/client_ip/path`, but it does not aggregate across Gunicorn workers and keys live for the
+  process lifetime. Port the same key shape to Redis with TTLs for production.
+- Inbound `X-Request-ID` is ignored by default to prevent log poisoning. Set
+  `TRUST_INBOUND_REQUEST_ID=true` only behind a trusted proxy that normalizes that header.
+- CSRF uses a double-submit cookie/header check. Origin/Referer validation is deferred; add it before
+  relying on browser-cookie auth in production.
 
 ## License
 

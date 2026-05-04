@@ -1,9 +1,11 @@
 """FastAPI app entrypoint.
 
 Middleware order (outermost → innermost):
-1. TrustedHostMiddleware — drops requests to unknown hosts (prod)
-2. TenantResolverMiddleware — sets request.state.tenant
-3. (CSRF, rate limit, auth — add as you port from dotmac_starter)
+1. ObservabilityMiddleware — request id + structured request logs
+2. TrustedHostMiddleware — drops requests to unknown hosts (prod)
+3. TenantResolverMiddleware — sets request.state.tenant
+4. RateLimitMiddleware — tenant/ip/path keyed budget
+5. CSRFMiddleware — double-submit guard for browser-cookie flows
 """
 
 from __future__ import annotations
@@ -20,6 +22,9 @@ from app.api.persons import router as persons_router
 from app.api.rbac import router as rbac_router
 from app.api.tenants import router as tenants_router
 from app.config import settings, validate_settings
+from app.middleware.csrf import CSRFMiddleware
+from app.middleware.observability import ObservabilityMiddleware
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.tenant import TenantResolverMiddleware
 from app.services.exceptions import (
     BadRequestError,
@@ -43,13 +48,26 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="dotmac_starter_mt", lifespan=lifespan)
 
+# FastAPI/Starlette runs the last added middleware first.
+app.add_middleware(CSRFMiddleware, enabled=settings.csrf_enabled)
+app.add_middleware(
+    RateLimitMiddleware,
+    enabled=settings.rate_limit_enabled,
+    requests=settings.rate_limit_requests,
+    window_seconds=settings.rate_limit_window_seconds,
+)
+
+app.add_middleware(TenantResolverMiddleware)
+
 # Trusted hosts — only enable in prod with explicit list.
 if settings.trusted_hosts:
     hosts = [h.strip() for h in settings.trusted_hosts.split(",") if h.strip()]
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
 
-# Resolver runs after TrustedHost so we never resolve an untrusted host.
-app.add_middleware(TenantResolverMiddleware)
+app.add_middleware(
+    ObservabilityMiddleware,
+    trust_inbound_request_id=settings.trust_inbound_request_id,
+)
 
 
 # Domain exception handlers — same envelope shape as dotmac_starter.
