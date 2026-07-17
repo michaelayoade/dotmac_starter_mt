@@ -16,7 +16,10 @@ from sqlalchemy.orm import Session, sessionmaker
 # DATABASE_URL is pinned to a hermetic placeholder in tests/conftest.py (the
 # root conftest), which pytest imports before this module — see the comment
 # there about import-time engine creation in app.core.db.
-from app.core import audit  # noqa: F401
+from app.core import (
+    audit,  # noqa: F401
+    settings_models,  # noqa: F401
+)
 from app.core.models import Base, Tenant
 
 # Import feature model modules so Base.metadata is fully populated.

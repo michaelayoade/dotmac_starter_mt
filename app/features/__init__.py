@@ -3,4 +3,5 @@ FEATURE_MODULES = [
     "app.features.auth",
     "app.features.persons",
     "app.features.rbac",
+    "app.features.settings",
 ]

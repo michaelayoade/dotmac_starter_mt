@@ -71,6 +71,7 @@ modules = [
     "app.features.auth",
     "app.features.persons",
     "app.features.rbac",
+    "app.features.settings",
 ]
 
 [[tool.importlinter.contracts]]
