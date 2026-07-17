@@ -63,16 +63,15 @@ handlers, `/health` is registered directly on `app`, and
 ### Health bypass
 
 `/health` is a liveness check that must not touch the database (container
-orchestrators probe it before a DB may even be reachable). It is the *only*
-entry in both:
-
-- `TenantResolverMiddleware._HEALTH_PATHS` — an exact-path frozenset
-  short-circuited before any tenant resolution (no DB query at all), and
-- `tests/architecture/test_route_guards.py::ALLOWLIST` — the only route
-  permitted to carry zero `require_*` guards.
-
-Every other route either carries a `require_*` dependency or fails the
-architecture test.
+orchestrators probe it before a DB may even be reachable).
+`TenantResolverMiddleware._HEALTH_PATHS` is a frozenset containing `/health`
+and `/health/ready`; both are short-circuited before any tenant resolution
+(no DB query at all). Today only `/health` is mounted as a route; `/health/ready`
+is pre-listed for a future readiness endpoint and currently returns 404 at the
+router after bypassing tenant resolution. `/health` is the only route in
+`tests/architecture/test_route_guards.py::ALLOWLIST` permitted to carry zero
+`require_*` guards. Every other route either carries a `require_*` dependency
+or fails the architecture test.
 
 ## Tenant resolution
 

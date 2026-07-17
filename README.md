@@ -64,12 +64,11 @@ git clone <this-repo> my-app && cd my-app
 # tests/architecture/test_feature_manifests.py fails if the registry and
 # app/features/ directory drift apart.
 
-cp .env.example .env   # fill in change-me placeholders
-
-make test-db-up   # disposable Postgres + migrations (TEST_DB_PORT if the
-                  # default port is taken)
-make migrate      # apply migrations to your real DATABASE_URL/MIGRATION_DATABASE_URL
-make dev          # run the app
+# To run the app locally, follow the Quickstart section above (dev database).
+# To run the integration test suite, use `make test-db-up` to start a
+# disposable Postgres, `make test-integration` to run tests, then
+# `make test-db-down` to tear it down — that test DB is separate from the
+# persistent dev database used for running the app.
 ```
 
 A single-tenant deployment is this same app provisioned with exactly one
@@ -84,13 +83,12 @@ directly with `--reload`:
 
 ```bash
 poetry install
+cp .env.example .env   # dev defaults are already set; optionally customize DEV_DB_PORT etc.
 docker compose -f docker-compose.dev.yml up -d postgres   # DEV_DB_PORT/DEV_POSTGRES_* overridable
-MIGRATION_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/starter \
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/starter \
-    poetry run alembic upgrade head
+poetry run alembic upgrade head
 poetry run uvicorn app.main:app --reload --port 8000 \
     --forwarded-allow-ips "127.0.0.1"
-# equivalently, once DATABASE_URL is in .env: make dev
+# equivalently: make dev
 ```
 
 In dev, browsers resolve `*.localhost` automatically:
