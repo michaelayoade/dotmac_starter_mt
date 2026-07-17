@@ -20,11 +20,13 @@ here never attempts a real connection.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
 import sys
 
 import pytest
+from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.core.features import FeatureManifest
@@ -128,3 +130,30 @@ def test_import_app_main_works_with_settings_feature_disabled():
     )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
+
+
+def test_lifespan_seed_failure_is_deferred_non_fatal_and_health_still_serves(caplog):
+    """Regression for the CI docker-build health-gate failure (run
+    29592275704): with an unreachable DATABASE_URL, the real settings
+    manifest's `seed_platform_defaults` raises when it tries to connect —
+    previously this propagated out of `lifespan` and killed startup entirely
+    ("Application startup failed"), so `/health` never got a chance to
+    serve. Seeds are idempotent (`ensure_by_key` never overwrites), so a
+    failed seed must be deferred and non-fatal: log a warning and keep
+    serving; the next boot retries.
+
+    Uses the REAL manifests (this test does not monkeypatch `_manifests`)
+    so it exercises `seed_platform_defaults` against the hermetic,
+    unroutable `DATABASE_URL` pinned by `tests/conftest.py` — the exact
+    scenario from the failing CI job.
+    """
+    main_module.settings.seed_on_startup = True
+    main_module.settings.disabled_features = ""
+
+    with caplog.at_level(logging.WARNING, logger="app.main"):
+        with TestClient(main_module.app) as client:
+            response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert any("seed skipped" in record.getMessage() for record in caplog.records)

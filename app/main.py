@@ -10,6 +10,7 @@ Middleware order (outermost → innermost):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -41,12 +42,30 @@ setup_logging()
 _manifests = load_manifests(FEATURE_MODULES)
 
 
-def _run_enabled_seeds(manifests: list[FeatureManifest], disabled: set[str]) -> None:
+async def _run_enabled_seeds(
+    manifests: list[FeatureManifest], disabled: set[str]
+) -> None:
+    """Run each enabled manifest's seed hook off the event loop.
+
+    DEFERRED, NON-FATAL: seeds are idempotent (e.g. the settings feature's
+    own seed hook never overwrites an existing row), so a failed seed (e.g.
+    an unreachable DATABASE_URL) must never prevent the app from serving —
+    the liveness contract (`/health` never touches the DB, CI's docker-build
+    job health-gates a container booted against a deliberately unreachable
+    DB) must hold even when the seed step fails. The next boot retries.
+    `manifest.seed()` does sync DB I/O, so it's dispatched via
+    `asyncio.to_thread` rather than blocking the event loop.
+    """
     for manifest in manifests:
         if manifest.name in disabled or not manifest.enabled_by_default:
             continue
         if manifest.seed is not None:
-            manifest.seed()
+            try:
+                await asyncio.to_thread(manifest.seed)
+            except Exception as exc:
+                # seed failure must be swallowed here so it can never take
+                # down startup; see docstring above.
+                logger.warning("Feature %s seed skipped: %s", manifest.name, exc)
 
 
 @asynccontextmanager
@@ -57,7 +76,7 @@ async def lifespan(_: FastAPI):
             raise RuntimeError(f"Configuration error: {err}")
         logger.warning("Config: %s", err)
     if settings.seed_on_startup:
-        _run_enabled_seeds(_manifests, settings.disabled_feature_set)
+        await _run_enabled_seeds(_manifests, settings.disabled_feature_set)
     yield
 
 

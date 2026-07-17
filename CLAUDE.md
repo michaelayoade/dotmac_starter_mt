@@ -129,8 +129,10 @@ without touching core:
   step — and `scripts/deploy.sh` is the only place migrations run
   (`alembic upgrade heads`, before recreating the app container). CI's
   `docker-build` job health-gates a container booted with a deliberately
-  unreachable `DATABASE_URL`, which passes only because startup never
-  touches the DB for anything but the (DB-free) `/health` check.
+  unreachable `DATABASE_URL`, which passes because `/health` is DB-free and
+  because the lifespan's feature-seed step (see below) attempts but never
+  blocks on the DB: a seed failure is caught, logged, and skipped so
+  startup always reaches the point where `/health` can serve.
 - New feature: create the package + `feature.py`, register it in
   `app/features/__init__.py` (`FEATURE_MODULES`), add it to the
   import-linter "Features are independent" contract in `pyproject.toml`,

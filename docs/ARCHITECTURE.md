@@ -388,6 +388,12 @@ in the same migration that creates the table.
    under `app/features/` on disk is registered in `FEATURE_MODULES` and that
    each manifest's `name` matches its package name — so a feature can never
    silently go unmounted or be mounted twice under a different name.
+6. Separately, still inside `lifespan` and gated by `settings.seed_on_startup`,
+   each enabled manifest's optional `seed` hook is dispatched via
+   `asyncio.to_thread` (it does sync DB I/O); a seed is DEFERRED and
+   NON-FATAL — a failure is caught, logged (`Feature %s seed skipped: %s`),
+   and swallowed rather than propagated, so an unreachable DB at boot can
+   never take startup down (seeds are idempotent; the next boot retries).
 
 ## Error handling
 
