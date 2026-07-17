@@ -17,6 +17,7 @@ test) to prove:
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 
 import pytest
@@ -127,6 +128,51 @@ def test_health_paths_bypass_tenant_resolution_without_db_access(
 
     assert status == 200
     assert scope["state"]["tenant"] is None
+
+
+def test_unresolved_tenant_404_uses_error_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The middleware's hand-built 404 must match the app-wide error envelope."""
+    session_local, _ = _recording_session_local()
+    monkeypatch.setattr(tenant_module, "SessionLocal", session_local)
+    app = TenantResolverMiddleware(_ok_inner_app)
+
+    messages: list[dict[str, object]] = []
+
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict[str, object]) -> None:
+        messages.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/anything",
+        "raw_path": b"/anything",
+        "query_string": b"",
+        "headers": [(b"host", b"nosuch.example.com")],
+        "scheme": "http",
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+    asyncio.run(app(scope, receive, send))
+
+    start = next(m for m in messages if m["type"] == "http.response.start")
+    assert start["status"] == 404
+    body = json.loads(
+        b"".join(
+            m.get("body", b"")  # type: ignore[arg-type]
+            for m in messages
+            if m["type"] == "http.response.body"
+        )
+    )
+    assert body["code"] == "tenant_not_found"
+    assert body["message"] == "Tenant not found"
+    assert "request_id" in body
+    assert "detail" not in body
 
 
 @pytest.mark.parametrize("path", ["/health2", "/health/ready/x"])

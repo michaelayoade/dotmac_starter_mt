@@ -1,6 +1,8 @@
 """Structured JSON error handlers (ported pattern from dotmac_sub app/errors.py).
 
-Phase 3 (web UI) adds HTML content negotiation here; keep `_envelope` reusable.
+Phase 3 (web UI) adds HTML content negotiation here; keep `envelope` reusable.
+Every error body in the app — handlers here and the hand-built middleware
+responses (tenant resolver, rate limit, CSRF) — uses this one envelope shape.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.exceptions import (
     BadRequestError,
@@ -23,14 +26,30 @@ from app.core.logging import request_id_var
 
 logger = logging.getLogger(__name__)
 
+# Stable machine-readable slugs for bare HTTPExceptions (raised by FastAPI
+# internals, auth dependencies, and any leftover route-level raises).
+_STATUS_SLUGS = {
+    400: "bad_request",
+    401: "unauthorized",
+    403: "forbidden",
+    404: "not_found",
+    405: "method_not_allowed",
+    409: "conflict",
+    422: "validation_error",
+    429: "rate_limited",
+}
 
-def _envelope(code: str, message: str, details: Any = None) -> dict[str, Any]:
+
+def envelope(code: str, message: str, details: Any = None) -> dict[str, Any]:
     return {
         "code": code,
         "message": message,
         "details": details,
         "request_id": request_id_var.get(),
     }
+
+
+_envelope = envelope  # backwards-compatible private alias
 
 
 def register_error_handlers(app: FastAPI) -> None:
@@ -57,6 +76,15 @@ def register_error_handlers(app: FastAPI) -> None:
         logger.exception("Unhandled DomainError")
         return JSONResponse(
             status_code=500, content=_envelope("internal_error", "Internal error")
+        )
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_exception(_: Request, exc: StarletteHTTPException) -> JSONResponse:
+        code = _STATUS_SLUGS.get(exc.status_code, "http_error")
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=envelope(code, str(exc.detail)),
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

@@ -23,6 +23,7 @@ from starlette.types import ASGIApp
 
 from app.core.config import settings
 from app.core.db import SessionLocal
+from app.core.errors import envelope
 from app.core.models import Tenant, TenantDomain
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
         ):
             return JSONResponse(
                 status_code=404,
-                content={"detail": "Tenant not found"},
+                content=envelope("tenant_not_found", "Tenant not found"),
             )
         return await call_next(request)
 

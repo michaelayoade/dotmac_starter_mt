@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.core.errors import envelope
+
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 CSRF_COOKIE = "csrf_token"
 CSRF_HEADER = "x-csrf-token"
@@ -31,7 +33,7 @@ class CSRFMiddleware:
             if request.cookies and not _valid_csrf_token(cookie_token, header_token):
                 response = JSONResponse(
                     status_code=403,
-                    content={"detail": "CSRF check failed"},
+                    content=envelope("csrf_failed", "CSRF check failed"),
                 )
                 await response(scope, receive, send)
                 return

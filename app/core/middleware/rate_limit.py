@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.core.errors import envelope
+
 
 class RateLimitMiddleware:
     def __init__(
@@ -48,7 +50,7 @@ class RateLimitMiddleware:
             retry_after = max(1, int(self.window_seconds - (now - hits[0])))
             response = JSONResponse(
                 status_code=429,
-                content={"detail": "Rate limit exceeded"},
+                content=envelope("rate_limited", "Rate limit exceeded"),
                 headers={"Retry-After": str(retry_after)},
             )
             await response(scope, receive, send)
