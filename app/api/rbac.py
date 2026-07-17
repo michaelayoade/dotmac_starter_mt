@@ -5,16 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_role, require_tenant
 from app.models.person import Person
-from app.models.rbac import AuditEvent, PersonRole, Role
+from app.models.rbac import AuditEvent, Role
 from app.models.tenant import Tenant
+from app.services import rbac as rbac_service
 from app.services.audit import write_audit_event
 
 router = APIRouter(
@@ -61,14 +60,7 @@ def create_role(
     tenant: Tenant = Depends(require_tenant),
     actor: Person = Depends(require_role("admin")),
 ) -> Role:
-    role = Role(tenant_id=tenant.id, slug=payload.slug, name=payload.name)
-    db.add(role)
-    try:
-        db.flush()
-        db.refresh(role)
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Role already exists") from exc
+    role = rbac_service.create_role(db, tenant, payload)
     write_audit_event(
         db,
         tenant_id=tenant.id,
@@ -90,33 +82,15 @@ def grant_role(
     tenant: Tenant = Depends(require_tenant),
     actor: Person = Depends(require_role("admin")),
 ) -> None:
-    person = db.scalars(
-        select(Person)
-        .where(Person.tenant_id == tenant.id)
-        .where(Person.id == payload.person_id)
-    ).first()
-    role = db.scalars(
-        select(Role)
-        .where(Role.tenant_id == tenant.id)
-        .where(Role.id == payload.role_id)
-    ).first()
-    if person is None or role is None:
-        raise HTTPException(status_code=404, detail="Person or role not found")
-
-    db.add(PersonRole(tenant_id=tenant.id, person_id=person.id, role_id=role.id))
-    try:
-        db.flush()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Role already assigned") from exc
+    person_role = rbac_service.assign_role(db, tenant, payload)
     write_audit_event(
         db,
         tenant_id=tenant.id,
         actor_person_id=actor.id,
         action="role.grant",
         entity_type="person_role",
-        entity_id=str(person.id),
-        details={"role_id": str(role.id)},
+        entity_id=str(person_role.person_id),
+        details={"role_id": str(person_role.role_id)},
     )
 
 
@@ -126,10 +100,4 @@ def list_audit_events(
     tenant: Tenant = Depends(require_tenant),
     _: Person = Depends(require_role("admin")),
 ) -> list[AuditEvent]:
-    return list(
-        db.scalars(
-            select(AuditEvent)
-            .where(AuditEvent.tenant_id == tenant.id)
-            .order_by(AuditEvent.created_at.desc())
-        ).all()
-    )
+    return rbac_service.list_audit_events(db, tenant)

@@ -15,12 +15,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_platform_db, require_platform
 from app.models.tenant import Tenant
+from app.services import tenants as tenants_service
 
 router = APIRouter(
     prefix="/platform/tenants",
@@ -46,20 +45,12 @@ class TenantRead(BaseModel):
 def create_tenant(
     payload: TenantCreate, db: Session = Depends(get_platform_db)
 ) -> Tenant:
-    tenant = Tenant(slug=payload.slug, name=payload.name)
-    db.add(tenant)
-    try:
-        db.flush()
-        db.refresh(tenant)
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Slug already in use") from exc
-    return tenant
+    return tenants_service.create_tenant(db, payload)
 
 
 @router.get("", response_model=list[TenantRead])
 def list_tenants(db: Session = Depends(get_platform_db)) -> list[Tenant]:
-    return list(db.scalars(select(Tenant).order_by(Tenant.created_at.desc())).all())
+    return tenants_service.list_tenants(db)
 
 
 @router.get("/{tenant_id}", response_model=TenantRead)
