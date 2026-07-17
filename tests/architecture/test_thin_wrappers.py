@@ -10,6 +10,9 @@ DISALLOWED = [
     re.compile(r"\bdb\.query\("),
     re.compile(r"\bdb\.execute\("),
     re.compile(r"\bselect\("),
+    re.compile(r"\bdb\.get\("),
+    re.compile(r"\bdb\.scalars\("),
+    re.compile(r"\bdb\.scalar\("),
 ]
 
 

@@ -8,17 +8,25 @@ calls these functions, and shapes the response.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.models import Tenant
 
 
 def list_tenants(db: Session) -> list[Tenant]:
     return list(db.scalars(select(Tenant).order_by(Tenant.created_at.desc())).all())
+
+
+def get_tenant(db: Session, tenant_id: UUID) -> Tenant:
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise NotFoundError("Tenant not found")
+    return tenant
 
 
 def create_tenant(db: Session, payload: Any) -> Tenant:

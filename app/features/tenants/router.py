@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -55,7 +55,4 @@ def list_tenants(db: Session = Depends(get_platform_db)) -> list[Tenant]:
 
 @router.get("/{tenant_id}", response_model=TenantRead)
 def get_tenant(tenant_id: UUID, db: Session = Depends(get_platform_db)) -> Tenant:
-    tenant = db.get(Tenant, tenant_id)
-    if tenant is None:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    return tenant
+    return tenants_service.get_tenant(db, tenant_id)
