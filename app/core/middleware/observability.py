@@ -48,7 +48,6 @@ class ObservabilityMiddleware:
         try:
             await self.app(scope, receive, send_with_request_id)
         finally:
-            request_id_var.reset(token)
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             tenant = getattr(request.state, "tenant", None)
             logger.info(
@@ -62,3 +61,4 @@ class ObservabilityMiddleware:
                     "tenant_id": str(tenant.id) if tenant is not None else None,
                 },
             )
+            request_id_var.reset(token)
