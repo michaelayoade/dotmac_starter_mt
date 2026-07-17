@@ -17,9 +17,10 @@ from sqlalchemy.orm import Session, sessionmaker
 # Unit tests never touch a real database (SQLite in-memory below), but importing
 # a feature's router — e.g. via app.core.features.load_manifests — transitively
 # imports app.core.db, which builds a SQLAlchemy engine from DATABASE_URL at
-# import time. Set a well-formed placeholder so that import succeeds hermetically.
+# import time. Set a well-formed placeholder with an unroutable port so that import
+# succeeds hermetically and any accidental connection attempt fails fast.
 os.environ.setdefault(
-    "DATABASE_URL", "postgresql+psycopg://unit-test:unit-test@localhost:5432/unit-test"
+    "DATABASE_URL", "postgresql+psycopg://unit-test:unit-test@127.0.0.1:59999/unit-test"
 )
 
 from app.core import audit  # noqa: F401
