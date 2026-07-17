@@ -5,16 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     String,
     UniqueConstraint,
+    Uuid,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.models import Base, TimestampMixin, uuid_pk
@@ -29,7 +30,7 @@ class Role(Base, TimestampMixin):
 
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid(),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -60,17 +61,13 @@ class PersonRole(Base, TimestampMixin):
 
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid(),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
-    role_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    person_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False, index=True)
+    role_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False, index=True)
 
 
 class AuditEvent(Base):
@@ -78,19 +75,19 @@ class AuditEvent(Base):
 
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid(),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    actor_person_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), index=True
-    )
+    actor_person_id: Mapped[UUID | None] = mapped_column(Uuid(), index=True)
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(120), nullable=False)
     entity_id: Mapped[str | None] = mapped_column(String(120))
     details: Mapped[dict[str, object]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        sa.JSON().with_variant(postgresql.JSONB(), "postgresql"),
+        nullable=False,
+        default=dict,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

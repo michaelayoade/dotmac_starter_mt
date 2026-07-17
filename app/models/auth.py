@@ -11,8 +11,8 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     String,
     UniqueConstraint,
+    Uuid,
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.models import Base, TimestampMixin, uuid_pk
@@ -32,13 +32,13 @@ class UserCredential(Base, TimestampMixin):
 
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid(),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid(),
         nullable=False,
         index=True,
     )
@@ -62,13 +62,13 @@ class AuthSession(Base, TimestampMixin):
 
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid(),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     person_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid(),
         nullable=False,
         index=True,
     )

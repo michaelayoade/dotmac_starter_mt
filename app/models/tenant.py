@@ -10,8 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.models import Base, TimestampMixin, uuid_pk
@@ -46,7 +45,7 @@ class TenantDomain(Base, TimestampMixin):
 
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid(),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
