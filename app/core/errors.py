@@ -1,0 +1,71 @@
+"""Structured JSON error handlers (ported pattern from dotmac_sub app/errors.py).
+
+Phase 3 (web UI) adds HTML content negotiation here; keep `_envelope` reusable.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+from app.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    DomainError,
+    NotFoundError,
+)
+from app.core.logging import request_id_var
+
+logger = logging.getLogger(__name__)
+
+
+def _envelope(code: str, message: str, details: Any = None) -> dict[str, Any]:
+    return {
+        "code": code,
+        "message": message,
+        "details": details,
+        "request_id": request_id_var.get(),
+    }
+
+
+def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(NotFoundError)
+    async def _not_found(_: Request, exc: NotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=404, content=_envelope("not_found", str(exc)))
+
+    @app.exception_handler(BadRequestError)
+    async def _bad_request(_: Request, exc: BadRequestError) -> JSONResponse:
+        return JSONResponse(status_code=400, content=_envelope("bad_request", str(exc)))
+
+    @app.exception_handler(ConflictError)
+    async def _conflict(_: Request, exc: ConflictError) -> JSONResponse:
+        return JSONResponse(status_code=409, content=_envelope("conflict", str(exc)))
+
+    @app.exception_handler(DomainError)
+    async def _domain(_: Request, exc: DomainError) -> JSONResponse:
+        logger.exception("Unhandled DomainError")
+        return JSONResponse(
+            status_code=500, content=_envelope("internal_error", "Internal error")
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
+        safe = [
+            {"loc": [str(p) for p in e.get("loc", [])], "msg": str(e.get("msg", ""))}
+            for e in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=422,
+            content=_envelope("validation_error", "Validation failed", safe),
+        )
+
+    @app.exception_handler(Exception)
+    async def _catch_all(_: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled exception")
+        return JSONResponse(
+            status_code=500, content=_envelope("internal_error", "Internal error")
+        )
