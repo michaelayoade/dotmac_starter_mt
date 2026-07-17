@@ -3,8 +3,8 @@
 `AuthSession` moved to `app.core.models` (needed by `app.core.deps.require_user_auth`
 — core cannot import features). `UserCredential` stays here: nothing outside
 `app.features.auth.service` touches it, so it remains feature-local. It references
-`people` and `tenants` via string-form `ForeignKey`/`ForeignKeyConstraint` only —
-no import of `app.core.models.Person`/`Tenant` classes needed.
+`parties` and `tenants` via string-form `ForeignKey`/`ForeignKeyConstraint` only —
+no import of `app.core.models.Party`/`Tenant` classes needed.
 """
 
 from __future__ import annotations
@@ -28,10 +28,10 @@ class UserCredential(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("tenant_id", "email", name="uq_user_credentials_tenant_email"),
         ForeignKeyConstraint(
-            ["tenant_id", "person_id"],
-            ["people.tenant_id", "people.id"],
+            ["tenant_id", "party_id"],
+            ["parties.tenant_id", "parties.id"],
             ondelete="CASCADE",
-            name="fk_user_credentials_tenant_person",
+            name="fk_user_credentials_tenant_party",
         ),
     )
 
@@ -42,7 +42,7 @@ class UserCredential(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    person_id: Mapped[UUID] = mapped_column(
+    party_id: Mapped[UUID] = mapped_column(
         Uuid(),
         nullable=False,
         index=True,

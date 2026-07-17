@@ -15,7 +15,7 @@ from app.core import (
     audit,  # noqa: F401  (register AuditEvent for autogenerate)
     settings_models,  # noqa: F401  (register DomainSetting)
 )
-from app.core.models import Base  # registers Tenant/Person/Role/PersonRole/AuthSession
+from app.core.models import Base  # registers Tenant/Party/Role/PartyRole/AuthSession
 from app.features.auth import (
     models as auth,  # noqa: F401  (register UserCredential for autogenerate)
 )

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import AuditEvent
 from app.core.exceptions import ConflictError, NotFoundError
-from app.core.models import Person, PersonRole, Role, Tenant
+from app.core.models import Party, PartyRole, Role, Tenant
 from app.core.query import apply_pagination
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import resolve_value
@@ -50,28 +50,28 @@ def create_role(db: Session, tenant: Tenant, payload: RoleCreate) -> Role:
     return role
 
 
-def assign_role(db: Session, tenant: Tenant, payload: RoleGrantRequest) -> PersonRole:
-    person = db.scalars(
-        select(Person)
-        .where(Person.tenant_id == tenant.id)
-        .where(Person.id == payload.person_id)
+def assign_role(db: Session, tenant: Tenant, payload: RoleGrantRequest) -> PartyRole:
+    party = db.scalars(
+        select(Party)
+        .where(Party.tenant_id == tenant.id)
+        .where(Party.id == payload.party_id)
     ).first()
     role = db.scalars(
         select(Role)
         .where(Role.tenant_id == tenant.id)
         .where(Role.id == payload.role_id)
     ).first()
-    if person is None or role is None:
-        raise NotFoundError("Person or role not found")
+    if party is None or role is None:
+        raise NotFoundError("Party or role not found")
 
-    person_role = PersonRole(tenant_id=tenant.id, person_id=person.id, role_id=role.id)
-    db.add(person_role)
+    party_role = PartyRole(tenant_id=tenant.id, party_id=party.id, role_id=role.id)
+    db.add(party_role)
     try:
         db.flush()
     except IntegrityError as exc:
         db.rollback()
         raise ConflictError("Role already assigned") from exc
-    return person_role
+    return party_role
 
 
 def list_audit_events(db: Session, tenant: Tenant) -> list[AuditEvent]:

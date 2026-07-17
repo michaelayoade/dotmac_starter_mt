@@ -19,14 +19,19 @@ single-tenant app is simply a deployment with one tenant row.
 
 **Model placement rule:** models queried by core (deps/middleware) live in
 core; feature-local models live in the feature. Concretely: `Tenant`,
-`TenantDomain`, `Person`, `Role`, `PersonRole`, `AuthSession` live in
-`app/core/models.py` because `app.core.deps` (the `require_*` guards) and
-`app.core.middleware.tenant` (the resolver) query them directly, and core
-cannot import features to get at them. `AuditEvent` + `write_audit_event`
+`TenantDomain`, `Party` (+ subtype tables `PartyPerson`/`PartyOrganization`),
+`Role`, `PartyRole`, `AuthSession` live in `app/core/models.py` because
+`app.core.deps` (the `require_*` guards) and `app.core.middleware.tenant`
+(the resolver) query them directly, and core cannot import features to get
+at them. `Party` (`party_type` person|organization) is the fleet-wide
+identity source of truth — it replaced the bare `Person` model (spec
+amendment 2026-07-17); profile data lives on the subtype tables, which carry
+no `tenant_id` of their own and inherit isolation via an `EXISTS`-based RLS
+policy joined through the FK to `parties`. `AuditEvent` + `write_audit_event`
 live in `app/core/audit.py` for the same cross-cutting reason (every
 feature writes audit events). Everything else stays local to its feature —
 e.g. `UserCredential` lives in `app/features/auth/models.py` because nothing
-outside `auth` touches it; it references `people`/`tenants` via string-form
+outside `auth` touches it; it references `parties`/`tenants` via string-form
 `ForeignKey`/`ForeignKeyConstraint`, no import needed. This is a deliberate
 deviation from "one model per feature package" — see ADR-0002.
 

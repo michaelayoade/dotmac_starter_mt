@@ -26,13 +26,13 @@ class RoleRead(BaseModel):
 
 
 class RoleGrantRequest(BaseModel):
-    person_id: UUID
+    party_id: UUID
     role_id: UUID
 
 
 class AuditEventRead(BaseModel):
     id: UUID
-    actor_person_id: UUID | None
+    actor_party_id: UUID | None
     action: str
     entity_type: str
     entity_id: str | None

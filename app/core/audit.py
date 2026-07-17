@@ -28,7 +28,7 @@ class AuditEvent(Base):
         nullable=False,
         index=True,
     )
-    actor_person_id: Mapped[UUID | None] = mapped_column(Uuid(), index=True)
+    actor_party_id: Mapped[UUID | None] = mapped_column(Uuid(), index=True)
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(120), nullable=False)
     entity_id: Mapped[str | None] = mapped_column(String(120))
@@ -48,7 +48,7 @@ def write_audit_event(
     db: Session,
     *,
     tenant_id: UUID,
-    actor_person_id: UUID | None,
+    actor_party_id: UUID | None,
     action: str,
     entity_type: str,
     entity_id: str | None = None,
@@ -56,7 +56,7 @@ def write_audit_event(
 ) -> AuditEvent:
     event = AuditEvent(
         tenant_id=tenant_id,
-        actor_person_id=actor_person_id,
+        actor_party_id=actor_party_id,
         action=action,
         entity_type=entity_type,
         entity_id=entity_id,

@@ -22,21 +22,25 @@ app/
 
 Core never imports `app/features` (import-linter contract). Features never
 import each other (import-linter contract). Cross-feature references are
-FK/UUID columns, never a Python import — e.g. `rbac`'s `PersonRole` refers
-to `people` via a composite FK, not by importing `app.features.persons`.
+FK/UUID columns, never a Python import — e.g. `rbac`'s `PartyRole` refers
+to `parties` via a composite FK, not by importing `app.features.persons`.
 
 ### Model placement: core vs. feature
 
-`Tenant`, `TenantDomain`, `Person`, `Role`, `PersonRole`, `AuthSession` live
-in `app/core/models.py`; `AuditEvent` + `write_audit_event` live in
+`Tenant`, `TenantDomain`, `Party` (+ subtype tables `PartyPerson`/
+`PartyOrganization`), `Role`, `PartyRole`, `AuthSession` live in
+`app/core/models.py`; `AuditEvent` + `write_audit_event` live in
 `app/core/audit.py`. These are the models `app.core.deps` (route guards) and
 `app.core.middleware.tenant` (the resolver) query directly — and since core
 cannot import features, anything core needs to query at runtime must live in
-core. Everything not needed outside its own feature stays feature-local:
-`UserCredential` (password hashes) lives in `app/features/auth/models.py`,
-referencing `people`/`tenants` by string-form `ForeignKey`/
-`ForeignKeyConstraint` only. See ADR-0002 for the full rationale — this is a
-deliberate deviation from "one model per feature package."
+core. `Party` (spec amendment 2026-07-17) replaced the bare `Person` model —
+it's the fleet-wide identity source of truth (`party_type` person|
+organization), with profile data on the subtype tables. Everything not
+needed outside its own feature stays feature-local: `UserCredential`
+(password hashes) lives in `app/features/auth/models.py`, referencing
+`parties`/`tenants` by string-form `ForeignKey`/`ForeignKeyConstraint` only.
+See ADR-0002 for the full rationale — this is a deliberate deviation from
+"one model per feature package."
 
 ## Request flow / middleware order
 

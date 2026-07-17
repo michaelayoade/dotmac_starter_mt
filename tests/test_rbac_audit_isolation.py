@@ -24,7 +24,7 @@ def test_cross_tenant_role_assignment_returns_404(
     role_id = _create_role(a, a_token, "support")["id"]
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
-    b_person_id = b.post(
+    b_party_id = b.post(
         "/auth/register",
         json={
             "email": "user-b@tenant-b.example.org",
@@ -37,7 +37,7 @@ def test_cross_tenant_role_assignment_returns_404(
     response = a.post(
         "/rbac/role-grants",
         headers={"Authorization": f"Bearer {a_token}"},
-        json={"person_id": b_person_id, "role_id": role_id},
+        json={"party_id": b_party_id, "role_id": role_id},
     )
     assert response.status_code == 404
 

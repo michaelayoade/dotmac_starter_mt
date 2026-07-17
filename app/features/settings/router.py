@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import write_audit_event
 from app.core.deps import get_db, require_role, require_tenant
-from app.core.models import Person, Tenant
+from app.core.models import Party, Tenant
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import get_spec
 from app.features.settings import service as settings_service
@@ -28,7 +28,7 @@ def list_settings(
     domain: str,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    _: Person = Depends(require_role("admin")),
+    _: Party = Depends(require_role("admin")),
 ) -> list[SettingOut]:
     return settings_service.list_settings(db, tenant, domain)
 
@@ -40,7 +40,7 @@ def update_setting(
     payload: SettingUpdate,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    actor: Person = Depends(require_role("admin")),
+    actor: Party = Depends(require_role("admin")),
 ) -> SettingOut:
     result = settings_service.update_setting(db, tenant, domain, key, payload.value)
 
@@ -50,7 +50,7 @@ def update_setting(
     write_audit_event(
         db,
         tenant_id=tenant.id,
-        actor_person_id=actor.id,
+        actor_party_id=actor.id,
         action="settings.update",
         entity_type="setting",
         entity_id=key,

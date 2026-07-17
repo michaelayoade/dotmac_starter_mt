@@ -32,7 +32,7 @@ from app.core import settings_resolver as sr
 from app.core.audit import AuditEvent
 from app.core.deps import get_db, require_user_auth
 from app.core.errors import register_error_handlers
-from app.core.models import Person, PersonRole, Role, Tenant
+from app.core.models import Party, PartyPerson, PartyRole, PartyType, Role, Tenant
 from app.core.settings_models import SettingDomain, SettingValueType
 
 # Import for the side effect: registers custom_fields/max_per_entity,
@@ -42,25 +42,26 @@ from app.features.settings.router import router as settings_router
 
 
 @pytest.fixture()
-def admin_person(db: Session, tenant_row: Tenant) -> Person:
-    person = Person(
+def admin_person(db: Session, tenant_row: Tenant) -> Party:
+    party = Party(
         tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Admin User",
         email="admin@acme.test",
-        first_name="Admin",
-        last_name="User",
     )
-    db.add(person)
+    db.add(party)
     db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Admin", last_name="User"))
     role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
     db.add(role)
     db.flush()
-    db.add(PersonRole(tenant_id=tenant_row.id, person_id=person.id, role_id=role.id))
+    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.flush()
-    return person
+    return party
 
 
 @pytest.fixture()
-def app_client(db: Session, tenant_row: Tenant, admin_person: Person) -> TestClient:
+def app_client(db: Session, tenant_row: Tenant, admin_person: Party) -> TestClient:
     app = FastAPI()
     register_error_handlers(app)
     app.include_router(settings_router)
@@ -251,13 +252,15 @@ def test_put_unknown_key_in_known_domain_is_not_found(app_client: TestClient) ->
 def test_non_admin_person_is_forbidden(
     app_client: TestClient, db: Session, tenant_row: Tenant
 ) -> None:
-    non_admin = Person(
+    non_admin = Party(
         tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Member User",
         email="member@acme.test",
-        first_name="Member",
-        last_name="User",
     )
     db.add(non_admin)
+    db.flush()
+    db.add(PartyPerson(party_id=non_admin.id, first_name="Member", last_name="User"))
     db.flush()
     app_client.app.dependency_overrides[require_user_auth] = lambda: non_admin
 
@@ -271,7 +274,7 @@ def test_non_admin_person_is_forbidden(
 
 
 def test_put_setting_writes_audit_event(
-    app_client: TestClient, db: Session, tenant_row: Tenant, admin_person: Person
+    app_client: TestClient, db: Session, tenant_row: Tenant, admin_person: Party
 ) -> None:
     resp = app_client.put("/settings/custom_fields/max_per_entity", json={"value": 5})
     assert resp.status_code == 200
@@ -281,7 +284,7 @@ def test_put_setting_writes_audit_event(
     event = events[0]
     assert event.action == "settings.update"
     assert event.entity_type == "setting"
-    assert event.actor_person_id == admin_person.id
+    assert event.actor_party_id == admin_person.id
     assert event.details["domain"] == "custom_fields"
     assert event.details["key"] == "max_per_entity"
     assert event.details["is_secret"] is False
@@ -291,7 +294,7 @@ def test_put_secret_setting_audit_event_has_no_value(
     app_client: TestClient,
     db: Session,
     tenant_row: Tenant,
-    admin_person: Person,
+    admin_person: Party,
     secret_spec: sr.SettingSpec,
 ) -> None:
     resp = app_client.put(

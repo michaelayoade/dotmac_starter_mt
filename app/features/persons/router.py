@@ -7,6 +7,10 @@ and enforced at the DB layer by RLS.
 A request to `acme.app.com/people` lists ACME's people. A request to
 `widgets.app.com/people` with the SAME ID will 404 even if the ID exists in ACME —
 because RLS filters it out before the row reaches the application.
+
+Backed by `Party` (`party_type == person`) + `PartyPerson` since Task 6 — the
+`/people` request/response shape is unchanged this task (Task 7 owns any
+route/schema redesign).
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_tenant
-from app.core.models import Person, Tenant
+from app.core.models import Tenant
 from app.features.persons import service as persons_service
 from app.features.persons.schemas import PersonCreate, PersonRead
 
@@ -33,17 +37,19 @@ def create_person(
     payload: PersonCreate,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-) -> Person:
+) -> persons_service.PersonRecord:
     return persons_service.create_person(db, tenant, payload)
 
 
 @router.get("", response_model=list[PersonRead])
-def list_people(db: Session = Depends(get_db)) -> list[Person]:
+def list_people(db: Session = Depends(get_db)) -> list[persons_service.PersonRecord]:
     return persons_service.list_persons(db)
 
 
 @router.get("/{person_id}", response_model=PersonRead)
-def get_person(person_id: UUID, db: Session = Depends(get_db)) -> Person:
+def get_person(
+    person_id: UUID, db: Session = Depends(get_db)
+) -> persons_service.PersonRecord:
     return persons_service.get_person(db, person_id)
 
 

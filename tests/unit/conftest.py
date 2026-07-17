@@ -20,7 +20,7 @@ from app.core import (
     audit,  # noqa: F401
     settings_models,  # noqa: F401
 )
-from app.core.models import Base, Tenant
+from app.core.models import Base, Party, PartyPerson, PartyType, Tenant
 
 # Import feature model modules so Base.metadata is fully populated.
 from app.features.auth import models as auth  # noqa: F401
@@ -76,3 +76,21 @@ def tenant_row(db: Session) -> Tenant:
     db.add(row)
     db.flush()
     return row
+
+
+@pytest.fixture()
+def party_row(db: Session, tenant_row: Tenant) -> Party:
+    """A person-type `Party` with its `PartyPerson` subtype row — the Task 6
+    replacement for the old bare-`Person` fixture pattern.
+    """
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Ada Lovelace",
+        email="ada@example.com",
+    )
+    db.add(party)
+    db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Ada", last_name="Lovelace"))
+    db.flush()
+    return party

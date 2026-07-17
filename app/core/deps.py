@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db, get_platform_db
-from app.core.models import AuthSession, Person, PersonRole, Role, Tenant
+from app.core.models import AuthSession, Party, PartyRole, PartyType, Role, Tenant
 from app.core.security import decode_access_token, hash_token
 
 
@@ -39,8 +39,14 @@ def require_user_auth(
     request: Request,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
-) -> Person:
-    """Validate JWT/session and return the tenant-local person."""
+) -> Party:
+    """Validate JWT/session and return the tenant-local party.
+
+    Only `party_type == PartyType.person` parties can authenticate —
+    organization parties have no credentials and can never be the `sub` of a
+    session token, but the check is defense-in-depth against a stray/garbled
+    token claiming an org party's id.
+    """
     tenant = require_tenant(request)
     token = _bearer_token(authorization)
     if token is None:
@@ -55,7 +61,7 @@ def require_user_auth(
         )
 
     try:
-        person_id = UUID(str(payload["sub"]))
+        party_id = UUID(str(payload["sub"]))
     except (KeyError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,37 +79,37 @@ def require_user_auth(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
         )
-    if session.person_id != person_id or session.tenant_id != tenant.id:
+    if session.party_id != party_id or session.tenant_id != tenant.id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
         )
 
-    person = db.get(Person, person_id)
-    if person is None:
+    party = db.get(Party, party_id)
+    if party is None or party.party_type != PartyType.person:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
         )
-    return person
+    return party
 
 
 def require_role(role_slug: str):
-    """Return a dependency that requires the current person to hold `role_slug`."""
+    """Return a dependency that requires the current party to hold `role_slug`."""
 
     def _dependency(
         request: Request,
-        person: Person = Depends(require_user_auth),
+        party: Party = Depends(require_user_auth),
         db: Session = Depends(get_db),
-    ) -> Person:
+    ) -> Party:
         tenant = require_tenant(request)
         has_role = db.scalars(
-            select(PersonRole)
+            select(PartyRole)
             .join(
                 Role,
-                (Role.id == PersonRole.role_id)
-                & (Role.tenant_id == PersonRole.tenant_id),
+                (Role.id == PartyRole.role_id)
+                & (Role.tenant_id == PartyRole.tenant_id),
             )
-            .where(PersonRole.tenant_id == tenant.id)
-            .where(PersonRole.person_id == person.id)
+            .where(PartyRole.tenant_id == tenant.id)
+            .where(PartyRole.party_id == party.id)
             .where(Role.tenant_id == tenant.id)
             .where(Role.slug == role_slug)
         ).first()
@@ -111,7 +117,7 @@ def require_role(role_slug: str):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
             )
-        return person
+        return party
 
     return _dependency
 

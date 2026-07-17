@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_tenant, require_user_auth
-from app.core.models import Person, Tenant
+from app.core.models import Party, Tenant
 from app.features.auth import service as auth_flows
 from app.features.auth.schemas import (
     CurrentUserResponse,
@@ -28,8 +28,8 @@ def register(
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
 ) -> CurrentUserResponse:
-    person = auth_flows.register(db, tenant, payload)
-    return _current_user_response(person)
+    view = auth_flows.register(db, tenant, payload)
+    return _current_user_response(view)
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -43,15 +43,19 @@ def login(
 
 
 @router.get("/me", response_model=CurrentUserResponse)
-def me(person: Person = Depends(require_user_auth)) -> CurrentUserResponse:
-    return _current_user_response(person)
+def me(
+    party: Party = Depends(require_user_auth),
+    db: Session = Depends(get_db),
+) -> CurrentUserResponse:
+    view = auth_flows.get_current_user_view(db, party)
+    return _current_user_response(view)
 
 
-def _current_user_response(person: Person) -> CurrentUserResponse:
+def _current_user_response(view: auth_flows.PersonView) -> CurrentUserResponse:
     return CurrentUserResponse(
-        id=person.id,
-        email=person.email,
-        first_name=person.first_name,
-        last_name=person.last_name,
-        tenant_id=person.tenant_id,
+        id=view.id,
+        email=view.email,
+        first_name=view.first_name,
+        last_name=view.last_name,
+        tenant_id=view.tenant_id,
     )

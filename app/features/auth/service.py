@@ -3,18 +3,32 @@
 All `select()`/session-mutation calls for the auth domain live here —
 `app/features/auth/router.py` only resolves dependencies, calls these
 functions, and shapes the response.
+
+Registration creates a `party_type == person` `Party` plus its `PartyPerson`
+subtype row in the same transaction — `Party` replaced `Person` (Task 6); the
+`/auth/register` request/response shape is unchanged, kept mechanically
+person-shaped (Task 7 owns any schema redesign).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, UnauthorizedError
-from app.core.models import AuthSession, Person, PersonRole, Role, Tenant
+from app.core.models import (
+    AuthSession,
+    Party,
+    PartyPerson,
+    PartyRole,
+    PartyType,
+    Role,
+    Tenant,
+)
 from app.core.security import (
     hash_password,
     hash_token,
@@ -33,30 +47,56 @@ class LoginResult:
     token_type: str = "bearer"
 
 
-def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> Person:
-    person = Person(
+@dataclass(frozen=True)
+class PersonView:
+    """`CurrentUserResponse`-shaped combination of `Party` + its `PartyPerson`
+    subtype row — the API keeps returning person-shaped payloads this task
+    (Task 7 owns schema redesign), but the fields now come from two tables.
+    """
+
+    id: UUID
+    email: str
+    first_name: str
+    last_name: str
+    tenant_id: UUID
+
+
+def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonView:
+    party = Party(
         tenant_id=tenant.id,
+        party_type=PartyType.person,
+        display_name=f"{payload.first_name} {payload.last_name}",
         email=payload.email,
-        first_name=payload.first_name,
-        last_name=payload.last_name,
     )
-    db.add(person)
+    db.add(party)
     try:
         db.flush()
+        party_person = PartyPerson(
+            party_id=party.id,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+        )
+        db.add(party_person)
         credential = UserCredential(
             tenant_id=tenant.id,
-            person_id=person.id,
+            party_id=party.id,
             email=payload.email,
             password_hash=hash_password(payload.password),
         )
         db.add(credential)
         db.flush()
-        _assign_first_user_admin(db, tenant, person)
-        db.refresh(person)
+        _assign_first_user_admin(db, tenant, party)
+        db.refresh(party)
     except IntegrityError as exc:
         db.rollback()
         raise ConflictError("Email already registered") from exc
-    return person
+    return PersonView(
+        id=party.id,
+        email=payload.email,
+        first_name=party_person.first_name,
+        last_name=party_person.last_name,
+        tenant_id=party.tenant_id,
+    )
 
 
 def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
@@ -70,11 +110,11 @@ def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
     ):
         raise UnauthorizedError("Invalid credentials")
 
-    token, expires_at = issue_access_token(credential.person_id, tenant.id)
+    token, expires_at = issue_access_token(credential.party_id, tenant.id)
     db.add(
         AuthSession(
             tenant_id=tenant.id,
-            person_id=credential.person_id,
+            party_id=credential.party_id,
             token_hash=hash_token(token),
             expires_at=expires_at,
         )
@@ -83,9 +123,23 @@ def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
     return LoginResult(access_token=token)
 
 
-def _assign_first_user_admin(db: Session, tenant: Tenant, person: Person) -> None:
+def get_current_user_view(db: Session, party: Party) -> PersonView:
+    """Combine `party` with its `PartyPerson` subtype row for `/auth/me`."""
+    party_person = db.get(PartyPerson, party.id)
+    if party_person is None or party.email is None:
+        raise UnauthorizedError("Invalid credentials")
+    return PersonView(
+        id=party.id,
+        email=party.email,
+        first_name=party_person.first_name,
+        last_name=party_person.last_name,
+        tenant_id=party.tenant_id,
+    )
+
+
+def _assign_first_user_admin(db: Session, tenant: Tenant, party: Party) -> None:
     existing_assignment = db.scalars(
-        select(PersonRole).where(PersonRole.tenant_id == tenant.id).limit(1)
+        select(PartyRole).where(PartyRole.tenant_id == tenant.id).limit(1)
     ).first()
     if existing_assignment is not None:
         return
@@ -97,8 +151,8 @@ def _assign_first_user_admin(db: Session, tenant: Tenant, person: Person) -> Non
         role = Role(tenant_id=tenant.id, slug="admin", name="Admin")
         db.add(role)
         db.flush()
-    db.add(PersonRole(tenant_id=tenant.id, person_id=person.id, role_id=role.id))
+    db.add(PartyRole(tenant_id=tenant.id, party_id=party.id, role_id=role.id))
     db.flush()
 
 
-__all__ = ["LoginResult", "login", "register"]
+__all__ = ["LoginResult", "PersonView", "get_current_user_view", "login", "register"]
