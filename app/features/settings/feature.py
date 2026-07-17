@@ -12,5 +12,8 @@ override), both guarded by `require_tenant` + `require_role("admin")` — see
 
 from app.core.features import FeatureManifest
 from app.features.settings.router import router
+from app.features.settings.seed import seed_platform_defaults
 
-feature = FeatureManifest(name="settings", routers=[router])
+feature = FeatureManifest(
+    name="settings", routers=[router], seed=seed_platform_defaults
+)

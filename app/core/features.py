@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import importlib
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from fastapi import APIRouter, FastAPI
@@ -25,6 +25,12 @@ class FeatureManifest:
     routers: Sequence[APIRouter] = field(default_factory=tuple)
     core: bool = True
     enabled_by_default: bool = True
+    # Optional startup hook (e.g. seeding the feature's own default data).
+    # `app.main`'s lifespan calls this for every ENABLED manifest that
+    # declares one, gated by `settings.seed_on_startup` — added so main.py
+    # never has to hard-import a specific feature's seed function (final-
+    # review Group 3). Most features have no seed data and leave this None.
+    seed: Callable[[], None] | None = None
 
 
 def load_manifests(module_names: Sequence[str]) -> list[FeatureManifest]:
