@@ -83,13 +83,16 @@ directly with `--reload`:
 
 ```bash
 poetry install
-cp .env.example .env   # dev defaults are already set; optionally customize DEV_DB_PORT etc.
 docker compose -f docker-compose.dev.yml up -d postgres   # DEV_DB_PORT/DEV_POSTGRES_* overridable
+# Point the app and alembic at the dev Postgres (matches the compose defaults above).
+# The initial migration must run as a superuser — it creates the app_user/platform_api/app_admin roles.
+export DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/starter
+export MIGRATION_DATABASE_URL="$DATABASE_URL"
 poetry run alembic upgrade head
-poetry run uvicorn app.main:app --reload --port 8000 \
-    --forwarded-allow-ips "127.0.0.1"
-# equivalently: make dev
+make dev   # or: poetry run uvicorn app.main:app --reload --port 8000
 ```
+
+In this quickstart flow, the app runs as the Postgres superuser, which bypasses Row-Level Security — tenant isolation is not enforced. Use `make test-db-up && make test-integration` to verify isolation in the integration suite; production must use the three-role setup from `.env.example`.
 
 In dev, browsers resolve `*.localhost` automatically:
 
