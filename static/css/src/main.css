@@ -1,6 +1,14 @@
 @import "tailwindcss";
 
-/* Enable class-based dark mode (Tailwind v4) */
+/* Enable class-based dark mode (Tailwind v4). templates/base.html toggles
+   `.dark` on <html> via Alpine's `$store.dark.on` (see static/js/components.js'
+   `dark` store) — this is the v4 CSS-first replacement for
+   `darkMode: "class"` in the old tailwind.config.js (deleted; see below).
+   Tailwind's own at-rule handling treats a body-less top-level `@variant`
+   as `@custom-variant` (verified: `grep -o ":where(\.dark[^)]*)"
+   static/css/main.css` after a build shows the selector in the compiled
+   output), so this is equivalent to the documented
+   `@custom-variant dark (&:where(.dark, .dark *));` form. */
 @variant dark (&:where(.dark, .dark *));
 
 /* ==========================================================================
@@ -45,6 +53,71 @@
   --animate-stagger-in: staggerFadeIn 0.5s ease-out forwards;
   --animate-counter-pop: counterPop 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* ==========================================================================
+   CONTENT SOURCES (Tailwind v4 CSS-based config)
+
+   `tailwind.config.js` has been DELETED. Under @tailwindcss/cli v4 as wired
+   here (no `@config "../../tailwind.config.js";` import anywhere in this
+   file), that config file's `content`/`safelist`/`darkMode`/`theme.extend`
+   keys were never read by the v4 CLI at all — @tailwindcss/cli v4 only
+   understands CSS-first config (`@theme`, `@source`, `@custom-variant`,
+   `@utility`) unless a JS config is explicitly wired back in via `@config`.
+   Nothing in this repo does that, so the old config.js was 100% inert; its
+   apparent "it built fine" was Tailwind silently ignoring it, not applying
+   it. (Verified during the phase2b Task 1 review: `bg-primary-500` — a
+   class ONLY listed in the old safelist, never used literally in any
+   template — was absent from the built `static/css/main.css`.)
+
+   v4's default content detection auto-scans the project root (respecting
+   .gitignore) for candidate class names in any file type, which already
+   covers every .html file under templates/ and every .js file under
+   static/js/ without an explicit `@source` — verified after this fix: a
+   literal class from
+   templates/components/table_macros.html (`bg-primary-600`, used in
+   empty_state()'s CTA link) IS present in the built CSS. No explicit
+   `@source "../../templates";` is needed; one is added anyway below,
+   pinned to this file's relative path, so content coverage doesn't
+   silently depend on auto-detection continuing to include templates/ if
+   the directory structure changes.
+   ========================================================================== */
+@source "../../templates";
+@source "../../static/js";
+
+/* ==========================================================================
+   SAFELIST — classes that are dynamically composed, not literal, in some
+   template/macro, so v4's text-scanner (which only matches literal class
+   tokens, no matter the source language) can never discover them on its
+   own.
+
+   Today, table_macros.html's status_badge() macro writes each status's
+   full class string as a literal dict value (color_map maps each status
+   name to one complete class-name string, e.g. the active status entry) —
+   that whole literal string is still visible to the text-scanner even
+   though it sits inside a Jinja expression, so status_badge()'s classes do
+   NOT need safelisting; verified they are compiled in the current build
+   already, no @source inline() entry required for them.
+
+   This safelist exists for the ONE color set that table_macros.html's own
+   header comment documents as forward-looking (ported verbatim from
+   SUB:tailwind.config.js's `MACRO_COLORS` convention): "as more admin
+   screens land ... some will likely want a `color` parameter threaded into
+   a macro" (e.g. a future generalized status_badge(status, color) that
+   builds `bg-{{ color }}-100` by string interpolation). Once a class is
+   built that way, no literal token exists anywhere in the templates for
+   the scanner to find, and the class is silently dropped without this
+   safelist. Kept scoped to the same MACRO_COLORS palette (primary, accent,
+   slate, green, red, yellow, blue) and the same suffix set the old
+   config.js safelisted, so no macro migrating to the dynamic-color pattern
+   needs to touch this file.
+   ========================================================================== */
+@source inline("bg-{primary,accent,slate,green,red,yellow,blue}-{50,100,500,600}");
+@source inline("text-{primary,accent,slate,green,red,yellow,blue}-{600,700}");
+@source inline("border-{primary,accent,slate,green,red,yellow,blue}-{200,300}");
+@source inline("from-{primary,accent,slate,green,red,yellow,blue}-500");
+@source inline("to-{primary,accent,slate,green,red,yellow,blue}-500");
+@source inline("dark:bg-{primary,accent,slate,green,red,yellow,blue}-900/{20,30}");
+@source inline("dark:text-{primary,accent,slate,green,red,yellow,blue}-{300,400}");
 
 /* ==========================================================================
    BASE STYLES

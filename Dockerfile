@@ -9,14 +9,22 @@
 # gitignored (build artifact, not source — see .gitignore). The final
 # python stage never installs node; it only COPYs the built static/ tree
 # (source assets + compiled CSS) and templates/ from css-builder.
+#
+# `npm ci` (not `npm install`) — requires package-lock.json to be present
+# and installs exactly what it specifies, failing loudly if package.json
+# and the lockfile have drifted, instead of silently re-resolving/rewriting
+# the lockfile the way `npm install` would in a throwaway container.
+# Tailwind v4 is CSS-first (static/css/src/main.css's `@theme`/`@source`/
+# `@custom-variant`) — there is no tailwind.config.js to COPY in this stage
+# any more; see static/css/src/main.css for why the old config.js was
+# deleted.
 FROM node:20-slim AS css-builder
 
 WORKDIR /build
 
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
-COPY tailwind.config.js ./
 COPY static ./static
 COPY templates ./templates
 RUN npm run css:build

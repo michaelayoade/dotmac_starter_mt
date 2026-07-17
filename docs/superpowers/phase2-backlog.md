@@ -52,6 +52,9 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 - `LOG_LEVEL` setting for `setup_logging()` (currently fixed INFO default).
 - Share one health-path constant between tenant middleware (`_HEALTH_PATHS`) and the
   rate-limit bypass (currently only literal `/health`) before mounting `/health/ready`.
+- /static/* requests pay tenant resolution (up to 2 DB SELECTs each; 500s when DB down) —
+  exempt static prefix in TenantResolverMiddleware (prefix-match, carefully — assigned
+  to 2b-T2).
 - ~~Service payload typing: replace `payload: Any` with concrete Pydantic schemas across
   the four feature services (pairs with mypy tightening).~~ — **delivered 2a-T1/T2**,
   now a standing hard rule enforced by `tests/unit/test_service_typing.py`.
