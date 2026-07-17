@@ -45,7 +45,6 @@ _EXCLUDED_FILE = "app/core/settings_resolver.py"
 # the comment; a new orphan should get a real consumer instead.
 _ALLOWED_ORPHAN_SETTINGS: set[str] = {
     "ui_branding",  # consumed in plan 2b (branding UI)
-    "max_per_entity",  # consumed in Task 9 (custom fields service)
 }
 
 

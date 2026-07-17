@@ -21,6 +21,8 @@ table only defines the field *shape* (type, validation, display).
 from __future__ import annotations
 
 import enum
+import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
@@ -164,3 +166,108 @@ class CustomFieldDefinition(Base, TimestampMixin):
 
     # Status
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    def validate_value(self, value: Any) -> tuple[bool, str | None]:
+        """Validate a value against this field's rules.
+
+        Ported from ERP's `CustomFieldDefinition.validate_value`
+        (`dotmac_erp:app/models/finance/automation/custom_field.py`) with two
+        gap-closures (verified: ERP declared these columns/type but never
+        enforced them — see `docs/superpowers/upstream-findings.md`):
+
+        - `min_value`/`max_value` are enforced for NUMBER/DECIMAL, compared
+          as `Decimal` (ERP stored these but the method never read them).
+        - MULTISELECT membership is validated (each element checked against
+          `field_options["options"]`) — ERP had no MULTISELECT branch at
+          all, so a MULTISELECT field's `field_options` were purely
+          decorative there. PORT-DELTA: this is new behavior, not a port.
+
+        Returns `(is_valid, error_message)`, same shape as ERP's method —
+        the service layer (`service.py::validate_values`) aggregates the
+        error messages instead of returning the tuple to its own caller.
+        """
+        if self.is_required and (value is None or value == ""):
+            return False, f"{self.field_name} is required"
+
+        if value is None or value == "":
+            return True, None
+
+        if self.field_type == CustomFieldType.NUMBER:
+            try:
+                numeric = Decimal(int(value))
+            except (ValueError, TypeError):
+                return False, f"{self.field_name} must be a number"
+            range_error = self._range_error(numeric)
+            if range_error:
+                return False, range_error
+
+        elif self.field_type == CustomFieldType.DECIMAL:
+            try:
+                numeric = Decimal(str(value))
+            except (InvalidOperation, ValueError, TypeError):
+                return False, f"{self.field_name} must be a decimal number"
+            range_error = self._range_error(numeric)
+            if range_error:
+                return False, range_error
+
+        elif self.field_type == CustomFieldType.EMAIL:
+            email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+            if not re.match(email_pattern, str(value)):
+                return False, f"{self.field_name} must be a valid email address"
+
+        elif self.field_type == CustomFieldType.SELECT:
+            if self.field_options:
+                valid_values = [
+                    opt.get("value") for opt in self.field_options.get("options", [])
+                ]
+                if str(value) not in valid_values:
+                    return (
+                        False,
+                        f"{self.field_name} must be one of the allowed options",
+                    )
+
+        elif self.field_type == CustomFieldType.MULTISELECT:
+            if self.field_options:
+                valid_values = [
+                    opt.get("value") for opt in self.field_options.get("options", [])
+                ]
+                if not isinstance(value, list | tuple):
+                    return False, f"{self.field_name} must be a list of values"
+                if any(str(item) not in valid_values for item in value):
+                    return (
+                        False,
+                        f"{self.field_name} must contain only allowed options",
+                    )
+
+        # Regex validation
+        if self.validation_regex:
+            if not re.match(self.validation_regex, str(value)):
+                return (
+                    False,
+                    self.validation_message or f"{self.field_name} format is invalid",
+                )
+
+        # Length validation
+        if self.max_length and len(str(value)) > self.max_length:
+            return (
+                False,
+                f"{self.field_name} must be at most {self.max_length} characters",
+            )
+
+        return True, None
+
+    def _range_error(self, numeric: Decimal) -> str | None:
+        """min_value/max_value are stored as strings; compare as Decimal."""
+        if self.min_value is not None:
+            try:
+                if numeric < Decimal(self.min_value):
+                    return f"{self.field_name} must be at least {self.min_value}"
+            except InvalidOperation:
+                pass
+        if self.max_value is not None:
+            try:
+                if numeric > Decimal(self.max_value):
+                    return f"{self.field_name} must be at most {self.max_value}"
+            except InvalidOperation:
+                pass
+        return None
