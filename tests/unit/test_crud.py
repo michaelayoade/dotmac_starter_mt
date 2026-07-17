@@ -2,7 +2,7 @@ import pytest
 
 from app.core.crud import CRUDManager
 from app.core.exceptions import NotFoundError
-from app.models.person import Person
+from app.features.persons.models import Person
 
 
 class People(CRUDManager[Person]):

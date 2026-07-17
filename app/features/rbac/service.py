@@ -1,8 +1,8 @@
 """Tenant-scoped RBAC service.
 
 All `select()`/session-mutation calls for the RBAC domain live here —
-`app/api/rbac.py` only resolves dependencies, calls these functions, writes
-the audit trail, and shapes the response.
+`app/features/rbac/router.py` only resolves dependencies, calls these
+functions, writes the audit trail, and shapes the response.
 """
 
 from __future__ import annotations
@@ -13,10 +13,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.audit import AuditEvent
 from app.core.exceptions import ConflictError, NotFoundError
-from app.models.person import Person
-from app.models.rbac import AuditEvent, PersonRole, Role
-from app.models.tenant import Tenant
+from app.features.persons.models import Person
+from app.features.rbac.models import PersonRole, Role
+from app.features.tenants.models import Tenant
 
 
 def list_roles(db: Session) -> list[Role]:

@@ -25,10 +25,15 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60
     trust_inbound_request_id: bool = False
+    disabled_features: str = ""  # comma-separated feature names
 
     @property
     def is_production(self) -> bool:
         return self.environment.lower() in {"prod", "production"}
+
+    @property
+    def disabled_feature_set(self) -> set[str]:
+        return {f.strip() for f in self.disabled_features.split(",") if f.strip()}
 
 
 settings = Settings()

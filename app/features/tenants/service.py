@@ -1,8 +1,8 @@
 """Platform-admin tenant service — provision/list tenants.
 
 Business logic and the only `select()`/session-mutation calls for the tenant
-domain live here; `app/api/tenants.py` only resolves dependencies, calls
-these functions, and shapes the response.
+domain live here; `app/features/tenants/router.py` only resolves dependencies,
+calls these functions, and shapes the response.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError
-from app.models.tenant import Tenant
+from app.features.tenants.models import Tenant
 
 
 def list_tenants(db: Session) -> list[Tenant]:

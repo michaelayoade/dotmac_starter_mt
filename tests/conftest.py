@@ -53,7 +53,7 @@ def admin_session(admin_engine) -> Generator[Session, None, None]:
 
 @pytest.fixture
 def tenant_a(admin_session: Session):
-    from app.models.tenant import Tenant
+    from app.features.tenants.models import Tenant
 
     t = Tenant(slug="alpha", name="Alpha Test Tenant")
     admin_session.add(t)
@@ -66,7 +66,7 @@ def tenant_a(admin_session: Session):
 
 @pytest.fixture
 def tenant_b(admin_session: Session):
-    from app.models.tenant import Tenant
+    from app.features.tenants.models import Tenant
 
     t = Tenant(slug="beta", name="Beta Test Tenant")
     admin_session.add(t)

@@ -7,17 +7,30 @@ logic only and must scope queries explicitly where they care about tenancy.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Generator
 
 import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+# Unit tests never touch a real database (SQLite in-memory below), but importing
+# a feature's router — e.g. via app.core.features.load_manifests — transitively
+# imports app.core.db, which builds a SQLAlchemy engine from DATABASE_URL at
+# import time. Set a well-formed placeholder so that import succeeds hermetically.
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+psycopg://unit-test:unit-test@localhost:5432/unit-test"
+)
+
+from app.core import audit  # noqa: F401
 from app.core.models import Base
 
 # Import model modules so Base.metadata is fully populated.
-from app.models import auth, person, rbac, tenant  # noqa: F401
-from app.models.tenant import Tenant
+from app.features.auth import models as auth  # noqa: F401
+from app.features.persons import models as person  # noqa: F401
+from app.features.rbac import models as rbac  # noqa: F401
+from app.features.tenants import models as tenant  # noqa: F401
+from app.features.tenants.models import Tenant
 
 
 @pytest.fixture(scope="session")

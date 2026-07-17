@@ -11,10 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db, get_platform_db
 from app.core.security import decode_access_token, hash_token
-from app.models.auth import AuthSession
-from app.models.person import Person
-from app.models.rbac import PersonRole, Role
-from app.models.tenant import Tenant
+from app.features.auth.models import AuthSession
+from app.features.persons.models import Person
+from app.features.rbac.models import PersonRole, Role
+from app.features.tenants.models import Tenant
 
 
 def require_tenant(request: Request) -> Tenant:

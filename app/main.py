@@ -16,17 +16,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
-from app.api.auth import router as auth_router
-from app.api.persons import router as persons_router
-from app.api.rbac import router as rbac_router
-from app.api.tenants import router as tenants_router
 from app.core.config import settings, validate_settings
 from app.core.errors import register_error_handlers
+from app.core.features import load_manifests, mount_features
 from app.core.logging import setup_logging
 from app.core.middleware.csrf import CSRFMiddleware
 from app.core.middleware.observability import ObservabilityMiddleware
 from app.core.middleware.rate_limit import RateLimitMiddleware
 from app.core.middleware.tenant import TenantResolverMiddleware
+from app.features import FEATURE_MODULES
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +74,8 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-app.include_router(tenants_router)
-app.include_router(auth_router)
-app.include_router(persons_router)
-app.include_router(rbac_router)
+mount_features(
+    app,
+    manifests=load_manifests(FEATURE_MODULES),
+    disabled=settings.disabled_feature_set,
+)

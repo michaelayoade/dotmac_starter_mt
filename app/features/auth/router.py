@@ -9,9 +9,9 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_tenant, require_user_auth
-from app.models.person import Person
-from app.models.tenant import Tenant
-from app.services import auth_flows
+from app.features.auth import service as auth_flows
+from app.features.persons.models import Person
+from app.features.tenants.models import Tenant
 
 router = APIRouter(
     prefix="/auth", tags=["auth"], dependencies=[Depends(require_tenant)]

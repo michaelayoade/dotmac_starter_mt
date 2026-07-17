@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from app.models.tenant import Tenant
+from app.features.tenants.models import Tenant
 
 
 def test_tenant_row_visible_in_session(db, tenant_row):

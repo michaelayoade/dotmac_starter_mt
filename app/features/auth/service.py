@@ -1,8 +1,8 @@
 """Tenant-scoped auth service — register/login flows.
 
 All `select()`/session-mutation calls for the auth domain live here —
-`app/api/auth.py` only resolves dependencies, calls these functions, and
-shapes the response.
+`app/features/auth/router.py` only resolves dependencies, calls these
+functions, and shapes the response.
 """
 
 from __future__ import annotations
@@ -21,10 +21,10 @@ from app.core.security import (
     issue_access_token,
     verify_password,
 )
-from app.models.auth import AuthSession, UserCredential
-from app.models.person import Person
-from app.models.rbac import PersonRole, Role
-from app.models.tenant import Tenant
+from app.features.auth.models import AuthSession, UserCredential
+from app.features.persons.models import Person
+from app.features.rbac.models import PersonRole, Role
+from app.features.tenants.models import Tenant
 
 
 @dataclass(frozen=True)

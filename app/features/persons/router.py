@@ -18,9 +18,9 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_tenant
-from app.models.person import Person
-from app.models.tenant import Tenant
-from app.services import persons as persons_service
+from app.features.persons import service as persons_service
+from app.features.persons.models import Person
+from app.features.tenants.models import Tenant
 
 router = APIRouter(
     prefix="/people",

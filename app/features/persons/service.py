@@ -3,8 +3,8 @@
 `Persons` handles the plain-CRUD paths (create/get/delete) via `CRUDManager`;
 `list_persons` is the one query that isn't single-entity CRUD. All
 `select()`/session-mutation calls for the person domain live here —
-`app/api/persons.py` only resolves dependencies, calls these functions, and
-shapes the response.
+`app/features/persons/router.py` only resolves dependencies, calls these
+functions, and shapes the response.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ from sqlalchemy.orm import Session
 
 from app.core.crud import CRUDManager
 from app.core.exceptions import ConflictError
-from app.models.person import Person
-from app.models.tenant import Tenant
+from app.features.persons.models import Person
+from app.features.tenants.models import Tenant
 
 
 class Persons(CRUDManager[Person]):

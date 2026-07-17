@@ -9,12 +9,12 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.audit import AuditEvent, write_audit_event
 from app.core.deps import get_db, require_role, require_tenant
-from app.models.person import Person
-from app.models.rbac import AuditEvent, Role
-from app.models.tenant import Tenant
-from app.services import rbac as rbac_service
-from app.services.audit import write_audit_event
+from app.features.persons.models import Person
+from app.features.rbac import service as rbac_service
+from app.features.rbac.models import Role
+from app.features.tenants.models import Tenant
 
 router = APIRouter(
     prefix="/rbac", tags=["rbac"], dependencies=[Depends(require_tenant)]
