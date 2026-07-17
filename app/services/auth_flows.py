@@ -10,12 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ConflictError
+from app.core.exceptions import ConflictError, UnauthorizedError
 from app.core.security import (
     hash_password,
     hash_token,
@@ -71,9 +70,7 @@ def login(db: Session, tenant: Tenant, payload: Any) -> LoginResult:
     if credential is None or not verify_password(
         payload.password, credential.password_hash
     ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
-        )
+        raise UnauthorizedError("Invalid credentials")
 
     token, expires_at = issue_access_token(credential.person_id, tenant.id)
     db.add(

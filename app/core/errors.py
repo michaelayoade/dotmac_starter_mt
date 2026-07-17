@@ -17,6 +17,7 @@ from app.core.exceptions import (
     ConflictError,
     DomainError,
     NotFoundError,
+    UnauthorizedError,
 )
 from app.core.logging import request_id_var
 
@@ -44,6 +45,12 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ConflictError)
     async def _conflict(_: Request, exc: ConflictError) -> JSONResponse:
         return JSONResponse(status_code=409, content=_envelope("conflict", str(exc)))
+
+    @app.exception_handler(UnauthorizedError)
+    async def _unauthorized(_: Request, exc: UnauthorizedError) -> JSONResponse:
+        return JSONResponse(
+            status_code=401, content=_envelope("unauthorized", str(exc))
+        )
 
     @app.exception_handler(DomainError)
     async def _domain(_: Request, exc: DomainError) -> JSONResponse:

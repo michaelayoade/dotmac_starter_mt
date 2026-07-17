@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.errors import register_error_handlers
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
 
 
 def _make_app() -> FastAPI:
@@ -16,6 +16,10 @@ def _make_app() -> FastAPI:
     @app.get("/conflict")
     def conflict():
         raise ConflictError("Duplicate slug")
+
+    @app.get("/unauthorized")
+    def unauthorized():
+        raise UnauthorizedError("Invalid credentials")
 
     @app.get("/boom")
     def boom():
@@ -46,6 +50,14 @@ def test_unhandled_exception_is_opaque():
     assert resp.status_code == 500
     assert resp.json()["code"] == "internal_error"
     assert "nope" not in resp.text
+
+
+def test_unauthorized_envelope():
+    resp = TestClient(_make_app()).get("/unauthorized")
+    assert resp.status_code == 401
+    body = resp.json()
+    assert body["code"] == "unauthorized"
+    assert body["message"] == "Invalid credentials"
 
 
 def test_validation_error_envelope():

@@ -21,3 +21,7 @@ class BadRequestError(DomainError):
 
 class ConflictError(DomainError):
     """Operation conflicts with existing state (unique violation, etc.)."""
+
+
+class UnauthorizedError(DomainError):
+    """Caller's credentials are missing or invalid."""
