@@ -327,6 +327,22 @@ router after bypassing tenant resolution. `/health` is the only route in
 `require_*` guards. Every other route either carries a `require_*` dependency
 or fails the architecture test.
 
+### Static-asset bypass
+
+`/static/*` (the `StaticFiles` mount in `app/main.py`, serving
+`static/css/main.css`, vendor JS, etc.) gets the same before-resolution
+short-circuit as `/health`, via `_is_static_path()`: `path == "/static"` or
+`path.startswith("/static/")` — plain string checks, deliberately no regex.
+Before this bypass existed, `TenantResolverMiddleware.dispatch` opened a
+`SessionLocal()` for every static-asset request same as any other route; with
+the DB unreachable, that raised and turned a should-be-200 static asset into
+a 500 — verified as a real repro (`/static/css/main.css` 500s with the DB
+down) and fixed alongside the branded HTML error pages in plan 2b Task 2.
+`tests/unit/test_tenant_middleware.py` covers both the exact/prefix bypass
+(`/static`, `/static/css/main.css`) and the near-miss paths that must NOT
+bypass (`/staticevil`, `/static2/x` — a bare `startswith("/static")` without
+the trailing-slash check would wrongly match both).
+
 ## Tenant resolution
 
 `TenantResolverMiddleware._resolve()`, in order:

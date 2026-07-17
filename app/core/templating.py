@@ -10,6 +10,17 @@ the sanitize/format/timeago Jinja filters from that donor are NOT ported
 here — nothing in this phase's templates needs them yet, and they can be
 added back filter-by-filter when a template actually calls one (avoids
 shipping untested surface area).
+
+`brand` (below) is the deployment-STATIC half of branding
+(`app.core.branding.get_brand()` — defaults < brand.json < env, cached for
+the process lifetime; see that module's docstring). It is installed once as
+a template global, so every template can read `brand.name` etc. without a
+route passing it explicitly. The per-TENANT DB override
+(`app.core.branding.load_branding(db, tenant_id)`) is deliberately NOT a
+global — it needs a request-scoped `db` session and `tenant_id`, so routes
+that want the tenant-overridden brand call `load_branding` themselves and
+pass the result into their own render() context (shadowing this global's
+`brand` key for that response only).
 """
 
 from __future__ import annotations
@@ -23,6 +34,8 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+
+from app.core.branding import get_brand
 
 templates = Jinja2Templates(directory="templates")
 
@@ -56,21 +69,30 @@ def current_year() -> int:
     return datetime.now(UTC).year
 
 
-# `brand` is a stub `{}` until Task 2 installs app.core.branding.get_brand()
-# as this same global. Templates already read it defensively (`brand.name if
-# brand and brand.name else ...`) so the stub renders sane fallbacks today.
-templates.env.globals["brand"] = {}
+# Deployment-static brand identity — see this module's docstring for the
+# static/tenant-override split. `get_brand()` is `lru_cache`d, so this is a
+# cheap dict lookup after the first call, not a re-read of brand.json.
+templates.env.globals["brand"] = get_brand()
 templates.env.globals["static_asset_url"] = static_asset_url
 templates.env.globals["current_year"] = current_year
 
 
 def render(
-    request: Request, name: str, context: dict[str, Any] | None = None
+    request: Request,
+    name: str,
+    context: dict[str, Any] | None = None,
+    *,
+    status_code: int = 200,
 ) -> HTMLResponse:
     """Render template `name` with `context`, returning an HTMLResponse.
 
     `request` is threaded into the context automatically (Jinja2Templates'
     new-style call convention requires it as the first positional arg, and
-    templates reference it directly — e.g. `request.url.path`).
+    templates reference it directly — e.g. `request.url.path`). `status_code`
+    defaults to 200; branded HTML error pages (app.core.errors._negotiate)
+    pass the envelope's real status (404, 500, ...) so the HTTP status line
+    matches the JSON sibling response, not just the rendered body.
     """
-    return templates.TemplateResponse(request, name, context or {})
+    return templates.TemplateResponse(
+        request, name, context or {}, status_code=status_code
+    )

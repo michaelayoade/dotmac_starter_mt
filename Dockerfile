@@ -47,7 +47,7 @@ RUN poetry install --only main --no-root --no-interaction
 
 COPY app ./app
 COPY alembic ./alembic
-COPY alembic.ini VERSION ./
+COPY alembic.ini VERSION brand.json ./
 COPY templates ./templates
 COPY --from=css-builder /build/static ./static
 

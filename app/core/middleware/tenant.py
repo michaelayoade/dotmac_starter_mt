@@ -9,6 +9,20 @@ Resolution order:
 2. Subdomain extraction against PLATFORM_ROOT_DOMAIN
 3. Host == PLATFORM_ROOT_DOMAIN → no tenant (platform routes only)
 4. Otherwise: 404
+
+Two path-prefix bypasses run BEFORE resolution (no DB query at all): exact
+`_HEALTH_PATHS` members (see that constant), and anything under `/static/`
+(`path == "/static"` or `path.startswith("/static/")`, plain string checks —
+no regex, so `/staticevil` and `/static2/x` do NOT match; see
+`tests/unit/test_tenant_middleware.py` for the near-miss coverage). Static
+assets (`app.mount("/static", ...)` in app/main.py) are public by
+construction and served with no tenant context, so resolving a tenant for
+them is both wasted work and a correctness bug: before this bypass, a
+`/static/css/main.css` request with the DB unreachable 500'd instead of
+serving the asset — `TenantResolverMiddleware.dispatch` opened a `SessionLocal()`
+for every static request and had nothing to catch that exception. See
+`docs/ARCHITECTURE.md`'s "Health bypass" section for the same story applied
+to `/health`.
 """
 
 from __future__ import annotations
@@ -29,6 +43,15 @@ from app.core.models import Tenant, TenantDomain
 logger = logging.getLogger(__name__)
 
 _HEALTH_PATHS = frozenset({"/health", "/health/ready"})
+_STATIC_PATH = "/static"
+_STATIC_PATH_PREFIX = "/static/"
+
+
+def _is_static_path(path: str) -> bool:
+    """Plain string checks only (no regex — see module docstring): exact
+    `/static` or anything under `/static/`. `/staticevil` and `/static2/x`
+    must NOT match — `startswith("/static")` alone would wrongly catch both."""
+    return path == _STATIC_PATH or path.startswith(_STATIC_PATH_PREFIX)
 
 
 class TenantResolverMiddleware(BaseHTTPMiddleware):
@@ -44,6 +67,14 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
         # health probes). Short-circuit before resolution, per the /health
         # route's "does not touch DB" contract in app/main.py.
         if request.url.path in _HEALTH_PATHS:
+            request.state.tenant = None
+            return await call_next(request)
+
+        # Static assets (app.mount("/static", ...) in app/main.py) are
+        # public and tenant-agnostic — short-circuit before resolution for
+        # the same reason as health paths above (see module docstring: this
+        # was a real 500 when the DB was unreachable).
+        if _is_static_path(request.url.path):
             request.state.tenant = None
             return await call_next(request)
 

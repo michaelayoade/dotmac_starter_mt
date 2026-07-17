@@ -107,9 +107,10 @@ without touching core:
   `resolve_value(...)`-style reference) somewhere under `app/` outside the
   `settings` feature package and `app/core/settings_resolver.py` itself — a
   setting nobody reads is a dead control. The allowlist for known,
-  intentionally-not-yet-wired keys currently holds exactly one entry
-  (`ui_branding`, consumed when plan 2b's branding UI lands) and may only
-  shrink, never grow, without a task/plan reference.
+  intentionally-not-yet-wired keys is EMPTY as of plan 2b Task 2
+  (`ui_branding` was the one entry, now consumed by
+  `app.core.branding.load_branding`) and may only shrink, never grow,
+  without a task/plan reference.
   (`tests/architecture/test_no_orphan_settings.py`)
 - Every tenant-scoped model: `tenant_id UUID NOT NULL REFERENCES tenants(id)`
   + a composite unique on `(tenant_id, ...)` for anything unique-per-tenant,
