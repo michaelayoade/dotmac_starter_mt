@@ -22,6 +22,7 @@ from collections.abc import Generator
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 
@@ -270,6 +271,140 @@ def test_organization_party_creatable_and_isolated(
         finally:
             b.rollback()
             b.close()
+    finally:
+        admin_session.execute(
+            text("DELETE FROM parties WHERE id = :id"), {"id": str(party_id)}
+        )
+        admin_session.commit()
+
+
+def _insert_bare_party(
+    session: Session,
+    *,
+    tenant_id: uuid.UUID,
+    party_type: str,
+    display_name: str,
+) -> uuid.UUID:
+    """Insert only the `parties` row — no subtype row.
+
+    Used by the write-denial canaries below so the cross-tenant subtype
+    INSERT attempt is the only insert on the subtype table (a PK conflict
+    from a pre-existing subtype row would mask the RLS rejection we're
+    trying to prove).
+    """
+    party_id = uuid.uuid4()
+    session.execute(
+        text(
+            "INSERT INTO parties (id, tenant_id, party_type, display_name) "
+            "VALUES (:id, :tenant_id, :party_type, :display_name)"
+        ),
+        {
+            "id": str(party_id),
+            "tenant_id": str(tenant_id),
+            "party_type": party_type,
+            "display_name": display_name,
+        },
+    )
+    return party_id
+
+
+def test_tenant_b_cannot_insert_party_person_row_for_tenant_a_party(
+    admin_session: Session,
+    tenant_a,
+    tenant_b,
+    tenant_sessionmaker: sessionmaker[Session],
+) -> None:
+    """Subtype write-denial canary: a `party_persons` INSERT whose `party_id`
+    belongs to tenant A, issued under tenant B's session context, must be
+    rejected by the `EXISTS`-based RLS `WITH CHECK` clause — not merely
+    filtered out on read. This is the test that would fail if the migration's
+    subtype policy were missing its `WITH CHECK` (read-only `USING`).
+    """
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        party_id = _insert_bare_party(
+            a,
+            tenant_id=tenant_a.id,
+            party_type="person",
+            display_name="Bare Person",
+        )
+        a.commit()
+    finally:
+        a.close()
+
+    try:
+        b = _as_tenant(tenant_sessionmaker, tenant_b.id)
+        try:
+            with pytest.raises(DBAPIError, match="row-level security"):
+                b.execute(
+                    text(
+                        "INSERT INTO party_persons (party_id, first_name, last_name) "
+                        "VALUES (:party_id, :first_name, :last_name)"
+                    ),
+                    {
+                        "party_id": str(party_id),
+                        "first_name": "Eve",
+                        "last_name": "Intruder",
+                    },
+                )
+        finally:
+            b.rollback()
+            b.close()
+
+        remaining = admin_session.execute(
+            text("SELECT count(*) FROM party_persons WHERE party_id = :id"),
+            {"id": str(party_id)},
+        ).scalar_one()
+        assert remaining == 0
+    finally:
+        admin_session.execute(
+            text("DELETE FROM parties WHERE id = :id"), {"id": str(party_id)}
+        )
+        admin_session.commit()
+
+
+def test_tenant_b_cannot_insert_party_organization_row_for_tenant_a_party(
+    admin_session: Session,
+    tenant_a,
+    tenant_b,
+    tenant_sessionmaker: sessionmaker[Session],
+) -> None:
+    """Same write-denial canary as above, for `party_organizations` — cheap
+    to add given `_insert_bare_party` is type-agnostic, and proves the
+    `WITH CHECK` clause is correct for BOTH subtype tables, not just one.
+    """
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        party_id = _insert_bare_party(
+            a,
+            tenant_id=tenant_a.id,
+            party_type="organization",
+            display_name="Bare Org",
+        )
+        a.commit()
+    finally:
+        a.close()
+
+    try:
+        b = _as_tenant(tenant_sessionmaker, tenant_b.id)
+        try:
+            with pytest.raises(DBAPIError, match="row-level security"):
+                b.execute(
+                    text(
+                        "INSERT INTO party_organizations (party_id, legal_name) "
+                        "VALUES (:party_id, :legal_name)"
+                    ),
+                    {"party_id": str(party_id), "legal_name": "Intruder Org LLC"},
+                )
+        finally:
+            b.rollback()
+            b.close()
+
+        remaining = admin_session.execute(
+            text("SELECT count(*) FROM party_organizations WHERE party_id = :id"),
+            {"id": str(party_id)},
+        ).scalar_one()
+        assert remaining == 0
     finally:
         admin_session.execute(
             text("DELETE FROM parties WHERE id = :id"), {"id": str(party_id)}

@@ -97,4 +97,10 @@ def get_person(db: Session, person_id: UUID) -> PersonRecord:
 
 
 def delete_person(db: Session, person_id: UUID) -> None:
+    party = Parties.get(db, str(person_id))
+    if party.party_type != PartyType.person:
+        # Org-type parties aren't reachable via /people — treat as not-found,
+        # same as get_person's missing-subtype behavior. Deleting them is
+        # explicitly out of scope for this endpoint.
+        raise NotFoundError(Parties.not_found_detail)
     Parties.delete(db, str(person_id), commit=False)
