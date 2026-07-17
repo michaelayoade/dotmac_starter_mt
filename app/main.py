@@ -25,6 +25,7 @@ from app.core.middleware.observability import ObservabilityMiddleware
 from app.core.middleware.rate_limit import RateLimitMiddleware
 from app.core.middleware.tenant import TenantResolverMiddleware
 from app.features import FEATURE_MODULES
+from app.features.settings.seed import seed_platform_defaults
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ async def lifespan(_: FastAPI):
         if settings.is_production:
             raise RuntimeError(f"Configuration error: {err}")
         logger.warning("Config: %s", err)
+    if settings.seed_on_startup:
+        seed_platform_defaults()
     yield
 
 
