@@ -43,3 +43,9 @@ def test_delete_hard(db, tenant_row):
     People.delete(db, str(row.id), commit=False)
     with pytest.raises(NotFoundError):
         People.get(db, str(row.id))
+
+
+def test_get_malformed_uuid_raises_not_found(db):
+    """Verify get() raises NotFoundError for malformed UUIDs."""
+    with pytest.raises(NotFoundError):
+        People.get(db, "not-a-uuid")
