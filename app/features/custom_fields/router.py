@@ -37,6 +37,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_role, require_tenant
+from app.core.exceptions import BadRequestError
 from app.core.models import Party, Tenant
 from app.features.custom_fields import service as custom_fields_service
 from app.features.custom_fields.models import CustomFieldDefinition
@@ -49,6 +50,28 @@ from app.features.custom_fields.schemas import (
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+
+# SoT: `app/features/custom_fields/models.py::CustomFieldDefinition` is the
+# authority for which columns are `nullable=False`. These six are typed as
+# `X | None = None` in `CustomFieldUpdate` purely so `model_dump(exclude_unset=True)`
+# can distinguish "not sent" from "sent" — NOT because the column accepts
+# NULL. A client that explicitly PATCHes `{"is_required": null}` must be
+# rejected here, before `service.update_field`'s `setattr` loop reaches it
+# and SQLAlchemy dies with a masked 500 IntegrityError. Kept as a literal
+# frozenset (not derived from the Pydantic model) because Pydantic has no
+# cheap way to ask "which Optional fields are Optional only for
+# exclude_unset purposes, not because the underlying column is nullable" —
+# keep this set in sync with `models.py`'s `nullable=False` columns by hand.
+NOT_NULLABLE_FIELDS = frozenset(
+    {
+        "field_type",
+        "is_required",
+        "display_order",
+        "show_in_list",
+        "show_in_form",
+        "show_in_detail",
+    }
+)
 
 router = APIRouter(
     prefix="/custom-fields",
@@ -80,6 +103,10 @@ def list_definitions(
     tenant: Tenant = Depends(require_tenant),
     _: Party = Depends(require_role("admin")),
 ) -> list[CustomFieldDefinition]:
+    """`entity_type` is REQUIRED (not optional) because the underlying
+    service only exposes `list_for_entity(db, tenant_id, entity_type, ...)` —
+    there is no "list every definition for every entity_type" service call to
+    delegate to (see module docstring for the full rationale)."""
     definitions = custom_fields_service.list_for_entity(db, tenant.id, entity_type)
     return definitions[offset : offset + limit]
 
@@ -103,6 +130,9 @@ def update_definition(
     _: Party = Depends(require_role("admin")),
 ) -> CustomFieldDefinition:
     updates = payload.model_dump(exclude_unset=True)
+    for key in NOT_NULLABLE_FIELDS:
+        if key in updates and updates[key] is None:
+            raise BadRequestError(f"{key} cannot be null")
     return custom_fields_service.update_field(db, tenant.id, field_id, updates)
 
 

@@ -69,6 +69,9 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 - Settings cache (Redis) with invalidation on write — phase 3, alongside Celery/Redis infra.
 - RBAC: consider `require_user_auth` (not admin) for `GET /rbac/roles` when 2b builds
   role-assignment dropdowns.
+- Custom-fields definitions list paginates in-router via Python slice (bounded by
+  max_per_entity, default 20); if the bound ever rises materially, push limit/offset into
+  list_for_entity via apply_pagination.
 
 ## SOT-complete gaps (criteria added to spec 2026-07-17)
 

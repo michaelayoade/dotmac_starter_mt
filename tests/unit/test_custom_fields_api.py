@@ -261,6 +261,43 @@ def test_patch_missing_is_404(app_client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def test_patch_explicit_null_for_non_nullable_field_is_bad_request(
+    app_client: TestClient,
+) -> None:
+    """`is_required` backs a NOT NULL column (models.py) but `CustomFieldUpdate`
+    types it as `bool | None = None` so `exclude_unset` can distinguish "not
+    sent" from "sent". An explicit `null` must be rejected at the router
+    boundary before it ever reaches `setattr`/`db.flush()` — letting it
+    through means SQLAlchemy dies with a masked 500 IntegrityError instead of
+    a clean 400."""
+    created = _create(app_client)
+
+    resp = app_client.patch(
+        f"/custom-fields/definitions/{created['id']}",
+        json={"is_required": None},
+    )
+    assert resp.status_code == 400, resp.text
+    body = resp.json()
+    assert body["code"] == "bad_request"
+    assert "cannot be null" in body["message"]
+
+
+def test_patch_explicit_null_for_nullable_field_clears_it(
+    app_client: TestClient,
+) -> None:
+    """`help_text` is a genuinely nullable column — explicit `null` must
+    still be accepted and clear the field (this is the behavior the
+    non-nullable-field guard must NOT break)."""
+    created = _create(app_client, help_text="original help")
+
+    resp = app_client.patch(
+        f"/custom-fields/definitions/{created['id']}",
+        json={"help_text": None},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["help_text"] is None
+
+
 # ---------------------------------------------------------------------------
 # DELETE /custom-fields/definitions/{id} — soft deactivate
 # ---------------------------------------------------------------------------
