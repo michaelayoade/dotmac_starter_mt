@@ -9,12 +9,12 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db import get_db, get_platform_db
+from app.core.db import get_db, get_platform_db
+from app.core.security import decode_access_token, hash_token
 from app.models.auth import AuthSession
 from app.models.person import Person
 from app.models.rbac import PersonRole, Role
 from app.models.tenant import Tenant
-from app.services.security import decode_access_token, hash_token
 
 
 def require_tenant(request: Request) -> Tenant:

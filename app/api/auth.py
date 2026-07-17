@@ -10,17 +10,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_tenant, require_user_auth
-from app.models.auth import AuthSession, UserCredential
-from app.models.person import Person
-from app.models.rbac import PersonRole, Role
-from app.models.tenant import Tenant
-from app.services.security import (
+from app.core.deps import get_db, require_tenant, require_user_auth
+from app.core.security import (
     hash_password,
     hash_token,
     issue_access_token,
     verify_password,
 )
+from app.models.auth import AuthSession, UserCredential
+from app.models.person import Person
+from app.models.rbac import PersonRole, Role
+from app.models.tenant import Tenant
 
 router = APIRouter(
     prefix="/auth", tags=["auth"], dependencies=[Depends(require_tenant)]

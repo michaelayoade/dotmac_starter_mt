@@ -15,7 +15,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from app.config import settings
+from app.core.config import settings
 
 PBKDF2_ITERATIONS = 210_000
 

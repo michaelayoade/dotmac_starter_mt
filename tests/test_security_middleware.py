@@ -7,9 +7,9 @@ from http import cookies
 from typing import Any
 from uuid import uuid4
 
-from app.middleware.csrf import CSRF_COOKIE, CSRFMiddleware
-from app.middleware.observability import ObservabilityMiddleware
-from app.middleware.rate_limit import RateLimitMiddleware
+from app.core.middleware.csrf import CSRF_COOKIE, CSRFMiddleware
+from app.core.middleware.observability import ObservabilityMiddleware
+from app.core.middleware.rate_limit import RateLimitMiddleware
 
 
 def test_csrf_sets_cookie_on_safe_request_and_blocks_cookie_post_without_header():

@@ -14,7 +14,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, uuid_pk
+from app.core.models import Base, TimestampMixin, uuid_pk
 
 
 class Tenant(Base, TimestampMixin):

@@ -21,17 +21,17 @@ from app.api.auth import router as auth_router
 from app.api.persons import router as persons_router
 from app.api.rbac import router as rbac_router
 from app.api.tenants import router as tenants_router
-from app.config import settings, validate_settings
-from app.middleware.csrf import CSRFMiddleware
-from app.middleware.observability import ObservabilityMiddleware
-from app.middleware.rate_limit import RateLimitMiddleware
-from app.middleware.tenant import TenantResolverMiddleware
-from app.services.exceptions import (
+from app.core.config import settings, validate_settings
+from app.core.exceptions import (
     BadRequestError,
     ConflictError,
     DomainError,
     NotFoundError,
 )
+from app.core.middleware.csrf import CSRFMiddleware
+from app.core.middleware.observability import ObservabilityMiddleware
+from app.core.middleware.rate_limit import RateLimitMiddleware
+from app.core.middleware.tenant import TenantResolverMiddleware
 
 logger = logging.getLogger(__name__)
 

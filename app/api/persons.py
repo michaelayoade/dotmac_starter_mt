@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_tenant
+from app.core.deps import get_db, require_tenant
 from app.models.person import Person
 from app.models.tenant import Tenant
 

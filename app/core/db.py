@@ -13,7 +13,7 @@ from fastapi import Request
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import settings
+from app.core.config import settings
 
 engine = create_engine(
     settings.database_url,

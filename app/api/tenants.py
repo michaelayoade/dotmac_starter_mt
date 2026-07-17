@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_platform_db, require_platform
+from app.core.deps import get_platform_db, require_platform
 from app.models.tenant import Tenant
 
 router = APIRouter(
