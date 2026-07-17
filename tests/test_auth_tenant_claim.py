@@ -16,7 +16,7 @@ def test_jwt_issued_for_tenant_a_rejected_on_tenant_b(
     register = a.post(
         "/auth/register",
         json={
-            "email": "alice-auth@a.test",
+            "email": "alice-auth@tenant-a.example.com",
             "password": "correct horse battery staple",
             "first_name": "Alice",
             "last_name": "Auth",
@@ -27,7 +27,7 @@ def test_jwt_issued_for_tenant_a_rejected_on_tenant_b(
     login = a.post(
         "/auth/login",
         json={
-            "email": "alice-auth@a.test",
+            "email": "alice-auth@tenant-a.example.com",
             "password": "correct horse battery staple",
         },
     )
