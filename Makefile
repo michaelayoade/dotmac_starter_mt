@@ -66,6 +66,12 @@ docker-dev: ## Run app+postgres locally (dev overlay)
 	APP_IMAGE=$(IMAGE_NAME):$(IMAGE_TAG) APP_PORT=$(APP_PORT) IMAGE_NAME=$(IMAGE_NAME) IMAGE_TAG=$(IMAGE_TAG) \
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
+##@ Release
+bump-version: ## Bump semver: make bump-version part=patch|minor|major
+	poetry run python scripts/bump_version.py $(part)
+deploy: ## Deploy tag: make deploy TAG=sha-abc123
+	IMAGE_NAME=$(IMAGE_NAME) APP_PORT=$(APP_PORT) ./scripts/deploy.sh $(TAG)
+
 .PHONY: help lint lint-imports format type-check security check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	docker-build docker-dev
+	docker-build docker-dev bump-version deploy

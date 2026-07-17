@@ -29,3 +29,6 @@ htmlcov/
 
 # Worktrees
 .worktrees/
+
+# deploy.sh pre-migration DB backups
+/backups/

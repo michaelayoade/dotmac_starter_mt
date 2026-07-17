@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac_starter_mt"
-version = "0.1.0"
+version = "0.4.0"
 description = "Multi-tenant FastAPI starter"
 authors = ["DotMac"]
 readme = "README.md"
@@ -43,6 +43,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106"]
 "alembic/*" = ["E501"]
+"scripts/*" = ["S603", "S607"]  # trusted local ops tooling invoking git/docker
 
 [tool.mypy]
 python_version = "3.12"
