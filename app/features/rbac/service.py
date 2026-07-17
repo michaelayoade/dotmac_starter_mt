@@ -27,7 +27,7 @@ _DEFAULT_AUDIT_RETENTION_DAYS = 365
 
 
 def list_roles(db: Session, tenant: Tenant, *, limit: int, offset: int) -> list[Role]:
-    # Explicit tenant filter (unlike list_persons' RLS-only approach) — RLS also
+    # Explicit tenant filter (unlike list_parties' RLS-only approach) — RLS also
     # enforces this at the DB layer, but the scoping-convention triage calls for an
     # explicit filter here too: it keeps the query self-describing and correct even
     # if RLS were ever misconfigured for this table.

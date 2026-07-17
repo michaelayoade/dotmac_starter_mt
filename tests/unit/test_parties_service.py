@@ -1,0 +1,196 @@
+"""Unit coverage for `app.features.parties.service` (Task 7).
+
+`Party` (`party_type` person|organization) replaced the bare `Person` model
+(Task 6); this feature (Task 7) owns its own API shape —
+`create_person_party`/`create_organization_party` each write a `Party` +
+subtype row atomically via a single flush (no commit — `get_db` owns the
+transaction), and `list_parties` filters by `party_type`.
+"""
+
+from __future__ import annotations
+
+import pytest
+from sqlalchemy.orm import Session
+
+from app.core.exceptions import ConflictError, NotFoundError
+from app.core.models import Party, PartyType, Tenant
+from app.features.parties import service as parties_service
+from app.features.parties.schemas import OrganizationPartyCreate, PersonPartyCreate
+
+
+def test_create_person_party_creates_party_and_subtype_row(
+    db: Session, tenant_row: Tenant
+) -> None:
+    party = parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(
+            email="ada@example.com", first_name="Ada", last_name="Lovelace"
+        ),
+    )
+
+    assert party.party_type == PartyType.person
+    assert party.tenant_id == tenant_row.id
+    assert party.email == "ada@example.com"
+    assert party.display_name == "Ada Lovelace"
+    assert party.person_profile is not None
+    assert party.person_profile.first_name == "Ada"
+    assert party.person_profile.last_name == "Lovelace"
+    assert party.organization_profile is None
+
+
+def test_create_person_party_is_flush_only_rollback_discards_it(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Carry-over atomicity item: the create paths flush, they never commit —
+    `get_db` owns the commit. Proven here by rolling back after the call and
+    confirming nothing persisted.
+    """
+    party = parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(email="rollback@example.com", first_name="R", last_name="B"),
+    )
+    party_id = party.id
+
+    db.rollback()
+
+    assert db.get(Party, party_id) is None
+
+
+def test_create_person_party_duplicate_email_raises_conflict(
+    db: Session, tenant_row: Tenant
+) -> None:
+    parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(email="dup@example.com", first_name="First", last_name="One"),
+    )
+
+    with pytest.raises(ConflictError):
+        parties_service.create_person_party(
+            db,
+            tenant_row,
+            PersonPartyCreate(
+                email="DUP@example.com", first_name="Second", last_name="Two"
+            ),
+        )
+
+
+def test_create_organization_party_creates_party_and_subtype_row(
+    db: Session, tenant_row: Tenant
+) -> None:
+    party = parties_service.create_organization_party(
+        db, tenant_row, OrganizationPartyCreate(legal_name="Acme Corp Ltd.")
+    )
+
+    assert party.party_type == PartyType.organization
+    assert party.tenant_id == tenant_row.id
+    assert party.email is None
+    assert party.display_name == "Acme Corp Ltd."
+    assert party.organization_profile is not None
+    assert party.organization_profile.legal_name == "Acme Corp Ltd."
+    assert party.person_profile is None
+
+
+def test_create_organization_party_accepts_optional_email(
+    db: Session, tenant_row: Tenant
+) -> None:
+    party = parties_service.create_organization_party(
+        db,
+        tenant_row,
+        OrganizationPartyCreate(
+            legal_name="Widgets Inc", email="contact@widgets.example"
+        ),
+    )
+
+    assert party.email == "contact@widgets.example"
+
+
+def test_list_parties_filters_by_party_type(db: Session, tenant_row: Tenant) -> None:
+    person = parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(email="person@example.com", first_name="P", last_name="Q"),
+    )
+    org = parties_service.create_organization_party(
+        db, tenant_row, OrganizationPartyCreate(legal_name="Org LLC")
+    )
+
+    only_people = parties_service.list_parties(
+        db, party_type=PartyType.person, limit=50, offset=0
+    )
+    assert [p.id for p in only_people] == [person.id]
+
+    only_orgs = parties_service.list_parties(
+        db, party_type=PartyType.organization, limit=50, offset=0
+    )
+    assert [p.id for p in only_orgs] == [org.id]
+
+    everyone = parties_service.list_parties(db, party_type=None, limit=50, offset=0)
+    assert {p.id for p in everyone} == {person.id, org.id}
+
+
+def test_list_parties_paginates(db: Session, tenant_row: Tenant) -> None:
+    for i in range(3):
+        parties_service.create_person_party(
+            db,
+            tenant_row,
+            PersonPartyCreate(
+                email=f"page{i}@example.com", first_name="P", last_name=str(i)
+            ),
+        )
+
+    page = parties_service.list_parties(db, party_type=None, limit=2, offset=0)
+    assert len(page) == 2
+
+    rest = parties_service.list_parties(db, party_type=None, limit=2, offset=2)
+    assert len(rest) == 1
+
+
+def test_get_party_returns_party_with_profile_loaded(
+    db: Session, tenant_row: Tenant
+) -> None:
+    created = parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(email="get@example.com", first_name="G", last_name="E"),
+    )
+
+    fetched = parties_service.get_party(db, created.id)
+
+    assert fetched.id == created.id
+    assert fetched.person_profile is not None
+    assert fetched.person_profile.first_name == "G"
+
+
+def test_get_party_missing_raises_not_found(db: Session, tenant_row: Tenant) -> None:
+    with pytest.raises(NotFoundError):
+        parties_service.get_party(db, tenant_row.id)
+
+
+def test_delete_party_removes_person_party(db: Session, tenant_row: Tenant) -> None:
+    party = parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(email="del@example.com", first_name="D", last_name="L"),
+    )
+
+    parties_service.delete_party(db, party.id)
+
+    assert db.get(Party, party.id) is None
+
+
+def test_delete_party_removes_organization_party(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Unlike the old `/people`-only `delete_person`, `/parties` deletion is not
+    restricted to person-type parties — organizations are deletable too.
+    """
+    party = parties_service.create_organization_party(
+        db, tenant_row, OrganizationPartyCreate(legal_name="Deletable Org")
+    )
+
+    parties_service.delete_party(db, party.id)
+
+    assert db.get(Party, party.id) is None

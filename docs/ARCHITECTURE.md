@@ -14,7 +14,7 @@ app/
   features/
     tenants/     platform-level tenant provisioning (no tenant context)
     auth/        JWT login, sessions, /auth/me
-    persons/     example tenant-scoped CRUD resource
+    parties/     person + organization CRUD (/parties/people, /parties/organizations)
     rbac/        roles, role grants, audit-event read endpoint
   main.py        app assembly: middleware stack, error handlers, /health,
                  feature mounting
@@ -23,7 +23,7 @@ app/
 Core never imports `app/features` (import-linter contract). Features never
 import each other (import-linter contract). Cross-feature references are
 FK/UUID columns, never a Python import — e.g. `rbac`'s `PartyRole` refers
-to `parties` via a composite FK, not by importing `app.features.persons`.
+to `parties` via a composite FK, not by importing `app.features.parties`.
 
 ### Model placement: core vs. feature
 
@@ -123,7 +123,7 @@ in the same migration that creates the table.
 
 1. `app/main.py` imports `FEATURE_MODULES` from `app/features/__init__.py`
    — a plain list of dotted module paths (currently `tenants`, `auth`,
-   `persons`, `rbac`).
+   `parties`, `rbac`).
 2. `app.core.features.load_manifests(FEATURE_MODULES)` imports each
    `<module>.feature` submodule via `importlib` (so core never statically
    imports `app.features`) and collects its `feature: FeatureManifest`

@@ -69,7 +69,7 @@ type = "independence"
 modules = [
     "app.features.tenants",
     "app.features.auth",
-    "app.features.persons",
+    "app.features.parties",
     "app.features.rbac",
     "app.features.settings",
 ]

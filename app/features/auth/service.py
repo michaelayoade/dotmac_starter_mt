@@ -62,11 +62,16 @@ class PersonView:
 
 
 def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonView:
+    # Normalize to lowercase at this boundary so credential lookup at login
+    # matches the parties CI-unique semantics (the `parties` table's email
+    # uniqueness index is `lower(email)`-based; `UserCredential.email` must
+    # agree with it or a mixed-case register + lowercase login would fail).
+    email = payload.email.lower()
     party = Party(
         tenant_id=tenant.id,
         party_type=PartyType.person,
         display_name=f"{payload.first_name} {payload.last_name}",
-        email=payload.email,
+        email=email,
     )
     db.add(party)
     try:
@@ -80,7 +85,7 @@ def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonVie
         credential = UserCredential(
             tenant_id=tenant.id,
             party_id=party.id,
-            email=payload.email,
+            email=email,
             password_hash=hash_password(payload.password),
         )
         db.add(credential)
@@ -92,7 +97,7 @@ def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonVie
         raise ConflictError("Email already registered") from exc
     return PersonView(
         id=party.id,
-        email=payload.email,
+        email=email,
         first_name=party_person.first_name,
         last_name=party_person.last_name,
         tenant_id=party.tenant_id,
@@ -100,10 +105,11 @@ def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonVie
 
 
 def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
+    email = payload.email.lower()
     credential = db.scalars(
         select(UserCredential)
         .where(UserCredential.tenant_id == tenant.id)
-        .where(UserCredential.email == payload.email)
+        .where(UserCredential.email == email)
     ).first()
     if credential is None or not verify_password(
         payload.password, credential.password_hash
