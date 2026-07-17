@@ -11,8 +11,15 @@
 #
 # Procedure (per the org's infra safety flow):
 #   verify image on registry -> pg_dump backup -> pin APP_IMAGE in .env ->
-#   pull -> alembic upgrade head (one-off container) -> recreate app ->
+#   pull -> alembic upgrade heads (one-off container) -> recreate app ->
 #   health gate.
+#
+# Config resolution order: explicit shell environment is overlaid by .env
+# (sourced with set -a), then any var still unset falls back to its built-in
+# default. The one exception is APP_IMAGE, the deploy target: it is always
+# derived from the CLI <image-tag> argument, assigned last, unconditionally —
+# never the stale APP_IMAGE= pin that .env sourcing just loaded (.env always
+# carries the previous deploy's pin, since compose requires it).
 #
 # On a failed health gate the previous image is re-pinned and the app service
 # is recreated on it. Migrations are NOT reverted automatically — new
@@ -30,6 +37,7 @@
 #   BACKUP_DIR              default: backups (relative to DEPLOY_DIR)
 #   HEALTH_RETRIES          default: 15
 #   HEALTH_INTERVAL         default: 2 (seconds)
+#   HEALTH_CURL_TIMEOUT     default: 5 (seconds; curl --connect-timeout/--max-time)
 #   MIGRATION_DATABASE_URL  required, read from ENV_FILE — no default
 set -euo pipefail
 
@@ -51,6 +59,7 @@ Config (env var, or set in ENV_FILE — default <DEPLOY_DIR>/.env):
   BACKUP_DIR              default backups
   HEALTH_RETRIES          default 15
   HEALTH_INTERVAL         default 2 (seconds)
+  HEALTH_CURL_TIMEOUT     default 5 (seconds)
   MIGRATION_DATABASE_URL  required, must be set in .env
 USAGE
 }
@@ -63,18 +72,7 @@ TAG="$1"
 
 cd "${DEPLOY_DIR}"
 
-COMPOSE_FILE_PROD="${COMPOSE_FILE_PROD:-docker-compose.yml}"
-IMAGE_NAME="${IMAGE_NAME:-dotmac_starter_mt}"
-APP_PORT="${APP_PORT:-8000}"
-DEPLOY_HEALTH_HOST="${DEPLOY_HEALTH_HOST:-127.0.0.1}"
-BACKUP_DIR="${BACKUP_DIR:-backups}"
-HEALTH_RETRIES="${HEALTH_RETRIES:-15}"
-HEALTH_INTERVAL="${HEALTH_INTERVAL:-2}"
 ENV_FILE="${ENV_FILE:-${DEPLOY_DIR}/.env}"
-HEALTH_URL="http://${DEPLOY_HEALTH_HOST}:${APP_PORT}/health"
-
-COMPOSE=(docker compose -f "${COMPOSE_FILE_PROD}")
-APP_IMAGE="${IMAGE_NAME}:${TAG}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "Missing ${ENV_FILE} — deploy.sh requires an environment file with at least" >&2
@@ -82,11 +80,26 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
-# Load .env (APP_IMAGE, MIGRATION_DATABASE_URL, etc.) into this shell's env.
+# Load .env (APP_IMAGE, MIGRATION_DATABASE_URL, etc.) into this shell's env
+# BEFORE computing any derived config below — config-file values must land
+# first so the "still unset" defaults that follow don't get clobbered by a
+# stale value sourced afterwards. Precedence for everything below is:
+# explicit environment > .env > built-in default — EXCEPT APP_IMAGE, which
+# is always the CLI TAG regardless of what .env pins (see below).
 set -a
 # shellcheck disable=SC1090
 . "${ENV_FILE}"
 set +a
+
+# Defaults for anything still unset after sourcing .env.
+: "${COMPOSE_FILE_PROD:=docker-compose.yml}"
+: "${IMAGE_NAME:=dotmac_starter_mt}"
+: "${APP_PORT:=8000}"
+: "${DEPLOY_HEALTH_HOST:=127.0.0.1}"
+: "${BACKUP_DIR:=backups}"
+: "${HEALTH_RETRIES:=15}"
+: "${HEALTH_INTERVAL:=2}"
+: "${HEALTH_CURL_TIMEOUT:=5}"
 
 if [[ -z "${MIGRATION_DATABASE_URL:-}" ]]; then
   echo "MIGRATION_DATABASE_URL is not set in ${ENV_FILE} — required for the" >&2
@@ -95,6 +108,16 @@ if [[ -z "${MIGRATION_DATABASE_URL:-}" ]]; then
 fi
 
 PREV_IMAGE="$(grep -E '^APP_IMAGE=' "${ENV_FILE}" | cut -d= -f2- || true)"
+
+# APP_IMAGE is the deploy target: it must ALWAYS be the CLI-supplied TAG,
+# never whatever stale value .env sourcing just loaded (.env always has an
+# old APP_IMAGE= pin from the previous deploy, since compose requires it).
+# Assigned last, unconditionally — this is the one exception to the
+# .env-wins precedence above.
+APP_IMAGE="${IMAGE_NAME}:${TAG}"
+
+HEALTH_URL="http://${DEPLOY_HEALTH_HOST}:${APP_PORT}/health"
+COMPOSE=(docker compose -f "${COMPOSE_FILE_PROD}")
 
 log "Deploying ${APP_IMAGE} (currently pinned: ${PREV_IMAGE:-none})"
 
@@ -108,9 +131,9 @@ BACKUP_FILE="${BACKUP_DIR}/${STAMP}.sql.gz"
 # pg_dump/libpq don't understand the SQLAlchemy "+driver" URL suffix
 # (e.g. postgresql+psycopg://) — strip it down to a plain postgresql:// URI.
 PG_DUMP_URL="$(printf '%s' "${MIGRATION_DATABASE_URL}" | sed -E 's#^postgresql\+[A-Za-z0-9_]+://#postgresql://#')"
-set -o pipefail
+# pipefail is already on globally (set -euo pipefail above) — no need to
+# toggle it locally here.
 pg_dump "${PG_DUMP_URL}" | gzip > "${BACKUP_FILE}"
-set +o pipefail
 if [[ ! -s "${BACKUP_FILE}" ]]; then
   echo "Backup produced an empty file — aborting" >&2
   rm -f "${BACKUP_FILE}"
@@ -132,11 +155,17 @@ else
   printf 'APP_IMAGE=%s\n' "${APP_IMAGE}" >> "${ENV_FILE}"
 fi
 
+if ! grep -qFx "APP_IMAGE=${APP_IMAGE}" "${ENV_FILE}"; then
+  echo "Pin verification failed — ${ENV_FILE} does not contain APP_IMAGE=${APP_IMAGE}" >&2
+  echo "after the pin. Aborting before touching running containers." >&2
+  exit 1
+fi
+
 log "Pulling image"
 "${COMPOSE[@]}" pull app
 
-log "Applying migrations (alembic upgrade head)"
-"${COMPOSE[@]}" run --rm -e DATABASE_URL="${MIGRATION_DATABASE_URL}" app alembic upgrade head
+log "Applying migrations (alembic upgrade heads)"
+"${COMPOSE[@]}" run --rm -e DATABASE_URL="${MIGRATION_DATABASE_URL}" app alembic upgrade heads
 
 log "Recreating app service"
 "${COMPOSE[@]}" up -d app
@@ -144,7 +173,7 @@ log "Recreating app service"
 log "Waiting for app health at ${HEALTH_URL} (${HEALTH_RETRIES} retries, ${HEALTH_INTERVAL}s apart)"
 healthy=0
 for ((i = 1; i <= HEALTH_RETRIES; i++)); do
-  if curl -fsS -o /dev/null "${HEALTH_URL}" 2>/dev/null; then
+  if curl -fsS --connect-timeout "${HEALTH_CURL_TIMEOUT}" --max-time "${HEALTH_CURL_TIMEOUT}" -o /dev/null "${HEALTH_URL}" 2>/dev/null; then
     healthy=1
     break
   fi
