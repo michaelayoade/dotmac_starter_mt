@@ -19,6 +19,9 @@ from app.core.models import Base  # registers Tenant/Party/Role/PartyRole/AuthSe
 from app.features.auth import (
     models as auth,  # noqa: F401  (register UserCredential for autogenerate)
 )
+from app.features.custom_fields import (
+    models as custom_fields,  # noqa: F401  (register CustomFieldDefinition)
+)
 
 config = context.config
 

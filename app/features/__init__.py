@@ -4,4 +4,5 @@ FEATURE_MODULES = [
     "app.features.parties",
     "app.features.rbac",
     "app.features.settings",
+    "app.features.custom_fields",
 ]

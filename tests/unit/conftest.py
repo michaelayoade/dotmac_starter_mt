@@ -24,6 +24,7 @@ from app.core.models import Base, Party, PartyPerson, PartyType, Tenant
 
 # Import feature model modules so Base.metadata is fully populated.
 from app.features.auth import models as auth  # noqa: F401
+from app.features.custom_fields import models as custom_fields  # noqa: F401
 
 
 @pytest.fixture(scope="session")

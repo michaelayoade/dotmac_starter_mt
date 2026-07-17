@@ -43,7 +43,10 @@ from sqlalchemy import (
     Uuid,
     func,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+_JSON_VARIANT = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -136,6 +139,11 @@ class Party(Base, TimestampMixin):
     case-insensitive partial unique index `(tenant_id, lower(email))
     WHERE email IS NOT NULL` — see the migration. Profile data lives on the
     subtype tables (`PartyPerson`/`PartyOrganization`), joined 1:1 on `id`.
+
+    `custom_fields` (Task 8) holds field *values* keyed by `field_code`,
+    riding on this table's existing RLS policy; field *shape* (type,
+    validation, display) is defined per-tenant in
+    `app.features.custom_fields.models.CustomFieldDefinition`.
     """
 
     __tablename__ = "parties"
@@ -169,6 +177,12 @@ class Party(Base, TimestampMixin):
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str | None] = mapped_column(String(320))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    custom_fields: Mapped[dict] = mapped_column(
+        _JSON_VARIANT,
+        nullable=False,
+        default=dict,
+        server_default=sa.text("'{}'"),
+    )
 
     person_profile: Mapped[PartyPerson | None] = relationship(
         back_populates="party",
