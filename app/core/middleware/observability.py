@@ -9,6 +9,8 @@ from uuid import uuid4
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.core.logging import request_id_var
+
 logger = logging.getLogger("app.requests")
 
 
@@ -42,9 +44,11 @@ class ObservabilityMiddleware:
                 message["headers"] = headers
             await send(message)
 
+        token = request_id_var.set(request_id)
         try:
             await self.app(scope, receive, send_with_request_id)
         finally:
+            request_id_var.reset(token)
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             tenant = getattr(request.state, "tenant", None)
             logger.info(

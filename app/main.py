@@ -28,12 +28,15 @@ from app.core.exceptions import (
     DomainError,
     NotFoundError,
 )
+from app.core.logging import setup_logging
 from app.core.middleware.csrf import CSRFMiddleware
 from app.core.middleware.observability import ObservabilityMiddleware
 from app.core.middleware.rate_limit import RateLimitMiddleware
 from app.core.middleware.tenant import TenantResolverMiddleware
 
 logger = logging.getLogger(__name__)
+
+setup_logging()
 
 
 @asynccontextmanager
