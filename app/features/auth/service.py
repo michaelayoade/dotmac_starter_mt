@@ -8,7 +8,6 @@ functions, and shapes the response.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +22,7 @@ from app.core.security import (
     verify_password,
 )
 from app.features.auth.models import UserCredential
+from app.features.auth.schemas import LoginRequest, RegisterRequest
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class LoginResult:
     token_type: str = "bearer"
 
 
-def register(db: Session, tenant: Tenant, payload: Any) -> Person:
+def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> Person:
     person = Person(
         tenant_id=tenant.id,
         email=payload.email,
@@ -59,7 +59,7 @@ def register(db: Session, tenant: Tenant, payload: Any) -> Person:
     return person
 
 
-def login(db: Session, tenant: Tenant, payload: Any) -> LoginResult:
+def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
     credential = db.scalars(
         select(UserCredential)
         .where(UserCredential.tenant_id == tenant.id)

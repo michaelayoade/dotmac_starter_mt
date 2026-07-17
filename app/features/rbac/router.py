@@ -2,49 +2,26 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from uuid import UUID
-
-from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.audit import AuditEvent, write_audit_event
 from app.core.deps import get_db, require_role, require_tenant
 from app.core.models import Person, Role, Tenant
 from app.features.rbac import service as rbac_service
+from app.features.rbac.schemas import (
+    AuditEventRead,
+    RoleCreate,
+    RoleGrantRequest,
+    RoleRead,
+)
+
+DEFAULT_ROLES_LIMIT = 50
+MAX_ROLES_LIMIT = 200
 
 router = APIRouter(
     prefix="/rbac", tags=["rbac"], dependencies=[Depends(require_tenant)]
 )
-
-
-class RoleCreate(BaseModel):
-    slug: str = Field(min_length=1, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
-    name: str = Field(min_length=1, max_length=120)
-
-
-class RoleRead(BaseModel):
-    id: UUID
-    slug: str
-    name: str
-    model_config = {"from_attributes": True}
-
-
-class RoleGrantRequest(BaseModel):
-    person_id: UUID
-    role_id: UUID
-
-
-class AuditEventRead(BaseModel):
-    id: UUID
-    actor_person_id: UUID | None
-    action: str
-    entity_type: str
-    entity_id: str | None
-    details: dict[str, object]
-    created_at: datetime
-    model_config = {"from_attributes": True}
 
 
 @router.post(
@@ -69,6 +46,17 @@ def create_role(
         details={"slug": role.slug},
     )
     return role
+
+
+@router.get("/roles", response_model=list[RoleRead])
+def list_roles(
+    limit: int = Query(default=DEFAULT_ROLES_LIMIT, ge=0, le=MAX_ROLES_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(require_tenant),
+    _: Person = Depends(require_role("admin")),
+) -> list[Role]:
+    return rbac_service.list_roles(db, tenant, limit=limit, offset=offset)
 
 
 @router.post(

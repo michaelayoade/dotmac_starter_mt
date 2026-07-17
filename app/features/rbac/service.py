@@ -7,8 +7,6 @@ functions, writes the audit trail, and shapes the response.
 
 from __future__ import annotations
 
-from typing import Any
-
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -16,13 +14,23 @@ from sqlalchemy.orm import Session
 from app.core.audit import AuditEvent
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.models import Person, PersonRole, Role, Tenant
+from app.core.query import apply_pagination
+from app.features.rbac.schemas import RoleCreate, RoleGrantRequest
 
 
-def list_roles(db: Session) -> list[Role]:
-    return list(db.scalars(select(Role).order_by(Role.created_at.desc())).all())
+def list_roles(db: Session, tenant: Tenant, *, limit: int, offset: int) -> list[Role]:
+    # Explicit tenant filter (unlike list_persons' RLS-only approach) — RLS also
+    # enforces this at the DB layer, but the scoping-convention triage calls for an
+    # explicit filter here too: it keeps the query self-describing and correct even
+    # if RLS were ever misconfigured for this table.
+    stmt = (
+        select(Role).where(Role.tenant_id == tenant.id).order_by(Role.created_at.desc())
+    )
+    stmt = apply_pagination(stmt, limit=limit, offset=offset)
+    return list(db.scalars(stmt).all())
 
 
-def create_role(db: Session, tenant: Tenant, payload: Any) -> Role:
+def create_role(db: Session, tenant: Tenant, payload: RoleCreate) -> Role:
     role = Role(tenant_id=tenant.id, slug=payload.slug, name=payload.name)
     db.add(role)
     try:
@@ -34,7 +42,7 @@ def create_role(db: Session, tenant: Tenant, payload: Any) -> Role:
     return role
 
 
-def assign_role(db: Session, tenant: Tenant, payload: Any) -> PersonRole:
+def assign_role(db: Session, tenant: Tenant, payload: RoleGrantRequest) -> PersonRole:
     person = db.scalars(
         select(Person)
         .where(Person.tenant_id == tenant.id)

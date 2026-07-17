@@ -2,44 +2,22 @@
 
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_tenant, require_user_auth
 from app.core.models import Person, Tenant
 from app.features.auth import service as auth_flows
+from app.features.auth.schemas import (
+    CurrentUserResponse,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 
 router = APIRouter(
     prefix="/auth", tags=["auth"], dependencies=[Depends(require_tenant)]
 )
-
-
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=256)
-    first_name: str = Field(min_length=1, max_length=80)
-    last_name: str = Field(min_length=1, max_length=80)
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=1, max_length=256)
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
-
-class CurrentUserResponse(BaseModel):
-    id: UUID
-    email: EmailStr
-    first_name: str
-    last_name: str
-    tenant_id: UUID
 
 
 @router.post(

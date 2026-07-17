@@ -37,6 +37,30 @@ def test_cross_tenant_role_assignment_returns_404(
     assert response.status_code == 404
 
 
+def test_roles_from_tenant_a_invisible_to_tenant_b(
+    app_client: TestClient,
+    tenant_a,
+    tenant_b,
+):
+    a = client_for(app_client, tenant_a.slug)
+    a_token = _register_and_login(a, "roles-a@tenant-a.example.com")
+    _create_role(a, a_token, "editor")
+
+    a_roles = a.get("/rbac/roles", headers={"Authorization": f"Bearer {a_token}"})
+    assert a_roles.status_code == 200
+    # "admin" is auto-assigned to the first registered user of the tenant
+    # (see auth/service.py::_assign_first_user_admin); "editor" is the one we made.
+    assert {role["slug"] for role in a_roles.json()} == {"admin", "editor"}
+
+    b = client_for(TestClient(app_client.app), tenant_b.slug)
+    b_token = _register_and_login(b, "roles-b@tenant-b.example.org")
+    b_roles = b.get("/rbac/roles", headers={"Authorization": f"Bearer {b_token}"})
+    assert b_roles.status_code == 200
+    b_slugs = {role["slug"] for role in b_roles.json()}
+    assert b_slugs == {"admin"}
+    assert "editor" not in b_slugs
+
+
 def test_audit_events_from_tenant_a_invisible_to_tenant_b(
     app_client: TestClient,
     tenant_a,
