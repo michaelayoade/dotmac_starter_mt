@@ -15,9 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import AuditEvent
 from app.core.exceptions import ConflictError, NotFoundError
-from app.features.persons.models import Person
-from app.features.rbac.models import PersonRole, Role
-from app.features.tenants.models import Tenant
+from app.core.models import Person, PersonRole, Role, Tenant
 
 
 def list_roles(db: Session) -> list[Role]:

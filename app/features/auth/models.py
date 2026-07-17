@@ -1,12 +1,17 @@
-"""Tenant-scoped auth models."""
+"""Auth feature-local models.
+
+`AuthSession` moved to `app.core.models` (needed by `app.core.deps.require_user_auth`
+— core cannot import features). `UserCredential` stays here: nothing outside
+`app.features.auth.service` touches it, so it remains feature-local. It references
+`people` and `tenants` via string-form `ForeignKey`/`ForeignKeyConstraint` only —
+no import of `app.core.models.Person`/`Tenant` classes needed.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     String,
@@ -44,36 +49,3 @@ class UserCredential(Base, TimestampMixin):
     )
     email: Mapped[str] = mapped_column(String(254), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-
-
-class AuthSession(Base, TimestampMixin):
-    __tablename__ = "auth_sessions"
-    __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "token_hash", name="uq_auth_sessions_tenant_token_hash"
-        ),
-        ForeignKeyConstraint(
-            ["tenant_id", "person_id"],
-            ["people.tenant_id", "people.id"],
-            ondelete="CASCADE",
-            name="fk_auth_sessions_tenant_person",
-        ),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    tenant_id: Mapped[UUID] = mapped_column(
-        Uuid(),
-        ForeignKey("tenants.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    person_id: Mapped[UUID] = mapped_column(
-        Uuid(),
-        nullable=False,
-        index=True,
-    )
-    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

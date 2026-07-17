@@ -11,10 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.core.audit import AuditEvent, write_audit_event
 from app.core.deps import get_db, require_role, require_tenant
-from app.features.persons.models import Person
+from app.core.models import Person, Role, Tenant
 from app.features.rbac import service as rbac_service
-from app.features.rbac.models import Role
-from app.features.tenants.models import Tenant
 
 router = APIRouter(
     prefix="/rbac", tags=["rbac"], dependencies=[Depends(require_tenant)]

@@ -22,7 +22,7 @@ type-check: ## mypy
 	poetry run mypy app
 security: ## Bandit security scan
 	poetry run bandit -c pyproject.toml -r app
-check: lint type-check security ## Lint + types + security
+check: lint lint-imports type-check security ## Lint + types + security
 	poetry run ruff format --check .
 
 ##@ Testing

@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_platform_db, require_platform
+from app.core.models import Tenant
 from app.features.tenants import service as tenants_service
-from app.features.tenants.models import Tenant
 
 router = APIRouter(
     prefix="/platform/tenants",

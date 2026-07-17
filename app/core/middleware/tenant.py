@@ -23,7 +23,7 @@ from starlette.types import ASGIApp
 
 from app.core.config import settings
 from app.core.db import SessionLocal
-from app.features.tenants.models import Tenant, TenantDomain
+from app.core.models import Tenant, TenantDomain
 
 logger = logging.getLogger(__name__)
 

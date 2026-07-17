@@ -15,16 +15,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.models import AuthSession, Person, PersonRole, Role, Tenant
 from app.core.security import (
     hash_password,
     hash_token,
     issue_access_token,
     verify_password,
 )
-from app.features.auth.models import AuthSession, UserCredential
-from app.features.persons.models import Person
-from app.features.rbac.models import PersonRole, Role
-from app.features.tenants.models import Tenant
+from app.features.auth.models import UserCredential
 
 
 @dataclass(frozen=True)

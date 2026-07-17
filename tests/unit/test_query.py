@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy import select
 
 from app.core.exceptions import BadRequestError
+from app.core.models import Person
 from app.core.query import apply_ordering
-from app.features.persons.models import Person
 
 
 def test_apply_ordering_noop_when_order_by_none():

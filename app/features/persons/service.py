@@ -18,8 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.crud import CRUDManager
 from app.core.exceptions import ConflictError
-from app.features.persons.models import Person
-from app.features.tenants.models import Tenant
+from app.core.models import Person, Tenant
 
 
 class Persons(CRUDManager[Person]):

@@ -59,6 +59,25 @@ testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
 
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Features are independent of each other"
+type = "independence"
+modules = [
+    "app.features.tenants",
+    "app.features.auth",
+    "app.features.persons",
+    "app.features.rbac",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core must not import features"
+type = "forbidden"
+source_modules = ["app.core"]
+forbidden_modules = ["app.features"]
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

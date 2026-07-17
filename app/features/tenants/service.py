@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError
-from app.features.tenants.models import Tenant
+from app.core.models import Tenant
 
 
 def list_tenants(db: Session) -> list[Tenant]:

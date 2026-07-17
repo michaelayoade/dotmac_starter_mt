@@ -1,8 +1,8 @@
 import pytest
 from sqlalchemy import select
 
+from app.core.models import Tenant
 from app.core.unit_of_work import UnitOfWork
-from app.features.tenants.models import Tenant
 
 
 def test_uow_commits_on_clean_exit(db):

@@ -24,14 +24,10 @@ os.environ.setdefault(
 )
 
 from app.core import audit  # noqa: F401
-from app.core.models import Base
+from app.core.models import Base, Tenant
 
-# Import model modules so Base.metadata is fully populated.
+# Import feature model modules so Base.metadata is fully populated.
 from app.features.auth import models as auth  # noqa: F401
-from app.features.persons import models as person  # noqa: F401
-from app.features.rbac import models as rbac  # noqa: F401
-from app.features.tenants import models as tenant  # noqa: F401
-from app.features.tenants.models import Tenant
 
 
 @pytest.fixture(scope="session")

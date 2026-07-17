@@ -12,13 +12,10 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from app.core import audit  # noqa: F401  (register AuditEvent for autogenerate)
-from app.core.models import Base
+from app.core.models import Base  # registers Tenant/Person/Role/PersonRole/AuthSession
 from app.features.auth import (
-    models as auth,  # noqa: F401  (register models for autogenerate)
+    models as auth,  # noqa: F401  (register UserCredential for autogenerate)
 )
-from app.features.persons import models as person  # noqa: F401
-from app.features.rbac import models as rbac  # noqa: F401
-from app.features.tenants import models as tenant  # noqa: F401
 
 config = context.config
 
