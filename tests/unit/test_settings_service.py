@@ -162,6 +162,18 @@ def test_resolve_value_tenant_row_wins_over_platform_row(db, tenant_row, monkeyp
 
 @pytest.fixture(autouse=True)
 def _register_coercion_test_specs():
+    """Registers test-only specs in the module-level `sr._REGISTRY`.
+
+    Teardown snapshots the registry's keys before registering and removes
+    exactly the keys this fixture added afterward, so these test-only specs
+    (`auth/test_bool`, `auth/test_string`, `auth/test_allowed`,
+    `auth/test_int_range`) don't leak into other test modules that inspect
+    `all_specs()`/`_REGISTRY` (e.g. a full-suite run where import order
+    differs from a single-file run). The registry module's public API
+    (`register_specs`/`all_specs`/`get_spec`) is unchanged — teardown pokes
+    `_REGISTRY` directly since there's no `unregister` helper.
+    """
+    before_keys = set(sr._REGISTRY.keys())
     sr.register_specs(
         [
             sr.SettingSpec(
@@ -193,6 +205,10 @@ def _register_coercion_test_specs():
             ),
         ]
     )
+    yield
+    added_keys = set(sr._REGISTRY.keys()) - before_keys
+    for key in added_keys:
+        del sr._REGISTRY[key]
 
 
 def test_resolve_value_coerces_boolean_from_string(db):
@@ -252,6 +268,28 @@ def test_resolve_value_json_passthrough(db):
     db.flush()
     value = sr.resolve_value(db, SettingDomain.branding, "ui_branding", tenant_id=None)
     assert value == {"logo": "a.png"}
+
+
+def test_resolve_value_json_default_is_not_aliased_across_calls(db, tenant_row):
+    """Regression: `resolve_value` used to return the spec's `default` object
+    directly when no row exists. Since `SettingSpec.default` is stored once on
+    the (module-level, effectively process-lifetime) frozen dataclass
+    instance in `_REGISTRY`, returning it by reference meant a caller
+    mutating its result mutated the spec default for every future
+    resolution — and every other caller — for the rest of the process.
+    `branding/ui_branding`'s default is `{}` (see spec.py); resolving it
+    twice with no DB row must yield two independent dicts.
+    """
+    first = sr.resolve_value(
+        db, SettingDomain.branding, "ui_branding", tenant_id=tenant_row.id
+    )
+    assert first == {}
+    first["logo"] = "corrupted.png"
+
+    second = sr.resolve_value(
+        db, SettingDomain.branding, "ui_branding", tenant_id=tenant_row.id
+    )
+    assert second == {}
 
 
 def test_resolve_value_out_of_range_int_falls_back_to_default(db):

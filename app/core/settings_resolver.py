@@ -24,6 +24,7 @@ instead of sub's single-tenant assumption.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -200,6 +201,15 @@ def resolve_value(
             value = spec.default
         elif spec.max_value is not None and value > spec.max_value:
             value = spec.default
+
+    if spec.value_type == SettingValueType.json and value is not None:
+        # json-type values are mutable (dicts). `value` may be the shared
+        # `spec.default` object (assigned by reference above whenever
+        # resolution falls back to the default) — every caller must get an
+        # independent copy so mutating one caller's result can't corrupt the
+        # spec default (and thus every future resolution) for the rest of
+        # the process. Scalars (bool/int/str) are immutable, no copy needed.
+        value = copy.deepcopy(value)
 
     return value
 
