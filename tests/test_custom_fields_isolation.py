@@ -30,10 +30,15 @@ import uuid
 from collections.abc import Generator
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
+
+from tests.conftest import client_for
+
+PASSWORD = "correct horse battery staple"
 
 
 @pytest.fixture(scope="module")
@@ -257,3 +262,142 @@ def test_party_custom_fields_value_invisible_to_tenant_b(
             text("DELETE FROM parties WHERE id = :id"), {"id": str(party_id)}
         )
         admin_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# Task 10 — THE ACCEPTANCE CANARY: the spec's literal end-to-end scenario,
+# driven entirely through the real HTTP API against a real, already-migrated
+# Postgres. This is the proof of the phase's headline requirement — "fields
+# are data, zero migrations per field" — precisely BECAUSE this test never
+# touches alembic/the migration runner at any point between defining
+# `eye_color` and using it: no migration fixture is invoked, no `alembic
+# upgrade` call appears anywhere in this test or its fixtures. The schema
+# was migrated once, before the test session started (`make test-db-up`);
+# everything below — the field *definition* and its *value* — is ordinary
+# row data written and read through `custom_field_definitions` and
+# `parties.custom_fields`, not new columns or new migrations.
+# ---------------------------------------------------------------------------
+
+
+def _register_and_login(client: TestClient, email: str) -> tuple[str, str]:
+    """Registers + logs in a new user, returning (access_token, party_id).
+
+    The first registered user of a tenant is auto-assigned the "admin" role
+    (`app.features.auth.service._assign_first_user_admin`), so this doubles
+    as "register the tenant's admin" for the canary below — no separate
+    role-grant call needed.
+    """
+    register = client.post(
+        "/auth/register",
+        json={
+            "email": email,
+            "password": PASSWORD,
+            "first_name": "Admin",
+            "last_name": "User",
+        },
+    )
+    assert register.status_code == 201, register.text
+    party_id = register.json()["id"]
+
+    login = client.post("/auth/login", json={"email": email, "password": PASSWORD})
+    assert login.status_code == 200, login.text
+    return login.json()["access_token"], party_id
+
+
+def test_eye_color_custom_field_end_to_end_canary(
+    app_client: TestClient, tenant_a, tenant_b
+) -> None:
+    """Tenant A admin defines `eye_color` (SELECT, runtime data — no
+    migration), sets it on a person-type party, reads it back; tenant B's
+    admin sees neither the definition nor the value; an invalid SELECT
+    option 400s with the envelope shape.
+
+    NOTE on request ordering: every mutating call (POST/PUT) on a given
+    client happens BEFORE that client's first GET. `CSRFMiddleware`
+    (`app/core/middleware/csrf.py`) double-submit-checks any non-safe method
+    once a `csrf_token` cookie exists (a GET response sets one), and this
+    test sends no `x-csrf-token` header — same ordering constraint already
+    followed by `tests/test_settings_isolation.py`'s API canary. Nothing
+    tenancy-related here; purely a TestClient/CSRF-cookie sequencing detail.
+    """
+    a = client_for(app_client, tenant_a.slug)
+    a_token, a_party_id = _register_and_login(a, "eyecolor-a@tenant-a.example.com")
+
+    create_resp = a.post(
+        "/custom-fields/definitions",
+        headers={"Authorization": f"Bearer {a_token}"},
+        json={
+            "entity_type": "party",
+            "field_code": "eye_color",
+            "field_name": "Eye color",
+            "field_type": "SELECT",
+            "field_options": {
+                "options": [
+                    {"value": "brown", "label": "Brown"},
+                    {"value": "blue", "label": "Blue"},
+                ]
+            },
+        },
+    )
+    assert create_resp.status_code == 201, create_resp.text
+
+    put_resp = a.put(
+        f"/custom-fields/party/{a_party_id}/values",
+        headers={"Authorization": f"Bearer {a_token}"},
+        json={"eye_color": "brown"},
+    )
+    assert put_resp.status_code == 200, put_resp.text
+    assert put_resp.json() == {"eye_color": "brown"}
+
+    # --- Invalid SELECT option -> 400 envelope (still before any GET on `a`). ---
+    invalid_resp = a.put(
+        f"/custom-fields/party/{a_party_id}/values",
+        headers={"Authorization": f"Bearer {a_token}"},
+        json={"eye_color": "green"},
+    )
+    assert invalid_resp.status_code == 400
+    body = invalid_resp.json()
+    assert body["code"] == "bad_request"
+    assert "allowed options" in body["message"]
+
+    # --- Tenant B: PUT before any GET, same CSRF-ordering reason. ---
+    b = client_for(TestClient(app_client.app), tenant_b.slug)
+    b_token, b_party_id = _register_and_login(b, "eyecolor-b@tenant-b.example.org")
+
+    # Tenant B has no `eye_color` definition of its own yet, so setting it on
+    # tenant B's own party is an unknown-field-code 400 — proving the
+    # definition really is per-tenant, not global.
+    b_put_undefined = b.put(
+        f"/custom-fields/party/{b_party_id}/values",
+        headers={"Authorization": f"Bearer {b_token}"},
+        json={"eye_color": "brown"},
+    )
+    assert b_put_undefined.status_code == 400
+    assert b_put_undefined.json()["code"] == "bad_request"
+
+    # --- Reads (safe methods — order-independent w.r.t. CSRF). ---
+
+    get_resp = a.get(
+        f"/custom-fields/party/{a_party_id}/values",
+        headers={"Authorization": f"Bearer {a_token}"},
+    )
+    assert get_resp.status_code == 200
+    # Tenant A's value is unchanged by the earlier rejected write.
+    assert get_resp.json() == {"eye_color": "brown"}
+
+    # Tenant B sees neither the definition nor the value.
+    b_definitions = b.get(
+        "/custom-fields/definitions",
+        headers={"Authorization": f"Bearer {b_token}"},
+        params={"entity_type": "party"},
+    )
+    assert b_definitions.status_code == 200
+    assert b_definitions.json() == []
+
+    # Tenant B cannot even reach tenant A's party row (RLS-invisible) to read
+    # its value.
+    b_reads_a_value = b.get(
+        f"/custom-fields/party/{a_party_id}/values",
+        headers={"Authorization": f"Bearer {b_token}"},
+    )
+    assert b_reads_a_value.status_code == 404
