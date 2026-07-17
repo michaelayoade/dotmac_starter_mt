@@ -2,9 +2,9 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: starter_test
+      POSTGRES_USER: ${TEST_DB_ADMIN_USER:-postgres}
+      POSTGRES_PASSWORD: ${TEST_DB_ADMIN_PASSWORD:-postgres}
+      POSTGRES_DB: ${TEST_DB_NAME:-starter_test}
       # Disposable localhost-only test DB. The initial Alembic migration creates
       # `app_user` with LOGIN but no password, so TCP auth would fail without this;
       # trust auth is acceptable here because the container only binds to 127.0.0.1
