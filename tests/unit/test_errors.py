@@ -193,3 +193,76 @@ def test_html_client_401_preserves_www_authenticate_header():
     assert resp.status_code == 401
     assert resp.headers["WWW-Authenticate"] == "Bearer"
     assert resp.headers["content-type"].startswith("text/html")
+
+
+# ---------------------------------------------------------------------------
+# Error-page render failure fallback: if template rendering throws
+# (missing/corrupt template), the JSON envelope is returned instead, with
+# the correct status code and a logged exception.
+# ---------------------------------------------------------------------------
+
+
+def test_html_client_render_failure_falls_back_to_json_envelope(monkeypatch, caplog):
+    """When HTML rendering fails, a browser request gets the JSON envelope."""
+    from app.core import errors as errors_module
+
+    # Monkeypatch render_error to throw an exception
+    def broken_render_error(*args, **kwargs):
+        raise RuntimeError("Template rendering failed")
+
+    monkeypatch.setattr(errors_module, "render_error", broken_render_error)
+
+    client = TestClient(_make_app(), raise_server_exceptions=False)
+    resp = client.get("/missing", headers={"Accept": "text/html"})
+
+    # Should get JSON 404, not HTML or 500
+    assert resp.status_code == 404
+    assert resp.headers["content-type"].startswith("application/json")
+    body = resp.json()
+    assert body["code"] == "not_found"
+    assert body["message"] == "Widget not found"
+    assert "request_id" in body
+
+    # The exception must be logged
+    assert "Error-page render failed" in caplog.text
+
+
+def test_csrf_middleware_render_failure_falls_back_to_json_envelope(
+    monkeypatch, caplog
+):
+    """CSRF middleware (outside ExceptionMiddleware) also gets JSON fallback."""
+
+    from app.core import errors as errors_module
+    from app.core.middleware.csrf import CSRFMiddleware
+
+    app = FastAPI()
+    register_error_handlers(app)
+    app.add_middleware(ObservabilityMiddleware)
+    app.add_middleware(CSRFMiddleware, enabled=True)
+
+    @app.post("/form")
+    def form():
+        return {"ok": True}
+
+    # Monkeypatch render_error to throw
+    def broken_render_error(*args, **kwargs):
+        raise RuntimeError("Template rendering failed")
+
+    monkeypatch.setattr(errors_module, "render_error", broken_render_error)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    # CSRF check will fail (no csrf token in header), triggering _negotiate.
+    # We need to set a cookie so the middleware runs the CSRF check.
+    resp = client.post(
+        "/form", headers={"Accept": "text/html"}, cookies={"other_cookie": "value"}
+    )
+
+    # Should get JSON 403 with csrf_failed code, not HTML or 500
+    assert resp.status_code == 403
+    assert resp.headers["content-type"].startswith("application/json")
+    body = resp.json()
+    assert body["code"] == "csrf_failed"
+    assert "request_id" in body
+
+    # The exception must be logged
+    assert "Error-page render failed" in caplog.text

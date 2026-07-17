@@ -138,7 +138,12 @@ def _negotiate(
     if not _wants_html(request):
         return JSONResponse(status_code=status_code, content=env, headers=headers)
 
-    response = render_error(request, status_code, env)
+    try:
+        response = render_error(request, status_code, env)
+    except Exception:
+        logger.exception("Error-page render failed; falling back to JSON envelope")
+        return JSONResponse(status_code=status_code, content=env, headers=headers)
+
     if headers:
         for key, value in headers.items():
             response.headers[key] = value
