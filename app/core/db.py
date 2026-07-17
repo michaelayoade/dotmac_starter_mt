@@ -47,7 +47,7 @@ def get_db(request: Request) -> Generator[Session, None, None]:
         tenant = getattr(request.state, "tenant", None)
         if tenant is not None:
             db.execute(
-                text("SET LOCAL app.current_tenant = :tenant_id"),
+                text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
                 {"tenant_id": str(tenant.id)},
             )
         yield db
