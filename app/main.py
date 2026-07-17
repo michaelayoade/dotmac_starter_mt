@@ -13,27 +13,22 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
 
-from app.api.auth import router as auth_router
-from app.api.persons import router as persons_router
-from app.api.rbac import router as rbac_router
-from app.api.tenants import router as tenants_router
-from app.config import settings, validate_settings
-from app.middleware.csrf import CSRFMiddleware
-from app.middleware.observability import ObservabilityMiddleware
-from app.middleware.rate_limit import RateLimitMiddleware
-from app.middleware.tenant import TenantResolverMiddleware
-from app.services.exceptions import (
-    BadRequestError,
-    ConflictError,
-    DomainError,
-    NotFoundError,
-)
+from app.core.config import settings, validate_settings
+from app.core.errors import register_error_handlers
+from app.core.features import load_manifests, mount_features
+from app.core.logging import setup_logging
+from app.core.middleware.csrf import CSRFMiddleware
+from app.core.middleware.observability import ObservabilityMiddleware
+from app.core.middleware.rate_limit import RateLimitMiddleware
+from app.core.middleware.tenant import TenantResolverMiddleware
+from app.features import FEATURE_MODULES
 
 logger = logging.getLogger(__name__)
+
+setup_logging()
 
 
 @asynccontextmanager
@@ -70,26 +65,7 @@ app.add_middleware(
 )
 
 
-# Domain exception handlers — same envelope shape as dotmac_starter.
-@app.exception_handler(NotFoundError)
-async def _not_found(_: Request, exc: NotFoundError) -> JSONResponse:
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
-
-
-@app.exception_handler(BadRequestError)
-async def _bad_request(_: Request, exc: BadRequestError) -> JSONResponse:
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
-
-
-@app.exception_handler(ConflictError)
-async def _conflict(_: Request, exc: ConflictError) -> JSONResponse:
-    return JSONResponse(status_code=409, content={"detail": str(exc)})
-
-
-@app.exception_handler(DomainError)
-async def _domain_fallback(_: Request, exc: DomainError) -> JSONResponse:
-    logger.exception("Unhandled DomainError")
-    return JSONResponse(status_code=500, content={"detail": "Internal error"})
+register_error_handlers(app)
 
 
 @app.get("/health")
@@ -98,7 +74,8 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-app.include_router(tenants_router)
-app.include_router(auth_router)
-app.include_router(persons_router)
-app.include_router(rbac_router)
+mount_features(
+    app,
+    manifests=load_manifests(FEATURE_MODULES),
+    disabled=settings.disabled_feature_set,
+)

@@ -1,0 +1,25 @@
+# Production compose: pulls a baked image only. Migrations are applied as a
+# separate pre-deploy step (scripts/deploy.sh) — never on container boot.
+#
+# Config knobs (all overridable via .env or shell env):
+#   APP_IMAGE        (required) published image ref, e.g. registry/dotmac_starter_mt:0.4.0
+#   APP_PORT          default 8000  — host bind port AND the port the app listens
+#                      on inside the container (matches the image's APP_PORT arg;
+#                      override both consistently if you rebuild with a different
+#                      port baked in via --build-arg APP_PORT).
+#   APP_MEM_LIMIT     default 512m
+#   APP_PIDS_LIMIT    default 256
+services:
+  app:
+    image: ${APP_IMAGE:?Set APP_IMAGE to a published image tag}
+    env_file: .env
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:${APP_PORT:-8000}"
+    restart: unless-stopped
+    mem_limit: ${APP_MEM_LIMIT:-512m}
+    pids_limit: ${APP_PIDS_LIMIT:-256}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:${APP_PORT:-8000}/health')\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5

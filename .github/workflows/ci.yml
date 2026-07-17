@@ -1,0 +1,106 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [lint, lint-imports, type-check, security]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+      - run: poetry install
+      - run: make ${{ matrix.target }}
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+      - run: poetry install
+      - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov-report=term
+
+  integration:
+    runs-on: ubuntu-latest
+    # Single source of truth for the disposable CI Postgres. `make test-db-up`
+    # brings up docker-compose.test.yml (compose up --wait) and runs
+    # `alembic upgrade head` against it, then `make test-integration` composes
+    # TEST_DATABASE_URL (app_user) and TEST_MIGRATION_DATABASE_URL (admin)
+    # from these same TEST_DB_* values — identical to a local run.
+    # NOTE: the `env:` context is not available in `jobs.<job>.services`, so
+    # this job cannot use a `services:` block; docker-compose.test.yml (which
+    # also sets POSTGRES_HOST_AUTH_METHOD: trust, for the same reason — the
+    # initial Alembic migration creates `app_user` with LOGIN but no
+    # password — trust auth is fine since this is a disposable,
+    # localhost-only CI database) is the actual source of the Postgres
+    # container instead.
+    env:
+      TEST_DB_PORT: "5433"
+      TEST_DB_HOST: localhost
+      TEST_DB_NAME: starter_test
+      TEST_DB_ADMIN_USER: postgres
+      TEST_DB_ADMIN_PASSWORD: postgres
+      TEST_DB_USER: app_user
+      TEST_DB_PASSWORD: app_user
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+      - run: poetry install
+      - run: make test-db-up
+      - run: make test-integration
+      - run: make test-db-down
+        if: always()
+
+  docker-build:
+    runs-on: ubuntu-latest
+    # Builds the prod image and health-gates it before merge. Port/tag are
+    # job-local env, not magic numbers, so they can be bumped in one place.
+    env:
+      APP_PORT: "8000"
+      IMAGE_TAG: "starter:ci"
+      SMOKE_CONTAINER: "smoke"
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg APP_PORT=${{ env.APP_PORT }} -t ${{ env.IMAGE_TAG }} .
+      - run: |
+          docker run -d --name ${{ env.SMOKE_CONTAINER }} -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
+            -e DATABASE_URL=postgresql+psycopg://x:x@localhost/x ${{ env.IMAGE_TAG }}
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:${{ env.APP_PORT }}/health && exit 0; sleep 2;
+          done
+          docker logs ${{ env.SMOKE_CONTAINER }}; exit 1

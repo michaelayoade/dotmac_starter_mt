@@ -15,14 +15,14 @@ def test_cross_tenant_role_assignment_returns_404(
     tenant_b,
 ):
     a = client_for(app_client, tenant_a.slug)
-    a_token = _register_and_login(a, "admin-a@rbac.test")
+    a_token = _register_and_login(a, "admin-a@tenant-a.example.com")
     role_id = _create_role(a, a_token, "support")["id"]
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
     b_person_id = b.post(
         "/auth/register",
         json={
-            "email": "user-b@rbac.test",
+            "email": "user-b@tenant-b.example.org",
             "password": PASSWORD,
             "first_name": "User",
             "last_name": "B",
@@ -43,16 +43,20 @@ def test_audit_events_from_tenant_a_invisible_to_tenant_b(
     tenant_b,
 ):
     a = client_for(app_client, tenant_a.slug)
-    a_token = _register_and_login(a, "audit-a@rbac.test")
+    a_token = _register_and_login(a, "audit-a@tenant-a.example.com")
     _create_role(a, a_token, "audited-role")
 
-    a_events = a.get("/rbac/audit-events", headers={"Authorization": f"Bearer {a_token}"})
+    a_events = a.get(
+        "/rbac/audit-events", headers={"Authorization": f"Bearer {a_token}"}
+    )
     assert a_events.status_code == 200
     assert [event["action"] for event in a_events.json()] == ["role.create"]
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
-    b_token = _register_and_login(b, "audit-b@rbac.test")
-    b_events = b.get("/rbac/audit-events", headers={"Authorization": f"Bearer {b_token}"})
+    b_token = _register_and_login(b, "audit-b@tenant-b.example.org")
+    b_events = b.get(
+        "/rbac/audit-events", headers={"Authorization": f"Bearer {b_token}"}
+    )
     assert b_events.status_code == 200
     assert b_events.json() == []
 

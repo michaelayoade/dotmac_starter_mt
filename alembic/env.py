@@ -11,8 +11,11 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from app.models import auth, person, rbac, tenant  # noqa: F401  (register models for autogenerate)
-from app.models.base import Base
+from app.core import audit  # noqa: F401  (register AuditEvent for autogenerate)
+from app.core.models import Base  # registers Tenant/Person/Role/PersonRole/AuthSession
+from app.features.auth import (
+    models as auth,  # noqa: F401  (register UserCredential for autogenerate)
+)
 
 config = context.config
 
@@ -23,11 +26,7 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return (
-        os.getenv("MIGRATION_DATABASE_URL")
-        or os.getenv("DATABASE_URL")
-        or ""
-    )
+    return os.getenv("MIGRATION_DATABASE_URL") or os.getenv("DATABASE_URL") or ""
 
 
 def run_migrations_offline() -> None:

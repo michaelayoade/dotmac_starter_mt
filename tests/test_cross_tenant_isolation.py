@@ -25,7 +25,11 @@ def test_person_created_in_tenant_a_invisible_to_tenant_b(
     a = client_for(app_client, tenant_a.slug)
     resp = a.post(
         "/people",
-        json={"email": "alice@a.test", "first_name": "Alice", "last_name": "A"},
+        json={
+            "email": "alice@tenant-a.example.com",
+            "first_name": "Alice",
+            "last_name": "A",
+        },
     )
     assert resp.status_code == 201, resp.text
     person_id = resp.json()["id"]
@@ -46,7 +50,11 @@ def test_person_delete_from_other_tenant_returns_404(
     a = client_for(app_client, tenant_a.slug)
     resp = a.post(
         "/people",
-        json={"email": "bob@a.test", "first_name": "Bob", "last_name": "B"},
+        json={
+            "email": "bob@tenant-a.example.com",
+            "first_name": "Bob",
+            "last_name": "B",
+        },
     )
     assert resp.status_code == 201
     person_id = resp.json()["id"]
@@ -69,14 +77,22 @@ def test_email_can_be_reused_across_tenants(
     a = client_for(app_client, tenant_a.slug)
     r1 = a.post(
         "/people",
-        json={"email": "shared@x.test", "first_name": "A", "last_name": "User"},
+        json={
+            "email": "shared@example.com",
+            "first_name": "A",
+            "last_name": "User",
+        },
     )
     assert r1.status_code == 201
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
     r2 = b.post(
         "/people",
-        json={"email": "shared@x.test", "first_name": "B", "last_name": "User"},
+        json={
+            "email": "shared@example.com",
+            "first_name": "B",
+            "last_name": "User",
+        },
     )
     assert r2.status_code == 201
 

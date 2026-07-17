@@ -12,6 +12,18 @@ This skeleton uses `os.getenv("TEST_DATABASE_URL")` — set it before running te
 from __future__ import annotations
 
 import os
+
+# Must run before any `app.` import anywhere in the test session: importing a
+# feature's router — e.g. via app.core.features.load_manifests — transitively
+# imports app.core.db, which builds a SQLAlchemy engine from DATABASE_URL at
+# import time. Set a well-formed placeholder with an unroutable port so that a
+# bare `pytest tests` collects hermetically (no .env / exported DATABASE_URL
+# required) and any accidental connection attempt fails fast. Integration runs
+# override this via the autouse `_set_database_url` fixture below.
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+psycopg://unit-test:unit-test@127.0.0.1:59999/unit-test"
+)
+
 from collections.abc import Generator
 
 import pytest
@@ -53,7 +65,8 @@ def admin_session(admin_engine) -> Generator[Session, None, None]:
 
 @pytest.fixture
 def tenant_a(admin_session: Session):
-    from app.models.tenant import Tenant
+    from app.core.models import Tenant
+
     t = Tenant(slug="alpha", name="Alpha Test Tenant")
     admin_session.add(t)
     admin_session.commit()
@@ -65,7 +78,8 @@ def tenant_a(admin_session: Session):
 
 @pytest.fixture
 def tenant_b(admin_session: Session):
-    from app.models.tenant import Tenant
+    from app.core.models import Tenant
+
     t = Tenant(slug="beta", name="Beta Test Tenant")
     admin_session.add(t)
     admin_session.commit()
@@ -79,6 +93,7 @@ def tenant_b(admin_session: Session):
 def app_client():
     """TestClient that lets you set Host header per request."""
     from app.main import app
+
     return TestClient(app)
 
 

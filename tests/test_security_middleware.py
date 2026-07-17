@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from http import cookies
 from typing import Any
 from uuid import uuid4
 
-from app.middleware.csrf import CSRF_COOKIE, CSRFMiddleware
-from app.middleware.observability import ObservabilityMiddleware
-from app.middleware.rate_limit import RateLimitMiddleware
+from app.core.middleware.csrf import CSRF_COOKIE, CSRFMiddleware
+from app.core.middleware.observability import ObservabilityMiddleware
+from app.core.middleware.rate_limit import RateLimitMiddleware
 
 
 def test_csrf_sets_cookie_on_safe_request_and_blocks_cookie_post_without_header():
@@ -60,6 +61,38 @@ def test_rate_limit_key_isolated_by_tenant():
     assert _run(app, method="GET", path="/foo", tenant=tenant_a)["status"] == 200
     assert _run(app, method="GET", path="/foo", tenant=tenant_a)["status"] == 429
     assert _run(app, method="GET", path="/foo", tenant=tenant_b)["status"] == 200
+
+
+def test_rate_limit_response_uses_error_envelope_and_retry_after():
+    app = RateLimitMiddleware(_ok_app, requests=1, window_seconds=60)
+
+    assert _run(app, method="GET", path="/limited")["status"] == 200
+    response = _run(app, method="GET", path="/limited")
+    assert response["status"] == 429
+    retry_after = [v for k, v in response["headers"] if k == b"retry-after"]
+    assert retry_after and int(retry_after[0]) >= 1
+    body = _body_json(response)
+    assert body["code"] == "rate_limited"
+    assert body["message"] == "Rate limit exceeded"
+    assert "request_id" in body
+    assert "detail" not in body
+
+
+def test_csrf_failure_response_uses_error_envelope():
+    app = CSRFMiddleware(_ok_app)
+
+    response = _run(
+        app,
+        method="POST",
+        path="/form",
+        headers=[(b"cookie", f"{CSRF_COOKIE}=token".encode())],
+    )
+    assert response["status"] == 403
+    body = _body_json(response)
+    assert body["code"] == "csrf_failed"
+    assert body["message"] == "CSRF check failed"
+    assert "request_id" in body
+    assert "detail" not in body
 
 
 def test_observability_generates_request_id_by_default():
@@ -132,8 +165,23 @@ def _run(
         "state": {"tenant": tenant} if tenant is not None else {},
     }
     asyncio.run(app(scope, receive, send))
-    start = next(message for message in messages if message["type"] == "http.response.start")
-    return {"status": start["status"], "headers": start["headers"], "messages": messages}
+    start = next(
+        message for message in messages if message["type"] == "http.response.start"
+    )
+    return {
+        "status": start["status"],
+        "headers": start["headers"],
+        "messages": messages,
+    }
+
+
+def _body_json(response: dict[str, Any]) -> dict[str, Any]:
+    body = b"".join(
+        message.get("body", b"")
+        for message in response["messages"]
+        if message["type"] == "http.response.body"
+    )
+    return json.loads(body)
 
 
 def _cookie_value(response: dict[str, Any], name: str) -> str | None:

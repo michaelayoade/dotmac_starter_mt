@@ -58,6 +58,7 @@ def downgrade() -> None:
 # Roles
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _ensure_roles() -> None:
     """Create database roles if they don't exist.
 
@@ -85,6 +86,7 @@ def _ensure_roles() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # Platform tables (NOT under RLS)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _create_tenants_table() -> None:
     op.create_table(
@@ -142,6 +144,7 @@ def _create_tenant_domains_table() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # Tenant-scoped tables (RLS-protected)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _create_people_table() -> None:
     op.create_table(
@@ -367,7 +370,9 @@ def _create_audit_events_table() -> None:
         ),
     )
     op.create_index("ix_audit_events_tenant_id", "audit_events", ["tenant_id"])
-    op.create_index("ix_audit_events_actor_person_id", "audit_events", ["actor_person_id"])
+    op.create_index(
+        "ix_audit_events_actor_person_id", "audit_events", ["actor_person_id"]
+    )
 
 
 def _create_current_tenant_function() -> None:
@@ -414,7 +419,9 @@ def _apply_rls() -> None:
 def _grant_roles() -> None:
     """Grant explicit online privileges; app_admin remains for migrations/offline ops."""
     op.execute("GRANT USAGE ON SCHEMA public TO app_user, platform_api;")
-    op.execute("GRANT EXECUTE ON FUNCTION app_current_tenant_id() TO app_user, platform_api;")
+    op.execute(
+        "GRANT EXECUTE ON FUNCTION app_current_tenant_id() TO app_user, platform_api;"
+    )
 
     op.execute("GRANT SELECT ON tenants, tenant_domains TO app_user, platform_api;")
     op.execute(
@@ -422,7 +429,9 @@ def _grant_roles() -> None:
         "people, user_credentials, auth_sessions, roles, person_roles TO app_user;"
     )
     op.execute("GRANT SELECT, INSERT ON audit_events TO app_user;")
-    op.execute("GRANT INSERT, UPDATE, DELETE ON tenants, tenant_domains TO platform_api;")
+    op.execute(
+        "GRANT INSERT, UPDATE, DELETE ON tenants, tenant_domains TO platform_api;"
+    )
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON "
         "people, user_credentials, auth_sessions, roles, person_roles TO platform_api;"

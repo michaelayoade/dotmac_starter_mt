@@ -1,0 +1,47 @@
+# Dev overlay: local build + throwaway Postgres. Use with docker-compose.yml:
+#   APP_IMAGE=dotmac_starter_mt:dev docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# (the `make docker-dev` target does this for you).
+#
+# Config knobs:
+#   DEV_DATABASE_URL   default postgresql+psycopg://postgres:postgres@postgres:5432/starter
+#                       Compose does not reliably expand ${VAR:-default} substitutions
+#                       nested inside a larger interpolated string across two merged
+#                       files, so the connection string is one overridable var rather
+#                       than composed from DEV_DB_USER/DEV_DB_PASSWORD/etc pieces.
+#                       Override this directly if you need different dev DB creds —
+#                       just keep DEV_POSTGRES_* below in sync since they seed the
+#                       actual postgres container.
+#   DEV_POSTGRES_USER      default postgres
+#   DEV_POSTGRES_PASSWORD  default postgres
+#   DEV_POSTGRES_DB        default starter
+#   DEV_DB_PORT             default 5432 — host port the dev Postgres is published on
+#   IMAGE_NAME / IMAGE_TAG  default dotmac_starter_mt / dev — local build tag
+#                            (matches the Makefile's docker-build defaults)
+services:
+  app:
+    build:
+      context: .
+      args:
+        APP_PORT: ${APP_PORT:-8000}
+    image: ${IMAGE_NAME:-dotmac_starter_mt}:${IMAGE_TAG:-dev}
+    volumes:
+      - ./app:/srv/app/app
+    environment:
+      DATABASE_URL: ${DEV_DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/starter}
+      MIGRATION_DATABASE_URL: ${DEV_DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/starter}
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DEV_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${DEV_POSTGRES_DB:-starter}
+    ports:
+      - "${DEV_DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DEV_POSTGRES_USER:-postgres}"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

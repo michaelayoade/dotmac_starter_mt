@@ -19,9 +19,6 @@ venv/
 .coverage
 htmlcov/
 
-# Poetry
-poetry.lock
-
 # IDE
 .idea/
 .vscode/
@@ -32,3 +29,6 @@ poetry.lock
 
 # Worktrees
 .worktrees/
+
+# deploy.sh pre-migration DB backups
+/backups/
