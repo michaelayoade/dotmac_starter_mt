@@ -7,22 +7,15 @@ logic only and must scope queries explicitly where they care about tenancy.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Generator
 
 import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-# Unit tests never touch a real database (SQLite in-memory below), but importing
-# a feature's router — e.g. via app.core.features.load_manifests — transitively
-# imports app.core.db, which builds a SQLAlchemy engine from DATABASE_URL at
-# import time. Set a well-formed placeholder with an unroutable port so that import
-# succeeds hermetically and any accidental connection attempt fails fast.
-os.environ.setdefault(
-    "DATABASE_URL", "postgresql+psycopg://unit-test:unit-test@127.0.0.1:59999/unit-test"
-)
-
+# DATABASE_URL is pinned to a hermetic placeholder in tests/conftest.py (the
+# root conftest), which pytest imports before this module — see the comment
+# there about import-time engine creation in app.core.db.
 from app.core import audit  # noqa: F401
 from app.core.models import Base, Tenant
 

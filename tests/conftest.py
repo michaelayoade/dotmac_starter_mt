@@ -12,6 +12,18 @@ This skeleton uses `os.getenv("TEST_DATABASE_URL")` — set it before running te
 from __future__ import annotations
 
 import os
+
+# Must run before any `app.` import anywhere in the test session: importing a
+# feature's router — e.g. via app.core.features.load_manifests — transitively
+# imports app.core.db, which builds a SQLAlchemy engine from DATABASE_URL at
+# import time. Set a well-formed placeholder with an unroutable port so that a
+# bare `pytest tests` collects hermetically (no .env / exported DATABASE_URL
+# required) and any accidental connection attempt fails fast. Integration runs
+# override this via the autouse `_set_database_url` fixture below.
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+psycopg://unit-test:unit-test@127.0.0.1:59999/unit-test"
+)
+
 from collections.abc import Generator
 
 import pytest
