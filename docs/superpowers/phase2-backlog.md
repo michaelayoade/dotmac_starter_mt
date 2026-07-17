@@ -59,3 +59,13 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   (persons service style); pick one convention for explicit-vs-RLS-only tenant filters.
 - Dangling doc pointers to untracked task reports (Dockerfile, query.py, bump_version.py,
   deploy.sh headers) — commit the reports or strip the references.
+
+## Added during phase 2a execution
+
+- Settings: add `sqlite_where` mirrors to the domain_settings partial unique indexes so the
+  resolver precedence test can run unstubbed on SQLite.
+- Settings: `_normalize_for_db` None-handling for json/boolean types → clean BadRequestError
+  at the settings API boundary (owned by T5's validation; verify it landed there).
+- Settings cache (Redis) with invalidation on write — phase 3, alongside Celery/Redis infra.
+- RBAC: consider `require_user_auth` (not admin) for `GET /rbac/roles` when 2b builds
+  role-assignment dropdowns.
