@@ -131,6 +131,7 @@ docker compose -f docker-compose.dev.yml up -d postgres   # DEV_DB_PORT/DEV_POST
 export DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/starter
 export MIGRATION_DATABASE_URL="$DATABASE_URL"
 poetry run alembic upgrade head
+make css-build   # builds static/css/main.css (Tailwind v4) — gitignored, build-only; re-run after editing static/css/src/main.css, or use `make css-watch` while iterating
 make dev   # or: poetry run uvicorn app.main:app --reload --port 8000
 ```
 

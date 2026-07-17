@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en" x-data :class="{ 'dark': $store.dark.on }">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="htmx-config" content='{"defaultSwapStyle":"innerHTML"}' />
+    <title>{% block title %}{{ brand.name if brand and brand.name else "Admin" }}{% endblock %}</title>
+
+    <!-- Fonts: Outfit (display) + Plus Jakarta Sans (body) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS (built from static/css/src/main.css via `npm run css:build`) -->
+    <link rel="stylesheet" href="{{ static_asset_url('/static/css/main.css') }}">
+
+    {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 antialiased">
+    <!-- HTMX + Alpine. `components.js` registers Alpine.data()/Alpine.store()
+         components on the `alpine:init` event, so it must load BEFORE the
+         (deferred) alpine.min.js core so its listener is attached in time. -->
+    <script src="{{ static_asset_url('/static/js/htmx.min.js') }}"></script>
+    <script src="{{ static_asset_url('/static/js/components.js') }}"></script>
+    <script defer src="{{ static_asset_url('/static/js/alpine.min.js') }}"></script>
+
+    <!-- CSRF header bridge — see static/js/csrf.js docstring. Loaded early so
+         the htmx:configRequest listener is registered before any htmx call
+         can fire. NOTE: plain `<form method="post">` is NOT covered by this
+         bridge — every mutating form/link in these templates MUST use
+         hx-post/hx-put/hx-delete instead; see csrf.js for why. -->
+    <script src="{{ static_asset_url('/static/js/csrf.js') }}"></script>
+
+    {% block body %}
+    {% block content %}{% endblock %}
+    {% endblock %}
+
+    <!-- Toast notifications, driven by `toastStore` (static/js/components.js)
+         and the `show-toast` window event (dispatched via
+         `window.showToast(message, type)` or an `HX-Trigger: {"showToast":
+         {...}}` response header). -->
+    <div id="toast-container"
+         x-data="toastStore"
+         x-on:show-toast.window="addToast($event.detail)"
+         role="status"
+         aria-live="polite"
+         aria-atomic="true"
+         class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div x-show="toast.visible"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="translate-y-2 opacity-0"
+                 x-transition:enter-end="translate-y-0 opacity-100"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="translate-y-0 opacity-100"
+                 x-transition:leave-end="translate-y-2 opacity-0"
+                 :class="{
+                     'bg-green-600': isSuccess(toast),
+                     'bg-red-600': isError(toast),
+                     'bg-yellow-500': isWarning(toast),
+                     'bg-blue-600': isInfo(toast)
+                 }"
+                 class="px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium pointer-events-auto flex items-center gap-2 max-w-sm">
+                <span x-text="toast.message"></span>
+                <button x-on:click="removeToast(toast.id)" aria-label="Dismiss notification" class="ml-2 hover:opacity-75">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+        </template>
+    </div>
+
+    <script>
+        window.showToast = function (message, type, duration) {
+            window.dispatchEvent(new CustomEvent('show-toast', {
+                detail: { message: message, type: type || 'info', duration: duration || 4000 }
+            }));
+        };
+
+        document.body.addEventListener('htmx:afterRequest', function (evt) {
+            var trigger = evt.detail.xhr.getResponseHeader('HX-Trigger');
+            if (!trigger) return;
+            try {
+                var data = JSON.parse(trigger);
+                if (data.showToast) {
+                    window.dispatchEvent(new CustomEvent('show-toast', { detail: data.showToast }));
+                }
+            } catch (e) { /* HX-Trigger wasn't our JSON shape — ignore */ }
+        });
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -10,3 +10,5 @@ __pycache__
 *.md
 .superpowers
 .github
+node_modules
+static/css/main.css

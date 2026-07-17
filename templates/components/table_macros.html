@@ -1,0 +1,169 @@
+{#
+  Table/list UI macros. Ported from ST:templates/admin/components/
+  table_macros.html with one deliberate change: action_buttons()'s delete
+  control used to be a `<form method="POST">` carrying a hidden csrf_token
+  input. This app's CSRF defense is the header bridge (static/js/csrf.js
+  reads the `csrf_token` cookie and sets it as the `X-CSRF-Token` header on
+  every htmx request) instead of a form-field double-submit, and templates
+  here use hx-post/hx-put/hx-delete for ALL mutations — never a plain
+  `<form method="post">` (see templates/base.html's csrf.js comment for
+  why that combination doesn't work). So action_buttons() renders delete as
+  an hx-post button with htmx's built-in hx-confirm, no hidden input, no
+  <form> wrapper.
+#}
+{% macro icon(name) %}
+{% set icons = {
+    'view': [
+        'M15 12a3 3 0 11-6 0 3 3 0 016 0z',
+        'M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z',
+    ],
+    'edit': [
+        'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
+    ],
+    'delete': [
+        'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
+    ],
+    'plus': [
+        'M12 4v16m8-8H4',
+    ],
+    'download': [
+        'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4',
+    ],
+    'upload': [
+        'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12',
+    ],
+    'settings': [
+        'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z',
+        'M15 12a3 3 0 11-6 0 3 3 0 016 0z',
+    ],
+    'ban': [
+        'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636',
+    ],
+    'check': [
+        'M5 13l4 4L19 7',
+    ],
+    'refresh': [
+        'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+    ],
+    'external': [
+        'M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14',
+    ],
+    'key': [
+        'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z',
+    ],
+    'mail': [
+        'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+    ],
+    'user': [
+        'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z',
+    ],
+} %}
+{% set paths = icons.get(name) %}
+{% if paths %}
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    {% for d in paths %}<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ d }}" />{% endfor %}
+</svg>
+{% else %}
+{# Fallback: info-circle for unknown icon names — no raw HTML injected #}
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+</svg>
+{% endif %}
+{% endmacro %}
+
+{% macro table_header(columns) %}
+<thead>
+    <tr class="border-b border-slate-200 dark:border-slate-700">
+        {% for col in columns %}
+        <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 {{ col.class if col.class else '' }}">
+            {{ col.label }}
+        </th>
+        {% endfor %}
+    </tr>
+</thead>
+{% endmacro %}
+
+{% macro empty_state(message="No items found", action_url=none, action_label="Create") %}
+<div class="text-center py-12">
+    <svg class="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+    </svg>
+    <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">{{ message }}</p>
+    {% if action_url %}
+    <a href="{{ action_url }}" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+        {{ action_label }}
+    </a>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{#
+  action_buttons: view/edit are plain links. Delete is an hx-post button
+  (no hidden csrf input — csrf.js's htmx:configRequest hook attaches the
+  X-CSRF-Token header). `delete_target`/`delete_swap` let the caller say
+  what disappears on success (e.g. `delete_target="closest tr"` in a table
+  body); left unset, htmx's default (swap the button's own innerHTML) is
+  almost never what you want, so callers driving a real delete flow should
+  pass a target explicitly.
+#}
+{% macro action_buttons(edit_url=none, delete_url=none, detail_url=none, extra_buttons=[], delete_target=none, delete_swap="outerHTML swap:200ms", delete_confirm="Are you sure you want to delete this item?") %}
+<div class="flex items-center gap-1">
+    {% if detail_url %}
+    <a href="{{ detail_url }}" class="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400" title="View">
+        {{ icon("view") }}
+    </a>
+    {% endif %}
+    {% if edit_url %}
+    <a href="{{ edit_url }}" class="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400" title="Edit">
+        {{ icon("edit") }}
+    </a>
+    {% endif %}
+    {% for btn in extra_buttons %}
+    <a href="{{ btn.url }}" class="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400" title="{{ btn.title }}">
+        {{ icon(btn.icon) }}
+    </a>
+    {% endfor %}
+    {% if delete_url %}
+    <button type="button"
+            hx-post="{{ delete_url }}"
+            hx-confirm="{{ delete_confirm }}"
+            {% if delete_target %}hx-target="{{ delete_target }}"{% endif %}
+            hx-swap="{{ delete_swap }}"
+            class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-600 dark:hover:text-red-400" title="Delete">
+        {{ icon("delete") }}
+    </button>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro pagination(page, total_pages, base_url) %}
+{% if total_pages > 1 %}
+<div class="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+    <p class="text-sm text-slate-500 dark:text-slate-400">Page {{ page }} of {{ total_pages }}</p>
+    <div class="flex items-center gap-1">
+        {% if page > 1 %}
+        <a href="{{ base_url }}?page={{ page - 1 }}" class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">Previous</a>
+        {% endif %}
+        {% if page < total_pages %}
+        <a href="{{ base_url }}?page={{ page + 1 }}" class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">Next</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro status_badge(status) %}
+{% set color_map = {
+    'active': 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+    'inactive': 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400',
+    'archived': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+    'pending': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    'deleted': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+} %}
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ color_map.get(status | lower if status else '', 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400') }}">
+    {{ status | replace('_', ' ') | title if status else 'Unknown' }}
+</span>
+{% endmacro %}
