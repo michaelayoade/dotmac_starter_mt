@@ -259,7 +259,12 @@ def deactivate_field(
 
 
 def validate_values(
-    db: Session, tenant_id: UUID, entity_type: str, values: dict[str, Any]
+    db: Session,
+    tenant_id: UUID,
+    entity_type: str,
+    values: dict[str, Any],
+    *,
+    merged: dict[str, Any] | None = None,
 ) -> None:
     """Validate `values` against this entity_type's active field definitions.
 
@@ -268,14 +273,35 @@ def validate_values(
     `validate_custom_fields` (which silently `continue`d past an unknown
     field code), a code with no matching definition is an error here — gap
     2 in the module docstring.
+
+    Final-review Group 1 fix — required-field vs. partial-update bug:
+    is-required validation (the first loop below) is checked against
+    `merged` when the caller supplies it, NOT against `values` itself.
+    `values` is only ever the caller's PARTIAL request; a key the caller
+    didn't touch is absent from it even when the entity already has a
+    stored value for it (`set_values` merges before calling this). Checking
+    required-ness against the raw partial `values` therefore 400s any
+    partial update that omits an already-satisfied required field — the
+    headline bug this fix closes. `set_values` computes the full merged
+    result (current stored values + this update, `None` entries deleted)
+    and passes it as `merged`; direct callers that don't pass `merged` keep
+    the old behavior (required-ness checked against `values` itself — e.g.
+    a caller validating a dict that already represents the full desired
+    state, or this module's own unit tests exercising `validate_values` in
+    isolation).
+
+    Type/format/option validation (the second loop) always runs against
+    `values` ONLY, regardless of `merged` — an untouched stored value was
+    already validated when it was written and is not re-validated here.
     """
     definitions = list_for_entity(db, tenant_id, entity_type)
     definitions_by_code = {defn.field_code: defn for defn in definitions}
     errors: list[str] = []
 
+    required_context = values if merged is None else merged
     for defn in definitions:
         if defn.is_required:
-            value = values.get(defn.field_code)
+            value = required_context.get(defn.field_code)
             if value is None or value == "":
                 errors.append(f"{defn.field_name} is required")
 
@@ -315,9 +341,15 @@ def set_values(
     `None` raises `NotFoundError` (cross-tenant rows are invisible to `db.get`
     under Postgres RLS; the unit-test suite only exercises the true-missing
     case since SQLite has no RLS).
+
+    The merge is computed BEFORE validation (final-review Group 1 fix) so
+    `validate_values` can check is-required against the entity's full
+    post-update state (`merged`) rather than this partial `values` dict —
+    see that function's docstring. Type/option validation still runs against
+    `values` only. A rejected update never reaches `row.custom_fields` —
+    `merged` stays a local dict until validation passes.
     """
     row = _get_entity_row(db, entity_type, entity_id)
-    validate_values(db, tenant_id, entity_type, values)
 
     merged = dict(row.custom_fields or {})
     for key, value in values.items():
@@ -325,6 +357,8 @@ def set_values(
             merged.pop(key, None)
         else:
             merged[key] = value
+
+    validate_values(db, tenant_id, entity_type, values, merged=merged)
 
     row.custom_fields = merged
     flag_modified(row, "custom_fields")

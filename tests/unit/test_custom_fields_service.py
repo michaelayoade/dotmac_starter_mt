@@ -529,6 +529,70 @@ def test_set_values_missing_entity_raises_not_found(
         cf_service.set_values(db, tenant_row.id, "party", uuid4(), {})
 
 
+# ---------------------------------------------------------------------------
+# set_values — required-field validation runs against the MERGED result, not
+# the partial request (final-review Group 1 fix).
+# ---------------------------------------------------------------------------
+
+
+def test_set_values_partial_put_omitting_stored_required_field_succeeds(
+    db: Session, tenant_row: Tenant, party_row: Party
+) -> None:
+    """A required field already satisfied by a PRIOR set_values call must not
+    400 a later partial PUT that simply doesn't mention it."""
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="eye_color", is_required=True)
+    )
+    cf_service.create_field(db, tenant_row.id, _payload(field_code="nickname"))
+
+    cf_service.set_values(
+        db, tenant_row.id, "party", party_row.id, {"eye_color": "brown"}
+    )
+
+    result = cf_service.set_values(
+        db, tenant_row.id, "party", party_row.id, {"nickname": "Ada"}
+    )
+    assert result == {"eye_color": "brown", "nickname": "Ada"}
+
+
+def test_set_values_deleting_required_field_via_none_raises_bad_request(
+    db: Session, tenant_row: Tenant, party_row: Party
+) -> None:
+    """`None` deletes a key (see test_set_values_merges_and_none_deletes) — but
+    deleting the ONLY value satisfying a required field must still 400, since
+    the merged result would leave that required field missing."""
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="eye_color", is_required=True)
+    )
+    cf_service.set_values(
+        db, tenant_row.id, "party", party_row.id, {"eye_color": "brown"}
+    )
+
+    with pytest.raises(BadRequestError, match="required"):
+        cf_service.set_values(
+            db, tenant_row.id, "party", party_row.id, {"eye_color": None}
+        )
+
+    # Untouched — the rejected update must not have been applied.
+    assert cf_service.get_values(db, tenant_row.id, "party", party_row.id) == {
+        "eye_color": "brown"
+    }
+
+
+def test_set_values_fresh_entity_missing_required_field_raises_bad_request(
+    db: Session, tenant_row: Tenant, party_row: Party
+) -> None:
+    """First-ever PUT for an entity with no stored custom_fields: the merged
+    result IS the incoming request, so a missing required field still 400s —
+    this is the pre-existing behavior the merged-context fix must not break."""
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="eye_color", is_required=True)
+    )
+
+    with pytest.raises(BadRequestError, match="required"):
+        cf_service.set_values(db, tenant_row.id, "party", party_row.id, {})
+
+
 def test_get_values_missing_entity_raises_not_found(
     db: Session, tenant_row: Tenant
 ) -> None:
