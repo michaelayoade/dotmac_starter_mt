@@ -47,7 +47,20 @@ Tooling & delivery:
 - Deploy: immutable-image prod compose (`APP_IMAGE` required, no bind mounts) vs explicit dev overlay; `deploy.sh` (verify image → DB backup → pin tag → pull → `alembic upgrade heads` as one-off container → recreate → health gate → auto-rollback); **migrations never run on container boot**; image retention script.
 - Versioning: single `VERSION` file synced to `pyproject.toml`, `bump_version.py`, label-driven version-bump-PR workflow, `CHANGELOG.md`.
 
-## Feature modularity: the feature-package registry
+## Model source-of-truth and the Party identity model
+
+**Amendment 2026-07-17 (Michael):** every model has exactly one source of truth — declared
+provenance (which repo/module its canonical definition lives in) and one owner (core vs a
+feature). Apps built from this starter inherit models; they never re-declare person-ish or
+identity-ish tables. `docs/ARCHITECTURE.md` carries the provenance table.
+
+**Identity SoT is the Party pattern**, replacing the bare `Person` model (phase 2a):
+`parties` (id, tenant_id, `party_type` person|organization, display_name, email, is_active,
+RLS) with subtype tables `party_persons` (party_id PK/FK, first_name, last_name, …profile)
+and `party_organizations` (party_id PK/FK, legal_name). Auth credentials, RBAC grants,
+audit actors, and custom-field values all bind to `party_id`. Fleet rationale: ERP
+customers/suppliers, CRM contacts/companies, and sub subscribers are all party roles —
+future features attach role tables to parties instead of inventing new identity tables.
 
 Generalizes dotmac_sub's declarative router-spec + deferred-mount pattern into self-contained feature packages:
 
