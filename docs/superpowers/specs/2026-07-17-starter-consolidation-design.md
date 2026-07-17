@@ -82,6 +82,7 @@ Alembic: single migration lineage (features contribute migrations to one history
 Phase-ordered:
 
 1. **Core parity:** auth (JWT + refresh rotation, MFA/TOTP, password reset, lockout, API keys, sessions), RBAC, audit logging, settings/branding. All models on `base.py` mixins with `tenant_id` + composite uniques; all queries tenant-scoped via the CRUD base.
+   Also in phase 2: **custom fields** as a feature package (`app/features/custom_fields/`), ported from dotmac_erp's `app/models/finance/automation/custom_field.py` + `app/services/finance/automation/custom_fields.py` and generalized: `entity_type` as a string registry (features declare their own entities, not a hardcoded finance enum), `tenant_id` + RLS like all tenant-scoped models, domain exceptions instead of in-service `HTTPException`, per-entity field limit via settings. The ERP module is the port SoT for field types (text/textarea/number/decimal/date/datetime/boolean/select/multiselect) and the unique-field-code-per-entity constraint.
 2. **Async infra:** Celery + Redis (worker, beat), `task_session` pattern, tenant-aware task conventions (task payloads carry tenant_id; sessions set RLS context).
 3. **Web UI shell:** Jinja2 + HTMX + Alpine.js + Tailwind v4 (npm build), per-portal `templates/{admin,customer,public,auth}` with shared `layouts/` and `components/`, `brand.json` white-label global, branded error pages.
 4. **Heavier modules:** billing, file uploads, notifications, WebSockets — each as a disable-able feature package.
