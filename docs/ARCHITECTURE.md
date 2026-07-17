@@ -109,6 +109,20 @@ string never appears as a literal anywhere under `app/` outside the
 `settings` package and the resolver module — a spec with no reader is a
 dead control an admin could "change" with zero effect.
 
+**Extension-point hazard for 2b feature authors**: a new `SettingSpec` under
+an EXISTING `SettingDomain` (`auth`/`audit`/`branding`/`custom_fields`) needs
+no migration — but adding a NEW `SettingDomain` member does, and it's a
+manual, unlinked two-place edit: the Python enum
+(`app.core.settings_models.SettingDomain`) AND the migration's
+`ck_domain_settings_domain` CHECK constraint (`"domain IN ('auth', 'audit',
+'branding', 'custom_fields')"`, `alembic/versions/
+20260717_0002_settings_table.py`) must both change together. Nothing
+statically enforces this pairing; forgetting the migration means the enum
+member is valid Python but every `INSERT`/`UPDATE` against it fails the DB
+CHECK constraint at write time (a 500, not a clean validation error). See
+`docs/superpowers/phase2-backlog.md`'s SOT-complete gaps for the tracked
+ticket.
+
 Write path: `PUT /settings/{domain}/{key}` → `settings/service.py::
 update_setting` → `validate_spec_value` (raises `BadRequestError` on any
 violation, never silently coerces on write — unlike the read-path

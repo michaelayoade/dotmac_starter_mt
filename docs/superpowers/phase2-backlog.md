@@ -18,7 +18,7 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   `finance/automation` custom-field module, generalized (string entity_type registry,
   tenant_id + RLS, domain exceptions, settings-driven per-entity limit) in
   `app/features/custom_fields/`. Runtime-field requirement demonstrated by the
-  `eye_color` e2e canary (`tests/unit/test_custom_fields_api.py`) — zero migrations
+  `eye_color` e2e canary (`tests/test_custom_fields_isolation.py`) — zero migrations
   between defining and using a field.
 - After core parity lands: archive `dotmac_starter` with a pointer README.
 
@@ -99,3 +99,50 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   the same commit, not leave it to a later doc pass.
 - External-system contracts: none in the starter yet; when OpenBao/webhooks arrive (2c),
   each must be declared transport vs contracted authority in ARCHITECTURE.md.
+- `UserCredential.email` (`app/features/auth/models.py`) duplicates `Party.email` —
+  written once at `register`, no drift detection or repair if a future 2c email-update
+  flow changes one without the other. 2c's email-update flows must pick a single
+  write-owner (mirroring the `Party.display_name` dual-writer resolution above) or add
+  a repair path; until then the two columns can silently disagree.
+- Custom fields: deactivating a `CustomFieldDefinition` (`deactivate_field`) leaves any
+  already-stored values for that `field_code` sitting in every entity's `custom_fields`
+  JSONB column — there is no cleanup path. Orphaned keys are invisible to
+  `list_for_entity`/`validate_values` (inactive definitions are excluded by default) but
+  are never deleted, so `get_values` can return keys with no active definition behind
+  them, and reactivating the definition later resurrects whatever stale value happens to
+  still be there.
+- Governance-check evasion notes (found auditing this review's own test additions —
+  none exploited, but the checks are narrower than they look):
+  - `tests/unit/test_service_typing.py`'s Any-ban regex (`r"payload:\s*Any\b"`) only
+    matches a parameter literally named `payload` — a service function typed
+    `data: Any` or `updates: Any` evades it entirely.
+  - `tests/architecture/test_no_orphan_settings.py`'s orphan-matcher treats any quoted
+    string literal matching a spec's `key` anywhere in `app/` (outside settings/the
+    resolver) as "consumed" — a coincidental literal (e.g. an unrelated dict key or
+    docstring example that happens to share the setting's name) would satisfy it without
+    the setting actually driving behavior.
+  - `tests/architecture/test_route_guards.py::test_every_route_has_a_guard` accepts ANY
+    `require_*`-prefixed dependency name, so it cannot distinguish tenancy
+    (`require_tenant`) from authentication (`require_user_auth`/`require_role`) — this is
+    exactly how the Group 2 parties gap (mutations reachable with only a resolved tenant,
+    no auth) passed the architecture suite for two tasks. Proposal for 2b: a tiered guard
+    test — mutating routes (POST/PUT/PATCH/DELETE) must carry an authentication-tier guard
+    (`require_user_auth` or `require_role`), not just any `require_*` dependency; read
+    routes may still accept `require_tenant` alone where that's a deliberate, commented
+    choice.
+- `SettingDomain` (`app/core/settings_models.py`) is duplicated in two places that must
+  change together and aren't statically linked: the Python enum and the migration's
+  `ck_domain_settings_domain` CHECK constraint (`"domain IN ('auth', 'audit', 'branding',
+  'custom_fields')"`, `alembic/versions/20260717_0002_settings_table.py`). A 2b feature
+  author adding a new `SettingDomain` member without a companion migration altering the
+  CHECK constraint gets an enum member that Python accepts but Postgres rejects at INSERT
+  time — see `docs/ARCHITECTURE.md`'s extension-points note.
+- `SettingSpec.default = None` is a seed hazard for non-`json` value types:
+  `seed_platform_defaults` -> `ensure_by_key` -> `_normalize_for_db` calls `str(value)`
+  for `string`/`integer` specs, so a `string`/`integer` spec declared with `default=None`
+  seeds the literal text `"None"` (not a real null) and a `boolean` spec with
+  `default=None` seeds `"false"` silently. Only `json`-typed specs handle `None`
+  correctly (stored as `value_json IS NULL`, which then fails the
+  `ck_domain_settings_value_alignment` CHECK — loud, not silent). No spec declares
+  `default=None` today; a future spec author should not assume a `None` default is safe
+  for anything but `json`.
