@@ -20,4 +20,7 @@ def resolve_entity(entity_type: str) -> type:
     try:
         return ENTITY_MODELS[entity_type]
     except KeyError:
-        raise BadRequestError(f"Unknown entity_type: {entity_type!r}") from None
+        raise BadRequestError(
+            f"Unknown entity type {entity_type!r} — register it in "
+            "app/features/custom_fields/registry.py (ENTITY_MODELS)"
+        ) from None

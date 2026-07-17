@@ -14,6 +14,15 @@ Upstream only what fixes the source repo on its own terms — not starter-specif
 2. **`CustomFieldDefinition.validate_value` ignores its own `min_value`/`max_value`.**
    Columns exist and are settable via the form, but validation never compares NUMBER/DECIMAL
    values against them. PR: Decimal comparison in `validate_value`.
+   **Extended (Task 9 review, 2026-07-17):** the same method validates NONE of BOOLEAN, DATE,
+   DATETIME, URL, PHONE, or CURRENCY — a `BOOLEAN` field accepts the string `"true"`, a `DATE`
+   field accepts `"not a date"`, etc.; only TEXT/NUMBER/DECIMAL/EMAIL/SELECT get any check at
+   all. dotmac_starter_mt's port (`app/features/custom_fields/models.py`) added real checks for
+   BOOLEAN (`isinstance(value, bool)`) and DATE/DATETIME (`fromisoformat`-parseable); URL/PHONE/
+   CURRENCY are left as a *documented* passthrough (format varies too much per project — use
+   `validation_regex`) rather than silently unchecked. PR against ERP: at minimum add the
+   BOOLEAN/DATE/DATETIME checks; consider documenting the URL/PHONE/CURRENCY passthrough
+   explicitly rather than leaving it implicit.
 3. **`validate_custom_fields` silently ignores unknown field codes.** Typo'd keys pass
    validation and would be persisted (once value storage exists). PR: collect unknown codes
    as errors (or at minimum log).

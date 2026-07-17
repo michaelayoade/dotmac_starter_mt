@@ -70,6 +70,43 @@ def test_create_field_non_identifier_code_raises_bad_request(
         cf_service.create_field(db, tenant_row.id, _payload(field_code="not-valid!"))
 
 
+def test_create_field_unknown_entity_type_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    with pytest.raises(BadRequestError, match="app/features/custom_fields/registry.py"):
+        cf_service.create_field(db, tenant_row.id, _payload(entity_type="widget"))
+
+
+def test_create_field_non_numeric_min_value_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    with pytest.raises(BadRequestError, match="min_value must be numeric"):
+        cf_service.create_field(
+            db,
+            tenant_row.id,
+            _payload(
+                field_code="age",
+                field_type=CustomFieldType.NUMBER,
+                min_value="not-a-number",
+            ),
+        )
+
+
+def test_create_field_non_numeric_max_value_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    with pytest.raises(BadRequestError, match="max_value must be numeric"):
+        cf_service.create_field(
+            db,
+            tenant_row.id,
+            _payload(
+                field_code="discount",
+                field_type=CustomFieldType.DECIMAL,
+                max_value="not-a-number",
+            ),
+        )
+
+
 def test_create_field_limit_reached_raises_bad_request(
     db: Session, tenant_row: Tenant
 ) -> None:
@@ -161,6 +198,36 @@ def test_update_field_updates_allowed_fields(db: Session, tenant_row: Tenant) ->
 
     assert updated.field_name == "Renamed"
     assert updated.is_required is True
+
+
+def test_update_field_non_numeric_min_value_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    field = cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="age", field_type=CustomFieldType.NUMBER)
+    )
+
+    with pytest.raises(BadRequestError, match="min_value must be numeric"):
+        cf_service.update_field(
+            db, tenant_row.id, field.id, {"min_value": "not-a-number"}
+        )
+
+
+def test_update_field_non_numeric_max_value_on_field_type_change_raises(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """field_type flips from TEXT (unchecked) to DECIMAL — max_value must now
+    be re-validated even though only field_type was in the updates dict."""
+    field = cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="rate", max_value="not-a-number"),
+    )
+
+    with pytest.raises(BadRequestError, match="max_value must be numeric"):
+        cf_service.update_field(
+            db, tenant_row.id, field.id, {"field_type": CustomFieldType.DECIMAL}
+        )
 
 
 def test_update_field_forbids_entity_type_and_field_code_change(
@@ -296,6 +363,128 @@ def test_validate_values_multiselect_membership(
 
     # All members valid — no error.
     cf_service.validate_values(db, tenant_row.id, "party", {"tags": ["a", "b"]})
+
+
+def test_validate_values_boolean_rejects_truthy_string(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="is_vip", field_type=CustomFieldType.BOOLEAN),
+    )
+
+    with pytest.raises(BadRequestError, match="must be true or false"):
+        cf_service.validate_values(db, tenant_row.id, "party", {"is_vip": "true"})
+
+
+def test_validate_values_boolean_accepts_bool(db: Session, tenant_row: Tenant) -> None:
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="is_vip", field_type=CustomFieldType.BOOLEAN),
+    )
+
+    cf_service.validate_values(db, tenant_row.id, "party", {"is_vip": True})
+
+
+def test_validate_values_date_accepts_iso_string(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="anniversary", field_type=CustomFieldType.DATE),
+    )
+
+    cf_service.validate_values(
+        db, tenant_row.id, "party", {"anniversary": "2026-01-01"}
+    )
+
+
+def test_validate_values_date_rejects_non_iso_string(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="anniversary", field_type=CustomFieldType.DATE),
+    )
+
+    with pytest.raises(BadRequestError, match="valid date"):
+        cf_service.validate_values(
+            db, tenant_row.id, "party", {"anniversary": "01/01/2026"}
+        )
+
+
+def test_validate_values_datetime_accepts_iso_string(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="last_login", field_type=CustomFieldType.DATETIME),
+    )
+
+    cf_service.validate_values(
+        db, tenant_row.id, "party", {"last_login": "2026-01-01T10:30:00"}
+    )
+
+
+def test_validate_values_datetime_rejects_non_iso_string(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="last_login", field_type=CustomFieldType.DATETIME),
+    )
+
+    with pytest.raises(BadRequestError, match="valid datetime"):
+        cf_service.validate_values(
+            db, tenant_row.id, "party", {"last_login": "not-a-datetime"}
+        )
+
+
+@pytest.mark.parametrize(
+    "field_type", [CustomFieldType.URL, CustomFieldType.PHONE, CustomFieldType.CURRENCY]
+)
+def test_validate_values_url_phone_currency_passthrough_arbitrary_strings(
+    db: Session, tenant_row: Tenant, field_type: CustomFieldType
+) -> None:
+    """URL/PHONE/CURRENCY are documented passthroughs — no format check by
+    default (see service.py module docstring and validate_value docstring)."""
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="contact", field_type=field_type)
+    )
+
+    cf_service.validate_values(
+        db, tenant_row.id, "party", {"contact": "definitely not a real value ###"}
+    )
+
+
+def test_validate_values_url_respects_validation_regex_when_set(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The passthrough is opt-out-able: projects that need URL format
+    enforcement use validation_regex."""
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(
+            field_code="website",
+            field_type=CustomFieldType.URL,
+            validation_regex=r"^https://",
+        ),
+    )
+
+    with pytest.raises(BadRequestError, match="format is invalid"):
+        cf_service.validate_values(db, tenant_row.id, "party", {"website": "not-a-url"})
+
+    # A conforming value passes.
+    cf_service.validate_values(
+        db, tenant_row.id, "party", {"website": "https://example.com"}
+    )
 
 
 # ---------------------------------------------------------------------------

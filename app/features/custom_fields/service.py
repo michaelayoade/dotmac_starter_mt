@@ -26,6 +26,27 @@ logged in `docs/superpowers/upstream-findings.md`):
    generically via `registry.resolve_entity` so any future registered
    entity gets this for free.
 
+Task 9 review fixes (same day, before Task 10's router lands):
+- `create_field` calls `registry.resolve_entity(payload.entity_type)` first,
+  so an unregistered `entity_type` fails loudly with a message naming the
+  extension point (`registry.py`'s `ENTITY_MODELS`) instead of silently
+  creating a definition that `set_values`/`get_values` can never resolve.
+- `create_field` / `update_field` reject a non-numeric `min_value`/
+  `max_value` string on a NUMBER/DECIMAL definition (definition
+  self-consistency — `_validate_min_max_numeric`); previously
+  `CustomFieldDefinition._range_error` caught the resulting
+  `InvalidOperation` and silently skipped the range check.
+- `validate_value` (`models.py`) gained real checks for BOOLEAN (must be a
+  `bool`, not a truthy string) and DATE/DATETIME (must be an ISO 8601
+  string parseable by `date.fromisoformat`/`datetime.fromisoformat`, or the
+  matching Python object).
+- **URL, PHONE, and CURRENCY values are intentionally NOT format-validated**
+  by default — real-world formats vary too much per project (international
+  phone formats, currency codes vs. symbols, internal vs. public URLs) for
+  a starter to bake in one opinion. Set `validation_regex` (+ optionally
+  `validation_message`) on the field definition to enforce your project's
+  format; see `CustomFieldDefinition.validate_value` in `models.py`.
+
 Other adaptations from the ERP port:
 - `organization_id` -> `tenant_id` throughout; queries filter explicitly
   (mirroring ERP's explicit `organization_id ==` filters) rather than
@@ -44,6 +65,7 @@ Other adaptations from the ERP port:
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
@@ -55,11 +77,34 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import resolve_value
-from app.features.custom_fields.models import CustomFieldDefinition
+from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
 from app.features.custom_fields.registry import resolve_entity
 from app.features.custom_fields.schemas import CustomFieldCreate
 
 _DEFAULT_MAX_PER_ENTITY = 20
+
+_NUMERIC_FIELD_TYPES = (CustomFieldType.NUMBER, CustomFieldType.DECIMAL)
+_MIN_MAX_CONSISTENCY_KEYS = {"min_value", "max_value", "field_type"}
+
+
+def _validate_min_max_numeric(
+    field_type: CustomFieldType, min_value: str | None, max_value: str | None
+) -> None:
+    """Definition self-consistency: `min_value`/`max_value` are free-text
+    columns (see `models.py`), so a NUMBER/DECIMAL definition can otherwise
+    be created with a non-numeric bound that `validate_value`'s `_range_error`
+    would silently swallow (`InvalidOperation` caught, range check skipped)."""
+    if field_type not in _NUMERIC_FIELD_TYPES:
+        return
+    for label, value in (("min_value", min_value), ("max_value", max_value)):
+        if value is None:
+            continue
+        try:
+            Decimal(value)
+        except InvalidOperation as exc:
+            raise BadRequestError(
+                f"{label} must be numeric for NUMBER/DECIMAL fields"
+            ) from exc
 
 
 def _active_field_count(db: Session, tenant_id: UUID, entity_type: str) -> int:
@@ -82,10 +127,17 @@ def create_field(
 ) -> CustomFieldDefinition:
     """Create a field definition, enforcing the per-(tenant, entity_type) limit.
 
-    Limit check runs FIRST, ahead of the duplicate-code and identifier
-    checks ERP already had — the gap this task closes (see module
-    docstring, gap 1).
+    `entity_type` is resolved against the registry FIRST — an unknown
+    entity_type fails loudly with a message naming the extension point
+    (`registry.py::resolve_entity`) rather than falling through to a limit
+    check keyed on an entity_type that can never actually be used with
+    `set_values`/`get_values`. Limit check runs next, ahead of the
+    duplicate-code and identifier checks ERP already had — the gap this
+    task closes (see module docstring, gap 1).
     """
+    resolve_entity(payload.entity_type)
+    _validate_min_max_numeric(payload.field_type, payload.min_value, payload.max_value)
+
     limit = resolve_value(
         db,
         SettingDomain.custom_fields,
@@ -180,6 +232,14 @@ def update_field(
     updates.pop("entity_type", None)
     updates.pop("field_code", None)
 
+    if _MIN_MAX_CONSISTENCY_KEYS & updates.keys():
+        effective_type = updates.get("field_type", field.field_type)
+        effective_min = updates.get("min_value", field.min_value)
+        effective_max = updates.get("max_value", field.max_value)
+        _validate_min_max_numeric(effective_type, effective_min, effective_max)
+
+    # Router must pass schema-validated dicts only — this loop trusts its
+    # input (inherited ERP shape; Task 10's router owns input filtering).
     for key, value in updates.items():
         if hasattr(field, key):
             setattr(field, key, value)

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import enum
 import re
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
@@ -182,6 +183,21 @@ class CustomFieldDefinition(Base, TimestampMixin):
           all, so a MULTISELECT field's `field_options` were purely
           decorative there. PORT-DELTA: this is new behavior, not a port.
 
+        Task 9 review fixes — real checks added for two more types ERP left
+        as pure passthrough:
+        - BOOLEAN: value must be a `bool` (`True`/`False`), not a truthy
+          string like `"true"`.
+        - DATE / DATETIME: value must be a `date`/`datetime` object, or a
+          string parseable by `date.fromisoformat`/`datetime.fromisoformat`
+          (ISO 8601).
+
+        **URL, PHONE, and CURRENCY are deliberately left as passthrough —
+        no format check runs for them here.** Real-world formats for these
+        vary too much per project (international phone numbers, currency
+        codes vs. symbols, internal vs. public URLs) for a starter to pick
+        one. Set `validation_regex` (+ optionally `validation_message`) on
+        the field definition to enforce your project's format.
+
         Returns `(is_valid, error_message)`, same shape as ERP's method —
         the service layer (`service.py::validate_values`) aggregates the
         error messages instead of returning the tuple to its own caller.
@@ -209,6 +225,30 @@ class CustomFieldDefinition(Base, TimestampMixin):
             range_error = self._range_error(numeric)
             if range_error:
                 return False, range_error
+
+        elif self.field_type == CustomFieldType.BOOLEAN:
+            if not isinstance(value, bool):
+                return False, f"{self.field_name} must be true or false"
+
+        elif self.field_type == CustomFieldType.DATE:
+            if not isinstance(value, date):
+                try:
+                    date.fromisoformat(str(value))
+                except ValueError:
+                    return (
+                        False,
+                        f"{self.field_name} must be a valid date (YYYY-MM-DD)",
+                    )
+
+        elif self.field_type == CustomFieldType.DATETIME:
+            if not isinstance(value, datetime):
+                try:
+                    datetime.fromisoformat(str(value))
+                except ValueError:
+                    return (
+                        False,
+                        f"{self.field_name} must be a valid datetime (ISO 8601)",
+                    )
 
         elif self.field_type == CustomFieldType.EMAIL:
             email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
