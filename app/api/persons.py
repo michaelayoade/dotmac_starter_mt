@@ -81,7 +81,9 @@ def get_person(person_id: UUID, db: Session = Depends(get_db)) -> Person:
     return person
 
 
-@router.delete("/{person_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{person_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+)
 def delete_person(person_id: UUID, db: Session = Depends(get_db)) -> None:
     person = db.get(Person, person_id)
     if person is None:

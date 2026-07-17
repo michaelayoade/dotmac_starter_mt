@@ -81,7 +81,9 @@ def create_role(
     return role
 
 
-@router.post("/role-grants", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/role-grants", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+)
 def grant_role(
     payload: RoleGrantRequest,
     db: Session = Depends(get_db),
