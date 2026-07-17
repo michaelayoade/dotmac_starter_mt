@@ -46,12 +46,12 @@ test-db-up: ## Start disposable test Postgres (TEST_DB_PORT, default 5433) and m
 	docker compose -f docker-compose.test.yml up -d --wait
 	MIGRATION_DATABASE_URL=postgresql+psycopg://$(TEST_DB_ADMIN_USER):$(TEST_DB_ADMIN_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	DATABASE_URL=postgresql+psycopg://$(TEST_DB_ADMIN_USER):$(TEST_DB_ADMIN_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
-	poetry run alembic upgrade head
+	poetry run alembic upgrade heads
 test-db-down: ## Stop test Postgres
 	TEST_DB_PORT=$(TEST_DB_PORT) TEST_DB_ADMIN_USER=$(TEST_DB_ADMIN_USER) TEST_DB_ADMIN_PASSWORD=$(TEST_DB_ADMIN_PASSWORD) TEST_DB_NAME=$(TEST_DB_NAME) \
 	docker compose -f docker-compose.test.yml down -v
 migrate: ## Apply migrations (uses MIGRATION_DATABASE_URL from env)
-	poetry run alembic upgrade head
+	poetry run alembic upgrade heads
 migrate-new: ## Create migration: make migrate-new msg="..."
 	poetry run alembic revision --autogenerate -m "$(msg)"
 

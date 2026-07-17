@@ -17,9 +17,9 @@ reliable) condition for the setting to affect behavior.
 
 `_ALLOWED_ORPHAN_SETTINGS` starts EMPTY per this task's contract and may only
 ever shrink: a newly-registered key with no reader must fail the build
-immediately rather than accumulate here. The two entries below are known,
-scoped exceptions carried forward explicitly by name in the task briefs that
-introduced them — not a general escape hatch.
+immediately rather than accumulate here. The entry below is a known,
+scoped exception carried forward explicitly by name in the task briefs that
+introduced it — not a general escape hatch.
 """
 
 from __future__ import annotations

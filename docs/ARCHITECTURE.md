@@ -214,7 +214,7 @@ made concrete — every model has exactly one declared owner.
 | `PartyRole` | `party_roles` | core | dotmac_sub (`app/models/rbac.py::PersonRole`, tenant-adapted + renamed for Party) |
 | `AuthSession` | `auth_sessions` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
 | `AuditEvent` | `audit_events` | core | dotmac_sub (`app/models/audit.py`, tenant-adapted) |
-| `DomainSetting` | `domain_settings` | core | dotmac_sub (`app/models/domain_settings.py`, tenant-adapted with the platform-NULL-row split and a restored `CheckConstraint` from `dotmac_sub`'s own model that `dotmac_starter` had dropped) |
+| `DomainSetting` | `domain_settings` | core | dotmac_starter (`app/models/domain_settings.py`, tenant-adapted), with `CheckConstraint` restored from dotmac_sub |
 | `UserCredential` | `user_credentials` | auth | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
 
