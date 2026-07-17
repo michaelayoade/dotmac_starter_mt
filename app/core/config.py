@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
     trust_inbound_request_id: bool = False
     disabled_features: str = ""  # comma-separated feature names
+    seed_on_startup: bool = True  # seed platform setting defaults in lifespan
 
     @property
     def is_production(self) -> bool:

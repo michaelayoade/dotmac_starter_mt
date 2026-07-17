@@ -43,10 +43,10 @@ def verify_password(password: str, password_hash: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
-def issue_access_token(person_id: UUID, tenant_id: UUID) -> tuple[str, datetime]:
+def issue_access_token(party_id: UUID, tenant_id: UUID) -> tuple[str, datetime]:
     expires_at = datetime.now(UTC) + timedelta(seconds=settings.jwt_ttl_seconds)
     payload = {
-        "sub": str(person_id),
+        "sub": str(party_id),
         "tenant_id": str(tenant_id),
         "exp": int(expires_at.timestamp()),
         "jti": secrets.token_urlsafe(16),

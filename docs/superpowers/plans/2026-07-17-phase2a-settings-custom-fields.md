@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Concrete Pydantic typing across all feature services, a tenant-scoped settings-as-data registry, and a custom-fields feature package where fields are runtime data (create "eye color" on person via API — zero migrations per field).
+**Goal:** Concrete Pydantic typing across all feature services, a tenant-scoped settings-as-data registry, the Party identity remodel (one identity SoT: party = person | organization), and a custom-fields feature package where fields are runtime data (create "eye color" on a party via API — zero migrations per field).
 
 **Architecture:** Two new feature packages (`settings`, `custom_fields`) built on the phase-1 foundation (CRUDManager, domain exceptions → envelope, RLS, feature registry, architecture governance). Settings rows are tenant-scoped with platform-level defaults (`tenant_id NULL`); resolution is tenant row → platform row → spec default. Custom-field definitions are rows; values live in a `custom_fields` JSONB column on the target entity, validated at the service layer.
 
@@ -20,7 +20,8 @@
 - New feature packages must be added to `FEATURE_MODULES` AND the import-linter independence contract in `pyproject.toml` (the sync test fails otherwise), AND their model modules imported in `alembic/env.py` + `tests/unit/conftest.py` (known governance gap — do it by hand, it's on the phase-2 backlog to automate).
 - Integration runs: `TEST_DB_PORT=5437` (host ports 5433/5434 are production containers — never touch). Baseline at branch start: 14 integration, 38 unit+architecture.
 - Error bodies: the single JSON envelope everywhere; services raise domain exceptions only.
-- Features may import `app.core.*` freely (the six identity models incl. `Person` live in `app/core/models.py`) but never other features.
+- Features may import `app.core.*` freely (identity models live in `app/core/models.py`; from Task 6 onward the identity SoT is `Party`/`PartyPerson`/`PartyOrganization`/`PartyRole` — the Party remodel amendment) but never other features.
+- Model provenance rule (spec amendment): every model has one declared SoT and owner; Task 11's ARCHITECTURE.md update adds the provenance table.
 - New API routes follow existing prefix style (`/settings`, `/custom-fields`) — no `/api/v1` (deferred per spec amendment).
 - All list endpoints added here take `limit`/`offset` query params with `ge=0, le=<cap>` router-level bounds using `apply_pagination`.
 
@@ -197,29 +198,72 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON domain_settings TO platform_api;
 
 ---
 
-### Task 6: Custom fields — models + migration + isolation canary (canary FIRST)
+### Task 6: Party identity remodel — core models + migration + canary (canary FIRST)
+
+**Rationale (spec amendment 2026-07-17):** the identity SoT is the Party pattern. `Person`
+is replaced by `Party` (person | organization) with subtype tables; auth credentials, RBAC
+grants, and audit actors rebind to `party_id`. The starter has no production data — replace,
+don't dual-write.
 
 **Files:**
-- Create: `app/features/custom_fields/{__init__.py,models.py,feature.py,registry.py}`, `alembic/versions/<rev>_custom_fields.py`
-- Modify: `app/features/__init__.py`, `pyproject.toml` (contract), `alembic/env.py`, `tests/unit/conftest.py`, `app/core/models.py` (Person gains `custom_fields` JSONB column)
-- Test: `tests/test_custom_fields_isolation.py`
+- Modify: `app/core/models.py` — REPLACE `Person` with: `Party` (table `parties`: `id` uuid_pk, `tenant_id` UUID NOT NULL FK tenants ON DELETE CASCADE, `party_type: Mapped[PartyType]` enum {person, organization}, `display_name: String(200) NOT NULL`, `email: String(320) NULL` with partial unique index `(tenant_id, lower(email)) WHERE email IS NOT NULL`, `is_active` default True, TimestampMixin); `PartyPerson` (table `party_persons`: `party_id` UUID PK + FK parties ON DELETE CASCADE, `first_name String(100)`, `last_name String(100)` — copy any other profile columns the current `Person` carries); `PartyOrganization` (table `party_organizations`: `party_id` UUID PK/FK as above, `legal_name String(200) NOT NULL`). Rebind: `AuthSession.person_id` → `party_id`; `PersonRole` → `PartyRole` (table `party_roles`, columns/composites renamed accordingly); `UserCredential.person_id` (in features/auth/models.py) → `party_id`. `app/core/audit.py`: actor column renamed to `actor_party_id` if it exists as person-named.
+- Create: `alembic/versions/<rev>_party_identity.py` — DROP the old `people`/`person_roles`-shaped tables and CREATE the new ones (destructive is correct: template, no data; downgrade recreates the old shape), with RLS ENABLE/FORCE + tenant policies + grants on `parties`, `party_persons`, `party_organizations`, `party_roles` (subtype tables carry no tenant_id — they inherit isolation through the FK to `parties`; document this in the migration docstring; RLS on them uses `EXISTS (SELECT 1 FROM parties p WHERE p.id = party_id AND p.tenant_id = app_current_tenant_id())`).
+- Modify: `app/core/deps.py` + `app/core/middleware/*` wherever `Person` was queried (require_user_auth → `db.get(Party, ...)` + assert `party_type == PartyType.person` for login-capable actors), `alembic/env.py`, `tests/unit/conftest.py` (imports + `tenant_row`-style factories: add `party_row` fixture creating a person-type party with subtype row).
+- Test: `tests/test_party_isolation.py` (canary FIRST) — replaces/extends the person isolation assertions: tenant A's parties invisible to B; subtype rows unreachable cross-tenant (query via join under B's context returns zero); org-type party creatable and isolated.
 
 **Interfaces:**
-- Consumes: core models (`Person`), RLS migration pattern, and `app.core.settings_resolver.resolve_value` (settings model + resolver live in core per Tasks 3–4's placement rule, so this feature never imports the settings feature).
-- Produces:
-  - `CustomFieldDefinition` model, table `custom_field_definitions`: port of `ERP:app/models/finance/automation/custom_field.py` with adaptations: `tenant_id UUID NOT NULL REFERENCES tenants(id)` replaces `organization_id`; `entity_type: String(50)` replaces the enum (validated against the registry at service layer); PK `id` via `uuid_pk()` (repo convention) instead of `field_id`; drop `created_by/updated_by` (no actor plumbing yet — phase 2c); keep all field-shape columns (field_code String(50), field_name, description, field_type Enum(CustomFieldType) — KEEP this enum, ported verbatim 13 members —, field_options JSON-variant, is_required, default_value, validation_regex, validation_message, min_value, max_value, max_length, display_order, section_name, placeholder, help_text, show_in_list/form/detail — drop css_class and show_in_print (YAGNI for the starter)), `is_active`, timestamps via TimestampMixin. `UniqueConstraint(tenant_id, entity_type, field_code)`.
-  - `registry.py`: `ENTITY_MODELS: dict[str, type] = {"person": Person}` + `def resolve_entity(entity_type: str) -> type` raising `BadRequestError` on unknown. All current registrable entities live in `app.core.models`, so no cross-feature imports; the dict is the extension point features use later.
-  - Core `Person` model gains `custom_fields: Mapped[dict] = mapped_column(sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=False, server_default=text("'{}'"))`.
-  - Migration: definitions table + standard tenant RLS (copy `_apply_rls` single-table pattern: `USING (tenant_id = app_current_tenant_id())` all commands) + grants to app_user/platform_api + `ALTER TABLE people ADD COLUMN custom_fields JSONB NOT NULL DEFAULT '{}'`.
+- Consumes: existing RLS pattern; every phase-1 canary that referenced `Person` (they will need updating — that's Task 7's job for API-level ones; model-level references in `tests/unit/conftest.py` update here).
+- Produces (Tasks 7–10 and plan 2b bind to these EXACT names): `app.core.models.{Party, PartyType, PartyPerson, PartyOrganization, PartyRole}`; fixture `party_row`. Provenance rule: these five are core-owned, canonical for the whole fleet.
 
-- [ ] **Step 1: Canary FIRST** — `tests/test_custom_fields_isolation.py`: tenant A inserts an `eye_color` definition for `person`; tenant B's session sees zero definitions; tenant B creates its own `eye_color` (same code — allowed, per-tenant unique); A's person row's `custom_fields` value invisible to B (via existing person isolation). RED (table missing).
-- [ ] **Step 2: Models + registry + scaffold feature** (empty routers), FEATURE_MODULES + contract + env/conftest imports. Unit suite green (SQLite JSON variant works).
-- [ ] **Step 3: Migration → canary GREEN** on the disposable Postgres. Confirm the persons ADD COLUMN backfills `'{}'` for existing rows.
-- [ ] **Step 4: Full gate + commit** — `git commit -m "feat(custom-fields): definitions model + person JSONB values column (RLS canary first)"`
+- [ ] **Step 1: Canary FIRST** (`tests/test_party_isolation.py`) — RED (tables missing).
+- [ ] **Step 2: Core model replacement + dependent import fixes until `import app.main` works and unit suite compiles** (unit tests referencing Person adapt mechanically — same fields, new names; auth/rbac feature service/router compile fixes are ALLOWED here where purely mechanical renames, but behavioral rework belongs to Task 7 — if a rename cascades into logic changes, note it and defer).
+- [ ] **Step 3: Migration (destructive replace + RLS incl. subtype EXISTS policies) → canary GREEN on the disposable Postgres.**
+- [ ] **Step 4: Full gate** — unit+architecture green; integration: the pre-existing person/auth/rbac canaries WILL need mechanical renames (person→party) to pass — update them (assert same isolation semantics; do not weaken any assertion); 16+ integration green. Commit: `feat(core)!: Party identity model replaces Person (person/organization subtypes, RLS canary first)`
 
 ---
 
-### Task 7: Custom fields service — port, generalize, enforce the limit
+### Task 7: Parties feature + auth/rbac rebinding
+
+**Files:**
+- Rename/rework: `app/features/persons/` → `app/features/parties/` (models.py stays absent — Party is core; `service.py` reworked: `Parties(CRUDManager[Party])`, `create_person_party(db, payload) -> Party` (creates party + PartyPerson atomically), `create_organization_party(db, payload) -> Party`, `list_parties(db, *, party_type: PartyType | None)`; `router.py`: routes move from `/people` to `/parties` — `POST /parties/people`, `POST /parties/organizations`, `GET /parties?party_type=&limit=&offset=` (paginated, ge=0/le=200), `GET /parties/{id}`, `DELETE /parties/{id}` (204, response_model=None); `schemas.py`: `PersonPartyCreate`, `OrganizationPartyCreate`, `PartyRead` (includes party_type + subtype fields flattened); `feature.py` name="parties").
+- Modify: `app/features/auth/{service,router,schemas}.py` — register creates a person-type Party (+ PartyPerson + UserCredential bound to party_id); login/me flow returns party-shaped identity; `app/features/rbac/{service,router}.py` — grants/list operate on PartyRole/party_id (route payload field renames person_id → party_id).
+- Modify: `app/features/__init__.py` (persons → parties), pyproject independence contract (sync test enforces), integration canaries' API calls (person endpoints → party endpoints).
+- Test: unit service/API tests for the two create paths + type filter; all integration canaries green post-rename.
+
+**Interfaces:**
+- Consumes: Task 6 core models.
+- Produces: the `parties` feature package (Tasks 8–10's registry binds `{"party": Party}`); auth/rbac fully party-bound. Plan 2b screens build against `/parties`.
+
+- [ ] **Step 1: TDD service (SQLite)** — create_person_party makes both rows atomically (flush, no commit — get_db owns commit); org path; type filter; RED→GREEN.
+- [ ] **Step 2: Rework routers/schemas; update auth+rbac bindings; rename feature package (git mv), FEATURE_MODULES + contract.**
+- [ ] **Step 3: Update integration canaries to the new endpoints (same isolation semantics, zero weakened assertions); full gate: unit+architecture, make check, integration all green on the disposable Postgres.**
+- [ ] **Step 4: Commit:** `feat(parties)!: parties feature replaces persons; auth/rbac bind to party_id`
+
+---
+
+### Task 8: Custom fields — models + migration + isolation canary (canary FIRST)
+
+**Files:**
+- Create: `app/features/custom_fields/{__init__.py,models.py,feature.py,registry.py}`, `alembic/versions/<rev>_custom_fields.py`
+- Modify: `app/features/__init__.py`, `pyproject.toml` (contract), `alembic/env.py`, `tests/unit/conftest.py`, `app/core/models.py` (**Party** gains `custom_fields` JSONB column)
+- Test: `tests/test_custom_fields_isolation.py`
+
+**Interfaces:**
+- Consumes: core models (`Party` — post Task 6), RLS migration pattern, and `app.core.settings_resolver.resolve_value` (settings model + resolver live in core per Tasks 3–4's placement rule, so this feature never imports the settings feature).
+- Produces:
+  - `CustomFieldDefinition` model, table `custom_field_definitions`: port of `ERP:app/models/finance/automation/custom_field.py` with adaptations: `tenant_id UUID NOT NULL REFERENCES tenants(id)` replaces `organization_id`; `entity_type: String(50)` replaces the enum (validated against the registry at service layer); PK `id` via `uuid_pk()` (repo convention) instead of `field_id`; drop `created_by/updated_by` (no actor plumbing yet — phase 2c); keep all field-shape columns (field_code String(50), field_name, description, field_type Enum(CustomFieldType) — KEEP this enum, ported verbatim 13 members —, field_options JSON-variant, is_required, default_value, validation_regex, validation_message, min_value, max_value, max_length, display_order, section_name, placeholder, help_text, show_in_list/form/detail — drop css_class and show_in_print (YAGNI for the starter)), `is_active`, timestamps via TimestampMixin. `UniqueConstraint(tenant_id, entity_type, field_code)`.
+  - `registry.py`: `ENTITY_MODELS: dict[str, type] = {"party": Party}` + `def resolve_entity(entity_type: str) -> type` raising `BadRequestError` on unknown. All current registrable entities live in `app.core.models`, so no cross-feature imports; the dict is the extension point features use later.
+  - Core `Party` model gains `custom_fields: Mapped[dict] = mapped_column(sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=False, server_default=text("'{}'"))`.
+  - Migration: definitions table + standard tenant RLS (copy `_apply_rls` single-table pattern: `USING (tenant_id = app_current_tenant_id())` all commands) + grants to app_user/platform_api + `ALTER TABLE parties ADD COLUMN custom_fields JSONB NOT NULL DEFAULT '{}'`.
+
+- [ ] **Step 1: Canary FIRST** — `tests/test_custom_fields_isolation.py`: tenant A inserts an `eye_color` definition for `party`; tenant B's session sees zero definitions; tenant B creates its own `eye_color` (same code — allowed, per-tenant unique); A's party row's `custom_fields` value invisible to B (via existing party isolation). RED (table missing).
+- [ ] **Step 2: Models + registry + scaffold feature** (empty routers), FEATURE_MODULES + contract + env/conftest imports. Unit suite green (SQLite JSON variant works).
+- [ ] **Step 3: Migration → canary GREEN** on the disposable Postgres. Confirm the parties ADD COLUMN backfills `'{}'` for existing rows.
+- [ ] **Step 4: Full gate + commit** — `git commit -m "feat(custom-fields): definitions model + party JSONB values column (RLS canary first)"`
+
+---
+
+### Task 9: Custom fields service — port, generalize, enforce the limit
 
 **Files:**
 - Create: `app/features/custom_fields/service.py`
@@ -240,7 +284,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON domain_settings TO platform_api;
 
 ---
 
-### Task 8: Custom fields API + end-to-end runtime-field canary
+### Task 10: Custom fields API + end-to-end runtime-field canary
 
 **Files:**
 - Create: `app/features/custom_fields/{router.py,schemas.py}`
@@ -251,25 +295,25 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON domain_settings TO platform_api;
 - Consumes: Task 7 service.
 - Produces routes (router-level `require_tenant`, per-route `require_user_auth` — match rbac's guard pattern):
   - `POST /custom-fields/definitions` → create_field (201)
-  - `GET /custom-fields/definitions?entity_type=person&limit=&offset=` → list (paginated, ge=0 bounds)
+  - `GET /custom-fields/definitions?entity_type=party&limit=&offset=` → list (paginated, ge=0 bounds)
   - `GET /custom-fields/definitions/{id}` / `PATCH .../{id}` / `DELETE .../{id}` (soft deactivate, 204 with `response_model=None` — remember the FastAPI 0.115 gotcha)
   - `GET /custom-fields/{entity_type}/{entity_id}/values` and `PUT .../values` → get_values/set_values
   - Schemas: `CustomFieldCreate/Update/Out`, `CustomFieldValues(root: dict[str, Any])`.
 
 - [ ] **Step 1: TDD API on SQLite** (app-builder pattern) — definition CRUD flows, values round-trip, envelope codes on each error path.
-- [ ] **Step 2: The spec's acceptance canary (END-TO-END, Postgres)** — extend the isolation test with the user's literal scenario: tenant A admin `POST /custom-fields/definitions {"entity_type":"person","field_code":"eye_color","field_name":"Eye color","field_type":"SELECT","field_options":{"options":[{"value":"brown","label":"Brown"},{"value":"blue","label":"Blue"}]}}` → `PUT /custom-fields/person/<person_id>/values {"eye_color":"brown"}` → `GET .../values` returns it → tenant B sees neither the definition nor the value → invalid option "green" → 400 envelope. **Zero migrations were run between definition and use** — that's the requirement proven.
+- [ ] **Step 2: The spec's acceptance canary (END-TO-END, Postgres)** — extend the isolation test with the user's literal scenario: tenant A admin `POST /custom-fields/definitions {"entity_type":"party","field_code":"eye_color","field_name":"Eye color","field_type":"SELECT","field_options":{"options":[{"value":"brown","label":"Brown"},{"value":"blue","label":"Blue"}]}}` → `PUT /custom-fields/party/<party_id>/values {"eye_color":"brown"}` (the party is a person-type party) → `GET .../values` returns it → tenant B sees neither the definition nor the value → invalid option "green" → 400 envelope. **Zero migrations were run between definition and use** — that's the requirement proven.
 - [ ] **Step 3: Full gate + commit** — `git commit -m "feat(custom-fields): definitions + values API — fields are runtime data, no migrations"`
 
 ---
 
-### Task 9: Docs + changelog + version bump
+### Task 11: Docs + changelog + version bump
 
 **Files:**
 - Modify: `CLAUDE.md` (feature list + settings/custom-fields rules), `docs/ARCHITECTURE.md` (two new features, settings resolution order, values-in-JSONB design + registry extension point), `README.md` (custom-fields quick example), `CHANGELOG.md`, `VERSION`/`pyproject.toml` via `make bump-version part=minor` (→ 0.5.0), `docs/superpowers/phase2-backlog.md` (strike delivered items: typed payloads, list_roles, settings cache noted for phase 3)
 
 **Interfaces:** none new; docs must describe as-built (read the code, not this plan, where they diverge).
 
-- [ ] **Step 1: Write docs; verify every documented route/command/var exists (grep-driven, as Task 13 phase 1 did).**
+- [ ] **Step 1: Write docs; verify every documented route/command/var exists (grep-driven, as Task 13 phase 1 did).** ARCHITECTURE.md additionally gains the **model provenance table** (spec amendment): every model in the repo listed with its owner (core | feature) and its port SoT (dotmac_sub / dotmac_starter / dotmac_erp / native), including the Party family as the fleet-canonical identity models.
 - [ ] **Step 2: Final full gate incl. one complete integration cycle; `make bump-version part=minor`; commit** — `git commit -m "docs: settings + custom-fields; v0.5.0"`
 
 ---

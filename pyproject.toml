@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac_starter_mt"
-version = "0.4.0"
+version = "0.5.0"
 description = "Multi-tenant FastAPI starter"
 authors = ["DotMac"]
 readme = "README.md"
@@ -69,8 +69,10 @@ type = "independence"
 modules = [
     "app.features.tenants",
     "app.features.auth",
-    "app.features.persons",
+    "app.features.parties",
     "app.features.rbac",
+    "app.features.settings",
+    "app.features.custom_fields",
 ]
 
 [[tool.importlinter.contracts]]

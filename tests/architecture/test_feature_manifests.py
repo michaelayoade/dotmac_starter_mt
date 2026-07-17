@@ -53,3 +53,29 @@ def test_contract_comparison_detects_drift() -> None:
     assert sorted(reordered) == sorted(FEATURE_MODULES)
     mutated = [*FEATURE_MODULES, "app.features.ghost_feature"]
     assert sorted(contract_modules) != sorted(mutated)
+
+
+def test_main_does_not_hard_import_a_specific_feature_package() -> None:
+    """Final-review Group 3: `app/main.py` seeds features generically via each
+    manifest's optional `seed` hook (`app.core.features.FeatureManifest.seed`,
+    dispatched by `_run_enabled_seeds` over `load_manifests(FEATURE_MODULES)`)
+    instead of hard-importing e.g. `app.features.settings.seed.
+    seed_platform_defaults` — deleting or disabling a feature package must not
+    break `import app.main`. Deleting a package can't be exercised in-tree
+    (this repo always has all six on disk), so this is a static proxy: the
+    only allowed `app.features.` reference is the `FEATURE_MODULES` registry
+    import (`from app.features import FEATURE_MODULES`), which names no
+    specific feature. Any OTHER `app.features.<name>` import (a dotted
+    reference into a feature subpackage) fails the build.
+    """
+    main_source = (PROJECT_ROOT / "app" / "main.py").read_text()
+    offending = [
+        line.strip()
+        for line in main_source.splitlines()
+        if "app.features." in line
+        and "from app.features import FEATURE_MODULES" not in line
+    ]
+    assert not offending, (
+        "app/main.py must not hard-import a specific feature package:\n"
+        + "\n".join(offending)
+    )

@@ -4,8 +4,8 @@ from app.core.features import FeatureManifest, load_manifests, mount_features
 
 
 def test_load_manifests_reads_feature_attribute():
-    manifests = load_manifests(["app.features.persons"])
-    assert manifests[0].name == "persons"
+    manifests = load_manifests(["app.features.parties"])
+    assert manifests[0].name == "parties"
     assert manifests[0].routers
 
 

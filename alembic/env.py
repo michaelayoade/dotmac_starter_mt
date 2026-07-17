@@ -11,10 +11,16 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from app.core import audit  # noqa: F401  (register AuditEvent for autogenerate)
-from app.core.models import Base  # registers Tenant/Person/Role/PersonRole/AuthSession
+from app.core import (
+    audit,  # noqa: F401  (register AuditEvent for autogenerate)
+    settings_models,  # noqa: F401  (register DomainSetting)
+)
+from app.core.models import Base  # registers Tenant/Party/Role/PartyRole/AuthSession
 from app.features.auth import (
     models as auth,  # noqa: F401  (register UserCredential for autogenerate)
+)
+from app.features.custom_fields import (
+    models as custom_fields,  # noqa: F401  (register CustomFieldDefinition)
 )
 
 config = context.config
