@@ -9,7 +9,6 @@ functions, and shapes the response.
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -19,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.crud import CRUDManager
 from app.core.exceptions import ConflictError
 from app.core.models import Person, Tenant
+from app.features.persons.schemas import PersonCreate
 
 
 class Persons(CRUDManager[Person]):
@@ -32,7 +32,7 @@ def list_persons(db: Session) -> list[Person]:
     return list(db.scalars(select(Person).order_by(Person.created_at.desc())).all())
 
 
-def create_person(db: Session, tenant: Tenant, payload: Any) -> Person:
+def create_person(db: Session, tenant: Tenant, payload: PersonCreate) -> Person:
     data = {
         "tenant_id": tenant.id,  # never from payload — always from request state
         "email": payload.email,

@@ -14,32 +14,18 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_tenant
 from app.core.models import Person, Tenant
 from app.features.persons import service as persons_service
+from app.features.persons.schemas import PersonCreate, PersonRead
 
 router = APIRouter(
     prefix="/people",
     tags=["people"],
     dependencies=[Depends(require_tenant)],
 )
-
-
-class PersonCreate(BaseModel):
-    email: EmailStr
-    first_name: str = Field(min_length=1, max_length=80)
-    last_name: str = Field(min_length=1, max_length=80)
-
-
-class PersonRead(BaseModel):
-    id: UUID
-    email: EmailStr
-    first_name: str
-    last_name: str
-    model_config = {"from_attributes": True}
 
 
 @router.post("", response_model=PersonRead, status_code=status.HTTP_201_CREATED)

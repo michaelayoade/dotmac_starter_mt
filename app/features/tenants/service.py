@@ -7,7 +7,6 @@ calls these functions, and shapes the response.
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -16,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.models import Tenant
+from app.features.tenants.schemas import TenantCreate
 
 
 def list_tenants(db: Session) -> list[Tenant]:
@@ -29,7 +29,7 @@ def get_tenant(db: Session, tenant_id: UUID) -> Tenant:
     return tenant
 
 
-def create_tenant(db: Session, payload: Any) -> Tenant:
+def create_tenant(db: Session, payload: TenantCreate) -> Tenant:
     tenant = Tenant(slug=payload.slug, name=payload.name)
     db.add(tenant)
     try:
