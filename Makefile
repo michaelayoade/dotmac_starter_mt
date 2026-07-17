@@ -8,6 +8,10 @@ TEST_DB_ADMIN_PASSWORD ?= postgres
 TEST_DB_HOST ?= localhost
 TEST_DB_NAME ?= starter_test
 
+IMAGE_NAME ?= dotmac_starter_mt
+IMAGE_TAG ?= dev
+APP_PORT ?= 8000
+
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
@@ -55,5 +59,13 @@ migrate-new: ## Create migration: make migrate-new msg="..."
 dev: ## Run dev server
 	poetry run uvicorn app.main:app --reload --port 8000
 
+##@ Docker
+docker-build: ## Build local dev image (IMAGE_NAME, IMAGE_TAG, APP_PORT overridable)
+	docker build --build-arg APP_PORT=$(APP_PORT) -t $(IMAGE_NAME):$(IMAGE_TAG) .
+docker-dev: ## Run app+postgres locally (dev overlay)
+	APP_IMAGE=$(IMAGE_NAME):$(IMAGE_TAG) APP_PORT=$(APP_PORT) IMAGE_NAME=$(IMAGE_NAME) IMAGE_TAG=$(IMAGE_TAG) \
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
 .PHONY: help lint lint-imports format type-check security check test test-unit \
-	test-integration test-cov test-db-up test-db-down migrate migrate-new dev
+	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
+	docker-build docker-dev

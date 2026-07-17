@@ -27,6 +27,8 @@ from app.core.models import Tenant, TenantDomain
 
 logger = logging.getLogger(__name__)
 
+_HEALTH_PATHS = frozenset({"/health", "/health/ready"})
+
 
 class TenantResolverMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
@@ -35,6 +37,15 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         host = (request.headers.get("host") or "").split(":")[0].lower()
+
+        # Liveness/readiness checks must not touch the DB (they run before a
+        # DB may even be reachable — container smoke tests, orchestrator
+        # health probes). Short-circuit before resolution, per the /health
+        # route's "does not touch DB" contract in app/main.py.
+        if request.url.path in _HEALTH_PATHS:
+            request.state.tenant = None
+            return await call_next(request)
+
         request.state.tenant = self._resolve(host)
 
         # Platform paths are allowed without a tenant.
@@ -91,4 +102,4 @@ def _is_platform_path(path: str, host: str, root: str) -> bool:
     """Routes that are valid without a resolved tenant."""
     if host == root:
         return True
-    return path.startswith("/platform/") or path in {"/health", "/health/ready"}
+    return path.startswith("/platform/") or path in _HEALTH_PATHS

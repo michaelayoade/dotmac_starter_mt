@@ -85,3 +85,22 @@ jobs:
       - run: make test-integration
       - run: make test-db-down
         if: always()
+
+  docker-build:
+    runs-on: ubuntu-latest
+    # Builds the prod image and health-gates it before merge. Port/tag are
+    # job-local env, not magic numbers, so they can be bumped in one place.
+    env:
+      APP_PORT: "8000"
+      IMAGE_TAG: "starter:ci"
+      SMOKE_CONTAINER: "smoke"
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg APP_PORT=${{ env.APP_PORT }} -t ${{ env.IMAGE_TAG }} .
+      - run: |
+          docker run -d --name ${{ env.SMOKE_CONTAINER }} -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
+            -e DATABASE_URL=postgresql+psycopg://x:x@localhost/x ${{ env.IMAGE_TAG }}
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:${{ env.APP_PORT }}/health && exit 0; sleep 2;
+          done
+          docker logs ${{ env.SMOKE_CONTAINER }}; exit 1
