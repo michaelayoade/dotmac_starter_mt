@@ -77,6 +77,34 @@ def test_create_person_party_duplicate_email_raises_conflict(
         )
 
 
+def test_create_person_party_normalizes_email_to_lowercase(
+    db: Session, tenant_row: Tenant
+) -> None:
+    party = parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(
+            email="MiXeD@ExAmPlE.com", first_name="Mixed", last_name="Case"
+        ),
+    )
+
+    assert party.email == "mixed@example.com"
+
+
+def test_create_organization_party_normalizes_email_to_lowercase(
+    db: Session, tenant_row: Tenant
+) -> None:
+    party = parties_service.create_organization_party(
+        db,
+        tenant_row,
+        OrganizationPartyCreate(
+            legal_name="MixedCase Org", email="CoNtAcT@ExAmPlE.com"
+        ),
+    )
+
+    assert party.email == "contact@example.com"
+
+
 def test_create_organization_party_creates_party_and_subtype_row(
     db: Session, tenant_row: Tenant
 ) -> None:

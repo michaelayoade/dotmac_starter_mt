@@ -34,12 +34,13 @@ class Parties(CRUDManager[Party]):
 def create_person_party(
     db: Session, tenant: Tenant, payload: PersonPartyCreate
 ) -> Party:
+    email = payload.email.lower()
     party = Party(
         tenant_id=tenant.id,  # never from payload — always from request state
         party_type=PartyType.person,
         # write-once until an update endpoint exists (see backlog)
         display_name=f"{payload.first_name} {payload.last_name}",
-        email=payload.email,
+        email=email,
     )
     # Assigning via the relationship (rather than setting party_id by hand)
     # lets SQLAlchemy's cascade add both rows and resolve the FK in a single
@@ -60,12 +61,13 @@ def create_person_party(
 def create_organization_party(
     db: Session, tenant: Tenant, payload: OrganizationPartyCreate
 ) -> Party:
+    email = payload.email.lower() if payload.email else None
     party = Party(
         tenant_id=tenant.id,  # never from payload — always from request state
         party_type=PartyType.organization,
         # write-once until an update endpoint exists (see backlog)
         display_name=payload.legal_name,
-        email=payload.email,
+        email=email,
     )
     party.organization_profile = PartyOrganization(legal_name=payload.legal_name)
     db.add(party)
