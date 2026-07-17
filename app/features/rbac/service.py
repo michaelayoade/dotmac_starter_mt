@@ -7,6 +7,8 @@ functions, writes the audit trail, and shapes the response.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,7 +17,13 @@ from app.core.audit import AuditEvent
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.models import Person, PersonRole, Role, Tenant
 from app.core.query import apply_pagination
+from app.core.settings_models import SettingDomain
+from app.core.settings_resolver import resolve_value
 from app.features.rbac.schemas import RoleCreate, RoleGrantRequest
+
+# Fallback if the settings feature is disabled in this deployment — matches
+# the `audit/retention_days` spec's own default (app/features/settings/spec.py).
+_DEFAULT_AUDIT_RETENTION_DAYS = 365
 
 
 def list_roles(db: Session, tenant: Tenant, *, limit: int, offset: int) -> list[Role]:
@@ -67,10 +75,23 @@ def assign_role(db: Session, tenant: Tenant, payload: RoleGrantRequest) -> Perso
 
 
 def list_audit_events(db: Session, tenant: Tenant) -> list[AuditEvent]:
+    # Bound by the tenant's `audit/retention_days` setting (Task 5) — events
+    # older than the retention window are dropped from the listing, not just
+    # cosmetically hidden (there is no separate purge job yet; this is the
+    # setting's only consumer).
+    retention_days = resolve_value(
+        db,
+        SettingDomain.audit,
+        "retention_days",
+        tenant_id=tenant.id,
+        default=_DEFAULT_AUDIT_RETENTION_DAYS,
+    )
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
     return list(
         db.scalars(
             select(AuditEvent)
             .where(AuditEvent.tenant_id == tenant.id)
+            .where(AuditEvent.created_at >= cutoff)
             .order_by(AuditEvent.created_at.desc())
         ).all()
     )

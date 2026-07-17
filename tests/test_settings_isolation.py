@@ -13,10 +13,11 @@ Three properties, each load-bearing:
 
 Requires a real Postgres (RLS doesn't exist on SQLite) — see
 `tests/test_cross_tenant_isolation.py` for the fixture/setup convention this
-file follows. Unlike the other isolation canaries, there is no router yet
-(Task 3 scaffolds the feature only; the router lands in Task 5), so this file
-talks to `domain_settings` directly over SQL as the `app_user` role rather than
-through the HTTP API.
+file follows. The bulk of this file predates the router (Task 3 scaffolded
+the feature only) and talks to `domain_settings` directly over SQL as the
+`app_user` role. `test_tenant_a_put_max_per_entity_does_not_affect_tenant_b`
+at the bottom is the Task 5 API-level canary, added once the router landed —
+it goes through the real HTTP API (`PUT`/`GET /settings/...`) instead.
 """
 
 from __future__ import annotations
@@ -27,10 +28,13 @@ from collections.abc import Generator
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
+
+from tests.conftest import client_for
 
 
 @pytest.fixture(scope="module")
@@ -247,3 +251,68 @@ def test_platform_api_manages_only_null_tenant_rows(
         admin_session.commit()
     finally:
         platform_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Task 5 API-level canary: PUT/GET /settings/... through the real HTTP API.
+# ---------------------------------------------------------------------------
+
+_PASSWORD = "correct horse battery staple"
+
+
+def _register_and_login(client: TestClient, email: str) -> str:
+    register = client.post(
+        "/auth/register",
+        json={
+            "email": email,
+            "password": _PASSWORD,
+            "first_name": "Admin",
+            "last_name": "User",
+        },
+    )
+    assert register.status_code == 201, register.text
+
+    login = client.post("/auth/login", json={"email": email, "password": _PASSWORD})
+    assert login.status_code == 200, login.text
+    return login.json()["access_token"]
+
+
+def test_tenant_a_put_max_per_entity_does_not_affect_tenant_b(
+    app_client: TestClient,
+    tenant_a,
+    tenant_b,
+) -> None:
+    """The canary the settings API exists for: a tenant admin's `PUT` writes
+    only THEIR row. `custom_fields/max_per_entity` defaults to 20 (see
+    `app/features/settings/spec.py`) — tenant A overrides it to 5; tenant B
+    must keep resolving the spec default via `GET`, unaffected.
+    """
+    a = client_for(app_client, tenant_a.slug)
+    a_token = _register_and_login(a, "settings-a@tenant-a.example.com")
+
+    put_resp = a.put(
+        "/settings/custom_fields/max_per_entity",
+        headers={"Authorization": f"Bearer {a_token}"},
+        json={"value": 5},
+    )
+    assert put_resp.status_code == 200, put_resp.text
+    assert put_resp.json()["value"] == 5
+    assert put_resp.json()["source"] == "tenant"
+
+    b = client_for(TestClient(app_client.app), tenant_b.slug)
+    b_token = _register_and_login(b, "settings-b@tenant-b.example.org")
+    b_list = b.get(
+        "/settings/custom_fields", headers={"Authorization": f"Bearer {b_token}"}
+    )
+    assert b_list.status_code == 200, b_list.text
+    b_entry = next(item for item in b_list.json() if item["key"] == "max_per_entity")
+    assert b_entry["value"] == 20
+    assert b_entry["source"] == "default"
+
+    a_list = a.get(
+        "/settings/custom_fields", headers={"Authorization": f"Bearer {a_token}"}
+    )
+    assert a_list.status_code == 200, a_list.text
+    a_entry = next(item for item in a_list.json() if item["key"] == "max_per_entity")
+    assert a_entry["value"] == 5
+    assert a_entry["source"] == "tenant"

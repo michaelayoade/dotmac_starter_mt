@@ -28,7 +28,20 @@ from app.features.auth import models as auth  # noqa: F401
 
 @pytest.fixture(scope="session")
 def unit_engine():
-    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    # `check_same_thread=False`: FastAPI's TestClient (used by tests/unit/
+    # test_settings_api.py to exercise the real guarded router) runs sync
+    # route dependencies in a worker thread via `run_in_threadpool`, but the
+    # `db` fixture below hands every test the SAME underlying connection
+    # object, opened once on the pytest thread. Plain pysqlite refuses to let
+    # a second thread touch a connection it didn't create; since our usage is
+    # always sequential (one caller at a time, never concurrent), this is
+    # safe to relax — same fix FastAPI's own testing docs recommend for
+    # sqlite `:memory:` engines exercised via TestClient.
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+    )
     Base.metadata.create_all(engine)
     yield engine
     engine.dispose()

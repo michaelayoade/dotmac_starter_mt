@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime, timedelta
+
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from tests.conftest import client_for
 
@@ -83,6 +88,60 @@ def test_audit_events_from_tenant_a_invisible_to_tenant_b(
     )
     assert b_events.status_code == 200
     assert b_events.json() == []
+
+
+def test_audit_events_are_bounded_by_tenant_retention_days_setting(
+    app_client: TestClient,
+    tenant_a,
+    admin_session: Session,
+) -> None:
+    """`audit/retention_days` (Task 5) — the setting's only consumer:
+    `app.features.rbac.service.list_audit_events` drops events older than the
+    tenant's effective retention window. Set retention to 1 day via the real
+    settings API, insert an event backdated 2 days via `admin_session`
+    (RLS-bypassing — the API has no way to backdate `created_at`), then
+    confirm the listing excludes it while keeping a recent one.
+    """
+    a = client_for(app_client, tenant_a.slug)
+    a_token = _register_and_login(a, "retention-a@tenant-a.example.com")
+    _create_role(a, a_token, "recent-role")  # writes a recent audit event
+
+    set_retention = a.put(
+        "/settings/audit/retention_days",
+        headers={"Authorization": f"Bearer {a_token}"},
+        json={"value": 1},
+    )
+    assert set_retention.status_code == 200, set_retention.text
+    assert set_retention.json()["value"] == 1
+
+    old_event_id = uuid.uuid4()
+    admin_session.execute(
+        text(
+            "INSERT INTO audit_events "
+            "(id, tenant_id, action, entity_type, details, created_at) "
+            "VALUES (:id, :tenant_id, 'old.event', 'test', '{}'::jsonb, :created_at)"
+        ),
+        {
+            "id": str(old_event_id),
+            "tenant_id": str(tenant_a.id),
+            "created_at": datetime.now(UTC) - timedelta(days=2),
+        },
+    )
+    admin_session.commit()
+
+    try:
+        events = a.get(
+            "/rbac/audit-events", headers={"Authorization": f"Bearer {a_token}"}
+        )
+        assert events.status_code == 200, events.text
+        actions = [event["action"] for event in events.json()]
+        assert "old.event" not in actions
+        assert "role.create" in actions
+    finally:
+        admin_session.execute(
+            text("DELETE FROM audit_events WHERE id = :id"), {"id": str(old_event_id)}
+        )
+        admin_session.commit()
 
 
 def _register_and_login(client: TestClient, email: str) -> str:

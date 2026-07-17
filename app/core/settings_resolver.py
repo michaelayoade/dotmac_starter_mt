@@ -26,18 +26,22 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import BadRequestError
 from app.core.settings_models import DomainSetting, SettingDomain, SettingValueType
 
 # Sentinel distinguishing "no default kwarg passed" from "default=None was
 # passed explicitly" in resolve_value.
 _UNSET = object()
+
+# Which row (if any) determined a resolved value — see `resolve_with_source`.
+SettingSource = Literal["tenant", "platform", "default"]
 
 
 @dataclass(frozen=True)
@@ -142,6 +146,84 @@ def _coerce(value_type: SettingValueType, raw: object) -> object | None:
     return raw
 
 
+def resolve_with_source(
+    db: Session,
+    domain: SettingDomain,
+    key: str,
+    *,
+    tenant_id: UUID | None,
+    default: Any = _UNSET,
+) -> tuple[Any, SettingSource]:
+    """Resolve a setting value AND where it came from: tenant, platform, or default.
+
+    Same precedence/coercion/fallback semantics as `resolve_value` (which now
+    delegates here, keeping its signature and behavior identical) — see that
+    docstring for the resolution rules. `source` reflects the ROW that
+    actually determined the returned value: if a tenant or platform row
+    exists but fails coercion/`allowed`/range validation, resolution falls
+    back to the spec default and `source` is `"default"` too (a bad stored
+    value degrades all the way to the safe default, not to "the row exists
+    but we ignored it").
+
+    Added for the settings admin API (`GET /settings/{domain}`), which must
+    tell callers whether a value is tenant-overridden, platform-default, or
+    the spec's built-in default (e.g. to mask secrets only when a real row
+    value is shown, not when displaying the default).
+    """
+    try:
+        spec = get_spec(domain, key)
+    except KeyError:
+        if default is not _UNSET:
+            return default, "default"
+        raise
+
+    row = None
+    source: SettingSource = "default"
+    if tenant_id is not None:
+        row = _select_row(db, domain, key, tenant_id)
+        if row is not None:
+            source = "tenant"
+    if row is None:
+        row = _select_row(db, domain, key, None)
+        if row is not None:
+            source = "platform"
+
+    raw = _extract_raw(row)
+    if raw is None:
+        raw = spec.default
+        source = "default"
+
+    value = _coerce(spec.value_type, raw)
+    if value is None and raw is not None:
+        # Coercion failed (e.g. a corrupted/unparseable stored value) —
+        # degrade to the spec default rather than surface a bad value.
+        value = spec.default
+        source = "default"
+
+    if spec.allowed is not None and value is not None and value not in spec.allowed:
+        value = spec.default
+        source = "default"
+
+    if spec.value_type == SettingValueType.integer and isinstance(value, int):
+        if spec.min_value is not None and value < spec.min_value:
+            value = spec.default
+            source = "default"
+        elif spec.max_value is not None and value > spec.max_value:
+            value = spec.default
+            source = "default"
+
+    if spec.value_type == SettingValueType.json and value is not None:
+        # json-type values are mutable (dicts). `value` may be the shared
+        # `spec.default` object (assigned by reference above whenever
+        # resolution falls back to the default) — every caller must get an
+        # independent copy so mutating one caller's result can't corrupt the
+        # spec default (and thus every future resolution) for the rest of
+        # the process. Scalars (bool/int/str) are immutable, no copy needed.
+        value = copy.deepcopy(value)
+
+    return value, source
+
+
 def resolve_value(
     db: Session,
     domain: SettingDomain,
@@ -169,49 +251,65 @@ def resolve_value(
     as-is. Without a `default=` kwarg, an unregistered key raises `KeyError`.
 
     No caching: see module docstring — a Redis-backed cache is phase 3.
+
+    Thin delegator over `resolve_with_source` — see that function for the
+    `source` ("tenant"/"platform"/"default") the settings admin API needs.
     """
-    try:
-        spec = get_spec(domain, key)
-    except KeyError:
-        if default is not _UNSET:
-            return default
-        raise
-
-    row = None
-    if tenant_id is not None:
-        row = _select_row(db, domain, key, tenant_id)
-    if row is None:
-        row = _select_row(db, domain, key, None)
-
-    raw = _extract_raw(row)
-    if raw is None:
-        raw = spec.default
-
-    value = _coerce(spec.value_type, raw)
-    if value is None and raw is not None:
-        # Coercion failed (e.g. a corrupted/unparseable stored value) —
-        # degrade to the spec default rather than surface a bad value.
-        value = spec.default
-
-    if spec.allowed is not None and value is not None and value not in spec.allowed:
-        value = spec.default
-
-    if spec.value_type == SettingValueType.integer and isinstance(value, int):
-        if spec.min_value is not None and value < spec.min_value:
-            value = spec.default
-        elif spec.max_value is not None and value > spec.max_value:
-            value = spec.default
-
-    if spec.value_type == SettingValueType.json and value is not None:
-        # json-type values are mutable (dicts). `value` may be the shared
-        # `spec.default` object (assigned by reference above whenever
-        # resolution falls back to the default) — every caller must get an
-        # independent copy so mutating one caller's result can't corrupt the
-        # spec default (and thus every future resolution) for the rest of
-        # the process. Scalars (bool/int/str) are immutable, no copy needed.
-        value = copy.deepcopy(value)
-
+    value, _source = resolve_with_source(
+        db, domain, key, tenant_id=tenant_id, default=default
+    )
     return value
+
+
+def validate_spec_value(spec: SettingSpec, value: object) -> object:
+    """Validate `value` against `spec`'s type/allowed/range constraints for a WRITE.
+
+    Unlike `resolve_value`'s coercion (which silently degrades an unreadable
+    *stored* value to the spec default — a read-path safety net), this is the
+    write-path gate: any violation raises `BadRequestError` instead of
+    guessing, so the caller (the settings admin API) can return a clean 400
+    before anything is written. Returns the coerced value, ready to pass to
+    `upsert_by_key`.
+
+    `None` is never accepted, for any `value_type`. This closes a gap in
+    `_normalize_for_db`: passed straight through, `None` would either violate
+    the `ck_domain_settings_value_alignment` CHECK constraint at flush time
+    for `json` (raising a raw `IntegrityError` instead of a clean 400) or
+    silently store `false` for `boolean` (a null update would be
+    misinterpreted as an explicit "off" with no error at all).
+    """
+    if value is None:
+        raise BadRequestError(f"{spec.domain.value}/{spec.key}: value must not be null")
+
+    coerced = _coerce(spec.value_type, value)
+    if coerced is None:
+        raise BadRequestError(
+            f"{spec.domain.value}/{spec.key}: invalid value for type "
+            f"{spec.value_type.value}"
+        )
+
+    if spec.value_type == SettingValueType.json and not isinstance(coerced, dict):
+        raise BadRequestError(
+            f"{spec.domain.value}/{spec.key}: value must be an object"
+        )
+
+    if spec.allowed is not None and coerced not in spec.allowed:
+        raise BadRequestError(
+            f"{spec.domain.value}/{spec.key}: value must be one of "
+            f"{sorted(spec.allowed)}"
+        )
+
+    if spec.value_type == SettingValueType.integer and isinstance(coerced, int):
+        if spec.min_value is not None and coerced < spec.min_value:
+            raise BadRequestError(
+                f"{spec.domain.value}/{spec.key}: value must be >= {spec.min_value}"
+            )
+        if spec.max_value is not None and coerced > spec.max_value:
+            raise BadRequestError(
+                f"{spec.domain.value}/{spec.key}: value must be <= {spec.max_value}"
+            )
+
+    return coerced
 
 
 def _normalize_for_db(
