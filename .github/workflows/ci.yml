@@ -8,6 +8,7 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         target: [lint, lint-imports, type-check, security]
     steps:
@@ -46,11 +47,18 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    # Single source of truth for the disposable CI Postgres. Every URL used
-    # below (service container env, migrate step, `make test-integration`)
-    # is composed from these values via env-context/shell expansion or the
-    # Makefile's own TEST_DB_* ?= defaults — none are duplicated as literals.
-    # Mirrors docker-compose.test.yml, which uses the same variable names.
+    # Single source of truth for the disposable CI Postgres. `make test-db-up`
+    # brings up docker-compose.test.yml (compose up --wait) and runs
+    # `alembic upgrade head` against it, then `make test-integration` composes
+    # TEST_DATABASE_URL (app_user) and TEST_MIGRATION_DATABASE_URL (admin)
+    # from these same TEST_DB_* values — identical to a local run.
+    # NOTE: the `env:` context is not available in `jobs.<job>.services`, so
+    # this job cannot use a `services:` block; docker-compose.test.yml (which
+    # also sets POSTGRES_HOST_AUTH_METHOD: trust, for the same reason — the
+    # initial Alembic migration creates `app_user` with LOGIN but no
+    # password — trust auth is fine since this is a disposable,
+    # localhost-only CI database) is the actual source of the Postgres
+    # container instead.
     env:
       TEST_DB_PORT: "5433"
       TEST_DB_HOST: localhost
@@ -59,24 +67,6 @@ jobs:
       TEST_DB_ADMIN_PASSWORD: postgres
       TEST_DB_USER: app_user
       TEST_DB_PASSWORD: app_user
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: ${{ env.TEST_DB_ADMIN_USER }}
-          POSTGRES_PASSWORD: ${{ env.TEST_DB_ADMIN_PASSWORD }}
-          POSTGRES_DB: ${{ env.TEST_DB_NAME }}
-          # The initial Alembic migration creates `app_user` with LOGIN but
-          # no password (alembic/versions/20260504_0001_initial_tenant_schema.py),
-          # so TCP auth would fail without this. Trust auth is acceptable
-          # here because this is a disposable, localhost-only CI database —
-          # mirrors the same decision in docker-compose.test.yml.
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - "${{ env.TEST_DB_PORT }}:5432"
-        options: >-
-          --health-cmd "pg_isready -U $POSTGRES_USER" --health-interval 2s
-          --health-timeout 2s --health-retries 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -91,16 +81,7 @@ jobs:
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
       - run: poetry install
-      - name: Migrate (creates RLS roles as superuser)
-        # alembic/env.py reads MIGRATION_DATABASE_URL (falls back to
-        # DATABASE_URL) — composed here from the job-level TEST_DB_* values,
-        # same shape as the Makefile's test-db-up target.
-        run: poetry run alembic upgrade head
-        env:
-          MIGRATION_DATABASE_URL: postgresql+psycopg://${{ env.TEST_DB_ADMIN_USER }}:${{ env.TEST_DB_ADMIN_PASSWORD }}@${{ env.TEST_DB_HOST }}:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}
-          DATABASE_URL: postgresql+psycopg://${{ env.TEST_DB_ADMIN_USER }}:${{ env.TEST_DB_ADMIN_PASSWORD }}@${{ env.TEST_DB_HOST }}:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}
-      - name: RLS canaries
-        # make test-integration composes TEST_DATABASE_URL (app_user) and
-        # TEST_MIGRATION_DATABASE_URL (admin) itself from TEST_DB_* — no
-        # inline connection strings needed here.
-        run: make test-integration
+      - run: make test-db-up
+      - run: make test-integration
+      - run: make test-db-down
+        if: always()
