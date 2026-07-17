@@ -69,3 +69,13 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 - Settings cache (Redis) with invalidation on write — phase 3, alongside Celery/Redis infra.
 - RBAC: consider `require_user_auth` (not admin) for `GET /rbac/roles` when 2b builds
   role-assignment dropdowns.
+
+## SOT-complete gaps (criteria added to spec 2026-07-17)
+
+- `Party.display_name`: stored projection of subtype fields, write-once, no drift
+  detection/repair — when 2b adds update endpoints: single write-owner + idempotent repair,
+  or compute-at-read.
+- Ownership table: T11's provenance table must name an owner for every mutable resource and
+  state transition (not just models) — routes/service functions per resource.
+- External-system contracts: none in the starter yet; when OpenBao/webhooks arrive (2c),
+  each must be declared transport vs contracted authority in ARCHITECTURE.md.

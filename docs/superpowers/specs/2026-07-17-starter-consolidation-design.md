@@ -54,6 +54,20 @@ provenance (which repo/module its canonical definition lives in) and one owner (
 feature). Apps built from this starter inherit models; they never re-declare person-ish or
 identity-ish tables. `docs/ARCHITECTURE.md` carries the provenance table.
 
+**SOT-complete criteria (Michael, 2026-07-17)** — the architecture's definition of done,
+checked at every phase's final review:
+
+1. Every mutable resource, decision and state transition has one named owner.
+2. Routes, tasks, webhooks and event handlers only validate, authorize and delegate.
+3. Every projection has provenance, freshness, drift detection and an idempotent repair path.
+4. External systems are transports or explicitly contracted authorities.
+5. Legacy writers, fallbacks and migration flags are removed.
+
+Known open items against these criteria are tracked in `docs/superpowers/phase2-backlog.md`
+(e.g. `Party.display_name` is a stored projection of subtype fields — currently write-once
+with no update path; when updates arrive it needs a single write-owner, drift detection, and
+an idempotent repair function, or must become computed-at-read).
+
 **Identity SoT is the Party pattern**, replacing the bare `Person` model (phase 2a):
 `parties` (id, tenant_id, `party_type` person|organization, display_name, email, is_active,
 RLS) with subtype tables `party_persons` (party_id PK/FK, first_name, last_name, …profile)
