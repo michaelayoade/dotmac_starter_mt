@@ -124,6 +124,50 @@ def test_resolve_value_tenant_row_present_no_platform_row(db, tenant_row):
     assert value == 45
 
 
+def test_resolve_value_deactivated_tenant_row_falls_through_to_default(db, tenant_row):
+    """Final-review Group 4(c): `is_active` was a dead column — `_select_row`
+    never filtered on it, so a deactivated row still resolved as if active.
+    A deactivated tenant row (no platform row either) must fall all the way
+    through to the spec default, not resolve to its own stale value."""
+    db.add(
+        DomainSetting(
+            tenant_id=tenant_row.id,
+            domain=SettingDomain.audit,
+            key="retention_days",
+            value_type=SettingValueType.integer,
+            value_text="45",
+            is_active=False,
+        )
+    )
+    db.flush()
+    value, source = sr.resolve_with_source(
+        db, SettingDomain.audit, "retention_days", tenant_id=tenant_row.id
+    )
+    assert value == 365
+    assert source == "default"
+
+
+def test_resolve_value_deactivated_platform_row_falls_through_to_default(
+    db, tenant_row
+):
+    db.add(
+        DomainSetting(
+            tenant_id=None,
+            domain=SettingDomain.audit,
+            key="retention_days",
+            value_type=SettingValueType.integer,
+            value_text="200",
+            is_active=False,
+        )
+    )
+    db.flush()
+    value, source = sr.resolve_with_source(
+        db, SettingDomain.audit, "retention_days", tenant_id=tenant_row.id
+    )
+    assert value == 365
+    assert source == "default"
+
+
 def test_resolve_value_tenant_row_wins_over_platform_row(db, tenant_row, monkeypatch):
     """SQLite can't hold both a platform and a tenant row for the same key at
     once (see module docstring), so this exercises the precedence *logic*

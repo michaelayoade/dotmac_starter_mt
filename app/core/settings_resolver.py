@@ -58,7 +58,6 @@ class SettingSpec:
     value_type: SettingValueType
     default: object | None
     label: str | None = None
-    required: bool = False
     allowed: set[str] | None = None
     min_value: int | None = None
     max_value: int | None = None
@@ -97,11 +96,18 @@ def get_spec(domain: SettingDomain, key: str) -> SettingSpec:
 def _select_row(
     db: Session, domain: SettingDomain, key: str, tenant_id: UUID | None
 ) -> DomainSetting | None:
+    """Final-review Group 4(c): `is_active` was a dead column — declared on
+    the model (`settings_models.py`), never read here. A deactivated row now
+    falls through resolution exactly like a missing one (tenant row inactive
+    -> platform row; platform row inactive -> spec default), instead of
+    resolving as if it were still active.
+    """
     return db.scalars(
         select(DomainSetting)
         .where(DomainSetting.domain == domain)
         .where(DomainSetting.key == key)
         .where(DomainSetting.tenant_id == tenant_id)
+        .where(DomainSetting.is_active == True)  # noqa: E712
     ).first()
 
 

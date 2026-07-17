@@ -209,10 +209,18 @@ class CustomFieldDefinition(Base, TimestampMixin):
             return True, None
 
         if self.field_type == CustomFieldType.NUMBER:
+            # Final-review Group 4(b): `Decimal(int(value))` truncated toward
+            # zero BEFORE either the integrality or range check ran — 3.7
+            # silently became 3, and a value like 7.9 against max_value=7
+            # would truncate to exactly 7 and pass. `Decimal(str(value))`
+            # preserves full precision so both checks below see the value
+            # the caller actually sent.
             try:
-                numeric = Decimal(int(value))
-            except (ValueError, TypeError):
+                numeric = Decimal(str(value))
+            except (InvalidOperation, ValueError, TypeError):
                 return False, f"{self.field_name} must be a number"
+            if numeric != numeric.to_integral_value():
+                return False, f"{self.field_name} must be a whole number"
             range_error = self._range_error(numeric)
             if range_error:
                 return False, range_error

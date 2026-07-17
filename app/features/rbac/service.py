@@ -75,10 +75,11 @@ def assign_role(db: Session, tenant: Tenant, payload: RoleGrantRequest) -> Party
 
 
 def list_audit_events(db: Session, tenant: Tenant) -> list[AuditEvent]:
-    # Bound by the tenant's `audit/retention_days` setting (Task 5) — events
-    # older than the retention window are dropped from the listing, not just
-    # cosmetically hidden (there is no separate purge job yet; this is the
-    # setting's only consumer).
+    # Bound by the tenant's `audit/retention_days` setting (Task 5). This is
+    # a LISTING-time filter only — rows older than the retention window are
+    # excluded from what this function returns, but they are NOT deleted:
+    # there is no purge job. The rows persist in `audit_events` indefinitely;
+    # this `resolve_value` call is the setting's only consumer.
     retention_days = resolve_value(
         db,
         SettingDomain.audit,

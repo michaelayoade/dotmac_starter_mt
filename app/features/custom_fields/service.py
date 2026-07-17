@@ -65,6 +65,7 @@ Other adaptations from the ERP port:
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
@@ -107,6 +108,24 @@ def _validate_min_max_numeric(
             ) from exc
 
 
+def _validate_regex_compiles(validation_regex: str | None) -> None:
+    """Definition self-consistency (final-review Group 4(a)): `validation_regex`
+    is a free-text column (`models.py`) never checked at write time — an
+    unparseable pattern (e.g. `"["`) previously only failed the first time
+    some value happened to be validated against it, via an unhandled
+    `re.error` out of `CustomFieldDefinition.validate_value`'s bare
+    `re.match(self.validation_regex, ...)`. Compile-checked here instead, at
+    create/update time, so a bad pattern 400s immediately."""
+    if validation_regex is None:
+        return
+    try:
+        re.compile(validation_regex)
+    except re.error as exc:
+        raise BadRequestError(
+            f"validation_regex is not a valid pattern: {exc}"
+        ) from exc
+
+
 def _active_field_count(db: Session, tenant_id: UUID, entity_type: str) -> int:
     return (
         db.scalar(
@@ -137,6 +156,7 @@ def create_field(
     """
     resolve_entity(payload.entity_type)
     _validate_min_max_numeric(payload.field_type, payload.min_value, payload.max_value)
+    _validate_regex_compiles(payload.validation_regex)
 
     limit = resolve_value(
         db,
@@ -237,6 +257,9 @@ def update_field(
         effective_min = updates.get("min_value", field.min_value)
         effective_max = updates.get("max_value", field.max_value)
         _validate_min_max_numeric(effective_type, effective_min, effective_max)
+
+    if "validation_regex" in updates:
+        _validate_regex_compiles(updates["validation_regex"])
 
     # Router must pass schema-validated dicts only — this loop trusts its
     # input (inherited ERP shape; Task 10's router owns input filtering).

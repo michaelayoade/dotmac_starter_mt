@@ -107,6 +107,28 @@ def test_create_field_non_numeric_max_value_raises_bad_request(
         )
 
 
+def test_create_field_invalid_validation_regex_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Final-review Group 4(a): an unparseable `validation_regex` must fail
+    loudly at create time — not later, the first time some value happens to
+    be validated against it (`re.match` would raise `re.error`, an
+    unhandled 500)."""
+    with pytest.raises(BadRequestError, match="validation_regex"):
+        cf_service.create_field(
+            db, tenant_row.id, _payload(field_code="sku", validation_regex="[")
+        )
+
+
+def test_update_field_invalid_validation_regex_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    field = cf_service.create_field(db, tenant_row.id, _payload())
+
+    with pytest.raises(BadRequestError, match="validation_regex"):
+        cf_service.update_field(db, tenant_row.id, field.id, {"validation_regex": "["})
+
+
 def test_create_field_limit_reached_raises_bad_request(
     db: Session, tenant_row: Tenant
 ) -> None:
@@ -281,6 +303,58 @@ def test_validate_values_number_non_numeric_raises(
 
     with pytest.raises(BadRequestError, match="must be a number"):
         cf_service.validate_values(db, tenant_row.id, "party", {"age": "not-a-number"})
+
+
+def test_validate_values_number_rejects_non_integral(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Final-review Group 4(b): NUMBER must reject 3.7 outright — not
+    silently truncate it to 3 (the old `Decimal(int(value))` behavior)."""
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="age", field_type=CustomFieldType.NUMBER),
+    )
+
+    with pytest.raises(BadRequestError, match="whole number"):
+        cf_service.validate_values(db, tenant_row.id, "party", {"age": 3.7})
+
+
+def test_validate_values_number_accepts_whole_float(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """5.0 IS a whole number — must be accepted, not rejected as non-integral."""
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="age", field_type=CustomFieldType.NUMBER),
+    )
+
+    cf_service.validate_values(db, tenant_row.id, "party", {"age": 5.0})
+
+
+def test_validate_values_number_range_checked_on_untruncated_value(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Final-review Group 4(b): 7.9 must be rejected outright (non-integral) —
+    NOT silently truncated to 7 and then waved through a max_value=7 range
+    check (the old `Decimal(int(value))` behavior). A genuinely in-range
+    whole number still passes, and a genuinely out-of-range whole number
+    still hits the range-check error, not the integrality one."""
+    cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(field_code="score", field_type=CustomFieldType.NUMBER, max_value="7"),
+    )
+
+    with pytest.raises(BadRequestError, match="whole number"):
+        cf_service.validate_values(db, tenant_row.id, "party", {"score": 7.9})
+
+    # A genuinely in-range whole number still passes.
+    cf_service.validate_values(db, tenant_row.id, "party", {"score": 7})
+
+    with pytest.raises(BadRequestError, match="must be at most 7"):
+        cf_service.validate_values(db, tenant_row.id, "party", {"score": 8})
 
 
 def test_validate_values_select_non_member_raises(
