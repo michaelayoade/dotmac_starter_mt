@@ -36,7 +36,9 @@ class CSRFMiddleware:
                 await response(scope, receive, send)
                 return
 
-        set_cookie = request.method in SAFE_METHODS and CSRF_COOKIE not in request.cookies
+        set_cookie = (
+            request.method in SAFE_METHODS and CSRF_COOKIE not in request.cookies
+        )
 
         async def send_with_csrf(message: Message) -> None:
             if set_cookie and message["type"] == "http.response.start":

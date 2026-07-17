@@ -89,7 +89,9 @@ def _encode_jwt(payload: dict[str, object]) -> str:
 
 
 def _sign(signing_input: bytes) -> str:
-    digest = hmac.new(settings.jwt_secret.encode(), signing_input, hashlib.sha256).digest()
+    digest = hmac.new(
+        settings.jwt_secret.encode(), signing_input, hashlib.sha256
+    ).digest()
     return _b64encode(digest)
 
 

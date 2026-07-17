@@ -43,7 +43,9 @@ class TenantRead(BaseModel):
 
 
 @router.post("", response_model=TenantRead, status_code=status.HTTP_201_CREATED)
-def create_tenant(payload: TenantCreate, db: Session = Depends(get_platform_db)) -> Tenant:
+def create_tenant(
+    payload: TenantCreate, db: Session = Depends(get_platform_db)
+) -> Tenant:
     tenant = Tenant(slug=payload.slug, name=payload.name)
     db.add(tenant)
     try:

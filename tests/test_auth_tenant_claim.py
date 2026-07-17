@@ -34,7 +34,10 @@ def test_jwt_issued_for_tenant_a_rejected_on_tenant_b(
     assert login.status_code == 200, login.text
     token = login.json()["access_token"]
 
-    assert a.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+    assert (
+        a.get("/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code
+        == 200
+    )
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
     rejected = b.get("/auth/me", headers={"Authorization": f"Bearer {token}"})

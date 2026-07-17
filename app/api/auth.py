@@ -15,9 +15,16 @@ from app.models.auth import AuthSession, UserCredential
 from app.models.person import Person
 from app.models.rbac import PersonRole, Role
 from app.models.tenant import Tenant
-from app.services.security import hash_password, hash_token, issue_access_token, verify_password
+from app.services.security import (
+    hash_password,
+    hash_token,
+    issue_access_token,
+    verify_password,
+)
 
-router = APIRouter(prefix="/auth", tags=["auth"], dependencies=[Depends(require_tenant)])
+router = APIRouter(
+    prefix="/auth", tags=["auth"], dependencies=[Depends(require_tenant)]
+)
 
 
 class RegisterRequest(BaseModel):
@@ -34,7 +41,7 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"  # noqa: S105 - OAuth token type, not a password.
+    token_type: str = "bearer"
 
 
 class CurrentUserResponse(BaseModel):
@@ -45,7 +52,9 @@ class CurrentUserResponse(BaseModel):
     tenant_id: UUID
 
 
-@router.post("/register", response_model=CurrentUserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=CurrentUserResponse, status_code=status.HTTP_201_CREATED
+)
 def register(
     payload: RegisterRequest,
     db: Session = Depends(get_db),
@@ -87,8 +96,12 @@ def login(
         .where(UserCredential.tenant_id == tenant.id)
         .where(UserCredential.email == payload.email)
     ).first()
-    if credential is None or not verify_password(payload.password, credential.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if credential is None or not verify_password(
+        payload.password, credential.password_hash
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
 
     token, expires_at = issue_access_token(credential.person_id, tenant.id)
     db.add(

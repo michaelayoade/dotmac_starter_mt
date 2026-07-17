@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, String, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,7 +49,9 @@ class UserCredential(Base, TimestampMixin):
 class AuthSession(Base, TimestampMixin):
     __tablename__ = "auth_sessions"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "token_hash", name="uq_auth_sessions_tenant_token_hash"),
+        UniqueConstraint(
+            "tenant_id", "token_hash", name="uq_auth_sessions_tenant_token_hash"
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "person_id"],
             ["people.tenant_id", "people.id"],
@@ -65,5 +73,7 @@ class AuthSession(Base, TimestampMixin):
         index=True,
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

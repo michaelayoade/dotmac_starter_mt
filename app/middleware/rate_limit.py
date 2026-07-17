@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict, deque
-from typing import Deque
 
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
@@ -28,7 +27,7 @@ class RateLimitMiddleware:
         self.enabled = enabled
         self.requests = requests
         self.window_seconds = window_seconds
-        self._hits: dict[str, Deque[float]] = defaultdict(deque)
+        self._hits: dict[str, deque[float]] = defaultdict(deque)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":

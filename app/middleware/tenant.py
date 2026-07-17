@@ -1,8 +1,8 @@
 """Tenant resolver middleware.
 
-Resolves a Tenant from the incoming Host header and attaches it to `request.state.tenant`.
-Routes that require a tenant use `Depends(require_tenant)`; platform routes assert
-`request.state.tenant is None`.
+Resolves a Tenant from the incoming Host header and attaches it to
+`request.state.tenant`. Routes that require a tenant use `Depends(require_tenant)`;
+platform routes assert `request.state.tenant is None`.
 
 Resolution order:
 1. Custom domain match in `tenant_domains.verified_at IS NOT NULL`
@@ -33,7 +33,7 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._root = settings.platform_root_domain.lower().lstrip(".")
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+    async def dispatch(self, request: Request, call_next):
         host = (request.headers.get("host") or "").split(":")[0].lower()
         request.state.tenant = self._resolve(host)
 

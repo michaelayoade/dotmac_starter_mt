@@ -132,8 +132,14 @@ def _run(
         "state": {"tenant": tenant} if tenant is not None else {},
     }
     asyncio.run(app(scope, receive, send))
-    start = next(message for message in messages if message["type"] == "http.response.start")
-    return {"status": start["status"], "headers": start["headers"], "messages": messages}
+    start = next(
+        message for message in messages if message["type"] == "http.response.start"
+    )
+    return {
+        "status": start["status"],
+        "headers": start["headers"],
+        "messages": messages,
+    }
 
 
 def _cookie_value(response: dict[str, Any], name: str) -> str | None:

@@ -21,20 +21,25 @@ class Tenant(Base, TimestampMixin):
     __tablename__ = "tenants"
 
     id: Mapped[UUID] = uuid_pk()
-    slug: Mapped[str] = mapped_column(String(63), unique=True, nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(
+        String(63), unique=True, nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    domains: Mapped[list["TenantDomain"]] = relationship(
+    domains: Mapped[list[TenantDomain]] = relationship(
         back_populates="tenant",
         cascade="all, delete-orphan",
     )
 
 
 class TenantDomain(Base, TimestampMixin):
-    """Custom-domain mapping. Subdomain on platform_root_domain works without a row here."""
+    """Custom-domain mapping.
+
+    Subdomain on platform_root_domain works without a row here.
+    """
 
     __tablename__ = "tenant_domains"
     __table_args__ = (UniqueConstraint("domain", name="uq_tenant_domains_domain"),)

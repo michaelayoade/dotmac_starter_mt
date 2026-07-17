@@ -29,7 +29,9 @@ platform_engine = create_engine(
 )
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-PlatformSessionLocal = sessionmaker(bind=platform_engine, autocommit=False, autoflush=False)
+PlatformSessionLocal = sessionmaker(
+    bind=platform_engine, autocommit=False, autoflush=False
+)
 
 
 def get_db(request: Request) -> Generator[Session, None, None]:

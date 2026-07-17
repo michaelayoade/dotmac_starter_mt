@@ -54,6 +54,7 @@ def admin_session(admin_engine) -> Generator[Session, None, None]:
 @pytest.fixture
 def tenant_a(admin_session: Session):
     from app.models.tenant import Tenant
+
     t = Tenant(slug="alpha", name="Alpha Test Tenant")
     admin_session.add(t)
     admin_session.commit()
@@ -66,6 +67,7 @@ def tenant_a(admin_session: Session):
 @pytest.fixture
 def tenant_b(admin_session: Session):
     from app.models.tenant import Tenant
+
     t = Tenant(slug="beta", name="Beta Test Tenant")
     admin_session.add(t)
     admin_session.commit()
@@ -79,6 +81,7 @@ def tenant_b(admin_session: Session):
 def app_client():
     """TestClient that lets you set Host header per request."""
     from app.main import app
+
     return TestClient(app)
 
 

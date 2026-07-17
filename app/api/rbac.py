@@ -17,7 +17,9 @@ from app.models.rbac import AuditEvent, PersonRole, Role
 from app.models.tenant import Tenant
 from app.services.audit import write_audit_event
 
-router = APIRouter(prefix="/rbac", tags=["rbac"], dependencies=[Depends(require_tenant)])
+router = APIRouter(
+    prefix="/rbac", tags=["rbac"], dependencies=[Depends(require_tenant)]
+)
 
 
 class RoleCreate(BaseModel):
@@ -87,10 +89,14 @@ def grant_role(
     actor: Person = Depends(require_role("admin")),
 ) -> None:
     person = db.scalars(
-        select(Person).where(Person.tenant_id == tenant.id).where(Person.id == payload.person_id)
+        select(Person)
+        .where(Person.tenant_id == tenant.id)
+        .where(Person.id == payload.person_id)
     ).first()
     role = db.scalars(
-        select(Role).where(Role.tenant_id == tenant.id).where(Role.id == payload.role_id)
+        select(Role)
+        .where(Role.tenant_id == tenant.id)
+        .where(Role.id == payload.role_id)
     ).first()
     if person is None or role is None:
         raise HTTPException(status_code=404, detail="Person or role not found")
