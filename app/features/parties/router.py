@@ -14,6 +14,14 @@ replaces the old person-only `/people` surface with `/parties`, which
 handles both party types: `POST /parties/people`, `POST
 /parties/organizations`, `GET /parties` (paginated, optional `party_type`
 filter), `GET /parties/{id}`, `DELETE /parties/{id}`.
+
+Guard pattern matches `app.features.settings.router` / `app.features.rbac.
+router` / `app.features.custom_fields.router`: router-level `Depends
+(require_tenant)` plus a per-route `Depends(require_role("admin"))` on every
+route (final-review Group 2 — mutations were previously reachable by any
+authenticated caller, unguarded by role). **Loosen per-route in phase 2b**
+once this app grows real UI roles — a plain authenticated user reading their
+own tenant's party directory is a reasonable target to loosen first.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, require_tenant
+from app.core.deps import get_db, require_role, require_tenant
 from app.core.models import Party, PartyType, Tenant
 from app.features.parties import service as parties_service
 from app.features.parties.schemas import (
@@ -47,6 +55,7 @@ def create_person_party(
     payload: PersonPartyCreate,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
+    _: Party = Depends(require_role("admin")),
 ) -> PartyRead:
     party = parties_service.create_person_party(db, tenant, payload)
     return _to_party_read(party)
@@ -59,6 +68,7 @@ def create_organization_party(
     payload: OrganizationPartyCreate,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
+    _: Party = Depends(require_role("admin")),
 ) -> PartyRead:
     party = parties_service.create_organization_party(db, tenant, payload)
     return _to_party_read(party)
@@ -70,6 +80,7 @@ def list_parties(
     limit: int = Query(default=DEFAULT_PARTIES_LIMIT, ge=0, le=MAX_PARTIES_LIMIT),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    _: Party = Depends(require_role("admin")),
 ) -> list[PartyRead]:
     parties = parties_service.list_parties(
         db, party_type=party_type, limit=limit, offset=offset
@@ -78,7 +89,11 @@ def list_parties(
 
 
 @router.get("/{party_id}", response_model=PartyRead)
-def get_party(party_id: UUID, db: Session = Depends(get_db)) -> PartyRead:
+def get_party(
+    party_id: UUID,
+    db: Session = Depends(get_db),
+    _: Party = Depends(require_role("admin")),
+) -> PartyRead:
     party = parties_service.get_party(db, party_id)
     return _to_party_read(party)
 
@@ -86,7 +101,11 @@ def get_party(party_id: UUID, db: Session = Depends(get_db)) -> PartyRead:
 @router.delete(
     "/{party_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
 )
-def delete_party(party_id: UUID, db: Session = Depends(get_db)) -> None:
+def delete_party(
+    party_id: UUID,
+    db: Session = Depends(get_db),
+    _: Party = Depends(require_role("admin")),
+) -> None:
     parties_service.delete_party(db, party_id)
 
 
