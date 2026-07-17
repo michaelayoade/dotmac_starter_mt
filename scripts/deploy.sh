@@ -157,7 +157,8 @@ fi
 
 if ! grep -qFx "APP_IMAGE=${APP_IMAGE}" "${ENV_FILE}"; then
   echo "Pin verification failed — ${ENV_FILE} does not contain APP_IMAGE=${APP_IMAGE}" >&2
-  echo "after the pin. Aborting before touching running containers." >&2
+  echo "after the pin. Aborting before touching running containers. Restoring previous pin." >&2
+  repin_prev
   exit 1
 fi
 
