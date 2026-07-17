@@ -10,8 +10,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.core.audit import write_audit_event
 from app.core.deps import get_db, require_role, require_tenant
 from app.core.models import Person, Tenant
+from app.core.settings_models import SettingDomain
+from app.core.settings_resolver import get_spec
 from app.features.settings import service as settings_service
 from app.features.settings.schemas import SettingOut, SettingUpdate
 
@@ -37,6 +40,25 @@ def update_setting(
     payload: SettingUpdate,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    _: Person = Depends(require_role("admin")),
+    actor: Person = Depends(require_role("admin")),
 ) -> SettingOut:
-    return settings_service.update_setting(db, tenant, domain, key, payload.value)
+    result = settings_service.update_setting(db, tenant, domain, key, payload.value)
+
+    # Write audit event with domain/key but NOT the value (which may be secret).
+    domain_enum = SettingDomain(domain)
+    spec = get_spec(domain_enum, key)
+    write_audit_event(
+        db,
+        tenant_id=tenant.id,
+        actor_person_id=actor.id,
+        action="settings.update",
+        entity_type="setting",
+        entity_id=key,
+        details={
+            "domain": domain,
+            "key": key,
+            "is_secret": spec.is_secret,
+        },
+    )
+
+    return result

@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core import settings_resolver as sr
+from app.core.audit import AuditEvent
 from app.core.deps import get_db, require_user_auth
 from app.core.errors import register_error_handlers
 from app.core.models import Person, PersonRole, Role, Tenant
@@ -262,3 +263,47 @@ def test_non_admin_person_is_forbidden(
 
     resp = app_client.get("/settings/custom_fields")
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Audit event on settings update (PUT)
+# ---------------------------------------------------------------------------
+
+
+def test_put_setting_writes_audit_event(
+    app_client: TestClient, db: Session, tenant_row: Tenant, admin_person: Person
+) -> None:
+    resp = app_client.put("/settings/custom_fields/max_per_entity", json={"value": 5})
+    assert resp.status_code == 200
+
+    events = db.query(AuditEvent).filter(AuditEvent.tenant_id == tenant_row.id).all()
+    assert len(events) == 1
+    event = events[0]
+    assert event.action == "settings.update"
+    assert event.entity_type == "setting"
+    assert event.actor_person_id == admin_person.id
+    assert event.details["domain"] == "custom_fields"
+    assert event.details["key"] == "max_per_entity"
+    assert event.details["is_secret"] is False
+
+
+def test_put_secret_setting_audit_event_has_no_value(
+    app_client: TestClient,
+    db: Session,
+    tenant_row: Tenant,
+    admin_person: Person,
+    secret_spec: sr.SettingSpec,
+) -> None:
+    resp = app_client.put(
+        "/settings/auth/test_secret_token", json={"value": "sekret-value"}
+    )
+    assert resp.status_code == 200
+
+    events = db.query(AuditEvent).filter(AuditEvent.tenant_id == tenant_row.id).all()
+    assert len(events) == 1
+    event = events[0]
+    assert event.action == "settings.update"
+    assert event.details["domain"] == "auth"
+    assert event.details["key"] == "test_secret_token"
+    assert event.details["is_secret"] is True
+    assert "value" not in event.details
