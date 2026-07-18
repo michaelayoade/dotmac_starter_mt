@@ -11,7 +11,7 @@ API-only switch (that conflation was finding F1) — for an actual pure-JSON
 deployment with no `/admin` surface at all across every feature, set
 `WEB_ENABLED=false` instead (`app.core.config.Settings.web_enabled`, gates
 `mount_features`'s `web_routers` mounting and the `/static` mount in
-`app/main.py`). `GET/POST /admin/login` and `GET /admin/logout` are owned by
+`app/main.py`). `GET/POST /admin/login` and `POST /admin/logout` are owned by
 the `auth` feature (`app.features.auth.web`, also in ITS `web_routers` now)
 and stay mounted whenever `web_enabled` is True, regardless of
 `DISABLED_FEATURES=web` — login/logout are `auth`'s business (a core

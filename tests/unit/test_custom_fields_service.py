@@ -307,6 +307,80 @@ def test_list_for_entity_excludes_inactive_by_default(
 
 
 # ---------------------------------------------------------------------------
+# list_for_entity(..., visible_in=...) — F6 fix. `visible_in` is the single
+# query-level owner of visibility filtering: one field per show_in_* flag,
+# `None` (default) keeps every pre-existing caller's behavior (all
+# definitions, no visibility filter) unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_list_for_entity_visible_in_form_filters_by_show_in_form(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="shown", show_in_form=True)
+    )
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="hidden", show_in_form=False)
+    )
+
+    result = cf_service.list_for_entity(db, tenant_row.id, "party", visible_in="form")
+
+    assert [f.field_code for f in result] == ["shown"]
+
+
+def test_list_for_entity_visible_in_detail_filters_by_show_in_detail(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="shown", show_in_detail=True)
+    )
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="hidden", show_in_detail=False)
+    )
+
+    result = cf_service.list_for_entity(db, tenant_row.id, "party", visible_in="detail")
+
+    assert [f.field_code for f in result] == ["shown"]
+
+
+def test_list_for_entity_visible_in_list_filters_by_show_in_list(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """`show_in_list` defaults to False (schema default) — a field must opt
+    IN to appear here, unlike form/detail which default to opted-in."""
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="shown", show_in_list=True)
+    )
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="hidden", show_in_list=False)
+    )
+
+    result = cf_service.list_for_entity(db, tenant_row.id, "party", visible_in="list")
+
+    assert [f.field_code for f in result] == ["shown"]
+
+
+def test_list_for_entity_visible_in_none_returns_every_definition(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The default (`visible_in=None`) is unfiltered — every pre-existing
+    caller (JSON API's `list_definitions`, `validate_values`' own internal
+    lookup) keeps seeing every active definition regardless of any
+    show_in_* flag."""
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="a", show_in_form=False)
+    )
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="b", show_in_detail=False)
+    )
+
+    result = cf_service.list_for_entity(db, tenant_row.id, "party")
+
+    assert {f.field_code for f in result} == {"a", "b"}
+
+
+# ---------------------------------------------------------------------------
 # update_field / deactivate_field
 # ---------------------------------------------------------------------------
 

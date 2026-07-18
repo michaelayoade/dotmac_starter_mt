@@ -276,7 +276,11 @@ def test_dashboard_rejects_non_admin_party(
 
 
 # ---------------------------------------------------------------------------
-# GET /admin/logout
+# POST /admin/logout (F7 — was GET; see app.features.auth.web's docstring).
+# This fixture's bare FastAPI() app carries no CSRFMiddleware, so these
+# calls need no `x-csrf-token` header — the real CSRF-enforcement proof
+# lives in `tests/test_security_middleware.py` (unit) and
+# `tests/test_admin_portal_e2e.py` (Postgres, full stack).
 # ---------------------------------------------------------------------------
 
 
@@ -290,7 +294,7 @@ def test_logout_clears_cookie_and_redirects(
     )
     token = login.cookies["access_token"]
 
-    resp = web_client.get(
+    resp = web_client.post(
         "/admin/logout", cookies={"access_token": token}, follow_redirects=False
     )
     assert resp.status_code == 302
@@ -307,9 +311,17 @@ def test_logout_clears_cookie_and_redirects(
 
 
 def test_logout_without_cookie_still_redirects(web_client: TestClient) -> None:
-    resp = web_client.get("/admin/logout", follow_redirects=False)
+    resp = web_client.post("/admin/logout", follow_redirects=False)
     assert resp.status_code == 302
     assert resp.headers["location"] == "/admin/login"
+
+
+def test_logout_get_is_removed(web_client: TestClient) -> None:
+    """F7's exact vector: `GET /admin/logout` must no longer exist — a
+    CSRF-exempt safe method that mutated session state (forced-logout
+    CSRF). FastAPI returns 405 for a known path/wrong method, not 404."""
+    resp = web_client.get("/admin/logout", follow_redirects=False)
+    assert resp.status_code == 405
 
 
 # ---------------------------------------------------------------------------

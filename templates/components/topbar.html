@@ -57,7 +57,14 @@
                         </p>
                     </div>
                     <a href="/" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Home</a>
-                    <a href="/admin/logout" class="block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700">Sign Out</a>
+                    <!-- F7 fix: logout is now a CSRF-protected POST (was a
+                         bare GET link, a forced-logout CSRF vector) — every
+                         mutating control MUST use hx-post, never a plain
+                         link/method="post" form, so static/js/csrf.js's
+                         htmx:configRequest hook can attach the CSRF header
+                         (see CLAUDE.md's "CSRF header-bridge contract"). -->
+                    <button type="button" hx-post="/admin/logout" hx-target="body" hx-swap="none"
+                            class="block w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-700">Sign Out</button>
                 </div>
             </div>
         </div>

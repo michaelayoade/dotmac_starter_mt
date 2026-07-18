@@ -1,4 +1,4 @@
-"""Auth's web (cookie) surface: `GET/POST /admin/login` + `GET /admin/logout`.
+"""Auth's web (cookie) surface: `GET/POST /admin/login` + `POST /admin/logout`.
 
 Relocated here from `app.features.web.web` per Task 3 review's required fix
 (see `.superpowers/sdd/task-3-report.md`'s fix note) — login/logout are
@@ -10,10 +10,24 @@ is deleted along with it).
 `GET/POST /admin/login` are deliberately UNGUARDED (pre-auth by definition —
 you can't require login to reach the login form) — both are in
 `tests/architecture/test_route_guards.py::ALLOWLIST` with a comment.
-`GET /admin/logout` is also unguarded: it must clear a stale/expired/garbled
-cookie and redirect even when `require_web_auth` would otherwise reject the
-request — logout is defined as "always succeeds", not "requires a valid
-session" (also allowlisted, with its own comment there).
+
+`POST /admin/logout` (F7 fix — was `GET /admin/logout`, a CSRF-exempt safe
+method that let a third-party page force a victim's logout by merely
+embedding an `<img src="/admin/logout">`; see
+`docs/superpowers/plans/2026-07-18-phase2b1-sot-composability.md` Task 5).
+Making it a POST puts it back under `CSRFMiddleware`'s double-submit check
+like every other mutation. It still carries only `Depends(require_tenant)`,
+no `require_web_auth` — session self-termination must not require a
+role/auth-tier check: revoking YOUR OWN session is always allowed for any
+authenticated cookie (admin or not), the same way you don't need to already
+be "authorized" to hit "log out". CSRF protection (not a role check) is
+what stops a FORCED logout now. `tests/architecture/test_route_guards.py`'s
+`MUTATING_ALLOWLIST` carries this route with the same "matches
+`POST /admin/login`'s reasoning" comment; the non-admin route sweep
+(`tests/unit/test_admin_route_sweep.py`) explicitly skips it for the
+identical reason — a non-admin cookie logging itself out is success, not a
+guard failure, so the sweep's "must redirect because the guard rejected it"
+assertion would be testing the wrong thing here.
 
 No direct database-query calls in this file (see
 `tests/architecture/test_thin_wrappers.py`) — thin-wrapper rule; all of
@@ -120,12 +134,16 @@ async def login_submit(
     return response
 
 
-@router.get("/logout")
+@router.post("/logout", response_model=None)
 def logout(
     request: Request,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
 ) -> RedirectResponse:
+    # F7 fix: POST, not GET — see module docstring. `require_tenant` only
+    # (no `require_web_auth`): a missing/expired/garbled/foreign-tenant
+    # cookie must still redirect to login cleanly, not 401 — logout is
+    # defined as "always succeeds", not "requires a valid session".
     token = request.cookies.get(ACCESS_TOKEN_COOKIE)
     auth_service.web_logout(db, tenant, token)
     # `quote()` unconditionally, matching the `WebAuthRedirect` handler's
@@ -135,6 +153,12 @@ def logout(
     # literal never changing.
     response = RedirectResponse(url=quote("/admin/login", safe="/?=&"), status_code=302)
     response.delete_cookie(ACCESS_TOKEN_COOKIE, path="/")
+    # htmx: the topbar's Sign Out control is `hx-post` (required for the
+    # CSRF header bridge — see CLAUDE.md's "CSRF header-bridge contract").
+    # Without this header htmx would try to swap the redirect's followed
+    # body into the topbar instead of actually navigating — same reasoning
+    # as `login_submit`'s identical header above.
+    response.headers["HX-Redirect"] = "/admin/login"
     return response
 
 

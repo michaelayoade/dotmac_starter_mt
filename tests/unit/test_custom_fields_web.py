@@ -185,6 +185,32 @@ def test_index_shows_inactive_fields_with_deactivate_hidden(
     assert "inactive" in resp.text.lower()
 
 
+def test_index_table_renders_visibility_badge_column(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """F6: `show_in_list` is otherwise a dead control — this "Visibility"
+    column is its consumer (a per-row summary badge, not a filter). Assert
+    the column header renders and that a field opted OUT of every surface
+    (all three show_in_* flags False) still appears in the row — the badge
+    summarizes visibility, it never hides the definition row itself."""
+    token = _login(web_client, registered_admin["email"])
+    _make_field(
+        db,
+        tenant_row,
+        field_code="invisible_field",
+        field_name="Invisible Field",
+        show_in_list=False,
+        show_in_form=False,
+        show_in_detail=False,
+    )
+    db.commit()
+
+    resp = web_client.get("/admin/custom-fields", cookies={"access_token": token})
+    assert resp.status_code == 200
+    assert "Visibility" in resp.text
+    assert "Invisible Field" in resp.text
+
+
 # ---------------------------------------------------------------------------
 # GET/POST /admin/custom-fields/create, "" — definition create
 # ---------------------------------------------------------------------------
@@ -550,6 +576,116 @@ def test_values_panel_post_multiselect_getlist(
 
     db.refresh(party)
     assert party.custom_fields == {"tags": ["a", "b"]}
+
+
+# ---------------------------------------------------------------------------
+# F6: visibility flags actually consumed by the values panel — the edit form
+# only renders `show_in_form` fields, a read-only "Details" section renders
+# `show_in_detail` fields, and — the CRITICAL regression this pins — a field
+# hidden from the form (`show_in_form=False`) has no input at all, so
+# submitting the form must NEVER wipe its already-stored value (merge
+# semantics: absent key = untouched, per `service.set_values`'s docstring).
+# ---------------------------------------------------------------------------
+
+
+def test_values_panel_edit_form_omits_show_in_form_false_field(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    _make_field(db, tenant_row, field_code="loyalty_tier", show_in_form=True)
+    _make_field(
+        db,
+        tenant_row,
+        field_code="internal_note",
+        field_name="Internal Note",
+        show_in_form=False,
+        show_in_detail=True,
+    )
+    party = _make_party(db, tenant_row)
+    cf_service.set_values(
+        db, tenant_row.id, "party", party.id, {"internal_note": "confidential"}
+    )
+    db.commit()
+
+    resp = web_client.get(
+        f"/admin/custom-fields/party/{party.id}/values-panel",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    # The form-visible field gets a real input.
+    assert 'name="loyalty_tier"' in resp.text
+    # The hidden-from-form field has NO input on the page at all...
+    assert 'name="internal_note"' not in resp.text
+    # ...but its value is still shown, read-only, in the Details section
+    # (show_in_detail consumer).
+    assert "Internal Note" in resp.text
+    assert "confidential" in resp.text
+
+
+def test_values_panel_post_does_not_delete_hidden_from_form_field_value(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """CRITICAL regression pin (F6 brief): a field with `show_in_form=False`
+    is absent from the submitted form entirely — `set_values`' merge
+    semantics (absent key = untouched) must leave its stored value alone,
+    not silently delete it just because this submit didn't mention it."""
+    token = _login(web_client, registered_admin["email"])
+    _make_field(db, tenant_row, field_code="loyalty_tier", show_in_form=True)
+    _make_field(db, tenant_row, field_code="internal_note", show_in_form=False)
+    party = _make_party(db, tenant_row)
+    cf_service.set_values(
+        db,
+        tenant_row.id,
+        "party",
+        party.id,
+        {"loyalty_tier": "gold", "internal_note": "keep me"},
+    )
+    db.commit()
+
+    # Only the form-visible field is submitted — `internal_note` never
+    # appears in the POST body, exactly as the real browser form would send
+    # it (it has no input for a show_in_form=False field).
+    resp = web_client.post(
+        f"/admin/custom-fields/party/{party.id}/values-panel",
+        data={"loyalty_tier": "platinum"},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200
+
+    db.refresh(party)
+    assert party.custom_fields == {
+        "loyalty_tier": "platinum",
+        "internal_note": "keep me",
+    }
+
+
+def test_values_panel_detail_section_omits_show_in_detail_false_field(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    _make_field(
+        db,
+        tenant_row,
+        field_code="hidden_everywhere_but_form",
+        field_name="Not In Details",
+        show_in_form=True,
+        show_in_detail=False,
+    )
+    party = _make_party(db, tenant_row)
+    db.commit()
+
+    resp = web_client.get(
+        f"/admin/custom-fields/party/{party.id}/values-panel",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    # Still editable...
+    assert 'name="hidden_everywhere_but_form"' in resp.text
+    # ...but the field NAME shouldn't appear a second time as a read-only
+    # detail row. It legitimately appears once (the form label) — assert
+    # exactly once, proving no duplicate "Details" row was rendered for it.
+    assert resp.text.count("Not In Details") == 1
 
 
 def test_values_panel_get_missing_party_returns_negotiated_404(

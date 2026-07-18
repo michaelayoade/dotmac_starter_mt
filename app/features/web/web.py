@@ -1,6 +1,6 @@
 """Web-portal route: the admin dashboard shell.
 
-`GET/POST /admin/login` and `GET /admin/logout` are owned by the `auth`
+`GET/POST /admin/login` and `POST /admin/logout` are owned by the `auth`
 feature (`app.features.auth.web`) — moved there per Task 3 review's required
 fix (see `.superpowers/sdd/task-3-report.md`'s fix note) so login/logout's
 call into `auth`'s own `login()` flow is a same-module call, not a

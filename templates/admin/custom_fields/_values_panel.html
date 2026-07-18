@@ -16,11 +16,26 @@
   app: the fragment IS the swapped content, it doesn't re-wrap itself in the
   container the parent already provides).
 
-  Context: `party_id` (UUID), `definitions` (list[CustomFieldDefinition],
-  active only, for entity_type "party"), `values` (dict[str, Any] — current
-  or just-submitted field_code -> value), `errors` (`{"_form": message}` on
-  a validation failure — see app.features.custom_fields.service.
-  validate_values, which joins every violation with a newline).
+  Context: `party_id` (UUID), `definitions_form` (list[CustomFieldDefinition]
+  filtered to `show_in_form` — see `service.list_for_entity`'s `visible_in`
+  parameter, F6), `definitions_detail` (same, filtered to `show_in_detail`),
+  `values` (dict[str, Any] — current-or-just-submitted field_code -> value,
+  UNFILTERED so the read-only section below can still display a field's
+  stored value even when it's hidden from the form), `errors`
+  (`{"_form": message}` on a validation failure — see
+  app.features.custom_fields.service.validate_values, which joins every
+  violation with a newline).
+
+  Two sections, each backed by its own `visible_in`-filtered definitions
+  list (single query-level owner of visibility semantics, per
+  `service.list_for_entity`'s docstring — this template never re-filters a
+  definition by its show_in_* flags itself):
+    1. "Details" — read-only listing of `definitions_detail` (F6's
+       `show_in_detail` consumer).
+    2. The edit form — inputs for `definitions_form` only (F6's
+       `show_in_form` consumer); a field with `show_in_form=False` has NO
+       input here at all, so it's never present in the submitted form data
+       and `service.set_values`' merge leaves its stored value untouched.
 #}
 {% from "components/form_macros.html" import text_input, textarea, select_field, checkbox, submit_button %}
 
@@ -32,14 +47,41 @@
 </div>
 {% endif %}
 
-{% if not definitions %}
+{% if not definitions_form and not definitions_detail %}
 <p class="text-sm text-slate-500 dark:text-slate-400">No custom fields are defined for parties yet.</p>
 {% else %}
+
+{% if definitions_detail %}
+<div class="mb-6" data-testid="custom-fields-detail">
+    <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-2">Details</h3>
+    <dl class="divide-y divide-slate-100 dark:divide-slate-700/50 border border-slate-200 dark:border-slate-700 rounded-lg px-3">
+        {% for defn in definitions_detail %}
+        {% set raw = values.get(defn.field_code) %}
+        <div class="flex items-center justify-between gap-4 py-2 text-sm">
+            <dt class="text-slate-500 dark:text-slate-400">{{ defn.field_name }}</dt>
+            <dd class="text-slate-900 dark:text-white font-medium text-right">
+                {% if defn.field_type.value == "BOOLEAN" %}
+                    {{ "Yes" if raw else "No" }}
+                {% elif raw is none or raw == "" %}
+                    <span class="text-slate-400 dark:text-slate-500">Not set</span>
+                {% elif raw is iterable and raw is not string %}
+                    {{ raw | join(", ") }}
+                {% else %}
+                    {{ raw }}
+                {% endif %}
+            </dd>
+        </div>
+        {% endfor %}
+    </dl>
+</div>
+{% endif %}
+
+{% if definitions_form %}
 <form hx-post="/admin/custom-fields/party/{{ party_id }}/values-panel"
       hx-target="#custom-fields-panel"
       hx-swap="innerHTML"
       class="space-y-4">
-    {% for defn in definitions %}
+    {% for defn in definitions_form %}
     <div>
         {% if defn.field_type.value == "BOOLEAN" %}
         {{ checkbox(defn.field_code, defn.field_name, checked=values.get(defn.field_code, false), help_text=defn.help_text or "") }}
@@ -77,4 +119,6 @@
     {% endfor %}
     {{ submit_button(label="Save Custom Fields") }}
 </form>
+{% endif %}
+
 {% endif %}

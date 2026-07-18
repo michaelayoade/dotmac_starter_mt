@@ -413,7 +413,8 @@ def _render_values_panel(
     tenant: Tenant,
     *,
     party_id: UUID,
-    definitions: list[CustomFieldDefinition],
+    definitions_form: list[CustomFieldDefinition],
+    definitions_detail: list[CustomFieldDefinition],
     values: dict[str, Any],
     errors: dict[str, str] | None = None,
     status_code: int = 200,
@@ -423,7 +424,8 @@ def _render_values_panel(
         "admin/custom_fields/_values_panel.html",
         {
             "party_id": party_id,
-            "definitions": definitions,
+            "definitions_form": definitions_form,
+            "definitions_detail": definitions_detail,
             "values": values,
             "errors": errors or {},
         },
@@ -439,14 +441,31 @@ def party_values_panel(
     tenant: Tenant = Depends(require_tenant),
     auth: dict = Depends(require_web_auth),
 ) -> HTMLResponse:
-    definitions = custom_fields_service.list_for_entity(
-        db, tenant.id, _PARTY_ENTITY_TYPE
+    # F6 fix: two DIFFERENT slices of the same entity's definitions, each
+    # asking `list_for_entity`'s `visible_in` for its own semantics — the
+    # edit form only wants `show_in_form` fields, the read-only "Details"
+    # listing above it only wants `show_in_detail` fields. `values` itself
+    # stays UNFILTERED (the full stored dict) — both sections index into it
+    # by field_code, and the detail section in particular needs to be able
+    # to display a field's stored value even when that field is hidden from
+    # the form (`show_in_form=False`).
+    definitions_form = custom_fields_service.list_for_entity(
+        db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="form"
+    )
+    definitions_detail = custom_fields_service.list_for_entity(
+        db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="detail"
     )
     values = custom_fields_service.get_values(
         db, tenant.id, _PARTY_ENTITY_TYPE, party_id
     )
     return _render_values_panel(
-        request, db, tenant, party_id=party_id, definitions=definitions, values=values
+        request,
+        db,
+        tenant,
+        party_id=party_id,
+        definitions_form=definitions_form,
+        definitions_detail=definitions_detail,
+        values=values,
     )
 
 
@@ -458,11 +477,17 @@ async def party_values_panel_submit(
     tenant: Tenant = Depends(require_tenant),
     auth: dict = Depends(require_web_auth),
 ) -> HTMLResponse:
-    definitions = custom_fields_service.list_for_entity(
-        db, tenant.id, _PARTY_ENTITY_TYPE
+    # Only `show_in_form` fields are ever extracted from the submitted form
+    # data below — a field hidden from the form (`show_in_form=False`) has
+    # no input on the page at all, so it's never a key in `submitted_values`
+    # either. `set_values`' merge semantics (see that function's docstring)
+    # then leave it untouched: this IS the F6 "hidden field survives a panel
+    # save" pin, achieved by construction rather than a special case.
+    definitions_form = custom_fields_service.list_for_entity(
+        db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="form"
     )
     form_data = await request.form()
-    submitted_values = _values_from_form(form_data, definitions)
+    submitted_values = _values_from_form(form_data, definitions_form)
 
     try:
         updated = custom_fields_service.set_values(
@@ -475,19 +500,41 @@ async def party_values_panel_submit(
         # other form in this app. `_form` carries every violation, newline-
         # joined (see `service.validate_values`'s docstring); the template
         # renders it as one block rather than trying to map lines back to
-        # individual fields.
+        # individual fields. The failed submit never reached `set_values`'
+        # persisted merge, so the read-only "Details" section is rendered
+        # from the entity's ACTUAL stored values (not the rejected attempt)
+        # overlaid with what was just submitted, so show_in_form fields
+        # reflect the admin's attempted edit while show_in_detail-only
+        # fields (absent from `submitted_values` entirely) still show their
+        # real stored value instead of going blank.
+        definitions_detail = custom_fields_service.list_for_entity(
+            db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="detail"
+        )
+        current_values = custom_fields_service.get_values(
+            db, tenant.id, _PARTY_ENTITY_TYPE, party_id
+        )
         return _render_values_panel(
             request,
             db,
             tenant,
             party_id=party_id,
-            definitions=definitions,
-            values=submitted_values,
+            definitions_form=definitions_form,
+            definitions_detail=definitions_detail,
+            values={**current_values, **submitted_values},
             errors={"_form": str(exc)},
         )
 
+    definitions_detail = custom_fields_service.list_for_entity(
+        db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="detail"
+    )
     return _render_values_panel(
-        request, db, tenant, party_id=party_id, definitions=definitions, values=updated
+        request,
+        db,
+        tenant,
+        party_id=party_id,
+        definitions_form=definitions_form,
+        definitions_detail=definitions_detail,
+        values=updated,
     )
 
 

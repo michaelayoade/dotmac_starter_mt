@@ -62,7 +62,18 @@ _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # Mirrors tests/architecture/test_route_guards.py::MUTATING_ALLOWLIST's
 # ("POST", "/admin/login") entry — same route, same "can't require login to
 # reach the login form" reasoning.
-_SKIP = {("POST", "/admin/login")}
+#
+# ("POST", "/admin/logout") is ALSO skipped (F7): this sweep's assertion is
+# "a non-admin cookie gets a 302 to /admin/login because require_web_auth's
+# admin-role check rejected it before the route body ran". Logout carries
+# NO such check by design (`app.features.auth.web`'s module docstring —
+# session self-termination must not require role/auth-tier) and its own
+# success path ALSO redirects to `/admin/login` with a 302 — so a non-admin
+# cookie would coincidentally satisfy this test's literal assertions for an
+# entirely unrelated reason (it logged out successfully, not "was blocked").
+# Skipping it explicitly keeps this sweep honest: it only proves what it
+# says it proves for routes that are actually guarded by `require_web_auth`.
+_SKIP = {("POST", "/admin/login"), ("POST", "/admin/logout")}
 
 _DUMMY_UUID = "00000000-0000-0000-0000-000000000000"
 _PARAM_RE = re.compile(r"\{(\w+)\}")

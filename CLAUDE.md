@@ -123,6 +123,13 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   **every mutating form/link MUST use `hx-post`/`hx-put`/`hx-delete`**, never
   bare `method="post"` — enforced by
   `tests/architecture/test_web_conventions.py::test_no_template_uses_a_plain_method_post_form`.
+- **Session-mutating routes are POST, CSRF-bridged.** A GET must never
+  mutate session/auth state — a bare `<a href="/admin/logout">` was exactly
+  this mistake (F7): a CSRF-exempt safe method that a third-party page could
+  trigger just by loading it (`<img src=...>`), forcing a victim's logout.
+  `POST /admin/logout` (`app.features.auth.web`) fixed it by putting logout
+  back under the CSRF header-bridge above, same as every other mutation —
+  there is no separate "logout is special" exemption.
 - **Template escaping / `| safe` rule.** Jinja2 autoescapes by default;
   `| safe` opts a value OUT of escaping and must only be used on a value
   that has already been sanitized in Python, with a `sanitiz*` comment

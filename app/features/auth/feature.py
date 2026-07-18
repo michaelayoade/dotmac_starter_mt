@@ -1,6 +1,6 @@
 """Auth feature manifest.
 
-`web_router` (`GET/POST /admin/login`, `GET /admin/logout`) is entirely a
+`web_router` (`GET/POST /admin/login`, `POST /admin/logout`) is entirely a
 `web_routers` entry, not `routers` — cookie-based login/logout has no
 meaning without an HTML surface to authenticate INTO (API-only mode uses
 bearer tokens via `router`'s `/auth/*` JSON endpoints only, never cookies).

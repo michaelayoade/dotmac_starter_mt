@@ -125,6 +125,15 @@ def test_admin_portal_end_to_end_canary(
             "field_name": "Nickname",
             "field_type": "TEXT",
             "display_order": "0",
+            # F6: the values panel's edit form now only renders inputs for
+            # show_in_form fields (`web.py::party_values_panel`'s
+            # `visible_in="form"` query) — a raw form POST that omits an
+            # unchecked checkbox (as this one deliberately does to simulate
+            # a real browser submit) means `show_in_form` would otherwise
+            # default to False (see `_raw_from_form`), and the assertion
+            # below (`name="nickname"` present on the panel) would fail.
+            "show_in_form": "true",
+            "show_in_detail": "true",
         },
         headers={"x-csrf-token": csrf_a},
         follow_redirects=False,
@@ -180,7 +189,34 @@ def test_admin_portal_end_to_end_canary(
     access_token = a.cookies.get("access_token")
     assert access_token
 
-    logout_resp = a.get("/admin/logout", follow_redirects=False)
+    # F7 THE assertion: GET /admin/logout no longer exists (the exact
+    # forced-logout CSRF vector) — FastAPI 405s a known path/wrong method.
+    get_logout_resp = a.get("/admin/logout", follow_redirects=False)
+    assert get_logout_resp.status_code == 405
+
+    # F7 THE assertion: POST /admin/logout WITHOUT the CSRF header 403s —
+    # this is the actual proof that logout is no longer forgeable (a
+    # third-party page can trigger a cookie-carrying POST, e.g. via an
+    # auto-submitting form, but it cannot read this tenant's `csrf_token`
+    # cookie to mint a matching header). `a`'s cookie jar already carries
+    # both `access_token` and `csrf_token` (set on the very first GET
+    # `_web_login` made), so this genuinely exercises the double-submit
+    # mismatch, not "no cookies at all".
+    forged_logout_resp = a.post("/admin/logout", follow_redirects=False)
+    assert forged_logout_resp.status_code == 403
+    assert forged_logout_resp.json()["code"] == "csrf_failed"
+
+    # The session must still be very much alive after the forged attempt
+    # above — a blocked logout must not have revoked anything.
+    still_logged_in_resp = a.get("/admin", follow_redirects=False)
+    assert still_logged_in_resp.status_code == 200
+
+    # F7: logout is now POST (was a CSRF-exempt GET) — reuse `csrf_a`,
+    # captured by `_web_login` above, same bridge as every other mutation
+    # in this canary.
+    logout_resp = a.post(
+        "/admin/logout", headers={"x-csrf-token": csrf_a}, follow_redirects=False
+    )
     assert logout_resp.status_code == 302
 
     # (1) The client's own cookie jar no longer sends a live access_token —
