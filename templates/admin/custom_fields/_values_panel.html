@@ -18,7 +18,9 @@
 
   Context: `party_id` (UUID), `definitions_form` (list[CustomFieldDefinition]
   filtered to `show_in_form` — see `service.list_for_entity`'s `visible_in`
-  parameter, F6), `definitions_detail` (same, filtered to `show_in_detail`),
+  parameter, F6), `definitions_detail` (DETAIL-ONLY: `show_in_detail` AND NOT
+  `show_in_form` — Task 5 review finding 1; see
+  `app.features.custom_fields.web._detail_only_definitions`'s docstring),
   `values` (dict[str, Any] — current-or-just-submitted field_code -> value,
   UNFILTERED so the read-only section below can still display a field's
   stored value even when it's hidden from the form), `errors`
@@ -26,12 +28,13 @@
   app.features.custom_fields.service.validate_values, which joins every
   violation with a newline).
 
-  Two sections, each backed by its own `visible_in`-filtered definitions
-  list (single query-level owner of visibility semantics, per
-  `service.list_for_entity`'s docstring — this template never re-filters a
-  definition by its show_in_* flags itself):
-    1. "Details" — read-only listing of `definitions_detail` (F6's
-       `show_in_detail` consumer).
+  Two sections, mutually exclusive by field (a field never appears in both):
+    1. "Details" — read-only listing of `definitions_detail`. RULE:
+       `show_in_detail` renders read-only; if a field is ALSO
+       `show_in_form`, the editable input in section 2 below is the SINGLE
+       rendering of that field — this section only ever lists fields NOT
+       also in the form, so the common default (`show_in_form=True`,
+       `show_in_detail=True`) never double-renders.
     2. The edit form — inputs for `definitions_form` only (F6's
        `show_in_form` consumer); a field with `show_in_form=False` has NO
        input here at all, so it's never present in the submitted form data

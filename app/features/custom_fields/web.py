@@ -407,6 +407,34 @@ def _values_from_form(
     return values
 
 
+def _detail_only_definitions(
+    db: Session, tenant: Tenant
+) -> list[CustomFieldDefinition]:
+    """The single owner of the read-only "Details" section's visibility rule
+    (Task 5 review finding 1): `show_in_detail` renders read-only; if a field
+    is ALSO `show_in_form`, the editable input in the form below is the
+    single rendering of that field's value — showing it again as a read-only
+    row would be visible duplication (the default for BOTH flags is `True`,
+    see `schemas.py`, so this was the common case, not an edge case).
+
+    `list_for_entity`'s own `visible_in="detail"` deliberately stays a pure,
+    single-flag `show_in_detail` filter — a generic, independently-tested
+    query-level primitive (see its docstring and
+    `test_list_for_entity_visible_in_detail_filters_by_show_in_detail`) that
+    other future consumers may still want unfiltered by `show_in_form`. This
+    function layers the second condition (`not show_in_form`) on top,
+    in-Python, scoped to the ONE consumer (this panel's "Details" section)
+    that needs the narrower "detail-only" slice, rather than overloading
+    `list_for_entity`'s established semantics. Called from all three
+    "Details" call sites below so the combinator has exactly one
+    implementation.
+    """
+    detail_candidates = custom_fields_service.list_for_entity(
+        db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="detail"
+    )
+    return [defn for defn in detail_candidates if not defn.show_in_form]
+
+
 def _render_values_panel(
     request: Request,
     db: Session,
@@ -441,20 +469,20 @@ def party_values_panel(
     tenant: Tenant = Depends(require_tenant),
     auth: dict = Depends(require_web_auth),
 ) -> HTMLResponse:
-    # F6 fix: two DIFFERENT slices of the same entity's definitions, each
-    # asking `list_for_entity`'s `visible_in` for its own semantics — the
-    # edit form only wants `show_in_form` fields, the read-only "Details"
-    # listing above it only wants `show_in_detail` fields. `values` itself
-    # stays UNFILTERED (the full stored dict) — both sections index into it
-    # by field_code, and the detail section in particular needs to be able
-    # to display a field's stored value even when that field is hidden from
-    # the form (`show_in_form=False`).
+    # F6 fix, narrowed by Task 5 review finding 1: two DIFFERENT slices of
+    # the same entity's definitions — the edit form wants `show_in_form`
+    # fields (`list_for_entity`'s `visible_in="form"`), the read-only
+    # "Details" listing above it wants only the fields that are detail-only
+    # (`show_in_detail` AND NOT `show_in_form` — see `_detail_only_definitions`
+    # docstring for why a field visible in both must render just once, as the
+    # editable input). `values` itself stays UNFILTERED (the full stored
+    # dict) — both sections index into it by field_code, and the detail
+    # section in particular needs to be able to display a field's stored
+    # value even when that field is hidden from the form (`show_in_form=False`).
     definitions_form = custom_fields_service.list_for_entity(
         db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="form"
     )
-    definitions_detail = custom_fields_service.list_for_entity(
-        db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="detail"
-    )
+    definitions_detail = _detail_only_definitions(db, tenant)
     values = custom_fields_service.get_values(
         db, tenant.id, _PARTY_ENTITY_TYPE, party_id
     )
@@ -506,10 +534,10 @@ async def party_values_panel_submit(
         # overlaid with what was just submitted, so show_in_form fields
         # reflect the admin's attempted edit while show_in_detail-only
         # fields (absent from `submitted_values` entirely) still show their
-        # real stored value instead of going blank.
-        definitions_detail = custom_fields_service.list_for_entity(
-            db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="detail"
-        )
+        # real stored value instead of going blank. Detail-only slice, same
+        # as the GET route above (Task 5 review finding 1) — a field also
+        # `show_in_form` renders once, via the re-rendered form's input.
+        definitions_detail = _detail_only_definitions(db, tenant)
         current_values = custom_fields_service.get_values(
             db, tenant.id, _PARTY_ENTITY_TYPE, party_id
         )
@@ -524,9 +552,7 @@ async def party_values_panel_submit(
             errors={"_form": str(exc)},
         )
 
-    definitions_detail = custom_fields_service.list_for_entity(
-        db, tenant.id, _PARTY_ENTITY_TYPE, visible_in="detail"
-    )
+    definitions_detail = _detail_only_definitions(db, tenant)
     return _render_values_panel(
         request,
         db,

@@ -299,6 +299,11 @@ def test_logout_clears_cookie_and_redirects(
     )
     assert resp.status_code == 302
     assert resp.headers["location"] == "/admin/login"
+    # Pin the htmx redirect header (test_web_login.py:183's pattern) — a
+    # plain 302 Location is not enough for the topbar's `hx-post` Sign Out
+    # control; without `HX-Redirect` htmx would swap the followed
+    # redirect's body into the topbar instead of navigating.
+    assert resp.headers["hx-redirect"] == "/admin/login"
     set_cookie = resp.headers.get("set-cookie", "")
     assert "access_token=" in set_cookie
     assert 'access_token=""' in set_cookie or "Max-Age=0" in set_cookie
