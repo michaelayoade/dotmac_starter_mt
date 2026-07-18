@@ -301,11 +301,24 @@ here so all seven are discoverable as closed in one place:
   "backlogged" — this is now that entry. Tenant CRUD screens need a platform-scoped
   surface (require_platform hardening included — it's a documented stub that counts as
   an auth-tier guard today).
-- 2c ticket batch (small): `DISABLED_FEATURES=web` pin test; move route-level
-  `write_audit_event` calls into services (4 hand-mirrored sites today); cross-tenant
-  values-panel HTTP probe (tenant B → tenant A's URL → 404); `login()` uses
-  `identity.normalize_email` (read-path consistency); post-login redirect preserves the
-  query string; Google Fonts CDN dependency documented for airgapped consumers.
+- 2c ticket batch (small): ~~`DISABLED_FEATURES=web` pin test~~ — **DELIVERED 2b1-T1**:
+  `tests/unit/test_web_surface.py` (`_inspect_app({"DISABLED_FEATURES": "web"})`) pins
+  that `DISABLED_FEATURES=web` drops only `GET /admin`, not other features' `/admin/*`
+  or JSON routes; move route-level `write_audit_event` calls into services (4
+  hand-mirrored sites today); cross-tenant values-panel HTTP probe (tenant B → tenant
+  A's URL → 404); ~~`login()` uses `identity.normalize_email` (read-path
+  consistency)~~ — **DELIVERED 2b1-T3**: `auth/service.py::login` calls
+  `normalize_email(payload.email)` before querying `Party` (single email authority,
+  finding F2); post-login redirect preserves the query string; Google Fonts CDN
+  dependency documented for airgapped consumers.
+- Cleanup candidate (harmless, from 2b1-T1): ~15 dead `active_nav` context keys still
+  set in `web.py` render sites (`app/features/web/web.py`,
+  `app/features/parties/web.py`, `app/features/rbac/web.py`,
+  `app/features/settings/web.py`, `app/features/custom_fields/web.py`) — sidebar
+  highlighting moved to path-based matching (`templates/components/sidebar.html`,
+  `templates/layouts/admin.html`), so no template reads `active_nav` anymore; the
+  context keys are inert and can be deleted whenever one of those files is next
+  touched.
 
 ## Display/locale settings (user rule, 2026-07-18 — "everything by settings: datetime etc, all")
 

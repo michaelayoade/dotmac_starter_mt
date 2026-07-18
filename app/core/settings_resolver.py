@@ -396,6 +396,20 @@ def ensure_by_key(
     the winner's row instead of propagating the error — ported from
     `dotmac_sub:app/services/domain_settings.py::ensure_by_key`.
 
+    WARNING — the bare `db.rollback()` on the race path above is safe ONLY
+    because this function is called exclusively from a dedicated PLATFORM
+    session (`seed_platform_defaults()` at startup, outside any request),
+    which owns its whole transaction and sets no per-request state on it.
+    NEVER call `ensure_by_key` from a request-scoped `get_db` session — a
+    full rollback there would discard that session's `SET LOCAL
+    app.current_tenant` RLS context along with the race-loser's failed
+    INSERT, reintroducing finding F3 (see `app.core.db.conflict_savepoint`
+    and this repo's CLAUDE.md "Hard rules" entry on feature-service
+    rollbacks) for any query run afterwards on the same session. If a
+    request-scoped caller ever needs "insert if missing" semantics, wrap the
+    insert in `conflict_savepoint` instead of reusing this function's
+    `db.rollback()`.
+
     `tenant_id=None` targets the PLATFORM row — only a platform-role session
     should pass `None` (see `upsert_by_key`'s docstring).
     """
