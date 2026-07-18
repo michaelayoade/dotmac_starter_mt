@@ -23,8 +23,38 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.deps import authenticate_request, require_tenant
+from app.core.deps import authenticate_request
 from app.core.models import PartyRole, Role
+
+
+def safe_next_url(url: str | None, default: str = "/admin") -> str:
+    """Open-redirect guard for any `?next=` query param a web.py route reads.
+
+    Generic HTTP utility (Task 3 review's required fix relocated this from
+    `app.features.web.service` — every future feature's `web.py` wants this,
+    not just `auth`'s login form). Only a same-origin, absolute path is
+    accepted: must start with a single `/` (rejects protocol-relative
+    `//evil.example.com`) and must not contain `://` anywhere (rejects
+    `/x?u=http://evil.example.com` style smuggling as well as a bare
+    `http://evil.example.com` value). Anything else falls back to `default`.
+    """
+    if not url:
+        return default
+    if url.startswith("/") and not url.startswith("//") and "://" not in url:
+        return url
+    return default
+
+
+def is_secure_request(request: Request) -> bool:
+    """True if `request` arrived over HTTPS — either directly (`request.url.
+    scheme`) or forwarded through a TLS-terminating proxy (`X-Forwarded-
+    Proto: https`, the standard header nginx/most LBs set).
+
+    Generic HTTP utility (relocated here alongside `safe_next_url` — see its
+    docstring) — drives the `Secure` flag on any cookie a web.py route sets.
+    """
+    proto = request.headers.get("x-forwarded-proto", "")
+    return proto == "https" or request.url.scheme == "https"
 
 
 class WebAuthRedirect(HTTPException):
@@ -67,7 +97,14 @@ def require_web_auth(
     if party is None:
         raise WebAuthRedirect(next_url=request.url.path)
 
-    tenant = require_tenant(request)
+    # `authenticate_request` already validated the token's `tenant_id` claim
+    # against `request.state.tenant` (set by `TenantResolverMiddleware`
+    # before any route runs) — it returns `None`, handled above, if that
+    # tenant is missing or the claim doesn't match. So `request.state.tenant`
+    # is guaranteed non-None here; re-deriving it via `require_tenant(request)`
+    # would just re-check an invariant already proven by the successful
+    # `authenticate_request` call above.
+    tenant = request.state.tenant
     roles = list(
         db.scalars(
             select(Role.slug)
@@ -86,4 +123,9 @@ def require_web_auth(
     return {"party": party, "roles": roles}
 
 
-__all__ = ["WebAuthRedirect", "require_web_auth"]
+__all__ = [
+    "WebAuthRedirect",
+    "is_secure_request",
+    "require_web_auth",
+    "safe_next_url",
+]

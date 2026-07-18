@@ -159,7 +159,10 @@ def _negotiate(
 def register_error_handlers(app: FastAPI) -> None:
     # Lazy, function-local import — NOT at module top. `app.core.web_deps`
     # imports `app.core.deps`/`app.core.db`, and `app.core.db` builds a real
-    # SQLAlchemy engine from `settings.database_url` at MODULE IMPORT TIME.
+    # SQLAlchemy engine from `settings.database_url` at MODULE IMPORT TIME
+    # (see the backlog entry "Lazy engine construction in app/core/db.py" in
+    # docs/superpowers/phase2-backlog.md — this deferred import works around
+    # that same eager-construction issue rather than fixing it at the root).
     # `app.core.errors` is imported very early and at plain module scope by
     # `app.core.middleware.csrf` (for `_negotiate`/`envelope`) — which in
     # turn is imported at COLLECTION time (before any test fixture, autouse
@@ -181,11 +184,10 @@ def register_error_handlers(app: FastAPI) -> None:
         # Real 302 redirect to the login page — NOT routed through
         # `_negotiate` (that's for JSON-vs-HTML error *bodies*; a redirect
         # has no body to negotiate). `next_url` is quoted into the query
-        # string; `_safe_next_url` (app.features.web.service) already
-        # constrains what `next_url` can be when it originates from a user-
-        # supplied `next` query param, but this handler quotes unconditionally
-        # since `request.url.path` (the other caller) also needs safe
-        # encoding.
+        # string; `safe_next_url` (app.core.web_deps) already constrains
+        # what `next_url` can be when it originates from a user-supplied
+        # `next` query param, but this handler quotes unconditionally since
+        # `request.url.path` (the other caller) also needs safe encoding.
         return RedirectResponse(
             url=f"/admin/login?next={quote(exc.next_url, safe='')}",
             status_code=302,

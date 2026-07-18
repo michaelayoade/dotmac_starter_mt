@@ -1,22 +1,20 @@
-"""Web-portal service logic: login/logout session mutation + dashboard counts.
+"""Web-portal service logic: dashboard counts + current-user view.
 
 All `select()`/session-mutation calls the web routes need live here —
-`app/features/web/web.py` only resolves dependencies, parses the form, calls
-these functions, and shapes the response (thin-wrapper rule, same as every
-other feature's `router.py`/`web.py`).
+`app/features/web/web.py` only resolves dependencies, calls these functions,
+and shapes the response (thin-wrapper rule, same as every other feature's
+`router.py`/`web.py`).
 
-Cross-feature import note (Task 3 architecture decision — see
-`docs/superpowers/plans/2026-07-17-phase2b-admin-portal.md`'s Task 3
-section: "the web shell feature imports core only"): this module imports
-`app.features.auth.service.login` for ONE thing only — reusing the existing
-credential-check + token-issuance flow UNCHANGED for the login POST route,
-rather than duplicating password verification. That single edge is an
-explicit, reviewed exception to the "features are independent" contract
-(`pyproject.toml`'s `ignore_imports` entry, scoped to exactly this path) —
-everything else in this module (logout/session-revocation, dashboard counts,
-the current-user view) queries CORE models directly (`Party`, `Role`,
-`PartyRole`, `AuthSession`, `PartyPerson` all live in `app.core.models`) and
-touches no other feature package.
+Login/logout (`web_login`/`web_logout`) and their `safe_next_url`/
+`is_secure_request` helpers moved out of this module per Task 3 review's
+required fix (see `.superpowers/sdd/task-3-report.md`'s fix note):
+`web_login`/`web_logout` now live in `app.features.auth.service` (same
+module as `login()` — the cross-feature import into `app.features.auth`
+this module used to carry, and the `pyproject.toml` `ignore_imports`
+exception it required, are both gone); `safe_next_url`/`is_secure_request`
+now live in `app.core.web_deps` as generic HTTP utilities. Everything
+remaining here queries CORE models directly (`Party`, `Role`, `AuthSession`,
+`PartyPerson`) and touches no other feature package.
 """
 
 from __future__ import annotations
@@ -24,86 +22,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from fastapi import Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import UnauthorizedError
 from app.core.models import AuthSession, Party, PartyPerson, Role, Tenant
-from app.core.security import hash_token
-from app.features.auth import service as auth_service
-from app.features.auth.schemas import LoginRequest
-
-
-def safe_next_url(url: str | None, default: str = "/admin") -> str:
-    """Port of `ST:app/web/auth.py::_safe_next_url` — open-redirect guard.
-
-    Only a same-origin, absolute path is accepted: must start with a single
-    `/` (rejects protocol-relative `//evil.example.com`) and must not
-    contain `://` anywhere (rejects `/x?u=http://evil.example.com` style
-    smuggling as well as a bare `http://evil.example.com` value). Anything
-    else falls back to `default`.
-    """
-    if not url:
-        return default
-    if url.startswith("/") and not url.startswith("//") and "://" not in url:
-        return url
-    return default
-
-
-def is_secure_request(request: Request) -> bool:
-    """Port of `ST:app/web/auth.py::_is_secure_request`.
-
-    True if the request arrived over HTTPS — either directly (`request.url.
-    scheme`) or forwarded through a TLS-terminating proxy (`X-Forwarded-
-    Proto: https`, the standard header nginx/most LBs set). Drives the
-    `access_token` cookie's `Secure` flag: `Secure` in prod (behind the
-    proxy), not required in local dev over plain HTTP.
-    """
-    proto = request.headers.get("x-forwarded-proto", "")
-    return proto == "https" or request.url.scheme == "https"
-
-
-def web_login(db: Session, tenant: Tenant, username: str, password: str) -> str | None:
-    """Attempt login via the UNCHANGED auth-feature `login()` flow.
-
-    Returns the access token on success, `None` on invalid credentials —
-    never raises, so the web route can re-render the login form with a
-    generic error instead of leaking which part of the credential pair was
-    wrong.
-    """
-    try:
-        result = auth_service.login(
-            db, tenant, LoginRequest(email=username, password=password)
-        )
-    except UnauthorizedError:
-        return None
-    return result.access_token
-
-
-def web_logout(db: Session, tenant: Tenant, token: str | None) -> None:
-    """Revoke the `AuthSession` backing `token`, if any.
-
-    No auth-service call needed — session revocation only touches
-    `AuthSession`, a CORE model, so this is a plain, direct query here (same
-    pattern the auth service's own `login()` uses to CREATE a session; this
-    is the mirror-image REVOKE, added because no revocation path existed
-    anywhere in the app before this task). Silently no-ops on a
-    missing/already-revoked/foreign token — logout must always succeed from
-    the caller's point of view (clearing a stale cookie is not an error).
-    """
-    if not token:
-        return
-    session = db.scalars(
-        select(AuthSession)
-        .where(AuthSession.tenant_id == tenant.id)
-        .where(AuthSession.token_hash == hash_token(token))
-        .where(AuthSession.revoked_at.is_(None))
-    ).first()
-    if session is None:
-        return
-    session.revoked_at = datetime.now(UTC)
-    db.flush()
 
 
 @dataclass(frozen=True)
@@ -187,8 +109,4 @@ __all__ = [
     "DashboardCounts",
     "get_current_user_view",
     "get_dashboard_counts",
-    "is_secure_request",
-    "safe_next_url",
-    "web_login",
-    "web_logout",
 ]

@@ -27,7 +27,7 @@ ALLOWLIST = {
     # are {'get_db', 'require_tenant'}), so it already satisfies the guard
     # check without needing an allowlist entry.
     #
-    # GET/POST /admin/login (app.features.web.web) are genuinely pre-auth —
+    # GET/POST /admin/login (app.features.auth.web) are genuinely pre-auth —
     # you cannot require a login to reach the login form — and are listed
     # here explicitly (Task 3 brief) even though both routes also carry a
     # route-level `Depends(require_tenant)` (tenant-scoping the login page

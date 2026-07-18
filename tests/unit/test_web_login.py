@@ -1,13 +1,20 @@
 """TDD for the web login/logout/dashboard flow (Task 3).
 
 App-builder pattern from `tests/unit/test_settings_api.py`: bare `FastAPI()`
-+ `register_error_handlers` + the REAL `app.features.web.web.router`
-mounted, `get_db` overridden to the in-memory SQLite `db` fixture, and a
-thin middleware standing in for `TenantResolverMiddleware`. `require_web_auth`
++ `register_error_handlers` + the REAL `app.features.auth.web.router`
+(login/logout) and `app.features.web.web.router` (dashboard) mounted,
+`get_db` overridden to the in-memory SQLite `db` fixture, and a thin
+middleware standing in for `TenantResolverMiddleware`. `require_web_auth`
 and `require_user_auth` are NOT overridden — this exercises the real cookie
 auth path end to end (form -> service -> shared `authenticate_request` seam
 -> dashboard), same spirit as `tests/unit/test_deps_auth.py` for the bearer
 side.
+
+Login/logout moved from `app.features.web.{web,service}` to
+`app.features.auth.{web,service}` per Task 3 review's required fix (see
+`.superpowers/sdd/task-3-report.md`'s fix note) — both routers are mounted
+here since the flow under test spans both (login sets the cookie the
+dashboard route then reads).
 
 RLS doesn't exist on SQLite — cross-tenant isolation is proven separately by
 the Postgres canary `tests/test_web_auth_isolation.py`.
@@ -25,9 +32,10 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_db
 from app.core.errors import register_error_handlers
 from app.core.models import Party, PartyPerson, PartyType, Tenant
+from app.core.web_deps import safe_next_url
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import RegisterRequest
-from app.features.web.service import safe_next_url
+from app.features.auth.web import router as auth_web_router
 from app.features.web.web import router as web_router
 
 PASSWORD = "correct horse battery staple"
@@ -74,6 +82,7 @@ def non_admin_party(db: Session, tenant_row: Tenant) -> Party:
 def web_client(db: Session, tenant_row: Tenant) -> TestClient:
     app = FastAPI()
     register_error_handlers(app)
+    app.include_router(auth_web_router)
     app.include_router(web_router)
 
     @app.middleware("http")
