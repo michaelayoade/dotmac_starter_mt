@@ -238,3 +238,6 @@ anywhere (reviewers flag them like hardcoded ports). Each spec needs a real read
 (no-orphan-settings enforces). Scheduled as the FIRST task of the next plan (before or
 alongside 2c auth hardening); the portal's audit/list timestamps are the initial
 consumers.
+- `UnitOfWork.savepoint()` (unused by any request path) shares the `begin_nested()`
+  auto-flush ordering hazard fixed across services in 2b1-T2 — re-audit + docstring
+  ordering note before it is ever wired in (2b1-T2 review).
