@@ -1,6 +1,6 @@
 # ADR 0002 — Starter Consolidation
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-07-18 — archive decision reversed)
 **Date:** 2026-07-17
 **Supersedes:** N/A (extends ADR 0001, does not replace it)
 **Successor of:** ADR 0001 — Multi-Tenant Architecture
@@ -97,3 +97,20 @@ string-form FK, no import required. This rule is codified in `CLAUDE.md`.
 - `docs/adr/0001-multi-tenant-architecture.md` — founding tenancy decision (unchanged)
 - `CLAUDE.md` — layout and hard-rules summary for agents
 - `docs/ARCHITECTURE.md` — expanded architecture reference
+
+## Amendment 2026-07-18 — dotmac_starter is NOT archived
+
+Michael (2026-07-18): "we should not retire the dotmac_starter single tenant. this can be
+saas starter infrastructure while that can still be useful for simple apps."
+
+Revised positioning:
+- **dotmac_starter_mt** — the SaaS starter: multi-tenant infrastructure, RLS, platform
+  control plane, module/plugin architecture (see
+  `docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`).
+- **dotmac_starter** — remains available as the simple single-tenant starter for simple
+  apps. Not archived, not retired. It stays feature-frozen relative to this repo (new
+  capability work lands here); maintenance scope for it (backports, security fixes) is
+  decided case-by-case.
+
+The "archive after core parity / after 2c" milestones elsewhere in this repo's docs are
+void; superseded by this amendment.

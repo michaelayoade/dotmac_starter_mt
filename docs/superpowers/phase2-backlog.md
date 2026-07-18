@@ -21,7 +21,9 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   `app/features/custom_fields/`. Runtime-field requirement demonstrated by the
   `eye_color` e2e canary (`tests/test_custom_fields_isolation.py`) — zero migrations
   between defining and using a field.
-- After core parity lands: archive `dotmac_starter` with a pointer README.
+- ~~After core parity lands: archive `dotmac_starter` with a pointer README.~~ —
+  **REVERSED (Michael, 2026-07-18, ADR-0002 amendment):** dotmac_starter stays as the
+  simple single-tenant starter for simple apps; this repo is the SaaS starter. No archive.
 
 ## Architecture / correctness follow-ups
 
