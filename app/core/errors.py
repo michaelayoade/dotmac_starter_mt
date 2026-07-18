@@ -25,10 +25,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.exceptions import (
@@ -40,6 +41,11 @@ from app.core.exceptions import (
 )
 from app.core.logging import request_id_var
 from app.core.templating import render
+
+# NOTE: `WebAuthRedirect` is deliberately NOT imported here at module scope —
+# see the function-local import inside `register_error_handlers` below for
+# why (avoids transitively building `app.core.db`'s engine at module-import
+# time from whatever `DATABASE_URL` happens to be set).
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +157,40 @@ def _negotiate(
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    # Lazy, function-local import — NOT at module top. `app.core.web_deps`
+    # imports `app.core.deps`/`app.core.db`, and `app.core.db` builds a real
+    # SQLAlchemy engine from `settings.database_url` at MODULE IMPORT TIME.
+    # `app.core.errors` is imported very early and at plain module scope by
+    # `app.core.middleware.csrf` (for `_negotiate`/`envelope`) — which in
+    # turn is imported at COLLECTION time (before any test fixture, autouse
+    # or not, has run) by `tests/test_security_middleware.py`'s top-level
+    # `from app.core.middleware.csrf import ...`. A module-level import here
+    # would transitively build `app.core.db`'s engine against whatever
+    # `DATABASE_URL` happens to be set at collection time (the hermetic
+    # placeholder from `tests/conftest.py`) — permanently, since Python
+    # caches the module — breaking every later test that relies on
+    # `tests/conftest.py::_set_database_url`'s per-test `monkeypatch.setenv`
+    # to point `app.core.db` at the real test Postgres. Deferring the import
+    # to here means it only resolves when `register_error_handlers(app)` is
+    # actually CALLED (inside a fixture, after the monkeypatch has run), not
+    # merely when this module is imported.
+    from app.core.web_deps import WebAuthRedirect
+
+    @app.exception_handler(WebAuthRedirect)
+    async def _web_auth_redirect(request: Request, exc: WebAuthRedirect) -> Response:
+        # Real 302 redirect to the login page — NOT routed through
+        # `_negotiate` (that's for JSON-vs-HTML error *bodies*; a redirect
+        # has no body to negotiate). `next_url` is quoted into the query
+        # string; `_safe_next_url` (app.features.web.service) already
+        # constrains what `next_url` can be when it originates from a user-
+        # supplied `next` query param, but this handler quotes unconditionally
+        # since `request.url.path` (the other caller) also needs safe
+        # encoding.
+        return RedirectResponse(
+            url=f"/admin/login?next={quote(exc.next_url, safe='')}",
+            status_code=302,
+        )
+
     @app.exception_handler(NotFoundError)
     async def _not_found(request: Request, exc: NotFoundError) -> Response:
         return _negotiate(request, 404, _envelope("not_found", str(exc)))

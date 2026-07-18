@@ -18,6 +18,7 @@ pydantic = "^2.9"
 pydantic-settings = "^2.5"
 email-validator = "^2.2"
 jinja2 = "^3.1"
+python-multipart = "^0.0.32"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3"
@@ -64,6 +65,17 @@ pythonpath = ["."]
 [tool.importlinter]
 root_package = "app"
 
+# NOTE (Task 3 — web auth): `app.features.web` imports
+# `app.features.auth.service.login` / `app.features.auth.schemas.
+# LoginRequest` for exactly one reason — the `/admin/login` POST route
+# reuses the auth feature's existing credential-check + token-issuance flow
+# UNCHANGED (see app/features/web/service.py::web_login's docstring) rather
+# than duplicating password verification against `UserCredential` (which
+# stays feature-local to `auth` — see app/core/models.py's docstring and
+# ADR-0002 — so `web` cannot query it directly either). This is the ONE
+# explicit, reviewed exception; every other feature pair (including every
+# other `web -> *` edge) stays fully independent, still enforced by this
+# contract below.
 [[tool.importlinter.contracts]]
 name = "Features are independent of each other"
 type = "independence"
@@ -74,6 +86,11 @@ modules = [
     "app.features.rbac",
     "app.features.settings",
     "app.features.custom_fields",
+    "app.features.web",
+]
+ignore_imports = [
+    "app.features.web.service -> app.features.auth.service",
+    "app.features.web.service -> app.features.auth.schemas",
 ]
 
 [[tool.importlinter.contracts]]

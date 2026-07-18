@@ -35,38 +35,37 @@ def require_platform(request: Request) -> None:
         )
 
 
-def require_user_auth(
-    request: Request,
-    authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-) -> Party:
-    """Validate JWT/session and return the tenant-local party.
+def authenticate_request(request: Request, db: Session, *, token: str) -> Party | None:
+    """The ONE token+session+party validation path — SoT for both the bearer
+    (API) and cookie (web) auth flows.
+
+    Pure predicate: returns the authenticated `Party` or `None` on ANY
+    failure — it never raises. Callers decide how a `None` becomes a
+    response: `require_user_auth` (below) turns it into a 401
+    `HTTPException`; `app.core.web_deps.require_web_auth` turns it into a
+    `WebAuthRedirect` 302. This function does NOT resolve/require a tenant
+    itself — it reads whatever `request.state.tenant` already holds (set by
+    `TenantResolverMiddleware` before the route ever runs); if that's `None`
+    it fails closed rather than raising, since a 404-vs-401-vs-redirect
+    choice belongs to the caller, not this shared seam.
 
     Only `party_type == PartyType.person` parties can authenticate —
     organization parties have no credentials and can never be the `sub` of a
     session token, but the check is defense-in-depth against a stray/garbled
     token claiming an org party's id.
     """
-    tenant = require_tenant(request)
-    token = _bearer_token(authorization)
-    if token is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
-        )
+    tenant = getattr(request.state, "tenant", None)
+    if tenant is None:
+        return None
 
     payload = decode_access_token(token)
     if payload is None or payload.get("tenant_id") != str(tenant.id):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
-        )
+        return None
 
     try:
         party_id = UUID(str(payload["sub"]))
     except (KeyError, ValueError):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized",
-        ) from None
+        return None
 
     session = db.scalars(
         select(AuthSession)
@@ -76,16 +75,37 @@ def require_user_auth(
         .where(AuthSession.expires_at > datetime.now(UTC))
     ).first()
     if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
-        )
+        return None
     if session.party_id != party_id or session.tenant_id != tenant.id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
-        )
+        return None
 
     party = db.get(Party, party_id)
     if party is None or party.party_type != PartyType.person:
+        return None
+    return party
+
+
+def require_user_auth(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> Party:
+    """Validate JWT/session (bearer header) and return the tenant-local party.
+
+    Thin wrapper around `authenticate_request` (the shared validation seam)
+    — behavior/signature unchanged from before the Task 3 refactor: same
+    404 (missing tenant, via `require_tenant`) then 401 (everything else)
+    ordering, proven by the existing auth unit+integration tests passing
+    unmodified.
+    """
+    require_tenant(request)
+    token = _bearer_token(authorization)
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
+        )
+    party = authenticate_request(request, db, token=token)
+    if party is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
         )
@@ -133,6 +153,7 @@ def _bearer_token(authorization: str | None) -> str | None:
 
 __all__ = [
     "Depends",
+    "authenticate_request",
     "get_db",
     "get_platform_db",
     "require_platform",

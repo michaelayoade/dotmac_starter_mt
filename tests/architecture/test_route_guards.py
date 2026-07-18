@@ -26,6 +26,23 @@ ALLOWLIST = {
     # `route.dependant.dependencies` (confirmed: guard names for this route
     # are {'get_db', 'require_tenant'}), so it already satisfies the guard
     # check without needing an allowlist entry.
+    #
+    # GET/POST /admin/login (app.features.web.web) are genuinely pre-auth —
+    # you cannot require a login to reach the login form — and are listed
+    # here explicitly (Task 3 brief) even though both routes also carry a
+    # route-level `Depends(require_tenant)` (tenant-scoping the login page
+    # itself: the login target is always a specific tenant, resolved from
+    # the Host header) which would independently satisfy the guard-name
+    # check on its own, same as the `/auth/login` case above. The explicit
+    # entries make the "no auth required here" intent load-bearing and
+    # future-proof rather than an accident of `require_tenant`'s naming.
+    ("GET", "/admin/login"),
+    ("POST", "/admin/login"),
+    # GET /admin/logout must succeed even with a missing/expired/garbled
+    # cookie (clearing a stale cookie is not an auth failure) — it carries
+    # only `Depends(require_tenant)` (tenant-scoped session revocation), no
+    # `require_web_auth`. Same reasoning as `/admin/login` above.
+    ("GET", "/admin/logout"),
 }
 
 

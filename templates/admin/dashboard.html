@@ -1,0 +1,51 @@
+{#
+  Admin dashboard — the `/admin` landing page. Context contract (beyond
+  layouts/admin.html's own `active_nav`/`page_title`): `counts`
+  (app.features.web.service.DashboardCounts: parties/roles/active_sessions)
+  and `current_user` (app.features.web.service.CurrentUserView), both built
+  by app/features/web/web.py::dashboard from app/features/web/service.py —
+  never queried directly here (this is a template, not a query site).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/table_macros.html" import icon %}
+
+{% block admin_content %}
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 flex items-center gap-4">
+        <div class="h-10 w-10 rounded-lg bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center text-primary-600 dark:text-primary-400">
+            {{ icon("user") }}
+        </div>
+        <div>
+            <p class="text-2xl font-bold text-slate-900 dark:text-white font-display">{{ counts.parties }}</p>
+            <p class="text-sm text-slate-500 dark:text-slate-400">Parties</p>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 flex items-center gap-4">
+        <div class="h-10 w-10 rounded-lg bg-accent-50 dark:bg-accent-900/20 flex items-center justify-center text-accent-600 dark:text-accent-400">
+            {{ icon("key") }}
+        </div>
+        <div>
+            <p class="text-2xl font-bold text-slate-900 dark:text-white font-display">{{ counts.roles }}</p>
+            <p class="text-sm text-slate-500 dark:text-slate-400">Roles</p>
+        </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5 flex items-center gap-4">
+        <div class="h-10 w-10 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center text-green-600 dark:text-green-400">
+            {{ icon("check") }}
+        </div>
+        <div>
+            <p class="text-2xl font-bold text-slate-900 dark:text-white font-display">{{ counts.active_sessions }}</p>
+            <p class="text-sm text-slate-500 dark:text-slate-400">Active sessions</p>
+        </div>
+    </div>
+</div>
+
+<div class="mt-8 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+    <h3 class="text-sm font-semibold text-slate-900 dark:text-white mb-2">
+        Welcome{{ ", " ~ current_user.first_name if current_user and current_user.first_name else "" }}
+    </h3>
+    <p class="text-sm text-slate-500 dark:text-slate-400">
+        This is the admin portal dashboard. Use the sidebar to manage parties, roles, and settings.
+    </p>
+</div>
+{% endblock %}
