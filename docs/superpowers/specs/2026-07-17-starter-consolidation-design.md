@@ -149,3 +149,19 @@ When phase 2 (core parity) is complete and CI is green: archive `dotmac_starter`
 - Porting any ISP/domain functionality from dotmac_sub (RADIUS, PostGIS, OLT, ISP billing).
 - Mobile (Flutter) scaffolding — revisit later if a starter needs it.
 - Per-feature Alembic branches, plugin-style dynamic feature loading, or multi-repo shared libraries.
+
+## Amendment 2026-07-18: stronger SoT formalization (Michael's adoption review)
+
+The SOT-complete criteria above are extended: SoT is more than "one file contains the
+value". **For every concept, name exactly one:** definition authority; mutation owner;
+read/formatting owner; transaction owner; authorization policy; projection freshness rule;
+drift detector; idempotent repair path; governance test.
+
+Duplication is acceptable only when mechanically derived or protected by a bidirectional
+coherence test. Anything with zero consumers should be deleted until a real use case
+exists. Optional infrastructure (billing, queues, storage, notifications, WebSockets,
+product workflows) ships as secure contracts to follow, not unused implementations.
+
+Full review + sequencing: `docs/superpowers/reviews/2026-07-18-adoption-review.md`
+(control-plane security first, then capability hardening, then runtime/delivery
+standards and template ergonomics).
