@@ -18,6 +18,8 @@ from app.features.rbac.schemas import (
 
 DEFAULT_ROLES_LIMIT = 50
 MAX_ROLES_LIMIT = 200
+DEFAULT_AUDIT_LIMIT = 50
+MAX_AUDIT_LIMIT = 200
 
 router = APIRouter(
     prefix="/rbac", tags=["rbac"], dependencies=[Depends(require_tenant)]
@@ -82,8 +84,15 @@ def grant_role(
 
 @router.get("/audit-events", response_model=list[AuditEventRead])
 def list_audit_events(
+    limit: int = Query(default=DEFAULT_AUDIT_LIMIT, ge=0, le=MAX_AUDIT_LIMIT),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
     _: Party = Depends(require_role("admin")),
 ) -> list[AuditEvent]:
-    return rbac_service.list_audit_events(db, tenant)
+    # Task 6: audit-events was the last unpaginated list in the app — this
+    # route and `app.features.rbac.web`'s `/admin/audit` screen both call
+    # the SAME `rbac_service.list_audit_events`, so there is one paginated
+    # implementation, not two that could drift (see that function's
+    # docstring).
+    return rbac_service.list_audit_events(db, tenant, limit=limit, offset=offset)

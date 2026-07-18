@@ -39,6 +39,26 @@ def apply_pagination(stmt: Select, *, limit: int, offset: int) -> Select:
     return stmt.limit(limit).offset(offset)
 
 
+def escape_like(value: str) -> str:
+    """Escape SQL LIKE/ILIKE wildcards (`%`, `_`) and the escape character
+    itself (`\\`) so a caller's free-text search term matches literal
+    characters, not LIKE metacharacters (e.g. a search for `"50%"` should
+    match only the literal string `50%`, not any string starting with `50`).
+
+    Single owner (SoT) for this three-`.replace()` sequence — Task 6 pulled
+    it out of `app.features.parties.service._search_filter` (which used to
+    inline it) into core specifically so `app.features.rbac.service.
+    list_grantable_parties` can reach it too: `rbac` cannot import
+    `parties.service._search_filter` (it's feature-private, and features
+    never import each other), but both features may import core.
+
+    Callers still wrap the result in `%...%` (or a prefix/suffix-only
+    pattern) and pass `escape="\\\\"` to `.ilike()`/`.like()` themselves —
+    this function only escapes the value.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def apply_ordering(
     stmt: Select, model: type[T], order_by: str | None, allowed: set[str]
 ) -> Select:

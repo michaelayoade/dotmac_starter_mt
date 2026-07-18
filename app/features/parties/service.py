@@ -32,7 +32,7 @@ from app.core.crud import CRUDManager
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.identity import normalize_email, person_display_name
 from app.core.models import Party, PartyOrganization, PartyPerson, PartyType, Tenant
-from app.core.query import apply_pagination
+from app.core.query import apply_pagination, escape_like
 from app.features.parties.schemas import (
     OrganizationPartyCreate,
     OrganizationPartyUpdate,
@@ -218,13 +218,15 @@ def _search_filter(
     """Shared WHERE-clause builder for `search_parties`/`count_parties` (Task
     4) — one place for the filter shape so the count and the page of rows it
     paginates can never drift apart.
+
+    LIKE-escaping is `app.core.query.escape_like` (moved there in Task 6 so
+    `rbac.service.list_grantable_parties` can share it — see that helper's
+    docstring).
     """
     if party_type is not None:
         stmt = stmt.where(Party.party_type == party_type)
     if q:
-        # Escape SQL LIKE wildcards so "50%" matches only literal "50%"
-        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        like = f"%{escaped}%"
+        like = f"%{escape_like(q)}%"
         stmt = stmt.where(
             or_(
                 Party.display_name.ilike(like, escape="\\"),

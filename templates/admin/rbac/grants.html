@@ -1,0 +1,119 @@
+{#
+  Role grants (Task 6) — grant-role form (party picker + role picker) plus a
+  recent-grants list, at `/admin/role-grants`.
+
+  Context: `parties` (list[Party] — see
+  app.features.rbac.service.list_grantable_parties, already filtered by `q`),
+  `roles` (list[Role] — app.features.rbac.service.list_roles), `recent_grants`
+  (list[app.features.rbac.service.GrantView]), `q` (current party search
+  string, "" when unset), `errors` (`_form`/`party_id`/`role_id` -> message),
+  `form` (submitted values to repopulate a failed submit).
+
+  No separate `_grants.html` fragment exists (see app.features.rbac.web's
+  module docstring for why) — the server ALWAYS renders this full page, and
+  both the party-search input and the grant-submit form use htmx's
+  `hx-select="#grants-content"` so only that div gets swapped back in,
+  instead of the whole document being nested inside the triggering element.
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/form_macros.html" import submit_button %}
+{% from "components/table_macros.html" import table_header, empty_state %}
+
+{% block admin_content %}
+<div id="grants-content">
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display">Grant Role</h1>
+            <p class="text-sm text-slate-500 dark:text-slate-400">Assign a role to a party in this tenant.</p>
+        </div>
+        <a href="/admin/roles" class="px-3 py-2 rounded-lg text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Back to Roles</a>
+    </div>
+
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 max-w-2xl mb-8">
+        {% if errors.get("_form") %}
+        <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">
+            {{ errors.get("_form") }}
+        </div>
+        {% endif %}
+
+        <form hx-post="/admin/role-grants"
+              hx-select="#grants-content"
+              hx-target="#grants-content"
+              hx-swap="outerHTML"
+              class="space-y-4">
+            <div>
+                <label for="party-search" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Search parties</label>
+                <input type="search" id="party-search" name="q" value="{{ q }}"
+                       placeholder="Search by name or email…"
+                       hx-get="/admin/role-grants"
+                       hx-trigger="input changed delay:350ms, search"
+                       hx-select="#grants-content"
+                       hx-target="#grants-content"
+                       hx-swap="outerHTML"
+                       hx-push-url="true"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500" />
+            </div>
+
+            <div>
+                <label for="party_id" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Party <span class="text-red-500">*</span></label>
+                <select id="party_id" name="party_id" required
+                        class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                    <option value="" disabled {% if not form.get("party_id") %}selected{% endif %}>Select a party…</option>
+                    {% for party in parties %}
+                    <option value="{{ party.id }}" {% if form.get("party_id") == party.id | string %}selected{% endif %}>
+                        {{ party.display_name }}{% if party.email %} ({{ party.email }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if errors.get("party_id") %}
+                <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.get("party_id") }}</p>
+                {% endif %}
+            </div>
+
+            <div>
+                <label for="role_id" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Role <span class="text-red-500">*</span></label>
+                <select id="role_id" name="role_id" required
+                        class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                    <option value="" disabled {% if not form.get("role_id") %}selected{% endif %}>Select a role…</option>
+                    {% for role in roles %}
+                    <option value="{{ role.id }}" {% if form.get("role_id") == role.id | string %}selected{% endif %}>
+                        {{ role.name }} ({{ role.slug }})
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if errors.get("role_id") %}
+                <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.get("role_id") }}</p>
+                {% endif %}
+            </div>
+
+            {{ submit_button(label="Grant Role", cancel_url="/admin/roles") }}
+        </form>
+    </div>
+
+    <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-3">Recent Grants</h2>
+    <div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+        <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+            {{ table_header([
+                {"label": "Party"},
+                {"label": "Role"},
+                {"label": "Granted"},
+            ]) }}
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
+                {% for grant in recent_grants %}
+                <tr>
+                    <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">{{ grant.party_display_name }}</td>
+                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ grant.role_name }} ({{ grant.role_slug }})</td>
+                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ grant.created_at }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3">
+                        {{ empty_state(message="No role grants yet") }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,52 @@
+{#
+  Roles table fragment (Task 6) — the htmx swap target for
+  admin/rbac/roles.html's pagination controls, AND the initial render
+  `{% include %}`d by that same index page for a plain (non-htmx) page
+  load. Never extends a layout — this is a fragment.
+
+  Context: see admin/rbac/roles.html's docstring.
+#}
+{% from "components/table_macros.html" import table_header, empty_state %}
+
+<div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+    <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+        {{ table_header([
+            {"label": "Name"},
+            {"label": "Slug"},
+        ]) }}
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
+            {% for role in roles %}
+            <tr>
+                <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">{{ role.name }}</td>
+                <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ role.slug }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="2">
+                    {{ empty_state(message="No roles found", action_url="/admin/roles/create", action_label="New Role") }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+    <div class="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+        <p class="text-sm text-slate-500 dark:text-slate-400">Page {{ page }} of {{ total_pages }} ({{ total }} total)</p>
+        <div class="flex items-center gap-2">
+            {% if page > 1 %}
+            <button hx-get="/admin/roles?page={{ page - 1 }}"
+                    hx-target="#roles-table"
+                    hx-push-url="true"
+                    class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">Previous</button>
+            {% endif %}
+            {% if page < total_pages %}
+            <button hx-get="/admin/roles?page={{ page + 1 }}"
+                    hx-target="#roles-table"
+                    hx-push-url="true"
+                    class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">Next</button>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
