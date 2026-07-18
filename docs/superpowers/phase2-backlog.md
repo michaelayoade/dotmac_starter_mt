@@ -322,14 +322,42 @@ here so all seven are discoverable as closed in one place:
 
 ## Display/locale settings (user rule, 2026-07-18 — "everything by settings: datetime etc, all")
 
-Runtime/display behavior becomes tenant-configurable via settings-as-data: a `display`
-SettingDomain (timezone default UTC, date_format, datetime_format; page sizes where they
-matter), one core formatting helper (e.g. app/core/formatting.py) consumed by every
-template/service that renders datetimes — no hardcoded strftime/timezone literals
-anywhere (reviewers flag them like hardcoded ports). Each spec needs a real reader
-(no-orphan-settings enforces). Scheduled as the FIRST task of the next plan (before or
-alongside 2c auth hardening); the portal's audit/list timestamps are the initial
-consumers.
+~~Runtime/display behavior becomes tenant-configurable via settings-as-data: a `display`
+SettingDomain (timezone default UTC, date_format, datetime_format), one core formatting
+helper (e.g. app/core/formatting.py) consumed by every template/service that renders
+datetimes — no hardcoded strftime/timezone literals anywhere (reviewers flag them like
+hardcoded ports). Each spec needs a real reader (no-orphan-settings enforces). Scheduled
+as the FIRST task of the next plan (before or alongside 2c auth hardening); the portal's
+audit/list timestamps are the initial consumers.~~ — **DELIVERED in v0.7.0**: `display`
+SettingDomain (`timezone`, `date_format`, `datetime_format` — three `SettingSpec`s,
+`app/features/settings/spec.py`), auto-appearing in `/admin/settings`. The consumption
+shape differs slightly from this sketch's "core formatting helper consumed by every
+template/service": it's `app/core/display.py` (`DisplaySettings`/`load_display`/
+`get_request_display`, memoized on `request.state.display`, same per-request seam as
+branding) plus exactly two Jinja filters, `local_datetime`/`local_date`
+(`app.core.templating`) — templates only, no service reads these specs directly.
+Governance test `tests/architecture/test_web_conventions.py
+::test_timestamp_renders_go_through_local_filters` enforces the no-raw-render rule. See
+`docs/ARCHITECTURE.md`'s "Display settings" subsection for the full design (including the
+write-loud/read-degrade validator split and the migration's data-loss-on-downgrade note).
+
+- **Page-size settings — still OPEN, not part of the v0.7.0 delivery above.** No
+  display-domain (or any) page-size spec exists yet; `PAGE_SIZE`-style literals remain
+  per-file constants (see the list_query PARTIAL finding below, which flags the same
+  gap). Tracked for `docs/superpowers/plans/2026-07-18-capability-hardening.md`.
+- Timezone picker: the generic settings editor still renders every string-typed spec as
+  a free-text `<input>`, including `timezone` — the `allowed`-set → `<select>` dropdown
+  gap disclosed in the 2b recon is now also directly relevant here (a tenant admin has to
+  type a correct IANA zone name freehand; a typo write-fails loud via the validator, but
+  there's no picker/autocomplete to prevent it). No `allowed` set exists for `timezone`
+  today (open-ended IANA zone names, not a fixed enum) — closing this needs either a
+  curated `allowed` shortlist or a dedicated `<select>`/autocomplete widget keyed off a
+  timezone list, not the generic-spec-editor's existing dropdown-for-`allowed` path.
+- Number/currency locale formatting — deferred, YAGNI: no render site in this app
+  formats a number or currency value today (audit/list timestamps were the only display
+  consumers this section anticipated, and those are now covered). Don't add a spec or a
+  formatting helper until a real render site needs one; Babel (`babel.numbers`/
+  `babel.dates`) is the likely dependency when that day comes.
 - `UnitOfWork.savepoint()` (unused by any request path) shares the `begin_nested()`
   auto-flush ordering hazard fixed across services in 2b1-T2 — re-audit + docstring
   ordering note before it is ever wired in (2b1-T2 review).

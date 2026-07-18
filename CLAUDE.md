@@ -200,12 +200,29 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   view) escapes all of them until their globs/prefixes are extended — do
   that in the same task that adds such a surface (tracked in
   `docs/superpowers/phase2-backlog.md`).
+- **Display settings (tenant timezone + date/datetime formats).** A
+  `display` `SettingDomain` (three specs: `timezone`, `date_format`,
+  `datetime_format`) auto-appears in `/admin/settings` like any other
+  registered spec — no dedicated screen. `app.core.display.get_request_display`
+  resolves it once per request and memoizes on `request.state.display`,
+  warmed in `require_web_auth` — the exact same per-request seam shape as
+  `request.state.branding` (see "Branding pipeline" in
+  `docs/ARCHITECTURE.md`). The JSON API is untouched: responses stay
+  ISO-8601 UTC always: display formatting is a web-portal presentation
+  concern only. See `docs/ARCHITECTURE.md`'s "Display settings" subsection
+  for the write-loud/read-degrade validator split and the filter fallback
+  invariant.
 
 ## Hard rules (enforced — test/contract named per rule)
 
 - Routers (`router.py`, `web.py`) never issue direct DB queries (no
   `db.query(`, `db.execute(`, `select(`) — logic lives in `service.py`.
   (`tests/architecture/test_thin_wrappers.py::test_routers_do_not_issue_direct_queries`)
+- A template renders a `*_at` timestamp ONLY through the `local_datetime`/
+  `local_date` Jinja filters (`app.core.templating`) — never a raw
+  attribute — so every rendered timestamp honors the viewing tenant's
+  display settings.
+  (`tests/architecture/test_web_conventions.py::test_timestamp_renders_go_through_local_filters`)
 - Every mounted route carries a `require_*` guard dependency (route-level or
   router-level `dependencies=[...]`), or is in the explicit
   `ALLOWLIST` with a comment explaining why it's unauthenticated.

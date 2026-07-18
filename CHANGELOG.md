@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0 — 2026-07-18
+
+Display settings: a tenant-configurable `display` `SettingDomain`
+(timezone + date/datetime formats) consumed at render time by the admin
+portal, plus the `SettingSpec.validator` mechanism that makes it possible.
+
+### Added
+- **Display settings domain**: `timezone`, `date_format`, `datetime_format`
+  specs on the new `SettingDomain.display` — tenant-configurable via the
+  same tenant→platform→default resolver as every other setting, and
+  auto-appearing in `/admin/settings` (registry-driven index, no dedicated
+  screen needed).
+- **`SettingSpec.validator`**: an optional `Callable[[object], None]` run
+  after type/`allowed`/range checks. Write path
+  (`validate_spec_value`) raises a loud `BadRequestError` on failure; read
+  path (`resolve_with_source`/`resolve_value`) silently degrades to the
+  spec default instead — a corrupted or since-invalid stored value can
+  never 500 a render.
+- **`local_datetime`/`local_date` Jinja filters** (`app.core.templating`):
+  the one and only way a template renders a `*_at` timestamp, formatted in
+  the viewing tenant's timezone/format via `request.state.display`
+  (`app.core.display.get_request_display`, warmed in `require_web_auth` —
+  same per-request seam as tenant branding). New governance test,
+  `tests/architecture/test_web_conventions.py
+  ::test_timestamp_renders_go_through_local_filters`, fails the build on
+  any raw `*_at` render that bypasses these filters.
+
+No breaking changes. The JSON API is untouched — every response stays
+ISO-8601 UTC before and after this release.
+
 ## 0.6.1 — 2026-07-18
 
 Phase 2b.1: closes all seven findings (F1–F7) from Michael's post-merge
