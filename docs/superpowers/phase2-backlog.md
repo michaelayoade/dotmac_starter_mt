@@ -255,3 +255,11 @@ consumers.
 - `UnitOfWork.savepoint()` (unused by any request path) shares the `begin_nested()`
   auto-flush ordering hazard fixed across services in 2b1-T2 — re-audit + docstring
   ordering note before it is ever wired in (2b1-T2 review).
+
+## 2c-auth
+
+- Constant-time login: credential/party misses short-circuit without a dummy hash compare
+  (pre-existing before 2b1-T3, unchanged by it) — 2c adds a dummy-verify on the miss path
+  so timing doesn't distinguish "no account" from "wrong password" (2b1-T3 review).
+- Migration round-trip (upgrade→downgrade→upgrade) has no automated enforcement; consider
+  a CI/integration step exercising the last migration's cycle.

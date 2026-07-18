@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -151,7 +151,7 @@ def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
 
     Intended consequence (documented, not a bug): NULLing a person party's
     `email` (`app.features.parties.service.update_person_party`) disables
-    login for that party outright — the query is `Party.email ==
+    login for that party outright — the query is `func.lower(Party.email) ==
     normalize_email(email)`, and a NULL column matches no string. There is
     no separate identity to fall back to once the single email column is
     cleared; see `docs/ARCHITECTURE.md`'s "Auth credentials" ownership row
@@ -162,7 +162,18 @@ def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
         select(Party)
         .where(Party.tenant_id == tenant.id)
         .where(Party.party_type == PartyType.person)
-        .where(Party.email == email)
+        # `email` is already lowercased by `normalize_email` above, so this
+        # predicate is defense-in-depth, not the normalization itself — but
+        # it must be `func.lower(Party.email) == email`, not a bare
+        # `Party.email == email`, because that's *exactly* the expression
+        # the partial functional index `uq_parties_tenant_lower_email`
+        # (`(tenant_id, lower(email)) WHERE email IS NOT NULL`, see
+        # `app/core/models.py::Party.__table_args__`) is built on. Postgres
+        # only matches a functional index when the query's WHERE clause is
+        # syntactically the same expression the index was created with — a
+        # bare `Party.email == email` would silently fall back to a seq
+        # scan on this column.
+        .where(func.lower(Party.email) == email)
     ).first()
     credential = (
         db.scalars(

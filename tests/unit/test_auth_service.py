@@ -25,8 +25,10 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import UnauthorizedError
-from app.core.models import Party, Tenant
+from app.core.models import Party, PartyType, Tenant
+from app.core.security import hash_password
 from app.features.auth import service as auth_service
+from app.features.auth.models import UserCredential
 from app.features.auth.schemas import LoginRequest, RegisterRequest
 
 PASSWORD = "correct horse battery staple"
@@ -126,4 +128,50 @@ def test_login_null_party_email_rejected(db: Session, tenant_row: Tenant) -> Non
     with pytest.raises(UnauthorizedError):
         auth_service.login(
             db, tenant_row, LoginRequest(email="nullme@example.com", password=PASSWORD)
+        )
+
+
+def test_login_organization_party_same_email_rejected(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Phase 2b.1 Task 3 review (Important #2): proves `login()`'s
+    `Party.party_type == PartyType.person` filter is load-bearing, not
+    incidental.
+
+    An ORGANIZATION party can never be created by `register()` (it only ever
+    builds `party_type=person` rows), so this constructs one directly, gives
+    it the same email a login attempt uses, AND — the sharp part — binds a
+    real, valid `UserCredential` to that org party's `id`. In production
+    `register()` never creates such a row (nothing wires a credential to an
+    organization party), but building this exact combination here is what
+    makes the case sharp: without the `party_type == person` filter, the
+    `Party` lookup would match this org party by email alone, the
+    `UserCredential` lookup-by-`party_id` would then find this credential,
+    and `verify_password` would succeed — i.e. login would 200 as an
+    organization identity. With the filter in place, the `Party` query never
+    matches the org party at all, `party` is `None`, the credential lookup is
+    skipped, and login 401s, same as any other miss.
+    """
+    org_party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.organization,
+        display_name="Acme Corp",
+        email="org-shared@example.com",
+    )
+    db.add(org_party)
+    db.flush()
+    db.add(
+        UserCredential(
+            tenant_id=tenant_row.id,
+            party_id=org_party.id,
+            password_hash=hash_password(PASSWORD),
+        )
+    )
+    db.flush()
+
+    with pytest.raises(UnauthorizedError):
+        auth_service.login(
+            db,
+            tenant_row,
+            LoginRequest(email="org-shared@example.com", password=PASSWORD),
         )
