@@ -103,7 +103,7 @@
                 <tr>
                     <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">{{ grant.party_display_name }}</td>
                     <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ grant.role_name }} ({{ grant.role_slug }})</td>
-                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ grant.created_at }}</td>
+                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ grant.created_at | local_datetime }}</td>
                 </tr>
                 {% else %}
                 <tr>

@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from app.core.branding import get_request_branding
 from app.core.db import get_db
 from app.core.deps import authenticate_request
+from app.core.display import get_request_display
 from app.core.models import PartyRole, Role
 
 
@@ -120,6 +121,13 @@ def require_web_auth(
     # every authenticated portal page in one place; see this module's and
     # `app.core.branding`'s docstrings for the other two (login GET/POST).
     get_request_branding(request, db)
+
+    # Task 2 — warms `request.state.display` (tenant timezone/date/datetime
+    # formats) for every authenticated portal page, same seam as branding
+    # above. Login/error pages are NOT warmed on purpose (they render no
+    # timestamps); the `local_datetime`/`local_date` filter fallback in
+    # `app.core.templating` covers any future accident.
+    get_request_display(request, db)
 
     roles = list(
         db.scalars(

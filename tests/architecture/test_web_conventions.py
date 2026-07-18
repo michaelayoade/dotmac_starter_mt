@@ -208,3 +208,38 @@ def test_web_py_imports_only_its_own_feature_and_core() -> None:
         "web.py module(s) importing outside their own feature + app.core "
         "(features must stay independent of each other):\n" + "\n".join(violations)
     )
+
+
+# ---------------------------------------------------------------------------
+# 5. Every `*_at` timestamp render goes through local_datetime/local_date
+#    (Task 2: tenant display settings).
+# ---------------------------------------------------------------------------
+
+_JINJA_EXPR = re.compile(r"{{(.*?)}}", re.S)
+
+
+def _template_files() -> list[Path]:
+    """Every template under `templates/**` — wider than
+    `_admin_and_auth_templates()` above (which is scoped to admin/auth full
+    pages) because fragments (`_*.html`, e.g. `_audit_table.html`) render
+    `*_at` timestamps too and must be covered here.
+    """
+    return sorted(TEMPLATES_ROOT.glob("**/*.html"))
+
+
+def test_timestamp_renders_go_through_local_filters() -> None:
+    """A raw `{{ x.created_at }}` bypasses tenant display settings.
+
+    Any Jinja expression rendering a `*_at` attribute must apply
+    `local_datetime`/`local_date` ("local_date" substring covers both).
+    """
+    offenders: list[str] = []
+    for path in _template_files():
+        for match in _JINJA_EXPR.finditer(path.read_text(encoding="utf-8")):
+            expr = match.group(1)
+            if re.search(r"\b\w+_at\b", expr) and "local_date" not in expr:
+                offenders.append(f"{path}: {{{{{expr.strip()}}}}}")
+    assert not offenders, (
+        "Raw timestamp renders (add `| local_datetime` or `| local_date`): "
+        + "; ".join(offenders)
+    )

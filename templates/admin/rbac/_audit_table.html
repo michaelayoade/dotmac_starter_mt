@@ -23,7 +23,7 @@
                 <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">{{ event.action }}</td>
                 <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ event.actor_display_name }}</td>
                 <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ event.entity_type }}{% if event.entity_id %} ({{ event.entity_id }}){% endif %}</td>
-                <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ event.created_at }}</td>
+                <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ event.created_at | local_datetime }}</td>
                 <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
                     <pre class="whitespace-pre-wrap text-xs bg-slate-50 dark:bg-slate-900/40 rounded p-2 max-w-md overflow-x-auto">{{ event.details_json }}</pre>
                 </td>
