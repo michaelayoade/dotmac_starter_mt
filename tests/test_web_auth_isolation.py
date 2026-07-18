@@ -96,7 +96,23 @@ def test_web_logout_only_revokes_the_calling_tenants_session(
     token = login.cookies["access_token"]
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
-    b.get("/admin/logout", cookies={"access_token": token}, follow_redirects=False)
+    # F7: logout is now POST, so it's CSRF-checked — capture a csrf_token
+    # cookie from a safe GET first and present it as the header, same
+    # double-submit bridge every other mutating-request canary in this
+    # suite replicates (see e.g. test_admin_portal_e2e.py's `_web_login`).
+    # Without this the POST would 403 before ever reaching
+    # `auth_service.web_logout`, which would make the assertion below pass
+    # for the wrong reason (blocked by CSRF, not "tenant-scoped lookup found
+    # nothing under tenant B").
+    login_page_b = b.get("/admin/login")
+    csrf_b = login_page_b.cookies.get("csrf_token")
+    assert csrf_b, "CSRFMiddleware did not set a csrf_token cookie on the login GET"
+    b.post(
+        "/admin/logout",
+        cookies={"access_token": token},
+        headers={"x-csrf-token": csrf_b},
+        follow_redirects=False,
+    )
 
     # Tenant A's session must still be valid — tenant B's logout call
     # (tenant-scoped lookup finds nothing under tenant B) must not have

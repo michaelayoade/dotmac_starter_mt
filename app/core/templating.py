@@ -15,16 +15,30 @@ shipping untested surface area).
 (`app.core.branding.get_brand()` — defaults < brand.json < env, cached for
 the process lifetime; see that module's docstring). It is installed once as
 a template global, so every template can read `brand.name` etc. without a
-route passing it explicitly. The per-TENANT DB override
-(`app.core.branding.load_branding(db, tenant_id)`) is deliberately NOT a
-global — it needs a request-scoped `db` session and `tenant_id`, so routes
-that want the tenant-overridden brand call `load_branding` themselves and
-pass the result into their own render() context (shadowing this global's
-`brand` key for that response only).
+route passing it explicitly.
+
+The per-TENANT DB override (Task 4 / F4 fix) is resolved ONCE per request by
+`app.core.branding.get_request_branding` and cached on
+`request.state.branding` (see that module's docstring for the wiring/seam
+decision — `require_web_auth` + the two login-route call sites are the only
+places that populate it; routes never call it themselves and never change).
+`render()` below is the ONE place that reads it: if `request.state.branding`
+is set, it's injected into the context as `brand` UNLESS the caller's own
+`context` already defines a `brand` key (a route that wants to override —
+e.g. the branding editor's own live-preview render — wins; `dict.setdefault`
+below encodes that precedence). If `request.state.branding` was never set
+(no tenant on the request — a platform host, an error page rendered before
+any branding-populating dependency ran), `context` gets no `brand` key at
+all and Jinja falls through to the process-static `brand` GLOBAL installed
+below — so a request with nothing tenant-specific to show still renders the
+static brand, never an `UndefinedError`. Net precedence, highest first:
+explicit route context > per-request tenant override > static global.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import lru_cache
 from hashlib import sha256
@@ -36,8 +50,58 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.core.branding import get_brand
+from app.core.features import FeatureManifest, NavItem
 
 templates = Jinja2Templates(directory="templates")
+
+
+def install_surface_globals(
+    manifests: Sequence[FeatureManifest], disabled: set[str], web_enabled: bool
+) -> None:
+    """Set the process-static `enabled_features`/`nav_items` Jinja globals
+    from the loaded manifests — the ONE place templates learn which
+    features are on and what the sidebar contains (F1/F5 capability model;
+    see `app.core.features`'s module docstring). Called once from
+    `app.main` (module import time, right after `load_manifests`) — config
+    is process-static, so these globals are correct for the process
+    lifetime; a config change requires a restart, same as every other
+    process-static setting in this app.
+
+    `enabled_features` always reflects the real enabled-feature set
+    (`DISABLED_FEATURES` + each manifest's `enabled_by_default`), regardless
+    of `web_enabled` — it's the general "is this feature on" flag templates
+    use for optional-slot conditionals (e.g.
+    `templates/admin/parties/detail.html`'s `{% if 'custom_fields' in
+    enabled_features %}`), not specifically a web-surface concept.
+    `nav_items` is `()` when `web_enabled` is False — there is no sidebar to
+    populate when the whole `/admin` HTML surface is off.
+    """
+    enabled = frozenset(
+        manifest.name
+        for manifest in manifests
+        if manifest.name not in disabled and manifest.enabled_by_default
+    )
+    nav_items: tuple[NavItem, ...] = ()
+    if web_enabled:
+        collected: list[NavItem] = []
+        for manifest in manifests:
+            if manifest.name not in enabled:
+                continue
+            collected.extend(
+                replace(item, feature=manifest.name) for item in manifest.nav
+            )
+        nav_items = tuple(collected)
+    templates.env.globals["enabled_features"] = enabled
+    templates.env.globals["nav_items"] = nav_items
+
+
+# Safe defaults so any template render before `install_surface_globals` has
+# run (e.g. a test that builds its own throwaway app and never calls it)
+# degrades to "no optional features, no nav" rather than a Jinja
+# UndefinedError — `app.main` overwrites these at import time with the real,
+# manifest-derived values.
+templates.env.globals.setdefault("enabled_features", frozenset())
+templates.env.globals.setdefault("nav_items", ())
 
 
 @lru_cache(maxsize=256)
@@ -92,7 +156,15 @@ def render(
     defaults to 200; branded HTML error pages (app.core.errors._negotiate)
     pass the envelope's real status (404, 500, ...) so the HTTP status line
     matches the JSON sibling response, not just the rendered body.
+
+    Per-request tenant branding enrichment (Task 4 / F4 fix): `context`
+    gets a `brand` key from `request.state.branding` when one is present and
+    `context` didn't already define its own — see this module's docstring
+    for the full precedence rule and why no route needs to change to pick
+    this up.
     """
-    return templates.TemplateResponse(
-        request, name, context or {}, status_code=status_code
-    )
+    ctx = dict(context or {})
+    branding = getattr(request.state, "branding", None)
+    if branding is not None:
+        ctx.setdefault("brand", branding)
+    return templates.TemplateResponse(request, name, ctx, status_code=status_code)

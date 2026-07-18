@@ -38,11 +38,12 @@ ALLOWLIST = {
     # future-proof rather than an accident of `require_tenant`'s naming.
     ("GET", "/admin/login"),
     ("POST", "/admin/login"),
-    # GET /admin/logout must succeed even with a missing/expired/garbled
-    # cookie (clearing a stale cookie is not an auth failure) — it carries
-    # only `Depends(require_tenant)` (tenant-scoped session revocation), no
-    # `require_web_auth`. Same reasoning as `/admin/login` above.
-    ("GET", "/admin/logout"),
+    # NOTE: POST /admin/logout (F7 — was GET, a CSRF-exempt safe method; see
+    # `app.features.auth.web`'s module docstring) is intentionally NOT here.
+    # It carries `Depends(require_tenant)` — which independently satisfies
+    # this any-`require_*` check on its own — so it needs no allowlist entry
+    # for THIS test. It IS listed in `MUTATING_ALLOWLIST` below, for the
+    # stricter auth-tier check, with its own comment.
 }
 
 
@@ -133,6 +134,17 @@ MUTATING_ALLOWLIST = {
     # equivalent of the above, already in `ALLOWLIST` for the any-`require_*`
     # check; repeated here for the tiered check for the identical reason.
     ("POST", "/admin/login"),
+    # Web portal logout (`app.features.auth.web`, F7 fix — was a CSRF-exempt
+    # `GET /admin/logout`). Deliberately carries `require_tenant` ONLY, no
+    # auth-tier guard: session self-termination must not require a role/
+    # auth-tier check — revoking YOUR OWN session is always allowed for any
+    # authenticated cookie, admin or not (matches `POST /admin/login`'s "you
+    # cannot require login to log in" reasoning, mirrored here as "you
+    # cannot require an authorization check to log out"). CSRF protection —
+    # not a role check — is what stops a FORCED logout now; that's exactly
+    # what `test_csrf_*` in `tests/test_security_middleware.py` proves, and
+    # what makes this route safe to allowlist here.
+    ("POST", "/admin/logout"),
 }
 
 

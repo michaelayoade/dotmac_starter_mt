@@ -24,7 +24,9 @@ single-tenant app is simply a deployment with one tenant row.
   a registered entity's `custom_fields` JSONB column — 13 field types,
   zero-migration field creation), `web` (`core=False`, deletable — the
   admin-portal dashboard shell; `DISABLED_FEATURES=web` drops only `GET
-  /admin`, every other feature's own `/admin/*` routes and the API stay up).
+  /admin`, every other feature's own `/admin/*` routes and the API stay up —
+  see "Extension points" below for `WEB_ENABLED`, the different,
+  whole-portal switch).
 
 **Model placement rule:** models queried by core (deps/middleware) live in
 core; feature-local models live in the feature. Concretely: `Tenant`,
@@ -83,6 +85,30 @@ without touching core:
   no reader anywhere under `app/` (outside the settings feature and the
   resolver module itself) fails the no-orphan-settings test — wire a real
   `resolve_value(...)` call before shipping it, or don't register it yet.
+- **Add an admin-portal surface (the capability model — THE surface
+  extension point).** A feature's `FeatureManifest` (`app.core.features`)
+  declares `web_routers` (its `web.py` router, HTML/HTMX) and `nav` (a
+  tuple of `NavItem(label, path)`) SEPARATELY from `routers` (its JSON
+  API) — these two fields are the ONLY place a feature adds itself to the
+  admin portal's sidebar or mounts an `/admin/*` screen; there is no
+  parallel hardcoded nav list in a template to keep in sync
+  (`templates/components/sidebar.html` renders from the `nav_items` Jinja
+  global, itself built from every manifest's `nav` by
+  `app.core.templating.install_surface_globals`). Two independent on/off
+  switches, do not conflate them: `DISABLED_FEATURES=<name>` turns off ONE
+  named feature's `routers` AND `web_routers` together (still a per-feature,
+  not a per-surface, toggle); `WEB_ENABLED` (env var, default `true`) is the
+  whole-portal surface switch — `WEB_ENABLED=false` mounts NO feature's
+  `web_routers` at all (zero `/admin` routes, no `/static` mount) while
+  every feature's JSON `routers` keeps working unchanged — this is the real
+  API-only deployment mode. `tests/architecture/test_feature_manifests.py
+  ::test_nav_items_paths_exist_in_web_routers` fails the build if a
+  manifest's `NavItem.path` doesn't resolve to a route actually mounted in
+  that same manifest's `web_routers` (a dead/stale sidebar link — this is
+  also how a disabled feature's nav entry is kept from linking to a 404;
+  see `templates/admin/parties/detail.html`'s
+  `{% if 'custom_fields' in enabled_features %}` guard for the matching
+  optional-slot pattern on an embedded fragment, not just a nav link).
 - **Compose a cross-feature admin-UI fragment (values-panel pattern).** A
   feature never imports another feature's Python — but its web page can
   still show another feature's data, via an htmx-loaded fragment the OWNING
@@ -123,6 +149,13 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   **every mutating form/link MUST use `hx-post`/`hx-put`/`hx-delete`**, never
   bare `method="post"` — enforced by
   `tests/architecture/test_web_conventions.py::test_no_template_uses_a_plain_method_post_form`.
+- **Session-mutating routes are POST, CSRF-bridged.** A GET must never
+  mutate session/auth state — a bare `<a href="/admin/logout">` was exactly
+  this mistake (F7): a CSRF-exempt safe method that a third-party page could
+  trigger just by loading it (`<img src=...>`), forcing a victim's logout.
+  `POST /admin/logout` (`app.features.auth.web`) fixed it by putting logout
+  back under the CSRF header-bridge above, same as every other mutation —
+  there is no separate "logout is special" exemption.
 - **Template escaping / `| safe` rule.** Jinja2 autoescapes by default;
   `| safe` opts a value OUT of escaping and must only be used on a value
   that has already been sanitized in Python, with a `sanitiz*` comment
@@ -191,6 +224,25 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
 - Feature `service.py` functions never take `payload: Any` — every payload
   parameter is a concrete Pydantic schema.
   (`tests/unit/test_service_typing.py::test_no_any_typed_payloads_in_services`)
+- Feature services never call `db.rollback()` directly. `get_db`
+  (`app.core.db`) owns the request's transaction and issues `SET LOCAL
+  app.current_tenant` on it for RLS; a bare `db.rollback()` on an expected
+  conflict (duplicate email/slug/role-grant, etc.) rolls back that ENTIRE
+  transaction — wiping the tenant context along with it — so any query the
+  caller's exception handler runs afterwards (a web handler re-rendering a
+  form, re-listing recent grants) runs under FORCE RLS with no tenant set:
+  fail-closed to zero rows, or an `ObjectDeletedError` re-loading an
+  expired attribute (finding F3). Use `app.core.db.conflict_savepoint`
+  instead: `with conflict_savepoint(db): db.add(row); db.flush()` inside a
+  `try/except IntegrityError` — it rolls back only a SAVEPOINT, leaving the
+  outer transaction + its `SET LOCAL` intact. The mutation (`db.add`/
+  attribute assignment) must happen INSIDE the `with` block, not before
+  it — `Session.begin_nested()` auto-flushes any already-pending/dirty
+  objects while establishing the SAVEPOINT, so adding/mutating before
+  entering the block would let that pre-flush fail with no savepoint yet in
+  place to protect the outer transaction.
+  (`tests/architecture/test_no_feature_rollback.py`; canaries in
+  `tests/test_conflict_rls_context.py`)
 - Every registered `SettingSpec` key must have a real reader (a quoted-string
   `resolve_value(...)`-style reference) somewhere under `app/` outside the
   `settings` feature package and `app/core/settings_resolver.py` itself — a

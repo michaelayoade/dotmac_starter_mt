@@ -5,7 +5,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from app.core.features import FeatureManifest, load_manifests
+from app.core.features import FeatureManifest, NavItem, load_manifests
 from app.features import FEATURE_MODULES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -79,3 +79,95 @@ def test_main_does_not_hard_import_a_specific_feature_package() -> None:
         "app/main.py must not hard-import a specific feature package:\n"
         + "\n".join(offending)
     )
+
+
+def _extract_route_paths(routers: list) -> set[str]:
+    """Extract all route paths from a sequence of APIRouter objects."""
+    paths: set[str] = set()
+    for router in routers:
+        for route in router.routes:
+            if hasattr(route, "path"):
+                paths.add(route.path)
+    return paths
+
+
+def _manifest_nav_coherence_failures(manifest: FeatureManifest) -> list[str]:
+    """Return one message per `NavItem` in `manifest.nav` that has no matching
+    route in `manifest.web_routers`.
+
+    A manifest with nav entries but an EMPTY `web_routers` is NOT skipped
+    here — every one of its nav items is guaranteed to have no matching
+    route (there are no routes to match), i.e. a guaranteed dead sidebar
+    link, and must be reported just like a partial mismatch would be. Only
+    a manifest with no `nav` at all (nothing to check) is skipped, by the
+    caller.
+
+    Shared by the production check
+    (`test_nav_items_paths_exist_in_web_routers`) and the sensitivity/
+    negative-case check (`test_nav_paths_coherence_detects_bogus_entry`) so
+    both exercise the exact same logic — a fix to one can't silently
+    diverge from the other.
+    """
+    route_paths = _extract_route_paths(list(manifest.web_routers))
+    failures: list[str] = []
+    for nav_item in manifest.nav:
+        if nav_item.path not in route_paths:
+            available = sorted(route_paths)
+            failures.append(
+                f"{manifest.name}: NavItem({nav_item.label!r}, "
+                f"{nav_item.path!r}) has no matching route in web_routers. "
+                f"Available: {available}"
+            )
+    return failures
+
+
+def test_nav_items_paths_exist_in_web_routers() -> None:
+    """F5 preventive: every `NavItem.path` in a manifest must match the path
+    of at least one route in that same manifest's `web_routers`. This prevents
+    dead sidebar links (e.g. a nav entry pointing to an unmounted route).
+
+    Only a manifest with NO `nav` at all is skipped — a manifest with `nav`
+    entries but an EMPTY `web_routers` must still be checked (and will fail):
+    that combination is a guaranteed dead sidebar link, not a no-op.
+    `test_nav_paths_coherence_detects_bogus_entry` below proves this
+    specific case is caught, by calling the exact same helper.
+    """
+    manifests = load_manifests(FEATURE_MODULES)
+    failures: list[str] = []
+
+    for manifest in manifests:
+        if not manifest.nav:
+            continue
+        failures.extend(_manifest_nav_coherence_failures(manifest))
+
+    assert not failures, "NavItem paths must exist in web_routers:\n" + "\n".join(
+        failures
+    )
+
+
+def test_nav_paths_coherence_detects_bogus_entry() -> None:
+    """RED: prove the nav↔web_routers coherence check catches dead links,
+    INCLUDING the previously-skipped case of a manifest with `nav` set but
+    `web_routers` EMPTY (a guaranteed dead sidebar link — there are no
+    routes at all to match against). Calls the same
+    `_manifest_nav_coherence_failures` helper the production test uses, so
+    this is a genuine sensitivity test of the real check, not a
+    reimplementation that could drift from it.
+    """
+    nav_item = NavItem("Bogus Link", "/admin/bogus")
+    bogus = FeatureManifest(
+        name="bogus_feature",
+        core=False,
+        web_routers=[],  # Empty — no routes at all, guaranteed dead link
+        nav=[nav_item],
+    )
+
+    failures = _manifest_nav_coherence_failures(bogus)
+
+    assert failures, (
+        "expected the coherence check to flag a nav item with no matching "
+        "route when web_routers is empty — this is the previously-skipped "
+        "loophole (a nav-with-empty-web_routers manifest silently passed)"
+    )
+    assert "bogus_feature" in failures[0]
+    assert "/admin/bogus" in failures[0]

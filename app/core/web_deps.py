@@ -14,6 +14,15 @@ contract): (1) reads the token from the `access_token` COOKIE rather than an
 role `"admin"` on top of `party_type == person` — this app's default-deny
 shape for phase 2b (every portal page is admin-only until phase 3 adds
 per-portal roles; see the inline comment below).
+
+It ALSO (Task 4 / F4 fix) is one of the three call sites for
+`app.core.branding.get_request_branding` — since every authenticated
+`/admin/*` route already depends on this function, warming
+`request.state.branding` here is the single seam that covers the whole
+authenticated portal with zero per-route/per-router changes (see that
+module's docstring for the shapes considered and why this one won). The
+other two call sites are the pre-auth `GET`/`POST /admin/login` routes
+(`app.features.auth.web`), which never reach this function.
 """
 
 from __future__ import annotations
@@ -22,6 +31,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.branding import get_request_branding
 from app.core.db import get_db
 from app.core.deps import authenticate_request
 from app.core.models import PartyRole, Role
@@ -105,6 +115,12 @@ def require_web_auth(
     # would just re-check an invariant already proven by the successful
     # `authenticate_request` call above.
     tenant = request.state.tenant
+
+    # Call site 1/3 (Task 4 / F4 fix) — warms `request.state.branding` for
+    # every authenticated portal page in one place; see this module's and
+    # `app.core.branding`'s docstrings for the other two (login GET/POST).
+    get_request_branding(request, db)
+
     roles = list(
         db.scalars(
             select(Role.slug)

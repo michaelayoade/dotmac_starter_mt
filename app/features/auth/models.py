@@ -5,6 +5,17 @@
 `app.features.auth.service` touches it, so it remains feature-local. It references
 `parties` and `tenants` via string-form `ForeignKey`/`ForeignKeyConstraint` only —
 no import of `app.core.models.Party`/`Tenant` classes needed.
+
+No `email` column (Phase 2b.1 Task 3, finding F2): a credential-local copy of
+the login email used to drift from `Party.email` — a portal edit changed the
+one, `login()` read the other, so a person's login identity and their
+visible profile email could silently disagree. `Party.email` (core,
+`app/core/models.py`) is now the SINGLE email authority; `login()` resolves
+the party by email first, then this table by `party_id` only — see
+`app/features/auth/service.py::login`'s docstring and
+`docs/ARCHITECTURE.md`'s "Auth credentials" ownership row. Migration
+`alembic/versions/20260718_0005_single_email_authority.py` dropped the
+column + its `uq_user_credentials_tenant_email` unique constraint.
 """
 
 from __future__ import annotations
@@ -15,7 +26,6 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     String,
-    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,7 +36,6 @@ from app.core.models import Base, TimestampMixin, uuid_pk
 class UserCredential(Base, TimestampMixin):
     __tablename__ = "user_credentials"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "email", name="uq_user_credentials_tenant_email"),
         ForeignKeyConstraint(
             ["tenant_id", "party_id"],
             ["parties.tenant_id", "parties.id"],
@@ -47,5 +56,4 @@ class UserCredential(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    email: Mapped[str] = mapped_column(String(254), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)

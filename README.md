@@ -274,30 +274,44 @@ export DISABLED_FEATURES="custom_fields,settings"
 ```
 
 `app.core.features.mount_features` skips any feature whose name is in this
-set — its routers are never mounted, so its endpoints simply don't exist
-(404, not a guard failure). This is the fast path for "starting a project
-from this template" step 1 above; delete the package under `app/features/`
-only once you're sure you'll never want the feature back (`make test-unit`
-will tell you if the registry and import-linter contract still agree with
-what's on disk).
+set — its routers (both JSON `routers` and HTML `web_routers`, see below)
+are never mounted, so its endpoints simply don't exist (404, not a guard
+failure). This is the fast path for "starting a project from this template"
+step 1 above; delete the package under `app/features/` only once you're
+sure you'll never want the feature back (`make test-unit` will tell you if
+the registry and import-linter contract still agree with what's on disk).
+
+Each feature's `FeatureManifest` (`app/features/<name>/feature.py`)
+declares TWO separate router groups — `routers` (its JSON API) and
+`web_routers` (its `web.py` admin-portal screens) — plus `nav` (its sidebar
+entries). `DISABLED_FEATURES=<name>` still turns off BOTH router groups
+together for that one feature (there is no per-router granularity: disabling
+`parties`, say, drops its `/admin/parties/*` screens AND `/parties/*` from
+the JSON API in one move) — see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#capability-model-manifest-driven-surfaces-2b1-t1-findings-f1--f5)
+for the full capability model, including the nav↔routes coherence test and
+the optional-slot pattern for embedding one feature's UI inside another's
+page.
 
 **`DISABLED_FEATURES=web` is special: it does NOT disable the portal's
 login, and it does NOT remove any JSON API.** The `web` feature package
 owns exactly one route — `GET /admin`, the dashboard shell — so disabling
 it drops only that landing page. `GET`/`POST /admin/login` and
-`GET /admin/logout` are owned by the `auth` feature (core, always mounted)
+`POST /admin/logout` are owned by the `auth` feature (core, always mounted)
 and stay up regardless. Every other feature's own `/admin/*` screens
 (parties, RBAC, settings, custom fields) are mounted from THAT feature's
-`FeatureManifest` alongside its JSON router — one manifest, two routers,
-one on/off switch (`app/features/<name>/feature.py`'s `routers=[router,
-web_router]`). There is no per-router granularity: disabling `parties` (say)
-to drop its `/admin/parties/*` screens also drops `/parties/*` from the
-JSON API, and vice versa — `DISABLED_FEATURES` is a per-FEATURE toggle, not
-a per-surface one. If you want JSON-only with zero portal HTML, you cannot
-reach that by disabling individual feature packages without losing their
-API too; the practical "no HTML" deployment is simply "don't build/serve
-`static/`, don't visit `/admin/*`" — every JSON route keeps working exactly
-as it does today whether or not any portal template exists.
+own manifest, independently.
+
+**Real API-only mode: `WEB_ENABLED=false`.** This is a DIFFERENT knob from
+`DISABLED_FEATURES` — a whole-portal surface switch, not a per-feature one.
+`WEB_ENABLED=false` (see `.env.example`) mounts NO feature's `web_routers`
+at all (zero `/admin` routes across every feature) and also drops the
+`/static` asset mount — there is no HTML UI left to serve assets to. Every
+feature's JSON `routers` keep working completely unchanged. This is the
+real "JSON API only, zero portal HTML" deployment path; it composes with
+`DISABLED_FEATURES` (e.g. `WEB_ENABLED=false` plus `DISABLED_FEATURES=
+custom_fields` ships a pure JSON API with the custom-fields feature removed
+entirely).
 
 ## Route map
 
@@ -318,7 +332,7 @@ enforced by `tests/architecture/test_route_guards.py`.
 
 | Prefix | Feature | Notes |
 |---|---|---|
-| `GET`/`POST /admin/login`, `GET /admin/logout` | `auth` | Cookie login/logout — `/login` is deliberately unguarded (pre-auth), allowlisted with a comment. |
+| `GET`/`POST /admin/login`, `POST /admin/logout` | `auth` | Cookie login/logout — `/login` is deliberately unguarded (pre-auth); `/logout` is a CSRF-protected POST (was a CSRF-exempt GET), carries `require_tenant` only (no `require_web_auth` — logout always succeeds, even on an expired/foreign-tenant cookie). Both allowlisted with a comment. |
 | `GET /admin` | `web` | Dashboard shell — the one route this deletable feature owns. |
 | `GET /admin/parties`, `/create`, `POST /admin/parties/{people,organizations}`, `GET /admin/parties/{id}`, `GET`/`POST /admin/parties/{id}/edit`, `POST /admin/parties/{id}/delete` | `parties` | List/detail/create/edit/delete screens. |
 | `GET`/`POST /admin/roles`, `/admin/roles/create`, `GET`/`POST /admin/role-grants`, `GET /admin/audit` | `rbac` | Roles, grants, audit log screens. |

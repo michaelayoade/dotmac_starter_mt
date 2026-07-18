@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.crud import CRUDManager
+from app.core.db import conflict_savepoint
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.identity import normalize_email, person_display_name
 from app.core.models import Party, PartyOrganization, PartyPerson, PartyType, Tenant
@@ -78,11 +79,18 @@ def create_person_party(
     party.person_profile = PartyPerson(
         first_name=payload.first_name, last_name=payload.last_name
     )
-    db.add(party)
+    # `db.add` happens INSIDE the savepoint, not before it: `Session.
+    # begin_nested()` auto-flushes any already-pending changes as part of
+    # establishing the SAVEPOINT (`_take_snapshot`) — adding `party` before
+    # entering `conflict_savepoint` would let that pre-flush emit the
+    # conflicting INSERT with no savepoint yet in place to protect the
+    # outer transaction's `SET LOCAL` if it fails. See
+    # `.superpowers/sdd/task-2-report.md`'s harness-interplay notes.
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            db.add(party)
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError("Email already registered") from exc
     return party
 
@@ -101,11 +109,13 @@ def create_organization_party(
         email=email,
     )
     party.organization_profile = PartyOrganization(legal_name=payload.legal_name)
-    db.add(party)
+    # See create_person_party's comment: `db.add` must happen INSIDE the
+    # savepoint, not before it.
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            db.add(party)
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError("Email already registered") from exc
     return party
 
@@ -135,21 +145,29 @@ def update_person_party(
         if key in updates and updates[key] is None:
             raise BadRequestError(f"{key} cannot be null")
 
-    profile = party.person_profile
-    if "first_name" in updates:
-        profile.first_name = updates["first_name"]
-    if "last_name" in updates:
-        profile.last_name = updates["last_name"]
-    if "email" in updates:
-        raw_email = updates["email"]
-        party.email = normalize_email(raw_email) if raw_email else None
-
-    party.display_name = person_display_name(profile.first_name, profile.last_name)
-
+    # The whole mutation section runs INSIDE the savepoint, not just the
+    # final flush: `Session.begin_nested()` auto-flushes any already-dirty
+    # objects as part of establishing the SAVEPOINT (`_take_snapshot`), so
+    # mutating `party`/`profile` BEFORE entering `conflict_savepoint` would
+    # let that pre-flush emit the conflicting UPDATE with no savepoint yet
+    # in place to protect the outer transaction's `SET LOCAL` if it fails.
+    # See `.superpowers/sdd/task-2-report.md`'s harness-interplay notes.
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            profile = party.person_profile
+            if "first_name" in updates:
+                profile.first_name = updates["first_name"]
+            if "last_name" in updates:
+                profile.last_name = updates["last_name"]
+            if "email" in updates:
+                raw_email = updates["email"]
+                party.email = normalize_email(raw_email) if raw_email else None
+
+            party.display_name = person_display_name(
+                profile.first_name, profile.last_name
+            )
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError("Email already registered") from exc
     return party
 
@@ -180,19 +198,20 @@ def update_organization_party(
         if key in updates and updates[key] is None:
             raise BadRequestError(f"{key} cannot be null")
 
-    profile = party.organization_profile
-    if "legal_name" in updates:
-        profile.legal_name = updates["legal_name"]
-    if "email" in updates:
-        raw_email = updates["email"]
-        party.email = normalize_email(raw_email) if raw_email else None
-
-    party.display_name = profile.legal_name
-
+    # See update_person_party's comment: the whole mutation section runs
+    # INSIDE the savepoint, not just the final flush.
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            profile = party.organization_profile
+            if "legal_name" in updates:
+                profile.legal_name = updates["legal_name"]
+            if "email" in updates:
+                raw_email = updates["email"]
+                party.email = normalize_email(raw_email) if raw_email else None
+
+            party.display_name = profile.legal_name
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError("Email already registered") from exc
     return party
 

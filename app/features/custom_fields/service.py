@@ -67,7 +67,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -75,6 +75,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.db import conflict_savepoint
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import resolve_value
@@ -208,11 +209,18 @@ def create_field(
         )
 
     field = CustomFieldDefinition(tenant_id=tenant_id, **payload.model_dump())
-    db.add(field)
+    # `db.add` happens INSIDE the savepoint, not before it: `Session.
+    # begin_nested()` auto-flushes any already-pending changes as part of
+    # establishing the SAVEPOINT (`_take_snapshot`) — adding `field` before
+    # entering `conflict_savepoint` would let that pre-flush emit the
+    # conflicting INSERT with no savepoint yet in place to protect the
+    # outer transaction's `SET LOCAL` if it fails. See
+    # `.superpowers/sdd/task-2-report.md`'s harness-interplay notes.
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            db.add(field)
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError(
             f"Field with code '{payload.field_code}' already exists "
             f"for {payload.entity_type}"
@@ -250,13 +258,49 @@ def list_for_entity(
     entity_type: str,
     *,
     is_active: bool = True,
+    visible_in: Literal["form", "detail", "list"] | None = None,
 ) -> list[CustomFieldDefinition]:
+    """List this entity_type's field definitions.
+
+    F6 fix: `visible_in` is the SINGLE query-level owner of visibility
+    semantics — no template/consumer ever re-filters a definitions list by
+    `show_in_form`/`show_in_detail`/`show_in_list` itself, it asks this
+    function for the right slice instead:
+
+    - `visible_in="form"` -> `show_in_form` (consumer: the values-panel EDIT
+      form, `app.features.custom_fields.web.party_values_panel`, only
+      renders an input for fields where this is true).
+    - `visible_in="detail"` -> `show_in_detail` (consumer: the same panel's
+      read-only "Details" listing, embedded in the party detail page).
+    - `visible_in="list"` -> `show_in_list`. No list-VIEW consumer exists
+      yet (a future entity-list admin screen would request
+      `visible_in="list"` to pick its columns); today's only consumer of
+      `show_in_list` is the definitions table's own "visible in" badge
+      (`app.features.custom_fields.web.index` /
+      `templates/admin/custom_fields/_table.html`), which reads the flag
+      directly per-row to summarize it rather than filtering a list with
+      it — that badge is this flag's real consumer surface today, added by
+      the same task that added this parameter (F6), so `show_in_list` is no
+      longer a dead control even though its list-COLUMN story is still
+      future work.
+
+    `None` (the default) returns every definition regardless of any
+    show_in_* flag — every pre-existing caller (JSON API `list_for_entity`
+    passthrough, `validate_values`' own internal lookup) keeps that
+    behavior unchanged.
+    """
     stmt = select(CustomFieldDefinition).where(
         CustomFieldDefinition.tenant_id == tenant_id,
         CustomFieldDefinition.entity_type == entity_type,
     )
     if is_active:
         stmt = stmt.where(CustomFieldDefinition.is_active == True)  # noqa: E712
+    if visible_in == "form":
+        stmt = stmt.where(CustomFieldDefinition.show_in_form == True)  # noqa: E712
+    elif visible_in == "detail":
+        stmt = stmt.where(CustomFieldDefinition.show_in_detail == True)  # noqa: E712
+    elif visible_in == "list":
+        stmt = stmt.where(CustomFieldDefinition.show_in_list == True)  # noqa: E712
     stmt = stmt.order_by(
         CustomFieldDefinition.section_name,
         CustomFieldDefinition.display_order,

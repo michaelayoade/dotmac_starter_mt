@@ -32,10 +32,16 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_db
 from app.core.errors import register_error_handlers
 from app.core.models import Party, PartyPerson, PartyType, Tenant
+from app.core.settings_models import SettingDomain
+from app.core.settings_resolver import upsert_by_key
 from app.core.web_deps import safe_next_url
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import RegisterRequest
 from app.features.auth.web import router as auth_web_router
+
+# Import for the side effect: registers branding/ui_branding into the
+# resolver registry (`load_branding` calls `resolve_value` against it).
+from app.features.settings import spec as _settings_spec  # noqa: F401
 from app.features.web.web import router as web_router
 
 PASSWORD = "correct horse battery staple"
@@ -270,7 +276,11 @@ def test_dashboard_rejects_non_admin_party(
 
 
 # ---------------------------------------------------------------------------
-# GET /admin/logout
+# POST /admin/logout (F7 — was GET; see app.features.auth.web's docstring).
+# This fixture's bare FastAPI() app carries no CSRFMiddleware, so these
+# calls need no `x-csrf-token` header — the real CSRF-enforcement proof
+# lives in `tests/test_security_middleware.py` (unit) and
+# `tests/test_admin_portal_e2e.py` (Postgres, full stack).
 # ---------------------------------------------------------------------------
 
 
@@ -284,11 +294,16 @@ def test_logout_clears_cookie_and_redirects(
     )
     token = login.cookies["access_token"]
 
-    resp = web_client.get(
+    resp = web_client.post(
         "/admin/logout", cookies={"access_token": token}, follow_redirects=False
     )
     assert resp.status_code == 302
     assert resp.headers["location"] == "/admin/login"
+    # Pin the htmx redirect header (test_web_login.py:183's pattern) — a
+    # plain 302 Location is not enough for the topbar's `hx-post` Sign Out
+    # control; without `HX-Redirect` htmx would swap the followed
+    # redirect's body into the topbar instead of navigating.
+    assert resp.headers["hx-redirect"] == "/admin/login"
     set_cookie = resp.headers.get("set-cookie", "")
     assert "access_token=" in set_cookie
     assert 'access_token=""' in set_cookie or "Max-Age=0" in set_cookie
@@ -301,6 +316,98 @@ def test_logout_clears_cookie_and_redirects(
 
 
 def test_logout_without_cookie_still_redirects(web_client: TestClient) -> None:
-    resp = web_client.get("/admin/logout", follow_redirects=False)
+    resp = web_client.post("/admin/logout", follow_redirects=False)
     assert resp.status_code == 302
     assert resp.headers["location"] == "/admin/login"
+
+
+def test_logout_get_is_removed(web_client: TestClient) -> None:
+    """F7's exact vector: `GET /admin/logout` must no longer exist — a
+    CSRF-exempt safe method that mutated session state (forced-logout
+    CSRF). FastAPI returns 405 for a known path/wrong method, not 404."""
+    resp = web_client.get("/admin/logout", follow_redirects=False)
+    assert resp.status_code == 405
+
+
+# ---------------------------------------------------------------------------
+# Task 4 / F4: per-request tenant branding shows up portal-wide, not just in
+# the branding editor's own preview -- login page (2 call sites, pre-auth)
+# and the authenticated dashboard (via `require_web_auth`, call site 1/3).
+# Real cross-tenant/Postgres proof lives in
+# `tests/test_branding_portal_e2e.py`; these are the fast SQLite-level
+# wiring proofs.
+# ---------------------------------------------------------------------------
+
+
+def test_login_page_reflects_tenant_saved_branding(
+    web_client: TestClient, db: Session, tenant_row: Tenant
+) -> None:
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        {"name": "Acme Tenant Brand"},
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    resp = web_client.get("/admin/login")
+    assert resp.status_code == 200
+    assert "Acme Tenant Brand" in resp.text
+
+
+def test_login_post_failure_rerender_reflects_tenant_saved_branding(
+    web_client: TestClient, db: Session, tenant_row: Tenant, registered_admin: dict
+) -> None:
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        {"name": "Acme Tenant Brand"},
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    resp = web_client.post(
+        "/admin/login",
+        data={"username": registered_admin["email"], "password": "wrong-password"},
+    )
+    assert resp.status_code == 200
+    assert "Acme Tenant Brand" in resp.text
+
+
+def test_dashboard_sidebar_reflects_tenant_saved_branding(
+    web_client: TestClient, db: Session, tenant_row: Tenant, registered_admin: dict
+) -> None:
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        {"name": "Acme Tenant Brand"},
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    login = web_client.post(
+        "/admin/login",
+        data={"username": registered_admin["email"], "password": PASSWORD},
+        follow_redirects=False,
+    )
+    token = login.cookies["access_token"]
+
+    resp = web_client.get("/admin", cookies={"access_token": token})
+    assert resp.status_code == 200
+    assert "Acme Tenant Brand" in resp.text
+
+
+def test_login_page_uses_static_brand_when_no_tenant_override(
+    web_client: TestClient,
+) -> None:
+    """No `ui_branding` override saved yet -- the login page still shows
+    SOMETHING sane (the deployment-static brand), matching the pre-Task-4
+    behavior for a tenant that never touched branding."""
+    from app.core.branding import get_brand
+
+    resp = web_client.get("/admin/login")
+    assert resp.status_code == 200
+    assert get_brand()["name"] in resp.text

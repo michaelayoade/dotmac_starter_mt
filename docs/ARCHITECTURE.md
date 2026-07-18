@@ -218,21 +218,138 @@ restart. `tests/test_custom_fields_isolation.py` plus the eye-color e2e
 canary (`tests/unit/test_custom_fields_api.py`) demonstrate a field being
 defined and used in the same test run with zero schema changes in between.
 
+### Visibility flags are consumed, query-level (2b.1-T5, finding F6)
+
+`CustomFieldDefinition` has always declared `show_in_form`/`show_in_detail`/
+`show_in_list` (defaults `True`/`True`/`False`), but until this task nothing
+read them — every consumer listed every active definition regardless. The
+fix is a single query-level owner: `custom_fields_service.list_for_entity`
+gained an optional `visible_in: Literal["form", "detail", "list"] | None`
+filter that maps directly to the matching `show_in_*` column
+(`visible_in="form"` → `show_in_form == True`, etc.); `None` (every
+pre-existing caller) is unchanged — every definition, unfiltered. No
+consumer re-implements this filtering itself; each just asks for the slice
+it needs:
+
+- The values-panel **edit form**
+  (`app.features.custom_fields.web.party_values_panel`) requests
+  `visible_in="form"` — only `show_in_form` fields get an input.
+- The same panel's read-only **"Details" section** requests
+  `visible_in="detail"`, then layers one more in-Python condition,
+  `not show_in_form`, via the panel's own `_detail_only_definitions`
+  helper — a field that is BOTH `show_in_form` and `show_in_detail` (the
+  default for both flags, so the common case) renders its value exactly
+  ONCE, in the editable form input, not a second time as a duplicate
+  read-only row. This narrower "detail-only" combination is scoped to this
+  one consumer, in-Python, rather than overloading `list_for_entity`'s
+  established single-flag `visible_in="detail"` semantics, which other
+  future callers may still want unfiltered by `show_in_form`.
+- The definitions **table** (`templates/admin/custom_fields/_table.html`)
+  reads `show_in_list` per-row directly, to render a "visible in lists"
+  badge — a list-VIEW consumer that picks actual columns from
+  `visible_in="list"` is still future work (no entity-list admin screen
+  exists yet), but the flag is no longer a dead control now that this badge
+  reads it.
+
+Tests: one per flag/consumer (`tests/unit/test_custom_fields_service.py`,
+`tests/unit/test_custom_fields_web.py`) plus the detail/form
+non-double-render pin.
+
+## Capability model: manifest-driven surfaces (2b.1-T1, findings F1 + F5)
+
+Before this task, `FeatureManifest` had one router list; whether a route was
+a JSON endpoint or an HTML admin screen was a fact only the router itself
+knew, and the sidebar was a hand-maintained list in
+`templates/components/sidebar.html` with no link back to what was actually
+mounted — `DISABLED_FEATURES=web` looked like an API-only switch but wasn't
+(the other ~30 `/admin` routes stayed up), and a disabled feature could
+leave a dead nav link or an embedded fragment 404ing inside another
+feature's page. The fix makes the manifest the single, queryable source of
+truth for a feature's surfaces:
+
+- `FeatureManifest.routers` — JSON API routes. Mounted for every ENABLED
+  feature, always; `web_enabled` has no say here (this is what makes
+  API-only mode possible without also killing the API).
+- `FeatureManifest.web_routers` — HTML/HTMX admin-portal routes (the
+  feature's `web.py`). Mounted for an enabled feature ONLY when
+  `web_enabled` is `True`. `auth`'s login/logout router lives here too
+  (not in `routers`) — cookie auth has no meaning without a web surface to
+  authenticate into.
+- `FeatureManifest.nav: Sequence[NavItem]` — the sidebar entries this
+  feature contributes. `NavItem(label, path, feature="")` — `feature` is
+  left blank by the declaring `feature.py` and stamped in by the registry
+  when collecting nav items across manifests, so a feature never repeats
+  its own name.
+
+`app.core.features.mount_features(app, *, manifests, disabled, web_enabled)`
+mounts each enabled manifest's `routers` unconditionally, then its
+`web_routers` only `if web_enabled`. `app.main` calls
+`app.core.templating.install_surface_globals(manifests, disabled,
+web_enabled)` once at startup (config is process-static, so this is safe)
+to set two Jinja globals every template can read: `enabled_features:
+frozenset[str]` (every feature name that is actually mounted — the general
+"is this feature on" question, not specifically a web concept) and
+`nav_items: tuple[NavItem, ...]` (`()` when `web_enabled` is `False` — there
+is no sidebar to populate). `templates/components/sidebar.html` renders
+from `nav_items` — there is no parallel hardcoded link list to keep in
+sync.
+
+**Two independent on/off switches — do not conflate them:**
+
+- `DISABLED_FEATURES` (`Settings.disabled_feature_set`) turns off ONE named
+  feature entirely — both its `routers` and `web_routers` together, one
+  feature, one switch. `DISABLED_FEATURES=web` disables the `web` package
+  specifically (the admin DASHBOARD SHELL, `GET /admin`, and nothing else);
+  every other feature's own `/admin/*` screens and JSON routes are
+  unaffected.
+- `WEB_ENABLED` (`Settings.web_enabled`, env var, default `true`) is the
+  SURFACE switch: `WEB_ENABLED=false` mounts NO feature's `web_routers` at
+  all (zero `/admin` routes across every feature) and also drops the
+  `/static` `StaticFiles` mount (`app/main.py`) — there is no HTML UI left
+  to serve assets to. Every feature's `routers` (JSON API) keeps working
+  unchanged. This is the real API-only deployment mode, independent of
+  which individual features are enabled/disabled via `DISABLED_FEATURES`.
+
+**The optional-slot pattern (F5):** a feature's nav entry or an embedded
+fragment must never point at a route that might not be mounted. Two
+enforcement mechanisms:
+
+1. **Nav↔routes coherence test** —
+   `tests/architecture/test_feature_manifests.py
+   ::test_nav_items_paths_exist_in_web_routers` fails the build if any
+   manifest's `NavItem.path` doesn't correspond to a route actually mounted
+   in that SAME manifest's `web_routers` — a stale/dead sidebar link is a
+   build failure, not a 404 a user finds later.
+   `test_nav_paths_coherence_detects_bogus_entry` is the sensitivity check:
+   it injects a bogus nav entry and asserts the coherence test actually
+   catches it (a green coherence test that can't go red proves nothing).
+2. **`enabled_features`-gated fragment embeds** —
+   `templates/admin/parties/detail.html` wraps its custom-fields
+   values-panel embed in `{% if 'custom_fields' in enabled_features %}`;
+   with `DISABLED_FEATURES=custom_fields`, the party detail page renders
+   200 without the panel div (and without an htmx call to a route that no
+   longer exists) instead of a broken fragment. This is THE pattern for any
+   template that conditionally embeds another feature's optional UI: guard
+   on `enabled_features`, never assume a feature is mounted.
+
+Every feature that has portal pages puts them in that feature's own
+`web.py` (never `router.py`), mounted under `/admin/...`. Every `web.py`
+route calls the SAME `service.py` functions its JSON sibling calls (e.g.
+`parties/web.py`'s edit form and `PATCH`-equivalent both call
+`parties_service.update_person_party`) — one write-owner per resource, two
+presentation surfaces, never a second implementation of the write.
+
 ## Admin portal (web UI)
 
 Phase 2b added an HTML/HTMX admin portal alongside the existing JSON API —
-same tenants, same services, a second thin presentation surface. Every
-feature that has portal pages puts them in that feature's own `web.py`
-(never `router.py`), mounted under `/admin/...`; the deletable `web` feature
-package (`app/features/web/`, `core=False`) owns only the dashboard shell
+same tenants, same services, a second thin presentation surface (see
+"Capability model" above for how a feature's admin screens get mounted and
+how they reach the sidebar). The deletable `web` feature package
+(`app/features/web/`, `core=False`) owns only the dashboard shell
 (`GET /admin`) — `DISABLED_FEATURES=web` drops that one route and nothing
-else, since login/logout (`GET`/`POST /admin/login`, `GET /admin/logout`)
+else, since login/logout (`GET`/`POST /admin/login`, `POST /admin/logout`)
 are owned by `auth` (a core feature) and every other feature's `/admin/*`
-routes mount independently. Every `web.py` route calls the SAME
-`service.py` functions its JSON sibling calls (e.g. `parties/web.py`'s edit
-form and `PATCH`-equivalent both call `parties_service.update_person_party`)
-— one write-owner per resource, two presentation surfaces, never a second
-implementation of the write.
+routes mount independently.
 
 ### Template / asset layout
 
@@ -297,10 +414,15 @@ validation lands once and covers both surfaces:
    `WebAuthRedirect` (a 302 to `/admin/login?next=...`, registered as a
    dedicated exception handler in `app.core.errors`) — a portal auth
    failure is ALWAYS a redirect, never a bare 401/403 JSON body.
-3. **Logout** (`GET /admin/logout`) revokes the `AuthSession` server-side
-   (not just clearing the cookie) and redirects to the login page —
-   verified by the e2e canary re-submitting the revoked cookie value and
-   getting redirected again, not authenticated.
+3. **Logout** (`POST /admin/logout` — was `GET /admin/logout` until 2b.1-T5,
+   finding F7: a bare `<a href="/admin/logout">` is a CSRF-exempt safe
+   method, so a third-party page could force a victim's logout just by
+   loading `<img src="/admin/logout">`; the topbar's logout control is now
+   an `hx-post` button, routed through the same CSRF header-bridge as every
+   other mutation) revokes the `AuthSession` server-side (not just clearing
+   the cookie) and redirects to the login page — verified by the e2e canary
+   re-submitting the revoked cookie value and getting redirected again, not
+   authenticated.
 
 Phase 3 TODO (tracked in the backlog): `require_web_auth` hardcodes the
 `"admin"` role; loosen this per-route once non-admin portal surfaces exist.
@@ -341,23 +463,59 @@ docstring):
   (`SettingDomain.branding`, resolved via the same
   tenant→platform→spec-default resolver every other setting uses) overlaid
   on top. Per-request, not cached — a tenant admin's branding edit is live
-  on the next page load, no restart. `primary_color`/`accent_color`
-  overrides are validated as `#RRGGBB` hex (falling back to the static
-  color on a bad value); `custom_css` is run through
-  `sanitize_branding_css` (strips `@import`, `javascript:`/`data:` URLs,
-  `expression()`, `behavior:`, and any literal `<` — a `<script>` breakout
-  attempt) before it is ever rendered.
+  on the next page load, no restart. Only keys in `_KNOWN_BRAND_KEYS`
+  (`name`, `tagline`, `logo_url`, `primary_color`, `accent_color`,
+  `custom_css` — the branding editor's own form fields) are merged from the
+  stored override; anything else in that dict is ignored (2b final-review
+  follow-up, resolved 2b.1-T4/F4 — previously any key merged unchecked).
+  `primary_color`/`accent_color` overrides are validated as `#RRGGBB` hex
+  (falling back to the static color on a bad value); `custom_css` is run
+  through `sanitize_branding_css` (strips `@import`, `javascript:`/`data:`
+  URLs, `expression()`, `behavior:`, and any literal `<` — a `<script>`
+  breakout attempt) before it is ever rendered.
 
-`GET`/`POST /admin/settings/branding` (`app.features.settings.web`) is the
-first and only route that calls `load_branding` — it renders the CURRENT
-effective branding, and its own render context's `brand` key SHADOWS the
-process-global static `brand` template global for that one response only
-(the static global stays available to every other template unchanged). The
-same route is where `templates/admin/settings/branding.html`'s
-`custom_css` preview block uses `| safe` — the one real `| safe` usage in
-this app's templates, immediately preceded by a `SANITIZER:` comment
-pointing at `sanitize_branding_css`, which is what makes it safe (see the
-CLAUDE.md template-escaping rule and
+**Portal-wide resolution (2b.1-T4, finding F4):** `load_branding` used to
+have exactly one caller (the branding editor's own preview) — every other
+portal page and the login page rendered the deployment-static brand only,
+so saving a tenant's branding changed nothing outside the editor. Fixed by
+`app.core.branding.get_request_branding(request, db)`: resolves
+`load_branding(db, tenant.id)` (or the static `get_brand()` fallback when
+`request.state.tenant` is `None` — platform hosts, unresolved-tenant error
+contexts) exactly ONCE per request, memoized on `request.state.branding`.
+`app.core.templating.render()` is the single place that reads it back into
+the template context — it sets `context["brand"]` from
+`request.state.branding` unless the caller's own context already defines
+`brand` (route-level override still wins; see that module's docstring for
+the full precedence: explicit context > per-request tenant override >
+static global). No route changed to pick this up.
+
+Three call sites populate `request.state.branding` for the whole app,
+independent of how many features/routers exist (seam decision documented in
+`app.core.branding`'s module docstring, including the two rejected
+per-router/per-route shapes): `app.core.web_deps.require_web_auth` (covers
+every authenticated `/admin/*` page — one seam, since every such route
+already depends on it) and the two pre-auth `GET`/`POST /admin/login`
+routes (`app.features.auth.web`), which never reach `require_web_auth`.
+
+Cost: one extra DB read (`resolve_value` inside `load_branding`) per
+authenticated web request that didn't already need one — mitigated to
+"one per request" (not one per render) by the memoization above; fully
+removing it is the phase-3 settings-cache ticket
+(`docs/superpowers/phase2-backlog.md`'s "Added during phase 2a execution"
+section) — not needed to ship this fix.
+
+`GET`/`POST /admin/settings/branding` (`app.features.settings.web`) still
+calls `load_branding` directly for its own live-preview render (its context
+explicitly sets `brand`, which is why the precedence rule above lets a
+route override the per-request value) — it renders the CURRENT effective
+branding, and its own render context's `brand` key SHADOWS both the
+per-request tenant override and the process-global static `brand` template
+global for that one response only (the static global stays available to
+every other template unchanged). The same route is where
+`templates/admin/settings/branding.html`'s `custom_css` preview block uses
+`| safe` — the one real `| safe` usage in this app's templates, immediately
+preceded by a `SANITIZER:` comment pointing at `sanitize_branding_css`,
+which is what makes it safe (see the CLAUDE.md template-escaping rule and
 `test_safe_filter_only_used_with_a_sanitize_comment_nearby`).
 
 Write path: `POST /admin/settings/branding` composes the submitted
@@ -450,7 +608,7 @@ made concrete — every model has exactly one declared owner.
 | `AuthSession` | `auth_sessions` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
 | `AuditEvent` | `audit_events` | core | dotmac_sub (`app/models/audit.py`, tenant-adapted) |
 | `DomainSetting` | `domain_settings` | core | dotmac_starter (`app/models/domain_settings.py`, tenant-adapted), with `CheckConstraint` restored from dotmac_sub |
-| `UserCredential` | `user_credentials` | auth | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
+| `UserCredential` | `user_credentials` | auth | dotmac_sub (`app/models/auth.py`, tenant-adapted; `email` column dropped 2b.1-T3 — see "Auth credentials" ownership row and the F2 resolution note below) |
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
@@ -471,10 +629,11 @@ write:
 | Tenant domains | none — no write path exists yet (rows would be inserted by a future custom-domain feature) |
 | Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` / `update_person_party` / `update_organization_party` (the `/parties` API + `/admin/parties/{id}/edit` web flow), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
 | `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `app.core.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
+| `Party.email` (the login identity) | **Single column, single authority as of 2b.1-T3 (finding F2, resolved)**: owner is parties+auth writers via `app.core.identity.normalize_email` — same dual-writer/shared-invariant shape as `display_name` above (`create_person_party`/`update_person_party`/`create_organization_party`/`update_organization_party` and `auth/service.py::register` all call it). `app.features.auth.service.login` READS this column directly (join by `party_id` to find the credential row) instead of a second `UserCredential.email` copy, which is GONE — see the F2 resolution note under "Known dual-writer: Parties" below. No repair path needed: there is only ever one column now, so there is nothing to drift or re-sync. |
 | Party role grants | `app.features.rbac.service.assign_role` (the `POST /rbac/role-grants` JSON API **and** the `POST /admin/role-grants` web form both call this same function) **and** `app.features.auth.service._assign_first_user_admin` (auto-assigns the tenant's first registered user the `admin` role — a second, narrower writer of the same table; see the RBAC follow-up in `docs/superpowers/phase2-backlog.md`) |
 | Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and implicitly `_assign_first_user_admin` (creates the tenant's `admin` role on first use if it doesn't exist yet) |
-| Auth credentials | `app.features.auth.service.register` (the only writer — no credential-update/password-reset path yet, phase 2c) |
-| Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `GET /admin/logout`; the JSON API has no logout/revoke route of its own yet) |
+| Auth credentials | `app.features.auth.service.register` (the only writer of the `password_hash` row — no credential-update/password-reset path yet, phase 2c). `Party.email` is a SEPARATE resource with its own row above (Parties) — `UserCredential` carries no email of its own as of 2b.1-T3 (F2): `login()` resolves `Party` by email first, then `UserCredential` by `party_id` only. |
+| Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `POST /admin/logout`, CSRF-protected as of 2b.1-T5/F7; the JSON API has no logout/revoke route of its own yet) |
 | Audit events | `app.core.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes) and `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor) |
 | Domain settings rows | `app.core.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
 | `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `app.core.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
@@ -505,9 +664,26 @@ functions:
   `parties` table's uniqueness index is `lower(email)`-based — a
   mixed-case write from either path that skipped normalization would still
   be rejected by the DB constraint, but a *read*-side comparison
-  (credential lookup at login) that skipped it would silently fail to
+  (`login()`'s `Party` lookup) that skipped it would silently fail to
   match. A new writer of `Party.email` now has an obvious single function
   to call rather than a convention to remember and replicate.
+  **F2 resolution (Phase 2b.1 Task 3, RESOLVED):** until this task,
+  `app.features.auth.models.UserCredential` carried its OWN `email` column
+  — a write-once copy made at `register()` and never touched again. Once
+  `update_person_party` (Task 5) could edit or NULL `Party.email`, that
+  copy silently drifted from the real profile email, with no cross-feature
+  guard possible (parties cannot reach into auth's table under feature
+  independence). The fix removes the second column entirely — migration
+  `alembic/versions/20260718_0005_single_email_authority.py` drops
+  `user_credentials.email` + its unique constraint, and
+  `auth/service.py::login` now resolves `Party` by
+  `(tenant_id, normalize_email(email), party_type=person)` FIRST, then
+  `UserCredential` by `party_id` only. There is exactly one email column
+  system-wide now, so the two can never drift again — see the ownership
+  table's `Party.email` row above. Documented, intended consequence: a
+  person party with a NULL email cannot log in (the query matches no
+  string) — see `login()`'s docstring, and the (struck) backlog entry in
+  `docs/superpowers/phase2-backlog.md`.
 - **`display_name` derivation** — **closed as of Task 5** (previously the
   tracked SOT gap in `docs/superpowers/phase2-backlog.md`). Both writers
   now call `app.core.identity.person_display_name(first_name, last_name)`
@@ -620,17 +796,27 @@ in the same migration that creates the table.
 2. `app.core.features.load_manifests(FEATURE_MODULES)` imports each
    `<module>.feature` submodule via `importlib` (so core never statically
    imports `app.features`) and collects its `feature: FeatureManifest`
-   (`name`, `routers`, `core: bool`, `enabled_by_default: bool`).
-3. `app.core.features.mount_features(app, manifests=..., disabled=settings.disabled_feature_set)`
-   mounts each manifest's routers via `app.include_router(...)`, skipping
-   anything in `DISABLED_FEATURES` or with `enabled_by_default=False`.
+   (`name`, `routers`, `web_routers`, `nav`, `core: bool`,
+   `enabled_by_default: bool` — see "Capability model" above for the
+   `web_routers`/`nav` fields).
+3. `app.core.features.mount_features(app, manifests=..., disabled=settings.disabled_feature_set, web_enabled=settings.web_enabled)`
+   mounts each enabled manifest's `routers` via `app.include_router(...)`
+   unconditionally, then its `web_routers` ONLY `if web_enabled`, skipping
+   the whole manifest if its name is in `DISABLED_FEATURES` or its
+   `enabled_by_default` is `False`. `app/main.py` separately gates the
+   `/static` `StaticFiles` mount on the same `settings.web_enabled` flag,
+   and calls `install_surface_globals(manifests, disabled, web_enabled)` to
+   populate the `enabled_features`/`nav_items` Jinja globals once, at
+   startup (see "Capability model" above).
 4. Mount failures in a `core: True` feature re-raise (fails startup); a
    failure in a non-core feature is logged and skipped (fault isolation) —
    the app still boots without it.
 5. `tests/architecture/test_feature_manifests.py` guarantees every package
    under `app/features/` on disk is registered in `FEATURE_MODULES` and that
    each manifest's `name` matches its package name — so a feature can never
-   silently go unmounted or be mounted twice under a different name.
+   silently go unmounted or be mounted twice under a different name. The
+   same test module's `test_nav_items_paths_exist_in_web_routers` guarantees
+   nav↔route coherence (see "Capability model" above).
 6. Separately, still inside `lifespan` and gated by `settings.seed_on_startup`,
    each enabled manifest's optional `seed` hook is dispatched via
    `asyncio.to_thread` (it does sync DB I/O); a seed is DEFERRED and
@@ -658,6 +844,58 @@ is correlatable with the structured request log line. Services raise
 `test_routers_do_not_issue_direct_queries` — routers stay thin; the
 corollary is that error translation is centralized in `app/core/errors.py`,
 not scattered per-router).
+
+## Conflict handling: savepoints preserve RLS context (2b.1-T2, finding F3)
+
+`get_db` (`app.core.db`) owns the request's outer transaction and issues
+`SET LOCAL app.current_tenant` on it once, for RLS. The pre-2b.1 convention
+at every expected-conflict site (duplicate email/slug/role-grant, etc.) was
+`try: db.flush() except IntegrityError: db.rollback(); raise
+ConflictError(...)` — but a bare `db.rollback()` rolls back that ENTIRE
+outer transaction, discarding the `SET LOCAL` along with it. Any DB access
+the caller's `except ConflictError` handler performed afterwards (a web
+handler re-rendering a form from an already-loaded ORM object, or
+re-querying a list for the re-render) then ran with no tenant context set —
+under `FORCE ROW LEVEL SECURITY` that fails closed: either an
+`ObjectDeletedError` re-loading an expired attribute, or a silently empty
+result set (500s or blank re-renders, invisible on SQLite since it can't
+enforce RLS at all — this is why the canary requires Postgres).
+
+`app.core.db.conflict_savepoint(db)` is the fix, a context manager around
+`Session.begin_nested()` (a `SAVEPOINT` scoped INSIDE the outer
+transaction): on clean exit it commits the SAVEPOINT (a no-op release, not
+the outer `COMMIT`); on any exception it rolls back ONLY the SAVEPOINT —
+leaving the outer transaction and its `SET LOCAL` fully intact — then
+re-raises unchanged. Every conflict site (parties create/update ×2 each,
+`rbac` `create_role`/`assign_role`, `tenants` create, `auth` register,
+`custom_fields` create) follows the same shape:
+
+```python
+try:
+    with conflict_savepoint(db):
+        db.add(row)
+        db.flush()
+except IntegrityError:
+    raise ConflictError(...)
+```
+
+**The mutation must happen INSIDE the `with` block, never before it** —
+entering a nested transaction auto-flushes any already-pending/dirty
+objects on the session before the SAVEPOINT is actually established, so a
+`db.add(row)` issued before `conflict_savepoint` would let THAT auto-flush
+emit the conflicting statement with no savepoint yet in place to protect
+the outer transaction, reintroducing the exact bug this helper exists to
+fix.
+
+Enforcement: `tests/architecture/test_no_feature_rollback.py` bans a bare
+`db.rollback()` anywhere in `app/features/*/service.py` (this is also
+CLAUDE.md's hard rule). `tests/test_conflict_rls_context.py` is the
+Postgres canary — a duplicate-email person edit and a duplicate role grant,
+both via the web flow, asserting a 200 re-render WITH correct data (grants
+list still populated; edit form re-renders with the field error) rather
+than the pre-fix 500/empty-render. This canary was RED against pre-2b.1
+`main` by construction (the bug is invisible on SQLite, where these tests
+cannot even run).
 
 ## Testing model
 

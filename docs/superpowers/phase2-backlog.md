@@ -67,8 +67,20 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 - deploy.sh: generic ERR trap should also `up -d` the previous image for mid-`up` failures
   (today only the health-gate path restores); qualify `IMAGE_NAME` and rename CI job's
   `IMAGE_TAG` → `IMAGE_REF` when the GHCR publish job is added.
-- Service rollback convention: document that after `db.rollback()` (which discards the
-  transaction-scoped RLS context) the request must end, never continue.
+- ~~Service rollback convention: document that after `db.rollback()` (which discards the
+  transaction-scoped RLS context) the request must end, never continue.~~ — **RESOLVED
+  2b.1-T2 (finding F3)**: rather than documenting the hazard as a convention to remember,
+  the bare `db.rollback()` call itself is gone from every feature-service conflict site.
+  `app.core.db.conflict_savepoint(db)` wraps the mutation in a `SAVEPOINT`
+  (`Session.begin_nested()`) instead — on `IntegrityError` it rolls back only the
+  savepoint, leaving the outer transaction and its `SET LOCAL app.current_tenant` fully
+  intact, so the caller's `except ConflictError` handler (a web re-render, a re-query)
+  keeps working under RLS instead of running context-less. Enforced going forward by
+  `tests/architecture/test_no_feature_rollback.py` (bans a bare `db.rollback()` in
+  `app/features/*/service.py`) and canaried against real Postgres by
+  `tests/test_conflict_rls_context.py` (RED against pre-2b.1 `main` by construction —
+  the bug is invisible on SQLite). See `docs/ARCHITECTURE.md`'s "Conflict handling:
+  savepoints preserve RLS context" section and CLAUDE.md's matching hard rule.
 - Scoping style convention: services relying on RLS alone should say so in a comment
   (persons service style); pick one convention for explicit-vs-RLS-only tenant filters.
 - Dangling doc pointers to untracked task reports (Dockerfile, query.py, bump_version.py,
@@ -86,11 +98,22 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   scopes itself to `templates/{admin,auth}` and the `/admin` prefix — see the
   "2b-T8's web-conventions..." SOT-complete gap below; extend both when a non-admin
   portal surface lands.
-- `DISABLED_FEATURES` has no per-router granularity: a feature's JSON router and its
+- ~~`DISABLED_FEATURES` has no per-router granularity: a feature's JSON router and its
   `web.py` router are both registered on the same `FeatureManifest.routers` list, so
   disabling `parties` (etc.) drops its JSON API and its `/admin/parties/*` screens
   together — there is no way to keep one and drop the other short of splitting the
-  manifest, which nothing needs yet (documented as-is in README's "Disabling a feature").
+  manifest, which nothing needs yet (documented as-is in README's "Disabling a feature").~~
+  — **PARTIALLY RESOLVED 2b.1-T1 (finding F1)**: the manifest split now exists —
+  `FeatureManifest.routers` (JSON API) and `FeatureManifest.web_routers` (admin-portal
+  HTML) are separate fields, and a NEW, orthogonal switch (`WEB_ENABLED`) mounts/unmounts
+  every feature's `web_routers` at once, independent of `DISABLED_FEATURES`. What is
+  NOT resolved: `DISABLED_FEATURES=<name>` itself still turns off one named feature's
+  `routers` AND `web_routers` together — there is still no way to keep `parties`'s JSON
+  API while dropping only its `/admin/parties/*` screens (or vice versa) for that ONE
+  feature. `WEB_ENABLED` only ever answers the whole-portal question ("any web at all,
+  for every feature"), not a per-feature one — a genuine per-feature/per-surface toggle
+  remains open if a future consumer needs it. See `docs/ARCHITECTURE.md`'s "Capability
+  model" section.
 - `.env.example` had zero entries for the `BRAND_*` static-branding overrides
   `app.core.branding.get_brand()` reads via `os.getenv` (deployment-static identity layer,
   distinct from the per-tenant `ui_branding` DB setting) — a real as-built gap, closed in
@@ -101,6 +124,34 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   `web_logout` revokes sessions server-side, and `rbac/web.py`/`settings/web.py` both
   call `write_audit_event` too.
 
+## Added during phase 2b.1 execution (Michael's post-merge review findings F1–F7)
+
+Michael's post-merge review of 0.6.0 (22192f6) raised seven findings, tracked and closed
+by plan `docs/superpowers/plans/2026-07-18-phase2b1-sot-composability.md`. F2 (email
+authority) and F4 (portal-wide branding) already had pre-existing backlog entries above,
+now struck with resolution notes; F1 and F3 are struck above too. F5, F6, F7 had no prior
+backlog entry (net-new findings from the fresh review, not phase-1 carryover) — recorded
+here so all seven are discoverable as closed in one place:
+
+- **F5 (dead nav links + broken fragments when a feature is disabled)** — **DELIVERED
+  2b.1-T1**: `tests/architecture/test_feature_manifests.py
+  ::test_nav_items_paths_exist_in_web_routers` fails the build if a manifest's `NavItem`
+  points at a route not mounted in that manifest's `web_routers`; the party detail
+  page's custom-fields embed is gated by `{% if 'custom_fields' in enabled_features %}`
+  (the optional-slot pattern — see `docs/ARCHITECTURE.md`'s "Capability model" section)
+  so `DISABLED_FEATURES=custom_fields` renders the party detail page 200 without the
+  panel instead of a broken htmx fragment.
+- **F6 (`show_in_form`/`show_in_detail`/`show_in_list` declared but never consumed)** —
+  **DELIVERED 2b.1-T5**: `custom_fields_service.list_for_entity(..., visible_in=...)` is
+  the single query-level owner; the values-panel form, its detail-only read section, and
+  the definitions table's "visible in" badge are the three consumers. See
+  `docs/ARCHITECTURE.md`'s "Visibility flags are consumed" subsection.
+- **F7 (logout was a CSRF-exempt GET)** — **DELIVERED 2b.1-T5**: `POST /admin/logout`
+  only; `GET /admin/logout` removed (BREAKING, in CHANGELOG 0.6.1). Still carries
+  `require_tenant` only (no `require_web_auth`) — logout must always succeed even on an
+  expired/foreign-tenant cookie; the POST method plus the CSRF header-bridge is what
+  stops a FORCED logout now, not a role check.
+
 ## Added during phase 2a execution
 
 - Settings: add `sqlite_where` mirrors to the domain_settings partial unique indexes so the
@@ -109,7 +160,11 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   at the settings API boundary (owned by T5's validation; verify it landed there).
 - Settings cache (Redis) with invalidation on write — phase 3, alongside Celery/Redis
   infra (noted in `app/core/settings_resolver.py`'s module docstring; no caching exists
-  yet, every `resolve_value` call hits Postgres).
+  yet, every `resolve_value` call hits Postgres). This is also the fix for 2b.1-T4's
+  (F4) one-extra-DB-read-per-authenticated-web-request cost (`get_request_branding` ->
+  `load_branding` -> `resolve_value`) — request-scoped memoization (landed in T4) avoids
+  N reads per request, but every request still pays one; the Redis cache below removes
+  even that.
 - ~~RBAC: consider `require_user_auth` (not admin) for `GET /rbac/roles` when 2b builds
   role-assignment dropdowns.~~ — **moot as of 2b-T6**: the role-grant web dropdown
   (`/admin/role-grants`) calls `rbac_service.list_roles` directly, server-side — it
@@ -145,14 +200,28 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   the same commit, not leave it to a later doc pass.
 - External-system contracts: none in the starter yet; when OpenBao/webhooks arrive (2c),
   each must be declared transport vs contracted authority in ARCHITECTURE.md.
-- `UserCredential.email` (`app/features/auth/models.py`) duplicates `Party.email` —
+- ~~`UserCredential.email` (`app/features/auth/models.py`) duplicates `Party.email` —
   written once at `register`. **The drift surface is now LIVE as of 2b-T5**: `update_person_party`
   can change or explicitly NULL `Party.email` while `UserCredential.email` (the login
   identity) persists unchanged — a person's profile can show no email while login still
   works via the credential copy. A cross-feature guard is not possible under feature
   independence (parties cannot query auth's UserCredential). 2c's email-update flows
   must pick a single write-owner (mirroring the `Party.display_name` resolution above)
-  or add a repair path; until then the two columns can silently disagree.
+  or add a repair path; until then the two columns can silently disagree.~~ —
+  **RESOLVED 2b.1-T3 (finding F2)**: rather than picking a write-owner between two
+  columns, the second column is gone. Migration
+  `alembic/versions/20260718_0005_single_email_authority.py` drops
+  `user_credentials.email` + its unique constraint entirely;
+  `auth/service.py::login` resolves `Party` by `(tenant_id,
+  normalize_email(email), party_type=person)` first, then `UserCredential` by
+  `party_id` only. `Party.email` is now the single email column
+  system-wide (see `docs/ARCHITECTURE.md`'s ownership table, `Party.email`
+  row, and the F2 resolution note under "Known dual-writer: Parties") — no
+  repair path needed because there is nothing left to re-sync. Intended,
+  documented consequence: NULLing a person party's email now disables login
+  for that party outright (canaries: `tests/test_auth_email_authority.py`,
+  unit pin: `tests/unit/test_auth_service.py::
+  test_login_null_party_email_rejected`).
 - Custom fields: deactivating a `CustomFieldDefinition` (`deactivate_field`) leaves any
   already-stored values for that `field_code` sitting in every entity's `custom_fields`
   JSONB column — there is no cleanup path. Orphaned keys are invisible to
@@ -213,20 +282,43 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   tenant data unauthenticated and pass the build. Every current GET carries
   require_web_auth (verified route-by-route). 2c ticket: extend the tiered test to GETs
   under /admin (or any web prefix).
-- **Portal-wide tenant branding (untracked→tracked):** `load_branding` (per-tenant
+- ~~**Portal-wide tenant branding (untracked→tracked):** `load_branding` (per-tenant
   ui_branding override) is consumed ONLY by the branding editor's own preview — the rest
   of the portal renders the static brand. Phase-3 ticket (behind the settings cache):
   wire load_branding portal-wide; ALSO tighten its merge to an allowlist of known brand
-  keys (currently merges arbitrary override keys; harmless today, admin-only writer).
+  keys (currently merges arbitrary override keys; harmless today, admin-only writer).~~ —
+  **RESOLVED 2b.1-T4 (finding F4)**: `app.core.branding.get_request_branding(request, db)`
+  resolves `load_branding`/`get_brand()` ONCE per request, memoized on
+  `request.state.branding`; `app.core.templating.render()` injects it as the `brand`
+  context key for every web render unless the route already set its own (see that
+  module's and `app.core.branding`'s docstrings for the 3-call-site wiring:
+  `require_web_auth`, `GET`/`POST /admin/login`). `load_branding`'s merge is now
+  allowlisted to `_KNOWN_BRAND_KEYS` (`name`, `tagline`, `logo_url`, `primary_color`,
+  `accent_color`, `custom_css`) — an unknown override key is dropped, not merged. Cost:
+  one extra DB read per authenticated web request (the settings-cache phase-3 ticket
+  immediately below removes it; not needed to ship this fix).
 - **Platform-admin surface:** the 2b plan's scope-deviation note said this was
   "backlogged" — this is now that entry. Tenant CRUD screens need a platform-scoped
   surface (require_platform hardening included — it's a documented stub that counts as
   an auth-tier guard today).
-- 2c ticket batch (small): `DISABLED_FEATURES=web` pin test; move route-level
-  `write_audit_event` calls into services (4 hand-mirrored sites today); cross-tenant
-  values-panel HTTP probe (tenant B → tenant A's URL → 404); `login()` uses
-  `identity.normalize_email` (read-path consistency); post-login redirect preserves the
-  query string; Google Fonts CDN dependency documented for airgapped consumers.
+- 2c ticket batch (small): ~~`DISABLED_FEATURES=web` pin test~~ — **DELIVERED 2b1-T1**:
+  `tests/unit/test_web_surface.py` (`_inspect_app({"DISABLED_FEATURES": "web"})`) pins
+  that `DISABLED_FEATURES=web` drops only `GET /admin`, not other features' `/admin/*`
+  or JSON routes; move route-level `write_audit_event` calls into services (4
+  hand-mirrored sites today); cross-tenant values-panel HTTP probe (tenant B → tenant
+  A's URL → 404); ~~`login()` uses `identity.normalize_email` (read-path
+  consistency)~~ — **DELIVERED 2b1-T3**: `auth/service.py::login` calls
+  `normalize_email(payload.email)` before querying `Party` (single email authority,
+  finding F2); post-login redirect preserves the query string; Google Fonts CDN
+  dependency documented for airgapped consumers.
+- Cleanup candidate (harmless, from 2b1-T1): ~15 dead `active_nav` context keys still
+  set in `web.py` render sites (`app/features/web/web.py`,
+  `app/features/parties/web.py`, `app/features/rbac/web.py`,
+  `app/features/settings/web.py`, `app/features/custom_fields/web.py`) — sidebar
+  highlighting moved to path-based matching (`templates/components/sidebar.html`,
+  `templates/layouts/admin.html`), so no template reads `active_nav` anymore; the
+  context keys are inert and can be deleted whenever one of those files is next
+  touched.
 
 ## Display/locale settings (user rule, 2026-07-18 — "everything by settings: datetime etc, all")
 
@@ -238,3 +330,14 @@ anywhere (reviewers flag them like hardcoded ports). Each spec needs a real read
 (no-orphan-settings enforces). Scheduled as the FIRST task of the next plan (before or
 alongside 2c auth hardening); the portal's audit/list timestamps are the initial
 consumers.
+- `UnitOfWork.savepoint()` (unused by any request path) shares the `begin_nested()`
+  auto-flush ordering hazard fixed across services in 2b1-T2 — re-audit + docstring
+  ordering note before it is ever wired in (2b1-T2 review).
+
+## 2c-auth
+
+- Constant-time login: credential/party misses short-circuit without a dummy hash compare
+  (pre-existing before 2b1-T3, unchanged by it) — 2c adds a dummy-verify on the miss path
+  so timing doesn't distinguish "no account" from "wrong password" (2b1-T3 review).
+- Migration round-trip (upgrade→downgrade→upgrade) has no automated enforcement; consider
+  a CI/integration step exercising the last migration's cycle.

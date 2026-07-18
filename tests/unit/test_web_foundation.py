@@ -4,8 +4,17 @@ Builds a throwaway FastAPI app (no DB, no app.main middleware stack — this
 is purely about the templating/asset pipeline) with one trivial route that
 renders `layouts/admin.html` through the real `app.core.templating.render`
 helper, and checks the rendered HTML carries the admin shell's load-bearing
-pieces: the sidebar nav, the active_nav/page_title context contract, and
-the CSRF header-bridge <script> tag.
+pieces: the sidebar nav, the page_title context contract, and the CSRF
+header-bridge <script> tag.
+
+Phase 2b.1 Task 1: the sidebar nav (and its active-item highlighting) is no
+longer driven by an `active_nav` context var — it derives entirely from the
+`nav_items` Jinja global (`app.core.templating.install_surface_globals`,
+set for every unit test by `tests/unit/conftest.py`'s autouse
+`_default_surface_globals` fixture) and path-matches against
+`request.url.path`. The trivial route below is mounted AT `/admin` itself
+(the dashboard's own nav path) so it exercises real active-item
+highlighting, not a synthetic one.
 """
 
 from __future__ import annotations
@@ -19,12 +28,12 @@ from app.core.templating import render
 def _build_test_app() -> FastAPI:
     app = FastAPI()
 
-    @app.get("/trivial")
+    @app.get("/admin")
     def trivial(request: Request):
         return render(
             request,
             "layouts/admin.html",
-            {"active_nav": "dashboard", "page_title": "Trivial Page"},
+            {"page_title": "Trivial Page"},
         )
 
     return app
@@ -32,7 +41,7 @@ def _build_test_app() -> FastAPI:
 
 def test_admin_shell_renders_sidebar_and_csrf_script() -> None:
     client = TestClient(_build_test_app())
-    response = client.get("/trivial")
+    response = client.get("/admin")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
@@ -44,7 +53,8 @@ def test_admin_shell_renders_sidebar_and_csrf_script() -> None:
     assert "Dashboard" in body
     assert 'href="/admin/parties"' in body
 
-    # active_nav context contract highlights the current nav item.
+    # Path-based highlighting (request.url.path == "/admin", the Dashboard
+    # nav item's own path) marks the current nav item active.
     assert 'aria-current="page"' in body
 
     # page_title context contract reaches the topbar / <title>.

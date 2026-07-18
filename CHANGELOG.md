@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.6.1 — 2026-07-18
+
+Phase 2b.1: closes all seven findings (F1–F7) from Michael's post-merge
+review of 0.6.0 — a canonical feature/surface capability model driving
+mounting, navigation, and fragment composition; conflict handling that
+preserves RLS tenant context; one email authority; per-request tenant
+branding; consumed visibility flags; CSRF-protected logout. Every finding
+has a regression-catching test (see below).
+
+### BREAKING
+- **`user_credentials.email` column dropped** (finding F2). Login now
+  resolves `Party` by `(tenant_id, normalize_email(email),
+  party_type=person)` first, then `UserCredential` by `party_id` only —
+  `Party.email` is the single email authority system-wide. Migration
+  `alembic/versions/20260718_0005_single_email_authority.py` drops the
+  column and its unique constraint. Intended consequence: NULLing a
+  person party's email now disables login for that party outright
+  (`tests/test_auth_email_authority.py`,
+  `tests/unit/test_auth_service.py::test_login_null_party_email_rejected`).
+- **`GET /admin/logout` removed** (finding F7). Logout is
+  `POST /admin/logout` only — a bare `<a href="/admin/logout">` was a
+  CSRF-exempt safe method that let a third-party page force a victim's
+  logout by merely embedding `<img src="/admin/logout">`. The topbar's
+  logout control is now an `hx-post` button, routed through the same CSRF
+  header-bridge as every other mutation.
+- **`FeatureManifest` signature changed** (findings F1, F5).
+  `app.core.features.FeatureManifest` gained `web_routers: Sequence[
+  APIRouter] = ()` and `nav: Sequence[NavItem] = ()`; `mount_features` gained
+  a required `web_enabled: bool` keyword argument. Every feature moved its
+  `web.py` router from `routers` to `web_routers` — a project vendoring its
+  own feature packages against the old single-`routers` manifest shape must
+  update them.
+
+### Added
+- **Manifest capability model** (findings F1, F5): `FeatureManifest.
+  web_routers`/`nav` are now THE surface extension point — a feature
+  declares its admin-portal routes and sidebar entries there, never in a
+  parallel hardcoded template list. `WEB_ENABLED` (env var, default
+  `true`) is a new, whole-portal surface switch, distinct from the
+  per-feature `DISABLED_FEATURES`: `WEB_ENABLED=false` mounts NO feature's
+  `web_routers` (zero `/admin` routes, no `/static` mount) while every
+  feature's JSON API keeps working — the real API-only deployment mode.
+  `templates/admin/parties/detail.html`'s `{% if 'custom_fields' in
+  enabled_features %}` guard is the optional-slot pattern for embedding an
+  optional feature's fragment without a dead link/broken embed when that
+  feature is disabled. Enforced by
+  `tests/architecture/test_feature_manifests.py
+  ::test_nav_items_paths_exist_in_web_routers` (nav↔routes coherence) and
+  its bogus-entry sensitivity check.
+- **`app.core.db.conflict_savepoint`** (finding F3): every feature-service
+  conflict site (parties, rbac, tenants, auth, custom_fields) now wraps its
+  expected-conflict mutation in a `SAVEPOINT` instead of calling a bare
+  `db.rollback()`, so a `ConflictError` no longer discards the request's
+  `SET LOCAL app.current_tenant` RLS context. Canary:
+  `tests/test_conflict_rls_context.py` (Postgres — the bug is invisible on
+  SQLite); hard rule enforced by
+  `tests/architecture/test_no_feature_rollback.py`.
+- **Per-request tenant branding** (finding F4):
+  `app.core.branding.get_request_branding(request, db)` resolves
+  `load_branding`/`get_brand()` once per request, memoized on
+  `request.state.branding`, and `app.core.templating.render()` injects it
+  as the `brand` context for every web render (three call sites: `require_
+  web_auth`, `GET`/`POST /admin/login`) — previously only the branding
+  editor's own preview reflected a tenant's saved `ui_branding`. `load_
+  branding`'s merge is now allowlisted to known brand keys.
+- **Consumed visibility flags** (finding F6): `custom_fields_service.
+  list_for_entity` gained `visible_in: Literal["form", "detail", "list"] |
+  None` as the single query-level owner of `show_in_form`/`show_in_detail`/
+  `show_in_list` semantics; the values-panel edit form, its read-only
+  "Details" section (detail-only, no duplicate render of fields that are
+  both `show_in_form` and `show_in_detail`), and the definitions table's
+  "visible in" badge are the three consumers.
+- **`WEB_ENABLED`** documented in `.env.example` alongside `DISABLED_
+  FEATURES`, with the distinction spelled out (per-feature toggle vs.
+  whole-portal surface switch).
+
+### Fixed
+- `docs/ARCHITECTURE.md`/`README.md` stale `GET /admin/logout` references
+  updated to `POST /admin/logout` throughout (route map, auth-flow
+  narrative, mutable-resource ownership list).
+
 ## 0.6.0 — 2026-07-18
 
 Phase 2b: a server-rendered admin portal (Jinja2 + HTMX + Alpine + Tailwind

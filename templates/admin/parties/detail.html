@@ -63,11 +63,29 @@
   URL, never the feature's Python. The panel's own form posts back to that
   same route and re-swaps this div's content (#custom-fields-panel is the
   hx-target/hx-swap contract the partial relies on).
+
+  THE OPTIONAL-SLOT PATTERN (phase 2b.1 Task 1, finding F5): the hx-get
+  above is unconditional — if custom_fields is disabled
+  (DISABLED_FEATURES=custom_fields), that route 404s and the div would sit
+  there forever showing "Loading custom fields…". Any admin page that
+  fragment-composes another feature's UI (see the values-panel pattern
+  above) MUST wrap the composing div in an if-block testing membership of
+  the owning feature's name in the enabled_features set (see below) —
+  enabled_features is the frozenset app.core.templating.
+  install_surface_globals derives from the loaded manifests
+  (app.core.features), so this check is always in sync with what's actually
+  mounted. This is the ONE place to guard; do not also try to detect the
+  404 client-side. (NOTE: the actual Jinja tag syntax is deliberately not
+  spelled out literally anywhere in this HTML comment block — Jinja parses
+  its statement delimiters even inside an HTML comment, so writing them
+  literally here would open a real, unclosed block and break the render.)
 -->
+{% if 'custom_fields' in enabled_features %}
 <div id="custom-fields-panel"
      class="mt-6 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6"
      hx-get="/admin/custom-fields/party/{{ party.id }}/values-panel"
      hx-trigger="load">
     <p class="text-sm text-slate-500 dark:text-slate-400">Loading custom fields…</p>
 </div>
+{% endif %}
 {% endblock %}
