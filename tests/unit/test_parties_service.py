@@ -222,3 +222,46 @@ def test_delete_party_removes_organization_party(
     parties_service.delete_party(db, party.id)
 
     assert db.get(Party, party.id) is None
+
+
+def test_search_parties_escapes_like_wildcards(db: Session, tenant_row: Tenant) -> None:
+    """Searching "50%" matches only literal "50%", not "50X" patterns."""
+    # Create two parties: one with "50%" literally, one with "505"
+    p1 = parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(
+            email="50percent@example.com", first_name="50%", last_name="Off"
+        ),
+    )
+    parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(email="505@example.com", first_name="505", last_name="Name"),
+    )
+
+    # Search for "50%" should match only the literal "50%" party
+    results = parties_service.search_parties(
+        db, q="50%", party_type=None, limit=50, offset=0
+    )
+    assert len(results) == 1
+    assert results[0].id == p1.id
+
+
+def test_count_parties_escapes_like_wildcards(db: Session, tenant_row: Tenant) -> None:
+    """Count also uses escaped wildcards — should match search result count."""
+    parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(
+            email="50percent@example.com", first_name="50%", last_name="Off"
+        ),
+    )
+    parties_service.create_person_party(
+        db,
+        tenant_row,
+        PersonPartyCreate(email="505@example.com", first_name="505", last_name="Name"),
+    )
+
+    count = parties_service.count_parties(db, q="50%", party_type=None)
+    assert count == 1

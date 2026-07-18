@@ -222,6 +222,28 @@ def test_index_party_type_filter(
     assert "Ada Lovelace" not in resp.text
 
 
+def test_index_garbage_party_type_degrades_to_unfiltered(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """Bogus party_type (e.g., stale bookmark) degrades gracefully — returns
+    200 with unfiltered list, not 422.
+    """
+    token = _login(web_client, registered_admin["email"])
+    _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
+    _make_organization(db, tenant_row, "Widget Co")
+    db.commit()
+
+    resp = web_client.get(
+        "/admin/parties",
+        params={"party_type": "bogus"},
+        cookies={"access_token": token},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    assert "Ada Lovelace" in resp.text
+    assert "Widget Co" in resp.text
+
+
 def test_index_pagination_second_page(
     web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:

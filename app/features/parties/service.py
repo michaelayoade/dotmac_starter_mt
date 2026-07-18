@@ -104,8 +104,15 @@ def _search_filter(
     if party_type is not None:
         stmt = stmt.where(Party.party_type == party_type)
     if q:
-        like = f"%{q}%"
-        stmt = stmt.where(or_(Party.display_name.ilike(like), Party.email.ilike(like)))
+        # Escape SQL LIKE wildcards so "50%" matches only literal "50%"
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
+        stmt = stmt.where(
+            or_(
+                Party.display_name.ilike(like, escape="\\"),
+                Party.email.ilike(like, escape="\\"),
+            )
+        )
     return stmt
 
 
