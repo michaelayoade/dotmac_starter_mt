@@ -46,6 +46,10 @@ import ast
 import re
 from pathlib import Path
 
+from jinja2 import nodes
+
+from app.core.templating import templates
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_ROOT = PROJECT_ROOT / "templates"
 
@@ -213,9 +217,30 @@ def test_web_py_imports_only_its_own_feature_and_core() -> None:
 # ---------------------------------------------------------------------------
 # 5. Every `*_at` timestamp render goes through local_datetime/local_date
 #    (Task 2: tenant display settings).
+#
+# AST-based, not a substring match: a prior version of this check scanned
+# each `{{ ... }}` expression's raw text for `\w+_at\b` and then just tested
+# whether the literal substring "local_date" appeared ANYWHERE in that same
+# expression. That's bypassable — `{{ x.created_at | default("local_datetime") }}`
+# and `{{ x.created_at if local_date_format else "" }}` both contain the
+# substring "local_date" without the `created_at` attribute ever actually
+# being piped through the real filter, so the old check silently accepted
+# them (see `test_timestamp_filter_check_catches_bypass_attempts` below,
+# which pins this against the app's REAL Jinja environment).
+#
+# This walks the parsed AST (`templates.env.parse`, the same environment
+# every template actually renders through — so filter/extension behavior
+# matches production) instead: only `Output` nodes (the `{{ ... }}` render
+# sites) are inspected — a `{% if x.created_at %}` test expression lives on
+# the `If` node directly, never inside an `Output`, so it's correctly out of
+# scope (that's a truthiness check, not a render). Within each Output child
+# expression, every `Getattr`/`Getitem`/`Name` node whose name matches
+# `\w+_at$` must have a `Filter` node named `local_date`/`local_datetime`
+# somewhere between it and the root of that expression tree.
 # ---------------------------------------------------------------------------
 
-_JINJA_EXPR = re.compile(r"{{(.*?)}}", re.S)
+_TIMESTAMP_NAME_RE = re.compile(r"\w+_at$")
+_LOCAL_FILTER_NAMES = frozenset({"local_date", "local_datetime"})
 
 
 def _template_files() -> list[Path]:
@@ -227,19 +252,137 @@ def _template_files() -> list[Path]:
     return sorted(TEMPLATES_ROOT.glob("**/*.html"))
 
 
+def _timestamp_attr_name(expr: nodes.Node) -> str | None:
+    """If `expr` itself renders a `*_at`-named attribute/variable, return
+    its name; otherwise None. Checks `Getattr` (`x.created_at`), `Getitem`
+    with a literal string key (`x["created_at"]`), and bare `Name`
+    (`created_at` as a top-level template variable).
+    """
+    if isinstance(expr, nodes.Getattr) and _TIMESTAMP_NAME_RE.fullmatch(expr.attr):
+        return expr.attr
+    if isinstance(expr, nodes.Getitem):
+        arg = expr.arg
+        if (
+            isinstance(arg, nodes.Const)
+            and isinstance(arg.value, str)
+            and _TIMESTAMP_NAME_RE.fullmatch(arg.value)
+        ):
+            return arg.value
+    if isinstance(expr, nodes.Name) and _TIMESTAMP_NAME_RE.fullmatch(expr.name):
+        return expr.name
+    return None
+
+
+def _unwrapped_timestamp_attrs(expr: nodes.Node, wrapped: bool) -> list[str]:
+    """Recursively collect `*_at` attribute/name renders in `expr` that are
+    NOT wrapped by a `local_date`/`local_datetime` filter at any ancestor
+    depth within the expression tree.
+
+    `wrapped` is threaded down through the recursion: it becomes True only
+    while descending into the piped VALUE of a `Filter` node whose name is
+    `local_date`/`local_datetime` (a filter's OTHER args — e.g.
+    `default(x.created_at, "fallback")`'s second argument — are siblings,
+    not the piped value, and must NOT inherit that wrapped state from a
+    different filter).
+    """
+    offenders: list[str] = []
+    if isinstance(expr, nodes.Filter):
+        node_wrapped = wrapped or expr.name in _LOCAL_FILTER_NAMES
+        offenders.extend(_unwrapped_timestamp_attrs(expr.node, node_wrapped))
+        for arg in expr.args:
+            offenders.extend(_unwrapped_timestamp_attrs(arg, wrapped))
+        for kwarg in expr.kwargs:
+            offenders.extend(_unwrapped_timestamp_attrs(kwarg.value, wrapped))
+        if expr.dyn_args is not None:
+            offenders.extend(_unwrapped_timestamp_attrs(expr.dyn_args, wrapped))
+        if expr.dyn_kwargs is not None:
+            offenders.extend(_unwrapped_timestamp_attrs(expr.dyn_kwargs, wrapped))
+        return offenders
+
+    attr_name = _timestamp_attr_name(expr)
+    if attr_name is not None and not wrapped:
+        offenders.append(attr_name)
+
+    for child in expr.iter_child_nodes():
+        offenders.extend(_unwrapped_timestamp_attrs(child, wrapped))
+    return offenders
+
+
+def _template_offenders(source: str) -> list[str]:
+    """Parse `source` with the app's real Jinja environment and return one
+    `*_at` attribute name per unwrapped timestamp render found in any
+    `{{ ... }}` output expression.
+
+    Shared by the production check (`test_timestamp_renders_go_through_local_filters`)
+    and the sensitivity/bypass check
+    (`test_timestamp_filter_check_catches_bypass_attempts`) so both exercise
+    the exact same logic — a fix to one can't silently diverge from the
+    other (same structure as `_manifest_nav_coherence_failures` in
+    `tests/architecture/test_feature_manifests.py`).
+    """
+    template_ast = templates.env.parse(source)
+    offenders: list[str] = []
+    for output in template_ast.find_all(nodes.Output):
+        for child in output.nodes:
+            offenders.extend(_unwrapped_timestamp_attrs(child, wrapped=False))
+    return offenders
+
+
 def test_timestamp_renders_go_through_local_filters() -> None:
     """A raw `{{ x.created_at }}` bypasses tenant display settings.
 
-    Any Jinja expression rendering a `*_at` attribute must apply
-    `local_datetime`/`local_date` ("local_date" substring covers both).
+    Any `{{ ... }}` render of a `*_at` attribute/variable must be wrapped in
+    `| local_datetime` or `| local_date`, checked via the real Jinja AST
+    (see module docstring above section 5) rather than a substring match.
     """
     offenders: list[str] = []
     for path in _template_files():
-        for match in _JINJA_EXPR.finditer(path.read_text(encoding="utf-8")):
-            expr = match.group(1)
-            if re.search(r"\b\w+_at\b", expr) and "local_date" not in expr:
-                offenders.append(f"{path}: {{{{{expr.strip()}}}}}")
+        source = path.read_text(encoding="utf-8")
+        for attr in _template_offenders(source):
+            offenders.append(f"{path.relative_to(PROJECT_ROOT)}: {attr}")
     assert not offenders, (
         "Raw timestamp renders (add `| local_datetime` or `| local_date`): "
         + "; ".join(offenders)
     )
+
+
+def test_timestamp_filter_check_catches_bypass_attempts() -> None:
+    """Sensitivity test: prove `_template_offenders` (the SAME helper the
+    production check above calls — no re-implementation to drift from it)
+    catches non-literal bypasses of the local filter requirement, and does
+    not false-positive on the two legit forms.
+
+    These bypasses previously slipped past the old substring check (`"local_date"
+    not in expr`) because the literal substring "local_date" appears
+    SOMEWHERE in the expression even though `created_at` itself is never
+    piped through the real filter:
+
+    - `{{ x.created_at | default("local_datetime") }}` — "local_datetime"
+      only appears as a fallback STRING ARGUMENT to an unrelated filter
+      (`default`), not as the filter wrapping `created_at`.
+    - `{{ x.created_at if local_date_format else "" }}` — "local_date" only
+      appears as a substring of an unrelated variable name
+      (`local_date_format`) used as a conditional test, not a filter at all.
+    """
+    bypasses = [
+        "{{ x.created_at }}",
+        '{{ x.created_at | default("local_datetime") }}',
+        '{{ x.created_at if local_date_format else "" }}',
+        # Multi-line variant of the conditional bypass above — proves the
+        # AST-based check isn't sensitive to formatting/line breaks the way
+        # a regex-over-raw-text check could be.
+        '{{\n    x.created_at\n    if local_date_format\n    else ""\n}}',
+    ]
+    for source in bypasses:
+        offenders = _template_offenders(source)
+        assert offenders, f"expected this bypass attempt to be caught: {source!r}"
+
+    legit = [
+        "{{ x.created_at | local_datetime }}",
+        "{{ x.created_at | local_date }}",
+    ]
+    for source in legit:
+        offenders = _template_offenders(source)
+        assert (
+            not offenders
+        ), f"expected legit filtered render to pass: {source!r} -> {offenders}"

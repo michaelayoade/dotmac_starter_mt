@@ -69,6 +69,46 @@ class TestDisplaySpecs:
         spec = get_spec(SettingDomain.display, "datetime_format")
         assert validate_spec_value(spec, "%d %b %Y %H:%M") == "%d %b %Y %H:%M"
 
+    def test_format_write_accepts_default_date_pattern(self) -> None:
+        spec = get_spec(SettingDomain.display, "date_format")
+        assert validate_spec_value(spec, "%Y-%m-%d") == "%Y-%m-%d"
+
+    def test_format_write_rejects_platform_specific_directive(self) -> None:
+        """`%Q` is not a documented Python strftime directive. On glibc,
+        `datetime.strftime` silently passes unknown directives through as
+        literal text (no exception) — the old `"%" in fmt` + probe-render
+        check wrongly accepted this. The tokenizer must reject it explicitly.
+        """
+        spec = get_spec(SettingDomain.display, "date_format")
+        with pytest.raises(BadRequestError):
+            validate_spec_value(spec, "%Q")
+
+    def test_format_write_rejects_escape_only_string(self) -> None:
+        """`%%` is the literal-`%` escape, not a real directive — a format
+        string consisting ONLY of `%%` renders fine (no exception) but
+        contains zero actual strftime directives, so it must be rejected.
+        """
+        spec = get_spec(SettingDomain.display, "date_format")
+        with pytest.raises(BadRequestError):
+            validate_spec_value(spec, "%%")
+
+    def test_format_write_rejects_trailing_percent(self) -> None:
+        """A dangling `%` at the end of the string (no directive character
+        following it) is platform-dependent under the old probe-render
+        check (glibc renders it as a literal `%` with no exception) — must
+        be rejected explicitly instead of relying on the platform libc.
+        """
+        spec = get_spec(SettingDomain.display, "date_format")
+        with pytest.raises(BadRequestError):
+            validate_spec_value(spec, "%Y-%m-%d %")
+
+    def test_format_write_accepts_escape_plus_real_directive(self) -> None:
+        """`%%` (escape) alongside a real directive is valid — the
+        "at least one real directive" rule only excludes strings with
+        ZERO real directives, not strings that merely contain an escape."""
+        spec = get_spec(SettingDomain.display, "date_format")
+        assert validate_spec_value(spec, "100%% %Y") == "100%% %Y"
+
     def test_read_path_degrades_bad_stored_timezone_to_default(
         self, db, tenant_row
     ) -> None:
