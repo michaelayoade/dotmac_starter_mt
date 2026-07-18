@@ -129,6 +129,106 @@ def test_update_field_invalid_validation_regex_raises_bad_request(
         cf_service.update_field(db, tenant_row.id, field.id, {"validation_regex": "["})
 
 
+def test_create_field_select_without_options_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Task 7 review finding 3: `CustomFieldDefinition.validate_value`'s
+    SELECT/MULTISELECT branches only check membership `if self.field_options:`
+    (see `models.py`) — an options-less SELECT/MULTISELECT definition
+    silently skips membership validation forever after. Reject it at
+    create time instead (same "definition self-consistency, checked up
+    front" pattern as `_validate_min_max_numeric`/`_validate_regex_compiles`
+    above)."""
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.create_field(
+            db,
+            tenant_row.id,
+            _payload(field_code="tier", field_type=CustomFieldType.SELECT),
+        )
+
+
+def test_create_field_multiselect_without_options_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.create_field(
+            db,
+            tenant_row.id,
+            _payload(field_code="tags", field_type=CustomFieldType.MULTISELECT),
+        )
+
+
+def test_create_field_select_with_empty_options_list_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """`field_options={"options": []}` is distinct from `field_options=None`
+    but must fail the same way — an empty list is still "no options"."""
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.create_field(
+            db,
+            tenant_row.id,
+            _payload(
+                field_code="tier",
+                field_type=CustomFieldType.SELECT,
+                field_options={"options": []},
+            ),
+        )
+
+
+def test_update_field_flip_text_to_select_without_options_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """RED case from the task brief: flipping an existing TEXT field to
+    SELECT without also supplying `field_options` must 400, not silently
+    create a SELECT definition with no valid membership check."""
+    field = cf_service.create_field(db, tenant_row.id, _payload())
+
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.update_field(
+            db, tenant_row.id, field.id, {"field_type": CustomFieldType.SELECT}
+        )
+
+
+def test_update_field_select_adding_options_succeeds(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The positive case for the same guard: flipping to SELECT WHILE also
+    supplying non-empty `field_options` in the same update must succeed."""
+    field = cf_service.create_field(db, tenant_row.id, _payload())
+
+    updated = cf_service.update_field(
+        db,
+        tenant_row.id,
+        field.id,
+        {
+            "field_type": CustomFieldType.SELECT,
+            "field_options": {"options": [{"value": "gold"}]},
+        },
+    )
+
+    assert updated.field_type == CustomFieldType.SELECT
+    assert updated.field_options == {"options": [{"value": "gold"}]}
+
+
+def test_update_field_existing_select_clearing_options_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """An already-SELECT field with options must not be updatable to drop
+    every option (field_options=None) while remaining SELECT."""
+    field = cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(
+            field_code="tier",
+            field_type=CustomFieldType.SELECT,
+            field_options={"options": [{"value": "gold"}]},
+        ),
+    )
+
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.update_field(db, tenant_row.id, field.id, {"field_options": None})
+
+
 def test_create_field_limit_reached_raises_bad_request(
     db: Session, tenant_row: Tenant
 ) -> None:

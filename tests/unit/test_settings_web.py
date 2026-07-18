@@ -19,12 +19,13 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core import settings_resolver as sr
 from app.core.audit import AuditEvent
 from app.core.deps import get_db
 from app.core.errors import register_error_handlers
 from app.core.models import Tenant
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import upsert_by_key
+from app.core.settings_models import SettingDomain, SettingValueType
+from app.core.settings_resolver import resolve_value, upsert_by_key
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import RegisterRequest
 from app.features.auth.web import router as auth_web_router
@@ -222,8 +223,6 @@ def test_edit_submit_writes_tenant_override_and_redirects(
     assert resp.headers["location"] == "/admin/settings"
     assert resp.headers["hx-redirect"] == "/admin/settings"
 
-    from app.core.settings_resolver import resolve_value
-
     value = resolve_value(
         db, SettingDomain.audit, "retention_days", tenant_id=tenant_row.id
     )
@@ -256,6 +255,137 @@ def test_edit_submit_writes_audit_event(
     )
     event = db.query(AuditEvent).filter(AuditEvent.action == "settings.update").one()
     assert event.details["key"] == "retention_days"
+
+
+# ---------------------------------------------------------------------------
+# Secret web semantics (Task 7 review finding 1): the generic edit form must
+# never echo a secret's real (or masked) value, and submitting a BLANK value
+# must be a true no-op — no write at all, not even a validated write of the
+# empty string. Throwaway `is_secret=True` spec, same register/deregister
+# pattern as `tests/unit/test_settings_api.py::secret_spec` — none of this
+# app's three real specs are secrets, so this proves the contract rather
+# than exercising it incidentally.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def secret_spec():
+    spec = sr.SettingSpec(
+        domain=SettingDomain.auth,
+        key="test_secret_token",
+        value_type=SettingValueType.string,
+        default="unset",
+        is_secret=True,
+    )
+    sr.register_specs([spec])
+    yield spec
+    del sr._REGISTRY[(spec.domain, spec.key)]
+
+
+def test_secret_edit_form_never_renders_stored_value_or_mask(
+    web_client: TestClient,
+    registered_admin: dict,
+    db: Session,
+    tenant_row: Tenant,
+    secret_spec: sr.SettingSpec,
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    upsert_by_key(
+        db,
+        SettingDomain.auth,
+        "test_secret_token",
+        "sooper-secret-value",
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    resp = web_client.get(
+        "/admin/settings/auth/test_secret_token/edit",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 200
+    assert 'name="value"' in resp.text
+    assert 'value=""' in resp.text
+    # Neither the real stored value nor the API's display mask ever reaches
+    # this form's `value` input — blank is the ONLY contract.
+    assert "sooper-secret-value" not in resp.text
+    assert "********" not in resp.text
+
+
+def test_secret_edit_blank_submit_is_noop_no_write(
+    web_client: TestClient,
+    registered_admin: dict,
+    db: Session,
+    tenant_row: Tenant,
+    secret_spec: sr.SettingSpec,
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    upsert_by_key(
+        db,
+        SettingDomain.auth,
+        "test_secret_token",
+        "original-secret-value",
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    resp = web_client.post(
+        "/admin/settings/auth/test_secret_token/edit",
+        data={"value": ""},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/admin/settings"
+    assert resp.headers["hx-redirect"] == "/admin/settings"
+
+    # Stored value is untouched — a blank secret submit never reaches
+    # `update_setting`/`upsert_by_key` at all.
+    value = resolve_value(
+        db, SettingDomain.auth, "test_secret_token", tenant_id=tenant_row.id
+    )
+    assert value == "original-secret-value"
+
+    # No audit event either — a true no-op skips the write path entirely,
+    # it doesn't just write the same value back.
+    events = db.query(AuditEvent).filter(AuditEvent.action == "settings.update").all()
+    assert not any(e.details.get("key") == "test_secret_token" for e in events)
+
+
+def test_secret_edit_nonblank_submit_updates_stored_value(
+    web_client: TestClient,
+    registered_admin: dict,
+    db: Session,
+    tenant_row: Tenant,
+    secret_spec: sr.SettingSpec,
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    upsert_by_key(
+        db,
+        SettingDomain.auth,
+        "test_secret_token",
+        "original-secret-value",
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    resp = web_client.post(
+        "/admin/settings/auth/test_secret_token/edit",
+        data={"value": "brand-new-secret-value"},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/admin/settings"
+
+    value = resolve_value(
+        db, SettingDomain.auth, "test_secret_token", tenant_id=tenant_row.id
+    )
+    assert value == "brand-new-secret-value"
+
+    event = db.query(AuditEvent).filter(AuditEvent.action == "settings.update").one()
+    assert event.details["key"] == "test_secret_token"
+    assert event.details["is_secret"] is True
 
 
 # ---------------------------------------------------------------------------

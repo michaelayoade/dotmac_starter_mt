@@ -264,6 +264,33 @@ def test_create_submit_select_type_parses_options_text(
     }
 
 
+def test_create_submit_select_without_options_rerenders_200_with_inline_error(
+    web_client: TestClient, registered_admin: dict
+) -> None:
+    """Task 7 review finding 3: the web form path surfaces
+    `service.create_field`'s `BadRequestError` ("SELECT/MULTISELECT fields
+    require at least one option") inline at 200, same as the duplicate-code
+    conflict below — no options_text at all means `_parse_options` returns
+    `None`, so this exercises the create-time guard end to end through the
+    form."""
+    token = _login(web_client, registered_admin["email"])
+    resp = web_client.post(
+        "/admin/custom-fields",
+        data={
+            "entity_type": "party",
+            "field_code": "tier",
+            "field_name": "Tier",
+            "field_type": "SELECT",
+            "options_text": "",
+            "display_order": "0",
+        },
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200
+    assert "at least one option" in resp.text.lower()
+
+
 def test_create_submit_validation_error_rerenders_200(
     web_client: TestClient, registered_admin: dict
 ) -> None:
@@ -523,6 +550,43 @@ def test_values_panel_post_multiselect_getlist(
 
     db.refresh(party)
     assert party.custom_fields == {"tags": ["a", "b"]}
+
+
+def test_values_panel_get_missing_party_returns_negotiated_404(
+    web_client: TestClient, registered_admin: dict
+) -> None:
+    """Task 7 review finding 2: `service._get_entity_row` raises
+    `NotFoundError` when `db.get(model, entity_id)` returns `None` (a
+    random, never-created party UUID) — this must reach the browser as the
+    branded HTML 404 page (`register_error_handlers`'s `_negotiate`), never
+    a raw 500 or a bare JSON envelope, since an htmx `Accept: text/html`
+    request negotiates HTML."""
+    token = _login(web_client, registered_admin["email"])
+    resp = web_client.get(
+        f"/admin/custom-fields/party/{uuid4()}/values-panel",
+        cookies={"access_token": token},
+        headers={"Accept": "text/html"},
+    )
+    assert resp.status_code == 404
+    assert "text/html" in resp.headers["content-type"]
+    # Branded page, not a bare envelope — errors/404.html renders real copy.
+    assert "404" in resp.text
+
+
+def test_values_panel_post_missing_party_returns_negotiated_404(
+    web_client: TestClient, registered_admin: dict
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    resp = web_client.post(
+        f"/admin/custom-fields/party/{uuid4()}/values-panel",
+        data={},
+        cookies={"access_token": token},
+        headers={"Accept": "text/html"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 404
+    assert "text/html" in resp.headers["content-type"]
+    assert "404" in resp.text
 
 
 def test_parties_detail_page_contains_values_panel_hx_get_wiring(
