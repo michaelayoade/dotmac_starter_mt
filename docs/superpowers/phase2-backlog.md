@@ -111,10 +111,13 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 - External-system contracts: none in the starter yet; when OpenBao/webhooks arrive (2c),
   each must be declared transport vs contracted authority in ARCHITECTURE.md.
 - `UserCredential.email` (`app/features/auth/models.py`) duplicates `Party.email` —
-  written once at `register`, no drift detection or repair if a future 2c email-update
-  flow changes one without the other. 2c's email-update flows must pick a single
-  write-owner (mirroring the `Party.display_name` dual-writer resolution above) or add
-  a repair path; until then the two columns can silently disagree.
+  written once at `register`. **The drift surface is now LIVE as of 2b-T5**: `update_person_party`
+  can change or explicitly NULL `Party.email` while `UserCredential.email` (the login
+  identity) persists unchanged — a person's profile can show no email while login still
+  works via the credential copy. A cross-feature guard is not possible under feature
+  independence (parties cannot query auth's UserCredential). 2c's email-update flows
+  must pick a single write-owner (mirroring the `Party.display_name` resolution above)
+  or add a repair path; until then the two columns can silently disagree.
 - Custom fields: deactivating a `CustomFieldDefinition` (`deactivate_field`) leaves any
   already-stored values for that `field_code` sitting in every entity's `custom_fields`
   JSONB column — there is no cleanup path. Orphaned keys are invisible to
