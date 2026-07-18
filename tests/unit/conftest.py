@@ -20,11 +20,32 @@ from app.core import (
     audit,  # noqa: F401
     settings_models,  # noqa: F401
 )
+from app.core.features import load_manifests
 from app.core.models import Base, Party, PartyPerson, PartyType, Tenant
+from app.core.templating import install_surface_globals
+from app.features import FEATURE_MODULES
 
 # Import feature model modules so Base.metadata is fully populated.
 from app.features.auth import models as auth  # noqa: F401
 from app.features.custom_fields import models as custom_fields  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def _default_surface_globals():
+    """`install_surface_globals` sets the process-static `enabled_features`/
+    `nav_items` Jinja globals (app.core.templating) — normally a side effect
+    of importing `app.main`. A unit test that builds its own throwaway app
+    (bypassing app.main entirely) still renders real templates through the
+    shared `app.core.templating.templates` singleton, so those globals must
+    default to "every feature enabled" deterministically here, regardless of
+    import/test order or a previous test's disabled-feature override. Tests
+    proving F1/F5 behavior call `install_surface_globals` again themselves,
+    inside the test body, to set a different (disabled) state — this
+    autouse fixture only establishes the baseline before each test runs.
+    """
+    install_surface_globals(
+        load_manifests(FEATURE_MODULES), disabled=set(), web_enabled=True
+    )
 
 
 @pytest.fixture(scope="session")

@@ -26,6 +26,7 @@ from app.core.middleware.csrf import CSRFMiddleware
 from app.core.middleware.observability import ObservabilityMiddleware
 from app.core.middleware.rate_limit import RateLimitMiddleware
 from app.core.middleware.tenant import TenantResolverMiddleware
+from app.core.templating import install_surface_globals
 from app.features import FEATURE_MODULES
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,14 @@ setup_logging()
 # disabling a feature (e.g. `DISABLED_FEATURES=settings`) must not crash
 # import or run that feature's seed.
 _manifests = load_manifests(FEATURE_MODULES)
+
+# Process-static `enabled_features`/`nav_items` Jinja globals (F1/F5
+# capability model) — the manifests are the single source of truth for both
+# the sidebar and any template's optional-slot conditional
+# (`{% if 'x' in enabled_features %}`). Must run before any template ever
+# renders, so it happens here at import time, right after `_manifests` is
+# built — see app.core.templating.install_surface_globals's docstring.
+install_surface_globals(_manifests, settings.disabled_feature_set, settings.web_enabled)
 
 
 async def _run_enabled_seeds(
@@ -111,8 +120,12 @@ register_error_handlers(app)
 # `npm run css:build`; see app.core.templating.static_asset_url). No guard
 # needed — static assets are public by nature and StaticFiles mounts a
 # Starlette `Mount`, not an `APIRoute`, so it's outside
-# tests/architecture/test_route_guards.py's route-guard sweep.
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# tests/architecture/test_route_guards.py's route-guard sweep. Gated on
+# `web_enabled` (F1): there is no HTML UI to serve these assets to in
+# API-only mode, so the mount simply doesn't exist — WEB_ENABLED=false pins
+# zero /static routes, not just zero /admin routes.
+if settings.web_enabled:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/health")
@@ -125,4 +138,5 @@ mount_features(
     app,
     manifests=_manifests,
     disabled=settings.disabled_feature_set,
+    web_enabled=settings.web_enabled,
 )

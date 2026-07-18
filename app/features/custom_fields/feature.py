@@ -10,8 +10,13 @@ page lazy-loads (cross-feature UI composition via a browser-side `hx-get`,
 not a Python import — see `web.py`'s module docstring).
 """
 
-from app.core.features import FeatureManifest
+from app.core.features import FeatureManifest, NavItem
 from app.features.custom_fields.router import router
 from app.features.custom_fields.web import router as web_router
 
-feature = FeatureManifest(name="custom_fields", routers=[router, web_router])
+feature = FeatureManifest(
+    name="custom_fields",
+    routers=[router],
+    web_routers=[web_router],
+    nav=[NavItem("Custom Fields", "/admin/custom-fields")],
+)

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     trust_inbound_request_id: bool = False
     disabled_features: str = ""  # comma-separated feature names
     seed_on_startup: bool = True  # seed platform setting defaults in lifespan
+    # Surface switch (F1): False mounts NO feature's web_routers (zero
+    # /admin routes, no /static mount) — pure JSON API. Independent of
+    # DISABLED_FEATURES, which turns off one named feature entirely, JSON
+    # and web together. See app.core.features's module docstring.
+    web_enabled: bool = True
 
     @property
     def is_production(self) -> bool:

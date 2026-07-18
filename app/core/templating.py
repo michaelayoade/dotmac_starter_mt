@@ -25,6 +25,8 @@ pass the result into their own render() context (shadowing this global's
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import lru_cache
 from hashlib import sha256
@@ -36,8 +38,58 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.core.branding import get_brand
+from app.core.features import FeatureManifest, NavItem
 
 templates = Jinja2Templates(directory="templates")
+
+
+def install_surface_globals(
+    manifests: Sequence[FeatureManifest], disabled: set[str], web_enabled: bool
+) -> None:
+    """Set the process-static `enabled_features`/`nav_items` Jinja globals
+    from the loaded manifests — the ONE place templates learn which
+    features are on and what the sidebar contains (F1/F5 capability model;
+    see `app.core.features`'s module docstring). Called once from
+    `app.main` (module import time, right after `load_manifests`) — config
+    is process-static, so these globals are correct for the process
+    lifetime; a config change requires a restart, same as every other
+    process-static setting in this app.
+
+    `enabled_features` always reflects the real enabled-feature set
+    (`DISABLED_FEATURES` + each manifest's `enabled_by_default`), regardless
+    of `web_enabled` — it's the general "is this feature on" flag templates
+    use for optional-slot conditionals (e.g.
+    `templates/admin/parties/detail.html`'s `{% if 'custom_fields' in
+    enabled_features %}`), not specifically a web-surface concept.
+    `nav_items` is `()` when `web_enabled` is False — there is no sidebar to
+    populate when the whole `/admin` HTML surface is off.
+    """
+    enabled = frozenset(
+        manifest.name
+        for manifest in manifests
+        if manifest.name not in disabled and manifest.enabled_by_default
+    )
+    nav_items: tuple[NavItem, ...] = ()
+    if web_enabled:
+        collected: list[NavItem] = []
+        for manifest in manifests:
+            if manifest.name not in enabled:
+                continue
+            collected.extend(
+                replace(item, feature=manifest.name) for item in manifest.nav
+            )
+        nav_items = tuple(collected)
+    templates.env.globals["enabled_features"] = enabled
+    templates.env.globals["nav_items"] = nav_items
+
+
+# Safe defaults so any template render before `install_surface_globals` has
+# run (e.g. a test that builds its own throwaway app and never calls it)
+# degrades to "no optional features, no nav" rather than a Jinja
+# UndefinedError — `app.main` overwrites these at import time with the real,
+# manifest-derived values.
+templates.env.globals.setdefault("enabled_features", frozenset())
+templates.env.globals.setdefault("nav_items", ())
 
 
 @lru_cache(maxsize=256)
