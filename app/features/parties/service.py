@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -94,6 +94,55 @@ def list_parties(
     return list(db.scalars(stmt).unique().all())
 
 
+def _search_filter(
+    stmt: Select, *, q: str | None, party_type: PartyType | None
+) -> Select:
+    """Shared WHERE-clause builder for `search_parties`/`count_parties` (Task
+    4) — one place for the filter shape so the count and the page of rows it
+    paginates can never drift apart.
+    """
+    if party_type is not None:
+        stmt = stmt.where(Party.party_type == party_type)
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(or_(Party.display_name.ilike(like), Party.email.ilike(like)))
+    return stmt
+
+
+def search_parties(
+    db: Session,
+    *,
+    q: str | None,
+    party_type: PartyType | None,
+    limit: int,
+    offset: int,
+) -> list[Party]:
+    """Free-text (display_name/email) + party_type filtered listing for the
+    admin parties screen (Task 4's index/search/filter/pagination).
+
+    Same RLS-only tenant-scoping convention as `list_parties` above — no
+    explicit `tenant_id` filter; RLS enforces it, and
+    `tests/test_party_isolation.py` is the canary that would catch drift.
+    """
+    stmt = _search_filter(select(Party), q=q, party_type=party_type).options(
+        joinedload(Party.person_profile), joinedload(Party.organization_profile)
+    )
+    stmt = stmt.order_by(Party.created_at.desc())
+    stmt = apply_pagination(stmt, limit=limit, offset=offset)
+    return list(db.scalars(stmt).unique().all())
+
+
+def count_parties(db: Session, *, q: str | None, party_type: PartyType | None) -> int:
+    """Total row count for `search_parties`' filters — powers the index
+    page's pagination (page X of Y), computed with the SAME `_search_filter`
+    so the count and the page it describes can never disagree.
+    """
+    stmt = _search_filter(
+        select(func.count()).select_from(Party), q=q, party_type=party_type
+    )
+    return db.scalar(stmt) or 0
+
+
 def get_party(db: Session, party_id: UUID) -> Party:
     party = Parties.get(db, str(party_id))
     # Touch the subtype relationships now, while the session is open, so the
@@ -110,9 +159,11 @@ def delete_party(db: Session, party_id: UUID) -> None:
 
 __all__ = [
     "Parties",
+    "count_parties",
     "create_organization_party",
     "create_person_party",
     "delete_party",
     "get_party",
     "list_parties",
+    "search_parties",
 ]

@@ -1,0 +1,68 @@
+{#
+  Parties table fragment (Task 4) — the htmx swap target for
+  admin/parties/index.html's search/filter/pagination controls, AND the
+  initial render `{% include %}`d by that same index page for a plain
+  (non-htmx) page load. Never extends a layout — this is a fragment.
+
+  Context: see admin/parties/index.html's docstring.
+#}
+{% from "components/table_macros.html" import table_header, empty_state, action_buttons %}
+
+<div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+    <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+        {{ table_header([
+            {"label": "Name"},
+            {"label": "Type"},
+            {"label": "Email"},
+            {"label": "", "class": "text-right"},
+        ]) }}
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
+            {% for party in parties %}
+            <tr>
+                <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">
+                    <a href="/admin/parties/{{ party.id }}" class="hover:text-primary-600 dark:hover:text-primary-400">{{ party.display_name }}</a>
+                </td>
+                <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
+                    {{ "Person" if party.party_type.value == "person" else "Organization" }}
+                </td>
+                <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ party.email or "—" }}</td>
+                <td class="px-4 py-3 text-right">
+                    {{ action_buttons(
+                        detail_url="/admin/parties/" ~ party.id,
+                        delete_url="/admin/parties/" ~ party.id ~ "/delete",
+                        delete_confirm="Delete this party? This action cannot be undone."
+                    ) }}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4">
+                    {{ empty_state(message="No parties found", action_url="/admin/parties/create", action_label="New Party") }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+    <div class="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+        <p class="text-sm text-slate-500 dark:text-slate-400">Page {{ page }} of {{ total_pages }} ({{ total }} total)</p>
+        <div class="flex items-center gap-2">
+            {% set qs = "&q=" ~ (q | urlencode) if q else "" %}
+            {% set ts = "&party_type=" ~ party_type if party_type else "" %}
+            {% if page > 1 %}
+            <button hx-get="/admin/parties?page={{ page - 1 }}{{ qs }}{{ ts }}"
+                    hx-target="#parties-table"
+                    hx-push-url="true"
+                    class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">Previous</button>
+            {% endif %}
+            {% if page < total_pages %}
+            <button hx-get="/admin/parties?page={{ page + 1 }}{{ qs }}{{ ts }}"
+                    hx-target="#parties-table"
+                    hx-push-url="true"
+                    class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">Next</button>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>

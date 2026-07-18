@@ -1,0 +1,65 @@
+{#
+  Party detail (Task 4) — subtype fields plus the custom-fields values
+  placeholder Task 7 wires up.
+
+  Context: `party` (app.core.models.Party, with `person_profile`/
+  `organization_profile` already loaded — see
+  app.features.parties.service.get_party).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/table_macros.html" import action_buttons %}
+
+{% block admin_content %}
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display">{{ party.display_name }}</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400">
+            {{ "Person" if party.party_type.value == "person" else "Organization" }}
+        </p>
+    </div>
+    <div class="flex items-center gap-2">
+        <a href="/admin/parties" class="px-3 py-2 rounded-lg text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Back to Parties</a>
+        {{ action_buttons(
+            delete_url="/admin/parties/" ~ party.id ~ "/delete",
+            delete_confirm="Delete this party? This action cannot be undone."
+        ) }}
+    </div>
+</div>
+
+<div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 space-y-4">
+    <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Email</p>
+        <p class="text-sm text-slate-900 dark:text-white">{{ party.email or "—" }}</p>
+    </div>
+    {% if party.person_profile %}
+    <div class="grid grid-cols-2 gap-4">
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">First name</p>
+            <p class="text-sm text-slate-900 dark:text-white">{{ party.person_profile.first_name }}</p>
+        </div>
+        <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Last name</p>
+            <p class="text-sm text-slate-900 dark:text-white">{{ party.person_profile.last_name }}</p>
+        </div>
+    </div>
+    {% endif %}
+    {% if party.organization_profile %}
+    <div>
+        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Legal name</p>
+        <p class="text-sm text-slate-900 dark:text-white">{{ party.organization_profile.legal_name }}</p>
+    </div>
+    {% endif %}
+</div>
+
+<!--
+  Custom fields panel placeholder. Task 7 (the custom_fields feature's admin
+  wiring) replaces this static block with a lazy-loaded hx-get fragment
+  (hx-trigger="load") that reads/renders this party's `custom_fields` JSONB
+  values via app.features.custom_fields.registry's ENTITY_MODELS lookup — no
+  custom_fields import here (feature independence) and no fabricated values
+  in the meantime.
+-->
+<div id="custom-fields-panel" class="mt-6 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+    <p class="text-sm text-slate-500 dark:text-slate-400">Custom fields will appear here.</p>
+</div>
+{% endblock %}
