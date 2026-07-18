@@ -105,6 +105,11 @@ def render_error(
     directly only when the caller already knows it wants HTML unconditionally
     (e.g. a future route-level handler outside FastAPI's exception-handler
     machinery).
+
+    MUST NEVER call get_request_branding — reads request.state only. If
+    branding resolution fails upstream, the error page falls back to the
+    static brand via the Jinja2 global (no-recursion invariant, pinned by
+    test_load_branding_failure_yields_static_branded_error_page).
     """
     # "csrf_failed" gets its own dedicated copy (errors/csrf.html) regardless
     # of status code — it's a 403 like any bare-forbidden HTTPException, but

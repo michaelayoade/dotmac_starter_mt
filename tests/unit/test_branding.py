@@ -340,3 +340,122 @@ def test_sanitize_branding_css_none_returns_empty_string() -> None:
 
 def test_sanitize_branding_css_blank_returns_empty_string() -> None:
     assert sanitize_branding_css("   ") == ""
+
+
+# ---------------------------------------------------------------------------
+# get_request_branding() error handling (Task 4 review: no error-page recursion)
+# ---------------------------------------------------------------------------
+
+
+def test_load_branding_failure_yields_static_branded_error_page(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, db, tenant_row
+) -> None:
+    """Regression test: when load_branding raises during an authenticated
+    request, the error-page render must fall back to the static brand
+    (NEVER call get_request_branding again, which would recurse indefinitely
+    trying to brand an error while branding fails). The error is logged and
+    the request yields a branded 500 page.
+
+    Task 4 review finding: render_error must read request.state only, never
+    call get_request_branding (reads only the static brand via the Jinja2
+    global). This test pins that no-recursion invariant.
+    """
+    from collections.abc import Generator
+
+    from fastapi import Depends, FastAPI, Request
+    from fastapi.testclient import TestClient
+
+    from app.core.deps import get_db
+    from app.core.errors import register_error_handlers
+    from app.core.models import (
+        AuthSession,
+        Party,
+        PartyPerson,
+        PartyRole,
+        PartyType,
+        Role,
+    )
+    from app.core.security import hash_token, issue_access_token
+    from app.core.web_deps import require_web_auth
+
+    # Set up admin party with token.
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Admin User",
+        email="admin@acme.test",
+    )
+    db.add(party)
+    db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Admin", last_name="User"))
+    role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
+    db.add(role)
+    db.flush()
+    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
+    db.flush()
+
+    token, expires_at = issue_access_token(party.id, tenant_row.id)
+    db.add(
+        AuthSession(
+            tenant_id=tenant_row.id,
+            party_id=party.id,
+            token_hash=hash_token(token),
+            expires_at=expires_at,
+        )
+    )
+    db.flush()
+
+    # Mock load_branding to raise.
+    from app.core import branding as branding_mod
+
+    monkeypatch.setattr(
+        branding_mod,
+        "load_branding",
+        lambda db_arg, tenant_id: (_ for _ in ()).throw(
+            RuntimeError("Database connection failed")
+        ),
+    )
+
+    # Build test app with error handlers and a guarded route.
+    app = FastAPI()
+    register_error_handlers(app)
+
+    @app.get("/protected")
+    def protected(auth: dict = Depends(require_web_auth)) -> dict:
+        return {"party_id": str(auth["party"].id)}
+
+    @app.middleware("http")
+    async def _inject_tenant(request: Request, call_next):
+        request.state.tenant = tenant_row
+        return await call_next(request)
+
+    def _override_get_db() -> Generator[None, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = _override_get_db
+
+    client = TestClient(app, raise_server_exceptions=False)
+
+    # Make a request. require_web_auth will call get_request_branding, which
+    # will call load_branding, which will raise. The exception handler must
+    # catch it and fall back to the static brand (no recursion).
+    with caplog.at_level("ERROR"):
+        resp = client.get(
+            "/protected",
+            cookies={"access_token": token},
+            headers={"Accept": "text/html, */*"},
+        )
+
+    # Assert: 500 error, HTML response branded successfully (not a crash/recursion).
+    assert resp.status_code == 500
+    assert resp.headers["content-type"].startswith("text/html")
+    # The error page renders the 500 template successfully, proving that
+    # render_error fell back to the static brand (from Jinja2 globals) and
+    # did NOT call get_request_branding again (which would have raised again,
+    # causing recursion). Proof: the 500 template content is present.
+    assert "500" in resp.text  # Error page rendered (status number present).
+    assert "Server error" in resp.text  # Standard error text from 500.html.
+    assert "Traceback" not in resp.text  # No crash/stack trace.
+
+    # Assert: the exception was logged.
+    assert "Database connection failed" in caplog.text
