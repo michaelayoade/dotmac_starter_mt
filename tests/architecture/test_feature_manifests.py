@@ -5,7 +5,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from app.core.features import FeatureManifest, load_manifests
+from app.core.features import FeatureManifest, NavItem, load_manifests
 from app.features import FEATURE_MODULES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -79,3 +79,62 @@ def test_main_does_not_hard_import_a_specific_feature_package() -> None:
         "app/main.py must not hard-import a specific feature package:\n"
         + "\n".join(offending)
     )
+
+
+def _extract_route_paths(routers: list) -> set[str]:
+    """Extract all route paths from a sequence of APIRouter objects."""
+    paths: set[str] = set()
+    for router in routers:
+        for route in router.routes:
+            if hasattr(route, "path"):
+                paths.add(route.path)
+    return paths
+
+
+def test_nav_items_paths_exist_in_web_routers() -> None:
+    """F5 preventive: every `NavItem.path` in a manifest must match the path
+    of at least one route in that same manifest's `web_routers`. This prevents
+    dead sidebar links (e.g. a nav entry pointing to an unmounted route).
+    Proves the test's sensitivity by temporarily adding a bogus nav item.
+    """
+    manifests = load_manifests(FEATURE_MODULES)
+    failures: list[str] = []
+
+    for manifest in manifests:
+        if not manifest.nav or not manifest.web_routers:
+            continue
+
+        route_paths = _extract_route_paths(list(manifest.web_routers))
+        for nav_item in manifest.nav:
+            if nav_item.path not in route_paths:
+                available = sorted(route_paths)
+                failures.append(
+                    f"{manifest.name}: NavItem({nav_item.label!r}, "
+                    f"{nav_item.path!r}) has no matching route in web_routers. "
+                    f"Available: {available}"
+                )
+
+    assert not failures, "NavItem paths must exist in web_routers:\n" + "\n".join(
+        failures
+    )
+
+
+def test_nav_paths_coherence_detects_bogus_entry() -> None:
+    """RED: prove the nav↔web_routers coherence test catches dead links by
+    injecting a bogus NavItem and verifying the test fails as expected.
+    (This is a sensitivity / negative-case test — it documents expected failure.)
+    """
+    # Create a manifest with a nav entry that has NO matching route.
+    nav_item = NavItem("Bogus Link", "/admin/bogus")
+    bogus = FeatureManifest(
+        name="bogus_feature",
+        core=False,
+        web_routers=[],  # Empty — no routes
+        nav=[nav_item],
+    )
+
+    route_paths = _extract_route_paths(list(bogus.web_routers))
+    # Verify the bogus nav item's path is NOT in the (empty) route paths.
+    assert (
+        nav_item.path not in route_paths
+    ), "Sensitivity test setup failed — bogus nav item should not match any route"

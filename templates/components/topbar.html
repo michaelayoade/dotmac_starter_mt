@@ -1,8 +1,8 @@
 {#
   Admin topbar. `page_title` comes from layouts/admin.html's context
-  contract {active_nav, page_title}. `current_user` is optional — Task 3
-  (web auth) will pass it once `require_web_auth` exists; until then it
-  renders a generic "Admin" placeholder rather than erroring.
+  contract. `current_user` is optional — once passed by `require_web_auth`,
+  it renders the user's name; otherwise renders a generic "Admin" placeholder
+  rather than erroring.
 
   Ported from ST:templates/admin/components/topbar.html — the notification
   bell was dropped (no notifications feature in this app; see

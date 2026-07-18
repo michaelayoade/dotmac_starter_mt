@@ -144,6 +144,17 @@ def test_disabled_features_web_still_leaves_other_admin_routes_mounted() -> None
     assert any(p.startswith("/admin/parties") for p in data["admin_routes"])
 
 
+def test_combined_case_web_disabled_plus_feature_disabled() -> None:
+    """Task 1 Task 3 combined-case pin: `WEB_ENABLED=false` +
+    `DISABLED_FEATURES=custom_fields` together must yield zero admin routes,
+    JSON API intact, no error. Proves both switches compose correctly."""
+    data = _inspect_app({"WEB_ENABLED": "false", "DISABLED_FEATURES": "custom_fields"})
+    assert data["admin_routes"] == [], data["admin_routes"]
+    assert data["static_mounts"] == []
+    assert data["has_health"] is True
+    assert data["has_login_api"] is True
+
+
 # ---------------------------------------------------------------------------
 # F5 pin: DISABLED_FEATURES=custom_fields -> party detail 200 without the
 # values-panel div; sidebar lacks the Custom Fields entry.
