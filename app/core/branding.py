@@ -26,7 +26,37 @@ docstring for how each is wired into template context):
 admin-supplied `custom_css` override must not smuggle in an `@import`,
 `javascript:`/`data:` URL, IE `behavior:`, CSS `expression()`, or a
 `<script>` breakout via unescaped angle brackets, since the value is
-rendered `| safe` into a `<style>` block.
+rendered `| safe` into a `<style>` block. `load_branding`'s merge is also
+allowlisted to `_KNOWN_BRAND_KEYS` (2b review follow-up, folded into Task 4)
+-- an override dict key outside that set is silently ignored, so a stale or
+hand-crafted `ui_branding` payload can never inject an arbitrary key into
+the template context.
+
+`get_request_branding(request, db)` -- Task 4 (F4 fix): resolves
+`load_branding` (or the static `get_brand()` fallback, no tenant on
+`request.state`) exactly ONCE per request, memoized on
+`request.state.branding`. Wiring/seam decision (three shapes considered):
+
+1. A per-router `dependencies=[Depends(web_branding)]` at every
+   `include_router(..., dependencies=[...])` call site -- rejected: routers
+   are feature-owned (one per feature package), so this is N call sites
+   (one per feature's web router) and grows by one every time a feature
+   adds a web surface -- the opposite of a single seam.
+2. A route-level dependency added to every individual web route --
+   rejected for the same reason, worse (one call site per ROUTE, not per
+   router).
+3. **Chosen**: `app.core.web_deps.require_web_auth` (already a dependency
+   of every authenticated `/admin/*` route -- one seam, zero new call
+   sites) calls `get_request_branding` itself, populating
+   `request.state.branding` before the route body runs. That covers every
+   authenticated portal page. The two pre-auth surfaces that also render
+   HTML but never go through `require_web_auth` -- `GET`/`POST
+   /admin/login` (`app.features.auth.web`) -- call it explicitly (2 call
+   sites, commented at each). Total: 3 call sites for the whole app,
+   independent of how many features exist. `app.core.templating.render()`
+   then reads `request.state.branding` centrally (see that module's
+   docstring) -- routes never pass `brand` themselves unless they want to
+   override it (e.g. the branding editor's live preview).
 """
 
 from __future__ import annotations
@@ -40,6 +70,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from fastapi import Request
 from sqlalchemy.orm import Session
 
 from app.core.settings_models import SettingDomain
@@ -72,6 +103,17 @@ _DEFAULTS: dict[str, str] = {
     "support_email": "support@example.com",
     "app_url": "https://example.com",
 }
+
+# Keys the branding editor (`app.features.settings.web._branding_form`)
+# exposes and that `load_branding` is willing to merge from the tenant's
+# `ui_branding` override -- enumerated from that editor's form fields. Any
+# other key in the stored dict (stale shape, hand-crafted via the raw JSON
+# generic editor, a future field not yet wired here) is silently ignored
+# rather than merged into the render context (2b final-review follow-up,
+# folded into Task 4 -- see this module's docstring).
+_KNOWN_BRAND_KEYS = frozenset(
+    {"name", "tagline", "logo_url", "primary_color", "accent_color", "custom_css"}
+)
 
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _CSS_URL = re.compile(r"""(?is)url\(\s*(["']?)(.*?)\1\s*\)""")
@@ -168,6 +210,8 @@ def load_branding(db: Session, tenant_id: UUID | None) -> dict[str, Any]:
 
     Any friendly key present in the stored override replaces the static
     value; keys the override doesn't mention keep the static brand's value.
+    Only keys in `_KNOWN_BRAND_KEYS` are merged -- anything else in the
+    stored dict is ignored (allowlist, see this module's docstring).
     `primary_color`/`accent_color` overrides are validated as `#RRGGBB` hex
     (falling back to the static color on a bad value) and `custom_css` is
     run through `sanitize_branding_css` -- mirrors
@@ -180,6 +224,8 @@ def load_branding(db: Session, tenant_id: UUID | None) -> dict[str, Any]:
     )
     if isinstance(override, dict):
         for key, value in override.items():
+            if key not in _KNOWN_BRAND_KEYS:
+                continue
             if isinstance(value, str) and value.strip():
                 merged[key] = value.strip()
         if "primary_color" in override:
@@ -193,3 +239,33 @@ def load_branding(db: Session, tenant_id: UUID | None) -> dict[str, Any]:
         if "custom_css" in override:
             merged["custom_css"] = sanitize_branding_css(override.get("custom_css"))
     return merged
+
+
+def get_request_branding(request: Request, db: Session) -> dict[str, Any]:
+    """Resolve THIS request's effective branding exactly once, memoized on
+    `request.state.branding` (Task 4 / F4 fix -- see this module's docstring
+    for the wiring/seam decision and the three call sites).
+
+    Falls back to the deployment-static `get_brand()` when
+    `request.state.tenant` is `None` or absent -- platform-host requests and
+    any context the tenant resolver couldn't attach a tenant to. Safe to
+    call more than once per request (e.g. `require_web_auth` warms the
+    cache, a route calls this again for its own reasons): the second call
+    returns the cached dict without a second `load_branding` DB read.
+    """
+    cached = getattr(request.state, "branding", None)
+    if cached is not None:
+        return cached
+    tenant = getattr(request.state, "tenant", None)
+    branding = load_branding(db, tenant.id) if tenant is not None else get_brand()
+    request.state.branding = branding
+    return branding
+
+
+__all__ = [
+    "get_brand",
+    "get_request_branding",
+    "load_branding",
+    "reset_brand_cache",
+    "sanitize_branding_css",
+]

@@ -109,7 +109,11 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   at the settings API boundary (owned by T5's validation; verify it landed there).
 - Settings cache (Redis) with invalidation on write — phase 3, alongside Celery/Redis
   infra (noted in `app/core/settings_resolver.py`'s module docstring; no caching exists
-  yet, every `resolve_value` call hits Postgres).
+  yet, every `resolve_value` call hits Postgres). This is also the fix for 2b.1-T4's
+  (F4) one-extra-DB-read-per-authenticated-web-request cost (`get_request_branding` ->
+  `load_branding` -> `resolve_value`) — request-scoped memoization (landed in T4) avoids
+  N reads per request, but every request still pays one; the Redis cache below removes
+  even that.
 - ~~RBAC: consider `require_user_auth` (not admin) for `GET /rbac/roles` when 2b builds
   role-assignment dropdowns.~~ — **moot as of 2b-T6**: the role-grant web dropdown
   (`/admin/role-grants`) calls `rbac_service.list_roles` directly, server-side — it
@@ -227,11 +231,21 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   tenant data unauthenticated and pass the build. Every current GET carries
   require_web_auth (verified route-by-route). 2c ticket: extend the tiered test to GETs
   under /admin (or any web prefix).
-- **Portal-wide tenant branding (untracked→tracked):** `load_branding` (per-tenant
+- ~~**Portal-wide tenant branding (untracked→tracked):** `load_branding` (per-tenant
   ui_branding override) is consumed ONLY by the branding editor's own preview — the rest
   of the portal renders the static brand. Phase-3 ticket (behind the settings cache):
   wire load_branding portal-wide; ALSO tighten its merge to an allowlist of known brand
-  keys (currently merges arbitrary override keys; harmless today, admin-only writer).
+  keys (currently merges arbitrary override keys; harmless today, admin-only writer).~~ —
+  **RESOLVED 2b.1-T4 (finding F4)**: `app.core.branding.get_request_branding(request, db)`
+  resolves `load_branding`/`get_brand()` ONCE per request, memoized on
+  `request.state.branding`; `app.core.templating.render()` injects it as the `brand`
+  context key for every web render unless the route already set its own (see that
+  module's and `app.core.branding`'s docstrings for the 3-call-site wiring:
+  `require_web_auth`, `GET`/`POST /admin/login`). `load_branding`'s merge is now
+  allowlisted to `_KNOWN_BRAND_KEYS` (`name`, `tagline`, `logo_url`, `primary_color`,
+  `accent_color`, `custom_css`) — an unknown override key is dropped, not merged. Cost:
+  one extra DB read per authenticated web request (the settings-cache phase-3 ticket
+  immediately below removes it; not needed to ship this fix).
 - **Platform-admin surface:** the 2b plan's scope-deviation note said this was
   "backlogged" — this is now that entry. Tenant CRUD screens need a platform-scoped
   surface (require_platform hardening included — it's a documented stub that counts as

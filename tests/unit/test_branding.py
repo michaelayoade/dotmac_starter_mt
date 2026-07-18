@@ -194,6 +194,109 @@ def test_load_branding_sanitizes_custom_css_in_override(db, tenant_row) -> None:
     assert branding["custom_css"] == ""
 
 
+def test_load_branding_ignores_unknown_override_keys(db, tenant_row) -> None:
+    """Task 4 / F4 review follow-up: `load_branding` only merges keys in
+    `_KNOWN_BRAND_KEYS` -- an unrecognized key in the stored `ui_branding`
+    dict (stale shape, hand-crafted via the raw-JSON generic editor, a
+    future field not yet wired) must never leak into the render context.
+    """
+    from app.core.settings_resolver import upsert_by_key
+
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        {"name": "Acme Tenant Brand", "evil_injected_key": "<script>alert(1)</script>"},
+        tenant_id=tenant_row.id,
+    )
+
+    branding = load_branding(db, tenant_row.id)
+    assert branding["name"] == "Acme Tenant Brand"
+    assert "evil_injected_key" not in branding
+
+
+def test_known_brand_keys_matches_the_branding_editor_form_fields() -> None:
+    """Pin the allowlist to the exact fields `app.features.settings.web`'s
+    `_branding_form`/`branding_submit` expose -- if the editor ever grows a
+    field, this test forces a conscious allowlist update in the same task.
+    """
+    assert branding_module._KNOWN_BRAND_KEYS == frozenset(
+        {"name", "tagline", "logo_url", "primary_color", "accent_color", "custom_css"}
+    )
+
+
+# ---------------------------------------------------------------------------
+# get_request_branding(): request-scoped, memoized resolution (Task 4 / F4)
+# ---------------------------------------------------------------------------
+
+
+class _FakeState:
+    def __init__(self, tenant=None):
+        self.tenant = tenant
+
+
+class _FakeRequest:
+    def __init__(self, tenant=None):
+        self.state = _FakeState(tenant=tenant)
+
+
+def test_get_request_branding_resolves_tenant_override(db, tenant_row) -> None:
+    from app.core.branding import get_request_branding
+    from app.core.settings_resolver import upsert_by_key
+
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        {"name": "Acme Tenant Brand"},
+        tenant_id=tenant_row.id,
+    )
+
+    request = _FakeRequest(tenant=tenant_row)
+    branding = get_request_branding(request, db)
+    assert branding["name"] == "Acme Tenant Brand"
+    assert request.state.branding is branding
+
+
+def test_get_request_branding_falls_back_to_static_when_no_tenant(db) -> None:
+    """No tenant on `request.state` -- platform hosts, unresolved-tenant
+    error contexts -- falls back to the deployment-static `get_brand()`,
+    never a DB read."""
+    from app.core.branding import get_request_branding
+
+    request = _FakeRequest(tenant=None)
+    branding = get_request_branding(request, db)
+    assert branding == get_brand()
+    assert request.state.branding == get_brand()
+
+
+def test_get_request_branding_memoizes_one_load_branding_call_per_request(
+    monkeypatch: pytest.MonkeyPatch, db, tenant_row
+) -> None:
+    """Call-count spy: `load_branding` must be called exactly once per
+    request even if `get_request_branding` is invoked more than once on the
+    same request (e.g. `require_web_auth` warms the cache, a route calls it
+    again) -- the second call must return the cached
+    `request.state.branding` without a second DB read."""
+    from app.core import branding as branding_mod
+
+    calls: list[int] = []
+    real_load_branding = branding_mod.load_branding
+
+    def _spy_load_branding(db_arg, tenant_id):
+        calls.append(1)
+        return real_load_branding(db_arg, tenant_id)
+
+    monkeypatch.setattr(branding_mod, "load_branding", _spy_load_branding)
+
+    request = _FakeRequest(tenant=tenant_row)
+    first = branding_mod.get_request_branding(request, db)
+    second = branding_mod.get_request_branding(request, db)
+
+    assert len(calls) == 1
+    assert first is second
+
+
 # ---------------------------------------------------------------------------
 # sanitize_branding_css -- verbatim port, test cases ported from
 # dotmac_starter:tests/test_branding_service.py

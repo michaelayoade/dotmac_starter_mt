@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.core.branding import get_request_branding
 from app.core.config import settings
 from app.core.deps import get_db, require_tenant
 from app.core.models import Tenant
@@ -44,8 +45,15 @@ ACCESS_TOKEN_COOKIE = "access_token"  # noqa: S105 # nosec B105 -- cookie name, 
 def login_page(
     request: Request,
     next: str = "/admin",
+    db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
 ) -> HTMLResponse:
+    # Call site 2/3 (Task 4 / F4 fix) — the login page is pre-auth, so it
+    # never goes through `require_web_auth` (call site 1/3); tenant is
+    # already host-resolved (`require_tenant` above) so the tenant's saved
+    # branding shows on ITS OWN login page even before anyone signs in. See
+    # `app.core.branding`'s module docstring for the full seam decision.
+    get_request_branding(request, db)
     return render(
         request,
         "auth/login.html",
@@ -59,6 +67,10 @@ async def login_submit(
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
 ) -> HTMLResponse | RedirectResponse:
+    # Call site 3/3 (Task 4 / F4 fix) — a failed submit re-renders
+    # `auth/login.html` below without a redirect, so it needs the same
+    # branding the GET above would have shown; see that route's comment.
+    get_request_branding(request, db)
     form = await request.form()
     username = str(form.get("username", "")).strip()
     password = str(form.get("password", ""))

@@ -266,3 +266,12 @@ def test_csrf_middleware_render_failure_falls_back_to_json_envelope(
 
     # The exception must be logged
     assert "Error-page render failed" in caplog.text
+
+
+# NOTE: `request.state.branding` fallback/override behavior for HTML error
+# pages is exercised directly against `app.core.templating.render()` in
+# `tests/unit/test_templating.py` (Task 4 / F4) -- none of this app's
+# `errors/*.html` templates actually surface `brand.name` in their body (the
+# `{% block title %}` that would show it is overridden by every status-code
+# template), so a `TestClient` assertion against error-page HTML text
+# cannot observe the enrichment; the render()-level test can.

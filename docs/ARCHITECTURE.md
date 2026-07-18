@@ -341,23 +341,59 @@ docstring):
   (`SettingDomain.branding`, resolved via the same
   tenant→platform→spec-default resolver every other setting uses) overlaid
   on top. Per-request, not cached — a tenant admin's branding edit is live
-  on the next page load, no restart. `primary_color`/`accent_color`
-  overrides are validated as `#RRGGBB` hex (falling back to the static
-  color on a bad value); `custom_css` is run through
-  `sanitize_branding_css` (strips `@import`, `javascript:`/`data:` URLs,
-  `expression()`, `behavior:`, and any literal `<` — a `<script>` breakout
-  attempt) before it is ever rendered.
+  on the next page load, no restart. Only keys in `_KNOWN_BRAND_KEYS`
+  (`name`, `tagline`, `logo_url`, `primary_color`, `accent_color`,
+  `custom_css` — the branding editor's own form fields) are merged from the
+  stored override; anything else in that dict is ignored (2b final-review
+  follow-up, resolved 2b.1-T4/F4 — previously any key merged unchecked).
+  `primary_color`/`accent_color` overrides are validated as `#RRGGBB` hex
+  (falling back to the static color on a bad value); `custom_css` is run
+  through `sanitize_branding_css` (strips `@import`, `javascript:`/`data:`
+  URLs, `expression()`, `behavior:`, and any literal `<` — a `<script>`
+  breakout attempt) before it is ever rendered.
 
-`GET`/`POST /admin/settings/branding` (`app.features.settings.web`) is the
-first and only route that calls `load_branding` — it renders the CURRENT
-effective branding, and its own render context's `brand` key SHADOWS the
-process-global static `brand` template global for that one response only
-(the static global stays available to every other template unchanged). The
-same route is where `templates/admin/settings/branding.html`'s
-`custom_css` preview block uses `| safe` — the one real `| safe` usage in
-this app's templates, immediately preceded by a `SANITIZER:` comment
-pointing at `sanitize_branding_css`, which is what makes it safe (see the
-CLAUDE.md template-escaping rule and
+**Portal-wide resolution (2b.1-T4, finding F4):** `load_branding` used to
+have exactly one caller (the branding editor's own preview) — every other
+portal page and the login page rendered the deployment-static brand only,
+so saving a tenant's branding changed nothing outside the editor. Fixed by
+`app.core.branding.get_request_branding(request, db)`: resolves
+`load_branding(db, tenant.id)` (or the static `get_brand()` fallback when
+`request.state.tenant` is `None` — platform hosts, unresolved-tenant error
+contexts) exactly ONCE per request, memoized on `request.state.branding`.
+`app.core.templating.render()` is the single place that reads it back into
+the template context — it sets `context["brand"]` from
+`request.state.branding` unless the caller's own context already defines
+`brand` (route-level override still wins; see that module's docstring for
+the full precedence: explicit context > per-request tenant override >
+static global). No route changed to pick this up.
+
+Three call sites populate `request.state.branding` for the whole app,
+independent of how many features/routers exist (seam decision documented in
+`app.core.branding`'s module docstring, including the two rejected
+per-router/per-route shapes): `app.core.web_deps.require_web_auth` (covers
+every authenticated `/admin/*` page — one seam, since every such route
+already depends on it) and the two pre-auth `GET`/`POST /admin/login`
+routes (`app.features.auth.web`), which never reach `require_web_auth`.
+
+Cost: one extra DB read (`resolve_value` inside `load_branding`) per
+authenticated web request that didn't already need one — mitigated to
+"one per request" (not one per render) by the memoization above; fully
+removing it is the phase-3 settings-cache ticket
+(`docs/superpowers/phase2-backlog.md`'s "Added during phase 2a execution"
+section) — not needed to ship this fix.
+
+`GET`/`POST /admin/settings/branding` (`app.features.settings.web`) still
+calls `load_branding` directly for its own live-preview render (its context
+explicitly sets `brand`, which is why the precedence rule above lets a
+route override the per-request value) — it renders the CURRENT effective
+branding, and its own render context's `brand` key SHADOWS both the
+per-request tenant override and the process-global static `brand` template
+global for that one response only (the static global stays available to
+every other template unchanged). The same route is where
+`templates/admin/settings/branding.html`'s `custom_css` preview block uses
+`| safe` — the one real `| safe` usage in this app's templates, immediately
+preceded by a `SANITIZER:` comment pointing at `sanitize_branding_css`,
+which is what makes it safe (see the CLAUDE.md template-escaping rule and
 `test_safe_filter_only_used_with_a_sanitize_comment_nearby`).
 
 Write path: `POST /admin/settings/branding` composes the submitted
