@@ -32,8 +32,8 @@ git clone <this-repo> my-app && cd my-app
 
 Then, in order:
 
-1. **Pick your features.** Six ship today: `tenants`, `auth`, `parties`,
-   `rbac`, `settings`, `custom_fields` (see "What's in this template"
+1. **Pick your features.** Seven ship today: `tenants`, `auth`, `parties`,
+   `rbac`, `settings`, `custom_fields`, `web` (see "What's in this template"
    below). Disable what you don't need via `DISABLED_FEATURES` (fast — see
    "Disabling a feature" below), or delete the package under
    `app/features/` and remove it from `FEATURE_MODULES` in
@@ -57,10 +57,12 @@ Then, in order:
    spec with no real reader anywhere in the code fails the
    no-orphan-settings architecture test — wire the `resolve_value(...)`
    call before you ship it.
-4. **Brand it.** `settings/branding/ui_branding` is a `json`-typed setting
-   spec reserved for logo/colors/white-label overrides (consumed by the
-   admin portal in a later phase); rename/extend it for your own branding
-   needs.
+4. **Brand it.** Deployment-wide identity (name, tagline, colors, support
+   email, app URL) is `brand.json` (repo root) + `BRAND_*` env var
+   overrides — see `.env.example`. Per-tenant branding overrides on top of
+   that live in the `settings/branding/ui_branding` setting, editable at
+   `/admin/settings/branding`. Both layers are consumed by the admin portal
+   (see "Admin portal" below).
 
 To run the app locally, see **Quickstart (dev)** below. To run the
 integration test suite, use `make test-db-up` to start a disposable
@@ -86,6 +88,13 @@ used for running the app.
   no migration, no deploy — and set/read its value through a generic
   values API. This is the template's signature capability; see the
   quickstart below.
+- **Admin portal**: a server-rendered HTML/HTMX admin UI (Jinja2 + Tailwind
+  v4 + Alpine) at `/admin/*` — cookie-based login, dashboard, and CRUD
+  screens for parties, RBAC roles/grants/audit, settings (incl. a friendly
+  branding editor), and custom fields. Deletable (`DISABLED_FEATURES=web`)
+  without losing the JSON API. See "Admin portal quickstart" below and
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#admin-portal-web-ui) for the
+  auth flow, branding pipeline, and cross-feature UI composition pattern.
 - CSRF middleware, tenant-aware in-memory rate limiting, and request IDs.
 - `TenantResolverMiddleware` that parses the host header → `request.state.tenant`.
 - `get_db` dependency that runs `SET LOCAL app.current_tenant` for RLS.
@@ -107,10 +116,13 @@ This is intentionally minimal outside the tenancy/governance foundation. To
 productionize further, port what your project needs:
 
 - MFA, password reset, account lockout, and production auth hardening
+  (phase 2c on this repo's own roadmap; fleet-specific rationale lives in
+  `docs/adr/`, not here)
 - Billing, file uploads, notifications, scheduler
 - Security headers
-- A working admin/customer web UI (phase 2b on this repo's own roadmap;
-  fleet-specific rationale for that roadmap lives in `docs/adr/`, not here)
+- A self-service (non-admin) portal surface — today every `/admin/*` page
+  requires the `admin` role; see `app.core.web_deps.require_web_auth`'s
+  docstring for the phase-3 loosening plan
 
 Each port follows the pattern already established: add `tenant_id`, write
 the cross-tenant isolation test first, port the code, watch the test go
@@ -159,6 +171,57 @@ curl -X POST http://acme.localhost:8000/parties/people \
 curl http://acme.localhost:8000/parties     # sees Alice
 curl http://widgets.localhost:8000/parties  # sees nothing
 ```
+
+## Admin portal quickstart
+
+The portal is server-rendered HTML (Jinja2 + HTMX + Alpine, Tailwind v4
+CSS), served from the same FastAPI process as the JSON API — no separate
+frontend build/deploy. Continuing from the Quickstart above (Postgres
+migrated, at least one tenant provisioned):
+
+```bash
+npm ci                 # installs the Tailwind v4 CLI (devDependency, pinned via package-lock.json)
+make css-build          # -> static/css/main.css (gitignored — rebuild after editing static/css/src/main.css)
+make dev                # poetry run uvicorn app.main:app --reload --port 8000
+```
+
+Then, in a browser (dev resolves `*.localhost` automatically, so no
+`/etc/hosts` edits needed):
+
+1. Register your first user — `/auth/register` is a JSON endpoint (no
+   portal signup form exists; every portal account starts as an API
+   registration), the same shape as the Quickstart above's
+   `/parties/people` example. The FIRST person registered in a tenant is
+   auto-assigned the `admin` role, which the portal requires:
+   ```bash
+   curl -X POST http://acme.localhost:8000/auth/register \
+       -H "Content-Type: application/json" \
+       -d '{"email":"admin@acme.com","password":"correcthorsebatterystaple","first_name":"Admin","last_name":"User"}'
+   ```
+2. Visit `http://acme.localhost:8000/admin/login` and sign in with that
+   email/password. The login form is HTMX (`hx-post`) with the CSRF
+   header-bridge (`static/js/csrf.js`) wired automatically — nothing to
+   configure.
+3. Land on `http://acme.localhost:8000/admin` — the dashboard, showing
+   party/role/active-session counts for this tenant.
+4. From the sidebar: **Parties** (list/create/edit/detail, with a
+   custom-fields values panel on the detail page — the cross-feature UI
+   composition pattern, see ARCHITECTURE.md), **RBAC** (roles, role
+   grants, audit log), **Settings** (per-key editor + a friendly branding
+   editor at `/admin/settings/branding` that live-previews your
+   `primary_color`/`accent_color`/`custom_css`), **Custom Fields**
+   (definitions CRUD).
+5. `http://widgets.localhost:8000/admin` (a second tenant, its own
+   register+login) sees none of tenant A's data — same RLS isolation the
+   JSON API gets, proven end-to-end by `tests/test_admin_portal_e2e.py`.
+
+<!-- Screenshot: admin/dashboard.html — dashboard with stat cards -->
+<!-- Screenshot: admin/parties/detail.html — party detail + custom-fields values panel -->
+<!-- Screenshot: admin/settings/branding.html — branding editor with live preview -->
+
+Screenshots deferred (no CI artifact pipeline for them yet) — the
+placeholders above mark where they'd go; capture manually against a
+`make dev` instance if you want them for a fork's own docs.
 
 ## Quick example: custom fields (zero migrations)
 
@@ -218,6 +281,24 @@ only once you're sure you'll never want the feature back (`make test-unit`
 will tell you if the registry and import-linter contract still agree with
 what's on disk).
 
+**`DISABLED_FEATURES=web` is special: it does NOT disable the portal's
+login, and it does NOT remove any JSON API.** The `web` feature package
+owns exactly one route — `GET /admin`, the dashboard shell — so disabling
+it drops only that landing page. `GET`/`POST /admin/login` and
+`GET /admin/logout` are owned by the `auth` feature (core, always mounted)
+and stay up regardless. Every other feature's own `/admin/*` screens
+(parties, RBAC, settings, custom fields) are mounted from THAT feature's
+`FeatureManifest` alongside its JSON router — one manifest, two routers,
+one on/off switch (`app/features/<name>/feature.py`'s `routers=[router,
+web_router]`). There is no per-router granularity: disabling `parties` (say)
+to drop its `/admin/parties/*` screens also drops `/parties/*` from the
+JSON API, and vice versa — `DISABLED_FEATURES` is a per-FEATURE toggle, not
+a per-surface one. If you want JSON-only with zero portal HTML, you cannot
+reach that by disabling individual feature packages without losing their
+API too; the practical "no HTML" deployment is simply "don't build/serve
+`static/`, don't visit `/admin/*`" — every JSON route keeps working exactly
+as it does today whether or not any portal template exists.
+
 ## Route map
 
 | Prefix | Feature | Notes |
@@ -233,6 +314,21 @@ what's on disk).
 Every route above (except `/health`) carries a `require_*` guard —
 enforced by `tests/architecture/test_route_guards.py`.
 
+### Admin portal routes (`/admin/*`)
+
+| Prefix | Feature | Notes |
+|---|---|---|
+| `GET`/`POST /admin/login`, `GET /admin/logout` | `auth` | Cookie login/logout — `/login` is deliberately unguarded (pre-auth), allowlisted with a comment. |
+| `GET /admin` | `web` | Dashboard shell — the one route this deletable feature owns. |
+| `GET /admin/parties`, `/create`, `POST /admin/parties/{people,organizations}`, `GET /admin/parties/{id}`, `GET`/`POST /admin/parties/{id}/edit`, `POST /admin/parties/{id}/delete` | `parties` | List/detail/create/edit/delete screens. |
+| `GET`/`POST /admin/roles`, `/admin/roles/create`, `GET`/`POST /admin/role-grants`, `GET /admin/audit` | `rbac` | Roles, grants, audit log screens. |
+| `GET /admin/settings`, `GET`/`POST /admin/settings/{domain}/{key}/edit`, `GET`/`POST /admin/settings/branding` | `settings` | Generic per-key editor + friendly branding editor. |
+| `GET`/`POST /admin/custom-fields`, `/create`, `GET`/`POST /admin/custom-fields/{id}/edit`, `POST /admin/custom-fields/{id}/deactivate`, `GET`/`POST /admin/custom-fields/party/{id}/values-panel` | `custom_fields` | Definitions CRUD + the values-panel fragment `parties/detail.html` embeds. |
+
+Every `/admin/*` route (except the two login routes) carries
+`require_web_auth`, which also requires the `admin` role — see
+`app.core.web_deps`.
+
 ## Run the cross-tenant tests
 
 ```bash
@@ -244,6 +340,8 @@ poetry run pytest \
     tests/test_party_isolation.py \
     tests/test_settings_isolation.py \
     tests/test_custom_fields_isolation.py \
+    tests/test_web_auth_isolation.py \
+    tests/test_admin_portal_e2e.py \
     -v
 ```
 

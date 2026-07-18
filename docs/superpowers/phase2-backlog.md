@@ -6,14 +6,15 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 ## Features (spec-scoped)
 
 - **Core parity:** auth hardening (MFA/TOTP, refresh rotation, password reset, lockout,
-  API keys) — still open. ~~RBAC parity (incl. mounting `GET /rbac/roles` —
+  API keys) — still open (now explicitly phase 2c, per the 2b completion criteria).
+  ~~RBAC parity (incl. mounting `GET /rbac/roles` —
   `rbac/service.py::list_roles` exists, currently uncalled; add an explicit tenant filter
   when wiring)~~ — **delivered 2a-T2**: `GET /rbac/roles` mounted with explicit tenant
   filter + pagination. ~~settings-as-data~~ — **delivered 2a-T3..T5**: spec registry +
   resolver + tenant admin API (`app/core/settings_models.py`/`settings_resolver.py` +
-  `app/features/settings/`). **Branding** (`ui_branding` setting spec) remains open —
-  it's declared and the sole no-orphan-settings allowlist entry, pending plan 2b's
-  branding UI as its consumer.
+  `app/features/settings/`). ~~**Branding** (`ui_branding` setting spec)~~ — **delivered
+  2b-T2/T7**: `app.core.branding.load_branding` is the consumer
+  (`/admin/settings/branding`); the no-orphan-settings allowlist is now EMPTY.
 - ~~**Custom fields feature package**~~ — **delivered 2a-T8..T10**: port SoT dotmac_erp
   `finance/automation` custom-field module, generalized (string entity_type registry,
   tenant_id + RLS, domain exceptions, settings-driven per-entity limit) in
@@ -52,9 +53,12 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 - `LOG_LEVEL` setting for `setup_logging()` (currently fixed INFO default).
 - Share one health-path constant between tenant middleware (`_HEALTH_PATHS`) and the
   rate-limit bypass (currently only literal `/health`) before mounting `/health/ready`.
-- /static/* requests pay tenant resolution (up to 2 DB SELECTs each; 500s when DB down) —
+- ~~/static/* requests pay tenant resolution (up to 2 DB SELECTs each; 500s when DB down) —
   exempt static prefix in TenantResolverMiddleware (prefix-match, carefully — assigned
-  to 2b-T2).
+  to 2b-T2).~~ — **delivered 2b-T2**: `_is_static_path()` bypasses
+  `TenantResolverMiddleware` before any DB query, exact/prefix-matched (`/static`,
+  `/static/...`), with near-miss tests (`/staticevil`, `/static2/x`) proving the
+  trailing-slash check isn't a bare `startswith`.
 - ~~Service payload typing: replace `payload: Any` with concrete Pydantic schemas across
   the four feature services (pairs with mypy tightening).~~ — **delivered 2a-T1/T2**,
   now a standing hard rule enforced by `tests/unit/test_service_typing.py`.
@@ -69,6 +73,33 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   (persons service style); pick one convention for explicit-vs-RLS-only tenant filters.
 - Dangling doc pointers to untracked task reports (Dockerfile, query.py, bump_version.py,
   deploy.sh headers) — commit the reports or strip the references.
+- `rbac/web.py::role_grants_submit` re-renders `/admin/role-grants` on every validation/
+  conflict failure with `q=None` (`_render_grants_page(request, db, tenant, q=None, ...)`),
+  discarding whatever party-search filter was active in the grantable-parties list before
+  the failed submit — a cosmetic one-liner (`raw.get("q")` from the submitted form, once
+  the template also posts it as a hidden field) not fixed as of 2b-T8/T9 (checked directly
+  against the source for this task; still `q=None` on all three failure branches).
+
+## Added during phase 2b execution
+
+- Admin portal governance (tiered guard test, web-conventions checks, non-admin sweep)
+  scopes itself to `templates/{admin,auth}` and the `/admin` prefix — see the
+  "2b-T8's web-conventions..." SOT-complete gap below; extend both when a non-admin
+  portal surface lands.
+- `DISABLED_FEATURES` has no per-router granularity: a feature's JSON router and its
+  `web.py` router are both registered on the same `FeatureManifest.routers` list, so
+  disabling `parties` (etc.) drops its JSON API and its `/admin/parties/*` screens
+  together — there is no way to keep one and drop the other short of splitting the
+  manifest, which nothing needs yet (documented as-is in README's "Disabling a feature").
+- `.env.example` had zero entries for the `BRAND_*` static-branding overrides
+  `app.core.branding.get_brand()` reads via `os.getenv` (deployment-static identity layer,
+  distinct from the per-tenant `ui_branding` DB setting) — a real as-built gap, closed in
+  this task (2b-T9) alongside `BRAND_CONFIG_PATH`.
+- The mutable-resource ownership table's "Auth sessions" and "Audit events" rows had
+  gone stale since 2b-T3/T6 (said "no revoke/logout write path yet" and "called from
+  rbac/router.py and settings/router.py only") — corrected in this task (2b-T9):
+  `web_logout` revokes sessions server-side, and `rbac/web.py`/`settings/web.py` both
+  call `write_audit_event` too.
 
 ## Added during phase 2a execution
 
@@ -79,8 +110,12 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 - Settings cache (Redis) with invalidation on write — phase 3, alongside Celery/Redis
   infra (noted in `app/core/settings_resolver.py`'s module docstring; no caching exists
   yet, every `resolve_value` call hits Postgres).
-- RBAC: consider `require_user_auth` (not admin) for `GET /rbac/roles` when 2b builds
-  role-assignment dropdowns.
+- ~~RBAC: consider `require_user_auth` (not admin) for `GET /rbac/roles` when 2b builds
+  role-assignment dropdowns.~~ — **moot as of 2b-T6**: the role-grant web dropdown
+  (`/admin/role-grants`) calls `rbac_service.list_roles` directly, server-side — it
+  never hits the JSON `GET /rbac/roles` route, so no guard change was needed. The route
+  itself still requires `require_role("admin")`, unchanged; revisit only if a future
+  JS-driven (not server-rendered) dropdown needs to call it directly from the browser.
 - Custom-fields definitions list paginates in-router via Python slice (bounded by
   max_per_entity, default 20); if the bound ever rises materially, push limit/offset into
   list_for_entity via apply_pagination.
@@ -139,11 +174,16 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
     `require_*`-prefixed dependency name, so it cannot distinguish tenancy
     (`require_tenant`) from authentication (`require_user_auth`/`require_role`) — this is
     exactly how the Group 2 parties gap (mutations reachable with only a resolved tenant,
-    no auth) passed the architecture suite for two tasks. Proposal for 2b: a tiered guard
-    test — mutating routes (POST/PUT/PATCH/DELETE) must carry an authentication-tier guard
-    (`require_user_auth` or `require_role`), not just any `require_*` dependency; read
-    routes may still accept `require_tenant` alone where that's a deliberate, commented
-    choice.
+    no auth) passed the architecture suite for two tasks. ~~Proposal for 2b: a tiered
+    guard test...~~ — **delivered 2b-T8**:
+    `test_mutating_routes_require_an_auth_tier_guard` requires every POST/PUT/PATCH/DELETE
+    route to carry a guard from the hand-built `AUTH_GUARD_NAMES` set (`require_user_auth`,
+    `require_role`, `require_web_auth`, `require_platform` — deliberately not a
+    `require_`-prefix match), unless allowlisted (`MUTATING_ALLOWLIST`: the two register/
+    login pre-auth routes). Note: `test_every_route_has_a_guard`'s original looser
+    behavior (any `require_*` counts) is UNCHANGED and still runs alongside the new,
+    stricter test — the gap this bullet describes is closed by addition, not by editing
+    the original check.
 - `SettingDomain` (`app/core/settings_models.py`) is duplicated in two places that must
   change together and aren't statically linked: the Python enum and the migration's
   `ck_domain_settings_domain` CHECK constraint (`"domain IN ('auth', 'audit', 'branding',
