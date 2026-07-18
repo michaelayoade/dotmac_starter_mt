@@ -87,10 +87,18 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 
 ## SOT-complete gaps (criteria added to spec 2026-07-17)
 
-- `Party.display_name`: stored projection of subtype fields, write-once, no drift
+- ~~`Party.display_name`: stored projection of subtype fields, write-once, no drift
   detection/repair — when 2b adds update endpoints: single write-owner + idempotent repair,
   or compute-at-read. Still open; explicitly named as a known gap in
-  `docs/ARCHITECTURE.md`'s "Known dual-writer: Parties" section.
+  `docs/ARCHITECTURE.md`'s "Known dual-writer: Parties" section.~~ — **delivered 2b-T5**:
+  `app.core.identity.person_display_name`/`normalize_email` are the single-owner
+  implementations of the invariant both writers (parties service, auth service) call;
+  `update_person_party`/`update_organization_party` (new this task) recompute
+  `display_name` on every write, so it's no longer write-once — repair is just "re-save"
+  (call the update function). `docs/ARCHITECTURE.md`'s ownership table and dual-writer
+  section both updated in the same commit. API parity (`PATCH /parties/{id}` JSON route)
+  intentionally NOT added this task (brief scoped it web-only) — the service functions
+  exist, wiring a JSON route is one line later; noted here so it isn't lost.
 - ~~Ownership table: T11's provenance table must name an owner for every mutable resource
   and state transition (not just models) — routes/service functions per resource.~~ —
   **delivered 2a-T11**: `docs/ARCHITECTURE.md` carries both the model provenance table

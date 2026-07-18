@@ -248,7 +248,8 @@ write:
 |---|---|
 | Tenants | `app.features.tenants.service.create_tenant` (platform-only; no update/delete service yet) |
 | Tenant domains | none — no write path exists yet (rows would be inserted by a future custom-domain feature) |
-| Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` (the `/parties` API), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
+| Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` / `update_person_party` / `update_organization_party` (the `/parties` API + `/admin/parties/{id}/edit` web flow), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
+| `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `app.core.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
 | Party role grants | `app.features.rbac.service.assign_role` (API path) **and** `app.features.auth.service._assign_first_user_admin` (auto-assigns the tenant's first registered user the `admin` role — a second, narrower writer of the same table; see the RBAC follow-up in `docs/superpowers/phase2-backlog.md`) |
 | Roles | `app.features.rbac.service.create_role`, and implicitly `_assign_first_user_admin` (creates the tenant's `admin` role on first use if it doesn't exist yet) |
 | Auth credentials | `app.features.auth.service.register` (the only writer — no credential-update/password-reset path yet, phase 2c) |
@@ -264,33 +265,37 @@ Two service functions independently construct a `Party` + `PartyPerson`
 row: `auth/service.py::register` (the `/auth/register` self-service signup
 flow, which also creates the `UserCredential` and first-admin role grant in
 the same transaction) and `parties/service.py::create_person_party` /
-`create_organization_party` (the tenant-admin `/parties` API, used to add a
-party without a login). This is a **deliberate, not accidental** dual
-writer — one flow is "a person signs themselves up," the other is "an admin
-adds a contact/customer record" — flagged here per SOT-complete honesty
-rather than silently left implicit.
+`create_organization_party` / `update_person_party` /
+`update_organization_party` (the tenant-admin `/parties` API and the
+`/admin/parties/{id}/edit` web flow, Task 5). This is a **deliberate, not
+accidental** dual writer — one flow is "a person signs themselves up," the
+other is "an admin manages a contact/customer record" — flagged here per
+SOT-complete honesty rather than silently left implicit. The writers
+themselves stay two; what changed (Task 5) is that the INVARIANTS both must
+preserve are no longer hand-duplicated at each call site — they're
+implemented once in `app.core.identity` and both writers call the same
+functions:
 
-The shared invariant both writers must preserve, by hand, in both places:
-
-- **Email is lowercased at the write boundary.** `auth/service.py::register`
-  calls `payload.email.lower()` once and reuses that value for `Party.email`,
-  `UserCredential.email`, and the returned view; `parties/service.py::
-  create_person_party`/`create_organization_party` do the same
-  (`payload.email.lower()`) independently. Both must agree because the
+- **Email is lowercased at the write boundary**, via
+  `app.core.identity.normalize_email` — `auth/service.py::register` and
+  `parties/service.py`'s create/update functions all call this one function
+  instead of each writing its own `.lower()`. Both must agree because the
   `parties` table's uniqueness index is `lower(email)`-based — a
   mixed-case write from either path that skipped normalization would still
   be rejected by the DB constraint, but a *read*-side comparison
   (credential lookup at login) that skipped it would silently fail to
-  match. There is no shared helper enforcing this today — a new writer of
-  `Party.email` must replicate the `.lower()` call, not assume it.
-- **`display_name` derivation.** Both writers compute
-  `f"{first_name} {last_name}"` (person) / `legal_name` (organization) and
-  write it once at create time; there is no update path for either writer
-  today, so no drift-repair function exists yet. This is the specific
-  known gap already tracked in `docs/superpowers/phase2-backlog.md`
-  ("SOT-complete gaps") — when an update endpoint lands, `display_name`
-  needs either a single write-owner + idempotent repair, or must become
-  computed-at-read instead of stored.
+  match. A new writer of `Party.email` now has an obvious single function
+  to call rather than a convention to remember and replicate.
+- **`display_name` derivation** — **closed as of Task 5** (previously the
+  tracked SOT gap in `docs/superpowers/phase2-backlog.md`). Both writers
+  now call `app.core.identity.person_display_name(first_name, last_name)`
+  for the person case (organizations reassign `legal_name` directly — no
+  helper needed, `legal_name` IS the display name); `update_person_party`/
+  `update_organization_party` (`parties/service.py`) recompute
+  `display_name` INSIDE the update, from the just-updated subtype fields,
+  so the projection is refreshed on every write, not just at create. See
+  the ownership table above (`Party.display_name` projection row) for the
+  owner/repair statement.
 
 ## Request flow / middleware order
 

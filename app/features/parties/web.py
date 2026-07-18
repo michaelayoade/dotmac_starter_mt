@@ -1,4 +1,4 @@
-"""Parties' web (HTMX) surface: `/admin/parties` list/create/detail/delete.
+"""Parties' web (HTMX) surface: `/admin/parties` list/create/detail/delete/edit.
 
 Mirrors `app.features.auth.web`/`app.features.web.web`'s established shape —
 `require_web_auth` on every route, thin wrappers (no direct DB query in this
@@ -22,6 +22,17 @@ instead of trying to swap a redirect's followed body into the triggering
 element. A validation failure on create re-renders `create.html` at 200 with
 field errors — same "re-render, don't redirect" convention as
 `app.features.auth.web.login_submit`'s bad-credentials path.
+
+`GET`/`POST /admin/parties/{id}/edit` (Task 5) follow the identical
+re-render-on-failure / HX-Redirect-on-success shape, but there is only ONE
+form per party (type-appropriate — person or organization — determined by
+the already-persisted `party.party_type`, never a user-supplied value), not
+a tab-toggle between two: `party_type` is immutable, so the edit screen
+never offers a choice. `parties_service.update_person_party`/
+`update_organization_party` are the single write-owner of the recomputed
+`display_name` projection (see docs/ARCHITECTURE.md's "Known dual-writer:
+Parties" section) — this router only validates, authorizes (via
+`require_web_auth`), and delegates.
 """
 
 from __future__ import annotations
@@ -36,11 +47,16 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_tenant
 from app.core.exceptions import ConflictError
-from app.core.models import PartyType, Tenant
+from app.core.models import Party, PartyType, Tenant
 from app.core.templating import render
 from app.core.web_deps import require_web_auth
 from app.features.parties import service as parties_service
-from app.features.parties.schemas import OrganizationPartyCreate, PersonPartyCreate
+from app.features.parties.schemas import (
+    OrganizationPartyCreate,
+    OrganizationPartyUpdate,
+    PersonPartyCreate,
+    PersonPartyUpdate,
+)
 
 router = APIRouter(prefix="/admin/parties", tags=["web"])
 
@@ -88,6 +104,28 @@ def _render_create_form(
             "active_nav": "parties",
             "page_title": "New Party",
             "party_type": active_tab if active_tab in _VALID_TABS else "person",
+            "errors": errors or {},
+            "form": form or {},
+        },
+        status_code=status_code,
+    )
+
+
+def _render_edit_form(
+    request: Request,
+    *,
+    party: Party,
+    errors: dict[str, str] | None = None,
+    form: dict[str, str] | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    return render(
+        request,
+        "admin/parties/edit.html",
+        {
+            "active_nav": "parties",
+            "page_title": f"Edit {party.display_name}",
+            "party": party,
             "errors": errors or {},
             "form": form or {},
         },
@@ -230,6 +268,79 @@ def detail(
         "admin/parties/detail.html",
         {"active_nav": "parties", "page_title": party.display_name, "party": party},
     )
+
+
+@router.get("/{party_id}/edit")
+def edit_form(
+    request: Request,
+    party_id: UUID,
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(require_tenant),
+    auth: dict = Depends(require_web_auth),
+) -> HTMLResponse:
+    party = parties_service.get_party(db, party_id)
+    return _render_edit_form(request, party=party)
+
+
+@router.post("/{party_id}/edit", response_model=None)
+async def edit_submit(
+    request: Request,
+    party_id: UUID,
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(require_tenant),
+    auth: dict = Depends(require_web_auth),
+) -> HTMLResponse | RedirectResponse:
+    party = parties_service.get_party(db, party_id)
+    form_data = await request.form()
+
+    if party.party_type == PartyType.person:
+        raw = {
+            "first_name": str(form_data.get("first_name", "")).strip(),
+            "last_name": str(form_data.get("last_name", "")).strip(),
+            "email": str(form_data.get("email", "")).strip(),
+        }
+        try:
+            person_payload = PersonPartyUpdate(
+                first_name=raw["first_name"],
+                last_name=raw["last_name"],
+                email=raw["email"] or None,
+            )
+        except ValidationError as exc:
+            return _render_edit_form(
+                request, party=party, errors=_field_errors(exc), form=raw
+            )
+        try:
+            parties_service.update_person_party(db, party_id, person_payload)
+        except ConflictError as exc:
+            return _render_edit_form(
+                request, party=party, errors={"_form": str(exc)}, form=raw
+            )
+    else:
+        raw = {
+            "legal_name": str(form_data.get("legal_name", "")).strip(),
+            "email": str(form_data.get("email", "")).strip(),
+        }
+        try:
+            organization_payload = OrganizationPartyUpdate(
+                legal_name=raw["legal_name"], email=raw["email"] or None
+            )
+        except ValidationError as exc:
+            return _render_edit_form(
+                request, party=party, errors=_field_errors(exc), form=raw
+            )
+        try:
+            parties_service.update_organization_party(
+                db, party_id, organization_payload
+            )
+        except ConflictError as exc:
+            return _render_edit_form(
+                request, party=party, errors={"_form": str(exc)}, form=raw
+            )
+
+    detail_url = f"/admin/parties/{party_id}"
+    response = RedirectResponse(url=detail_url, status_code=302)
+    response.headers["HX-Redirect"] = detail_url
+    return response
 
 
 @router.post("/{party_id}/delete", response_model=None)

@@ -31,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.identity import normalize_email, person_display_name
 from app.core.models import (
     AuthSession,
     Party,
@@ -77,11 +78,16 @@ def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonVie
     # matches the parties CI-unique semantics (the `parties` table's email
     # uniqueness index is `lower(email)`-based; `UserCredential.email` must
     # agree with it or a mixed-case register + lowercase login would fail).
-    email = payload.email.lower()
+    # `normalize_email`/`person_display_name` are the single-owner
+    # implementations of these invariants (app.core.identity) — the parties
+    # service's create/update paths call the same two functions, so the two
+    # writers can never independently drift (see docs/ARCHITECTURE.md's
+    # "Known dual-writer: Parties" section).
+    email = normalize_email(payload.email)
     party = Party(
         tenant_id=tenant.id,
         party_type=PartyType.person,
-        display_name=f"{payload.first_name} {payload.last_name}",
+        display_name=person_display_name(payload.first_name, payload.last_name),
         email=email,
     )
     db.add(party)

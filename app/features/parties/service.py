@@ -9,6 +9,15 @@ by `party_type` and paginates, and `Parties` (a `CRUDManager[Party]`) handles
 plain get/delete. All `select()`/session-mutation calls for the party domain
 live here — `app/features/parties/router.py` only resolves dependencies,
 calls these functions, and shapes the response.
+
+`update_person_party`/`update_organization_party` (Task 5) close the
+`display_name` dual-writer SOT gap: both the create and update paths now
+recompute `display_name` via the shared `app.core.identity` helpers
+(`normalize_email`/`person_display_name`), so this module — together with
+`app.features.auth.service.register` — is the single write-owner of the
+projection. `party_type` is immutable on update (enforced by raising
+`NotFoundError` on a type mismatch, same convention `delete_party` already
+uses via `Parties.get`).
 """
 
 from __future__ import annotations
@@ -20,10 +29,27 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.crud import CRUDManager
-from app.core.exceptions import ConflictError
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.core.identity import normalize_email, person_display_name
 from app.core.models import Party, PartyOrganization, PartyPerson, PartyType, Tenant
 from app.core.query import apply_pagination
-from app.features.parties.schemas import OrganizationPartyCreate, PersonPartyCreate
+from app.features.parties.schemas import (
+    OrganizationPartyCreate,
+    OrganizationPartyUpdate,
+    PersonPartyCreate,
+    PersonPartyUpdate,
+)
+
+# SoT: `PartyPerson.first_name`/`last_name` and `PartyOrganization.legal_name`
+# are `nullable=False` columns (app/core/models.py). The corresponding
+# `*Update` schema fields are typed `str | None = None` purely so
+# `model_dump(exclude_unset=True)` can distinguish "not sent" from "sent" —
+# not because the column accepts NULL. Same convention (and same reason) as
+# `custom_fields/router.py::NOT_NULLABLE_FIELDS`; kept here instead of a
+# router because this feature has no JSON PATCH route yet (web-only this
+# task — see docs/superpowers/phase2-backlog.md).
+_NOT_NULLABLE_PERSON_FIELDS = frozenset({"first_name", "last_name"})
+_NOT_NULLABLE_ORGANIZATION_FIELDS = frozenset({"legal_name"})
 
 
 class Parties(CRUDManager[Party]):
@@ -34,12 +60,15 @@ class Parties(CRUDManager[Party]):
 def create_person_party(
     db: Session, tenant: Tenant, payload: PersonPartyCreate
 ) -> Party:
-    email = payload.email.lower()
+    email = normalize_email(payload.email)
     party = Party(
         tenant_id=tenant.id,  # never from payload — always from request state
         party_type=PartyType.person,
-        # write-once until an update endpoint exists (see backlog)
-        display_name=f"{payload.first_name} {payload.last_name}",
+        # `app.core.identity.person_display_name` is the single-owner
+        # projection recompute — `update_person_party` below calls the same
+        # helper, and so does `app.features.auth.service.register` (Task 5
+        # closes the display_name dual-writer gap; see docs/ARCHITECTURE.md).
+        display_name=person_display_name(payload.first_name, payload.last_name),
         email=email,
     )
     # Assigning via the relationship (rather than setting party_id by hand)
@@ -61,16 +90,105 @@ def create_person_party(
 def create_organization_party(
     db: Session, tenant: Tenant, payload: OrganizationPartyCreate
 ) -> Party:
-    email = payload.email.lower() if payload.email else None
+    email = normalize_email(payload.email) if payload.email else None
     party = Party(
         tenant_id=tenant.id,  # never from payload — always from request state
         party_type=PartyType.organization,
-        # write-once until an update endpoint exists (see backlog)
+        # Organizations have no derivation helper to share (unlike persons)
+        # — `legal_name` IS the display name already; `update_organization_
+        # party` below reassigns the same way on every write.
         display_name=payload.legal_name,
         email=email,
     )
     party.organization_profile = PartyOrganization(legal_name=payload.legal_name)
     db.add(party)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError("Email already registered") from exc
+    return party
+
+
+def update_person_party(
+    db: Session, party_id: UUID, payload: PersonPartyUpdate
+) -> Party:
+    """Update subtype fields + email on a `party_type == person` `Party`,
+    recomputing `display_name` from the (possibly just-updated) subtype
+    fields via the shared `app.core.identity.person_display_name` helper —
+    this function is now the single write-owner of the projection for the
+    parties-service side (`app.features.auth.service.register` is the other
+    writer, for the initial create-at-signup case only; see
+    docs/ARCHITECTURE.md's "Known dual-writer: Parties" section).
+
+    `party_type` is immutable: a person party can never become an
+    organization, so calling this on an organization's `party_id` raises
+    `NotFoundError` — same "wrong type looks like missing" convention
+    `delete_party` already relies on via `Parties.get`/`_get_or_404`.
+    """
+    party = Parties.get(db, str(party_id))
+    if party.party_type is not PartyType.person or party.person_profile is None:
+        raise NotFoundError(Parties.not_found_detail)
+
+    updates = payload.model_dump(exclude_unset=True)
+    for key in _NOT_NULLABLE_PERSON_FIELDS:
+        if key in updates and updates[key] is None:
+            raise BadRequestError(f"{key} cannot be null")
+
+    profile = party.person_profile
+    if "first_name" in updates:
+        profile.first_name = updates["first_name"]
+    if "last_name" in updates:
+        profile.last_name = updates["last_name"]
+    if "email" in updates:
+        raw_email = updates["email"]
+        party.email = normalize_email(raw_email) if raw_email else None
+
+    party.display_name = person_display_name(profile.first_name, profile.last_name)
+
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ConflictError("Email already registered") from exc
+    return party
+
+
+def update_organization_party(
+    db: Session, party_id: UUID, payload: OrganizationPartyUpdate
+) -> Party:
+    """Update subtype fields + email on a `party_type == organization`
+    `Party`. Organizations have no shared display_name helper to call —
+    `legal_name` IS the display name — so this function reassigns
+    `party.display_name = profile.legal_name` directly on every write; it is
+    still the single write-owner of the projection for this party_type (see
+    `update_person_party`'s docstring for the person-side equivalent and the
+    dual-writer note in docs/ARCHITECTURE.md).
+
+    `party_type` is immutable — calling this on a person's `party_id` raises
+    `NotFoundError`, same convention as `update_person_party`/`delete_party`.
+    """
+    party = Parties.get(db, str(party_id))
+    if (
+        party.party_type is not PartyType.organization
+        or party.organization_profile is None
+    ):
+        raise NotFoundError(Parties.not_found_detail)
+
+    updates = payload.model_dump(exclude_unset=True)
+    for key in _NOT_NULLABLE_ORGANIZATION_FIELDS:
+        if key in updates and updates[key] is None:
+            raise BadRequestError(f"{key} cannot be null")
+
+    profile = party.organization_profile
+    if "legal_name" in updates:
+        profile.legal_name = updates["legal_name"]
+    if "email" in updates:
+        raw_email = updates["email"]
+        party.email = normalize_email(raw_email) if raw_email else None
+
+    party.display_name = profile.legal_name
+
     try:
         db.flush()
     except IntegrityError as exc:
@@ -173,4 +291,6 @@ __all__ = [
     "get_party",
     "list_parties",
     "search_parties",
+    "update_organization_party",
+    "update_person_party",
 ]

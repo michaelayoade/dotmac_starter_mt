@@ -451,3 +451,182 @@ def test_delete_unknown_party_is_404(
         follow_redirects=False,
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET/POST /admin/parties/{id}/edit (Task 5)
+# ---------------------------------------------------------------------------
+
+
+def test_edit_form_without_cookie_redirects_to_login(
+    web_client: TestClient, db: Session, tenant_row: Tenant
+) -> None:
+    party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
+    db.commit()
+    resp = web_client.get(f"/admin/parties/{party.id}/edit", follow_redirects=False)
+    assert resp.status_code == 302
+
+
+def test_edit_form_renders_person_fields(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
+    db.commit()
+
+    resp = web_client.get(
+        f"/admin/parties/{party.id}/edit", cookies={"access_token": token}
+    )
+    assert resp.status_code == 200
+    assert f'hx-post="/admin/parties/{party.id}/edit"' in resp.text
+    assert 'name="first_name"' in resp.text
+    assert 'value="Ada"' in resp.text
+    assert 'value="Lovelace"' in resp.text
+    assert 'name="legal_name"' not in resp.text
+
+
+def test_edit_form_renders_organization_fields(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    party = _make_organization(db, tenant_row, "Widget Co")
+    db.commit()
+
+    resp = web_client.get(
+        f"/admin/parties/{party.id}/edit", cookies={"access_token": token}
+    )
+    assert resp.status_code == 200
+    assert 'name="legal_name"' in resp.text
+    assert 'value="Widget Co"' in resp.text
+    assert 'name="first_name"' not in resp.text
+
+
+def test_edit_form_unknown_party_is_404(
+    web_client: TestClient, registered_admin: dict
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    resp = web_client.get(
+        "/admin/parties/00000000-0000-0000-0000-000000000000/edit",
+        cookies={"access_token": token},
+    )
+    assert resp.status_code == 404
+
+
+def test_edit_person_success_redirects_and_recomputes_display_name(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
+    db.commit()
+
+    resp = web_client.post(
+        f"/admin/parties/{party.id}/edit",
+        data={
+            "first_name": "Ada",
+            "last_name": "Byron",
+            "email": "ada@example.com",
+        },
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    detail_url = f"/admin/parties/{party.id}"
+    assert resp.headers["location"] == detail_url
+    assert resp.headers["hx-redirect"] == detail_url
+
+    db.expire_all()
+    updated = db.get(Party, party.id)
+    assert updated.display_name == "Ada Byron"
+    assert updated.person_profile.last_name == "Byron"
+
+
+def test_edit_person_validation_error_rerenders_200(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
+    db.commit()
+
+    resp = web_client.post(
+        f"/admin/parties/{party.id}/edit",
+        data={"first_name": "", "last_name": "Byron", "email": "ada@example.com"},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200
+    assert "first_name" in resp.text
+
+    db.expire_all()
+    unchanged = db.get(Party, party.id)
+    assert unchanged.display_name == "Ada Lovelace"
+
+
+def test_edit_person_duplicate_email_rerenders_200_with_conflict(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    _make_person(db, tenant_row, "Existing Person", "dup@example.com")
+    party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
+    db.commit()
+
+    resp = web_client.post(
+        f"/admin/parties/{party.id}/edit",
+        data={"first_name": "Ada", "last_name": "Lovelace", "email": "dup@example.com"},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200
+    assert "already registered" in resp.text.lower()
+
+
+def test_edit_organization_success_redirects_and_recomputes_display_name(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    party = _make_organization(db, tenant_row, "Widget Co")
+    db.commit()
+
+    resp = web_client.post(
+        f"/admin/parties/{party.id}/edit",
+        data={"legal_name": "Widget Co International"},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    detail_url = f"/admin/parties/{party.id}"
+    assert resp.headers["location"] == detail_url
+
+    db.expire_all()
+    updated = db.get(Party, party.id)
+    assert updated.display_name == "Widget Co International"
+    assert updated.organization_profile.legal_name == "Widget Co International"
+
+
+def test_edit_organization_validation_error_rerenders_200(
+    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    party = _make_organization(db, tenant_row, "Widget Co")
+    db.commit()
+
+    resp = web_client.post(
+        f"/admin/parties/{party.id}/edit",
+        data={"legal_name": ""},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 200
+    assert "legal_name" in resp.text
+
+
+def test_edit_submit_unknown_party_is_404(
+    web_client: TestClient, registered_admin: dict
+) -> None:
+    token = _login(web_client, registered_admin["email"])
+    resp = web_client.post(
+        "/admin/parties/00000000-0000-0000-0000-000000000000/edit",
+        data={"first_name": "A", "last_name": "B", "email": "a@example.com"},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 404

@@ -19,6 +19,7 @@
     </div>
     <div class="flex items-center gap-2">
         <a href="/admin/parties" class="px-3 py-2 rounded-lg text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Back to Parties</a>
+        <a href="/admin/parties/{{ party.id }}/edit" class="px-3 py-2 rounded-lg text-sm border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">Edit</a>
         {{ action_buttons(
             delete_url="/admin/parties/" ~ party.id ~ "/delete",
             delete_confirm="Delete this party? This action cannot be undone."

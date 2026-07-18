@@ -29,6 +29,7 @@
                 <td class="px-4 py-3 text-right">
                     {{ action_buttons(
                         detail_url="/admin/parties/" ~ party.id,
+                        edit_url="/admin/parties/" ~ party.id ~ "/edit",
                         delete_url="/admin/parties/" ~ party.id ~ "/delete",
                         delete_confirm="Delete this party? This action cannot be undone."
                     ) }}
