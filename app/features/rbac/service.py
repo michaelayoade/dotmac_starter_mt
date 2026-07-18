@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.audit import AuditEvent
+from app.core.db import conflict_savepoint
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.models import Party, PartyRole, Role, Tenant
 from app.core.query import apply_pagination, escape_like
@@ -57,12 +58,19 @@ def count_roles(db: Session, tenant: Tenant) -> int:
 
 def create_role(db: Session, tenant: Tenant, payload: RoleCreate) -> Role:
     role = Role(tenant_id=tenant.id, slug=payload.slug, name=payload.name)
-    db.add(role)
+    # `db.add` happens INSIDE the savepoint, not before it: `Session.
+    # begin_nested()` auto-flushes any already-pending changes as part of
+    # establishing the SAVEPOINT (`_take_snapshot`) — adding `role` before
+    # entering `conflict_savepoint` would let that pre-flush emit the
+    # conflicting INSERT with no savepoint yet in place to protect the
+    # outer transaction's `SET LOCAL` if it fails. See
+    # `.superpowers/sdd/task-2-report.md`'s harness-interplay notes.
     try:
-        db.flush()
-        db.refresh(role)
+        with conflict_savepoint(db):
+            db.add(role)
+            db.flush()
+            db.refresh(role)
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError("Role already exists") from exc
     return role
 
@@ -114,11 +122,13 @@ def assign_role(db: Session, tenant: Tenant, payload: RoleGrantRequest) -> Party
         raise NotFoundError("Party or role not found")
 
     party_role = PartyRole(tenant_id=tenant.id, party_id=party.id, role_id=role.id)
-    db.add(party_role)
+    # See create_role's comment: `db.add` must happen INSIDE the savepoint,
+    # not before it.
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            db.add(party_role)
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError("Role already assigned") from exc
     return party_role
 

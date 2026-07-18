@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.db import conflict_savepoint
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.models import Tenant
 from app.features.tenants.schemas import TenantCreate
@@ -31,11 +32,18 @@ def get_tenant(db: Session, tenant_id: UUID) -> Tenant:
 
 def create_tenant(db: Session, payload: TenantCreate) -> Tenant:
     tenant = Tenant(slug=payload.slug, name=payload.name)
-    db.add(tenant)
+    # `db.add` happens INSIDE the savepoint, not before it: `Session.
+    # begin_nested()` auto-flushes any already-pending changes as part of
+    # establishing the SAVEPOINT (`_take_snapshot`) — adding `tenant` before
+    # entering `conflict_savepoint` would let that pre-flush emit the
+    # conflicting INSERT with no savepoint yet in place to protect the
+    # outer transaction's `SET LOCAL` if it fails. See
+    # `.superpowers/sdd/task-2-report.md`'s harness-interplay notes.
     try:
-        db.flush()
-        db.refresh(tenant)
+        with conflict_savepoint(db):
+            db.add(tenant)
+            db.flush()
+            db.refresh(tenant)
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError("Slug already in use") from exc
     return tenant

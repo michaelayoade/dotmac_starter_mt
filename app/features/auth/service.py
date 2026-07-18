@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.db import conflict_savepoint
 from app.core.exceptions import ConflictError, UnauthorizedError
 from app.core.identity import normalize_email, person_display_name
 from app.core.models import (
@@ -90,27 +91,34 @@ def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonVie
         display_name=person_display_name(payload.first_name, payload.last_name),
         email=email,
     )
-    db.add(party)
+    # `db.add(party)` happens INSIDE the savepoint, not before it: `Session.
+    # begin_nested()` auto-flushes any already-pending changes as part of
+    # establishing the SAVEPOINT (`_take_snapshot`) — adding `party` before
+    # entering `conflict_savepoint` would let that pre-flush emit the
+    # conflicting INSERT with no savepoint yet in place to protect the
+    # outer transaction's `SET LOCAL` if it fails. See
+    # `.superpowers/sdd/task-2-report.md`'s harness-interplay notes.
     try:
-        db.flush()
-        party_person = PartyPerson(
-            party_id=party.id,
-            first_name=payload.first_name,
-            last_name=payload.last_name,
-        )
-        db.add(party_person)
-        credential = UserCredential(
-            tenant_id=tenant.id,
-            party_id=party.id,
-            email=email,
-            password_hash=hash_password(payload.password),
-        )
-        db.add(credential)
-        db.flush()
-        _assign_first_user_admin(db, tenant, party)
-        db.refresh(party)
+        with conflict_savepoint(db):
+            db.add(party)
+            db.flush()
+            party_person = PartyPerson(
+                party_id=party.id,
+                first_name=payload.first_name,
+                last_name=payload.last_name,
+            )
+            db.add(party_person)
+            credential = UserCredential(
+                tenant_id=tenant.id,
+                party_id=party.id,
+                email=email,
+                password_hash=hash_password(payload.password),
+            )
+            db.add(credential)
+            db.flush()
+            _assign_first_user_admin(db, tenant, party)
+            db.refresh(party)
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError("Email already registered") from exc
     return PersonView(
         id=party.id,

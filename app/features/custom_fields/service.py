@@ -75,6 +75,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.db import conflict_savepoint
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import resolve_value
@@ -208,11 +209,18 @@ def create_field(
         )
 
     field = CustomFieldDefinition(tenant_id=tenant_id, **payload.model_dump())
-    db.add(field)
+    # `db.add` happens INSIDE the savepoint, not before it: `Session.
+    # begin_nested()` auto-flushes any already-pending changes as part of
+    # establishing the SAVEPOINT (`_take_snapshot`) — adding `field` before
+    # entering `conflict_savepoint` would let that pre-flush emit the
+    # conflicting INSERT with no savepoint yet in place to protect the
+    # outer transaction's `SET LOCAL` if it fails. See
+    # `.superpowers/sdd/task-2-report.md`'s harness-interplay notes.
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            db.add(field)
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError(
             f"Field with code '{payload.field_code}' already exists "
             f"for {payload.entity_type}"

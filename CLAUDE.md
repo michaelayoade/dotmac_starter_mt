@@ -191,6 +191,25 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
 - Feature `service.py` functions never take `payload: Any` — every payload
   parameter is a concrete Pydantic schema.
   (`tests/unit/test_service_typing.py::test_no_any_typed_payloads_in_services`)
+- Feature services never call `db.rollback()` directly. `get_db`
+  (`app.core.db`) owns the request's transaction and issues `SET LOCAL
+  app.current_tenant` on it for RLS; a bare `db.rollback()` on an expected
+  conflict (duplicate email/slug/role-grant, etc.) rolls back that ENTIRE
+  transaction — wiping the tenant context along with it — so any query the
+  caller's exception handler runs afterwards (a web handler re-rendering a
+  form, re-listing recent grants) runs under FORCE RLS with no tenant set:
+  fail-closed to zero rows, or an `ObjectDeletedError` re-loading an
+  expired attribute (finding F3). Use `app.core.db.conflict_savepoint`
+  instead: `with conflict_savepoint(db): db.add(row); db.flush()` inside a
+  `try/except IntegrityError` — it rolls back only a SAVEPOINT, leaving the
+  outer transaction + its `SET LOCAL` intact. The mutation (`db.add`/
+  attribute assignment) must happen INSIDE the `with` block, not before
+  it — `Session.begin_nested()` auto-flushes any already-pending/dirty
+  objects while establishing the SAVEPOINT, so adding/mutating before
+  entering the block would let that pre-flush fail with no savepoint yet in
+  place to protect the outer transaction.
+  (`tests/architecture/test_no_feature_rollback.py`; canaries in
+  `tests/test_conflict_rls_context.py`)
 - Every registered `SettingSpec` key must have a real reader (a quoted-string
   `resolve_value(...)`-style reference) somewhere under `app/` outside the
   `settings` feature package and `app/core/settings_resolver.py` itself — a
