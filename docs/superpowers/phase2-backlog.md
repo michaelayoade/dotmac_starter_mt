@@ -334,6 +334,50 @@ consumers.
   auto-flush ordering hazard fixed across services in 2b1-T2 — re-audit + docstring
   ordering note before it is ever wired in (2b1-T2 review).
 
+## Verified gaps (2026-07-18 capability sweep — Michael's checklist: impact preview +
+## confirm, granular RBAC, list_query, Carbon/WCAG UI SoT, no-orphan codes)
+
+Planned as `docs/superpowers/plans/2026-07-18-capability-hardening.md` (runs after the
+display-settings plan merges). Evidence from a dual sweep of this repo + dotmac_erp
+(fleet pattern source). Summary verdicts:
+
+- **Impact preview + confirm — PARTIAL.** Confirms exist (`hx-confirm` on party delete,
+  custom-field deactivate) but every one is static copy; no computed "affects N records"
+  preview anywhere (party delete cascades `party_roles` via DB `ondelete="CASCADE"`
+  silently; deactivate copy promises "values are kept" without counting them). ERP has
+  the service-side half (`bulk_actions.py::can_delete -> (bool, reason)` guard idiom) but
+  no count-based preview UI either — the preview endpoint pattern is net-new.
+- **Granular RBAC — ABSENT.** Role-name matching only; the only guard string in the app
+  is `"admin"` (hardcoded at every `require_role` call site + `auth/service.py:268,271`
+  + the portal gate). No permission table, no per-action codes. ERP's shape to port:
+  colon-namespaced permission codes (`fleet:vehicles:manage`), `Permission`/
+  `RolePermission` tables, read/manage guard pairs, admin bypass (`app/web/fleet.py`,
+  `scripts/seed_rbac.py`, `app/web/deps.py::has_permission`). Prerequisite for the
+  phase-3 "portal role loosening" thread.
+- **list_query — PARTIAL.** `app/core/query.py` has `apply_pagination`/`apply_ordering`/
+  `escape_like`, but no unified params/envelope schema; `apply_ordering` has NO caller
+  (dead helper — wire it or remove it); `GET /tenants` is unbounded; custom-fields
+  definitions paginate by in-Python slice after fetching the full list; page-size
+  literals (`PAGE_SIZE=20` etc.) are per-file constants, not settings (violates the
+  everything-by-settings rule). ERP SoT to port:
+  `app/services/finance/platform/list_helpers.py` (`ListParams.from_request` with
+  page/limit-clamp/search/`-`-prefixed sort/filters + `ListResult.pagination_context()`).
+- **Carbon/WCAG UI SoT — PARTIAL (and NOT Carbon).** Zero Carbon usage in this repo AND
+  in dotmac_erp (verified) — the fleet UI SoT is Tailwind + design tokens (here: v4
+  `@theme` in `static/css/src/main.css`; ERP: CSS vars in base.html + design-system
+  rule doc). Real WCAG gaps here: no skip link, no `:focus-visible` styling, no
+  `sr-only` utility, icon-only delete button has `title` but no `aria-label`
+  (`table_macros.html:130-137`), `<main>` lacks a skip target id, no documented
+  conformance target. Strengths: form macros pair label/for-id, toast region has
+  `role="status" aria-live`, SVGs `aria-hidden`.
+- **No-orphan codes — PARTIAL.** Settings keys (orphan test) and nav/feature manifests
+  (coherence tests) are governed; custom-field types are enum+DB-check constrained. But
+  audit action strings (`"settings.update"`, `"role.create"`, `"role.grant"`) and role
+  slugs are free-form literals — any route can invent either; envelope error codes are
+  funnel-constrained by typed exceptions but have no canonical-list test. No such
+  governance exists in ERP either — net-new, extending the starter's own
+  no-orphan-settings precedent.
+
 ## 2c-auth
 
 - Constant-time login: credential/party misses short-circuit without a dummy hash compare
