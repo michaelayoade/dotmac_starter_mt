@@ -30,6 +30,10 @@ Upstream only what fixes the source repo on its own terms — not starter-specif
    `field_options["options"]` is non-empty), the same "definition self-consistency checked
    up front" pattern as the min/max and regex guards above. PR against ERP: add the same
    create/update-time guard rather than leaving the gap to `validate_value` at read time.
+   **RESOLVED (batch 2, 2026-07-18): erp#185 merged** — write-time guard in `create_field`/
+   `update_field`; also fixed two latent bugs in ERP's own tests/conftest.py JSONB shim
+   discovered by the new tests (SQLite dict-bind failure; `Text.__subclasses__()` detection
+   constraint documented in the shim docstring).
 3. **`validate_custom_fields` silently ignores unknown field codes.** Typo'd keys pass
    validation and would be persisted (once value storage exists). PR: collect unknown codes
    as errors (or at minimum log).
