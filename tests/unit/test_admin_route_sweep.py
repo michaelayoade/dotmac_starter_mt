@@ -16,6 +16,11 @@ swept automatically. `POST /admin/login` is skipped: it is genuinely
 pre-auth (see `tests/architecture/test_route_guards.py`'s
 `MUTATING_ALLOWLIST` for the same route, same reasoning).
 
+SCOPE LIMITATION: The `/admin` path-prefix enumeration assumption means a
+future non-admin portal surface escapes this sweep entirely until its routes
+are added to `_admin_mutating_routes()` — extend the prefix pattern in the
+same task that adds such a surface.
+
 Requests are executed against a purpose-built minimal app (same pattern as
 `tests/unit/test_web_login.py`'s `web_client` fixture) that mounts every
 `/admin/*` web router with `get_db` overridden to the in-memory SQLite `db`

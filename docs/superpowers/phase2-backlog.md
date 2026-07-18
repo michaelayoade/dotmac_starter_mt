@@ -160,3 +160,8 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   `ck_domain_settings_value_alignment` CHECK — loud, not silent). No spec declares
   `default=None` today; a future spec author should not assume a `None` default is safe
   for anything but `json`.
+- 2b-T8's web-conventions template checks and non-admin sweep scope themselves to
+  `templates/{admin,auth}` and the `/admin` path prefix; a future non-admin portal
+  surface (anticipated by `require_web_auth`'s docstring) escapes all four checks
+  until their globs/prefixes are extended — extend them in the same task that adds
+  such a surface.

@@ -31,6 +31,13 @@ behavior (nothing here talks to the DB or the app):
    (`pyproject.toml`), which covers `router.py` too but is a config file, not
    a test that runs in the fast unit/architecture suite by itself; this
    gives immediate, in-repo feedback without invoking `make lint-imports`.
+
+SCOPE LIMITATION: The template checks cover `templates/admin/**` and
+`templates/auth/*` only (errors/layouts/components unscanned; currently
+verified clean by the T8 review). The import scan skips relative imports
+(import-linter is the authoritative parallel contract). A future non-admin
+portal surface must extend `_admin_and_auth_templates()` and the sweep
+prefix accordingly.
 """
 
 from __future__ import annotations

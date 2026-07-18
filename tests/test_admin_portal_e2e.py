@@ -151,6 +151,7 @@ def test_admin_portal_end_to_end_canary(
     # -----------------------------------------------------------------
     settings_resp = a.get("/admin/settings")
     assert settings_resp.status_code == 200
+    assert "max_per_entity" in settings_resp.text
 
     # -----------------------------------------------------------------
     # Tenant B: a FRESH login (own TestClient -> own cookie jar) sees NONE
