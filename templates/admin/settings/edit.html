@@ -1,0 +1,44 @@
+{#
+  Generic per-setting editor (Task 7) — one `value` field, shape driven by
+  `setting.value_type`/`setting.is_secret`. Posts to
+  `app.features.settings.web.edit_key_submit`; a validation failure
+  re-renders THIS template at 200 with `errors`/`form` populated — same
+  "re-render, don't redirect" convention as every other form in this app.
+
+  Context: `setting` (SettingOut — `domain`, `key`, `value`, `value_type`,
+  `label`, `is_secret`, `source`), `errors` (`{"value": message}` on
+  failure), `form` (`{"value": ...}` — a secret's `value` is ALWAYS "" here,
+  never the real or masked value; see app.features.settings.web's docstring
+  for the "leave blank to keep" contract).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/form_macros.html" import text_input, textarea, checkbox, submit_button %}
+
+{% block admin_content %}
+<div class="max-w-2xl">
+    <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display mb-1">
+        Edit {{ setting.label or setting.key }}
+    </h1>
+    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-6">
+        {{ setting.domain }} / {{ setting.key }}
+    </p>
+
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+        <form hx-post="/admin/settings/{{ setting.domain }}/{{ setting.key }}/edit" class="space-y-4">
+            {% if setting.is_secret %}
+            {{ text_input("value", setting.label or setting.key, value="", type="password", help_text="Leave blank to keep the current value.") }}
+            {% elif setting.value_type == "boolean" %}
+            {{ checkbox("value", setting.label or setting.key, checked=form.get("value", false)) }}
+            {% elif setting.value_type == "json" %}
+            {{ textarea("value", setting.label or setting.key, value=form.get("value", ""), rows=8, help_text="Raw JSON object.") }}
+            {% else %}
+            {{ text_input("value", setting.label or setting.key, value=form.get("value", "")) }}
+            {% endif %}
+            {% if errors.get("value") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("value") }}</p>
+            {% endif %}
+            {{ submit_button(label="Save", cancel_url="/admin/settings") }}
+        </form>
+    </div>
+</div>
+{% endblock %}

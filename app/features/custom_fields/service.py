@@ -79,7 +79,7 @@ from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import resolve_value
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
-from app.features.custom_fields.registry import resolve_entity
+from app.features.custom_fields.registry import ENTITY_MODELS, resolve_entity
 from app.features.custom_fields.schemas import CustomFieldCreate
 
 _DEFAULT_MAX_PER_ENTITY = 20
@@ -396,12 +396,24 @@ def get_values(
     return dict(row.custom_fields or {})
 
 
+def list_entity_types() -> list[str]:
+    """Registered `entity_type` keys custom fields can attach to.
+
+    Thin wrapper over `registry.ENTITY_MODELS` (sorted for stable UI
+    ordering) — feeds the admin web UI's entity_type select
+    (`app.features.custom_fields.web`) without that module reaching into
+    the registry module directly for a one-line lookup.
+    """
+    return sorted(ENTITY_MODELS.keys())
+
+
 __all__ = [
     "create_field",
     "deactivate_field",
     "get_by_code",
     "get_field",
     "get_values",
+    "list_entity_types",
     "list_for_entity",
     "set_values",
     "update_field",

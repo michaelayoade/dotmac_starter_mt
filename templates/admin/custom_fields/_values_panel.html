@@ -1,0 +1,80 @@
+{#
+  Custom field VALUES panel fragment (Task 7) — the cross-feature UI
+  composition pattern. Owned entirely by the custom_fields feature (see
+  app.features.custom_fields.web's module docstring): the parties feature's
+  detail page (templates/admin/parties/detail.html) lazy-loads this fragment
+  via `hx-get="/admin/custom-fields/party/{{ party.id }}/values-panel"
+  hx-trigger="load"` — a URL reference only, no Python import either way.
+
+  This form posts BACK to that same URL (POST, not the JSON API's
+  `PUT /custom-fields/party/{id}/values`) so the whole round trip stays
+  HTML-in, HTML-out; see app.features.custom_fields.web's docstring for why
+  that matters. `hx-target`/`hx-swap` point at the parties template's own
+  `#custom-fields-panel` wrapper div (its id is a contract between the two
+  templates — this partial doesn't repeat that id itself, matching the
+  `_roles_table.html`/`_table.html` fragment convention elsewhere in this
+  app: the fragment IS the swapped content, it doesn't re-wrap itself in the
+  container the parent already provides).
+
+  Context: `party_id` (UUID), `definitions` (list[CustomFieldDefinition],
+  active only, for entity_type "party"), `values` (dict[str, Any] — current
+  or just-submitted field_code -> value), `errors` (`{"_form": message}` on
+  a validation failure — see app.features.custom_fields.service.
+  validate_values, which joins every violation with a newline).
+#}
+{% from "components/form_macros.html" import text_input, textarea, select_field, checkbox, submit_button %}
+
+<h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-4">Custom Fields</h2>
+
+{% if errors.get("_form") %}
+<div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm whitespace-pre-line" role="alert">
+    {{ errors.get("_form") }}
+</div>
+{% endif %}
+
+{% if not definitions %}
+<p class="text-sm text-slate-500 dark:text-slate-400">No custom fields are defined for parties yet.</p>
+{% else %}
+<form hx-post="/admin/custom-fields/party/{{ party_id }}/values-panel"
+      hx-target="#custom-fields-panel"
+      hx-swap="innerHTML"
+      class="space-y-4">
+    {% for defn in definitions %}
+    <div>
+        {% if defn.field_type.value == "BOOLEAN" %}
+        {{ checkbox(defn.field_code, defn.field_name, checked=values.get(defn.field_code, false), help_text=defn.help_text or "") }}
+        {% elif defn.field_type.value == "TEXTAREA" %}
+        {{ textarea(defn.field_code, defn.field_name, value=values.get(defn.field_code, "") or "", help_text=defn.help_text or "") }}
+        {% elif defn.field_type.value == "SELECT" %}
+        {{ select_field(defn.field_code, defn.field_name, options=(defn.field_options.get("options", []) if defn.field_options else []), selected=values.get(defn.field_code, ""), required=defn.is_required, help_text=defn.help_text or "") }}
+        {% elif defn.field_type.value == "MULTISELECT" %}
+        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{{ defn.field_name }}</label>
+        {% set selected_values = values.get(defn.field_code) or [] %}
+        <div class="space-y-1">
+            {% for opt in (defn.field_options.get("options", []) if defn.field_options else []) %}
+            <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                <input type="checkbox" name="{{ defn.field_code }}" value="{{ opt.value }}" {% if opt.value in selected_values %}checked{% endif %}
+                       class="rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500" />
+                {{ opt.label }}
+            </label>
+            {% endfor %}
+        </div>
+        {% if defn.help_text %}<p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ defn.help_text }}</p>{% endif %}
+        {% elif defn.field_type.value in ("NUMBER", "DECIMAL") %}
+        {{ text_input(defn.field_code, defn.field_name, value=values.get(defn.field_code, "") or "", type="number", required=defn.is_required, help_text=defn.help_text or "") }}
+        {% elif defn.field_type.value == "DATE" %}
+        {{ text_input(defn.field_code, defn.field_name, value=values.get(defn.field_code, "") or "", type="date", required=defn.is_required, help_text=defn.help_text or "") }}
+        {% elif defn.field_type.value == "DATETIME" %}
+        {{ text_input(defn.field_code, defn.field_name, value=values.get(defn.field_code, "") or "", type="datetime-local", required=defn.is_required, help_text=defn.help_text or "") }}
+        {% elif defn.field_type.value == "EMAIL" %}
+        {{ text_input(defn.field_code, defn.field_name, value=values.get(defn.field_code, "") or "", type="email", required=defn.is_required, help_text=defn.help_text or "") }}
+        {% elif defn.field_type.value == "URL" %}
+        {{ text_input(defn.field_code, defn.field_name, value=values.get(defn.field_code, "") or "", type="url", required=defn.is_required, help_text=defn.help_text or "") }}
+        {% else %}
+        {{ text_input(defn.field_code, defn.field_name, value=values.get(defn.field_code, "") or "", required=defn.is_required, help_text=defn.help_text or "") }}
+        {% endif %}
+    </div>
+    {% endfor %}
+    {{ submit_button(label="Save Custom Fields") }}
+</form>
+{% endif %}

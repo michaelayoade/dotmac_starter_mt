@@ -1,6 +1,9 @@
 {#
   Party detail (Task 4) — subtype fields plus the custom-fields values
-  placeholder Task 7 wires up.
+  panel Task 7 wires up via the cross-feature UI composition pattern (see
+  app.features.custom_fields.web's module docstring): this template never
+  imports anything from custom_fields, it only references a URL that
+  feature owns.
 
   Context: `party` (app.core.models.Party, with `person_profile`/
   `organization_profile` already loaded — see
@@ -53,14 +56,18 @@
 </div>
 
 <!--
-  Custom fields panel placeholder. Task 7 (the custom_fields feature's admin
-  wiring) replaces this static block with a lazy-loaded hx-get fragment
-  (hx-trigger="load") that reads/renders this party's `custom_fields` JSONB
-  values via app.features.custom_fields.registry's ENTITY_MODELS lookup — no
-  custom_fields import here (feature independence) and no fabricated values
-  in the meantime.
+  Custom fields panel — the cross-feature UI composition pattern (Task 7).
+  Lazy-loaded via hx-get on render (hx-trigger="load"); the response is
+  templates/admin/custom_fields/_values_panel.html, owned and rendered
+  entirely by app.features.custom_fields.web — this template only knows the
+  URL, never the feature's Python. The panel's own form posts back to that
+  same route and re-swaps this div's content (#custom-fields-panel is the
+  hx-target/hx-swap contract the partial relies on).
 -->
-<div id="custom-fields-panel" class="mt-6 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
-    <p class="text-sm text-slate-500 dark:text-slate-400">Custom fields will appear here.</p>
+<div id="custom-fields-panel"
+     class="mt-6 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6"
+     hx-get="/admin/custom-fields/party/{{ party.id }}/values-panel"
+     hx-trigger="load">
+    <p class="text-sm text-slate-500 dark:text-slate-400">Loading custom fields…</p>
 </div>
 {% endblock %}

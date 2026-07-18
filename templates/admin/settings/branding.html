@@ -1,0 +1,73 @@
+{#
+  Friendly ui_branding editor (Task 7) — see app.features.settings.web
+  module docstring for the full rationale (why this exists alongside the
+  generic edit.html, the field-name -> JSON-key mapping, load_branding
+  wiring). Posts to app.features.settings.web.branding_submit; a write
+  failure re-renders THIS template at 200 with `errors._form` populated.
+
+  Context: `brand` (dict — CURRENT effective branding, from
+  app.core.branding.load_branding(db, tenant.id): static brand.json/env
+  defaults with this tenant's ui_branding override layered on top),
+  `errors` (`{"_form": message}` on failure), `form` (`{"name", "tagline",
+  "logo_url", "primary_color", "accent_color", "custom_css"}` — the values
+  to repopulate the form with).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/form_macros.html" import text_input, textarea, submit_button %}
+
+{% block admin_content %}
+<div class="max-w-3xl">
+    <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display mb-1">Branding</h1>
+    <p class="text-sm text-slate-500 dark:text-slate-400 mb-6">
+        Override this tenant's display name, tagline, logo, colors, and custom CSS.
+        Any field left blank falls back to the deployment default.
+    </p>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+            {% if errors.get("_form") %}
+            <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">
+                {{ errors.get("_form") }}
+            </div>
+            {% endif %}
+            <form hx-post="/admin/settings/branding" class="space-y-4">
+                {{ text_input("name", "Display name", value=form.get("name", ""), placeholder=brand.name) }}
+                {{ text_input("tagline", "Tagline", value=form.get("tagline", ""), placeholder=brand.tagline) }}
+                {{ text_input("logo_url", "Logo URL", value=form.get("logo_url", ""), placeholder="https://…") }}
+                <div class="grid grid-cols-2 gap-4">
+                    {{ text_input("primary_color", "Primary color", value=form.get("primary_color", ""), placeholder=brand.primary_color) }}
+                    {{ text_input("accent_color", "Accent color", value=form.get("accent_color", ""), placeholder=brand.accent_color) }}
+                </div>
+                {{ textarea("custom_css", "Custom CSS", value=form.get("custom_css", ""), rows=8, help_text="Scoped raw CSS. @import, javascript:, expression(), behavior:, and angle brackets are stripped before it's ever rendered.") }}
+                {{ submit_button(label="Save Branding", cancel_url="/admin/settings") }}
+            </form>
+        </div>
+
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+            <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-4">Current effective branding</h2>
+            <div class="flex items-center gap-3 mb-4">
+                <span class="h-8 w-8 rounded-lg" style="background-color: {{ brand.primary_color }};"></span>
+                <span class="h-8 w-8 rounded-lg" style="background-color: {{ brand.accent_color }};"></span>
+                <div>
+                    <p class="text-sm font-semibold text-slate-900 dark:text-white">{{ brand.name }}</p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">{{ brand.tagline }}</p>
+                </div>
+            </div>
+            {% if brand.custom_css %}
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">Custom CSS preview</p>
+            <pre class="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap bg-slate-50 dark:bg-slate-900 rounded-lg p-3">{{ brand.custom_css }}</pre>
+            {#
+              SANITIZER: `brand.custom_css` above was already run through
+              app.core.branding.sanitize_branding_css inside load_branding
+              (this route never sees the raw stored value) — the `<style>`
+              block below is the ONE `| safe` in this app's templates, and
+              only for this already-scrubbed value. Do not add `| safe`
+              anywhere else without threading it through that same sanitizer
+              first.
+            #}
+            <style>{{ brand.custom_css | safe }}</style>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
