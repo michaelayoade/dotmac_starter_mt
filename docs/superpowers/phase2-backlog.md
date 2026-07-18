@@ -145,14 +145,28 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   the same commit, not leave it to a later doc pass.
 - External-system contracts: none in the starter yet; when OpenBao/webhooks arrive (2c),
   each must be declared transport vs contracted authority in ARCHITECTURE.md.
-- `UserCredential.email` (`app/features/auth/models.py`) duplicates `Party.email` —
+- ~~`UserCredential.email` (`app/features/auth/models.py`) duplicates `Party.email` —
   written once at `register`. **The drift surface is now LIVE as of 2b-T5**: `update_person_party`
   can change or explicitly NULL `Party.email` while `UserCredential.email` (the login
   identity) persists unchanged — a person's profile can show no email while login still
   works via the credential copy. A cross-feature guard is not possible under feature
   independence (parties cannot query auth's UserCredential). 2c's email-update flows
   must pick a single write-owner (mirroring the `Party.display_name` resolution above)
-  or add a repair path; until then the two columns can silently disagree.
+  or add a repair path; until then the two columns can silently disagree.~~ —
+  **RESOLVED 2b.1-T3 (finding F2)**: rather than picking a write-owner between two
+  columns, the second column is gone. Migration
+  `alembic/versions/20260718_0005_single_email_authority.py` drops
+  `user_credentials.email` + its unique constraint entirely;
+  `auth/service.py::login` resolves `Party` by `(tenant_id,
+  normalize_email(email), party_type=person)` first, then `UserCredential` by
+  `party_id` only. `Party.email` is now the single email column
+  system-wide (see `docs/ARCHITECTURE.md`'s ownership table, `Party.email`
+  row, and the F2 resolution note under "Known dual-writer: Parties") — no
+  repair path needed because there is nothing left to re-sync. Intended,
+  documented consequence: NULLing a person party's email now disables login
+  for that party outright (canaries: `tests/test_auth_email_authority.py`,
+  unit pin: `tests/unit/test_auth_service.py::
+  test_login_null_party_email_rejected`).
 - Custom fields: deactivating a `CustomFieldDefinition` (`deactivate_field`) leaves any
   already-stored values for that `field_code` sitting in every entity's `custom_fields`
   JSONB column — there is no cleanup path. Orphaned keys are invisible to

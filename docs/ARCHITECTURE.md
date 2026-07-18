@@ -450,7 +450,7 @@ made concrete — every model has exactly one declared owner.
 | `AuthSession` | `auth_sessions` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
 | `AuditEvent` | `audit_events` | core | dotmac_sub (`app/models/audit.py`, tenant-adapted) |
 | `DomainSetting` | `domain_settings` | core | dotmac_starter (`app/models/domain_settings.py`, tenant-adapted), with `CheckConstraint` restored from dotmac_sub |
-| `UserCredential` | `user_credentials` | auth | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
+| `UserCredential` | `user_credentials` | auth | dotmac_sub (`app/models/auth.py`, tenant-adapted; `email` column dropped 2b.1-T3 — see "Auth credentials" ownership row and the F2 resolution note below) |
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
@@ -471,9 +471,10 @@ write:
 | Tenant domains | none — no write path exists yet (rows would be inserted by a future custom-domain feature) |
 | Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` / `update_person_party` / `update_organization_party` (the `/parties` API + `/admin/parties/{id}/edit` web flow), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
 | `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `app.core.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
+| `Party.email` (the login identity) | **Single column, single authority as of 2b.1-T3 (finding F2, resolved)**: owner is parties+auth writers via `app.core.identity.normalize_email` — same dual-writer/shared-invariant shape as `display_name` above (`create_person_party`/`update_person_party`/`create_organization_party`/`update_organization_party` and `auth/service.py::register` all call it). `app.features.auth.service.login` READS this column directly (join by `party_id` to find the credential row) instead of a second `UserCredential.email` copy, which is GONE — see the F2 resolution note under "Known dual-writer: Parties" below. No repair path needed: there is only ever one column now, so there is nothing to drift or re-sync. |
 | Party role grants | `app.features.rbac.service.assign_role` (the `POST /rbac/role-grants` JSON API **and** the `POST /admin/role-grants` web form both call this same function) **and** `app.features.auth.service._assign_first_user_admin` (auto-assigns the tenant's first registered user the `admin` role — a second, narrower writer of the same table; see the RBAC follow-up in `docs/superpowers/phase2-backlog.md`) |
 | Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and implicitly `_assign_first_user_admin` (creates the tenant's `admin` role on first use if it doesn't exist yet) |
-| Auth credentials | `app.features.auth.service.register` (the only writer — no credential-update/password-reset path yet, phase 2c) |
+| Auth credentials | `app.features.auth.service.register` (the only writer of the `password_hash` row — no credential-update/password-reset path yet, phase 2c). `Party.email` is a SEPARATE resource with its own row above (Parties) — `UserCredential` carries no email of its own as of 2b.1-T3 (F2): `login()` resolves `Party` by email first, then `UserCredential` by `party_id` only. |
 | Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `GET /admin/logout`; the JSON API has no logout/revoke route of its own yet) |
 | Audit events | `app.core.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes) and `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor) |
 | Domain settings rows | `app.core.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
@@ -505,9 +506,26 @@ functions:
   `parties` table's uniqueness index is `lower(email)`-based — a
   mixed-case write from either path that skipped normalization would still
   be rejected by the DB constraint, but a *read*-side comparison
-  (credential lookup at login) that skipped it would silently fail to
+  (`login()`'s `Party` lookup) that skipped it would silently fail to
   match. A new writer of `Party.email` now has an obvious single function
   to call rather than a convention to remember and replicate.
+  **F2 resolution (Phase 2b.1 Task 3, RESOLVED):** until this task,
+  `app.features.auth.models.UserCredential` carried its OWN `email` column
+  — a write-once copy made at `register()` and never touched again. Once
+  `update_person_party` (Task 5) could edit or NULL `Party.email`, that
+  copy silently drifted from the real profile email, with no cross-feature
+  guard possible (parties cannot reach into auth's table under feature
+  independence). The fix removes the second column entirely — migration
+  `alembic/versions/20260718_0005_single_email_authority.py` drops
+  `user_credentials.email` + its unique constraint, and
+  `auth/service.py::login` now resolves `Party` by
+  `(tenant_id, normalize_email(email), party_type=person)` FIRST, then
+  `UserCredential` by `party_id` only. There is exactly one email column
+  system-wide now, so the two can never drift again — see the ownership
+  table's `Party.email` row above. Documented, intended consequence: a
+  person party with a NULL email cannot log in (the query matches no
+  string) — see `login()`'s docstring, and the (struck) backlog entry in
+  `docs/superpowers/phase2-backlog.md`.
 - **`display_name` derivation** — **closed as of Task 5** (previously the
   tracked SOT gap in `docs/superpowers/phase2-backlog.md`). Both writers
   now call `app.core.identity.person_display_name(first_name, last_name)`

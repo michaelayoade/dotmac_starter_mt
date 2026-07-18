@@ -11,9 +11,11 @@ call site.
 Two invariants live here:
 
 - `normalize_email` — the email-lowercasing rule (the `parties` table's
-  uniqueness index is `lower(email)`-based; `UserCredential.email` must
-  agree with it or a mixed-case write from one path and a lowercase read
-  from another would silently disagree).
+  uniqueness index is `lower(email)`-based; a mixed-case write that skipped
+  normalization would silently mismatch a lowercase login lookup later).
+  `Party.email` is the ONLY email column as of Phase 2b.1 Task 3 (finding
+  F2) — the credential table used to carry its own duplicate email column,
+  now dropped entirely, so there is no second writer left to keep in sync.
 - `person_display_name` — the `Party.display_name` projection for
   `party_type == person` (`f"{first_name} {last_name}"`). Both the parties
   service (`create_person_party`/`update_person_party`) and the auth
@@ -28,10 +30,11 @@ from __future__ import annotations
 def normalize_email(email: str) -> str:
     """Lowercase `email` — the one place this rule is implemented.
 
-    Every writer of `Party.email`/`UserCredential.email` must call this
-    (or already-normalized input) before persisting, so a case-insensitive
-    read later (credential lookup at login, the parties uniqueness index)
-    never silently mismatches a write that skipped normalization.
+    Every writer of `Party.email` (the single email authority, Task 3) must
+    call this (or already-normalized input) before persisting, so a
+    case-insensitive read later (`login()`'s Party lookup, the parties
+    uniqueness index) never silently mismatches a write that skipped
+    normalization.
     """
     return email.lower()
 
