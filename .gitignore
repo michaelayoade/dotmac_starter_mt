@@ -32,3 +32,9 @@ htmlcov/
 
 # deploy.sh pre-migration DB backups
 /backups/
+
+# Node / Tailwind build (Makefile's css-build / package.json's css:build
+# regenerate static/css/main.css from static/css/src/main.css — the compiled
+# output is a build artifact, not source)
+node_modules/
+static/css/main.css

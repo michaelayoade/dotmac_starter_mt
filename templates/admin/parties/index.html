@@ -1,0 +1,60 @@
+{#
+  Parties admin index — list/search/filter/create entry point (Task 4).
+
+  Context contract: `parties` (list[Party], `person_profile`/
+  `organization_profile` eagerly loaded — see
+  app.features.parties.service.search_parties), `q` (current search string,
+  "" when unset), `party_type` (current filter value: "", "person", or
+  "organization"), `page`, `total`, `total_pages`.
+
+  Fragment vs full page (app.features.parties.web.index): a plain browser
+  GET renders this full template (extends layouts/admin.html); an htmx
+  request (`HX-Request` header — every search/filter/pagination control
+  below is an `hx-get` back to this same `/admin/parties` route) gets
+  `admin/parties/_table.html` instead — same context, table only. Ported
+  shape from `SUB:templates/admin/customers/index.html`+`_table.html`'s HTMX
+  convention (search input `hx-trigger="input changed delay:350ms, search"`,
+  filters threaded through query params, `hx-target` on a stable container).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/table_macros.html" import icon %}
+
+{% block admin_content %}
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display">Parties</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400">People and organizations in this tenant.</p>
+    </div>
+    <a href="/admin/parties/create"
+       class="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-primary-500/25">
+        {{ icon("plus") }}
+        New Party
+    </a>
+</div>
+
+<div id="parties-filters" class="mb-4 flex flex-col sm:flex-row gap-3">
+    <input type="search" name="q" value="{{ q }}"
+           placeholder="Search by name or email…"
+           hx-get="/admin/parties"
+           hx-trigger="input changed delay:350ms, search"
+           hx-target="#parties-table"
+           hx-push-url="true"
+           hx-include="#parties-filters"
+           class="flex-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500" />
+    <select name="party_type"
+            hx-get="/admin/parties"
+            hx-trigger="change"
+            hx-target="#parties-table"
+            hx-push-url="true"
+            hx-include="#parties-filters"
+            class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        <option value="" {% if not party_type %}selected{% endif %}>All types</option>
+        <option value="person" {% if party_type == "person" %}selected{% endif %}>People</option>
+        <option value="organization" {% if party_type == "organization" %}selected{% endif %}>Organizations</option>
+    </select>
+</div>
+
+<div id="parties-table">
+    {% include "admin/parties/_table.html" %}
+</div>
+{% endblock %}

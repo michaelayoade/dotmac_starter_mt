@@ -1,0 +1,38 @@
+{#
+  Role create (Task 6) — single form, posts via `hx-post` to
+  `app.features.rbac.web.role_create_submit`. A field-validation or
+  conflict (duplicate slug) failure re-renders THIS template at 200 with
+  `errors`/`form` populated — same "re-render, don't redirect" convention as
+  admin/parties/create.html.
+
+  Context: `errors` (field name -> message, `_form` reserved for a
+  whole-form error such as a duplicate slug), `form` (submitted values to
+  repopulate the failed form).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/form_macros.html" import text_input, submit_button %}
+
+{% block admin_content %}
+<div class="max-w-2xl">
+    <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display mb-6">New Role</h1>
+
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+        {% if errors.get("_form") %}
+        <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">
+            {{ errors.get("_form") }}
+        </div>
+        {% endif %}
+        <form hx-post="/admin/roles" class="space-y-4">
+            {{ text_input("slug", "Slug", value=form.get("slug", ""), required=true, help_text="Lowercase letters, numbers, hyphens — e.g. \"support-agent\".") }}
+            {% if errors.get("slug") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("slug") }}</p>
+            {% endif %}
+            {{ text_input("name", "Name", value=form.get("name", ""), required=true) }}
+            {% if errors.get("name") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("name") }}</p>
+            {% endif %}
+            {{ submit_button(label="Create Role", cancel_url="/admin/roles") }}
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,79 @@
+{#
+  Settings admin index (Task 7) — every registered setting spec, grouped by
+  domain, with its EFFECTIVE value (tenant override -> platform default ->
+  spec default) and a badge showing which of those three resolved it.
+  Secret values are already masked server-side
+  (`app.features.settings.service.MASKED_SECRET_VALUE`) before this template
+  ever sees them — never rendered in the clear.
+
+  Context: `grouped` (dict[str domain -> list[SettingOut]], domains sorted
+  alphabetically) — see app.features.settings.web.index. `SettingOut` fields:
+  `domain`, `key`, `value`, `value_type`, `label`, `is_secret`, `source`.
+
+  No htmx fragment here (unlike parties/rbac) — see app.features.settings.web
+  module docstring for why a single full-page render is enough for this
+  small a registry.
+#}
+{% extends "layouts/admin.html" %}
+
+{% block admin_content %}
+{% set source_classes = {
+    "tenant": "bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400",
+    "platform": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+    "default": "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400",
+} %}
+
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display">Settings</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Tenant overrides for every registered setting.</p>
+    </div>
+    <a href="/admin/settings/branding"
+       class="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">
+        Branding
+    </a>
+</div>
+
+<div class="space-y-6">
+    {% for domain, items in grouped.items() %}
+    <div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+        <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+            <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ domain }}</h2>
+        </div>
+        <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
+                {% for item in items %}
+                <tr>
+                    <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">
+                        {{ item.label or item.key }}
+                        <p class="text-xs font-normal text-slate-400 dark:text-slate-500">{{ item.key }}</p>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
+                        {% if item.is_secret %}
+                        <span class="italic">hidden</span>
+                        {% elif item.value_type == "json" %}
+                        <span class="italic">{{ item.value | length }} key(s)</span>
+                        {% else %}
+                        {{ item.value }}
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ source_classes.get(item.source, source_classes['default']) }}">
+                            {{ item.source }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                        {% if domain == "branding" and item.key == "ui_branding" %}
+                        <a href="/admin/settings/branding" class="text-sm text-primary-600 dark:text-primary-400 hover:underline">Edit</a>
+                        {% else %}
+                        <a href="/admin/settings/{{ domain }}/{{ item.key }}/edit" class="text-sm text-primary-600 dark:text-primary-400 hover:underline">Edit</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

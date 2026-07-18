@@ -1,0 +1,38 @@
+{#
+  Roles admin index — list + create entry point (Task 6).
+
+  Context contract: `roles` (list[Role]), `page`, `total`, `total_pages` —
+  see app.features.rbac.web.roles_index.
+
+  Fragment vs full page: same `HX-Request` convention as
+  admin/parties/index.html — an htmx GET (every pagination control below is
+  an `hx-get` back to this same `/admin/roles` route) gets
+  `admin/rbac/_roles_table.html` instead of this full shell.
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/table_macros.html" import icon %}
+
+{% block admin_content %}
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display">Roles</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Tenant-scoped roles and their assignments.</p>
+    </div>
+    <div class="flex items-center gap-2">
+        <a href="/admin/role-grants"
+           class="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-600 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700">
+            {{ icon("key") }}
+            Grant Role
+        </a>
+        <a href="/admin/roles/create"
+           class="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-primary-500/25">
+            {{ icon("plus") }}
+            New Role
+        </a>
+    </div>
+</div>
+
+<div id="roles-table">
+    {% include "admin/rbac/_roles_table.html" %}
+</div>
+{% endblock %}

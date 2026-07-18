@@ -1,0 +1,52 @@
+{#
+  Admin shell layout. Context contract: routes rendering through this layout
+  must pass `active_nav` (a sidebar nav key — see components/sidebar.html)
+  and `page_title` (shown in the topbar and used to build <title>).
+  `success_message`/`error_message` are optional flash-style strings.
+
+  Ported from ST:templates/admin/base.html, adapted: our `templates/base.html`
+  block is named `content` (not `body`) for the page shell, so this layout
+  fills `content` (inherited from base.html) and exposes its own
+  `admin_content` block for page templates to fill — same two-layer
+  extends chain ST used (base.html -> admin/base.html -> page), renamed to
+  match this app's block names.
+#}
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} · {{ brand.name if brand and brand.name else "Admin" }}{% endblock %}
+
+{% block content %}
+<div class="flex min-h-screen bg-slate-50 dark:bg-slate-900">
+    {% include "components/sidebar.html" %}
+
+    <div class="flex-1 flex flex-col lg:ml-64">
+        {% include "components/topbar.html" %}
+
+        <main class="flex-1 p-6">
+            {% if success_message %}
+            <div class="mb-4 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-sm">
+                {{ success_message }}
+            </div>
+            {% endif %}
+            {% if error_message %}
+            <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm">
+                {{ error_message }}
+            </div>
+            {% endif %}
+            {% block admin_content %}{% endblock %}
+        </main>
+    </div>
+</div>
+
+<!-- Mobile sidebar overlay -->
+<div x-data="sidebarToggle"
+     x-on:toggle-sidebar.window="toggle()"
+     x-show="open"
+     x-cloak
+     class="lg:hidden fixed inset-0 z-50">
+    <div x-on:click="close()" class="absolute inset-0 bg-black/50"></div>
+    <div class="relative w-64 h-full">
+        {% include "components/sidebar.html" %}
+    </div>
+</div>
+{% endblock %}

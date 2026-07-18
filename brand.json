@@ -1,0 +1,9 @@
+{
+  "_comment": "Template-neutral deployment identity, read by app.core.branding.get_brand(). Keys are flat upper-case names matching the same-named environment variable (e.g. BRAND_NAME) so a deployment can override a single key without editing this file. Friendly (lower_snake_case) keys used by templates/callers -- name, tagline, primary_color, accent_color, support_email, app_url -- are the app.core.branding._KEY_MAP mapping of these JSON keys. Replace the values below (not the keys) to white-label a deployment; primary/accent colors here match static/css/src/main.css's @theme --color-primary-600 / --color-accent-500 defaults so an unbranded deployment's brand.* values agree with its compiled CSS.",
+  "BRAND_NAME": "Starter",
+  "BRAND_TAGLINE": "A DotMac starter application",
+  "BRAND_PRIMARY_COLOR": "#206a07",
+  "BRAND_ACCENT_COLOR": "#06b6d4",
+  "BRAND_SUPPORT_EMAIL": "support@example.com",
+  "BRAND_APP_URL": "https://example.com"
+}

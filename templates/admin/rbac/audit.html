@@ -1,0 +1,25 @@
+{#
+  Audit log admin index — paginated list (Task 6).
+
+  Context contract: `events` (list[dict] — see
+  app.features.rbac.web._audit_rows: `action`, `entity_type`, `entity_id`,
+  `actor_display_name`, `created_at`, `details_json` (pretty-printed JSON
+  TEXT, not a dict — Jinja autoescapes it when rendered, so no `| safe`
+  is used)), `page`, `total`, `total_pages`.
+
+  Fragment vs full page: same `HX-Request` convention as
+  admin/parties/index.html — every pagination control below is an
+  `hx-get` back to this same `/admin/audit` route.
+#}
+{% extends "layouts/admin.html" %}
+
+{% block admin_content %}
+<div class="mb-6">
+    <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display">Audit Log</h1>
+    <p class="text-sm text-slate-500 dark:text-slate-400">Recent admin actions in this tenant, bounded by the audit retention setting.</p>
+</div>
+
+<div id="audit-table">
+    {% include "admin/rbac/_audit_table.html" %}
+</div>
+{% endblock %}

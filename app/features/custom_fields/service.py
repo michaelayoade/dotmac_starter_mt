@@ -79,13 +79,15 @@ from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import resolve_value
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
-from app.features.custom_fields.registry import resolve_entity
+from app.features.custom_fields.registry import ENTITY_MODELS, resolve_entity
 from app.features.custom_fields.schemas import CustomFieldCreate
 
 _DEFAULT_MAX_PER_ENTITY = 20
 
 _NUMERIC_FIELD_TYPES = (CustomFieldType.NUMBER, CustomFieldType.DECIMAL)
 _MIN_MAX_CONSISTENCY_KEYS = {"min_value", "max_value", "field_type"}
+_OPTION_FIELD_TYPES = (CustomFieldType.SELECT, CustomFieldType.MULTISELECT)
+_SELECT_OPTIONS_CONSISTENCY_KEYS = {"field_type", "field_options"}
 
 
 def _validate_min_max_numeric(
@@ -106,6 +108,27 @@ def _validate_min_max_numeric(
             raise BadRequestError(
                 f"{label} must be numeric for NUMBER/DECIMAL fields"
             ) from exc
+
+
+def _validate_select_options(
+    field_type: CustomFieldType, field_options: dict[str, Any] | None
+) -> None:
+    """Task 7 review finding 3: `CustomFieldDefinition.validate_value`'s
+    SELECT/MULTISELECT branches only check membership `if self.field_options:`
+    (see `models.py`) — an options-less SELECT/MULTISELECT definition
+    silently skips membership validation forever after (the exact same
+    guard-shape gap logged for dotmac_erp, see
+    `docs/superpowers/upstream-findings.md` finding 2). Reject it at
+    create/update time instead, same "definition self-consistency, checked
+    up front" pattern as `_validate_min_max_numeric`/`_validate_regex_compiles`
+    above: a SELECT/MULTISELECT definition must carry at least one non-empty
+    option in `field_options["options"]`.
+    """
+    if field_type not in _OPTION_FIELD_TYPES:
+        return
+    options = (field_options or {}).get("options") or []
+    if not options:
+        raise BadRequestError("SELECT/MULTISELECT fields require at least one option")
 
 
 def _validate_regex_compiles(validation_regex: str | None) -> None:
@@ -157,6 +180,7 @@ def create_field(
     resolve_entity(payload.entity_type)
     _validate_min_max_numeric(payload.field_type, payload.min_value, payload.max_value)
     _validate_regex_compiles(payload.validation_regex)
+    _validate_select_options(payload.field_type, payload.field_options)
 
     limit = resolve_value(
         db,
@@ -260,6 +284,11 @@ def update_field(
 
     if "validation_regex" in updates:
         _validate_regex_compiles(updates["validation_regex"])
+
+    if _SELECT_OPTIONS_CONSISTENCY_KEYS & updates.keys():
+        effective_type = updates.get("field_type", field.field_type)
+        effective_options = updates.get("field_options", field.field_options)
+        _validate_select_options(effective_type, effective_options)
 
     # Router must pass schema-validated dicts only — this loop trusts its
     # input (inherited ERP shape; Task 10's router owns input filtering).
@@ -396,12 +425,24 @@ def get_values(
     return dict(row.custom_fields or {})
 
 
+def list_entity_types() -> list[str]:
+    """Registered `entity_type` keys custom fields can attach to.
+
+    Thin wrapper over `registry.ENTITY_MODELS` (sorted for stable UI
+    ordering) — feeds the admin web UI's entity_type select
+    (`app.features.custom_fields.web`) without that module reaching into
+    the registry module directly for a one-line lookup.
+    """
+    return sorted(ENTITY_MODELS.keys())
+
+
 __all__ = [
     "create_field",
     "deactivate_field",
     "get_by_code",
     "get_field",
     "get_values",
+    "list_entity_types",
     "list_for_entity",
     "set_values",
     "update_field",

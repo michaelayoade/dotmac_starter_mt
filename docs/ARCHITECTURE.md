@@ -12,17 +12,28 @@ app/
                  deps (route guards), middleware/, logging, errors, crud,
                  unit_of_work, features (manifest registry), audit,
                  settings_models (DomainSetting), settings_resolver (spec
-                 registry + tenant->platform->default resolver)
+                 registry + tenant->platform->default resolver), templating
+                 (Jinja env + render()), branding (static + per-tenant DB
+                 override), identity (Party invariant helpers), web_deps
+                 (cookie auth guard, shared with the bearer seam in deps.py)
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
-    auth/          JWT login, sessions, /auth/me
+    auth/          JWT login, sessions, /auth/me; owns /admin/login+logout (web)
     parties/       person + organization CRUD (/parties/people, /parties/organizations)
+                   + /admin/parties/* web screens (list/detail/create/edit)
     rbac/          roles, role grants, audit-event read endpoint
+                   + /admin/roles, /admin/role-grants, /admin/audit web screens
     settings/      tenant settings admin API (spec declarations, seed, router)
+                   + /admin/settings web screens (generic editor + branding editor)
     custom_fields/ field definitions CRUD + values on a registered entity's
                    custom_fields JSONB column (zero migrations per field)
+                   + /admin/custom-fields web screens, incl. the
+                   values-panel fragment other features' pages embed
+    web/           core=False, deletable — owns only the /admin dashboard shell
   main.py        app assembly: middleware stack, error handlers, /health,
                  feature mounting
+templates/       Jinja templates for the admin portal (see "Admin portal" below)
+static/          Tailwind v4 CSS + vendored htmx/Alpine JS for the portal
 ```
 
 Core never imports `app/features` (import-linter contract). Features never
@@ -207,6 +218,216 @@ restart. `tests/test_custom_fields_isolation.py` plus the eye-color e2e
 canary (`tests/unit/test_custom_fields_api.py`) demonstrate a field being
 defined and used in the same test run with zero schema changes in between.
 
+## Admin portal (web UI)
+
+Phase 2b added an HTML/HTMX admin portal alongside the existing JSON API —
+same tenants, same services, a second thin presentation surface. Every
+feature that has portal pages puts them in that feature's own `web.py`
+(never `router.py`), mounted under `/admin/...`; the deletable `web` feature
+package (`app/features/web/`, `core=False`) owns only the dashboard shell
+(`GET /admin`) — `DISABLED_FEATURES=web` drops that one route and nothing
+else, since login/logout (`GET`/`POST /admin/login`, `GET /admin/logout`)
+are owned by `auth` (a core feature) and every other feature's `/admin/*`
+routes mount independently. Every `web.py` route calls the SAME
+`service.py` functions its JSON sibling calls (e.g. `parties/web.py`'s edit
+form and `PATCH`-equivalent both call `parties_service.update_person_party`)
+— one write-owner per resource, two presentation surfaces, never a second
+implementation of the write.
+
+### Template / asset layout
+
+```
+templates/
+  base.html                 <html> shell: brand-aware <title>, static asset links
+  layouts/admin.html         {% extends "base.html" %} + sidebar/topbar chrome
+  components/                sidebar, topbar, form_macros, table_macros (Jinja macros)
+  auth/login.html             standalone (does not extend layouts/admin.html — pre-auth)
+  admin/
+    dashboard.html
+    parties/  rbac/  settings/  custom_fields/   one dir per feature's pages
+    <feature>/_*.html          "_"-prefixed = htmx fragment, not a full page
+  errors/{400,401,403,404,409,422,500,csrf}.html   branded error pages
+static/
+  css/src/main.css           Tailwind v4 CSS-first source (@theme/@source/@custom-variant)
+  css/main.css                compiled output — gitignored, build-only (`make css-build`)
+  js/{htmx,alpine}.min.js     vendored (no CDN, no node_modules at runtime)
+  js/csrf.js                  CSRF header bridge (see below)
+  js/components.js            small Alpine component glue
+```
+
+Every `templates/admin/**/*.html` and `templates/auth/*.html` file either
+`{% extends %}` a layout or is `_`-prefixed (a fragment meant to be
+`{% include %}`d or returned directly to an htmx swap) —
+`tests/architecture/test_web_conventions.py::test_every_admin_or_auth_template_extends_a_layout_or_is_a_fragment`.
+A `GET` route that serves both a full page and an htmx fragment (e.g.
+`GET /admin/parties`) branches on the `HX-Request` header: present → render
+just the `_table.html` fragment; absent → render the full `index.html`,
+which itself `{% include %}`s that same fragment once, so there is exactly
+one template that knows how to draw the table.
+
+Tailwind v4 is CSS-first — `static/css/src/main.css`'s `@theme` (design
+tokens) and `@source` (an explicit safelist of class-name patterns the
+compiler must not tree-shake away, since Jinja templates aren't a build-time
+scannable source the default content-detection understands) replace the old
+`tailwind.config.js` entirely. `npm run css:build` (`make css-build`, or the
+Dockerfile's `css-builder` stage) compiles it; `static/css/main.css` is
+gitignored — never commit it, always rebuild.
+
+### Auth flow: cookie + bearer share one seam
+
+`app.core.deps.authenticate_request` is the ONE function that validates a
+token (signature, expiry, session-revocation, tenant-claim match) and
+resolves it to a `Party` — both the JSON API's bearer `Authorization`
+header and the portal's cookie flow call it, so a security fix to token
+validation lands once and covers both surfaces:
+
+1. **Login** (`POST /admin/login`, `app.features.auth.web`) — a plain HTML
+   form POST (via `hx-post`, see the CSRF section below), calling
+   `auth_service.web_login` (same credential-check path `POST /auth/login`
+   uses for the JSON API) and, on success, setting an `access_token` cookie
+   (`HttpOnly`, `SameSite=Lax`, `Secure` iff `is_secure_request()`) instead
+   of returning the token in a JSON body.
+2. **Every portal page** depends on `app.core.web_deps.require_web_auth`,
+   which: reads the `access_token` COOKIE (no header fallback — cookie-only
+   is deliberate, this dependency is web-only) → calls
+   `authenticate_request(request, db, token=token)` (the shared seam) →
+   additionally requires the `"admin"` role (every portal page is
+   admin-only in this phase; no other portal-facing role exists yet,
+   see the phase 3 note below) → returns `{"party", "roles"}` or raises
+   `WebAuthRedirect` (a 302 to `/admin/login?next=...`, registered as a
+   dedicated exception handler in `app.core.errors`) — a portal auth
+   failure is ALWAYS a redirect, never a bare 401/403 JSON body.
+3. **Logout** (`GET /admin/logout`) revokes the `AuthSession` server-side
+   (not just clearing the cookie) and redirects to the login page —
+   verified by the e2e canary re-submitting the revoked cookie value and
+   getting redirected again, not authenticated.
+
+Phase 3 TODO (tracked in the backlog): `require_web_auth` hardcodes the
+`"admin"` role; loosen this per-route once non-admin portal surfaces exist.
+
+### CSRF header-bridge contract
+
+`app.core.middleware.csrf.CSRFMiddleware` validates a double-submit pair:
+the `X-CSRF-Token` HEADER must match the `csrf_token` COOKIE (deliberately
+NOT `HttpOnly`, so client JS can read it). `static/js/csrf.js` is the
+bridge — it copies the cookie onto that header for every htmx request
+(`htmx:configRequest` listener) and every `fetch()` call (monkey-patched),
+so every mutating form in these templates uses `hx-post`/`hx-put`/
+`hx-delete`, never a bare `<form method="post">` (which has no hook to
+attach a custom header and would 403 with `csrf_failed`) —
+`tests/architecture/test_web_conventions.py::test_no_template_uses_a_plain_method_post_form`
+enforces this. `tests/test_admin_portal_e2e.py` replicates the same bridge
+server-side (capture the `csrf_token` cookie from a safe `GET`, send it back
+as the `X-CSRF-Token` header on the following `POST`) rather than bypassing
+CSRF for the test.
+
+### Branding pipeline: static config + per-tenant DB override
+
+Two layers, kept deliberately separate (`app.core.branding`'s module
+docstring):
+
+- **`get_brand()`** — deployment-STATIC identity (name, tagline, colors,
+  support email, app URL). Resolution order, lowest to highest precedence:
+  built-in generic defaults < `brand.json` (repo root; path overridable via
+  `BRAND_CONFIG_PATH`) < same-named `BRAND_*` environment variable
+  (`BRAND_NAME`, `BRAND_TAGLINE`, `BRAND_PRIMARY_COLOR`,
+  `BRAND_ACCENT_COLOR`, `BRAND_SUPPORT_EMAIL`, `BRAND_APP_URL`). Cached for
+  the process lifetime (`lru_cache`) and installed as a Jinja global
+  (`app.core.templating`), so every template reads `brand.name` etc.
+  without a route passing it explicitly — a restart is required to pick up
+  a `brand.json`/env change.
+- **`load_branding(db, tenant_id)`** — the static brand above, with any
+  keys present in the tenant's `ui_branding` domain setting
+  (`SettingDomain.branding`, resolved via the same
+  tenant→platform→spec-default resolver every other setting uses) overlaid
+  on top. Per-request, not cached — a tenant admin's branding edit is live
+  on the next page load, no restart. `primary_color`/`accent_color`
+  overrides are validated as `#RRGGBB` hex (falling back to the static
+  color on a bad value); `custom_css` is run through
+  `sanitize_branding_css` (strips `@import`, `javascript:`/`data:` URLs,
+  `expression()`, `behavior:`, and any literal `<` — a `<script>` breakout
+  attempt) before it is ever rendered.
+
+`GET`/`POST /admin/settings/branding` (`app.features.settings.web`) is the
+first and only route that calls `load_branding` — it renders the CURRENT
+effective branding, and its own render context's `brand` key SHADOWS the
+process-global static `brand` template global for that one response only
+(the static global stays available to every other template unchanged). The
+same route is where `templates/admin/settings/branding.html`'s
+`custom_css` preview block uses `| safe` — the one real `| safe` usage in
+this app's templates, immediately preceded by a `SANITIZER:` comment
+pointing at `sanitize_branding_css`, which is what makes it safe (see the
+CLAUDE.md template-escaping rule and
+`test_safe_filter_only_used_with_a_sanitize_comment_nearby`).
+
+Write path: `POST /admin/settings/branding` composes the submitted
+sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/`accent_color`/
+`custom_css`) back into the `ui_branding` dict and calls the SAME
+`settings_service.update_setting(db, tenant, "branding", "ui_branding",
+raw)` the generic per-key editor (`POST /admin/settings/{domain}/{key}/edit`)
+and the JSON `PUT /settings/{domain}/{key}` API all call — one write path,
+three presentation surfaces (generic web editor, friendly branding editor,
+JSON API), each ending in the same audit event
+(`settings.update`, domain/key only, never the value).
+
+### Cross-feature UI composition (values-panel pattern)
+
+See CLAUDE.md's Extension points entry for the rule; concretely: the party
+detail page needs to show/edit a party's custom-field values, but `parties`
+may never import `custom_fields`. `custom_fields/web.py` owns
+`GET`/`POST /admin/custom-fields/party/{party_id}/values-panel` and the
+partial they render (`templates/admin/custom_fields/_values_panel.html`);
+`templates/admin/parties/detail.html` references only the URL
+(`hx-get=".../values-panel" hx-trigger="load"`) — composition happens
+entirely in the browser via htmx's lazy-load-on-render, zero Python import.
+The panel's own form posts back to the SAME web route (not the JSON API's
+`PUT /custom-fields/{entity_type}/{entity_id}/values` — an htmx form always
+sends `Accept: text/html`, and the JSON route would still return
+`application/json` regardless, which htmx would swap in as literal text),
+which calls the same `custom_fields_service.set_values` the JSON API uses.
+
+### Error negotiation: branded HTML with a JSON fallback
+
+`app.core.errors._negotiate` is the single JSON-vs-HTML decision point for
+every error response (FastAPI exception handlers and the CSRF/tenant/
+rate-limit ASGI middleware all route through it). Rule: a request "prefers
+HTML" iff `"text/html" in request.headers["accept"]` — htmx sends
+`Accept: text/html, */*`, so htmx error responses get the branded page too
+(a valid swap target), while a JSON API client (`Accept: application/json`)
+always gets the byte-identical envelope
+(`{"code", "message", "details", "request_id"}`) unchanged from the
+API-only phase. Every status this app has a dedicated template for
+(400/401/403/404/409/422/500, plus a special `csrf_failed` page regardless
+of its 403 status) renders that template with exactly the envelope's
+`code`/`message`/`request_id` fields; a status outside that map still gets
+a branded page via the `>=500`/else fallback — never a raw stack trace or
+blank page. **Fallback**: if `render_error` itself raises (a broken
+template, a missing asset during render), `_negotiate` catches it, logs
+`"Error-page render failed; falling back to JSON envelope"`, and returns
+the plain JSON envelope instead — an error page can never itself 500 an
+error response into an unhandled crash.
+
+### `/static` and `/health` bypass (recap)
+
+Both bypass `TenantResolverMiddleware` entirely before any DB query — see
+"Static-asset bypass" and "Health bypass" above (unchanged by the portal
+work, listed here for the reader looking for portal-adjacent behavior in
+one place).
+
+## Web-portal module provenance
+
+Same convention as the model provenance table below — owner and port
+source-of-truth for the modules phase 2b introduced. "ST" = `dotmac_starter`
+(the pre-consolidation single-tenant starter), "SUB" = `dotmac_sub`,
+"native" = no upstream port.
+
+| Module | Purpose | Port SoT |
+|---|---|---|
+| `app/core/templating.py` | Jinja2 environment + `render()`, `static_asset_url` cache-busting | ST (`app/templates.py::_asset_version`/`_static_asset_url`); the `brand`/branding-DB-override wiring is native to this phase |
+| `app/core/branding.py` | `get_brand()` (static) + `load_branding()` (DB overlay) + `sanitize_branding_css` | SUB (`app/services/branding_config.py::get_brand`) for the static layer; ST (`app/services/branding.py::get_branding`/`sanitize_branding_css`) for the DB-overlay + sanitizer, adapted from ST's single-tenant "one row, no tenant_id" model to this app's tenant-scoped resolver |
+| `app/core/web_deps.py` | `require_web_auth`, `WebAuthRedirect`, `safe_next_url`, `is_secure_request` | ST (`app/web/deps.py`), routed through this app's `authenticate_request` shared seam (native adaptation — ST had no bearer/cookie seam to share) |
+| `app/core/identity.py` | `normalize_email`, `person_display_name` — the single-owner Party-invariant helpers | native (closes the SOT gap tracked from 2a-T6/T7; no upstream port — see "Known dual-writer: Parties" below) |
+
 ## Model provenance table
 
 Every model class in `app/` (ORM `Base` subclasses — `grep -rn "class .*Base"
@@ -248,15 +469,17 @@ write:
 |---|---|
 | Tenants | `app.features.tenants.service.create_tenant` (platform-only; no update/delete service yet) |
 | Tenant domains | none — no write path exists yet (rows would be inserted by a future custom-domain feature) |
-| Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` (the `/parties` API), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
-| Party role grants | `app.features.rbac.service.assign_role` (API path) **and** `app.features.auth.service._assign_first_user_admin` (auto-assigns the tenant's first registered user the `admin` role — a second, narrower writer of the same table; see the RBAC follow-up in `docs/superpowers/phase2-backlog.md`) |
-| Roles | `app.features.rbac.service.create_role`, and implicitly `_assign_first_user_admin` (creates the tenant's `admin` role on first use if it doesn't exist yet) |
+| Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` / `update_person_party` / `update_organization_party` (the `/parties` API + `/admin/parties/{id}/edit` web flow), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
+| `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `app.core.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
+| Party role grants | `app.features.rbac.service.assign_role` (the `POST /rbac/role-grants` JSON API **and** the `POST /admin/role-grants` web form both call this same function) **and** `app.features.auth.service._assign_first_user_admin` (auto-assigns the tenant's first registered user the `admin` role — a second, narrower writer of the same table; see the RBAC follow-up in `docs/superpowers/phase2-backlog.md`) |
+| Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and implicitly `_assign_first_user_admin` (creates the tenant's `admin` role on first use if it doesn't exist yet) |
 | Auth credentials | `app.features.auth.service.register` (the only writer — no credential-update/password-reset path yet, phase 2c) |
-| Auth sessions | `app.features.auth.service.login` (issues); no revoke/logout write path yet |
-| Audit events | `app.core.audit.write_audit_event` — called from `rbac/router.py` and `settings/router.py` only; every audit-writing route calls this one function, never constructs `AuditEvent` directly |
-| Domain settings rows | `app.core.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting`) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
-| Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete) |
-| Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) |
+| Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `GET /admin/logout`; the JSON API has no logout/revoke route of its own yet) |
+| Audit events | `app.core.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes) and `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor) |
+| Domain settings rows | `app.core.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
+| `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `app.core.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
+| Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
+| Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
 
 ### Known dual-writer: Parties (auth register vs. parties service)
 
@@ -264,33 +487,37 @@ Two service functions independently construct a `Party` + `PartyPerson`
 row: `auth/service.py::register` (the `/auth/register` self-service signup
 flow, which also creates the `UserCredential` and first-admin role grant in
 the same transaction) and `parties/service.py::create_person_party` /
-`create_organization_party` (the tenant-admin `/parties` API, used to add a
-party without a login). This is a **deliberate, not accidental** dual
-writer — one flow is "a person signs themselves up," the other is "an admin
-adds a contact/customer record" — flagged here per SOT-complete honesty
-rather than silently left implicit.
+`create_organization_party` / `update_person_party` /
+`update_organization_party` (the tenant-admin `/parties` API and the
+`/admin/parties/{id}/edit` web flow, Task 5). This is a **deliberate, not
+accidental** dual writer — one flow is "a person signs themselves up," the
+other is "an admin manages a contact/customer record" — flagged here per
+SOT-complete honesty rather than silently left implicit. The writers
+themselves stay two; what changed (Task 5) is that the INVARIANTS both must
+preserve are no longer hand-duplicated at each call site — they're
+implemented once in `app.core.identity` and both writers call the same
+functions:
 
-The shared invariant both writers must preserve, by hand, in both places:
-
-- **Email is lowercased at the write boundary.** `auth/service.py::register`
-  calls `payload.email.lower()` once and reuses that value for `Party.email`,
-  `UserCredential.email`, and the returned view; `parties/service.py::
-  create_person_party`/`create_organization_party` do the same
-  (`payload.email.lower()`) independently. Both must agree because the
+- **Email is lowercased at the write boundary**, via
+  `app.core.identity.normalize_email` — `auth/service.py::register` and
+  `parties/service.py`'s create/update functions all call this one function
+  instead of each writing its own `.lower()`. Both must agree because the
   `parties` table's uniqueness index is `lower(email)`-based — a
   mixed-case write from either path that skipped normalization would still
   be rejected by the DB constraint, but a *read*-side comparison
   (credential lookup at login) that skipped it would silently fail to
-  match. There is no shared helper enforcing this today — a new writer of
-  `Party.email` must replicate the `.lower()` call, not assume it.
-- **`display_name` derivation.** Both writers compute
-  `f"{first_name} {last_name}"` (person) / `legal_name` (organization) and
-  write it once at create time; there is no update path for either writer
-  today, so no drift-repair function exists yet. This is the specific
-  known gap already tracked in `docs/superpowers/phase2-backlog.md`
-  ("SOT-complete gaps") — when an update endpoint lands, `display_name`
-  needs either a single write-owner + idempotent repair, or must become
-  computed-at-read instead of stored.
+  match. A new writer of `Party.email` now has an obvious single function
+  to call rather than a convention to remember and replicate.
+- **`display_name` derivation** — **closed as of Task 5** (previously the
+  tracked SOT gap in `docs/superpowers/phase2-backlog.md`). Both writers
+  now call `app.core.identity.person_display_name(first_name, last_name)`
+  for the person case (organizations reassign `legal_name` directly — no
+  helper needed, `legal_name` IS the display name); `update_person_party`/
+  `update_organization_party` (`parties/service.py`) recompute
+  `display_name` INSIDE the update, from the just-updated subtype fields,
+  so the projection is refreshed on every write, not just at create. See
+  the ownership table above (`Party.display_name` projection row) for the
+  owner/repair statement.
 
 ## Request flow / middleware order
 
@@ -326,6 +553,22 @@ router after bypassing tenant resolution. `/health` is the only route in
 `tests/architecture/test_route_guards.py::ALLOWLIST` permitted to carry zero
 `require_*` guards. Every other route either carries a `require_*` dependency
 or fails the architecture test.
+
+### Static-asset bypass
+
+`/static/*` (the `StaticFiles` mount in `app/main.py`, serving
+`static/css/main.css`, vendor JS, etc.) gets the same before-resolution
+short-circuit as `/health`, via `_is_static_path()`: `path == "/static"` or
+`path.startswith("/static/")` — plain string checks, deliberately no regex.
+Before this bypass existed, `TenantResolverMiddleware.dispatch` opened a
+`SessionLocal()` for every static-asset request same as any other route; with
+the DB unreachable, that raised and turned a should-be-200 static asset into
+a 500 — verified as a real repro (`/static/css/main.css` 500s with the DB
+down) and fixed alongside the branded HTML error pages in plan 2b Task 2.
+`tests/unit/test_tenant_middleware.py` covers both the exact/prefix bypass
+(`/static`, `/static/css/main.css`) and the near-miss paths that must NOT
+bypass (`/staticevil`, `/static2/x` — a bare `startswith("/static")` without
+the trailing-slash check would wrongly match both).
 
 ## Tenant resolution
 
@@ -373,7 +616,7 @@ in the same migration that creates the table.
 
 1. `app/main.py` imports `FEATURE_MODULES` from `app/features/__init__.py`
    — a plain list of dotted module paths (currently `tenants`, `auth`,
-   `parties`, `rbac`, `settings`, `custom_fields`).
+   `parties`, `rbac`, `settings`, `custom_fields`, `web`).
 2. `app.core.features.load_manifests(FEATURE_MODULES)` imports each
    `<module>.feature` submodule via `importlib` (so core never statically
    imports `app.features`) and collects its `feature: FeatureManifest`
@@ -421,15 +664,33 @@ not scattered per-router).
 - **Unit** (`tests/unit/`, `tests/architecture/`) — in-memory SQLite, no
   network, no RLS. Fast; run with `make test-unit`. Covers CRUD/UoW/query
   helpers, error envelopes, feature registry, logging, tenant middleware
-  logic, and the static architecture governance checks (thin routers,
-  route guards, feature registration).
+  logic, and the static architecture governance checks (thin routers, route
+  guards including the tiered auth-guard test, feature registration, web
+  template/import conventions
+  (`tests/architecture/test_web_conventions.py`), and the per-route
+  non-admin sweep (`tests/unit/test_admin_route_sweep.py`) — see CLAUDE.md's
+  "Web portal (admin UI)" section for what each of these checks.
 - **Integration** (`tests/*.py` at the top level —
   `test_cross_tenant_isolation.py`, `test_auth_tenant_claim.py`,
   `test_rbac_audit_isolation.py`, `test_security_middleware.py`,
   `test_party_isolation.py`, `test_settings_isolation.py`,
-  `test_custom_fields_isolation.py`) — require a real, migrated Postgres,
-  because SQLite cannot enforce RLS. These are the tenancy canaries: two
-  tenants, cross-tenant read/write attempts must come back empty/404. Run
+  `test_custom_fields_isolation.py`, `test_web_auth_isolation.py`,
+  `test_admin_portal_e2e.py`) — require a real, migrated Postgres, because
+  SQLite cannot enforce RLS. The first eight are the tenancy canaries: two
+  tenants, cross-tenant read/write attempts must come back empty/404.
+  `test_web_auth_isolation.py` is `test_auth_tenant_claim.py`'s cookie-path
+  mirror (2b-T3): a tenant A cookie replayed against tenant B's host must
+  redirect to login, never reach the dashboard, since
+  `authenticate_request`'s tenant-claim check runs identically for both
+  the bearer and cookie paths (the shared seam — see "Admin portal" above);
+  it also proves logout only revokes the calling tenant's own session.
+  `test_admin_portal_e2e.py::test_admin_portal_end_to_end_canary` is the
+  phase's proof canary — one test function drives the ENTIRE portal purely
+  through cookies/HTML forms (register → cookie login with the CSRF header
+  bridge → create a party → define + set a custom field via the
+  values-panel → view settings → a second tenant's cookie jar confirms RLS
+  isolation holds across every one of those pages, not just the API layer →
+  logout revokes the session server-side, not just the client cookie). Run
   with `make test-db-up && make test-integration && make test-db-down`
   (disposable Postgres via `docker-compose.test.yml`, trust auth,
   localhost-only, throwaway). `TEST_DB_PORT` (and the other `TEST_DB_*`

@@ -1,0 +1,54 @@
+{#
+  Custom field definitions table fragment (Task 7) — the htmx swap target
+  for admin/custom_fields/index.html's entity_type select, AND the initial
+  render `{% include %}`d by that same index page for a plain (non-htmx)
+  page load. Never extends a layout — this is a fragment.
+
+  Context: see admin/custom_fields/index.html's docstring.
+#}
+{% from "components/table_macros.html" import table_header, empty_state, status_badge %}
+
+<div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+    <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+        {{ table_header([
+            {"label": "Code"},
+            {"label": "Name"},
+            {"label": "Type"},
+            {"label": "Required"},
+            {"label": "Status"},
+            {"label": "", "class": "text-right"},
+        ]) }}
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-700/50">
+            {% for field in definitions %}
+            <tr>
+                <td class="px-4 py-3 text-sm font-mono text-slate-500 dark:text-slate-400">{{ field.field_code }}</td>
+                <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">{{ field.field_name }}</td>
+                <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ field.field_type.value }}</td>
+                <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">{{ "Yes" if field.is_required else "No" }}</td>
+                <td class="px-4 py-3">{{ status_badge("active" if field.is_active else "inactive") }}</td>
+                <td class="px-4 py-3 text-right">
+                    <div class="flex items-center justify-end gap-1">
+                        <a href="/admin/custom-fields/{{ field.id }}/edit" class="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400" title="Edit">
+                            Edit
+                        </a>
+                        {% if field.is_active %}
+                        <button type="button"
+                                hx-post="/admin/custom-fields/{{ field.id }}/deactivate"
+                                hx-confirm="Deactivate '{{ field.field_name }}'? Existing values are kept, but it will no longer appear in forms."
+                                class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-slate-400 hover:text-red-600 dark:hover:text-red-400 text-sm">
+                            Deactivate
+                        </button>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6">
+                    {{ empty_state(message="No custom fields for this entity type yet", action_url="/admin/custom-fields/create?entity_type=" ~ selected_entity_type, action_label="New Field") }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

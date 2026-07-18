@@ -196,3 +196,48 @@ def test_near_miss_paths_do_not_bypass_resolution(
         "resolver did not open a DB session for a near-miss path; "
         "the health-path bypass may be over-matching"
     )
+
+
+# ---------------------------------------------------------------------------
+# Static-asset bypass (backlog fix): `/static/*` must not touch the DB
+# either, for the same reason as health paths — before this fix, a request
+# for a static asset with the DB unreachable 500'd instead of serving the
+# file, because `dispatch` unconditionally opened `SessionLocal()`.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path", ["/static", "/static/css/main.css", "/static/js/htmx.min.js"]
+)
+def test_static_paths_bypass_tenant_resolution_without_db_access(
+    monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """Exact `/static` and anything under `/static/` short-circuit before
+    `_resolve()` — mirrors the health-path bypass test above."""
+    monkeypatch.setattr(tenant_module, "SessionLocal", _exploding_session_local)
+    app = TenantResolverMiddleware(_ok_inner_app)
+
+    scope, status = _drive(app, path)
+
+    assert status == 200
+    assert scope["state"]["tenant"] is None
+
+
+@pytest.mark.parametrize("path", ["/staticevil", "/static2/x"])
+def test_static_near_miss_paths_do_not_bypass_resolution(
+    monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """`/staticevil` and `/static2/x` merely start with the string "static"
+    but are neither `/static` nor under `/static/` — a naive
+    `path.startswith("/static")` check (no trailing slash) would wrongly
+    bypass these. They must still hit `_resolve()` / `SessionLocal()`."""
+    session_local, calls = _recording_session_local()
+    monkeypatch.setattr(tenant_module, "SessionLocal", session_local)
+    app = TenantResolverMiddleware(_ok_inner_app)
+
+    _drive(app, path)
+
+    assert calls["count"] >= 1, (
+        "resolver did not open a DB session for a near-miss static path; "
+        "the static-path bypass may be over-matching"
+    )

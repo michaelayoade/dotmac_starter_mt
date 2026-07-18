@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings, validate_settings
 from app.core.errors import register_error_handlers
@@ -105,6 +106,13 @@ app.add_middleware(
 
 
 register_error_handlers(app)
+
+# Serves templates/base.html's <link>/<script> asset URLs (built by
+# `npm run css:build`; see app.core.templating.static_asset_url). No guard
+# needed — static assets are public by nature and StaticFiles mounts a
+# Starlette `Mount`, not an `APIRoute`, so it's outside
+# tests/architecture/test_route_guards.py's route-guard sweep.
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/health")

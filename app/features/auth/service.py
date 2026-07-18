@@ -1,18 +1,29 @@
-"""Tenant-scoped auth service — register/login flows.
+"""Tenant-scoped auth service — register/login flows + the web (cookie)
+login/logout surface.
 
 All `select()`/session-mutation calls for the auth domain live here —
-`app/features/auth/router.py` only resolves dependencies, calls these
-functions, and shapes the response.
+`app/features/auth/router.py` and `app/features/auth/web.py` only resolve
+dependencies, call these functions, and shape the response.
 
 Registration creates a `party_type == person` `Party` plus its `PartyPerson`
 subtype row in the same transaction — `Party` replaced `Person` (Task 6); the
 `/auth/register` request/response shape is unchanged, kept mechanically
 person-shaped (Task 7 owns any schema redesign).
+
+`web_login`/`web_logout` (Task 3, relocated here per Task 3 review — see
+`.superpowers/sdd/task-3-report.md`'s fix note) are the admin-portal's
+cookie-based counterparts to `login()`: `web_login` calls `login()` directly,
+in the SAME module, so there is no cross-feature import at all (the prior
+`app.features.web.service -> app.features.auth.service` edge, and its
+`pyproject.toml` `ignore_imports` carve-out, are both gone). `web_logout`
+revokes an `AuthSession` — a CORE model — same pattern `login()` itself uses
+to create one.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictError, UnauthorizedError
+from app.core.identity import normalize_email, person_display_name
 from app.core.models import (
     AuthSession,
     Party,
@@ -66,11 +78,16 @@ def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonVie
     # matches the parties CI-unique semantics (the `parties` table's email
     # uniqueness index is `lower(email)`-based; `UserCredential.email` must
     # agree with it or a mixed-case register + lowercase login would fail).
-    email = payload.email.lower()
+    # `normalize_email`/`person_display_name` are the single-owner
+    # implementations of these invariants (app.core.identity) — the parties
+    # service's create/update paths call the same two functions, so the two
+    # writers can never independently drift (see docs/ARCHITECTURE.md's
+    # "Known dual-writer: Parties" section).
+    email = normalize_email(payload.email)
     party = Party(
         tenant_id=tenant.id,
         party_type=PartyType.person,
-        display_name=f"{payload.first_name} {payload.last_name}",
+        display_name=person_display_name(payload.first_name, payload.last_name),
         email=email,
     )
     db.add(party)
@@ -143,6 +160,47 @@ def get_current_user_view(db: Session, party: Party) -> PersonView:
     )
 
 
+def web_login(db: Session, tenant: Tenant, username: str, password: str) -> str | None:
+    """Attempt login via `login()` UNCHANGED — same module, no cross-feature
+    import needed (this used to be `app.features.web.service.web_login`
+    calling `auth_service.login`; Task 3 review's required fix moved it here
+    so the call is same-module instead of cross-feature).
+
+    Returns the access token on success, `None` on invalid credentials —
+    never raises, so the web route can re-render the login form with a
+    generic error instead of leaking which part of the credential pair was
+    wrong.
+    """
+    try:
+        result = login(db, tenant, LoginRequest(email=username, password=password))
+    except UnauthorizedError:
+        return None
+    return result.access_token
+
+
+def web_logout(db: Session, tenant: Tenant, token: str | None) -> None:
+    """Revoke the `AuthSession` backing `token`, if any.
+
+    Plain, direct query against `AuthSession` — a CORE model — same pattern
+    `login()` above uses to CREATE a session; this is the mirror-image
+    REVOKE. Silently no-ops on a missing/already-revoked/foreign token —
+    logout must always succeed from the caller's point of view (clearing a
+    stale cookie is not an error).
+    """
+    if not token:
+        return
+    session = db.scalars(
+        select(AuthSession)
+        .where(AuthSession.tenant_id == tenant.id)
+        .where(AuthSession.token_hash == hash_token(token))
+        .where(AuthSession.revoked_at.is_(None))
+    ).first()
+    if session is None:
+        return
+    session.revoked_at = datetime.now(UTC)
+    db.flush()
+
+
 def _assign_first_user_admin(db: Session, tenant: Tenant, party: Party) -> None:
     existing_assignment = db.scalars(
         select(PartyRole).where(PartyRole.tenant_id == tenant.id).limit(1)
@@ -161,4 +219,12 @@ def _assign_first_user_admin(db: Session, tenant: Tenant, party: Party) -> None:
     db.flush()
 
 
-__all__ = ["LoginResult", "PersonView", "get_current_user_view", "login", "register"]
+__all__ = [
+    "LoginResult",
+    "PersonView",
+    "get_current_user_view",
+    "login",
+    "register",
+    "web_login",
+    "web_logout",
+]
