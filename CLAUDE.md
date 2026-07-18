@@ -24,7 +24,9 @@ single-tenant app is simply a deployment with one tenant row.
   a registered entity's `custom_fields` JSONB column — 13 field types,
   zero-migration field creation), `web` (`core=False`, deletable — the
   admin-portal dashboard shell; `DISABLED_FEATURES=web` drops only `GET
-  /admin`, every other feature's own `/admin/*` routes and the API stay up).
+  /admin`, every other feature's own `/admin/*` routes and the API stay up —
+  see "Extension points" below for `WEB_ENABLED`, the different,
+  whole-portal switch).
 
 **Model placement rule:** models queried by core (deps/middleware) live in
 core; feature-local models live in the feature. Concretely: `Tenant`,
@@ -83,6 +85,30 @@ without touching core:
   no reader anywhere under `app/` (outside the settings feature and the
   resolver module itself) fails the no-orphan-settings test — wire a real
   `resolve_value(...)` call before shipping it, or don't register it yet.
+- **Add an admin-portal surface (the capability model — THE surface
+  extension point).** A feature's `FeatureManifest` (`app.core.features`)
+  declares `web_routers` (its `web.py` router, HTML/HTMX) and `nav` (a
+  tuple of `NavItem(label, path)`) SEPARATELY from `routers` (its JSON
+  API) — these two fields are the ONLY place a feature adds itself to the
+  admin portal's sidebar or mounts an `/admin/*` screen; there is no
+  parallel hardcoded nav list in a template to keep in sync
+  (`templates/components/sidebar.html` renders from the `nav_items` Jinja
+  global, itself built from every manifest's `nav` by
+  `app.core.templating.install_surface_globals`). Two independent on/off
+  switches, do not conflate them: `DISABLED_FEATURES=<name>` turns off ONE
+  named feature's `routers` AND `web_routers` together (still a per-feature,
+  not a per-surface, toggle); `WEB_ENABLED` (env var, default `true`) is the
+  whole-portal surface switch — `WEB_ENABLED=false` mounts NO feature's
+  `web_routers` at all (zero `/admin` routes, no `/static` mount) while
+  every feature's JSON `routers` keeps working unchanged — this is the real
+  API-only deployment mode. `tests/architecture/test_feature_manifests.py
+  ::test_nav_items_paths_exist_in_web_routers` fails the build if a
+  manifest's `NavItem.path` doesn't resolve to a route actually mounted in
+  that same manifest's `web_routers` (a dead/stale sidebar link — this is
+  also how a disabled feature's nav entry is kept from linking to a 404;
+  see `templates/admin/parties/detail.html`'s
+  `{% if 'custom_fields' in enabled_features %}` guard for the matching
+  optional-slot pattern on an embedded fragment, not just a nav link).
 - **Compose a cross-feature admin-UI fragment (values-panel pattern).** A
   feature never imports another feature's Python — but its web page can
   still show another feature's data, via an htmx-loaded fragment the OWNING

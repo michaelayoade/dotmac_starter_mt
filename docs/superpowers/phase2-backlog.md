@@ -67,8 +67,20 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
 - deploy.sh: generic ERR trap should also `up -d` the previous image for mid-`up` failures
   (today only the health-gate path restores); qualify `IMAGE_NAME` and rename CI job's
   `IMAGE_TAG` → `IMAGE_REF` when the GHCR publish job is added.
-- Service rollback convention: document that after `db.rollback()` (which discards the
-  transaction-scoped RLS context) the request must end, never continue.
+- ~~Service rollback convention: document that after `db.rollback()` (which discards the
+  transaction-scoped RLS context) the request must end, never continue.~~ — **RESOLVED
+  2b.1-T2 (finding F3)**: rather than documenting the hazard as a convention to remember,
+  the bare `db.rollback()` call itself is gone from every feature-service conflict site.
+  `app.core.db.conflict_savepoint(db)` wraps the mutation in a `SAVEPOINT`
+  (`Session.begin_nested()`) instead — on `IntegrityError` it rolls back only the
+  savepoint, leaving the outer transaction and its `SET LOCAL app.current_tenant` fully
+  intact, so the caller's `except ConflictError` handler (a web re-render, a re-query)
+  keeps working under RLS instead of running context-less. Enforced going forward by
+  `tests/architecture/test_no_feature_rollback.py` (bans a bare `db.rollback()` in
+  `app/features/*/service.py`) and canaried against real Postgres by
+  `tests/test_conflict_rls_context.py` (RED against pre-2b.1 `main` by construction —
+  the bug is invisible on SQLite). See `docs/ARCHITECTURE.md`'s "Conflict handling:
+  savepoints preserve RLS context" section and CLAUDE.md's matching hard rule.
 - Scoping style convention: services relying on RLS alone should say so in a comment
   (persons service style); pick one convention for explicit-vs-RLS-only tenant filters.
 - Dangling doc pointers to untracked task reports (Dockerfile, query.py, bump_version.py,
@@ -86,11 +98,22 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   scopes itself to `templates/{admin,auth}` and the `/admin` prefix — see the
   "2b-T8's web-conventions..." SOT-complete gap below; extend both when a non-admin
   portal surface lands.
-- `DISABLED_FEATURES` has no per-router granularity: a feature's JSON router and its
+- ~~`DISABLED_FEATURES` has no per-router granularity: a feature's JSON router and its
   `web.py` router are both registered on the same `FeatureManifest.routers` list, so
   disabling `parties` (etc.) drops its JSON API and its `/admin/parties/*` screens
   together — there is no way to keep one and drop the other short of splitting the
-  manifest, which nothing needs yet (documented as-is in README's "Disabling a feature").
+  manifest, which nothing needs yet (documented as-is in README's "Disabling a feature").~~
+  — **PARTIALLY RESOLVED 2b.1-T1 (finding F1)**: the manifest split now exists —
+  `FeatureManifest.routers` (JSON API) and `FeatureManifest.web_routers` (admin-portal
+  HTML) are separate fields, and a NEW, orthogonal switch (`WEB_ENABLED`) mounts/unmounts
+  every feature's `web_routers` at once, independent of `DISABLED_FEATURES`. What is
+  NOT resolved: `DISABLED_FEATURES=<name>` itself still turns off one named feature's
+  `routers` AND `web_routers` together — there is still no way to keep `parties`'s JSON
+  API while dropping only its `/admin/parties/*` screens (or vice versa) for that ONE
+  feature. `WEB_ENABLED` only ever answers the whole-portal question ("any web at all,
+  for every feature"), not a per-feature one — a genuine per-feature/per-surface toggle
+  remains open if a future consumer needs it. See `docs/ARCHITECTURE.md`'s "Capability
+  model" section.
 - `.env.example` had zero entries for the `BRAND_*` static-branding overrides
   `app.core.branding.get_brand()` reads via `os.getenv` (deployment-static identity layer,
   distinct from the per-tenant `ui_branding` DB setting) — a real as-built gap, closed in
@@ -100,6 +123,34 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   rbac/router.py and settings/router.py only") — corrected in this task (2b-T9):
   `web_logout` revokes sessions server-side, and `rbac/web.py`/`settings/web.py` both
   call `write_audit_event` too.
+
+## Added during phase 2b.1 execution (Michael's post-merge review findings F1–F7)
+
+Michael's post-merge review of 0.6.0 (22192f6) raised seven findings, tracked and closed
+by plan `docs/superpowers/plans/2026-07-18-phase2b1-sot-composability.md`. F2 (email
+authority) and F4 (portal-wide branding) already had pre-existing backlog entries above,
+now struck with resolution notes; F1 and F3 are struck above too. F5, F6, F7 had no prior
+backlog entry (net-new findings from the fresh review, not phase-1 carryover) — recorded
+here so all seven are discoverable as closed in one place:
+
+- **F5 (dead nav links + broken fragments when a feature is disabled)** — **DELIVERED
+  2b.1-T1**: `tests/architecture/test_feature_manifests.py
+  ::test_nav_items_paths_exist_in_web_routers` fails the build if a manifest's `NavItem`
+  points at a route not mounted in that manifest's `web_routers`; the party detail
+  page's custom-fields embed is gated by `{% if 'custom_fields' in enabled_features %}`
+  (the optional-slot pattern — see `docs/ARCHITECTURE.md`'s "Capability model" section)
+  so `DISABLED_FEATURES=custom_fields` renders the party detail page 200 without the
+  panel instead of a broken htmx fragment.
+- **F6 (`show_in_form`/`show_in_detail`/`show_in_list` declared but never consumed)** —
+  **DELIVERED 2b.1-T5**: `custom_fields_service.list_for_entity(..., visible_in=...)` is
+  the single query-level owner; the values-panel form, its detail-only read section, and
+  the definitions table's "visible in" badge are the three consumers. See
+  `docs/ARCHITECTURE.md`'s "Visibility flags are consumed" subsection.
+- **F7 (logout was a CSRF-exempt GET)** — **DELIVERED 2b.1-T5**: `POST /admin/logout`
+  only; `GET /admin/logout` removed (BREAKING, in CHANGELOG 0.6.1). Still carries
+  `require_tenant` only (no `require_web_auth`) — logout must always succeed even on an
+  expired/foreign-tenant cookie; the POST method plus the CSRF header-bridge is what
+  stops a FORCED logout now, not a role check.
 
 ## Added during phase 2a execution
 
