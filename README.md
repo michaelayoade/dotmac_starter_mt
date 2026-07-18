@@ -325,7 +325,7 @@ enforced by `tests/architecture/test_route_guards.py`.
 | `GET /admin/settings`, `GET`/`POST /admin/settings/{domain}/{key}/edit`, `GET`/`POST /admin/settings/branding` | `settings` | Generic per-key editor + friendly branding editor. |
 | `GET`/`POST /admin/custom-fields`, `/create`, `GET`/`POST /admin/custom-fields/{id}/edit`, `POST /admin/custom-fields/{id}/deactivate`, `GET`/`POST /admin/custom-fields/party/{id}/values-panel` | `custom_fields` | Definitions CRUD + the values-panel fragment `parties/detail.html` embeds. |
 
-Every `/admin/*` route (except the two login routes) carries
+Every `/admin/*` route (except the login and logout routes) carries
 `require_web_auth`, which also requires the `admin` role — see
 `app.core.web_deps`.
 

@@ -293,7 +293,7 @@ validation lands once and covers both surfaces:
    `authenticate_request(request, db, token=token)` (the shared seam) →
    additionally requires the `"admin"` role (every portal page is
    admin-only in this phase; no other portal-facing role exists yet,
-   see the phase 2c note below) → returns `{"party", "roles"}` or raises
+   see the phase 3 note below) → returns `{"party", "roles"}` or raises
    `WebAuthRedirect` (a 302 to `/admin/login?next=...`, registered as a
    dedicated exception handler in `app.core.errors`) — a portal auth
    failure is ALWAYS a redirect, never a bare 401/403 JSON body.
@@ -302,7 +302,7 @@ validation lands once and covers both surfaces:
    verified by the e2e canary re-submitting the revoked cookie value and
    getting redirected again, not authenticated.
 
-Phase 2c TODO (tracked in the backlog): `require_web_auth` hardcodes the
+Phase 3 TODO (tracked in the backlog): `require_web_auth` hardcodes the
 `"admin"` role; loosen this per-route once non-admin portal surfaces exist.
 
 ### CSRF header-bridge contract

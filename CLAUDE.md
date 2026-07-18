@@ -157,7 +157,7 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   and the portal (`app.core.web_deps.require_web_auth`, which reads the
   `access_token` cookie, calls `authenticate_request`, then additionally
   requires the `"admin"` role — every portal page is admin-only until phase
-  2c adds finer-grained portal roles). Any auth-tightening fix (token
+  phase 3 adds finer-grained portal roles). Any auth-tightening fix (token
   expiry, tenant-claim check, revocation) lands once, in
   `authenticate_request`, and both surfaces get it — never re-implement
   token validation in `web_deps.py`.

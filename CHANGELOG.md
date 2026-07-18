@@ -24,7 +24,7 @@ breaking changes.
   routed through the SAME `app.core.deps.authenticate_request` seam the
   JSON API's bearer-token path uses, so token/session/tenant validation has
   exactly one implementation for both surfaces. Every portal page requires
-  the `admin` role in this phase (phase 2c loosens this once non-admin
+  the `admin` role in this phase (phase 3 loosens this once non-admin
   portal surfaces exist).
 - **Branding pipeline** (`app.core.branding`): deployment-static identity
   (`brand.json` + `BRAND_*` env overrides, cached process-lifetime) merged
