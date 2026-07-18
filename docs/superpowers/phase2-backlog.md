@@ -21,7 +21,9 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   `app/features/custom_fields/`. Runtime-field requirement demonstrated by the
   `eye_color` e2e canary (`tests/test_custom_fields_isolation.py`) — zero migrations
   between defining and using a field.
-- After core parity lands: archive `dotmac_starter` with a pointer README.
+- ~~After core parity lands: archive `dotmac_starter` with a pointer README.~~ —
+  **REVERSED (Michael, 2026-07-18, ADR-0002 amendment):** dotmac_starter stays as the
+  simple single-tenant starter for simple apps; this repo is the SaaS starter. No archive.
 
 ## Architecture / correctness follow-ups
 
@@ -322,17 +324,89 @@ here so all seven are discoverable as closed in one place:
 
 ## Display/locale settings (user rule, 2026-07-18 — "everything by settings: datetime etc, all")
 
-Runtime/display behavior becomes tenant-configurable via settings-as-data: a `display`
-SettingDomain (timezone default UTC, date_format, datetime_format; page sizes where they
-matter), one core formatting helper (e.g. app/core/formatting.py) consumed by every
-template/service that renders datetimes — no hardcoded strftime/timezone literals
-anywhere (reviewers flag them like hardcoded ports). Each spec needs a real reader
-(no-orphan-settings enforces). Scheduled as the FIRST task of the next plan (before or
-alongside 2c auth hardening); the portal's audit/list timestamps are the initial
-consumers.
+~~Runtime/display behavior becomes tenant-configurable via settings-as-data: a `display`
+SettingDomain (timezone default UTC, date_format, datetime_format), one core formatting
+helper (e.g. app/core/formatting.py) consumed by every template/service that renders
+datetimes — no hardcoded strftime/timezone literals anywhere (reviewers flag them like
+hardcoded ports). Each spec needs a real reader (no-orphan-settings enforces). Scheduled
+as the FIRST task of the next plan (before or alongside 2c auth hardening); the portal's
+audit/list timestamps are the initial consumers.~~ — **DELIVERED in v0.7.0**: `display`
+SettingDomain (`timezone`, `date_format`, `datetime_format` — three `SettingSpec`s,
+`app/features/settings/spec.py`), auto-appearing in `/admin/settings`. The consumption
+shape differs slightly from this sketch's "core formatting helper consumed by every
+template/service": it's `app/core/display.py` (`DisplaySettings`/`load_display`/
+`get_request_display`, memoized on `request.state.display`, same per-request seam as
+branding) plus exactly two Jinja filters, `local_datetime`/`local_date`
+(`app.core.templating`) — templates only, no service reads these specs directly.
+Governance test `tests/architecture/test_web_conventions.py
+::test_timestamp_renders_go_through_local_filters` enforces the no-raw-render rule. See
+`docs/ARCHITECTURE.md`'s "Display settings" subsection for the full design (including the
+write-loud/read-degrade validator split and the migration's data-loss-on-downgrade note).
+
+- **Page-size settings — still OPEN, not part of the v0.7.0 delivery above.** No
+  display-domain (or any) page-size spec exists yet; `PAGE_SIZE`-style literals remain
+  per-file constants (see the list_query PARTIAL finding below, which flags the same
+  gap). Tracked for `docs/superpowers/plans/2026-07-18-capability-hardening.md`.
+- Timezone picker: the generic settings editor still renders every string-typed spec as
+  a free-text `<input>`, including `timezone` — the `allowed`-set → `<select>` dropdown
+  gap disclosed in the 2b recon is now also directly relevant here (a tenant admin has to
+  type a correct IANA zone name freehand; a typo write-fails loud via the validator, but
+  there's no picker/autocomplete to prevent it). No `allowed` set exists for `timezone`
+  today (open-ended IANA zone names, not a fixed enum) — closing this needs either a
+  curated `allowed` shortlist or a dedicated `<select>`/autocomplete widget keyed off a
+  timezone list, not the generic-spec-editor's existing dropdown-for-`allowed` path.
+- Number/currency locale formatting — deferred, YAGNI: no render site in this app
+  formats a number or currency value today (audit/list timestamps were the only display
+  consumers this section anticipated, and those are now covered). Don't add a spec or a
+  formatting helper until a real render site needs one; Babel (`babel.numbers`/
+  `babel.dates`) is the likely dependency when that day comes.
 - `UnitOfWork.savepoint()` (unused by any request path) shares the `begin_nested()`
   auto-flush ordering hazard fixed across services in 2b1-T2 — re-audit + docstring
   ordering note before it is ever wired in (2b1-T2 review).
+
+## Verified gaps (2026-07-18 capability sweep — Michael's checklist: impact preview +
+## confirm, granular RBAC, list_query, Carbon/WCAG UI SoT, no-orphan codes)
+
+Planned as `docs/superpowers/plans/2026-07-18-capability-hardening.md` (runs after the
+display-settings plan merges). Evidence from a dual sweep of this repo + dotmac_erp
+(fleet pattern source). Summary verdicts:
+
+- **Impact preview + confirm — PARTIAL.** Confirms exist (`hx-confirm` on party delete,
+  custom-field deactivate) but every one is static copy; no computed "affects N records"
+  preview anywhere (party delete cascades `party_roles` via DB `ondelete="CASCADE"`
+  silently; deactivate copy promises "values are kept" without counting them). ERP has
+  the service-side half (`bulk_actions.py::can_delete -> (bool, reason)` guard idiom) but
+  no count-based preview UI either — the preview endpoint pattern is net-new.
+- **Granular RBAC — ABSENT.** Role-name matching only; the only guard string in the app
+  is `"admin"` (hardcoded at every `require_role` call site + `auth/service.py:268,271`
+  + the portal gate). No permission table, no per-action codes. ERP's shape to port:
+  colon-namespaced permission codes (`fleet:vehicles:manage`), `Permission`/
+  `RolePermission` tables, read/manage guard pairs, admin bypass (`app/web/fleet.py`,
+  `scripts/seed_rbac.py`, `app/web/deps.py::has_permission`). Prerequisite for the
+  phase-3 "portal role loosening" thread.
+- **list_query — PARTIAL.** `app/core/query.py` has `apply_pagination`/`apply_ordering`/
+  `escape_like`, but no unified params/envelope schema; `apply_ordering` has NO caller
+  (dead helper — wire it or remove it); `GET /tenants` is unbounded; custom-fields
+  definitions paginate by in-Python slice after fetching the full list; page-size
+  literals (`PAGE_SIZE=20` etc.) are per-file constants, not settings (violates the
+  everything-by-settings rule). ERP SoT to port:
+  `app/services/finance/platform/list_helpers.py` (`ListParams.from_request` with
+  page/limit-clamp/search/`-`-prefixed sort/filters + `ListResult.pagination_context()`).
+- **Carbon/WCAG UI SoT — PARTIAL (and NOT Carbon).** Zero Carbon usage in this repo AND
+  in dotmac_erp (verified) — the fleet UI SoT is Tailwind + design tokens (here: v4
+  `@theme` in `static/css/src/main.css`; ERP: CSS vars in base.html + design-system
+  rule doc). Real WCAG gaps here: no skip link, no `:focus-visible` styling, no
+  `sr-only` utility, icon-only delete button has `title` but no `aria-label`
+  (`table_macros.html:130-137`), `<main>` lacks a skip target id, no documented
+  conformance target. Strengths: form macros pair label/for-id, toast region has
+  `role="status" aria-live`, SVGs `aria-hidden`.
+- **No-orphan codes — PARTIAL.** Settings keys (orphan test) and nav/feature manifests
+  (coherence tests) are governed; custom-field types are enum+DB-check constrained. But
+  audit action strings (`"settings.update"`, `"role.create"`, `"role.grant"`) and role
+  slugs are free-form literals — any route can invent either; envelope error codes are
+  funnel-constrained by typed exceptions but have no canonical-list test. No such
+  governance exists in ERP either — net-new, extending the starter's own
+  no-orphan-settings precedent.
 
 ## 2c-auth
 

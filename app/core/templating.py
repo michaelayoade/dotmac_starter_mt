@@ -7,9 +7,13 @@ context always carries the same globals (`request`, `brand`,
 
 Ported from ST:app/templates.py (`_asset_version`/`_static_asset_url`);
 the sanitize/format/timeago Jinja filters from that donor are NOT ported
-here — nothing in this phase's templates needs them yet, and they can be
-added back filter-by-filter when a template actually calls one (avoids
-shipping untested surface area).
+here. Two filters ARE registered below, `local_datetime`/`local_date`
+(Task 2): the display-settings consumption point — every template renders
+a `*_at` timestamp through one of these, never a raw attribute (governance:
+`tests/architecture/test_web_conventions.py
+::test_timestamp_renders_go_through_local_filters`). Any other filter stays
+unported until a template actually calls it (avoids shipping untested
+surface area).
 
 `brand` (below) is the deployment-STATIC half of branding
 (`app.core.branding.get_brand()` — defaults < brand.json < env, cached for
@@ -39,7 +43,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
@@ -48,11 +52,47 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from jinja2 import pass_context
 
 from app.core.branding import get_brand
+from app.core.display import DisplaySettings, default_display
 from app.core.features import FeatureManifest, NavItem
 
 templates = Jinja2Templates(directory="templates")
+
+
+def _context_display(context: Any) -> DisplaySettings:
+    request = context.get("request")
+    display = getattr(request.state, "display", None) if request is not None else None
+    # Fail-safe for renders that never warmed request.state.display (error
+    # pages, unauthenticated pages): spec defaults, never an exception.
+    return display if display is not None else default_display()
+
+
+@pass_context
+def local_datetime(context: Any, value: datetime | None) -> str:
+    if value is None:
+        return ""
+    display = _context_display(context)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)  # SQLite returns naive UTC
+    return value.astimezone(display.timezone).strftime(display.datetime_format)
+
+
+@pass_context
+def local_date(context: Any, value: datetime | date | None) -> str:
+    if value is None:
+        return ""
+    display = _context_display(context)
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        value = value.astimezone(display.timezone).date()
+    return value.strftime(display.date_format)
+
+
+templates.env.filters["local_datetime"] = local_datetime
+templates.env.filters["local_date"] = local_date
 
 
 def install_surface_globals(

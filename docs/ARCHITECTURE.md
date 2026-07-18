@@ -528,6 +528,90 @@ three presentation surfaces (generic web editor, friendly branding editor,
 JSON API), each ending in the same audit event
 (`settings.update`, domain/key only, never the value).
 
+### Display settings: tenant timezone + date/datetime formats
+
+Three specs registered on a new `SettingDomain.display`
+(`app/features/settings/spec.py`), resolved through the same
+tenant→platform→spec-default resolver every other setting uses — no
+dedicated screen or bespoke storage; they auto-appear in the registry-driven
+`/admin/settings` index like any other spec:
+
+- `timezone` (string, default `"UTC"`) — an IANA zone name.
+- `date_format` (string, default `"%Y-%m-%d"`) — a strftime pattern.
+- `datetime_format` (string, default `"%Y-%m-%d %H:%M"`) — a strftime
+  pattern.
+
+**Write-loud / read-degrade validator split.** `SettingSpec` gained a new
+field, `validator: Callable[[object], None] | None`, run after
+type-coercion/`allowed`/range checks. The two call sites that consult it
+behave in deliberately OPPOSITE ways for the SAME check:
+
+- **Write path** — `settings_resolver.validate_spec_value` runs the
+  validator LAST and lets its `ValueError` propagate as a `BadRequestError`
+  (a clean 400, whether the write came from the JSON `PUT
+  /settings/{domain}/{key}` API or the generic admin editor). An admin
+  typing `Foo/Bar` into `date_format` (no `%` directive, so
+  `_validate_strftime` raises before even calling `strftime`) or an unknown
+  zone name into `timezone` (`_validate_timezone` — `ZoneInfo(...)` raising
+  `ZoneInfoNotFoundError`) gets rejected before anything is written.
+- **Read path** — `settings_resolver.resolve_with_source` (which
+  `resolve_value` delegates to) catches the SAME `ValueError` and silently
+  degrades to the spec default, `source="default"` — same fallback
+  treatment as a coercion failure or an `allowed`-set miss. A row that
+  passed validation at write time but is later corrupted (a raw DB edit, a
+  future migration that reuses the column) or a zone whose tzdata went
+  missing from the runtime image can never surface as a validation error
+  mid-render; it just silently reverts to UTC / the default format string.
+
+This asymmetry is intentional, not an inconsistency: a write is a single
+request the caller can retry with better input, so it fails loud; a read
+happens on every page render for every user of that tenant, so it must
+never be the thing that turns a stored-data problem into a 500.
+
+**Per-request seam (mirrors branding).** `app.core.display.DisplaySettings`
+(`timezone: ZoneInfo`, `date_format`, `datetime_format`) is resolved by
+`get_request_display(request, db)` at most once per request and memoized on
+`request.state.display` — the identical shape to
+`request.state.branding`/`get_request_branding` above, including the same
+single warming call site: `app.core.web_deps.require_web_auth` (every
+authenticated `/admin/*` page). `load_display` additionally wraps the
+resolved timezone string in `ZoneInfo(...)` with its own
+try/except-to-`_UTC` fallback — belt-and-braces alongside the resolver's own
+validator-driven degrade, covering the case where a value that validated
+fine at write time (tzdata present then) can't be loaded at read time
+(tzdata missing now).
+
+**Filter fallback invariant.** Templates never read `request.state.display`
+directly; they consume it ONLY through the two Jinja filters registered in
+`app.core.templating` — `local_datetime` and `local_date` (`@pass_context`,
+so they can reach `request.state` without the caller threading it through).
+Both call a shared `_context_display(context)` helper that returns
+`request.state.display` if the current render already warmed it, or
+`default_display()` (spec defaults, UTC) if not — a render that never went
+through `require_web_auth` (an error page, a pre-auth page) still gets a
+formatted timestamp, never an `AttributeError`/`UndefinedError`. This is the
+one and only consumption point: `tests/architecture/test_web_conventions.py
+::test_timestamp_renders_go_through_local_filters` fails the build on any
+Jinja expression referencing a `*_at`-named attribute that doesn't also
+apply one of these two filters — see CLAUDE.md's hard-rules entry.
+
+**Migration note (data loss on downgrade).** `alembic/versions/
+20260718_0006_display_setting_domain.py` widens the
+`ck_domain_settings_domain` CHECK constraint from `('auth', 'audit',
+'branding', 'custom_fields')` to add `'display'`. Its `downgrade()` DELETES
+every `domain_settings` row with `domain = 'display'` before restoring the
+narrower constraint (any surviving row would violate it) — a real,
+documented data-loss-on-downgrade: rolling back this migration on a
+database with tenant-customized timezones/formats permanently discards
+those overrides, silently reverting every tenant to UTC/spec-default
+formatting with no way to recover the deleted rows short of a backup
+restore.
+
+**API boundary.** The JSON API is deliberately untouched: every response
+stays ISO-8601 UTC, unchanged before and after this feature. Display
+formatting is a web-portal presentation concern only; API consumers do
+their own localization.
+
 ### Cross-feature UI composition (values-panel pattern)
 
 See CLAUDE.md's Extension points entry for the rule; concretely: the party
@@ -639,6 +723,7 @@ write:
 | `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `app.core.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
+| Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`app.core.templating`) — no service reads these specs directly |
 
 ### Known dual-writer: Parties (auth register vs. parties service)
 
