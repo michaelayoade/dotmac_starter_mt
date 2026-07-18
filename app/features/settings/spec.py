@@ -14,8 +14,29 @@ feature in a later task.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from app.core.settings_models import SettingDomain, SettingValueType
 from app.core.settings_resolver import SettingSpec, register_specs
+
+
+def _validate_timezone(value: object) -> None:
+    try:
+        ZoneInfo(str(value))
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"unknown IANA timezone: {value!r}") from exc
+
+
+def _validate_strftime(value: object) -> None:
+    fmt = str(value)
+    if "%" not in fmt:
+        raise ValueError("format must contain at least one strftime % directive")
+    try:
+        datetime(2026, 1, 31, 13, 45, tzinfo=UTC).strftime(fmt)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"invalid strftime format: {exc}") from exc
+
 
 SPECS: list[SettingSpec] = [
     SettingSpec(
@@ -41,6 +62,30 @@ SPECS: list[SettingSpec] = [
         default=365,
         min_value=1,
         label="Audit event retention period (days)",
+    ),
+    SettingSpec(
+        domain=SettingDomain.display,
+        key="timezone",
+        value_type=SettingValueType.string,
+        default="UTC",
+        label="Display timezone (IANA name, e.g. Europe/London)",
+        validator=_validate_timezone,
+    ),
+    SettingSpec(
+        domain=SettingDomain.display,
+        key="date_format",
+        value_type=SettingValueType.string,
+        default="%Y-%m-%d",
+        label="Date display format (strftime)",
+        validator=_validate_strftime,
+    ),
+    SettingSpec(
+        domain=SettingDomain.display,
+        key="datetime_format",
+        value_type=SettingValueType.string,
+        default="%Y-%m-%d %H:%M",
+        label="Date+time display format (strftime)",
+        validator=_validate_strftime,
     ),
 ]
 

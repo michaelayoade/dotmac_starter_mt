@@ -25,6 +25,7 @@ instead of sub's single-tenant assumption.
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
@@ -62,6 +63,7 @@ class SettingSpec:
     min_value: int | None = None
     max_value: int | None = None
     is_secret: bool = False
+    validator: Callable[[object], None] | None = None
 
 
 _REGISTRY: dict[tuple[SettingDomain, str], SettingSpec] = {}
@@ -166,10 +168,10 @@ def resolve_with_source(
     delegates here, keeping its signature and behavior identical) — see that
     docstring for the resolution rules. `source` reflects the ROW that
     actually determined the returned value: if a tenant or platform row
-    exists but fails coercion/`allowed`/range validation, resolution falls
-    back to the spec default and `source` is `"default"` too (a bad stored
-    value degrades all the way to the safe default, not to "the row exists
-    but we ignored it").
+    exists but fails coercion/`allowed`/range/`validator` validation,
+    resolution falls back to the spec default and `source` is `"default"`
+    too (a bad stored value degrades all the way to the safe default, not to
+    "the row exists but we ignored it").
 
     Added for the settings admin API (`GET /settings/{domain}`), which must
     tell callers whether a value is tenant-overridden, platform-default, or
@@ -215,6 +217,13 @@ def resolve_with_source(
             value = spec.default
             source = "default"
         elif spec.max_value is not None and value > spec.max_value:
+            value = spec.default
+            source = "default"
+
+    if spec.validator is not None and value is not None:
+        try:
+            spec.validator(value)
+        except ValueError:
             value = spec.default
             source = "default"
 
@@ -283,6 +292,10 @@ def validate_spec_value(spec: SettingSpec, value: object) -> object:
     for `json` (raising a raw `IntegrityError` instead of a clean 400) or
     silently store `false` for `boolean` (a null update would be
     misinterpreted as an explicit "off" with no error at all).
+
+    A spec's `validator`, if set, runs last and raises `BadRequestError` too
+    (wrapping its `ValueError`) — e.g. the `display` domain's IANA-timezone
+    and strftime-format checks.
     """
     if value is None:
         raise BadRequestError(f"{spec.domain.value}/{spec.key}: value must not be null")
@@ -314,6 +327,14 @@ def validate_spec_value(spec: SettingSpec, value: object) -> object:
             raise BadRequestError(
                 f"{spec.domain.value}/{spec.key}: value must be <= {spec.max_value}"
             )
+
+    if spec.validator is not None:
+        try:
+            spec.validator(coerced)
+        except ValueError as exc:
+            raise BadRequestError(
+                f"Invalid value for {spec.domain.value}.{spec.key}: {exc}"
+            ) from None
 
     return coerced
 
