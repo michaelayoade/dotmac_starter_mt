@@ -276,6 +276,14 @@ def _timestamp_attr_name(expr: nodes.Node) -> str | None:
 def _unwrapped_timestamp_attrs(expr: nodes.Node, wrapped: bool) -> list[str]:
     """Recursively collect `*_at` attribute/name renders in `expr` that are
     NOT wrapped by a `local_date`/`local_datetime` filter at any ancestor
+
+    Known limits (final review 2026-07-18): name-based static analysis can't
+    follow aliasing, so these escape detection — `{% set y = x.created_at %}`
+    / `{% with %}` rebinding then rendering the alias, `map(attribute=
+    "created_at")`, `x | attr("created_at")`, and dynamic keys `x[key]`.
+    No template uses these today; if you add one, apply the local_* filter
+    at the render site and extend this walker (or its sensitivity test) in
+    the same change.
     depth within the expression tree.
 
     `wrapped` is threaded down through the recursion: it becomes True only

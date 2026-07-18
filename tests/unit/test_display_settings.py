@@ -60,6 +60,11 @@ class TestDisplaySpecs:
         spec = get_spec(SettingDomain.display, "timezone")
         assert validate_spec_value(spec, "Europe/London") == "Europe/London"
 
+    def test_format_write_rejects_null_byte(self) -> None:
+        spec = get_spec(SettingDomain.display, "date_format")
+        with pytest.raises(BadRequestError):
+            validate_spec_value(spec, "%Y\x00")
+
     def test_format_write_rejects_directive_free_string(self) -> None:
         spec = get_spec(SettingDomain.display, "date_format")
         with pytest.raises(BadRequestError):

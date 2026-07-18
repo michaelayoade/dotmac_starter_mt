@@ -49,6 +49,8 @@ def _validate_strftime(value: object) -> None:
     never depends on what the host libc happens to do with an unknown code.
     """
     fmt = str(value)
+    if "\x00" in fmt:
+        raise ValueError("format string must not contain null bytes")
     real_directive_count = 0
     i = 0
     length = len(fmt)
