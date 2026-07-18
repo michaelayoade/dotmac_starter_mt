@@ -205,3 +205,36 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   surface (anticipated by `require_web_auth`'s docstring) escapes all four checks
   until their globs/prefixes are extended — extend them in the same task that adds
   such a surface.
+
+## From the 2b final whole-branch review (2026-07-18)
+
+- **GET-tier guard gap (untracked→tracked):** the tiered auth-guard test covers MUTATING
+  routes only; a future `GET /admin/...` guarded by `require_tenant` alone would serve
+  tenant data unauthenticated and pass the build. Every current GET carries
+  require_web_auth (verified route-by-route). 2c ticket: extend the tiered test to GETs
+  under /admin (or any web prefix).
+- **Portal-wide tenant branding (untracked→tracked):** `load_branding` (per-tenant
+  ui_branding override) is consumed ONLY by the branding editor's own preview — the rest
+  of the portal renders the static brand. Phase-3 ticket (behind the settings cache):
+  wire load_branding portal-wide; ALSO tighten its merge to an allowlist of known brand
+  keys (currently merges arbitrary override keys; harmless today, admin-only writer).
+- **Platform-admin surface:** the 2b plan's scope-deviation note said this was
+  "backlogged" — this is now that entry. Tenant CRUD screens need a platform-scoped
+  surface (require_platform hardening included — it's a documented stub that counts as
+  an auth-tier guard today).
+- 2c ticket batch (small): `DISABLED_FEATURES=web` pin test; move route-level
+  `write_audit_event` calls into services (4 hand-mirrored sites today); cross-tenant
+  values-panel HTTP probe (tenant B → tenant A's URL → 404); `login()` uses
+  `identity.normalize_email` (read-path consistency); post-login redirect preserves the
+  query string; Google Fonts CDN dependency documented for airgapped consumers.
+
+## Display/locale settings (user rule, 2026-07-18 — "everything by settings: datetime etc, all")
+
+Runtime/display behavior becomes tenant-configurable via settings-as-data: a `display`
+SettingDomain (timezone default UTC, date_format, datetime_format; page sizes where they
+matter), one core formatting helper (e.g. app/core/formatting.py) consumed by every
+template/service that renders datetimes — no hardcoded strftime/timezone literals
+anywhere (reviewers flag them like hardcoded ports). Each spec needs a real reader
+(no-orphan-settings enforces). Scheduled as the FIRST task of the next plan (before or
+alongside 2c auth hardening); the portal's audit/list timestamps are the initial
+consumers.
