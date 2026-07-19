@@ -129,6 +129,106 @@ def test_update_field_invalid_validation_regex_raises_bad_request(
         cf_service.update_field(db, tenant_row.id, field.id, {"validation_regex": "["})
 
 
+def test_create_field_select_without_options_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Task 7 review finding 3: `CustomFieldDefinition.validate_value`'s
+    SELECT/MULTISELECT branches only check membership `if self.field_options:`
+    (see `models.py`) — an options-less SELECT/MULTISELECT definition
+    silently skips membership validation forever after. Reject it at
+    create time instead (same "definition self-consistency, checked up
+    front" pattern as `_validate_min_max_numeric`/`_validate_regex_compiles`
+    above)."""
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.create_field(
+            db,
+            tenant_row.id,
+            _payload(field_code="tier", field_type=CustomFieldType.SELECT),
+        )
+
+
+def test_create_field_multiselect_without_options_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.create_field(
+            db,
+            tenant_row.id,
+            _payload(field_code="tags", field_type=CustomFieldType.MULTISELECT),
+        )
+
+
+def test_create_field_select_with_empty_options_list_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """`field_options={"options": []}` is distinct from `field_options=None`
+    but must fail the same way — an empty list is still "no options"."""
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.create_field(
+            db,
+            tenant_row.id,
+            _payload(
+                field_code="tier",
+                field_type=CustomFieldType.SELECT,
+                field_options={"options": []},
+            ),
+        )
+
+
+def test_update_field_flip_text_to_select_without_options_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """RED case from the task brief: flipping an existing TEXT field to
+    SELECT without also supplying `field_options` must 400, not silently
+    create a SELECT definition with no valid membership check."""
+    field = cf_service.create_field(db, tenant_row.id, _payload())
+
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.update_field(
+            db, tenant_row.id, field.id, {"field_type": CustomFieldType.SELECT}
+        )
+
+
+def test_update_field_select_adding_options_succeeds(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The positive case for the same guard: flipping to SELECT WHILE also
+    supplying non-empty `field_options` in the same update must succeed."""
+    field = cf_service.create_field(db, tenant_row.id, _payload())
+
+    updated = cf_service.update_field(
+        db,
+        tenant_row.id,
+        field.id,
+        {
+            "field_type": CustomFieldType.SELECT,
+            "field_options": {"options": [{"value": "gold"}]},
+        },
+    )
+
+    assert updated.field_type == CustomFieldType.SELECT
+    assert updated.field_options == {"options": [{"value": "gold"}]}
+
+
+def test_update_field_existing_select_clearing_options_raises_bad_request(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """An already-SELECT field with options must not be updatable to drop
+    every option (field_options=None) while remaining SELECT."""
+    field = cf_service.create_field(
+        db,
+        tenant_row.id,
+        _payload(
+            field_code="tier",
+            field_type=CustomFieldType.SELECT,
+            field_options={"options": [{"value": "gold"}]},
+        ),
+    )
+
+    with pytest.raises(BadRequestError, match="at least one option"):
+        cf_service.update_field(db, tenant_row.id, field.id, {"field_options": None})
+
+
 def test_create_field_limit_reached_raises_bad_request(
     db: Session, tenant_row: Tenant
 ) -> None:
@@ -204,6 +304,80 @@ def test_list_for_entity_excludes_inactive_by_default(
 
     everyone = cf_service.list_for_entity(db, tenant_row.id, "party", is_active=False)
     assert [f.id for f in everyone] == [field.id]
+
+
+# ---------------------------------------------------------------------------
+# list_for_entity(..., visible_in=...) — F6 fix. `visible_in` is the single
+# query-level owner of visibility filtering: one field per show_in_* flag,
+# `None` (default) keeps every pre-existing caller's behavior (all
+# definitions, no visibility filter) unchanged.
+# ---------------------------------------------------------------------------
+
+
+def test_list_for_entity_visible_in_form_filters_by_show_in_form(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="shown", show_in_form=True)
+    )
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="hidden", show_in_form=False)
+    )
+
+    result = cf_service.list_for_entity(db, tenant_row.id, "party", visible_in="form")
+
+    assert [f.field_code for f in result] == ["shown"]
+
+
+def test_list_for_entity_visible_in_detail_filters_by_show_in_detail(
+    db: Session, tenant_row: Tenant
+) -> None:
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="shown", show_in_detail=True)
+    )
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="hidden", show_in_detail=False)
+    )
+
+    result = cf_service.list_for_entity(db, tenant_row.id, "party", visible_in="detail")
+
+    assert [f.field_code for f in result] == ["shown"]
+
+
+def test_list_for_entity_visible_in_list_filters_by_show_in_list(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """`show_in_list` defaults to False (schema default) — a field must opt
+    IN to appear here, unlike form/detail which default to opted-in."""
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="shown", show_in_list=True)
+    )
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="hidden", show_in_list=False)
+    )
+
+    result = cf_service.list_for_entity(db, tenant_row.id, "party", visible_in="list")
+
+    assert [f.field_code for f in result] == ["shown"]
+
+
+def test_list_for_entity_visible_in_none_returns_every_definition(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The default (`visible_in=None`) is unfiltered — every pre-existing
+    caller (JSON API's `list_definitions`, `validate_values`' own internal
+    lookup) keeps seeing every active definition regardless of any
+    show_in_* flag."""
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="a", show_in_form=False)
+    )
+    cf_service.create_field(
+        db, tenant_row.id, _payload(field_code="b", show_in_detail=False)
+    )
+
+    result = cf_service.list_for_entity(db, tenant_row.id, "party")
+
+    assert {f.field_code for f in result} == {"a", "b"}
 
 
 # ---------------------------------------------------------------------------

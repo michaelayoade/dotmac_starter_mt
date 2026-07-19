@@ -1,0 +1,61 @@
+{#
+  Party edit (Task 5) — unlike create.html, there is only ONE form here: the
+  type is already fixed (`party.party_type` is immutable — a person party
+  can never become an organization, enforced server-side in
+  `app.features.parties.service.update_person_party`/
+  `update_organization_party`), so this template never offers a type
+  choice, just the type-appropriate subtype fields + email.
+
+  Posts to `app.features.parties.web.edit_submit`; a validation or conflict
+  failure re-renders THIS template at 200 with `errors`/`form` populated —
+  same "re-render, don't redirect" convention as create.html/login.html.
+
+  Context: `party` (app.core.models.Party, with `person_profile`/
+  `organization_profile` already loaded), `errors` (flat field name ->
+  message, `_form` reserved for a whole-form error such as a duplicate
+  email), `form` (submitted values to repopulate on a failed submit).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/form_macros.html" import text_input, submit_button %}
+
+{% block admin_content %}
+<div class="max-w-2xl">
+    <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display mb-6">
+        Edit {{ "Person" if party.party_type.value == "person" else "Organization" }}
+    </h1>
+
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+        {% if errors.get("_form") %}
+        <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">
+            {{ errors.get("_form") }}
+        </div>
+        {% endif %}
+        <form hx-post="/admin/parties/{{ party.id }}/edit" class="space-y-4">
+            {% if party.party_type.value == "person" %}
+            {{ text_input("first_name", "First name", value=form.get("first_name", party.person_profile.first_name), required=true) }}
+            {% if errors.get("first_name") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("first_name") }}</p>
+            {% endif %}
+            {{ text_input("last_name", "Last name", value=form.get("last_name", party.person_profile.last_name), required=true) }}
+            {% if errors.get("last_name") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("last_name") }}</p>
+            {% endif %}
+            {{ text_input("email", "Email", value=form.get("email", party.email), type="email", required=true) }}
+            {% if errors.get("email") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("email") }}</p>
+            {% endif %}
+            {% else %}
+            {{ text_input("legal_name", "Legal name", value=form.get("legal_name", party.organization_profile.legal_name), required=true) }}
+            {% if errors.get("legal_name") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("legal_name") }}</p>
+            {% endif %}
+            {{ text_input("email", "Email (optional)", value=form.get("email", party.email), type="email") }}
+            {% if errors.get("email") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("email") }}</p>
+            {% endif %}
+            {% endif %}
+            {{ submit_button(label="Save Changes", cancel_url="/admin/parties/" ~ party.id) }}
+        </form>
+    </div>
+</div>
+{% endblock %}

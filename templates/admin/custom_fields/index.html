@@ -1,0 +1,50 @@
+{#
+  Custom fields admin index (Task 7) — definitions list, scoped to one
+  entity_type at a time via the select below.
+
+  Context contract: `entity_types` (list[str], from
+  app.features.custom_fields.service.list_entity_types — the registered
+  ENTITY_MODELS keys), `selected_entity_type` (str, "" if none registered),
+  `definitions` (list[CustomFieldDefinition] for `selected_entity_type`,
+  active AND inactive — see app.features.custom_fields.web.index).
+
+  Fragment vs full page: same `HX-Request` convention as
+  admin/parties/index.html — the entity_type select's `hx-get` back to this
+  same `/admin/custom-fields` route gets `_table.html` instead of this full
+  shell.
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/table_macros.html" import icon %}
+
+{% block admin_content %}
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display">Custom Fields</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400">Per-entity field definitions for this tenant.</p>
+    </div>
+    {% if selected_entity_type %}
+    <a href="/admin/custom-fields/create?entity_type={{ selected_entity_type }}"
+       class="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-primary-500/25">
+        {{ icon("plus") }}
+        New Field
+    </a>
+    {% endif %}
+</div>
+
+<div id="custom-fields-filters" class="mb-4">
+    <select name="entity_type"
+            hx-get="/admin/custom-fields"
+            hx-trigger="change"
+            hx-target="#custom-fields-table"
+            hx-push-url="true"
+            class="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        {% for entity_type in entity_types %}
+        <option value="{{ entity_type }}" {% if entity_type == selected_entity_type %}selected{% endif %}>{{ entity_type }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+<div id="custom-fields-table">
+    {% include "admin/custom_fields/_table.html" %}
+</div>
+{% endblock %}

@@ -42,10 +42,11 @@ _EXCLUDED_DIR_PREFIX = "app/features/settings/"
 _EXCLUDED_FILE = "app/core/settings_resolver.py"
 
 # Burn-down allowlist — do NOT add to this without a task/plan reference in
-# the comment; a new orphan should get a real consumer instead.
-_ALLOWED_ORPHAN_SETTINGS: set[str] = {
-    "ui_branding",  # consumed in plan 2b (branding UI)
-}
+# the comment; a new orphan should get a real consumer instead. EMPTY as of
+# plan 2b Task 2: `ui_branding` is now consumed by
+# `app.core.branding.load_branding` (`resolve_value(db, SettingDomain.branding,
+# "ui_branding", ...)`).
+_ALLOWED_ORPHAN_SETTINGS: set[str] = set()
 
 
 def _repo_root() -> pathlib.Path:

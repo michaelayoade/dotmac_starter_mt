@@ -1,0 +1,112 @@
+{#
+  Custom field definition create/edit form (Task 7). `field_type`'s select
+  drives which extra inputs are visible via Alpine (`x-show`, no reload) —
+  options editor for SELECT/MULTISELECT, min/max for NUMBER/DECIMAL,
+  max_length for TEXT/TEXTAREA. Regex + its error message apply to every
+  field type, so those two inputs are always visible.
+
+  Posts to app.features.custom_fields.web.create_submit (mode == "create")
+  or .edit_submit (mode == "edit"); a validation/conflict failure re-renders
+  THIS template at 200 with `errors`/`form` populated — same "re-render,
+  don't redirect" convention as every other form in this app.
+
+  Context: `mode` ("create"|"edit"), `field` (CustomFieldDefinition or none,
+  set only in edit mode — `entity_type`/`field_code` are immutable once set,
+  so those two inputs render `readonly` in edit mode), `entity_types`
+  (list[str]), `field_types` (list[str] — CustomFieldType values), `errors`
+  (flat field name -> message, `_form` reserved for a whole-form error),
+  `form` (submitted/current values — `options_text` is the SELECT/
+  MULTISELECT options editor's `value|label` per-line text representation,
+  see app.features.custom_fields.web._options_to_text/_parse_options).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/form_macros.html" import text_input, textarea, select_field, checkbox, submit_button %}
+{% set entity_type_options = [] %}
+{% for t in entity_types %}{% set _ = entity_type_options.append({"value": t, "label": t}) %}{% endfor %}
+{% set field_type_options = [] %}
+{% for t in field_types %}{% set _ = field_type_options.append({"value": t, "label": t}) %}{% endfor %}
+
+{% block admin_content %}
+<div class="max-w-2xl" x-data="{ fieldType: '{{ form.get('field_type', 'TEXT') }}' }">
+    <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display mb-6">
+        {{ "Edit " ~ field.field_name if field else "New Custom Field" }}
+    </h1>
+
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+        {% if errors.get("_form") %}
+        <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">
+            {{ errors.get("_form") }}
+        </div>
+        {% endif %}
+
+        <form hx-post="{{ '/admin/custom-fields/' ~ field.id ~ '/edit' if field else '/admin/custom-fields' }}" class="space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+                {{ select_field("entity_type", "Entity type", options=entity_type_options, selected=form.get("entity_type", "")) }}
+                {{ text_input("field_code", "Field code", value=form.get("field_code", ""), required=true, readonly=(field is not none), help_text="Letters, numbers, underscores. Immutable once created.") }}
+            </div>
+            {% if errors.get("entity_type") %}<p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("entity_type") }}</p>{% endif %}
+            {% if errors.get("field_code") %}<p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("field_code") }}</p>{% endif %}
+
+            {{ text_input("field_name", "Field name", value=form.get("field_name", ""), required=true) }}
+            {% if errors.get("field_name") %}<p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("field_name") }}</p>{% endif %}
+
+            {{ textarea("description", "Description", value=form.get("description", ""), rows=2) }}
+
+            {#
+              Inline (not the select_field macro) so the Alpine x-model
+              attribute can bind directly to it — that's what drives every
+              `x-show` conditional block below on change, without a reload.
+            #}
+            <div>
+                <label for="field_type" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Field type</label>
+                <select id="field_type" name="field_type" x-model="fieldType"
+                        class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                    {% for t in field_type_options %}
+                    <option value="{{ t.value }}">{{ t.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div x-show="['SELECT', 'MULTISELECT'].includes(fieldType)">
+                {{ textarea("options_text", "Options", value=form.get("options_text", ""), rows=4, help_text="One per line: value|label (label optional, defaults to value).") }}
+            </div>
+
+            <div class="grid grid-cols-2 gap-4" x-show="['NUMBER', 'DECIMAL'].includes(fieldType)">
+                {{ text_input("min_value", "Minimum value", value=form.get("min_value", "")) }}
+                {{ text_input("max_value", "Maximum value", value=form.get("max_value", "")) }}
+            </div>
+
+            <div x-show="['TEXT', 'TEXTAREA'].includes(fieldType)">
+                {{ text_input("max_length", "Max length", value=form.get("max_length", "")) }}
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                {{ text_input("validation_regex", "Validation regex", value=form.get("validation_regex", "")) }}
+                {{ text_input("validation_message", "Validation message", value=form.get("validation_message", "")) }}
+            </div>
+            {% if errors.get("validation_regex") %}<p class="text-xs text-red-600 dark:text-red-400">{{ errors.get("validation_regex") }}</p>{% endif %}
+
+            {{ text_input("default_value", "Default value", value=form.get("default_value", "")) }}
+
+            <div class="grid grid-cols-2 gap-4">
+                {{ text_input("section_name", "Section", value=form.get("section_name", "")) }}
+                {{ text_input("display_order", "Display order", value=form.get("display_order", "0")) }}
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                {{ text_input("placeholder", "Placeholder", value=form.get("placeholder", "")) }}
+                {{ text_input("help_text", "Help text", value=form.get("help_text", "")) }}
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 pt-2">
+                {{ checkbox("is_required", "Required", checked=form.get("is_required", false)) }}
+                {{ checkbox("show_in_list", "Show in list", checked=form.get("show_in_list", false)) }}
+                {{ checkbox("show_in_form", "Show in form", checked=form.get("show_in_form", true)) }}
+                {{ checkbox("show_in_detail", "Show in detail", checked=form.get("show_in_detail", true)) }}
+            </div>
+
+            {{ submit_button(label="Save Field", cancel_url="/admin/custom-fields") }}
+        </form>
+    </div>
+</div>
+{% endblock %}

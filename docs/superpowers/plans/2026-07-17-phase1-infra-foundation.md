@@ -1652,7 +1652,7 @@ APP_IMAGE=
 
 - [ ] **Step 3: ADR + ARCHITECTURE + README**
 
-`docs/adr/0002-starter-consolidation.md` — short: context (two starter repos), decision (this repo is the one starter; sub = infra SoT; starter = feature source; feature-package registry), consequences (dotmac_starter frozen → archived after phase 2), link to the spec.
+`docs/adr/0002-starter-consolidation.md` — short: context (two starter repos), decision (this repo is the one starter; sub = infra SoT; starter = feature source; feature-package registry), original consequence (dotmac_starter frozen → archived after phase 2; later superseded by ADR-0003), link to the spec.
 
 `docs/ARCHITECTURE.md` — the Layout + Hard rules sections from CLAUDE.md expanded with the request flow (middleware order from `app/main.py` docstring), the three-role DB model (from README), and the feature-mount sequence.
 

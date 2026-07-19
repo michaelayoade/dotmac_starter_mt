@@ -15,12 +15,88 @@ A single-tenant product is simply a deployment of this app with **one**
 tenant row (`POST /platform/tenants`) — not a different codebase, not a
 different code path.
 
+For new development, the accepted direction is to use this same foundation
+for vendor SaaS, dedicated hosted, self-hosted/on-premise, OEM, and
+single-tenant deployments. That profile/provider architecture is planned,
+not current runtime behavior; today the repo has only the feature manifest,
+`DISABLED_FEATURES`, and `WEB_ENABLED` composition seams.
+
 See [`docs/adr/0001-multi-tenant-architecture.md`](docs/adr/0001-multi-tenant-architecture.md)
 for the founding tenancy design, [`docs/adr/0002-starter-consolidation.md`](docs/adr/0002-starter-consolidation.md)
 for how this repo became the org's one starter template,
+[`docs/adr/0003-unified-deployment-profiles.md`](docs/adr/0003-unified-deployment-profiles.md)
+for the accepted deployment-profile and commercial-module decisions,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full architecture
 reference (including the model provenance/ownership tables), and
 [`CLAUDE.md`](CLAUDE.md) for the agent-facing rules summary.
+
+## Deployment direction (accepted; implementation planned)
+
+One codebase will compose independent deployment axes—tenancy topology,
+operator, connectivity, commercial authority, identity, branding, domains,
+locale, currency, legal/tax authority, data residency, UI surface, updates,
+and telemetry—through typed deployment profiles, module manifests, and provider
+interfaces. A profile name is configuration shorthand, not a value that feature
+code branches on. Even a one-tenant deployment keeps the tenant row, tenant
+context, composite tenant constraints, and PostgreSQL RLS.
+
+Commercial concerns are deliberately separate:
+
+- **Entitlements** are the common capability-decision layer: what a tenant may
+  use, within which dates and limits, and why.
+- **Subscriptions** are optional: plans, trials, renewals, grace periods, and
+  cancellation. They are needed only when the product has a recurring
+  commercial lifecycle.
+- **Billing** is optional: payment-provider customers, invoices, payments,
+  refunds, and webhooks. Enterprise/manual/ERP invoicing can omit it.
+- **Metering** is optional: immutable usage events and quota or billable-usage
+  aggregates. It is needed only for quantitative limits or usage pricing.
+- **Licensing** is optional: signed offline or delegated grants, commonly for
+  commercial on-premise and OEM distribution.
+
+Consequently, a perpetual on-premise install can use entitlements plus a
+signed license with no subscription or billing module; an invoiced enterprise
+deployment can use subscriptions without in-product billing; and self-service
+paid SaaS can install all of them. See the
+[`deployment profiles and commercial platform plan`](docs/superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md)
+for the authority model, workstreams, sequencing, and completion gates.
+
+Tenant domains follow the same provider model. The application owns normalized,
+verified domain-to-tenant mappings; a profile-selected ingress provider owns
+proxy bindings and TLS automation. Nginx is a valid static reverse proxy, but
+dynamic customer domains also require a certificate/DNS controller (or a
+managed load balancer, Caddy, Traefik, or Kubernetes ingress + cert-manager).
+The target workflow verifies DNS ownership before binding or issuing a
+certificate and never trusts an arbitrary first-request `Host` header.
+
+The accepted reuse model is also more than cloning. A clone is a snapshot and
+does not receive later fixes automatically. The target platform publishes a
+versioned kernel and optional modules; each product is a thin
+`ProductAssemblySpec` that pins those versions and adds only its domain modules,
+providers, brand, policies, and deployment profile. A core fix produces one
+release, automated update PRs for maintained products, their profile/lifecycle
+tests, and then a staged or customer-approved redeploy. Running deployments
+never change silently.
+
+The app remains both API-capable and web-capable. Business rules live in shared
+services; JSON routers and the built-in Jinja/HTMX `web` module are parallel
+adapters. Keep the working admin portal when useful, use `WEB_ENABLED=false`
+for API-only deployments, or build separate SPA/mobile/partner frontends
+against versioned OpenAPI contracts and the same authorization/capability APIs.
+
+Existing `dotmac_erp` and `dotmac_sub` are adoption candidates, not rewrite
+targets. ERP and ISP subscriber management remain separate product assemblies
+and normally separate deployments/databases. Other ISP operators should first
+receive dedicated one-tenant ISP deployments; shared multi-ISP SaaS follows only
+after an explicit cross-ISP isolation program. See the
+[`existing product adoption plan`](docs/superpowers/plans/2026-07-18-existing-product-adoption.md).
+
+Do not create a permanent ISP branch or clone from this repository. Continue the
+kernel/platform contracts here, adapt the existing `dotmac_sub` as the ISP
+assembly, and build vendor accounts/contracts/fleet/licensing in a separate thin
+control-plane assembly. Temporary feature branches are normal, but products
+consume versioned kernel/module releases so fixes propagate through tested update
+PRs rather than source copying.
 
 ## Starting a project from this template
 
@@ -32,8 +108,8 @@ git clone <this-repo> my-app && cd my-app
 
 Then, in order:
 
-1. **Pick your features.** Six ship today: `tenants`, `auth`, `parties`,
-   `rbac`, `settings`, `custom_fields` (see "What's in this template"
+1. **Pick your features.** Seven ship today: `tenants`, `auth`, `parties`,
+   `rbac`, `settings`, `custom_fields`, `web` (see "What's in this template"
    below). Disable what you don't need via `DISABLED_FEATURES` (fast — see
    "Disabling a feature" below), or delete the package under
    `app/features/` and remove it from `FEATURE_MODULES` in
@@ -57,10 +133,12 @@ Then, in order:
    spec with no real reader anywhere in the code fails the
    no-orphan-settings architecture test — wire the `resolve_value(...)`
    call before you ship it.
-4. **Brand it.** `settings/branding/ui_branding` is a `json`-typed setting
-   spec reserved for logo/colors/white-label overrides (consumed by the
-   admin portal in a later phase); rename/extend it for your own branding
-   needs.
+4. **Brand it.** Deployment-wide identity (name, tagline, colors, support
+   email, app URL) is `brand.json` (repo root) + `BRAND_*` env var
+   overrides — see `.env.example`. Per-tenant branding overrides on top of
+   that live in the `settings/branding/ui_branding` setting, editable at
+   `/admin/settings/branding`. Both layers are consumed by the admin portal
+   (see "Admin portal" below).
 
 To run the app locally, see **Quickstart (dev)** below. To run the
 integration test suite, use `make test-db-up` to start a disposable
@@ -86,6 +164,13 @@ used for running the app.
   no migration, no deploy — and set/read its value through a generic
   values API. This is the template's signature capability; see the
   quickstart below.
+- **Admin portal**: a server-rendered HTML/HTMX admin UI (Jinja2 + Tailwind
+  v4 + Alpine) at `/admin/*` — cookie-based login, dashboard, and CRUD
+  screens for parties, RBAC roles/grants/audit, settings (incl. a friendly
+  branding editor), and custom fields. Deletable (`DISABLED_FEATURES=web`)
+  without losing the JSON API. See "Admin portal quickstart" below and
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#admin-portal-web-ui) for the
+  auth flow, branding pipeline, and cross-feature UI composition pattern.
 - CSRF middleware, tenant-aware in-memory rate limiting, and request IDs.
 - `TenantResolverMiddleware` that parses the host header → `request.state.tenant`.
 - `get_db` dependency that runs `SET LOCAL app.current_tenant` for RLS.
@@ -107,10 +192,58 @@ This is intentionally minimal outside the tenancy/governance foundation. To
 productionize further, port what your project needs:
 
 - MFA, password reset, account lockout, and production auth hardening
-- Billing, file uploads, notifications, scheduler
+  (phase 2c on this repo's own roadmap; fleet-specific rationale lives in
+  `docs/adr/`, not here)
+- File uploads, notifications, scheduler
+- The manifest-driven module/plugin registry, tenant entitlements, typed
+  feature flags, dependency/health/migration validation, and effective-
+  capability admin UI described by the module control-plane directive
+- Typed deployment profiles and provider registry for SaaS, dedicated,
+  on-premise/air-gapped, OEM, and API-only packaging
+- Versioned platform-kernel/module distribution, thin product assemblies,
+  automated dependency-update PRs, signed releases/offline bundles, and the
+  cross-product compatibility matrix needed for one fix to propagate safely
+- Incremental ERP/subscriber-management assembly adoption, including a dedicated-
+  per-ISP path and the separate tenant-safety program required before shared
+  multi-ISP SaaS
+- End-to-end tenant lifecycle orchestration: onboarding, activation, provider
+  jobs, restriction/suspension/recovery, support access, cancellation, export,
+  retention/legal hold, provider cleanup, and purge
+- Fleet provisioning automation: a durable control-plane workflow, reusable
+  OpenTofu infrastructure modules, remote state/locking, cloud-init/Ansible host
+  bootstrap, isolated dedicated-ISP Compose deployments, optional Helm/GitOps
+  execution at larger scale, activation gates, drift reconciliation, and
+  auditable day-two operations. Kubernetes is not required for the first
+  dedicated-ISP deployment profile.
+- On-prem distribution/IP assurance tiers: signed minimal runtime images and
+  offline bundles, build-secret/layer hygiene, digest/provenance verification,
+  licence binding, optional compiled high-value modules, and a separately
+  threat-modelled attested-appliance path. Customer-controlled root access can
+  never be described as guaranteed source secrecy; use vendor-managed dedicated
+  hosting when that guarantee is a commercial requirement.
+- Tenant-safe fleet support and maintenance: OpenTelemetry logs/metrics/traces,
+  readiness and synthetic checks, outbound-only authenticated collectors,
+  health-only/local-only/air-gapped modes, SLO-based alerting, support cases and
+  SLA clocks, redacted diagnostic bundles, consented just-in-time access with
+  session audit, incident communication, version/EOL inventory, backup-restore
+  proof, drift detection, and canary maintenance waves. Permanent vendor SSH or
+  invisible tenant impersonation are not acceptable support mechanisms.
+- Internationalization and global commerce primitives: stable message IDs and
+  locale catalogs, RTL/pluralization, exact multi-currency Money/FX snapshots,
+  immutable prices/rating, invoicing/collections, versioned tax/jurisdiction
+  policy, legal entities, and data residency
+- Tenant-domain provisioning: separate platform/tenant hosts, DNS ownership
+  verification, ingress reconciliation, TLS issue/renew/revoke, canonical-host
+  policy, and production proxy/header trust configuration. The resolver and
+  `TenantDomain` model exist today, but no safe write/reconciliation path does.
+- Optional subscription, billing, metering, signed-licensing, and OEM
+  delegation modules; none should be inferred from the presence of
+  entitlements
+- Profile generator, deployment-specific packaging, and CI profile matrix
 - Security headers
-- A working admin/customer web UI (phase 2b on this repo's own roadmap;
-  fleet-specific rationale for that roadmap lives in `docs/adr/`, not here)
+- A self-service (non-admin) portal surface — today every `/admin/*` page
+  requires the `admin` role; see `app.core.web_deps.require_web_auth`'s
+  docstring for the phase-3 loosening plan
 
 Each port follows the pattern already established: add `tenant_id`, write
 the cross-tenant isolation test first, port the code, watch the test go
@@ -131,6 +264,7 @@ docker compose -f docker-compose.dev.yml up -d postgres   # DEV_DB_PORT/DEV_POST
 export DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/starter
 export MIGRATION_DATABASE_URL="$DATABASE_URL"
 poetry run alembic upgrade head
+make css-build   # builds static/css/main.css (Tailwind v4) — gitignored, build-only; re-run after editing static/css/src/main.css, or use `make css-watch` while iterating
 make dev   # or: poetry run uvicorn app.main:app --reload --port 8000
 ```
 
@@ -158,6 +292,57 @@ curl -X POST http://acme.localhost:8000/parties/people \
 curl http://acme.localhost:8000/parties     # sees Alice
 curl http://widgets.localhost:8000/parties  # sees nothing
 ```
+
+## Admin portal quickstart
+
+The portal is server-rendered HTML (Jinja2 + HTMX + Alpine, Tailwind v4
+CSS), served from the same FastAPI process as the JSON API — no separate
+frontend build/deploy. Continuing from the Quickstart above (Postgres
+migrated, at least one tenant provisioned):
+
+```bash
+npm ci                 # installs the Tailwind v4 CLI (devDependency, pinned via package-lock.json)
+make css-build          # -> static/css/main.css (gitignored — rebuild after editing static/css/src/main.css)
+make dev                # poetry run uvicorn app.main:app --reload --port 8000
+```
+
+Then, in a browser (dev resolves `*.localhost` automatically, so no
+`/etc/hosts` edits needed):
+
+1. Register your first user — `/auth/register` is a JSON endpoint (no
+   portal signup form exists; every portal account starts as an API
+   registration), the same shape as the Quickstart above's
+   `/parties/people` example. The FIRST person registered in a tenant is
+   auto-assigned the `admin` role, which the portal requires:
+   ```bash
+   curl -X POST http://acme.localhost:8000/auth/register \
+       -H "Content-Type: application/json" \
+       -d '{"email":"admin@acme.com","password":"correcthorsebatterystaple","first_name":"Admin","last_name":"User"}'
+   ```
+2. Visit `http://acme.localhost:8000/admin/login` and sign in with that
+   email/password. The login form is HTMX (`hx-post`) with the CSRF
+   header-bridge (`static/js/csrf.js`) wired automatically — nothing to
+   configure.
+3. Land on `http://acme.localhost:8000/admin` — the dashboard, showing
+   party/role/active-session counts for this tenant.
+4. From the sidebar: **Parties** (list/create/edit/detail, with a
+   custom-fields values panel on the detail page — the cross-feature UI
+   composition pattern, see ARCHITECTURE.md), **RBAC** (roles, role
+   grants, audit log), **Settings** (per-key editor + a friendly branding
+   editor at `/admin/settings/branding` that live-previews your
+   `primary_color`/`accent_color`/`custom_css`), **Custom Fields**
+   (definitions CRUD).
+5. `http://widgets.localhost:8000/admin` (a second tenant, its own
+   register+login) sees none of tenant A's data — same RLS isolation the
+   JSON API gets, proven end-to-end by `tests/test_admin_portal_e2e.py`.
+
+<!-- Screenshot: admin/dashboard.html — dashboard with stat cards -->
+<!-- Screenshot: admin/parties/detail.html — party detail + custom-fields values panel -->
+<!-- Screenshot: admin/settings/branding.html — branding editor with live preview -->
+
+Screenshots deferred (no CI artifact pipeline for them yet) — the
+placeholders above mark where they'd go; capture manually against a
+`make dev` instance if you want them for a fork's own docs.
 
 ## Quick example: custom fields (zero migrations)
 
@@ -210,12 +395,44 @@ export DISABLED_FEATURES="custom_fields,settings"
 ```
 
 `app.core.features.mount_features` skips any feature whose name is in this
-set — its routers are never mounted, so its endpoints simply don't exist
-(404, not a guard failure). This is the fast path for "starting a project
-from this template" step 1 above; delete the package under `app/features/`
-only once you're sure you'll never want the feature back (`make test-unit`
-will tell you if the registry and import-linter contract still agree with
-what's on disk).
+set — its routers (both JSON `routers` and HTML `web_routers`, see below)
+are never mounted, so its endpoints simply don't exist (404, not a guard
+failure). This is the fast path for "starting a project from this template"
+step 1 above; delete the package under `app/features/` only once you're
+sure you'll never want the feature back (`make test-unit` will tell you if
+the registry and import-linter contract still agree with what's on disk).
+
+Each feature's `FeatureManifest` (`app/features/<name>/feature.py`)
+declares TWO separate router groups — `routers` (its JSON API) and
+`web_routers` (its `web.py` admin-portal screens) — plus `nav` (its sidebar
+entries). `DISABLED_FEATURES=<name>` still turns off BOTH router groups
+together for that one feature (there is no per-router granularity: disabling
+`parties`, say, drops its `/admin/parties/*` screens AND `/parties/*` from
+the JSON API in one move) — see
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#capability-model-manifest-driven-surfaces-2b1-t1-findings-f1--f5)
+for the full capability model, including the nav↔routes coherence test and
+the optional-slot pattern for embedding one feature's UI inside another's
+page.
+
+**`DISABLED_FEATURES=web` is special: it does NOT disable the portal's
+login, and it does NOT remove any JSON API.** The `web` feature package
+owns exactly one route — `GET /admin`, the dashboard shell — so disabling
+it drops only that landing page. `GET`/`POST /admin/login` and
+`POST /admin/logout` are owned by the `auth` feature (core, always mounted)
+and stay up regardless. Every other feature's own `/admin/*` screens
+(parties, RBAC, settings, custom fields) are mounted from THAT feature's
+own manifest, independently.
+
+**Real API-only mode: `WEB_ENABLED=false`.** This is a DIFFERENT knob from
+`DISABLED_FEATURES` — a whole-portal surface switch, not a per-feature one.
+`WEB_ENABLED=false` (see `.env.example`) mounts NO feature's `web_routers`
+at all (zero `/admin` routes across every feature) and also drops the
+`/static` asset mount — there is no HTML UI left to serve assets to. Every
+feature's JSON `routers` keep working completely unchanged. This is the
+real "JSON API only, zero portal HTML" deployment path; it composes with
+`DISABLED_FEATURES` (e.g. `WEB_ENABLED=false` plus `DISABLED_FEATURES=
+custom_fields` ships a pure JSON API with the custom-fields feature removed
+entirely).
 
 ## Route map
 
@@ -232,6 +449,21 @@ what's on disk).
 Every route above (except `/health`) carries a `require_*` guard —
 enforced by `tests/architecture/test_route_guards.py`.
 
+### Admin portal routes (`/admin/*`)
+
+| Prefix | Feature | Notes |
+|---|---|---|
+| `GET`/`POST /admin/login`, `POST /admin/logout` | `auth` | Cookie login/logout — `/login` is deliberately unguarded (pre-auth); `/logout` is a CSRF-protected POST (was a CSRF-exempt GET), carries `require_tenant` only (no `require_web_auth` — logout always succeeds, even on an expired/foreign-tenant cookie). Both allowlisted with a comment. |
+| `GET /admin` | `web` | Dashboard shell — the one route this deletable feature owns. |
+| `GET /admin/parties`, `/create`, `POST /admin/parties/{people,organizations}`, `GET /admin/parties/{id}`, `GET`/`POST /admin/parties/{id}/edit`, `POST /admin/parties/{id}/delete` | `parties` | List/detail/create/edit/delete screens. |
+| `GET`/`POST /admin/roles`, `/admin/roles/create`, `GET`/`POST /admin/role-grants`, `GET /admin/audit` | `rbac` | Roles, grants, audit log screens. |
+| `GET /admin/settings`, `GET`/`POST /admin/settings/{domain}/{key}/edit`, `GET`/`POST /admin/settings/branding` | `settings` | Generic per-key editor + friendly branding editor. |
+| `GET`/`POST /admin/custom-fields`, `/create`, `GET`/`POST /admin/custom-fields/{id}/edit`, `POST /admin/custom-fields/{id}/deactivate`, `GET`/`POST /admin/custom-fields/party/{id}/values-panel` | `custom_fields` | Definitions CRUD + the values-panel fragment `parties/detail.html` embeds. |
+
+Every `/admin/*` route (except the login and logout routes) carries
+`require_web_auth`, which also requires the `admin` role — see
+`app.core.web_deps`.
+
 ## Run the cross-tenant tests
 
 ```bash
@@ -243,6 +475,8 @@ poetry run pytest \
     tests/test_party_isolation.py \
     tests/test_settings_isolation.py \
     tests/test_custom_fields_isolation.py \
+    tests/test_web_auth_isolation.py \
+    tests/test_admin_portal_e2e.py \
     -v
 ```
 

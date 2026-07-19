@@ -1,5 +1,207 @@
 # Changelog
 
+## 0.7.0 — 2026-07-18
+
+Display settings: a tenant-configurable `display` `SettingDomain`
+(timezone + date/datetime formats) consumed at render time by the admin
+portal, plus the `SettingSpec.validator` mechanism that makes it possible.
+
+### Added
+- **Display settings domain**: `timezone`, `date_format`, `datetime_format`
+  specs on the new `SettingDomain.display` — tenant-configurable via the
+  same tenant→platform→default resolver as every other setting, and
+  auto-appearing in `/admin/settings` (registry-driven index, no dedicated
+  screen needed).
+- **`SettingSpec.validator`**: an optional `Callable[[object], None]` run
+  after type/`allowed`/range checks. Write path
+  (`validate_spec_value`) raises a loud `BadRequestError` on failure; read
+  path (`resolve_with_source`/`resolve_value`) silently degrades to the
+  spec default instead — a corrupted or since-invalid stored value can
+  never 500 a render.
+- **`local_datetime`/`local_date` Jinja filters** (`app.core.templating`):
+  the one and only way a template renders a `*_at` timestamp, formatted in
+  the viewing tenant's timezone/format via `request.state.display`
+  (`app.core.display.get_request_display`, warmed in `require_web_auth` —
+  same per-request seam as tenant branding). New governance test,
+  `tests/architecture/test_web_conventions.py
+  ::test_timestamp_renders_go_through_local_filters`, fails the build on
+  any raw `*_at` render that bypasses these filters.
+
+No breaking changes. The JSON API is untouched — every response stays
+ISO-8601 UTC before and after this release.
+
+## 0.6.1 — 2026-07-18
+
+Phase 2b.1: closes all seven findings (F1–F7) from Michael's post-merge
+review of 0.6.0 — a canonical feature/surface capability model driving
+mounting, navigation, and fragment composition; conflict handling that
+preserves RLS tenant context; one email authority; per-request tenant
+branding; consumed visibility flags; CSRF-protected logout. Every finding
+has a regression-catching test (see below).
+
+### BREAKING
+- **`user_credentials.email` column dropped** (finding F2). Login now
+  resolves `Party` by `(tenant_id, normalize_email(email),
+  party_type=person)` first, then `UserCredential` by `party_id` only —
+  `Party.email` is the single email authority system-wide. Migration
+  `alembic/versions/20260718_0005_single_email_authority.py` drops the
+  column and its unique constraint. Intended consequence: NULLing a
+  person party's email now disables login for that party outright
+  (`tests/test_auth_email_authority.py`,
+  `tests/unit/test_auth_service.py::test_login_null_party_email_rejected`).
+- **`GET /admin/logout` removed** (finding F7). Logout is
+  `POST /admin/logout` only — a bare `<a href="/admin/logout">` was a
+  CSRF-exempt safe method that let a third-party page force a victim's
+  logout by merely embedding `<img src="/admin/logout">`. The topbar's
+  logout control is now an `hx-post` button, routed through the same CSRF
+  header-bridge as every other mutation.
+- **`FeatureManifest` signature changed** (findings F1, F5).
+  `app.core.features.FeatureManifest` gained `web_routers: Sequence[
+  APIRouter] = ()` and `nav: Sequence[NavItem] = ()`; `mount_features` gained
+  a required `web_enabled: bool` keyword argument. Every feature moved its
+  `web.py` router from `routers` to `web_routers` — a project vendoring its
+  own feature packages against the old single-`routers` manifest shape must
+  update them.
+
+### Added
+- **Manifest capability model** (findings F1, F5): `FeatureManifest.
+  web_routers`/`nav` are now THE surface extension point — a feature
+  declares its admin-portal routes and sidebar entries there, never in a
+  parallel hardcoded template list. `WEB_ENABLED` (env var, default
+  `true`) is a new, whole-portal surface switch, distinct from the
+  per-feature `DISABLED_FEATURES`: `WEB_ENABLED=false` mounts NO feature's
+  `web_routers` (zero `/admin` routes, no `/static` mount) while every
+  feature's JSON API keeps working — the real API-only deployment mode.
+  `templates/admin/parties/detail.html`'s `{% if 'custom_fields' in
+  enabled_features %}` guard is the optional-slot pattern for embedding an
+  optional feature's fragment without a dead link/broken embed when that
+  feature is disabled. Enforced by
+  `tests/architecture/test_feature_manifests.py
+  ::test_nav_items_paths_exist_in_web_routers` (nav↔routes coherence) and
+  its bogus-entry sensitivity check.
+- **`app.core.db.conflict_savepoint`** (finding F3): every feature-service
+  conflict site (parties, rbac, tenants, auth, custom_fields) now wraps its
+  expected-conflict mutation in a `SAVEPOINT` instead of calling a bare
+  `db.rollback()`, so a `ConflictError` no longer discards the request's
+  `SET LOCAL app.current_tenant` RLS context. Canary:
+  `tests/test_conflict_rls_context.py` (Postgres — the bug is invisible on
+  SQLite); hard rule enforced by
+  `tests/architecture/test_no_feature_rollback.py`.
+- **Per-request tenant branding** (finding F4):
+  `app.core.branding.get_request_branding(request, db)` resolves
+  `load_branding`/`get_brand()` once per request, memoized on
+  `request.state.branding`, and `app.core.templating.render()` injects it
+  as the `brand` context for every web render (three call sites: `require_
+  web_auth`, `GET`/`POST /admin/login`) — previously only the branding
+  editor's own preview reflected a tenant's saved `ui_branding`. `load_
+  branding`'s merge is now allowlisted to known brand keys.
+- **Consumed visibility flags** (finding F6): `custom_fields_service.
+  list_for_entity` gained `visible_in: Literal["form", "detail", "list"] |
+  None` as the single query-level owner of `show_in_form`/`show_in_detail`/
+  `show_in_list` semantics; the values-panel edit form, its read-only
+  "Details" section (detail-only, no duplicate render of fields that are
+  both `show_in_form` and `show_in_detail`), and the definitions table's
+  "visible in" badge are the three consumers.
+- **`WEB_ENABLED`** documented in `.env.example` alongside `DISABLED_
+  FEATURES`, with the distinction spelled out (per-feature toggle vs.
+  whole-portal surface switch).
+
+### Fixed
+- `docs/ARCHITECTURE.md`/`README.md` stale `GET /admin/logout` references
+  updated to `POST /admin/logout` throughout (route map, auth-flow
+  narrative, mutable-resource ownership list).
+
+## 0.6.0 — 2026-07-18
+
+Phase 2b: a server-rendered admin portal (Jinja2 + HTMX + Alpine + Tailwind
+v4) alongside the existing JSON API — same tenants, same services, cookie
+auth sharing the bearer path's validation seam. Purely additive; no
+breaking changes.
+
+### Added
+- **Admin portal** (`templates/`, `static/`, new `web.py` module per
+  feature, the deletable `app/features/web/` shell feature): cookie-based
+  login/logout (`GET`/`POST /admin/login`, `GET /admin/logout`, owned by
+  `auth`), a dashboard (`GET /admin`), and CRUD screens for parties (list/
+  detail/create/edit/delete), RBAC (roles, role grants, audit log), settings
+  (a generic per-key editor plus a friendly branding editor), and custom
+  fields (definitions CRUD, plus a values-panel fragment the party detail
+  page embeds via htmx — the cross-feature UI composition pattern; see
+  `docs/ARCHITECTURE.md`). `DISABLED_FEATURES=web` drops only the `GET
+  /admin` dashboard route — login stays mounted (owned by `auth`, a core
+  feature) and every other feature's own `/admin/*` screens are independent
+  surfaces on their own manifests, not on `web`.
+- **`app.core.web_deps.require_web_auth`** — cookie-based portal auth guard
+  routed through the SAME `app.core.deps.authenticate_request` seam the
+  JSON API's bearer-token path uses, so token/session/tenant validation has
+  exactly one implementation for both surfaces. Every portal page requires
+  the `admin` role in this phase (phase 3 loosens this once non-admin
+  portal surfaces exist).
+- **Branding pipeline** (`app.core.branding`): deployment-static identity
+  (`brand.json` + `BRAND_*` env overrides, cached process-lifetime) merged
+  per-request with a tenant's `settings/branding/ui_branding` DB override
+  (colors validated as hex, `custom_css` sanitized against
+  `@import`/`javascript:`/`expression()`/`behavior:`/angle-bracket
+  breakouts before being rendered `| safe`). This is the consumer that
+  closes the no-orphan-settings allowlist entry `ui_branding` opened in
+  0.5.0 — the allowlist is now EMPTY.
+- **Branded HTML error pages with a JSON fallback** (`app.core.errors`):
+  any error response negotiates JSON vs. a branded HTML page off the
+  `Accept` header (`text/html` → HTML, including htmx requests; anything
+  else → the unchanged JSON envelope). If rendering the HTML page itself
+  fails, the response falls back to the plain JSON envelope rather than
+  crashing.
+- **`/static/*` tenant-resolution exemption** — static assets bypass
+  `TenantResolverMiddleware` before any DB query, same as `/health`; before
+  this fix, static assets 500'd whenever the DB was unreachable.
+- **CSRF header-bridge** (`static/js/csrf.js`) — copies the `csrf_token`
+  cookie onto the `X-CSRF-Token` header for every htmx request and
+  `fetch()` call, so every mutating portal form uses `hx-post`/`hx-put`/
+  `hx-delete` (never a bare `method="post"`, which has no hook to attach
+  the header and 403s).
+- **`core/identity.py`** — single-owner `normalize_email`/
+  `person_display_name` helpers, closing the `Party.display_name`
+  write-once SOT gap tracked since 2a: both writers of a person `Party`
+  (`parties` service, `auth` service) now recompute `display_name` on every
+  create AND update through this one function.
+- **`core/query.py`**: `escape_like` — LIKE-wildcard escaping for the
+  parties search box, promoted to core so `rbac`'s audit-event search can
+  reuse it too.
+- **Governance**: a tiered auth-guard architecture test (mutating routes
+  must carry `require_user_auth`/`require_role`/`require_web_auth`/
+  `require_platform`, not just any `require_*` dependency —
+  `require_tenant` alone no longer satisfies it), web-template/import
+  convention checks (`tests/architecture/test_web_conventions.py`), a
+  per-route non-admin sweep (`tests/unit/test_admin_route_sweep.py`), and
+  an end-to-end portal canary against real Postgres
+  (`tests/test_admin_portal_e2e.py`) that drives register → cookie
+  login → party create → custom-field values-panel → cross-tenant
+  isolation → logout-revokes-session, entirely through cookies/HTML forms.
+
+### Changed
+- **Docker build now requires npm.** The `Dockerfile`'s `css-builder` stage
+  (`node:20-slim`, `npm ci && npm run css:build`) compiles
+  `static/css/main.css` before the final Python stage copies the built
+  `static/` tree — `docker-build`/CI's `docker-build` job needs network
+  access to install the pinned `node_modules` (or a warm build-cache layer)
+  the same as it always needed network access for `poetry install`.
+  Nothing changes for `make dev` locally beyond running `make css-build`
+  (`npm install && npm run css:build`) at least once first, which was
+  already required as of 2b-T1.
+- **New env knobs** (see `.env.example`): `BRAND_CONFIG_PATH` (override
+  `brand.json`'s location) and the `BRAND_*` static-identity overrides
+  (`BRAND_NAME`, `BRAND_TAGLINE`, `BRAND_PRIMARY_COLOR`,
+  `BRAND_ACCENT_COLOR`, `BRAND_SUPPORT_EMAIL`, `BRAND_APP_URL`) — all
+  optional, all read directly by `app.core.branding` (not `Settings`/
+  `app.core.config`), documented in `.env.example` for the first time in
+  this release (a real as-built gap this task closed — see the task-9
+  report's divergence list).
+
+### BREAKING
+None. The admin portal is fully additive: every existing JSON route,
+response shape, and error envelope is unchanged; `DISABLED_FEATURES` still
+accepts every pre-0.6.0 name plus the new `web` name.
+
 ## 0.5.0 — 2026-07-17
 
 Phase 2a: typed schemas everywhere, tenant-scoped settings-as-data, the

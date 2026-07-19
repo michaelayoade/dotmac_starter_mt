@@ -67,7 +67,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -75,17 +75,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.db import conflict_savepoint
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import resolve_value
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
-from app.features.custom_fields.registry import resolve_entity
+from app.features.custom_fields.registry import ENTITY_MODELS, resolve_entity
 from app.features.custom_fields.schemas import CustomFieldCreate
 
 _DEFAULT_MAX_PER_ENTITY = 20
 
 _NUMERIC_FIELD_TYPES = (CustomFieldType.NUMBER, CustomFieldType.DECIMAL)
 _MIN_MAX_CONSISTENCY_KEYS = {"min_value", "max_value", "field_type"}
+_OPTION_FIELD_TYPES = (CustomFieldType.SELECT, CustomFieldType.MULTISELECT)
+_SELECT_OPTIONS_CONSISTENCY_KEYS = {"field_type", "field_options"}
 
 
 def _validate_min_max_numeric(
@@ -106,6 +109,27 @@ def _validate_min_max_numeric(
             raise BadRequestError(
                 f"{label} must be numeric for NUMBER/DECIMAL fields"
             ) from exc
+
+
+def _validate_select_options(
+    field_type: CustomFieldType, field_options: dict[str, Any] | None
+) -> None:
+    """Task 7 review finding 3: `CustomFieldDefinition.validate_value`'s
+    SELECT/MULTISELECT branches only check membership `if self.field_options:`
+    (see `models.py`) — an options-less SELECT/MULTISELECT definition
+    silently skips membership validation forever after (the exact same
+    guard-shape gap logged for dotmac_erp, see
+    `docs/superpowers/upstream-findings.md` finding 2). Reject it at
+    create/update time instead, same "definition self-consistency, checked
+    up front" pattern as `_validate_min_max_numeric`/`_validate_regex_compiles`
+    above: a SELECT/MULTISELECT definition must carry at least one non-empty
+    option in `field_options["options"]`.
+    """
+    if field_type not in _OPTION_FIELD_TYPES:
+        return
+    options = (field_options or {}).get("options") or []
+    if not options:
+        raise BadRequestError("SELECT/MULTISELECT fields require at least one option")
 
 
 def _validate_regex_compiles(validation_regex: str | None) -> None:
@@ -157,6 +181,7 @@ def create_field(
     resolve_entity(payload.entity_type)
     _validate_min_max_numeric(payload.field_type, payload.min_value, payload.max_value)
     _validate_regex_compiles(payload.validation_regex)
+    _validate_select_options(payload.field_type, payload.field_options)
 
     limit = resolve_value(
         db,
@@ -184,11 +209,18 @@ def create_field(
         )
 
     field = CustomFieldDefinition(tenant_id=tenant_id, **payload.model_dump())
-    db.add(field)
+    # `db.add` happens INSIDE the savepoint, not before it: `Session.
+    # begin_nested()` auto-flushes any already-pending changes as part of
+    # establishing the SAVEPOINT (`_take_snapshot`) — adding `field` before
+    # entering `conflict_savepoint` would let that pre-flush emit the
+    # conflicting INSERT with no savepoint yet in place to protect the
+    # outer transaction's `SET LOCAL` if it fails. See
+    # `.superpowers/sdd/task-2-report.md`'s harness-interplay notes.
     try:
-        db.flush()
+        with conflict_savepoint(db):
+            db.add(field)
+            db.flush()
     except IntegrityError as exc:
-        db.rollback()
         raise ConflictError(
             f"Field with code '{payload.field_code}' already exists "
             f"for {payload.entity_type}"
@@ -226,13 +258,49 @@ def list_for_entity(
     entity_type: str,
     *,
     is_active: bool = True,
+    visible_in: Literal["form", "detail", "list"] | None = None,
 ) -> list[CustomFieldDefinition]:
+    """List this entity_type's field definitions.
+
+    F6 fix: `visible_in` is the SINGLE query-level owner of visibility
+    semantics — no template/consumer ever re-filters a definitions list by
+    `show_in_form`/`show_in_detail`/`show_in_list` itself, it asks this
+    function for the right slice instead:
+
+    - `visible_in="form"` -> `show_in_form` (consumer: the values-panel EDIT
+      form, `app.features.custom_fields.web.party_values_panel`, only
+      renders an input for fields where this is true).
+    - `visible_in="detail"` -> `show_in_detail` (consumer: the same panel's
+      read-only "Details" listing, embedded in the party detail page).
+    - `visible_in="list"` -> `show_in_list`. No list-VIEW consumer exists
+      yet (a future entity-list admin screen would request
+      `visible_in="list"` to pick its columns); today's only consumer of
+      `show_in_list` is the definitions table's own "visible in" badge
+      (`app.features.custom_fields.web.index` /
+      `templates/admin/custom_fields/_table.html`), which reads the flag
+      directly per-row to summarize it rather than filtering a list with
+      it — that badge is this flag's real consumer surface today, added by
+      the same task that added this parameter (F6), so `show_in_list` is no
+      longer a dead control even though its list-COLUMN story is still
+      future work.
+
+    `None` (the default) returns every definition regardless of any
+    show_in_* flag — every pre-existing caller (JSON API `list_for_entity`
+    passthrough, `validate_values`' own internal lookup) keeps that
+    behavior unchanged.
+    """
     stmt = select(CustomFieldDefinition).where(
         CustomFieldDefinition.tenant_id == tenant_id,
         CustomFieldDefinition.entity_type == entity_type,
     )
     if is_active:
         stmt = stmt.where(CustomFieldDefinition.is_active == True)  # noqa: E712
+    if visible_in == "form":
+        stmt = stmt.where(CustomFieldDefinition.show_in_form == True)  # noqa: E712
+    elif visible_in == "detail":
+        stmt = stmt.where(CustomFieldDefinition.show_in_detail == True)  # noqa: E712
+    elif visible_in == "list":
+        stmt = stmt.where(CustomFieldDefinition.show_in_list == True)  # noqa: E712
     stmt = stmt.order_by(
         CustomFieldDefinition.section_name,
         CustomFieldDefinition.display_order,
@@ -260,6 +328,11 @@ def update_field(
 
     if "validation_regex" in updates:
         _validate_regex_compiles(updates["validation_regex"])
+
+    if _SELECT_OPTIONS_CONSISTENCY_KEYS & updates.keys():
+        effective_type = updates.get("field_type", field.field_type)
+        effective_options = updates.get("field_options", field.field_options)
+        _validate_select_options(effective_type, effective_options)
 
     # Router must pass schema-validated dicts only — this loop trusts its
     # input (inherited ERP shape; Task 10's router owns input filtering).
@@ -396,12 +469,24 @@ def get_values(
     return dict(row.custom_fields or {})
 
 
+def list_entity_types() -> list[str]:
+    """Registered `entity_type` keys custom fields can attach to.
+
+    Thin wrapper over `registry.ENTITY_MODELS` (sorted for stable UI
+    ordering) — feeds the admin web UI's entity_type select
+    (`app.features.custom_fields.web`) without that module reaching into
+    the registry module directly for a one-line lookup.
+    """
+    return sorted(ENTITY_MODELS.keys())
+
+
 __all__ = [
     "create_field",
     "deactivate_field",
     "get_by_code",
     "get_field",
     "get_values",
+    "list_entity_types",
     "list_for_entity",
     "set_values",
     "update_field",

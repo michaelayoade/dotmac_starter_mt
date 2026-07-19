@@ -1,0 +1,48 @@
+{#
+  Admin sidebar nav. Phase 2b.1 Task 1 (findings F1/F5): this list is no
+  longer hardcoded here — every entry comes from `nav_items` (a tuple of
+  `app.core.features.NavItem`, collected from every ENABLED feature
+  manifest's own `nav` sequence by
+  `app.core.templating.install_surface_globals`, called once from
+  `app/main.py`). A disabled feature's link simply isn't in `nav_items`, so
+  it can never dangle here — this is THE fix for F5's "dead sidebar links
+  when a feature is off". To add a sidebar entry, add a `NavItem` to that
+  feature's OWN manifest (`feature.py`) — never add a link directly in this
+  template.
+
+  Highlighting is path-based (no `active_nav` context var needed anymore):
+  an item is active if the current request path equals its `path`, or (for
+  every path except the dashboard's bare "/admin", which would otherwise
+  match as a prefix of literally every other admin path) the current path
+  starts with `path + "/"` — so a nested route like a party's detail page
+  (`/admin/parties/<id>`) still highlights "People" (`/admin/parties`).
+
+  Per-item icons were dropped along with the hardcoded list — `NavItem` only
+  carries `label`/`path`(/`feature`), so every entry renders the same
+  generic icon; a richer per-feature icon would mean extending `NavItem`,
+  out of scope for this task.
+#}
+<aside class="fixed top-0 left-0 z-40 h-full w-64 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hidden lg:block overflow-y-auto" aria-label="Primary">
+    <div class="px-4 py-5 border-b border-slate-200 dark:border-slate-700">
+        <a href="/admin" class="flex items-center gap-3">
+            <div class="h-9 w-9 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white font-bold text-sm">
+                {{ brand.mark if brand and brand.mark else "A" }}
+            </div>
+            <span class="text-lg font-semibold text-slate-900 dark:text-white font-display">{{ brand.name if brand and brand.name else "Admin" }}</span>
+        </a>
+    </div>
+    <nav class="px-3 py-4 space-y-1" aria-label="Admin navigation">
+        {% for item in nav_items %}
+        {% set is_active = request.url.path == item.path or (item.path != "/admin" and request.url.path.startswith(item.path ~ "/")) %}
+        <a href="{{ item.path }}"
+           {% if is_active %}aria-current="page"{% endif %}
+           class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition
+                  {{ 'bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-400' if is_active else 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700/50' }}">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            {{ item.label }}
+        </a>
+        {% endfor %}
+    </nav>
+</aside>

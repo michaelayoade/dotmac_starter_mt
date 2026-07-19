@@ -5,6 +5,13 @@ The consolidated DotMac starter (spec:
 `docs/adr/0002-starter-consolidation.md`). Multi-tenant always; a
 single-tenant app is simply a deployment with one tenant row.
 
+ADR-0003 makes this repo the strategic foundation for new SaaS, dedicated,
+self-hosted/on-premise, OEM, and single-tenant deployments. Its profile,
+provider, entitlement, subscription, billing, metering, and licensing
+contracts are an accepted target—not implemented runtime APIs. Follow
+`docs/superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md`
+when adding them; do not invent interim competing authorities.
+
 ## Layout
 
 - `app/core/` — config, db, models base, security, deps (route guards),
@@ -12,15 +19,21 @@ single-tenant app is simply a deployment with one tenant row.
   write-side. Core never imports `app/features` (import-linter contract
   "Core must not import features", `make lint-imports`).
 - `app/features/<name>/` — self-contained: `models.py`, `schemas.py`,
-  `service.py`, `router.py`, `feature.py` (exports `feature: FeatureManifest`).
-  Features never import each other (import-linter contract "Features are
-  independent of each other"); cross-feature references use FK strings /
-  UUID columns, never a Python import. Six registered today: `tenants`,
-  `auth`, `parties`, `rbac`, `settings` (tenant-scoped settings-as-data admin
-  API — spec/seed/router/schemas only; the registry/resolver mechanics it
-  depends on live in core, see below), `custom_fields` (definitions CRUD +
-  values on a registered entity's `custom_fields` JSONB column — 13 field
-  types, zero-migration field creation).
+  `service.py`, `router.py` (JSON API), `web.py` (HTML/HTMX admin-portal
+  routes, mounted under `/admin/...` — see "Web portal (admin UI)" below),
+  `feature.py` (exports `feature: FeatureManifest`). Features never import
+  each other (import-linter contract "Features are independent of each
+  other"); cross-feature references use FK strings / UUID columns, never a
+  Python import. Seven registered today: `tenants`, `auth`, `parties`,
+  `rbac`, `settings` (tenant-scoped settings-as-data admin API —
+  spec/seed/router/schemas only; the registry/resolver mechanics it depends
+  on live in core, see below), `custom_fields` (definitions CRUD + values on
+  a registered entity's `custom_fields` JSONB column — 13 field types,
+  zero-migration field creation), `web` (`core=False`, deletable — the
+  admin-portal dashboard shell; `DISABLED_FEATURES=web` drops only `GET
+  /admin`, every other feature's own `/admin/*` routes and the API stay up —
+  see "Extension points" below for `WEB_ENABLED`, the different,
+  whole-portal switch).
 
 **Model placement rule:** models queried by core (deps/middleware) live in
 core; feature-local models live in the feature. Concretely: `Tenant`,
@@ -57,7 +70,7 @@ model-by-model provenance (owner + port source-of-truth) is the table in
 
 ## Extension points
 
-Three points let a project built from this template add its own surface
+Four points let a project built from this template add its own surface
 without touching core:
 
 - **Register a feature package.** Add `app/features/<name>/` (with
@@ -79,12 +92,196 @@ without touching core:
   no reader anywhere under `app/` (outside the settings feature and the
   resolver module itself) fails the no-orphan-settings test — wire a real
   `resolve_value(...)` call before shipping it, or don't register it yet.
+- **Add an admin-portal surface (the capability model — THE surface
+  extension point).** A feature's `FeatureManifest` (`app.core.features`)
+  declares `web_routers` (its `web.py` router, HTML/HTMX) and `nav` (a
+  tuple of `NavItem(label, path)`) SEPARATELY from `routers` (its JSON
+  API) — these two fields are the ONLY place a feature adds itself to the
+  admin portal's sidebar or mounts an `/admin/*` screen; there is no
+  parallel hardcoded nav list in a template to keep in sync
+  (`templates/components/sidebar.html` renders from the `nav_items` Jinja
+  global, itself built from every manifest's `nav` by
+  `app.core.templating.install_surface_globals`). Two independent on/off
+  switches, do not conflate them: `DISABLED_FEATURES=<name>` turns off ONE
+  named feature's `routers` AND `web_routers` together (still a per-feature,
+  not a per-surface, toggle); `WEB_ENABLED` (env var, default `true`) is the
+  whole-portal surface switch — `WEB_ENABLED=false` mounts NO feature's
+  `web_routers` at all (zero `/admin` routes, no `/static` mount) while
+  every feature's JSON `routers` keeps working unchanged — this is the real
+  API-only deployment mode. `tests/architecture/test_feature_manifests.py
+  ::test_nav_items_paths_exist_in_web_routers` fails the build if a
+  manifest's `NavItem.path` doesn't resolve to a route actually mounted in
+  that same manifest's `web_routers` (a dead/stale sidebar link — this is
+  also how a disabled feature's nav entry is kept from linking to a 404;
+  see `templates/admin/parties/detail.html`'s
+  `{% if 'custom_fields' in enabled_features %}` guard for the matching
+  optional-slot pattern on an embedded fragment, not just a nav link).
+- **Compose a cross-feature admin-UI fragment (values-panel pattern).** A
+  feature never imports another feature's Python — but its web page can
+  still show another feature's data, via an htmx-loaded fragment the OWNING
+  feature serves at its own URL. `templates/admin/parties/detail.html`
+  wants a party's custom-field values; `parties` cannot import
+  `custom_fields`, so the party detail template instead does
+  `hx-get="/admin/custom-fields/party/{{ party.id }}/values-panel"
+  hx-trigger="load"` — zero Python import, composition happens in the
+  browser. `custom_fields/web.py` owns both routes (`GET`/`POST
+  .../values-panel`) and the partial it renders
+  (`templates/admin/custom_fields/_values_panel.html`): the feature that
+  renders a partial owns that partial. Follow this pattern — an
+  htmx-fetched URL, not an import — any time one feature's admin page needs
+  another feature's UI.
+
+## Planned deployment composition (ADR-0003)
+
+These are accepted design constraints for future profile/control-plane work;
+they are not claims that the current runtime already enforces them:
+
+- Compose deployment types from module manifests and provider interfaces. Do
+  not scatter `if deployment_mode == ...`, plan-name, payment-state, or raw
+  license checks through feature code.
+- A single-tenant deployment keeps `Tenant`, request tenant context, composite
+  tenant constraints, and RLS. It is a topology, not a second schema or code
+  path.
+- Keep actor permission, tenant entitlement, rollout flag, runtime setting,
+  and quota as separate decisions. Entitlements are common; subscriptions,
+  billing, metering, and signed licensing are independently optional.
+- Feature code consumes explainable local entitlement/quota decisions. A
+  request-time access check never calls a payment provider or depends on
+  network license validation.
+- Treat Python plugins as trusted in-process code. Install and verify them in
+  the build/deploy supply chain; the admin UI may enable only already-installed,
+  migrated, dependency-complete, healthy code and may never run `pip install`.
+- Run plugin migrations at deploy time. Disabling a module preserves its data;
+  retirement requires an explicit impact preview and archive/export/delete
+  policy.
+- Treat tenant domains as lifecycle resources, not generic settings. Normalize
+  and prove DNS ownership before activation; reconcile desired bindings through
+  an ingress/TLS provider; never issue a certificate for an arbitrary first
+  request `Host`. Nginx is one provider, not an architecture dependency.
+- Keep the exact platform host, tenant base domain(s), and custom-domain target
+  distinct in the planned profile contract. Unknown/unverified hosts fail
+  closed, and forwarded headers are trusted only from configured proxies.
+- Products compose a pinned versioned kernel, versioned modules, product-owned
+  modules/providers/brand/policies, and a deployment profile. Do not copy,
+  monkey-patch, or fork kernel files for product behavior; add or improve a
+  declared extension point and propagate fixes through tested release updates.
+- Existing products adopt through assemblies, adapters, contract/shadow tests,
+  expand/contract migrations, reconciliation, and one-writer cutovers—never a
+  big-bang rewrite. ERP and ISP remain separate data planes; an ISP operator is a
+  tenant, while its subscribers remain product-domain parties/customers.
+- Keep business rules in services. JSON routers, Jinja/HTMX web routes, workers,
+  CLI, and external frontends are adapters. API-first does not mean deleting the
+  built-in `web` module; API-only is one profile, and both surfaces must reach the
+  same authorization and lifecycle decisions.
+- Model tenant, subscription, entitlement, provider-job, domain, and license
+  lifecycles separately. Cross-module transitions require idempotency,
+  transaction owner, outbox/inbox, audit, retry/compensation, and repair; payment
+  failure or module disablement never implicitly deletes tenant data.
+- Locale/language, timezone, currency, legal entity, tax jurisdiction, and data
+  residency are independent. Use stable language-neutral codes/message IDs,
+  exact Money (never float), immutable FX/price/rating/tax-policy snapshots, and
+  declared provider/policy versions—never country or plan-name branches in
+  features.
+
+## Web portal (admin UI)
+
+Every feature that has an admin-facing HTML surface puts it in that
+feature's own `web.py` (never in `router.py`, which is the JSON API), mounts
+under `/admin/...`, and renders through `app.core.templating.render()` — the
+one shared Jinja2 environment (see that module's docstring for the
+`brand`/`static_asset_url`/`current_year` globals every template gets for
+free). `web.py` is held to the same thin-wrapper rule as `router.py` (no
+`db.query`/`db.execute`/`select(` — logic stays in `service.py`) and may
+only import `app.core.*` or its OWN feature's modules — a cross-feature
+import (e.g. `parties/web.py` importing `rbac.service`) is caught by
+`tests/architecture/test_web_conventions.py::test_web_py_imports_only_its_own_feature_and_core`.
+
+- **Fragment composition, not imports** — see Extension points above
+  (values-panel pattern) for how one feature's admin page shows another
+  feature's data without a Python import.
+- **CSRF header-bridge contract.** `CSRFMiddleware` validates the
+  `X-CSRF-Token` HEADER against the `csrf_token` COOKIE (double-submit;
+  the cookie is deliberately not `HttpOnly` so JS can read it).
+  `static/js/csrf.js` copies the cookie onto that header for every htmx
+  request (`htmx:configRequest`) and every `fetch()` call (monkey-patched).
+  A plain `<form method="post">` has no hook to attach a custom header, so
+  **every mutating form/link MUST use `hx-post`/`hx-put`/`hx-delete`**, never
+  bare `method="post"` — enforced by
+  `tests/architecture/test_web_conventions.py::test_no_template_uses_a_plain_method_post_form`.
+- **Session-mutating routes are POST, CSRF-bridged.** A GET must never
+  mutate session/auth state — a bare `<a href="/admin/logout">` was exactly
+  this mistake (F7): a CSRF-exempt safe method that a third-party page could
+  trigger just by loading it (`<img src=...>`), forcing a victim's logout.
+  `POST /admin/logout` (`app.features.auth.web`) fixed it by putting logout
+  back under the CSRF header-bridge above, same as every other mutation —
+  there is no separate "logout is special" exemption.
+- **Template escaping / `| safe` rule.** Jinja2 autoescapes by default;
+  `| safe` opts a value OUT of escaping and must only be used on a value
+  that has already been sanitized in Python, with a `sanitiz*` comment
+  within 12 lines of the `| safe` use explaining why it's safe (the one real
+  usage today: `templates/admin/settings/branding.html`'s `custom_css`
+  preview, sanitized by `app.core.branding.sanitize_branding_css` before
+  `load_branding` ever returns it). Enforced by
+  `tests/architecture/test_web_conventions.py::test_safe_filter_only_used_with_a_sanitize_comment_nearby`.
+  Every `templates/admin/**/*.html` + `templates/auth/*.html` file must also
+  either `{% extends %}` a layout or be `_`-prefixed (a fragment) —
+  `test_every_admin_or_auth_template_extends_a_layout_or_is_a_fragment`.
+- **Tiered guard rule.** `tests/architecture/test_route_guards.py`'s plain
+  `test_every_route_has_a_guard` accepts ANY `require_*`-prefixed
+  dependency, including `require_tenant` alone — not enough for a mutating
+  route, which needs an actual auth-tier guard. A second, stricter test,
+  `test_mutating_routes_require_an_auth_tier_guard`, requires every
+  POST/PUT/PATCH/DELETE route to carry a guard from the hand-built
+  `AUTH_GUARD_NAMES` set (`require_user_auth`, `require_role`,
+  `require_web_auth`, `require_platform` — deliberately NOT a `require_`
+  prefix match, since `require_tenant` would wrongly pass) unless it's in
+  `MUTATING_ALLOWLIST` (the genuinely pre-auth routes: `POST /auth/register`,
+  `POST /auth/login`, `POST /admin/login`, each commented inline with why).
+  A per-route non-admin sweep,
+  `tests/unit/test_admin_route_sweep.py::test_non_admin_cookie_gets_redirected_not_200_or_500`,
+  independently drives every mutating `/admin/*` route with an
+  authenticated-but-non-admin cookie and asserts a redirect, not a 200 or a
+  500 (a 500 would mean the guard was missing and the request reached real
+  business logic).
+- **Auth model: cookie + bearer share one seam.** `app.core.deps
+  .authenticate_request` is the single token/session/tenant/party-type
+  validation function for BOTH the JSON API (bearer `Authorization` header)
+  and the portal (`app.core.web_deps.require_web_auth`, which reads the
+  `access_token` cookie, calls `authenticate_request`, then additionally
+  requires the `"admin"` role — every portal page is admin-only until phase
+  phase 3 adds finer-grained portal roles). Any auth-tightening fix (token
+  expiry, tenant-claim check, revocation) lands once, in
+  `authenticate_request`, and both surfaces get it — never re-implement
+  token validation in `web_deps.py`.
+- **Governance scope disclosure.** The web-conventions checks above and the
+  non-admin sweep are scoped to `templates/{admin,auth}` and the `/admin`
+  path prefix. A future non-admin portal surface (e.g. a self-service party
+  view) escapes all of them until their globs/prefixes are extended — do
+  that in the same task that adds such a surface (tracked in
+  `docs/superpowers/phase2-backlog.md`).
+- **Display settings (tenant timezone + date/datetime formats).** A
+  `display` `SettingDomain` (three specs: `timezone`, `date_format`,
+  `datetime_format`) auto-appears in `/admin/settings` like any other
+  registered spec — no dedicated screen. `app.core.display.get_request_display`
+  resolves it once per request and memoizes on `request.state.display`,
+  warmed in `require_web_auth` — the exact same per-request seam shape as
+  `request.state.branding` (see "Branding pipeline" in
+  `docs/ARCHITECTURE.md`). The JSON API is untouched: responses stay
+  ISO-8601 UTC always: display formatting is a web-portal presentation
+  concern only. See `docs/ARCHITECTURE.md`'s "Display settings" subsection
+  for the write-loud/read-degrade validator split and the filter fallback
+  invariant.
 
 ## Hard rules (enforced — test/contract named per rule)
 
 - Routers (`router.py`, `web.py`) never issue direct DB queries (no
   `db.query(`, `db.execute(`, `select(`) — logic lives in `service.py`.
   (`tests/architecture/test_thin_wrappers.py::test_routers_do_not_issue_direct_queries`)
+- A template renders a `*_at` timestamp ONLY through the `local_datetime`/
+  `local_date` Jinja filters (`app.core.templating`) — never a raw
+  attribute — so every rendered timestamp honors the viewing tenant's
+  display settings.
+  (`tests/architecture/test_web_conventions.py::test_timestamp_renders_go_through_local_filters`)
 - Every mounted route carries a `require_*` guard dependency (route-level or
   router-level `dependencies=[...]`), or is in the explicit
   `ALLOWLIST` with a comment explaining why it's unauthenticated.
@@ -103,13 +300,33 @@ without touching core:
 - Feature `service.py` functions never take `payload: Any` — every payload
   parameter is a concrete Pydantic schema.
   (`tests/unit/test_service_typing.py::test_no_any_typed_payloads_in_services`)
+- Feature services never call `db.rollback()` directly. `get_db`
+  (`app.core.db`) owns the request's transaction and issues `SET LOCAL
+  app.current_tenant` on it for RLS; a bare `db.rollback()` on an expected
+  conflict (duplicate email/slug/role-grant, etc.) rolls back that ENTIRE
+  transaction — wiping the tenant context along with it — so any query the
+  caller's exception handler runs afterwards (a web handler re-rendering a
+  form, re-listing recent grants) runs under FORCE RLS with no tenant set:
+  fail-closed to zero rows, or an `ObjectDeletedError` re-loading an
+  expired attribute (finding F3). Use `app.core.db.conflict_savepoint`
+  instead: `with conflict_savepoint(db): db.add(row); db.flush()` inside a
+  `try/except IntegrityError` — it rolls back only a SAVEPOINT, leaving the
+  outer transaction + its `SET LOCAL` intact. The mutation (`db.add`/
+  attribute assignment) must happen INSIDE the `with` block, not before
+  it — `Session.begin_nested()` auto-flushes any already-pending/dirty
+  objects while establishing the SAVEPOINT, so adding/mutating before
+  entering the block would let that pre-flush fail with no savepoint yet in
+  place to protect the outer transaction.
+  (`tests/architecture/test_no_feature_rollback.py`; canaries in
+  `tests/test_conflict_rls_context.py`)
 - Every registered `SettingSpec` key must have a real reader (a quoted-string
   `resolve_value(...)`-style reference) somewhere under `app/` outside the
   `settings` feature package and `app/core/settings_resolver.py` itself — a
   setting nobody reads is a dead control. The allowlist for known,
-  intentionally-not-yet-wired keys currently holds exactly one entry
-  (`ui_branding`, consumed when plan 2b's branding UI lands) and may only
-  shrink, never grow, without a task/plan reference.
+  intentionally-not-yet-wired keys is EMPTY as of plan 2b Task 2
+  (`ui_branding` was the one entry, now consumed by
+  `app.core.branding.load_branding`) and may only shrink, never grow,
+  without a task/plan reference.
   (`tests/architecture/test_no_orphan_settings.py`)
 - Every tenant-scoped model: `tenant_id UUID NOT NULL REFERENCES tenants(id)`
   + a composite unique on `(tenant_id, ...)` for anything unique-per-tenant,
@@ -121,7 +338,8 @@ without touching core:
   Postgres RLS integration canaries (`tests/test_cross_tenant_isolation.py`,
   `tests/test_rbac_audit_isolation.py`, `tests/test_auth_tenant_claim.py`,
   `tests/test_party_isolation.py`, `tests/test_settings_isolation.py`,
-  `tests/test_custom_fields_isolation.py`), which fail if isolation is
+  `tests/test_custom_fields_isolation.py`, `tests/test_web_auth_isolation.py`,
+  `tests/test_admin_portal_e2e.py`), which fail if isolation is
   missing. Run these against real Postgres
   (`make test-db-up && make test-integration`) — SQLite cannot enforce RLS.
 - Migrations run as `app_admin` (`MIGRATION_DATABASE_URL`), never on
@@ -170,9 +388,19 @@ in the same style — don't hardcode ports, hosts, image names, or paths.
   DB required) / `make test-db-up && make test-integration && make
   test-db-down` (Postgres RLS canaries; `TEST_DB_PORT` overridable if the
   default port is taken, e.g. `TEST_DB_PORT=5437 make test-db-up`).
-- `make dev` — run the dev server. `make docker-build` / `make docker-dev` —
-  build/run the container locally. `make migrate` / `make migrate-new` —
-  Alembic. `make deploy TAG=...` — production deploy via `scripts/deploy.sh`.
+- `make dev` — run the dev server. `make css-build` (`npm install && npm run
+  css:build`) compiles `static/css/src/main.css` (Tailwind v4, CSS-first —
+  `@theme`/`@source`/`@custom-variant`, no `tailwind.config.js`) into
+  `static/css/main.css`; run it at least once before `make dev`, since
+  templates reference the compiled file and it's gitignored (build
+  artifact). `make css-watch` rebuilds on save while iterating. Both are
+  thin wrappers over `package.json`'s `npm run css:build`/`css:watch`; the
+  Dockerfile's `css-builder` stage runs the same `npm ci && npm run
+  css:build` to produce the image's static assets (`npm ci`, not `install`
+  — fails loudly on lockfile drift instead of silently rewriting it).
+  `make docker-build` / `make docker-dev` — build/run the container
+  locally. `make migrate` / `make migrate-new` — Alembic. `make deploy
+  TAG=...` — production deploy via `scripts/deploy.sh`.
 
 ## Testing model
 

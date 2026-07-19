@@ -1,0 +1,76 @@
+{#
+  Party create — person and organization forms, tab-toggled with Alpine
+  (already loaded globally by templates/base.html; `x-cloak` is styled
+  invisible by the same global CSS the mobile sidebar overlay in
+  layouts/admin.html relies on). Each form posts via `hx-post` to its own
+  endpoint (`app.features.parties.web.create_person`/`create_organization`);
+  a field-validation or conflict failure re-renders THIS template at 200
+  with `errors`/`form` populated — same "re-render, don't redirect"
+  convention as templates/auth/login.html's bad-credentials path — rather
+  than a branded error page.
+
+  Context: `party_type` (which tab is active on load — "person" unless the
+  page was reached via `?party_type=organization` or a failed org submit),
+  `errors` (`{"person": {...}}` or `{"organization": {...}}`, field name ->
+  message, with `_form` reserved for a whole-form error such as a duplicate
+  email), `form` (submitted values to repopulate the failed form).
+#}
+{% extends "layouts/admin.html" %}
+{% from "components/form_macros.html" import text_input, submit_button %}
+
+{% block admin_content %}
+<div x-data="{ tab: '{{ party_type }}' }" class="max-w-2xl">
+    <h1 class="text-xl font-semibold text-slate-900 dark:text-white font-display mb-6">New Party</h1>
+
+    <div class="flex gap-2 mb-4 border-b border-slate-200 dark:border-slate-700">
+        <button type="button" @click="tab = 'person'"
+                :class="tab === 'person' ? 'border-primary-600 text-primary-600 dark:text-primary-400' : 'border-transparent text-slate-500 dark:text-slate-400'"
+                class="px-4 py-2 text-sm font-medium border-b-2 -mb-px">Person</button>
+        <button type="button" @click="tab = 'organization'"
+                :class="tab === 'organization' ? 'border-primary-600 text-primary-600 dark:text-primary-400' : 'border-transparent text-slate-500 dark:text-slate-400'"
+                class="px-4 py-2 text-sm font-medium border-b-2 -mb-px">Organization</button>
+    </div>
+
+    <div x-show="tab === 'person'" class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+        {% if errors.person %}
+        <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">
+            {{ errors.person.get("_form", "Please correct the errors below.") }}
+        </div>
+        {% endif %}
+        <form hx-post="/admin/parties/people" class="space-y-4">
+            {{ text_input("first_name", "First name", value=form.get("first_name", ""), required=true) }}
+            {% if errors.person and errors.person.get("first_name") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.person.get("first_name") }}</p>
+            {% endif %}
+            {{ text_input("last_name", "Last name", value=form.get("last_name", ""), required=true) }}
+            {% if errors.person and errors.person.get("last_name") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.person.get("last_name") }}</p>
+            {% endif %}
+            {{ text_input("email", "Email", value=form.get("email", ""), type="email", required=true) }}
+            {% if errors.person and errors.person.get("email") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.person.get("email") }}</p>
+            {% endif %}
+            {{ submit_button(label="Create Person", cancel_url="/admin/parties") }}
+        </form>
+    </div>
+
+    <div x-show="tab === 'organization'" x-cloak class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+        {% if errors.organization %}
+        <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">
+            {{ errors.organization.get("_form", "Please correct the errors below.") }}
+        </div>
+        {% endif %}
+        <form hx-post="/admin/parties/organizations" class="space-y-4">
+            {{ text_input("legal_name", "Legal name", value=form.get("legal_name", ""), required=true) }}
+            {% if errors.organization and errors.organization.get("legal_name") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.organization.get("legal_name") }}</p>
+            {% endif %}
+            {{ text_input("email", "Email (optional)", value=form.get("email", ""), type="email") }}
+            {% if errors.organization and errors.organization.get("email") %}
+            <p class="text-xs text-red-600 dark:text-red-400">{{ errors.organization.get("email") }}</p>
+            {% endif %}
+            {{ submit_button(label="Create Organization", cancel_url="/admin/parties") }}
+        </form>
+    </div>
+</div>
+{% endblock %}

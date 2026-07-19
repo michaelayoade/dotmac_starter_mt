@@ -95,6 +95,48 @@ def test_csrf_failure_response_uses_error_envelope():
     assert "detail" not in body
 
 
+def test_csrf_failure_html_negotiation_renders_branded_csrf_page():
+    """Same negotiation as app.core.errors._negotiate: a browser (Accept:
+    text/html) gets the branded errors/csrf.html page, not the JSON envelope
+    -- proving the middleware routes through the same decision point rather
+    than hand-building its own response."""
+    app = CSRFMiddleware(_ok_app)
+
+    response = _run(
+        app,
+        method="POST",
+        path="/form",
+        headers=[
+            (b"cookie", f"{CSRF_COOKIE}=token".encode()),
+            (b"accept", b"text/html"),
+        ],
+    )
+    assert response["status"] == 403
+    content_type = next(v for k, v in response["headers"] if k == b"content-type")
+    assert content_type.startswith(b"text/html")
+    body = b"".join(
+        m.get("body", b"")
+        for m in response["messages"]
+        if m["type"] == "http.response.body"
+    )
+    assert b"Session expired" in body
+
+
+def test_csrf_failure_json_default_unaffected_by_negotiation():
+    """No Accept header (the existing test's shape) still gets plain JSON --
+    negotiation must not change the default/API-client behavior."""
+    app = CSRFMiddleware(_ok_app)
+
+    response = _run(
+        app,
+        method="POST",
+        path="/form",
+        headers=[(b"cookie", f"{CSRF_COOKIE}=token".encode())],
+    )
+    content_type = next(v for k, v in response["headers"] if k == b"content-type")
+    assert content_type.startswith(b"application/json")
+
+
 def test_observability_generates_request_id_by_default():
     app = ObservabilityMiddleware(_ok_app)
 

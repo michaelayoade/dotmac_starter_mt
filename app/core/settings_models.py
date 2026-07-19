@@ -39,6 +39,7 @@ class SettingDomain(str, enum.Enum):
     audit = "audit"
     branding = "branding"
     custom_fields = "custom_fields"
+    display = "display"
 
 
 class SettingValueType(str, enum.Enum):

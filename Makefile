@@ -56,8 +56,14 @@ migrate-new: ## Create migration: make migrate-new msg="..."
 	poetry run alembic revision --autogenerate -m "$(msg)"
 
 ##@ Dev
-dev: ## Run dev server
+dev: ## Run dev server (run `make css-build` at least once first — templates reference static/css/main.css, which is gitignored/build-only)
 	poetry run uvicorn app.main:app --reload --port 8000
+css-build: ## Build Tailwind CSS once (static/css/src/main.css -> static/css/main.css)
+	npm install
+	npm run css:build
+css-watch: ## Rebuild Tailwind CSS on file change (dev loop)
+	npm install
+	npm run css:watch
 
 ##@ Docker
 docker-build: ## Build local dev image (IMAGE_NAME, IMAGE_TAG, APP_PORT overridable)
@@ -74,4 +80,4 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 
 .PHONY: help lint lint-imports format type-check security check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	docker-build docker-dev bump-version deploy
+	css-build css-watch docker-build docker-dev bump-version deploy
