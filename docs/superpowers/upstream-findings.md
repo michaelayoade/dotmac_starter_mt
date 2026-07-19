@@ -44,13 +44,19 @@ Upstream only what fixes the source repo on its own terms — not starter-specif
 
 ## dotmac_sub
 
-1. **`scripts/deploy.sh` health-gate curl has no timeouts.** A hung health endpoint stalls a
+1. ~~**`scripts/deploy.sh` health-gate curl has no timeouts.**~~ A hung health endpoint stalls a
    retry iteration indefinitely. PR: `--connect-timeout/--max-time` via a `HEALTH_CURL_TIMEOUT`
    env knob (as implemented in dotmac_starter_mt `scripts/deploy.sh`).
-2. **`scripts/deploy.sh` generic ERR trap repins `.env` but does not `up -d` the previous
-   image.** On a mid-`up -d` failure the old container may already be stopped/removed, leaving
+2. ~~**`scripts/deploy.sh` generic ERR trap repins `.env` but does not `up -d` the previous
+   image.**~~ On a mid-`up -d` failure the old container may already be stopped/removed, leaving
    nothing running; only the health-gate failure path does the full restore. PR: add the
    restore to the trap (mirrors the starter's fix).
+
+Both dotmac_sub items above: **RESOLVED (sub#1437, merged)** — `fix(deploy):
+health-gate curl timeouts; restore previous image on up-failure` added the
+`HEALTH_CURL_TIMEOUT` knob (`--connect-timeout`/`--max-time` on the probe) and a
+`restore_prev` ERR trap that repins AND recreates the app-image services on the
+previous release. Verified against `origin/main` (7807afcd) 2026-07-19.
 
 ## dotmac_starter
 
