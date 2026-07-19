@@ -1,6 +1,6 @@
 # ADR 0002 — Starter Consolidation
 
-**Status:** Accepted (amended 2026-07-18 — archive decision reversed)
+**Status:** Accepted (amended 2026-07-18; deployment positioning superseded by ADR-0003 for new development)
 **Date:** 2026-07-17
 **Supersedes:** N/A (extends ADR 0001, does not replace it)
 **Successor of:** ADR 0001 — Multi-Tenant Architecture
@@ -114,3 +114,16 @@ Revised positioning:
 
 The "archive after core parity / after 2c" milestones elsewhere in this repo's docs are
 void; superseded by this amendment.
+
+## Amendment 2026-07-18 — one profile-driven foundation for new development
+
+ADR-0003 supersedes the deployment-positioning portion of the amendment above for new
+development. `dotmac_starter_mt` is the canonical strategic foundation for new vendor
+SaaS, dedicated hosted, self-hosted/on-premise, OEM, and single-tenant deployments. A new
+single-tenant app uses the same tenant/RLS model with one tenant rather than a separate
+application architecture.
+
+The legacy `dotmac_starter` may remain available for simple or existing uses; this does
+not require deleting or archiving it. It must not become a second destination for new
+capability, control-plane, or security architecture. See
+`docs/adr/0003-unified-deployment-profiles.md` for the governing decision.

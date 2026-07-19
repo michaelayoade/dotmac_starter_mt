@@ -5,6 +5,13 @@ The consolidated DotMac starter (spec:
 `docs/adr/0002-starter-consolidation.md`). Multi-tenant always; a
 single-tenant app is simply a deployment with one tenant row.
 
+ADR-0003 makes this repo the strategic foundation for new SaaS, dedicated,
+self-hosted/on-premise, OEM, and single-tenant deployments. Its profile,
+provider, entitlement, subscription, billing, metering, and licensing
+contracts are an accepted target—not implemented runtime APIs. Follow
+`docs/superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md`
+when adding them; do not invent interim competing authorities.
+
 ## Layout
 
 - `app/core/` — config, db, models base, security, deps (route guards),
@@ -123,6 +130,58 @@ without touching core:
   renders a partial owns that partial. Follow this pattern — an
   htmx-fetched URL, not an import — any time one feature's admin page needs
   another feature's UI.
+
+## Planned deployment composition (ADR-0003)
+
+These are accepted design constraints for future profile/control-plane work;
+they are not claims that the current runtime already enforces them:
+
+- Compose deployment types from module manifests and provider interfaces. Do
+  not scatter `if deployment_mode == ...`, plan-name, payment-state, or raw
+  license checks through feature code.
+- A single-tenant deployment keeps `Tenant`, request tenant context, composite
+  tenant constraints, and RLS. It is a topology, not a second schema or code
+  path.
+- Keep actor permission, tenant entitlement, rollout flag, runtime setting,
+  and quota as separate decisions. Entitlements are common; subscriptions,
+  billing, metering, and signed licensing are independently optional.
+- Feature code consumes explainable local entitlement/quota decisions. A
+  request-time access check never calls a payment provider or depends on
+  network license validation.
+- Treat Python plugins as trusted in-process code. Install and verify them in
+  the build/deploy supply chain; the admin UI may enable only already-installed,
+  migrated, dependency-complete, healthy code and may never run `pip install`.
+- Run plugin migrations at deploy time. Disabling a module preserves its data;
+  retirement requires an explicit impact preview and archive/export/delete
+  policy.
+- Treat tenant domains as lifecycle resources, not generic settings. Normalize
+  and prove DNS ownership before activation; reconcile desired bindings through
+  an ingress/TLS provider; never issue a certificate for an arbitrary first
+  request `Host`. Nginx is one provider, not an architecture dependency.
+- Keep the exact platform host, tenant base domain(s), and custom-domain target
+  distinct in the planned profile contract. Unknown/unverified hosts fail
+  closed, and forwarded headers are trusted only from configured proxies.
+- Products compose a pinned versioned kernel, versioned modules, product-owned
+  modules/providers/brand/policies, and a deployment profile. Do not copy,
+  monkey-patch, or fork kernel files for product behavior; add or improve a
+  declared extension point and propagate fixes through tested release updates.
+- Existing products adopt through assemblies, adapters, contract/shadow tests,
+  expand/contract migrations, reconciliation, and one-writer cutovers—never a
+  big-bang rewrite. ERP and ISP remain separate data planes; an ISP operator is a
+  tenant, while its subscribers remain product-domain parties/customers.
+- Keep business rules in services. JSON routers, Jinja/HTMX web routes, workers,
+  CLI, and external frontends are adapters. API-first does not mean deleting the
+  built-in `web` module; API-only is one profile, and both surfaces must reach the
+  same authorization and lifecycle decisions.
+- Model tenant, subscription, entitlement, provider-job, domain, and license
+  lifecycles separately. Cross-module transitions require idempotency,
+  transaction owner, outbox/inbox, audit, retry/compensation, and repair; payment
+  failure or module disablement never implicitly deletes tenant data.
+- Locale/language, timezone, currency, legal entity, tax jurisdiction, and data
+  residency are independent. Use stable language-neutral codes/message IDs,
+  exact Money (never float), immutable FX/price/rating/tax-policy snapshots, and
+  declared provider/policy versions—never country or plan-name branches in
+  features.
 
 ## Web portal (admin UI)
 

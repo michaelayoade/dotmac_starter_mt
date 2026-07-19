@@ -152,7 +152,9 @@
 - Orphan-settings allowlist EMPTY. display_name projection has a single write-owner (ownership table updated).
 - PR to main, CI green, merge (established finish).
 
-Phase 2c (auth hardening: MFA/TOTP, refresh rotation, password reset, lockout, API keys — then archive dotmac_starter) follows.
+Phase 2c (auth hardening: MFA/TOTP, refresh rotation, password reset, lockout, API keys)
+follows. The former archive milestone is superseded by ADR-0003: the legacy starter may
+remain, while new strategic work lands in this profile-driven foundation.
 
 ## Scope deviation (controller, flagged to user)
 The original 2b scope listed "tenants" screens. Tenant CRUD is PLATFORM-scoped (require_platform,

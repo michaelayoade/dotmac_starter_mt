@@ -15,12 +15,88 @@ A single-tenant product is simply a deployment of this app with **one**
 tenant row (`POST /platform/tenants`) — not a different codebase, not a
 different code path.
 
+For new development, the accepted direction is to use this same foundation
+for vendor SaaS, dedicated hosted, self-hosted/on-premise, OEM, and
+single-tenant deployments. That profile/provider architecture is planned,
+not current runtime behavior; today the repo has only the feature manifest,
+`DISABLED_FEATURES`, and `WEB_ENABLED` composition seams.
+
 See [`docs/adr/0001-multi-tenant-architecture.md`](docs/adr/0001-multi-tenant-architecture.md)
 for the founding tenancy design, [`docs/adr/0002-starter-consolidation.md`](docs/adr/0002-starter-consolidation.md)
 for how this repo became the org's one starter template,
+[`docs/adr/0003-unified-deployment-profiles.md`](docs/adr/0003-unified-deployment-profiles.md)
+for the accepted deployment-profile and commercial-module decisions,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full architecture
 reference (including the model provenance/ownership tables), and
 [`CLAUDE.md`](CLAUDE.md) for the agent-facing rules summary.
+
+## Deployment direction (accepted; implementation planned)
+
+One codebase will compose independent deployment axes—tenancy topology,
+operator, connectivity, commercial authority, identity, branding, domains,
+locale, currency, legal/tax authority, data residency, UI surface, updates,
+and telemetry—through typed deployment profiles, module manifests, and provider
+interfaces. A profile name is configuration shorthand, not a value that feature
+code branches on. Even a one-tenant deployment keeps the tenant row, tenant
+context, composite tenant constraints, and PostgreSQL RLS.
+
+Commercial concerns are deliberately separate:
+
+- **Entitlements** are the common capability-decision layer: what a tenant may
+  use, within which dates and limits, and why.
+- **Subscriptions** are optional: plans, trials, renewals, grace periods, and
+  cancellation. They are needed only when the product has a recurring
+  commercial lifecycle.
+- **Billing** is optional: payment-provider customers, invoices, payments,
+  refunds, and webhooks. Enterprise/manual/ERP invoicing can omit it.
+- **Metering** is optional: immutable usage events and quota or billable-usage
+  aggregates. It is needed only for quantitative limits or usage pricing.
+- **Licensing** is optional: signed offline or delegated grants, commonly for
+  commercial on-premise and OEM distribution.
+
+Consequently, a perpetual on-premise install can use entitlements plus a
+signed license with no subscription or billing module; an invoiced enterprise
+deployment can use subscriptions without in-product billing; and self-service
+paid SaaS can install all of them. See the
+[`deployment profiles and commercial platform plan`](docs/superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md)
+for the authority model, workstreams, sequencing, and completion gates.
+
+Tenant domains follow the same provider model. The application owns normalized,
+verified domain-to-tenant mappings; a profile-selected ingress provider owns
+proxy bindings and TLS automation. Nginx is a valid static reverse proxy, but
+dynamic customer domains also require a certificate/DNS controller (or a
+managed load balancer, Caddy, Traefik, or Kubernetes ingress + cert-manager).
+The target workflow verifies DNS ownership before binding or issuing a
+certificate and never trusts an arbitrary first-request `Host` header.
+
+The accepted reuse model is also more than cloning. A clone is a snapshot and
+does not receive later fixes automatically. The target platform publishes a
+versioned kernel and optional modules; each product is a thin
+`ProductAssemblySpec` that pins those versions and adds only its domain modules,
+providers, brand, policies, and deployment profile. A core fix produces one
+release, automated update PRs for maintained products, their profile/lifecycle
+tests, and then a staged or customer-approved redeploy. Running deployments
+never change silently.
+
+The app remains both API-capable and web-capable. Business rules live in shared
+services; JSON routers and the built-in Jinja/HTMX `web` module are parallel
+adapters. Keep the working admin portal when useful, use `WEB_ENABLED=false`
+for API-only deployments, or build separate SPA/mobile/partner frontends
+against versioned OpenAPI contracts and the same authorization/capability APIs.
+
+Existing `dotmac_erp` and `dotmac_sub` are adoption candidates, not rewrite
+targets. ERP and ISP subscriber management remain separate product assemblies
+and normally separate deployments/databases. Other ISP operators should first
+receive dedicated one-tenant ISP deployments; shared multi-ISP SaaS follows only
+after an explicit cross-ISP isolation program. See the
+[`existing product adoption plan`](docs/superpowers/plans/2026-07-18-existing-product-adoption.md).
+
+Do not create a permanent ISP branch or clone from this repository. Continue the
+kernel/platform contracts here, adapt the existing `dotmac_sub` as the ISP
+assembly, and build vendor accounts/contracts/fleet/licensing in a separate thin
+control-plane assembly. Temporary feature branches are normal, but products
+consume versioned kernel/module releases so fixes propagate through tested update
+PRs rather than source copying.
 
 ## Starting a project from this template
 
@@ -118,7 +194,52 @@ productionize further, port what your project needs:
 - MFA, password reset, account lockout, and production auth hardening
   (phase 2c on this repo's own roadmap; fleet-specific rationale lives in
   `docs/adr/`, not here)
-- Billing, file uploads, notifications, scheduler
+- File uploads, notifications, scheduler
+- The manifest-driven module/plugin registry, tenant entitlements, typed
+  feature flags, dependency/health/migration validation, and effective-
+  capability admin UI described by the module control-plane directive
+- Typed deployment profiles and provider registry for SaaS, dedicated,
+  on-premise/air-gapped, OEM, and API-only packaging
+- Versioned platform-kernel/module distribution, thin product assemblies,
+  automated dependency-update PRs, signed releases/offline bundles, and the
+  cross-product compatibility matrix needed for one fix to propagate safely
+- Incremental ERP/subscriber-management assembly adoption, including a dedicated-
+  per-ISP path and the separate tenant-safety program required before shared
+  multi-ISP SaaS
+- End-to-end tenant lifecycle orchestration: onboarding, activation, provider
+  jobs, restriction/suspension/recovery, support access, cancellation, export,
+  retention/legal hold, provider cleanup, and purge
+- Fleet provisioning automation: a durable control-plane workflow, reusable
+  OpenTofu infrastructure modules, remote state/locking, cloud-init/Ansible host
+  bootstrap, isolated dedicated-ISP Compose deployments, optional Helm/GitOps
+  execution at larger scale, activation gates, drift reconciliation, and
+  auditable day-two operations. Kubernetes is not required for the first
+  dedicated-ISP deployment profile.
+- On-prem distribution/IP assurance tiers: signed minimal runtime images and
+  offline bundles, build-secret/layer hygiene, digest/provenance verification,
+  licence binding, optional compiled high-value modules, and a separately
+  threat-modelled attested-appliance path. Customer-controlled root access can
+  never be described as guaranteed source secrecy; use vendor-managed dedicated
+  hosting when that guarantee is a commercial requirement.
+- Tenant-safe fleet support and maintenance: OpenTelemetry logs/metrics/traces,
+  readiness and synthetic checks, outbound-only authenticated collectors,
+  health-only/local-only/air-gapped modes, SLO-based alerting, support cases and
+  SLA clocks, redacted diagnostic bundles, consented just-in-time access with
+  session audit, incident communication, version/EOL inventory, backup-restore
+  proof, drift detection, and canary maintenance waves. Permanent vendor SSH or
+  invisible tenant impersonation are not acceptable support mechanisms.
+- Internationalization and global commerce primitives: stable message IDs and
+  locale catalogs, RTL/pluralization, exact multi-currency Money/FX snapshots,
+  immutable prices/rating, invoicing/collections, versioned tax/jurisdiction
+  policy, legal entities, and data residency
+- Tenant-domain provisioning: separate platform/tenant hosts, DNS ownership
+  verification, ingress reconciliation, TLS issue/renew/revoke, canonical-host
+  policy, and production proxy/header trust configuration. The resolver and
+  `TenantDomain` model exist today, but no safe write/reconciliation path does.
+- Optional subscription, billing, metering, signed-licensing, and OEM
+  delegation modules; none should be inferred from the presence of
+  entitlements
+- Profile generator, deployment-specific packaging, and CI profile matrix
 - Security headers
 - A self-service (non-admin) portal surface — today every `/admin/*` page
   requires the `admin` role; see `app.core.web_deps.require_web_auth`'s

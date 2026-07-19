@@ -2,7 +2,247 @@
 
 This expands the `CLAUDE.md` summary. See `docs/adr/0001-multi-tenant-architecture.md`
 for the founding tenancy design and `docs/adr/0002-starter-consolidation.md`
-for how this repo came to be the org's one starter.
+for how this repo came to be the org's one starter. ADR-0003 defines the
+accepted, not-yet-implemented profile-driven direction for SaaS, dedicated,
+self-hosted/on-premise, OEM, and single-tenant deployments.
+
+## Target deployment profiles and commercial authorities (accepted; not implemented)
+
+The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
+`WEB_ENABLED`; it does **not** yet implement `DeploymentProfile`, a provider
+registry, tenant entitlements, subscriptions, billing, metering, or signed
+licensing. The target architecture is authoritative in
+[`ADR-0003`](adr/0003-unified-deployment-profiles.md), with delivery gates in
+the
+[`deployment profiles and commercial platform plan`](superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md).
+
+New deployment types compose modules and providers across independent axes
+(topology, operator, connectivity, commercial authority, identity, branding,
+domains, locale, currency, legal/tax authority, residency, UI surface, updates,
+and telemetry). Feature code must not branch on deployment-mode or plan-name
+strings. A one-tenant deployment still provisions a tenant row and retains
+tenant context, composite constraints, and RLS.
+
+The planned request-time decision is:
+
+```text
+installed + deployment-enabled + migrated + dependencies + healthy
+  + tenant entitlement + actor permission + applicable quota
+  = effective capability
+```
+
+These authorities must remain distinct:
+
+| Concern | Question answered | Required? |
+|---|---|---|
+| Permission | May this actor perform this action? | Yes for protected actions |
+| Entitlement | May this tenant use this capability/limit? | Common commercial/access core |
+| Feature flag | Should eligible traffic receive this rollout? | Optional; never authorization |
+| Setting | How should enabled behavior operate? | As declared by a module |
+| Subscription | What recurring plan/lifecycle applies? | Optional |
+| Billing | What payment/invoice settlement occurred? | Optional |
+| Metering | How much usage occurred and against which limit? | Optional |
+| Signed licensing | Which offline/delegated grant is valid? | Optional; typical on-prem/OEM |
+
+Contract grants, subscription state, or verified license claims project into
+entitlement grants. Billing may update subscription state, and metering may
+feed quota and/or billing, but request handlers consult local entitlement and
+quota decisions—not payment providers or raw license payloads.
+
+### Target tenant lifecycle and global commercial foundations
+
+The application currently has tenant creation and `Tenant.is_active`/
+`suspended_at`/`deleted_at` fields, but no canonical tenant transition service,
+cross-module lifecycle orchestrator, outbox/inbox, onboarding workflow,
+subscription/billing/rating lifecycle, support-access workflow, or coordinated
+offboarding/purge path. The target uses separate tenant, subscription,
+entitlement, provider-job, domain, and license state machines. Versioned policy
+maps commercial events to restriction/suspension; payment failure never directly
+deletes data.
+
+The existing display settings provide timezone and date/datetime presentation
+formats only. They are not internationalization, multi-currency, or
+multi-jurisdiction support. The target keeps locale/language, timezone,
+transaction and functional currencies, legal entity, tax jurisdiction, and
+data residency independent. It adds stable message IDs/catalogs, exact Money,
+immutable FX/price/rating/tax snapshots, and versioned jurisdiction policy while
+keeping API facts and codes language-neutral.
+
+Cross-module lifecycle mutations use idempotent commands, one local transaction
+owner, transactional outbox/idempotent inbox, retryable provider jobs,
+compensation, audit history, and reconcile/repair. Offboarding explicitly covers
+final settlement, read-only/export, credential/integration/domain cleanup,
+retention/legal hold, backup expiry, and purge.
+
+### Target infrastructure provisioning and fleet operations
+
+The existing Docker Compose and `scripts/deploy.sh` are a deployment primitive,
+not an end-to-end fleet provisioner. The target platform control plane records a
+pending `Deployment` and durable `ProvisioningRequest`; a restricted worker then
+uses a selected infrastructure provider to plan, approve, create, bootstrap,
+deploy, verify, activate, reconcile, and eventually retire it. Signup never runs
+OpenTofu, Ansible, Helm, migrations, or cloud APIs synchronously.
+
+The recommended first provider for dedicated ISPs is an isolated VM or cloud
+project/account, managed PostgreSQL where available, object storage, external
+secrets, DNS/TLS, and the existing immutable-image Compose release. Reusable
+OpenTofu modules own cloud desired state with encrypted/locked remote state per
+deployment; cloud-init/Ansible owns repeatable host bootstrap. The deployment
+worker retains external resource IDs and evidence, not raw provider credentials,
+and obtains least-privilege credentials from the configured secret/identity
+authority.
+
+Kubernetes is optional. A later managed-Kubernetes provider uses Helm/GitOps when
+regional fleet size, HA, or multi-service scheduling justifies it, while keeping
+separate ISP database and secret boundaries. A namespace alone is not treated as
+equivalent to account/project/cluster isolation. On-prem starts with Compose and
+can select K3s/conformant Kubernetes when the customer requires HA or already
+operates it.
+
+```text
+verified signup/contract -> commercial order -> pending deployment
+  -> IaC plan/approval/apply -> runtime bootstrap -> image deploy/migrate
+  -> one tenant + owner -> entitlement/license projection -> DNS/TLS
+  -> health/security/backup checks -> activation -> billing-start event
+```
+
+Every step is idempotent, serialized per deployment, resumable, audited, and
+records desired versus observed state plus compensation/repair. Day-two
+reconciliation handles drift, upgrades, renewals, backup verification, capacity,
+disaster recovery, suspension, export, retention, and termination. Artifact CI
+publishes signed images/SBOM/provenance; unrestricted fleet credentials remain in
+the provisioning environment rather than application CI or tenant deployments.
+
+Customer-controlled on-premise cannot provide an absolute source-confidentiality
+guarantee: a privileged host/container operator can inspect image files and layers,
+observe running code, and patch local license checks. The standard profile ships a
+minimal signed runtime image/offline bundle—not a repository—built in multiple
+stages with no Git history, tests, build secrets, or unnecessary source inputs in
+any final layer. It runs non-root/read-only, pins by digest, verifies signature and
+provenance, and contains only public licence/artifact verification material.
+
+Native compilation or obfuscation of selected modules raises reverse-engineering
+cost but is not treated as secrecy. Source-critical customers should select
+vendor-managed dedicated hosting, where they do not control the host/image. A
+separate attested-appliance profile may later use measured boot, confidential
+computing, remote attestation, and conditional key release on supported hardware;
+it still requires an explicit threat model and residual-risk statement. Contracts,
+OEM/source licences, and escrow address legal/commercial rights, not technical
+confidentiality.
+
+### Target support, observability, and maintenance operations
+
+Today the starter has correlated JSON request logs and a public liveness endpoint;
+it does not yet provide readiness, metrics/traces, central telemetry, fleet heartbeat,
+SLOs/alerts, support cases/access, diagnostic bundles, maintenance rings, or incident
+management. The target uses vendor-neutral OpenTelemetry instrumentation and a local
+collector, preserving request IDs while correlating logs, metrics, and traces.
+
+Connected deployments export outbound over mTLS to a regional gateway; restricted
+deployments can send signed aggregate health only; air-gapped deployments retain data
+locally and generate customer-approved redacted/encrypted diagnostic bundles. The
+gateway assigns canonical deployment/tenant scope from authenticated identity. Telemetry
+uses attribute allowlists, redaction, sampling, bounded buffering, contractual retention
+and residency, and excludes secrets, subscriber/business payloads, and high-cardinality
+identifiers by default. Telemetry failure never blocks application requests.
+
+The health surface separates public liveness, protected readiness, authenticated
+diagnostics, and external synthetic journeys. Central storage and dashboards isolate
+deployment/tenant data at ingest, query, alert, export, retention, and deletion. Alerts
+focus on actionable symptoms/SLOs, backups, certificate/licence expiry, capacity, job lag,
+drift, security exposure, and telemetry deadman signals; maintenance windows, grouping and
+inhibition prevent alert storms.
+
+Support requires a case, severity/SLA, consent or policy-approved break-glass, a
+time-bounded least-privilege grant, an outbound customer-controlled channel for on-prem,
+session/action/command recording, revocation, and customer-visible closure. Application
+impersonation and host access are separate. Shared passwords, permanent vendor SSH keys,
+hidden accounts, inbound-by-default tunnels, and invisible global impersonation are
+forbidden.
+
+Fleet maintenance inventories exact product/artifact/config/schema/module versions,
+support/EOL state, drift and backup/restore proof. Releases move through internal, canary,
+early-adopter and general rings with customer windows/approvals, preflight, backup,
+migration compatibility, readiness/synthetic observation, automatic wave halt and
+rollback evidence. The kernel defines common web/job/database/deployment signals;
+assemblies add domain signals such as ISP RADIUS, provisioning, usage and subscriber-
+service health. Incident management owns detection through recovery communication and
+post-incident corrective work.
+
+### Target cross-project reuse and frontend surfaces
+
+Cloning this repository currently creates an independent source snapshot; later
+fixes do not propagate automatically. The target separates a versioned platform
+kernel, versioned optional modules, thin product assemblies, and deployment
+profiles. Maintained products pin signed releases; automated update PRs rebuild
+and run each product's profile/lifecycle/migration tests before rollout. A fix is
+implemented once but deployed deliberately—never injected silently into running
+systems.
+
+ERP and ISP subscriber management remain separate product assemblies/data planes
+even when they consume the same kernel. ERP `Organization` is the natural tenant
+mapping candidate; in the ISP product, the ISP operator—not each subscriber—is
+the tenant. Dedicated one-tenant deployments are the safe initial adoption path
+for additional ISPs. The detailed strangler/adapter and later shared multi-ISP
+tenant-safety program is in the
+[`existing product adoption plan`](superpowers/plans/2026-07-18-existing-product-adoption.md).
+
+The current architecture already points toward an API-first, not API-only,
+surface model: feature `router.py` files expose JSON while `web.py` files and the
+optional `web` manifest expose the Jinja/HTMX portal over shared services. The
+target formalizes versioned OpenAPI contracts, generated-client tests, and a
+capability/bootstrap response for separate SPA/mobile/partner frontends. The
+built-in portal remains supported; `WEB_ENABLED=false` remains the API-only
+composition. Cookie/CSRF rules apply to the same-origin portal, while external
+frontends use explicitly configured bearer/OAuth/OIDC and CORS/origin contracts.
+
+### Target domain, DNS, TLS, and ingress control plane
+
+As built, `PLATFORM_ROOT_DOMAIN` serves both as the root host/platform context
+and the suffix for `{tenant-slug}.{root}`. `TenantResolverMiddleware` also
+accepts an exact `TenantDomain.domain` match only when `verified_at` is set.
+There is currently no mutation API for `TenantDomain`, DNS ownership
+verification, ingress reconciler, certificate lifecycle, or dynamic production
+`TRUSTED_HOSTS` policy. ADR-0001's ingress examples are design intent, not a
+completed custom-domain control plane.
+
+The target profile separates these concerns:
+
+- **Platform host:** the exact control-plane host, such as
+  `console.example.com`; tenant traffic must not reach platform routes.
+- **Tenant base domain(s):** wildcard tenant hosts such as
+  `{slug}.app.example.com`, normally served by wildcard DNS and TLS.
+- **Custom-domain target:** a stable CNAME/ALIAS target and ownership TXT
+  challenge used before a customer domain becomes routable.
+- **Ingress provider:** Nginx, Caddy, Traefik, Kubernetes ingress/cert-manager,
+  or a managed load balancer implementation of one provider contract.
+- **TLS provider:** ACME/DNS-01/HTTP-01, managed certificates, or manually
+  supplied/customer-PKI certificates according to deployment profile.
+
+`TenantDomain` is the desired application routing authority only after a
+normalized domain passes ownership verification and reaches `active` state.
+DNS and certificate systems remain external authorities; an idempotent
+reconciler records their observed state, last error, certificate expiry, and
+next retry. The planned lifecycle is:
+
+```text
+requested -> pending_dns -> verified -> pending_tls -> active
+                                      \-> failed/retry
+active -> suspended | removing -> removed
+```
+
+Domain input is lower-cased, IDNA-normalized, stripped of port/trailing dot,
+globally unique, and checked against reserved/platform domains. A random DNS
+TXT challenge—not CNAME presence alone—proves control. TLS is issued only after
+verification; certificates renew before expiry and are revoked/removed when a
+binding is retired. Wildcard certificates cover only the configured tenant
+suffix, not arbitrary custom domains.
+
+At the HTTP boundary, the selected proxy must preserve the validated `Host`,
+set `X-Forwarded-Proto`, replace rather than append untrusted forwarding
+headers, and be the only network peer whose forwarded headers the app trusts.
+Unknown/unverified hosts fail closed. On-prem/air-gapped profiles can use local
+DNS and customer PKI/manual certificates without any public ACME dependency.
 
 ## Layout
 
