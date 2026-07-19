@@ -22,8 +22,74 @@ was explicitly triaged "phase-2 ticket" — none blocks the phase-1 merge.
   `eye_color` e2e canary (`tests/test_custom_fields_isolation.py`) — zero migrations
   between defining and using a field.
 - ~~After core parity lands: archive `dotmac_starter` with a pointer README.~~ —
-  **REVERSED (Michael, 2026-07-18, ADR-0002 amendment):** dotmac_starter stays as the
-  simple single-tenant starter for simple apps; this repo is the SaaS starter. No archive.
+  **SUPERSEDED FOR NEW DEVELOPMENT (ADR-0003):** the legacy `dotmac_starter` may remain
+  available for simple/legacy uses, but `dotmac_starter_mt` is the canonical strategic
+  foundation for new SaaS, dedicated, self-hosted/on-premise, OEM, and single-tenant
+  deployments. No archive is required; new capability and security architecture must not
+  fork between starters.
+
+## Deployment profiles and commercial platform (accepted target; open)
+
+Decision: `docs/adr/0003-unified-deployment-profiles.md`. Delivery plan:
+`docs/superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md`.
+Sequence this after the control-plane-security program and the manifest-driven module
+control-plane prerequisites.
+
+- **Parallel product delivery:** run a platform-foundation lane in `dotmac_starter_mt` and
+  a separate vendor-control-plane assembly lane. The latter starts against tagged kernel/
+  assembly pre-releases with fake/manual providers, then adds account/contract/fleet/
+  licensing/support/provisioning/billing vertical slices. It must not copy starter source
+  or create parallel identity, authorization, entitlement, lifecycle, audit, job, settings,
+  or observability authorities. Integration advances through the foundation, manual
+  commercial, licence, provisioning-simulation, sandbox ISP, pilot, and production gates
+  defined in the delivery plan.
+
+- **Profile/provider registry:** typed profile axes, provider protocols, startup
+  validation, effective-profile diagnostics, and no-mode-branching governance tests.
+- **Entitlements core:** declared capabilities, dated/limited tenant grants, explainable
+  decisions, cache invalidation, history, impact preview, and audit. This is the common
+  foundation and absorbs module-control-plane step 4; do not also implement the older
+  `tenant_module_entitlements` sketch.
+- **Tenant lifecycle orchestration:** separate tenant/commercial/job/domain/license state
+  machines; idempotent commands; outbox/inbox; retry/compensation/repair; onboarding;
+  restriction/suspension/recovery; support access; cancellation/export/retention/legal
+  hold/provider cleanup/purge.
+- **Cross-project distribution:** versioned platform kernel and modules, thin product
+  assemblies, declared extension points, signed packages/base images/offline bundles,
+  automated update PRs, compatibility/migration gates, and cross-product CI so fixes
+  propagate without copying source or silently changing deployments.
+- **Existing product adoption:** ERP and subscriber-management assembly manifests,
+  contract baselines, adapter/shadow/cutover phases, separate databases, ERP
+  Organization-to-Tenant mapping, dedicated-per-ISP onboarding first, and a later
+  full-table/worker/cache/provider cross-ISP tenant-safety program before shared ISP SaaS.
+- **API + web surfaces:** keep shared service logic with JSON and built-in Jinja/HTMX
+  adapters; add versioned OpenAPI/generated-client and capability-bootstrap contracts for
+  separate frontends while retaining the optional `web` module and API-only profile.
+- **Internationalization/global primitives:** stable message IDs/catalogs, locale fallback,
+  pluralization/RTL, exact Money, independent transaction/functional/settlement currency,
+  immutable FX snapshots, and independent timezone/locale/currency selection.
+- **Multi-jurisdiction:** versioned legal-entity, tax, invoice, privacy/retention/consent,
+  and data-residency policies/providers; never infer jurisdiction from locale/domain/IP.
+- **Subscriptions/pricing (optional):** immutable plan/price/currency versions, recurring
+  lifecycle, effective dates, proration, and grandfathering only when a real selling
+  workflow needs them; no money collection.
+- **Billing (optional):** invoice/payment/credit/refund/collections lifecycle, provider or
+  ERP authority, signed idempotent webhooks, reconciliation, and outbox only for
+  self-service/embedded financial workflows.
+- **Metering/rating (optional):** immutable idempotent usage, rebuildable aggregates,
+  atomic quota decisions, closed-period corrections, and immutable price-to-charge
+  provenance only for quantitative limits or usage pricing.
+- **Signed licensing (optional):** offline/delegated license verification and entitlement
+  projection for commercial on-premise/OEM deployments; no private signing keys in a
+  customer deployment and no mandatory phone-home by default.
+- **Packaging and verification:** SaaS/dedicated/on-premise/OEM assets, air-gap proof,
+  bootstrap/backup/restore/upgrade paths, residency/recovery/backup-expiry policy,
+  generator output, profile matrix, and end-to-end lifecycle scenario matrix.
+- **Tenant domains and ingress:** separate platform/tenant/custom-domain configuration;
+  DNS TXT ownership proof; normalized lifecycle state; Nginx/controller, Caddy/Traefik,
+  cert-manager, managed-LB, and manual/customer-PKI provider seams; TLS renewal/removal;
+  proxy trust; reconciliation/drift repair; and domain admin surfaces. The current
+  resolver/`TenantDomain` table are read-side foundations, not a complete control plane.
 
 ## Architecture / correctness follow-ups
 

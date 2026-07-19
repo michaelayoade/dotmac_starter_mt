@@ -54,8 +54,9 @@ Upstream only what fixes the source repo on its own terms — not starter-specif
 
 ## dotmac_starter
 
-Frozen per ADR-0002 (no new features; archive after phase 2). Do not PR; gaps found there are
-fixed in dotmac_starter_mt only.
+Legacy/simple-use repository per ADR-0002 as superseded by ADR-0003. No archive is
+required, but do not add new strategic capabilities there; gaps found there are fixed in
+`dotmac_starter_mt` only unless a security/maintenance backport is explicitly selected.
 
 ## Process
 

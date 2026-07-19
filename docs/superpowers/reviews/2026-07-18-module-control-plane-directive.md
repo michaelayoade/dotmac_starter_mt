@@ -6,6 +6,23 @@ capability-hardening work should be evolved toward this manifest-driven model ra
 building separate registries independently"). Michael's preferred sequence (bottom of this
 doc) is the program order; step 1 = the adoption review's item 1 (platform-admin auth).
 
+Companion deployment/commercial decision: ADR-0003 and
+`docs/superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md` apply this
+manifest model across SaaS, dedicated, self-hosted/on-premise, OEM, and single-tenant
+profiles. `entitlements` is the common tenant capability layer; subscriptions, billing,
+metering, and signed licensing are separate optional modules. This directive remains the
+authority for module/plugin mechanics.
+
+**Lifecycle/commercial reconciliation (ADR-0003 amendment):** the provisional
+`tenant_module_entitlements` table below is superseded for implementation by the single
+`tenant_entitlement_grants` store and evaluator in deployment-plan Workstream 2. Module
+access is a manifest-declared capability such as `inventory.use`; it does not get a second
+grant table or guard. Preferred-sequence step 4 is therefore delivered by that workstream
+and is not a prerequisite that should be implemented twice. ADR-0003 and the companion
+plan own grant precedence, tenant/commercial lifecycle orchestration, outbox/inbox,
+internationalization, currency/FX, jurisdiction/tax, billing, licensing, and domain
+provider composition; this directive continues to own manifest/plugin mechanics.
+
 ---
 
 Yes — this should be a first-class part of the starter. The current FeatureManifest,

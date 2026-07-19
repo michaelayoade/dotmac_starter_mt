@@ -4,6 +4,12 @@
 **Status:** Approved
 **Decision owners:** Michael (user), Claude (design)
 
+> **Amendment 2026-07-18:** ADR-0003 is authoritative for deployment positioning. This
+> repo remains the canonical foundation for all new SaaS, dedicated, self-hosted/on-prem,
+> OEM, and single-tenant profiles; the legacy `dotmac_starter` may remain available and
+> need not be archived. Historical archive language below records the original decision
+> but is no longer an active milestone.
+
 ## Decision
 
 Consolidate `dotmac_starter` and `dotmac_starter_mt` into **one repo: `dotmac_starter_mt`**, with multi-tenancy always on. A "single-tenant" deployment is simply a deployment with one tenant. `dotmac_starter` is retired (archived with a pointer README) once feature parity is reached.
@@ -135,14 +141,15 @@ Upgrade to **pydantic-settings** (`BaseSettings`): typed, env-driven, documented
 
 ## Endgame for dotmac_starter
 
-When phase 2 (core parity) is complete and CI is green: archive `dotmac_starter` — README replaced with a pointer to `dotmac_starter_mt`, repo archived on GitHub. Until then it stays frozen (no new features).
+~~When phase 2 (core parity) is complete and CI is green: archive `dotmac_starter` — README replaced with a pointer to `dotmac_starter_mt`, repo archived on GitHub. Until then it stays frozen (no new features).~~ Superseded by ADR-0003: the repository may remain for legacy/simple uses, while all new strategic capability and security work targets this profile-driven foundation.
 
 ## Success criteria
 
 - One repo (`dotmac_starter_mt`) with CI green: lint, type-check, import-boundaries, architecture tests, unit suite (SQLite), RLS canaries (Postgres), docker health-gate.
 - A new app can be started by cloning, deleting/disabling unwanted feature packages, and deploying — single-tenant deployments work as one-tenant instances with no code changes.
 - Feature-boundary violations and unguarded routes fail the build, not review.
-- `dotmac_starter` archived with pointer.
+- ~~`dotmac_starter` archived with pointer.~~ Superseded by ADR-0003; no archive is
+  required.
 
 ## Non-goals
 
