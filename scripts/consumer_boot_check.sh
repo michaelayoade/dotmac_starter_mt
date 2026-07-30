@@ -139,22 +139,25 @@ echo "==> [3/6] Install the kernel + its declared deps into the clean venv"
 #                       in-process /health probe.
 # The workspace app/ is NOT installed and is NOT on sys.path — the whole point:
 # the consumer sees only the public kernel surface from site-packages.
+# NOTE: no global `--pre`. The alpha installs because INSTALL_SPEC is an EXACT
+# pre-release pin (`dotmac-kernel==0.1.0aN`), which pip honors on its own; a
+# global `--pre` would ALSO pull pre-releases of the transitive tools (it once
+# pulled a pre-release httpx that dropped `httpx.BaseTransport` and broke
+# Starlette's TestClient). httpx is pinned to the TestClient-compatible range
+# (matches the kernel's `testing` extra) for the same reason.
+_HTTPX='httpx>=0.27,<1'
 if [ "$MODE" = "registry" ]; then
-  # --pre from the PRIVATE Forgejo simple index (auth carried in KERNEL_INDEX_URL),
-  # with PyPI as an extra index ONLY for the public transitive deps (fastapi,
-  # sqlalchemy, psycopg, httpx, …) that Forgejo does not host. NOTE: real
-  # consumers (Vendor CP, Sub) should guard against dependency confusion — pin
-  # dotmac-kernel with a hash and/or resolve it from Forgejo alone — because a
-  # bare --extra-index-url aggregates versions across indexes. This is the
-  # release VERIFY smoke of an internal alpha, so the extra index is acceptable.
+  # Install from the PRIVATE Forgejo simple index (auth carried in
+  # KERNEL_INDEX_URL), with PyPI as an extra index ONLY for the public transitive
+  # deps (fastapi, sqlalchemy, psycopg, httpx, …) that Forgejo does not host.
+  # NOTE: real consumers (Vendor CP, Sub) should guard against dependency
+  # confusion — pin dotmac-kernel with a hash and/or resolve it from Forgejo
+  # alone. This is the release VERIFY smoke of an internal alpha.
   "$VPY" -m pip install --quiet --index-url "$KERNEL_INDEX_URL" \
     --extra-index-url "${PUBLIC_INDEX_URL:-https://pypi.org/simple}" \
-    --pre "$INSTALL_SPEC" "psycopg[binary]" httpx
-elif [ "$MODE" = "pypi" ]; then
-  # --pre so the alpha (0.1.0aN) is installable; from the real index.
-  "$VPY" -m pip install --quiet --pre "$INSTALL_SPEC" "psycopg[binary]" httpx
+    "$INSTALL_SPEC" "psycopg[binary]" "$_HTTPX"
 else
-  "$VPY" -m pip install --quiet "$INSTALL_SPEC" "psycopg[binary]" httpx
+  "$VPY" -m pip install --quiet "$INSTALL_SPEC" "psycopg[binary]" "$_HTTPX"
 fi
 
 echo "==> [4/6] Write the minimal EXTERNAL consumer app (public names only)"
