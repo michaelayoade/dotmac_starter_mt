@@ -38,6 +38,8 @@ and may change or disappear without a deprecation cycle**.
 
 | Module | Public names |
 |---|---|
+| `dotmac_kernel.app_factory` | `create_app`, `LayeredStaticFiles` |
+| `dotmac_kernel.assembly` | `ProductAssemblySpec` |
 | `dotmac_kernel.audit` | `AuditEvent`, `write_audit_event` |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
@@ -67,6 +69,19 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.settings_admin` | `all_specs`, `get_spec`, `resolve_with_source`, `upsert_by_key`, `ensure_by_key`, `validate_spec_value` |
 | `dotmac_kernel.templating` | `render`, `install_surface_globals`, `static_dir` |
 | `dotmac_kernel.web_deps` | `require_web_auth`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
+
+### Composing an app: `ProductAssemblySpec` + `create_app`
+
+A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAssemblySpec`
+(`name`, `modules`, `settings_overrides`, `branding`, `providers`, `web_enabled`,
+`disabled_modules`, `assembly_template_dir`, `assembly_static_dir`, `assembly_migrations`)
+and calls `dotmac_kernel.create_app(spec) -> FastAPI` (also reachable as
+`from dotmac_kernel import create_app`; it is lazily loaded so `import dotmac_kernel`
+stays DB-free). `create_app` wires logging, the lifespan (config validation + feature
+seeds), the middleware stack, error handlers, `/health`, the platform-auth surface, the
+static mount, and feature mounting. `assembly_template_dir`/`assembly_static_dir` layer the
+assembly's own templates/static OVER the kernel's (first-match-wins, via `use_assembly_templates`
+and `LayeredStaticFiles`).
 
 ### Settings: two distinct surfaces
 
