@@ -1037,15 +1037,25 @@ them (Starlette runs the *last-added* middleware first, so the add order in
 the source is the reverse of execution order — the list below is execution
 order):
 
-1. **ObservabilityMiddleware** — assigns/propagates a request ID
+1. **SecurityHeadersMiddleware** — outermost (added last), so it wraps
+   every response INCLUDING the middleware short-circuits below (tenant
+   404s, 429s, CSRF 403s): sets `X-Content-Type-Options`, `X-Frame-Options`,
+   `Referrer-Policy`, `Permissions-Policy`, HSTS on a secure request, and
+   the Content-Security-Policy. Only a last-resort UNHANDLED-exception 500
+   (Starlette's `ServerErrorMiddleware`, which wraps all user middleware)
+   escapes it. Knobs: `SECURITY_HEADERS_ENABLED`, `CONTENT_SECURITY_POLICY`
+   (empty → the computed-strict default; see `docs/SECURITY.md`).
+2. **ObservabilityMiddleware** — assigns/propagates a request ID
    (`TRUST_INBOUND_REQUEST_ID` gates whether an inbound `X-Request-ID` is
    trusted or a fresh one is generated) and emits structured request logs.
-2. **TrustedHostMiddleware** — only mounted when `TRUSTED_HOSTS` is set;
+3. **TrustedHostMiddleware** — only mounted when `TRUSTED_HOSTS` is set;
    drops requests to unrecognized `Host` headers before any tenant lookup.
-3. **TenantResolverMiddleware** — resolves `request.state.tenant` from the
+4. **TenantResolverMiddleware** — resolves `request.state.tenant` from the
    `Host` header (see below) and sets it before any route runs.
-4. **RateLimitMiddleware** — tenant/client-ip/path-keyed budget check.
-5. **CSRFMiddleware** — double-submit cookie/header check for
+5. **RateLimitMiddleware** — tenant/client-ip/route-template-keyed budget
+   check against the bounded store (`app/core/middleware/rate_limit.py`;
+   unmatched paths collapse into fixed hash buckets — see `docs/SECURITY.md`).
+6. **CSRFMiddleware** — double-submit cookie/header check for
    browser-cookie flows.
 
 After middleware, `register_error_handlers(app)` installs the exception
@@ -1269,7 +1279,7 @@ cannot even run).
 ## Testing model
 
 - **Unit** (`tests/unit/`, `tests/architecture/`) — in-memory SQLite, no
-  network, no RLS. Fast; run with `make test-unit`. Covers CRUD/UoW/query
+  network, no RLS. Fast; run with `make test-unit`. Covers CRUD/query
   helpers, error envelopes, feature registry, logging, tenant middleware
   logic, and the static architecture governance checks (thin routers, route
   guards including the tiered auth-guard test, feature registration, web

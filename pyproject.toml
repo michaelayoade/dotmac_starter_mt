@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac_starter_mt"
-version = "0.7.0"
+version = "0.8.0"
 description = "Multi-tenant FastAPI starter"
 authors = ["DotMac"]
 readme = "README.md"

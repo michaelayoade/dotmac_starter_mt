@@ -26,9 +26,35 @@ for the founding tenancy design, [`docs/adr/0002-starter-consolidation.md`](docs
 for how this repo became the org's one starter template,
 [`docs/adr/0003-unified-deployment-profiles.md`](docs/adr/0003-unified-deployment-profiles.md)
 for the accepted deployment-profile and commercial-module decisions,
+[`docs/adr/0004-platform-control-plane.md`](docs/adr/0004-platform-control-plane.md)
+for the platform control-plane security decisions,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full architecture
 reference (including the model provenance/ownership tables), and
-[`CLAUDE.md`](CLAUDE.md) for the agent-facing rules summary.
+[`AGENTS.md`](AGENTS.md) for the canonical agent-facing rules.
+
+## Documentation map
+
+The hierarchy, explicitly — when documents disagree, the higher authority
+for its scope wins and the stale one gets fixed:
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — **as-built truth**: what
+  the system actually does today (model provenance, ownership, transaction
+  authority, settings, portal).
+- [`docs/adr/`](docs/adr/) — **decisions + status**: why the system is
+  shaped this way; each ADR carries its status, and amendments are dated
+  notes, never rewritten history.
+- [`docs/superpowers/plans/`](docs/superpowers/plans/) (and `specs/`,
+  `reviews/`) — **non-authoritative intent**: how work was planned; never
+  cite a plan as proof of current behavior.
+- [`README.md`](README.md) (this file) — **onboarding**: what this is and
+  how to run it.
+- [`AGENTS.md`](AGENTS.md) — **agent rules**: the canonical, tool-neutral
+  hard-rules list with enforcing tests (`CLAUDE.md` indexes it and adds the
+  repo map + web-portal specifics).
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — **human dev rules**: gates,
+  test-first expectations, migration discipline, PR expectations.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — **security posture**: honest
+  OWASP ASVS 5.0 L2 mapping, CSP rationale, rate-limit store seam.
 
 ## Deployment direction (accepted; implementation planned)
 
@@ -457,7 +483,8 @@ entirely).
 | Prefix | Feature | Notes |
 |---|---|---|
 | `GET /health` | — | Liveness only, no DB touch, no guard (allowlisted). |
-| `POST/GET /platform/tenants`, `GET /platform/tenants/{id}` | `tenants` | Platform-root-domain only, `require_platform`. |
+| `POST /platform/auth/login`, `POST /platform/auth/logout` | — (core, `app.core.platform_auth`) | Platform-root-domain only; login is pre-auth (host-guarded), logout requires `require_platform_admin`. |
+| `POST/GET /platform/tenants`, `GET /platform/tenants/{id}` | `tenants` | Platform-root-domain only, `require_platform_admin` (see ADR-0004); `POST` provisions tenant + owner atomically. |
 | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` | `auth` | Tenant-scoped JWT flows. |
 | `POST /parties/people`, `POST /parties/organizations`, `GET /parties`, `GET /parties/{id}`, `DELETE /parties/{id}` | `parties` | Identity CRUD for both party types. |
 | `POST/GET /rbac/roles`, `POST /rbac/role-grants`, `GET /rbac/audit-events` | `rbac` | Roles, grants, audit read — `require_role("admin")`. |
