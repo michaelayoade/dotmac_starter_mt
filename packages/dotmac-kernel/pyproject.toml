@@ -9,6 +9,10 @@ packages = [{ include = "dotmac_kernel", from = "src" }]
 # CWD) — see Task 1b. Declared here ahead of that wiring so the wheel includes
 # them once they land under src/dotmac_kernel/.
 include = [
+    # PEP 561 marker — ships the kernel's inline type hints so a consumer's
+    # type-checker sees dotmac_kernel as a TYPED package (its contracts are
+    # annotated but invisible to mypy without this).
+    { path = "src/dotmac_kernel/py.typed", format = ["sdist", "wheel"] },
     { path = "src/dotmac_kernel/templates/**/*", format = ["sdist", "wheel"] },
     { path = "src/dotmac_kernel/static/**/*", format = ["sdist", "wheel"] },
     # Kernel base Alembic migrations (0001–0007), shipped so a consuming

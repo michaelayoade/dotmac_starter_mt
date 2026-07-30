@@ -75,7 +75,11 @@ if missing:
 # before poetry build). Source builds omit it; a PUBLISHED web kernel may not.
 if "dotmac_kernel/static/css/main.css" not in names:
     sys.exit("FAIL: dotmac_kernel/static/css/main.css missing — run `npm run css:build` before `poetry build`")
-print("    templates/, static/ (+fonts +compiled main.css), migrations/ all present")
+
+# PEP 561 marker MUST ship so consumers see dotmac_kernel as a TYPED package.
+if "dotmac_kernel/py.typed" not in names:
+    sys.exit("FAIL: dotmac_kernel/py.typed missing — the kernel's typed contracts would be invisible to consumers")
+print("    templates/, static/ (+fonts +compiled main.css), migrations/, py.typed all present")
 PY
 # check-wheel-contents catches empty dirs / stray top-level / duplicate paths.
 # Two warnings are KNOWN-ACCEPTABLE for this package and ignored deliberately:
