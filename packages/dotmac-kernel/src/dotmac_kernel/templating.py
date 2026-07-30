@@ -52,7 +52,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from jinja2 import pass_context
+from jinja2 import ChoiceLoader, FileSystemLoader, pass_context
 
 from dotmac_kernel.branding import get_brand
 from dotmac_kernel.display import DisplaySettings, default_display
@@ -75,6 +75,20 @@ def static_dir() -> Path:
 
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+def use_assembly_templates(directory: Path) -> None:
+    """Give an assembly's own template directory PRECEDENCE over the kernel's
+    (kernel-boundary Task 3A — the assembly-over-kernel ChoiceLoader). Called by
+    ``create_app`` when the spec carries an ``assembly_template_dir``: a template
+    the assembly ships (e.g. ``admin/dashboard.html``) then shadows the kernel's
+    same-named one, while any template the assembly does NOT override still
+    resolves from the packaged kernel templates. Idempotent-safe: it always
+    layers over the ORIGINAL kernel loader, never stacking assembly loaders."""
+    kernel_loader = FileSystemLoader(str(TEMPLATES_DIR))
+    templates.env.loader = ChoiceLoader(
+        [FileSystemLoader(str(directory)), kernel_loader]
+    )
 
 
 def _context_display(context: Any) -> DisplaySettings:
@@ -232,4 +246,5 @@ __all__ = [
     "render",
     "install_surface_globals",
     "static_dir",
+    "use_assembly_templates",
 ]

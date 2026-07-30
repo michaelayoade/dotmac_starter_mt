@@ -25,6 +25,7 @@ from __future__ import annotations
 # Only names whose defining module has no import-time engine/I/O side effect,
 # so `import dotmac_kernel` never requires DATABASE_URL. Engine-touching APIs
 # (db sessions, guards, middleware, platform auth) are submodule imports.
+from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.audit import AuditEvent, write_audit_event
 from dotmac_kernel.config import Settings, settings, validate_settings
 from dotmac_kernel.exceptions import (
@@ -80,6 +81,8 @@ __version__ = "0.1.0a1"
 # A name is public only if it is in that module's own `__all__`.
 SUPPORTED_MODULES: frozenset[str] = frozenset(
     {
+        "dotmac_kernel.app_factory",
+        "dotmac_kernel.assembly",
         "dotmac_kernel.audit",
         "dotmac_kernel.branding",
         "dotmac_kernel.config",
@@ -123,10 +126,26 @@ INTERNAL_MODULES: frozenset[str] = frozenset(
     }
 )
 
+
+def __getattr__(name: str):
+    """Lazy top-level access to `create_app` (kernel-boundary Task 3A). It lives
+    in `app_factory`, which imports the DB/middleware stack and constructs the
+    SQLAlchemy engine at import — resolving it lazily keeps `import dotmac_kernel`
+    itself DB-free while still allowing `from dotmac_kernel import create_app`."""
+    if name == "create_app":
+        from dotmac_kernel.app_factory import create_app
+
+        return create_app
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "__version__",
     "SUPPORTED_MODULES",
     "INTERNAL_MODULES",
+    # assembly composition
+    "ProductAssemblySpec",
+    "create_app",
     # audit
     "AuditEvent",
     "write_audit_event",
