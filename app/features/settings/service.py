@@ -11,15 +11,15 @@ from __future__ import annotations
 
 from dotmac_kernel.exceptions import NotFoundError
 from dotmac_kernel.models import Tenant
-from dotmac_kernel.settings_models import SettingDomain
-from dotmac_kernel.settings_resolver import (
-    SettingSpec,
+from dotmac_kernel.settings_admin import (
     all_specs,
     get_spec,
     resolve_with_source,
     upsert_by_key,
     validate_spec_value,
 )
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import SettingSpec
 from sqlalchemy.orm import Session
 
 from app.features.settings.schemas import SettingOut

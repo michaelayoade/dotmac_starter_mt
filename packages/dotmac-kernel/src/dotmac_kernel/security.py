@@ -145,3 +145,13 @@ def _b64encode(data: bytes) -> str:
 def _b64decode(data: str) -> bytes:
     padding = "=" * (-len(data) % 4)
     return base64.urlsafe_b64decode((data + padding).encode())
+
+
+__all__ = [
+    "hash_password",
+    "verify_password",
+    "password_needs_rehash",
+    "hash_token",
+    "issue_access_token",
+    "decode_access_token",
+]

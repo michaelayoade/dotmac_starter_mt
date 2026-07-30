@@ -10,8 +10,8 @@ from __future__ import annotations
 from dotmac_kernel.audit import write_audit_event
 from dotmac_kernel.deps import get_db, require_role, require_tenant
 from dotmac_kernel.models import Party, Tenant
+from dotmac_kernel.settings_admin import get_spec
 from dotmac_kernel.settings_models import SettingDomain
-from dotmac_kernel.settings_resolver import get_spec
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 

@@ -250,3 +250,8 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _catch_all(request: Request, exc: Exception) -> Response:
         logger.exception("Unhandled exception")
         return _negotiate(request, 500, _envelope("internal_error", "Internal error"))
+
+
+__all__ = [
+    "register_error_handlers",
+]

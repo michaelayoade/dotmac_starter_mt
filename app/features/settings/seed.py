@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 
 from dotmac_kernel.db import platform_session
-from dotmac_kernel.settings_resolver import all_specs, ensure_by_key
+from dotmac_kernel.settings_admin import all_specs, ensure_by_key
 
 logger = logging.getLogger(__name__)
 

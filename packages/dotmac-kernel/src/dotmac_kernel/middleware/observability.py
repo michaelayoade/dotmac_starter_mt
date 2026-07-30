@@ -62,3 +62,8 @@ class ObservabilityMiddleware:
                 },
             )
             request_id_var.reset(token)
+
+
+__all__ = [
+    "ObservabilityMiddleware",
+]

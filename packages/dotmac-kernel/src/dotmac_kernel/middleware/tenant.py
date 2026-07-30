@@ -144,3 +144,8 @@ def _is_platform_path(path: str, host: str, root: str) -> bool:
     the first place. See `PLATFORM_ROOT_DOMAIN` in `.env.example`.
     """
     return host == root or path in _HEALTH_PATHS
+
+
+__all__ = [
+    "TenantResolverMiddleware",
+]

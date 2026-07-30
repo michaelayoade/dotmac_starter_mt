@@ -226,3 +226,10 @@ def render(
     if branding is not None:
         ctx.setdefault("brand", branding)
     return templates.TemplateResponse(request, name, ctx, status_code=status_code)
+
+
+__all__ = [
+    "render",
+    "install_surface_globals",
+    "static_dir",
+]

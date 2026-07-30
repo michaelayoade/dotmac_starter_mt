@@ -79,3 +79,10 @@ def validate_settings(s: Settings) -> list[str]:
     if s.is_production and session_is_dev_default:
         errors.append("SESSION_HASH_SECRET must be set in production")
     return errors
+
+
+__all__ = [
+    "Settings",
+    "settings",
+    "validate_settings",
+]

@@ -13,13 +13,23 @@ from __future__ import annotations
 
 import os
 
-# Must run before any `app.` import anywhere in the test session: importing a
-# feature's router — e.g. via dotmac_kernel.features.load_manifests — transitively
-# imports dotmac_kernel.db, which builds a SQLAlchemy engine from DATABASE_URL at
-# import time. Set a well-formed placeholder with an unroutable port so that a
-# bare `pytest tests` collects hermetically (no .env / exported DATABASE_URL
-# required) and any accidental connection attempt fails fast. Integration runs
-# override this via the autouse `_set_database_url` fixture below.
+# Must run before any `app.`/`dotmac_kernel.` import anywhere in the test
+# session. `dotmac_kernel.config` constructs `settings = Settings()` at import
+# (reading DATABASE_URL/PLATFORM_DATABASE_URL from the env ONCE), and importing
+# `dotmac_kernel` now runs that eagerly (the Task-2 public-API package
+# __init__). Since a per-test monkeypatch of the env can't retro-construct that
+# frozen `settings`, promote the integration TEST_* URLs to the real env HERE,
+# at conftest import — before pytest collects any module whose top-level
+# `import dotmac_kernel` would freeze `settings`. Unit runs (no TEST_* set) fall
+# through to the hermetic placeholder below.
+if os.getenv("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
+if os.getenv("TEST_PLATFORM_DATABASE_URL"):
+    os.environ["PLATFORM_DATABASE_URL"] = os.environ["TEST_PLATFORM_DATABASE_URL"]
+# Well-formed placeholder with an unroutable port so a bare `pytest tests`
+# collects hermetically (engine builds, never connects) and any accidental
+# connection fails fast. The autouse `_set_database_url` fixture below still
+# re-pins it per test for good measure.
 os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://unit-test:unit-test@127.0.0.1:59999/unit-test"
 )
