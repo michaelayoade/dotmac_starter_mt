@@ -24,6 +24,19 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60
+    # LRU cap on the in-memory rate-limit store (Task 5 — bounds worst-case
+    # memory regardless of client behavior).
+    rate_limit_max_keys: int = 10_000
+    # RESERVED swap seam (contracts-not-implementations): a Redis-backed
+    # RateLimitStore for multi-process deployments. No redis dependency
+    # ships with the starter; setting this has no effect until a project
+    # provides the store implementation. See app/core/middleware/rate_limit.py.
+    rate_limit_redis_url: str = ""
+    # Security response headers (Task 5). Disable only when a fronting
+    # proxy owns these headers. Empty CSP = the computed strict default in
+    # app/core/middleware/security_headers.py.
+    security_headers_enabled: bool = True
+    content_security_policy: str = ""
     trust_inbound_request_id: bool = False
     disabled_features: str = ""  # comma-separated feature names
     seed_on_startup: bool = True  # seed platform setting defaults in lifespan
