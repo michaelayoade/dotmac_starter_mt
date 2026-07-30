@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.9.0 — 2026-07-30
+
+Kernel-boundary program: this repo is now the reference **assembly** consuming a
+genuinely publishable `dotmac-kernel` package (extracted from `app/core`), with
+the `0.1.0a1` kernel alpha prepared for publication to PyPI via OIDC trusted
+publishing.
+
+### Kernel extraction (consumes `dotmac-kernel`, no copied modules)
+- `packages/dotmac-kernel/` — the installable kernel (distribution
+  `dotmac-kernel`, import `dotmac_kernel`), an editable path dependency; the
+  assembly imports `dotmac_kernel.*` and never a copied core module (import-linter
+  "Kernel must not import the assembly").
+- **Public surface sealed** — `SUPPORTED_MODULES`/`INTERNAL_MODULES`, per-module
+  `__all__`, a `COMPATIBILITY.md` SemVer policy, and an AST governance test that
+  blocks the assembly from importing private names (K2).
+- **App composition** — `ProductAssemblySpec` + `create_app(spec)`; `app/main.py`
+  is now a thin spec-and-call (K3A). Byte-identical route inventory preserved.
+- **Provisioning provider contract** — `dotmac_kernel.providers.provisioning`
+  (typed Protocol + result/error hierarchy), pulled into the alpha per ruling C6
+  (K3B).
+- **Testing kit** — `dotmac_kernel.testing` (harness + fakes +
+  `FakeProvisioningProvider`/contract), supported public API; the old hand-built
+  unit harness in `tests/unit/conftest.py` deleted in favor of it (K5).
+- **Migration lineage split** — kernel base (`0001`–`0007`) + an independent
+  assembly lineage (`a001`, `depends_on` `0007`), idempotent-adoptive, with a
+  seven-rehearsal acceptance suite.
+- **Publish path** — `consumer-boot` CI job (clean-venv wheel proof, now a
+  required check) + `release-kernel.yml` (protected `workflow_dispatch`, OIDC
+  trusted publishing, build→publish→verify, tag after registry verification).
+
 ## 0.8.0 — 2026-07-30
 
 Control-plane security (plan

@@ -1,0 +1,154 @@
+name: Release kernel
+
+# Kernel-boundary Task 6 — publish `dotmac-kernel` to PyPI via OIDC Trusted
+# Publishing (R0, ratified 2026-07-30). Protected workflow_dispatch, NOT a tag
+# trigger: a maintainer starts it deliberately with an explicit version.
+#
+# Flow: build (on the exact current protected-main SHA; npm css:build ->
+# poetry build -> inspect bytes -> smoke the built wheel) -> publish (the SAME
+# bytes, OIDC, `pypi-release` environment, Michael's approval) -> verify (install
+# the PUBLISHED release from PyPI, smoke it, and only THEN tag the published SHA).
+#
+# No PyPI token or GitHub secret anywhere: `id-token: write` on `publish` only.
+# Every action is pinned to a reviewed full commit SHA (immutable) per GitHub
+# secure-use guidance; the trailing comment records the human-readable version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Kernel version to publish (MUST equal packages/dotmac-kernel pyproject version, e.g. 0.1.0a1)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      # Fail closed unless THIS run is the exact current tip of protected main
+      # (not merely an ancestor) — a stale or side-branch dispatch cannot publish.
+      - name: Assert run is on the current protected main SHA
+        run: |
+          git fetch --no-tags origin main
+          MAIN_SHA="$(git rev-parse origin/main)"
+          if [ "${GITHUB_SHA}" != "${MAIN_SHA}" ]; then
+            echo "::error::run SHA ${GITHUB_SHA} != current origin/main ${MAIN_SHA}"
+            exit 1
+          fi
+          echo "on current main: ${MAIN_SHA}"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+      - uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263 # v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      # The dispatched version must equal the package metadata — no inference.
+      - name: Assert version input matches package metadata
+        working-directory: packages/dotmac-kernel
+        run: |
+          PKG_VERSION="$(poetry version --short)"
+          if [ "${{ inputs.version }}" != "${PKG_VERSION}" ]; then
+            echo "::error::input '${{ inputs.version }}' != package version '${PKG_VERSION}'"
+            exit 1
+          fi
+          echo "version matches: ${PKG_VERSION}"
+
+      # Compile Tailwind CSS into the kernel package-data dir so the wheel ships
+      # the COMPILED static/css/main.css (a published web kernel requires it).
+      - name: Build CSS (npm ci && npm run css:build)
+        run: npm ci && npm run css:build
+
+      - name: Build wheel + sdist
+        working-directory: packages/dotmac-kernel
+        run: poetry build
+
+      # Inspection gate (R0 §4): metadata/dep-closure, package data incl. the
+      # compiled main.css + static/fonts, no app/ or secrets leaked.
+      - name: Inspect artifacts
+        run: bash packages/dotmac-kernel/scripts/inspect_dist.sh packages/dotmac-kernel/dist
+
+      # Release-artifact smoke (R0 §5): the SAME consumer_boot_check.sh, --wheel
+      # mode, against the freshly built release wheel (compiled CSS required).
+      - name: Release wheel smoke
+        run: bash scripts/consumer_boot_check.sh --wheel packages/dotmac-kernel/dist
+
+      - name: Upload built artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dotmac-kernel-dist
+          path: packages/dotmac-kernel/dist/*
+          retention-days: 90
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi-release        # protected: main-only + required review (Michael)
+    permissions:
+      id-token: write                # OIDC — ONLY this job; no token stored anywhere
+      contents: read
+    steps:
+      - name: Download the exact built bytes
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dotmac-kernel-dist
+          path: dist
+      # Trusted publishing: no password/user input -> OIDC exchange. Publishes
+      # the SAME bytes `build` inspected + smoked (downloaded, not rebuilt).
+      - name: Publish to PyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: dist
+
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write                # create the post-verification tag
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      # PyPI can lag a few seconds between publish and installability — poll the
+      # JSON API for the published version before smoking it.
+      - name: Wait for the release to be available on PyPI
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "https://pypi.org/pypi/dotmac-kernel/${{ inputs.version }}/json" >/dev/null; then
+              echo "available on PyPI"; exit 0
+            fi
+            echo "not yet on PyPI (attempt $i)…"; sleep 10
+          done
+          echo "::error::dotmac-kernel ${{ inputs.version }} did not appear on PyPI in time"
+          exit 1
+
+      # Install the PUBLISHED release from PyPI into a clean venv and smoke it
+      # (R0 §5 --from-pypi mode; compiled CSS required).
+      - name: Install from PyPI and verify
+        run: bash scripts/consumer_boot_check.sh --from-pypi "${{ inputs.version }}"
+
+      # Only AFTER registry verification: tag the published SHA.
+      - name: Tag the verified release
+        run: |
+          TAG="dotmac-kernel-v${{ inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "dotmac-kernel ${{ inputs.version }} (verified on PyPI)" "${GITHUB_SHA}"
+          git push origin "${TAG}"
+          echo "tagged ${TAG} on ${GITHUB_SHA}"
