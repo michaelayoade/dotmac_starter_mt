@@ -44,12 +44,19 @@ case "${1:-}" in
     MODE="pypi"
     PYPI_VERSION="${2:?usage: consumer_boot_check.sh --from-pypi <version>}"
     ;;
+  --from-registry)
+    # Install from a private index (Forgejo): KERNEL_INDEX_URL carries the
+    # authenticated simple-index URL. Same smoke, different source.
+    MODE="registry"
+    PYPI_VERSION="${2:?usage: consumer_boot_check.sh --from-registry <version>}"
+    : "${KERNEL_INDEX_URL:?--from-registry requires KERNEL_INDEX_URL (authenticated simple index)}"
+    ;;
   "")
     MODE="source"
     ;;
   *)
     echo "unknown argument: ${1}" >&2
-    echo "usage: consumer_boot_check.sh [--wheel <dist-dir> | --from-pypi <version>]" >&2
+    echo "usage: consumer_boot_check.sh [--wheel <dist-dir> | --from-pypi <version> | --from-registry <version>]" >&2
     exit 2
     ;;
 esac
@@ -104,6 +111,10 @@ case "$MODE" in
     INSTALL_SPEC="dotmac-kernel==${PYPI_VERSION}"
     echo "    from PyPI: --pre ${INSTALL_SPEC}"
     ;;
+  registry)
+    INSTALL_SPEC="dotmac-kernel==${PYPI_VERSION}"
+    echo "    from Forgejo index: --pre ${INSTALL_SPEC} (KERNEL_INDEX_URL)"
+    ;;
 esac
 
 echo "==> [2/6] Create a CLEAN consumer virtualenv (isolated from the repo venv)"
@@ -128,7 +139,18 @@ echo "==> [3/6] Install the kernel + its declared deps into the clean venv"
 #                       in-process /health probe.
 # The workspace app/ is NOT installed and is NOT on sys.path — the whole point:
 # the consumer sees only the public kernel surface from site-packages.
-if [ "$MODE" = "pypi" ]; then
+if [ "$MODE" = "registry" ]; then
+  # --pre from the PRIVATE Forgejo simple index (auth carried in KERNEL_INDEX_URL),
+  # with PyPI as an extra index ONLY for the public transitive deps (fastapi,
+  # sqlalchemy, psycopg, httpx, …) that Forgejo does not host. NOTE: real
+  # consumers (Vendor CP, Sub) should guard against dependency confusion — pin
+  # dotmac-kernel with a hash and/or resolve it from Forgejo alone — because a
+  # bare --extra-index-url aggregates versions across indexes. This is the
+  # release VERIFY smoke of an internal alpha, so the extra index is acceptable.
+  "$VPY" -m pip install --quiet --index-url "$KERNEL_INDEX_URL" \
+    --extra-index-url "${PUBLIC_INDEX_URL:-https://pypi.org/simple}" \
+    --pre "$INSTALL_SPEC" "psycopg[binary]" httpx
+elif [ "$MODE" = "pypi" ]; then
   # --pre so the alpha (0.1.0aN) is installable; from the real index.
   "$VPY" -m pip install --quiet --pre "$INSTALL_SPEC" "psycopg[binary]" httpx
 else

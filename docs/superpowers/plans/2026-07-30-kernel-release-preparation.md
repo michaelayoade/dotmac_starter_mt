@@ -1,5 +1,15 @@
 # Kernel Release Preparation (R0)
 
+> **⚠️ REGISTRY CHOICE SUPERSEDED (2026-07-30) by [ADR-0005](../../adr/0005-forgejo-private-registry.md).**
+> The registry decision below (§1 — public PyPI via OIDC trusted publishing) is
+> **no longer in effect**: `dotmac-kernel` publishes to a **private Forgejo
+> registry** (`https://registry.dotmac.io`), not public PyPI. The *release-gate*
+> design here (protected `workflow_dispatch`, exact-main-SHA gate, version-input
+> match, build-once/inspect/publish-same-bytes/verify-from-registry,
+> tag-after-verify, SHA-pinned actions) is **retained**; only the publish target
+> and credential mechanism change. See ADR-0005 and `deploy/forgejo/` for the
+> Forgejo standup + the reworked `release-kernel.yml`.
+
 > **Status: RATIFIED (with amendments) — 2026-07-30.** R0 was ratified by
 > Michael. The registry, ownership model, and trusted-publisher identity are
 > **decided** (below). The publish itself is **kernel-boundary Task 6 (K6)**,

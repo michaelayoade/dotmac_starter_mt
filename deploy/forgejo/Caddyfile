@@ -1,0 +1,22 @@
+# TLS reverse proxy for the Forgejo registry. Caddy obtains + renews a
+# Let's Encrypt cert for registry.dotmac.io automatically (ACME HTTP-01 on :80),
+# terminates TLS on :443, and proxies to the forgejo container. DNS
+# (registry.dotmac.io -> 194.163.130.216) must resolve and :80/:443 must be
+# reachable from the internet for issuance.
+
+registry.dotmac.io {
+	encode gzip zstd
+
+	# Package uploads (wheels, OCI layers) can be large — raise the body cap.
+	request_body {
+		max_size 512MB
+	}
+
+	reverse_proxy forgejo:3000
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+}

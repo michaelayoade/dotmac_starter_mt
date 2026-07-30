@@ -1,0 +1,6 @@
+# Never commit the populated env (secrets live in OpenBao; .env is host-only).
+.env
+caddy-data/
+caddy-config/
+data/
+db/
