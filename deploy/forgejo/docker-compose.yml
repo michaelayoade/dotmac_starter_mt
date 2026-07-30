@@ -1,0 +1,87 @@
+# Forgejo private artifact registry — dotmac-s3 (194.163.130.216), co-located
+# with the existing MinIO. Deploy dir on the host: /opt/forgejo/.
+#
+# Three services on a private bridge network:
+#   forgejo    — the registry app (web + package API), git-SSH disabled.
+#   forgejo-db — a DEDICATED Postgres for Forgejo metadata (separate from the
+#                host's nominatim Postgres). Package BLOBS live in MinIO, not here.
+#   caddy      — TLS reverse proxy (auto-ACME) on 80/443 -> forgejo:3000.
+#
+# Secrets come from ./.env (populated at deploy from OpenBao — NEVER committed;
+# see .env.example + RUNBOOK.md). Package blobs are stored in the MinIO bucket
+# reached via the host docker gateway (host.docker.internal -> the host's
+# published MinIO :9000).
+#
+# Pin images to a digest at deploy (RUNBOOK step 0); the version tags below are
+# the intended floor.
+
+services:
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:11
+    restart: unless-stopped
+    depends_on:
+      forgejo-db:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # reach the host-published MinIO :9000
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      # --- database (metadata) ---
+      FORGEJO__database__DB_TYPE: postgres
+      FORGEJO__database__HOST: forgejo-db:5432
+      FORGEJO__database__NAME: forgejo
+      FORGEJO__database__USER: forgejo
+      FORGEJO__database__PASSWD: ${FORGEJO_DB_PASSWORD:?set in .env from OpenBao}
+      # --- server / identity ---
+      FORGEJO__server__ROOT_URL: https://registry.dotmac.io/
+      FORGEJO__server__DOMAIN: registry.dotmac.io
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__server__DISABLE_SSH: "true" # a package registry needs no git-SSH; avoids :22
+      FORGEJO__service__DISABLE_REGISTRATION: "true" # private
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
+      FORGEJO__security__INSTALL_LOCK: "true"
+      # --- package BLOB storage -> MinIO bucket (NOT the metadata DB) ---
+      FORGEJO__storage.packages__STORAGE_TYPE: minio
+      FORGEJO__storage.packages__MINIO_ENDPOINT: host.docker.internal:9000
+      FORGEJO__storage.packages__MINIO_BUCKET: ${FORGEJO_MINIO_BUCKET:-dotmac-packages}
+      FORGEJO__storage.packages__MINIO_ACCESS_KEY_ID: ${FORGEJO_MINIO_ACCESS_KEY:?set in .env from OpenBao}
+      FORGEJO__storage.packages__MINIO_SECRET_ACCESS_KEY: ${FORGEJO_MINIO_SECRET_KEY:?set in .env from OpenBao}
+      FORGEJO__storage.packages__MINIO_USE_SSL: "false" # same host, private hop
+      FORGEJO__storage.packages__MINIO_LOCATION: us-east-1
+    volumes:
+      - /opt/forgejo/data:/data
+    networks: [forgejo]
+    # No host ports — only Caddy is exposed to the internet.
+
+  forgejo-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: forgejo
+      POSTGRES_PASSWORD: ${FORGEJO_DB_PASSWORD:?set in .env from OpenBao}
+      POSTGRES_DB: forgejo
+    volumes:
+      - /opt/forgejo/db:/var/lib/postgresql/data
+    networks: [forgejo]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forgejo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80" # ACME HTTP-01 + redirect
+      - "443:443" # TLS
+    volumes:
+      - /opt/forgejo/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/forgejo/caddy-data:/data
+      - /opt/forgejo/caddy-config:/config
+    networks: [forgejo]
+
+networks:
+  forgejo:
+    driver: bridge

@@ -95,9 +95,8 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi-release        # protected: main-only + required review (Michael)
+    environment: registry-release    # protected: main-only + required review (Michael)
     permissions:
-      id-token: write                # OIDC — ONLY this job; no token stored anywhere
       contents: read
     steps:
       - name: Download the exact built bytes
@@ -105,16 +104,31 @@ jobs:
         with:
           name: dotmac-kernel-dist
           path: dist
-      # Trusted publishing: no password/user input -> OIDC exchange. Publishes
-      # the SAME bytes `build` inspected + smoked (downloaded, not rebuilt).
-      - name: Publish to PyPI (trusted publishing)
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          packages-dir: dist
+          python-version: "3.12"
+      # Publish the SAME bytes `build` inspected + smoked (downloaded, not
+      # rebuilt) to the PRIVATE Forgejo index. `FORGEJO_PUBLISH_TOKEN` is a
+      # protected `registry-release` environment secret whose CANONICAL source is
+      # OpenBao (secret/dotmac/forgejo/ci-publisher-token) — rotate there, re-sync
+      # here. It is scoped to write:package on the `dotmac` org only.
+      #   Target hardening (see deploy/forgejo/RUNBOOK.md): a self-hosted runner
+      #   with GitHub OIDC -> OpenBao JWT auth, so no token is stored in GitHub.
+      #   That requires OpenBao to be reachable from the runner (it is not from
+      #   GitHub-hosted runners), which is why phase 1 uses the env secret.
+      - name: Publish to the Forgejo private index
+        env:
+          TWINE_USERNAME: ci-publisher
+          TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+        run: |
+          python -m pip install --quiet twine
+          python -m twine upload \
+            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
 
   verify:
     needs: publish
     runs-on: ubuntu-latest
+    environment: registry-release    # reuse the scoped token; still Michael-gated
     permissions:
       contents: write                # create the post-verification tag
     steps:
@@ -125,23 +139,28 @@ jobs:
         with:
           python-version: "3.12"
 
-      # PyPI can lag a few seconds between publish and installability — poll the
-      # JSON API for the published version before smoking it.
-      - name: Wait for the release to be available on PyPI
+      # The Forgejo index may lag a few seconds after publish — poll the simple
+      # index for the version before smoking it.
+      - name: Wait for the release on the Forgejo index
+        env:
+          IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/dotmac-kernel/
         run: |
           for i in $(seq 1 30); do
-            if curl -sf "https://pypi.org/pypi/dotmac-kernel/${{ inputs.version }}/json" >/dev/null; then
-              echo "available on PyPI"; exit 0
+            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
+              echo "available on the Forgejo index"; exit 0
             fi
-            echo "not yet on PyPI (attempt $i)…"; sleep 10
+            echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
           done
-          echo "::error::dotmac-kernel ${{ inputs.version }} did not appear on PyPI in time"
+          echo "::error::dotmac-kernel ${{ inputs.version }} did not appear on the Forgejo index in time"
           exit 1
 
-      # Install the PUBLISHED release from PyPI into a clean venv and smoke it
-      # (R0 §5 --from-pypi mode; compiled CSS required).
-      - name: Install from PyPI and verify
-        run: bash scripts/consumer_boot_check.sh --from-pypi "${{ inputs.version }}"
+      # Install the PUBLISHED release FROM THE FORGEJO INDEX into a clean venv and
+      # smoke it (compiled CSS required). KERNEL_INDEX_URL carries the scoped,
+      # authenticated simple-index URL (token masked in logs).
+      - name: Install from the Forgejo registry and verify
+        env:
+          KERNEL_INDEX_URL: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: bash scripts/consumer_boot_check.sh --from-registry "${{ inputs.version }}"
 
       # Only AFTER registry verification: tag the published SHA.
       - name: Tag the verified release
@@ -149,6 +168,6 @@ jobs:
           TAG="dotmac-kernel-v${{ inputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "dotmac-kernel ${{ inputs.version }} (verified on PyPI)" "${GITHUB_SHA}"
+          git tag -a "${TAG}" -m "dotmac-kernel ${{ inputs.version }} (verified on the Forgejo registry)" "${GITHUB_SHA}"
           git push origin "${TAG}"
           echo "tagged ${TAG} on ${GITHUB_SHA}"
