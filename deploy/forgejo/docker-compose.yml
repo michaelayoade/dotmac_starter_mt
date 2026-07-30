@@ -41,7 +41,6 @@ services:
       FORGEJO__service__DISABLE_REGISTRATION: "true" # private
       FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
       FORGEJO__security__INSTALL_LOCK: "true"
-      FORGEJO__packages__ENABLED: "true"
       # --- package BLOB storage -> MinIO bucket (NOT the metadata DB) ---
       FORGEJO__storage.packages__STORAGE_TYPE: minio
       FORGEJO__storage.packages__MINIO_ENDPOINT: host.docker.internal:9000
