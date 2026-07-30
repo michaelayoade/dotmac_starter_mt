@@ -20,7 +20,7 @@ where the work is tracked (`docs/superpowers/phase2-backlog.md`, the
 
 | Control | Status | Evidence / notes |
 |---|---|---|
-| Password storage: Argon2id | **Met** | `app/core/security.py` — argon2id, OWASP cheat-sheet parameters (m=19MiB, t=2, p=1); `tests/unit/test_security_baseline.py::TestPasswordStorage` |
+| Password storage: Argon2id | **Met** | `dotmac_kernel/security.py` — argon2id, OWASP cheat-sheet parameters (m=19MiB, t=2, p=1); `tests/unit/test_security_baseline.py::TestPasswordStorage` |
 | Legacy-hash migration | **Met** | PBKDF2 hashes verify and upgrade-on-login; `TestLoginHardening::test_legacy_hash_upgrades_on_successful_login` |
 | User-enumeration resistance (timing) | **Met (login seam)** | Constant-work miss paths on tenant login AND platform login (dummy-hash verification, counter-asserted — `test_unknown_email_burns_a_dummy_verification`). Register still discloses duplicate email via 409 under an `open` policy — acceptable while the default policy is `closed`; revisit in 2c |
 | Self-registration policy | **Met** | `auth.registration_policy` (default `closed`); 403 canaries in `tests/test_tenant_provisioning.py`; registered users receive no roles |
@@ -39,7 +39,7 @@ where the work is tracked (`docs/superpowers/phase2-backlog.md`, the
 | Security response headers | **Met** | `SecurityHeadersMiddleware` (outermost): nosniff, DENY, referrer-policy, permissions-policy, HSTS-on-TLS, CSP; `tests/unit/test_security_baseline.py::TestSecurityHeaders`. Known limit: the last-resort unhandled-exception 500 (ServerErrorMiddleware) bypasses user middleware and carries no headers |
 | Content-Security-Policy | **Met** | Computed-strict default (below); overridable via `CONTENT_SECURITY_POLICY` |
 | Rate limiting | **Met (single-process)** | Bounded LRU store, route-template keys, hash-bucketed unmatched paths (`tests/unit/test_security_baseline.py::TestBoundedRateLimitStore`). Multi-process deployments must swap the store (seam below) |
-| Output encoding / template escaping | **Met** | Jinja2 autoescape; `| safe` requires a nearby sanitize comment (`test_web_conventions.py`); tenant `custom_css` sanitized by `app.core.branding.sanitize_branding_css` |
+| Output encoding / template escaping | **Met** | Jinja2 autoescape; `| safe` requires a nearby sanitize comment (`test_web_conventions.py`); tenant `custom_css` sanitized by `dotmac_kernel.branding.sanitize_branding_css` |
 | Host-header integrity | **Met** | Tenant resolution is exact-host; `TrustedHostMiddleware` in prod (`TRUSTED_HOSTS` prod-required by `validate_settings`) |
 | Secrets hygiene | **Met** | Dev-default secrets are prod-fatal (`validate_settings`); no secret values in repo |
 
@@ -75,7 +75,7 @@ pins the no-external-origins property.
 
 ## Rate-limit store swap seam
 
-`app/core/middleware/rate_limit.py` defines the `RateLimitStore` protocol;
+`dotmac_kernel/middleware/rate_limit.py` defines the `RateLimitStore` protocol;
 the shipped `MemoryStore` is process-local and LRU-bounded
 (`RATE_LIMIT_MAX_KEYS`). A multi-process/multi-node deployment provides a
 Redis-backed implementation of the same `hit()` contract and passes it to

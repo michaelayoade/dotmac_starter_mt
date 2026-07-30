@@ -43,14 +43,14 @@ specifics) points here and must never fork these rules.
 7. **No `payload: Any` in feature services** — every payload parameter is a
    concrete Pydantic schema.
    (`tests/unit/test_service_typing.py::test_no_any_typed_payloads_in_services`)
-8. **`app/core/db.py` is the ONE transaction authority.** No module outside
+8. **`dotmac_kernel/db.py` is the ONE transaction authority.** No module outside
    it calls `SessionLocal()`/`PlatformSessionLocal()`/`sessionmaker(...)` or
    constructs `Session(...)`; boundaries (`get_db`/`get_platform_db`/
    `platform_session`) own commit/rollback, services only mutate and flush.
    See `docs/ARCHITECTURE.md` § "Transaction authority".
    (`tests/architecture/test_session_authority.py`)
 9. **Feature services never call `db.rollback()`.** Expected conflicts use
-   `app.core.db.conflict_savepoint`, with the mutation INSIDE the `with`
+   `dotmac_kernel.db.conflict_savepoint`, with the mutation INSIDE the `with`
    block — a bare rollback wipes the transaction's `SET LOCAL` tenant
    context. Full rationale: `docs/ARCHITECTURE.md` § "Conflict handling".
    (`tests/architecture/test_no_feature_rollback.py`; canaries in

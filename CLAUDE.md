@@ -21,10 +21,16 @@ when adding them; do not invent interim competing authorities.
 
 ## Layout
 
-- `app/core/` — config, db, models base, security, deps (route guards),
-  middleware, logging, errors, crud, features registry, audit
-  write-side. Core never imports `app/features` (import-linter contract
-  "Core must not import features", `make lint-imports`).
+This repo is the reference **assembly** (`app/`) plus the **kernel package** it
+consumes. The kernel lives at `packages/dotmac-kernel/src/dotmac_kernel/`
+(distribution `dotmac-kernel`, import `dotmac_kernel`), installed as an editable
+path dependency — the assembly imports `dotmac_kernel.*`, never a copied module.
+
+- `dotmac_kernel` (the kernel package) — config, db, models base, security,
+  platform auth, deps (route guards), middleware, logging, errors, crud,
+  features registry, audit write-side, templating, settings resolver,
+  branding, identity. The kernel never imports `app` (import-linter contract
+  "Kernel must not import the assembly", `make lint-imports`).
 - `app/features/<name>/` — self-contained: `models.py`, `schemas.py`,
   `service.py`, `router.py` (JSON API), `web.py` (HTML/HTMX admin-portal
   routes, mounted under `/admin/...` — see "Web portal (admin UI)" below),
@@ -45,18 +51,18 @@ when adding them; do not invent interim competing authorities.
 **Model placement rule:** models queried by core (deps/middleware) live in
 core; feature-local models live in the feature. Concretely: `Tenant`,
 `TenantDomain`, `Party` (+ subtype tables `PartyPerson`/`PartyOrganization`),
-`Role`, `PartyRole`, `AuthSession` live in `app/core/models.py` because
-`app.core.deps` (the `require_*` guards) and `app.core.middleware.tenant`
+`Role`, `PartyRole`, `AuthSession` live in `dotmac_kernel/models.py` because
+`dotmac_kernel.deps` (the `require_*` guards) and `dotmac_kernel.middleware.tenant`
 (the resolver) query them directly, and core cannot import features to get
 at them. `Party` (`party_type` person|organization) is the fleet-wide
 identity source of truth — it replaced the bare `Person` model (spec
 amendment 2026-07-17); profile data lives on the subtype tables, which carry
 no `tenant_id` of their own and inherit isolation via an `EXISTS`-based RLS
 policy joined through the FK to `parties`. `AuditEvent` + `write_audit_event`
-live in `app/core/audit.py` for the same cross-cutting reason (every
-feature writes audit events). `DomainSetting` (`app/core/settings_models.py`)
+live in `dotmac_kernel/audit.py` for the same cross-cutting reason (every
+feature writes audit events). `DomainSetting` (`dotmac_kernel/settings_models.py`)
 and the spec registry/tenant→platform→default resolver
-(`app/core/settings_resolver.py`) live in core for the identical reason: the
+(`dotmac_kernel/settings_resolver.py`) live in core for the identical reason: the
 `custom_fields` feature must consume `resolve_value` directly (per-entity
 field limit), and features may never import each other — so the mechanics
 both `settings` and `custom_fields` need sit in core, while the `settings`
@@ -67,13 +73,13 @@ feature-local in `app/features/custom_fields/models.py` — nothing outside
 that feature touches it; field *values* live on the entity's own model
 (e.g. `Party.custom_fields` JSONB), resolved generically through the
 `ENTITY_MODELS` registry (see Extension points below). Everything else
-stays local to its feature. `UserCredential` MOVED to `app/core/models.py`
+stays local to its feature. `UserCredential` MOVED to `dotmac_kernel/models.py`
 (control-plane security Task 2, PORT-DELTA): atomic tenant provisioning
 (`tenants` feature) creates the owner credential in the same transaction,
 and features never import each other — so it joined the other identity
 models under the placement rule above; the `auth` feature keeps all
-hashing/verification via `app.core.security`. Platform-actor identity
-(`PlatformAdmin`/`PlatformSession`) lives in `app/core/models_platform.py`
+hashing/verification via `dotmac_kernel.security`. Platform-actor identity
+(`PlatformAdmin`/`PlatformSession`) lives in `dotmac_kernel/models_platform.py`
 — platform catalog tables (no `tenant_id`, no RLS, revoked from
 `app_user`); see ADR-0004. This is a deliberate deviation from "one model
 per feature package" — see ADR-0002. The full model-by-model provenance
@@ -99,13 +105,13 @@ without touching core:
   `Party.custom_fields` for the pattern) — `set_values`/`get_values` read
   and write it generically via `db.get(model, entity_id)`.
 - **Declare a setting spec.** Add a `SettingSpec` to a feature's own spec
-  module and call `app.core.settings_resolver.register_specs([...])` at
+  module and call `dotmac_kernel.settings_resolver.register_specs([...])` at
   import time (see `app/features/settings/spec.py`). A registered spec with
   no reader anywhere under `app/` (outside the settings feature and the
   resolver module itself) fails the no-orphan-settings test — wire a real
   `resolve_value(...)` call before shipping it, or don't register it yet.
 - **Add an admin-portal surface (the capability model — THE surface
-  extension point).** A feature's `FeatureManifest` (`app.core.features`)
+  extension point).** A feature's `FeatureManifest` (`dotmac_kernel.features`)
   declares `web_routers` (its `web.py` router, HTML/HTMX) and `nav` (a
   tuple of `NavItem(label, path)`) SEPARATELY from `routers` (its JSON
   API) — these two fields are the ONLY place a feature adds itself to the
@@ -113,7 +119,7 @@ without touching core:
   parallel hardcoded nav list in a template to keep in sync
   (`templates/components/sidebar.html` renders from the `nav_items` Jinja
   global, itself built from every manifest's `nav` by
-  `app.core.templating.install_surface_globals`). Two independent on/off
+  `dotmac_kernel.templating.install_surface_globals`). Two independent on/off
   switches, do not conflate them: `DISABLED_FEATURES=<name>` turns off ONE
   named feature's `routers` AND `web_routers` together (still a per-feature,
   not a per-surface, toggle); `WEB_ENABLED` (env var, default `true`) is the
@@ -199,12 +205,12 @@ they are not claims that the current runtime already enforces them:
 
 Every feature that has an admin-facing HTML surface puts it in that
 feature's own `web.py` (never in `router.py`, which is the JSON API), mounts
-under `/admin/...`, and renders through `app.core.templating.render()` — the
+under `/admin/...`, and renders through `dotmac_kernel.templating.render()` — the
 one shared Jinja2 environment (see that module's docstring for the
 `brand`/`static_asset_url`/`current_year` globals every template gets for
 free). `web.py` is held to the same thin-wrapper rule as `router.py` (no
 `db.query`/`db.execute`/`select(` — logic stays in `service.py`) and may
-only import `app.core.*` or its OWN feature's modules — a cross-feature
+only import `dotmac_kernel.*` or its OWN feature's modules — a cross-feature
 import (e.g. `parties/web.py` importing `rbac.service`) is caught by
 `tests/architecture/test_web_conventions.py::test_web_py_imports_only_its_own_feature_and_core`.
 
@@ -232,7 +238,7 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   that has already been sanitized in Python, with a `sanitiz*` comment
   within 12 lines of the `| safe` use explaining why it's safe (the one real
   usage today: `templates/admin/settings/branding.html`'s `custom_css`
-  preview, sanitized by `app.core.branding.sanitize_branding_css` before
+  preview, sanitized by `dotmac_kernel.branding.sanitize_branding_css` before
   `load_branding` ever returns it). Enforced by
   `tests/architecture/test_web_conventions.py::test_safe_filter_only_used_with_a_sanitize_comment_nearby`.
   Every `templates/admin/**/*.html` + `templates/auth/*.html` file must also
@@ -256,10 +262,10 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   authenticated-but-non-admin cookie and asserts a redirect, not a 200 or a
   500 (a 500 would mean the guard was missing and the request reached real
   business logic).
-- **Auth model: cookie + bearer share one seam.** `app.core.deps
+- **Auth model: cookie + bearer share one seam.** `dotmac_kernel.deps
   .authenticate_request` is the single token/session/tenant/party-type
   validation function for BOTH the JSON API (bearer `Authorization` header)
-  and the portal (`app.core.web_deps.require_web_auth`, which reads the
+  and the portal (`dotmac_kernel.web_deps.require_web_auth`, which reads the
   `access_token` cookie, calls `authenticate_request`, then additionally
   requires the `"admin"` role — every portal page is admin-only until phase
   phase 3 adds finer-grained portal roles). Any auth-tightening fix (token
@@ -275,7 +281,7 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
 - **Display settings (tenant timezone + date/datetime formats).** A
   `display` `SettingDomain` (three specs: `timezone`, `date_format`,
   `datetime_format`) auto-appears in `/admin/settings` like any other
-  registered spec — no dedicated screen. `app.core.display.get_request_display`
+  registered spec — no dedicated screen. `dotmac_kernel.display.get_request_display`
   resolves it once per request and memoizes on `request.state.display`,
   warmed in `require_web_auth` — the exact same per-request seam shape as
   `request.state.branding` (see "Branding pipeline" in
@@ -306,7 +312,7 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 6. Import-linter independence contract stays in byte-for-byte sync with
    `FEATURE_MODULES` (`test_feature_manifests.py`).
 7. No `payload: Any` in feature services (`test_service_typing.py`).
-8. `app/core/db.py` is the one transaction authority
+8. `dotmac_kernel/db.py` is the one transaction authority
    (`test_session_authority.py`; ARCHITECTURE.md § "Transaction authority").
 9. Feature services never call `db.rollback()` — use `conflict_savepoint`,
    mutation INSIDE the `with` block (`test_no_feature_rollback.py`;

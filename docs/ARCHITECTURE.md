@@ -246,9 +246,14 @@ DNS and customer PKI/manual certificates without any public ACME dependency.
 
 ## Layout
 
+The kernel was extracted into an installable package (kernel-boundary Task 1);
+`app/` is the reference **assembly** that consumes it as `dotmac_kernel.*` via an
+editable path dependency — no copied modules, no import-path shims.
+
 ```
-app/
-  core/          config, db, models base (+ cross-cutting identity models incl.
+packages/dotmac-kernel/          the kernel package (distribution dotmac-kernel,
+  pyproject.toml                 import dotmac_kernel, editable path dep)
+  src/dotmac_kernel/   config, db, models base (+ cross-cutting identity models incl.
                  UserCredential), models_platform (PlatformAdmin/PlatformSession),
                  platform_auth (platform guard + auth routes), security,
                  deps (route guards), middleware/, logging, errors, crud,
@@ -258,6 +263,7 @@ app/
                  (Jinja env + render()), branding (static + per-tenant DB
                  override), identity (Party invariant helpers), web_deps
                  (cookie auth guard, shared with the bearer seam in deps.py)
+app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
     auth/          JWT login, sessions, /auth/me; owns /admin/login+logout (web)
@@ -287,15 +293,15 @@ to `parties` via a composite FK, not by importing `app.features.parties`.
 
 `Tenant`, `TenantDomain`, `Party` (+ subtype tables `PartyPerson`/
 `PartyOrganization`), `Role`, `PartyRole`, `AuthSession` live in
-`app/core/models.py`; `AuditEvent` + `write_audit_event` live in
-`app/core/audit.py`. These are the models `app.core.deps` (route guards) and
-`app.core.middleware.tenant` (the resolver) query directly — and since core
+`dotmac_kernel/models.py`; `AuditEvent` + `write_audit_event` live in
+`dotmac_kernel/audit.py`. These are the models `dotmac_kernel.deps` (route guards) and
+`dotmac_kernel.middleware.tenant` (the resolver) query directly — and since core
 cannot import features, anything core needs to query at runtime must live in
 core. `Party` (spec amendment 2026-07-17) replaced the bare `Person` model —
 it's the fleet-wide identity source of truth (`party_type` person|
 organization), with profile data on the subtype tables. `DomainSetting`
-(`app/core/settings_models.py`) and the spec registry + resolver
-(`app/core/settings_resolver.py`) live in core for the same reason, one
+(`dotmac_kernel/settings_models.py`) and the spec registry + resolver
+(`dotmac_kernel/settings_resolver.py`) live in core for the same reason, one
 level removed: the `custom_fields` feature must call `resolve_value`
 directly (the per-entity field limit), and features may never import each
 other, so the shared mechanics sit in core while the `settings` feature
@@ -312,7 +318,7 @@ for every model class in the repo — is the **Model provenance table** below.
 
 ## Settings resolution order + platform-row RLS design
 
-`domain_settings` (`app/core/settings_models.py::DomainSetting`) is keyed by
+`domain_settings` (`dotmac_kernel/settings_models.py::DomainSetting`) is keyed by
 `(tenant_id, domain, key)` where `tenant_id` is **nullable**: a
 `tenant_id IS NULL` row is a platform-level default, readable by every
 tenant but writable only by the `platform_api` role. This is the one
@@ -338,7 +344,7 @@ in `CLAUDE.md`):
   platform-default row is visible to every tenant, (c) a tenant session
   cannot smuggle a `tenant_id IS NULL`/other-tenant write past the policy.
 
-**Resolution order** (`app.core.settings_resolver.resolve_with_source`,
+**Resolution order** (`dotmac_kernel.settings_resolver.resolve_with_source`,
 `resolve_value` is a thin wrapper that drops the `source`): tenant row (if
 `tenant_id` is not `None`) → platform row (`tenant_id IS NULL`) → the
 `SettingSpec`'s own `default`. A stored value that fails coercion to the
@@ -366,7 +372,7 @@ dead control an admin could "change" with zero effect.
 an EXISTING `SettingDomain` (`auth`/`audit`/`branding`/`custom_fields`) needs
 no migration — but adding a NEW `SettingDomain` member does, and it's a
 manual, unlinked two-place edit: the Python enum
-(`app.core.settings_models.SettingDomain`) AND the migration's
+(`dotmac_kernel.settings_models.SettingDomain`) AND the migration's
 `ck_domain_settings_domain` CHECK constraint (`"domain IN ('auth', 'audit',
 'branding', 'custom_fields')"`, `alembic/versions/
 20260717_0002_settings_table.py`) must both change together. Nothing
@@ -386,7 +392,7 @@ it's a secret) written by the router, not the service.
 
 ## Party family + subtype RLS
 
-`Party` (`app/core/models.py`) is the fleet-wide identity source of truth —
+`Party` (`dotmac_kernel/models.py`) is the fleet-wide identity source of truth —
 `party_type` discriminates `person`/`organization`. It carries the standard
 tenant-scoped template (`tenant_id NOT NULL`, composite unique
 `(tenant_id, id)`, a case-insensitive partial unique index
@@ -523,10 +529,10 @@ truth for a feature's surfaces:
   when collecting nav items across manifests, so a feature never repeats
   its own name.
 
-`app.core.features.mount_features(app, *, manifests, disabled, web_enabled)`
+`dotmac_kernel.features.mount_features(app, *, manifests, disabled, web_enabled)`
 mounts each enabled manifest's `routers` unconditionally, then its
 `web_routers` only `if web_enabled`. `app.main` calls
-`app.core.templating.install_surface_globals(manifests, disabled,
+`dotmac_kernel.templating.install_surface_globals(manifests, disabled,
 web_enabled)` once at startup (config is process-static, so this is safe)
 to set two Jinja globals every template can read: `enabled_features:
 frozenset[str]` (every feature name that is actually mounted — the general
@@ -634,7 +640,7 @@ gitignored — never commit it, always rebuild.
 
 ### Auth flow: cookie + bearer share one seam
 
-`app.core.deps.authenticate_request` is the ONE function that validates a
+`dotmac_kernel.deps.authenticate_request` is the ONE function that validates a
 token (signature, expiry, session-revocation, tenant-claim match) and
 resolves it to a `Party` — both the JSON API's bearer `Authorization`
 header and the portal's cookie flow call it, so a security fix to token
@@ -646,7 +652,7 @@ validation lands once and covers both surfaces:
    uses for the JSON API) and, on success, setting an `access_token` cookie
    (`HttpOnly`, `SameSite=Lax`, `Secure` iff `is_secure_request()`) instead
    of returning the token in a JSON body.
-2. **Every portal page** depends on `app.core.web_deps.require_web_auth`,
+2. **Every portal page** depends on `dotmac_kernel.web_deps.require_web_auth`,
    which: reads the `access_token` COOKIE (no header fallback — cookie-only
    is deliberate, this dependency is web-only) → calls
    `authenticate_request(request, db, token=token)` (the shared seam) →
@@ -654,7 +660,7 @@ validation lands once and covers both surfaces:
    admin-only in this phase; no other portal-facing role exists yet,
    see the phase 3 note below) → returns `{"party", "roles"}` or raises
    `WebAuthRedirect` (a 302 to `/admin/login?next=...`, registered as a
-   dedicated exception handler in `app.core.errors`) — a portal auth
+   dedicated exception handler in `dotmac_kernel.errors`) — a portal auth
    failure is ALWAYS a redirect, never a bare 401/403 JSON body.
 3. **Logout** (`POST /admin/logout` — was `GET /admin/logout` until 2b.1-T5,
    finding F7: a bare `<a href="/admin/logout">` is a CSRF-exempt safe
@@ -671,7 +677,7 @@ Phase 3 TODO (tracked in the backlog): `require_web_auth` hardcodes the
 
 ### CSRF header-bridge contract
 
-`app.core.middleware.csrf.CSRFMiddleware` validates a double-submit pair:
+`dotmac_kernel.middleware.csrf.CSRFMiddleware` validates a double-submit pair:
 the `X-CSRF-Token` HEADER must match the `csrf_token` COOKIE (deliberately
 NOT `HttpOnly`, so client JS can read it). `static/js/csrf.js` is the
 bridge — it copies the cookie onto that header for every htmx request
@@ -687,7 +693,7 @@ CSRF for the test.
 
 ### Branding pipeline: static config + per-tenant DB override
 
-Two layers, kept deliberately separate (`app.core.branding`'s module
+Two layers, kept deliberately separate (`dotmac_kernel.branding`'s module
 docstring):
 
 - **`get_brand()`** — deployment-STATIC identity (name, tagline, colors,
@@ -697,7 +703,7 @@ docstring):
   (`BRAND_NAME`, `BRAND_TAGLINE`, `BRAND_PRIMARY_COLOR`,
   `BRAND_ACCENT_COLOR`, `BRAND_SUPPORT_EMAIL`, `BRAND_APP_URL`). Cached for
   the process lifetime (`lru_cache`) and installed as a Jinja global
-  (`app.core.templating`), so every template reads `brand.name` etc.
+  (`dotmac_kernel.templating`), so every template reads `brand.name` etc.
   without a route passing it explicitly — a restart is required to pick up
   a `brand.json`/env change.
 - **`load_branding(db, tenant_id)`** — the static brand above, with any
@@ -720,11 +726,11 @@ docstring):
 have exactly one caller (the branding editor's own preview) — every other
 portal page and the login page rendered the deployment-static brand only,
 so saving a tenant's branding changed nothing outside the editor. Fixed by
-`app.core.branding.get_request_branding(request, db)`: resolves
+`dotmac_kernel.branding.get_request_branding(request, db)`: resolves
 `load_branding(db, tenant.id)` (or the static `get_brand()` fallback when
 `request.state.tenant` is `None` — platform hosts, unresolved-tenant error
 contexts) exactly ONCE per request, memoized on `request.state.branding`.
-`app.core.templating.render()` is the single place that reads it back into
+`dotmac_kernel.templating.render()` is the single place that reads it back into
 the template context — it sets `context["brand"]` from
 `request.state.branding` unless the caller's own context already defines
 `brand` (route-level override still wins; see that module's docstring for
@@ -733,8 +739,8 @@ static global). No route changed to pick this up.
 
 Three call sites populate `request.state.branding` for the whole app,
 independent of how many features/routers exist (seam decision documented in
-`app.core.branding`'s module docstring, including the two rejected
-per-router/per-route shapes): `app.core.web_deps.require_web_auth` (covers
+`dotmac_kernel.branding`'s module docstring, including the two rejected
+per-router/per-route shapes): `dotmac_kernel.web_deps.require_web_auth` (covers
 every authenticated `/admin/*` page — one seam, since every such route
 already depends on it) and the two pre-auth `GET`/`POST /admin/login`
 routes (`app.features.auth.web`), which never reach `require_web_auth`.
@@ -810,12 +816,12 @@ request the caller can retry with better input, so it fails loud; a read
 happens on every page render for every user of that tenant, so it must
 never be the thing that turns a stored-data problem into a 500.
 
-**Per-request seam (mirrors branding).** `app.core.display.DisplaySettings`
+**Per-request seam (mirrors branding).** `dotmac_kernel.display.DisplaySettings`
 (`timezone: ZoneInfo`, `date_format`, `datetime_format`) is resolved by
 `get_request_display(request, db)` at most once per request and memoized on
 `request.state.display` — the identical shape to
 `request.state.branding`/`get_request_branding` above, including the same
-single warming call site: `app.core.web_deps.require_web_auth` (every
+single warming call site: `dotmac_kernel.web_deps.require_web_auth` (every
 authenticated `/admin/*` page). `load_display` additionally wraps the
 resolved timezone string in `ZoneInfo(...)` with its own
 try/except-to-`_UTC` fallback — belt-and-braces alongside the resolver's own
@@ -825,7 +831,7 @@ fine at write time (tzdata present then) can't be loaded at read time
 
 **Filter fallback invariant.** Templates never read `request.state.display`
 directly; they consume it ONLY through the two Jinja filters registered in
-`app.core.templating` — `local_datetime` and `local_date` (`@pass_context`,
+`dotmac_kernel.templating` — `local_datetime` and `local_date` (`@pass_context`,
 so they can reach `request.state` without the caller threading it through).
 Both call a shared `_context_display(context)` helper that returns
 `request.state.display` if the current render already warmed it, or
@@ -872,7 +878,7 @@ which calls the same `custom_fields_service.set_values` the JSON API uses.
 
 ### Error negotiation: branded HTML with a JSON fallback
 
-`app.core.errors._negotiate` is the single JSON-vs-HTML decision point for
+`dotmac_kernel.errors._negotiate` is the single JSON-vs-HTML decision point for
 every error response (FastAPI exception handlers and the CSRF/tenant/
 rate-limit ASGI middleware all route through it). Rule: a request "prefers
 HTML" iff `"text/html" in request.headers["accept"]` — htmx sends
@@ -907,10 +913,10 @@ source-of-truth for the modules phase 2b introduced. "ST" = `dotmac_starter`
 
 | Module | Purpose | Port SoT |
 |---|---|---|
-| `app/core/templating.py` | Jinja2 environment + `render()`, `static_asset_url` cache-busting | ST (`app/templates.py::_asset_version`/`_static_asset_url`); the `brand`/branding-DB-override wiring is native to this phase |
-| `app/core/branding.py` | `get_brand()` (static) + `load_branding()` (DB overlay) + `sanitize_branding_css` | SUB (`app/services/branding_config.py::get_brand`) for the static layer; ST (`app/services/branding.py::get_branding`/`sanitize_branding_css`) for the DB-overlay + sanitizer, adapted from ST's single-tenant "one row, no tenant_id" model to this app's tenant-scoped resolver |
-| `app/core/web_deps.py` | `require_web_auth`, `WebAuthRedirect`, `safe_next_url`, `is_secure_request` | ST (`app/web/deps.py`), routed through this app's `authenticate_request` shared seam (native adaptation — ST had no bearer/cookie seam to share) |
-| `app/core/identity.py` | `normalize_email`, `person_display_name` — the single-owner Party-invariant helpers | native (closes the SOT gap tracked from 2a-T6/T7; no upstream port — see "Known dual-writer: Parties" below) |
+| `dotmac_kernel/templating.py` | Jinja2 environment + `render()`, `static_asset_url` cache-busting | ST (`app/templates.py::_asset_version`/`_static_asset_url`); the `brand`/branding-DB-override wiring is native to this phase |
+| `dotmac_kernel/branding.py` | `get_brand()` (static) + `load_branding()` (DB overlay) + `sanitize_branding_css` | SUB (`app/services/branding_config.py::get_brand`) for the static layer; ST (`app/services/branding.py::get_branding`/`sanitize_branding_css`) for the DB-overlay + sanitizer, adapted from ST's single-tenant "one row, no tenant_id" model to this app's tenant-scoped resolver |
+| `dotmac_kernel/web_deps.py` | `require_web_auth`, `WebAuthRedirect`, `safe_next_url`, `is_secure_request` | ST (`app/web/deps.py`), routed through this app's `authenticate_request` shared seam (native adaptation — ST had no bearer/cookie seam to share) |
+| `dotmac_kernel/identity.py` | `normalize_email`, `person_display_name` — the single-owner Party-invariant helpers | native (closes the SOT gap tracked from 2a-T6/T7; no upstream port — see "Known dual-writer: Parties" below) |
 
 ## Model provenance table
 
@@ -934,7 +940,7 @@ made concrete — every model has exactly one declared owner.
 | `AuthSession` | `auth_sessions` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
 | `AuditEvent` | `audit_events` | core | dotmac_sub (`app/models/audit.py`, tenant-adapted) |
 | `DomainSetting` | `domain_settings` | core | dotmac_starter (`app/models/domain_settings.py`, tenant-adapted), with `CheckConstraint` restored from dotmac_sub |
-| `UserCredential` | `user_credentials` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted; `email` column dropped 2b.1-T3 — see "Auth credentials" ownership row and the F2 resolution note below). PORT-DELTA (control-plane security Task 2): moved from the `auth` feature to core — atomic tenant provisioning (`tenants` feature) must create the owner credential and features never import each other, so the model joined the other identity models under ADR-0002's placement rule; hashing/verification stays in `app.core.security` |
+| `UserCredential` | `user_credentials` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted; `email` column dropped 2b.1-T3 — see "Auth credentials" ownership row and the F2 resolution note below). PORT-DELTA (control-plane security Task 2): moved from the `auth` feature to core — atomic tenant provisioning (`tenants` feature) must create the owner credential and features never import each other, so the model joined the other identity models under ADR-0002's placement rule; hashing/verification stays in `dotmac_kernel.security` |
 | `PlatformAdmin` | `platform_admins` | core | native (control-plane security Task 1, ADR-0004) — platform catalog table: no `tenant_id`, no RLS, GRANT `platform_api`/`app_admin` only, REVOKEd from `app_user` |
 | `PlatformSession` | `platform_sessions` | core | native (control-plane security Task 1, ADR-0004) — same grant model as `platform_admins` |
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
@@ -955,21 +961,21 @@ write:
 |---|---|
 | Tenants | `app.features.tenants.service.provision_tenant` (platform-only, control-plane security Task 2 — one transaction creating tenant + owner party/person/credential + `admin` role grant + two audit events; no update/delete service yet) |
 | Platform admins | `scripts/create_platform_admin.py::upsert_admin` (CLI-only, platform/migration DB credentials — the same trust boundary as migrations; deliberately NO HTTP write path, see ADR-0004) |
-| Platform sessions | `app.core.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |
+| Platform sessions | `dotmac_kernel.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |
 | Tenant domains | none — no write path exists yet (rows would be inserted by a future custom-domain feature) |
 | Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` / `update_person_party` / `update_organization_party` (the `/parties` API + `/admin/parties/{id}/edit` web flow), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
-| `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `app.core.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
-| `Party.email` (the login identity) | **Single column, single authority as of 2b.1-T3 (finding F2, resolved)**: owner is parties+auth writers via `app.core.identity.normalize_email` — same dual-writer/shared-invariant shape as `display_name` above (`create_person_party`/`update_person_party`/`create_organization_party`/`update_organization_party` and `auth/service.py::register` all call it). `app.features.auth.service.login` READS this column directly (join by `party_id` to find the credential row) instead of a second `UserCredential.email` copy, which is GONE — see the F2 resolution note under "Known dual-writer: Parties" below. No repair path needed: there is only ever one column now, so there is nothing to drift or re-sync. |
+| `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `dotmac_kernel.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
+| `Party.email` (the login identity) | **Single column, single authority as of 2b.1-T3 (finding F2, resolved)**: owner is parties+auth writers via `dotmac_kernel.identity.normalize_email` — same dual-writer/shared-invariant shape as `display_name` above (`create_person_party`/`update_person_party`/`create_organization_party`/`update_organization_party` and `auth/service.py::register` all call it). `app.features.auth.service.login` READS this column directly (join by `party_id` to find the credential row) instead of a second `UserCredential.email` copy, which is GONE — see the F2 resolution note under "Known dual-writer: Parties" below. No repair path needed: there is only ever one column now, so there is nothing to drift or re-sync. |
 | Party role grants | `app.features.rbac.service.assign_role` (the `POST /rbac/role-grants` JSON API **and** the `POST /admin/role-grants` web form both call this same function) **and** `app.features.tenants.service.provision_tenant` (grants the provisioned owner the `admin` role inside the provisioning transaction). The race-prone `_assign_first_user_admin` first-registrant bootstrap is DELETED (control-plane security Task 2) — registration never grants a role |
 | Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and `app.features.tenants.service.provision_tenant` (creates the new tenant's `admin` role during provisioning) |
 | Auth credentials | `app.features.auth.service.register` (policy-gated self-registration, `auth.registration_policy` default `closed`) **and** `app.features.tenants.service.provision_tenant` (the owner credential, inside the provisioning transaction) — no credential-update/password-reset path yet, phase 2c. `Party.email` is a SEPARATE resource with its own row above (Parties) — `UserCredential` carries no email of its own as of 2b.1-T3 (F2): `login()` resolves `Party` by email first, then `UserCredential` by `party_id` only. |
 | Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `POST /admin/logout`, CSRF-protected as of 2b.1-T5/F7; the JSON API has no logout/revoke route of its own yet) |
-| Audit events | `app.core.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes), `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor), and `tenants/service.py::provision_tenant` (`platform.tenant.create` + `platform.tenant.owner_provision`, the platform actor named in `details.platform_actor` since platform admins are not tenant parties) |
-| Domain settings rows | `app.core.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
-| `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `app.core.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
+| Audit events | `dotmac_kernel.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes), `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor), and `tenants/service.py::provision_tenant` (`platform.tenant.create` + `platform.tenant.owner_provision`, the platform actor named in `details.platform_actor` since platform admins are not tenant parties) |
+| Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
+| `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
-| Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`app.core.templating`) — no service reads these specs directly |
+| Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
 
 ### Known dual-writer: Parties (auth register vs. parties service)
 
@@ -989,11 +995,11 @@ other is "an admin manages a contact/customer record" — flagged here per
 SOT-complete honesty rather than silently left implicit. The writers
 themselves stay two; what changed (Task 5) is that the INVARIANTS both must
 preserve are no longer hand-duplicated at each call site — they're
-implemented once in `app.core.identity` and both writers call the same
+implemented once in `dotmac_kernel.identity` and both writers call the same
 functions:
 
 - **Email is lowercased at the write boundary**, via
-  `app.core.identity.normalize_email` — `auth/service.py::register` and
+  `dotmac_kernel.identity.normalize_email` — `auth/service.py::register` and
   `parties/service.py`'s create/update functions all call this one function
   instead of each writing its own `.lower()`. Both must agree because the
   `parties` table's uniqueness index is `lower(email)`-based — a
@@ -1021,7 +1027,7 @@ functions:
   `docs/superpowers/phase2-backlog.md`.
 - **`display_name` derivation** — **closed as of Task 5** (previously the
   tracked SOT gap in `docs/superpowers/phase2-backlog.md`). Both writers
-  now call `app.core.identity.person_display_name(first_name, last_name)`
+  now call `dotmac_kernel.identity.person_display_name(first_name, last_name)`
   for the person case (organizations reassign `legal_name` directly — no
   helper needed, `legal_name` IS the display name); `update_person_party`/
   `update_organization_party` (`parties/service.py`) recompute
@@ -1053,7 +1059,7 @@ order):
 4. **TenantResolverMiddleware** — resolves `request.state.tenant` from the
    `Host` header (see below) and sets it before any route runs.
 5. **RateLimitMiddleware** — tenant/client-ip/route-template-keyed budget
-   check against the bounded store (`app/core/middleware/rate_limit.py`;
+   check against the bounded store (`dotmac_kernel/middleware/rate_limit.py`;
    unmatched paths collapse into fixed hash buckets — see `docs/SECURITY.md`).
 6. **CSRFMiddleware** — double-submit cookie/header check for
    browser-cookie flows.
@@ -1111,13 +1117,13 @@ Three Postgres roles, three connection URLs (`DATABASE_URL`,
 Alembic migration (`alembic/versions/20260504_0001_initial_tenant_schema.py`):
 
 - **`app_user`** (`DATABASE_URL`) — the FastAPI request-path role for
-  tenant-scoped routes. RLS-enforced, cannot bypass. `app.core.db.get_db`
+  tenant-scoped routes. RLS-enforced, cannot bypass. `dotmac_kernel.db.get_db`
   runs `SELECT set_config('app.current_tenant', :id, true)` per request
   (transaction-scoped — the next pooled connection starts with no setting).
   RLS policies read that setting via `app_current_tenant_id()`, which
   treats unset/malformed values as `NULL`, so a forgotten tenant scope
   fails closed (zero rows) rather than leaking.
-- **`platform_api`** (`PLATFORM_DATABASE_URL`) — used by `app.core.db.get_platform_db`
+- **`platform_api`** (`PLATFORM_DATABASE_URL`) — used by `dotmac_kernel.db.get_platform_db`
   for platform-wide routes (tenant provisioning). Explicit grants, **no**
   `BYPASSRLS`. Falls back to `DATABASE_URL` if unset (local dev only).
 - **`app_admin`** (`MIGRATION_DATABASE_URL`) — `BYPASSRLS`. Used only by
@@ -1138,13 +1144,13 @@ in the same migration that creates the table.
 1. `app/main.py` imports `FEATURE_MODULES` from `app/features/__init__.py`
    — a plain list of dotted module paths (currently `tenants`, `auth`,
    `parties`, `rbac`, `settings`, `custom_fields`, `web`).
-2. `app.core.features.load_manifests(FEATURE_MODULES)` imports each
+2. `dotmac_kernel.features.load_manifests(FEATURE_MODULES)` imports each
    `<module>.feature` submodule via `importlib` (so core never statically
    imports `app.features`) and collects its `feature: FeatureManifest`
    (`name`, `routers`, `web_routers`, `nav`, `core: bool`,
    `enabled_by_default: bool` — see "Capability model" above for the
    `web_routers`/`nav` fields).
-3. `app.core.features.mount_features(app, manifests=..., disabled=settings.disabled_feature_set, web_enabled=settings.web_enabled)`
+3. `dotmac_kernel.features.mount_features(app, manifests=..., disabled=settings.disabled_feature_set, web_enabled=settings.web_enabled)`
    mounts each enabled manifest's `routers` via `app.include_router(...)`
    unconditionally, then its `web_routers` ONLY `if web_enabled`, skipping
    the whole manifest if its name is in `DISABLED_FEATURES` or its
@@ -1171,29 +1177,29 @@ in the same migration that creates the table.
 
 ## Error handling
 
-`app/core/exceptions.py` defines a `DomainError` hierarchy:
+`dotmac_kernel/exceptions.py` defines a `DomainError` hierarchy:
 `NotFoundError` (404), `BadRequestError` (400), `ConflictError` (409),
 `UnauthorizedError` (401), plus FastAPI's own `RequestValidationError`
-(422) and an unhandled-exception catch-all (500). `app/core/errors.py`
+(422) and an unhandled-exception catch-all (500). `dotmac_kernel/errors.py`
 maps every one of these to the same JSON envelope:
 
 ```json
 {"code": "not_found", "message": "...", "details": null, "request_id": "..."}
 ```
 
-`request_id` is pulled from `app.core.logging.request_id_var`, the same
+`request_id` is pulled from `dotmac_kernel.logging.request_id_var`, the same
 context var `ObservabilityMiddleware` populates — so every error response
 is correlatable with the structured request log line. Services raise
 `DomainError` subclasses and let them bubble; routers never construct
 `HTTPException` themselves for domain-level failures (see
 `test_routers_do_not_issue_direct_queries` — routers stay thin; the
-corollary is that error translation is centralized in `app/core/errors.py`,
+corollary is that error translation is centralized in `dotmac_kernel/errors.py`,
 not scattered per-router).
 
 ## Transaction authority (control-plane security Task 4)
 
 There is exactly ONE transaction authority in this codebase:
-`app/core/db.py`. The contract:
+`dotmac_kernel/db.py`. The contract:
 
 - **The boundary owns commit/rollback.** `get_db` and `get_platform_db`
   (request boundaries) and `platform_session` (the non-request boundary for
@@ -1205,7 +1211,7 @@ There is exactly ONE transaction authority in this codebase:
 - **Expected conflicts use `conflict_savepoint`** — roll back the SAVEPOINT,
   not the transaction (next section).
 - **No route, task, or service constructs an ad hoc session.** The old
-  `app/core/unit_of_work.py` (`UnitOfWork`, `ConcurrencyConflict`) was a
+  `dotmac_kernel/unit_of_work.py` (`UnitOfWork`, `ConcurrencyConflict`) was a
   second, zero-consumer transaction authority — DELETED under the stronger
   SoT rule (zero consumers → delete), not kept "just in case".
 - **Provisioning's `SET LOCAL` idiom:** platform-session code that must
@@ -1216,17 +1222,17 @@ There is exactly ONE transaction authority in this codebase:
   := true)` idiom `get_db` uses, because `platform_api` has no BYPASSRLS.
 
 Enforced by `tests/architecture/test_session_authority.py` (AST-based: no
-module outside `app/core/db.py` may call `SessionLocal()`,
+module outside `dotmac_kernel/db.py` may call `SessionLocal()`,
 `PlatformSessionLocal()`, `sessionmaker(...)`, or construct `Session(...)`;
 no feature module may import `sessionmaker`; sensitivity self-tested). The
-one allowlisted exception is `app/core/middleware/tenant.py`: the resolver
+one allowlisted exception is `dotmac_kernel/middleware/tenant.py`: the resolver
 runs before any route dependency exists, so it owns its own short
 read-only session boundary — the allowlist entry and this paragraph must
 stay in sync.
 
 ## Conflict handling: savepoints preserve RLS context (2b.1-T2, finding F3)
 
-`get_db` (`app.core.db`) owns the request's outer transaction and issues
+`get_db` (`dotmac_kernel.db`) owns the request's outer transaction and issues
 `SET LOCAL app.current_tenant` on it once, for RLS. The pre-2b.1 convention
 at every expected-conflict site (duplicate email/slug/role-grant, etc.) was
 `try: db.flush() except IntegrityError: db.rollback(); raise
@@ -1240,7 +1246,7 @@ under `FORCE ROW LEVEL SECURITY` that fails closed: either an
 result set (500s or blank re-renders, invisible on SQLite since it can't
 enforce RLS at all — this is why the canary requires Postgres).
 
-`app.core.db.conflict_savepoint(db)` is the fix, a context manager around
+`dotmac_kernel.db.conflict_savepoint(db)` is the fix, a context manager around
 `Session.begin_nested()` (a `SAVEPOINT` scoped INSIDE the outer
 transaction): on clean exit it commits the SAVEPOINT (a no-op release, not
 the outer `COMMIT`); on any exception it rolls back ONLY the SAVEPOINT —
