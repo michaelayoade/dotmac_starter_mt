@@ -4,6 +4,27 @@
 > This plan follows the control-plane-security program and the manifest-driven module
 > control-plane directive. It must not be represented in README/ARCHITECTURE as current
 > runtime behavior until the corresponding completion gates pass.
+>
+> **Amendment 2026-07-30 (ownership rulings C1–C7 — lane assignment).** This plan's workstreams
+> were not labelled by lane, which the vendor control-plane design surfaced as ambiguities.
+> Michael's rulings assign them:
+> - **Workstream 11's `Deployment`/`ProvisioningRequest`/`ProvisioningStep`/`SupportAccessGrant`
+>   tables and the durable deployment workflow are owned by the vendor control plane** (a
+>   SEPARATE `dotmac_vendor_control_plane` repository, ruling C5), NOT the starter/kernel
+>   (rulings C1, C2). The kernel owns reusable **protocols/primitives only**.
+> - **The `ProvisioningProvider` (protocol + typed plan/apply/observe results + stable errors +
+>   fake + parametrized contract suite) moves into the kernel alpha** (ruling C6) — see the
+>   kernel-boundary plan's amended Tasks 3/5. Fleet workflows and cloud-specific operations stay
+>   OUT of the kernel.
+> - **Workstream 2's `tenant_entitlement_grants` is written ONLY by the product data plane**,
+>   which verifies a signed/versioned delivery the control plane initiates and acknowledges the
+>   applied version/digest (ruling C4).
+> - **Workstream 12's fleet/support/incident admin surfaces belong to the vendor-control-plane
+>   portal** (ruling C7), on the kernel's portal-composition machinery.
+> - **Release channels/waves never authorize a deployment**; a pin is desired state only under
+>   `vendor automatic` update authority (ruling C3).
+> Full text: `docs/superpowers/plans/2026-07-30-vendor-control-plane-domain-foundation.md`
+> § "Ownership rulings".
 
 ## Goal
 
