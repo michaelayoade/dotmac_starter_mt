@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# K4 — empty-consumer WHEEL proof.
+# Empty-consumer WHEEL proof (K4) + release smoke modes (K6).
 #
 # Proves the kernel works when INSTALLED AS A WHEEL and consumed by an EXTERNAL
 # application — not run from the workspace source tree. The milestone this gates
@@ -10,21 +10,53 @@
 # liveness endpoint, and resolve the kernel's packaged data (templates, static,
 # migrations) — all from site-packages, with the repo `app/` NEVER on sys.path.
 #
-# Steps:
-#   1. Build the kernel wheel (poetry build -f wheel).
-#   2. Create a CLEAN virtualenv in a temp dir (NOT the repo/.venv).
-#   3. pip install the wheel + the two runtime pieces the kernel deliberately
-#      leaves to the consumer (a DB driver + an HTTP test client) — see below.
-#   4. Write a ~15-line external consumer app that imports only public names.
-#   5. Boot it (Starlette TestClient) with an UNREACHABLE-but-well-formed
-#      DATABASE_URL and assert GET /health == 200 (DB-free liveness invariant).
-#   6. Assert the packaged data resolves FROM THE INSTALLED WHEEL (site-packages).
-#   7. Clean up the temp venv/dir.
+# MODES (one script, no parallel copy — R0 amendment):
+#   (default)              SOURCE mode. Build the wheel from source here
+#                          (poetry build -f wheel) and smoke it. The compiled
+#                          static/css/main.css is a gitignored build artifact, so
+#                          source mode TOLERATES its absence. This is what the
+#                          `consumer-boot` CI gate on main runs — behavior
+#                          unchanged.
+#   --wheel <dist-dir>     RELEASE-ARTIFACT mode. Do NOT build; smoke an existing
+#                          wheel in <dist-dir> (the release `build` job runs
+#                          `npm run css:build` then `poetry build` first). Release
+#                          mode REQUIRES static/css/main.css.
+#   --from-pypi <version>  FROM-REGISTRY mode. `pip install --pre
+#                          dotmac-kernel==<version>` from PyPI into a clean venv
+#                          and smoke the PUBLISHED artifact. Release mode REQUIRES
+#                          static/css/main.css.
 #
 # CI-friendly and deterministic: no Postgres, no port binding (TestClient runs
 # the ASGI app in-process), temp workspace removed on exit.
 #
 set -euo pipefail
+
+# ── Mode parsing ─────────────────────────────────────────────────────────────
+MODE="source"
+DIST_DIR=""
+PYPI_VERSION=""
+case "${1:-}" in
+  --wheel)
+    MODE="wheel"
+    DIST_DIR="${2:?usage: consumer_boot_check.sh --wheel <dist-dir>}"
+    ;;
+  --from-pypi)
+    MODE="pypi"
+    PYPI_VERSION="${2:?usage: consumer_boot_check.sh --from-pypi <version>}"
+    ;;
+  "")
+    MODE="source"
+    ;;
+  *)
+    echo "unknown argument: ${1}" >&2
+    echo "usage: consumer_boot_check.sh [--wheel <dist-dir> | --from-pypi <version>]" >&2
+    exit 2
+    ;;
+esac
+# Release modes (a real built/published artifact) require the compiled web asset;
+# source mode tolerates its absence (the gitignored build artifact isn't built).
+REQUIRE_COMPILED_CSS=0
+[ "$MODE" = "source" ] || REQUIRE_COMPILED_CSS=1
 
 # ── Locations ───────────────────────────────────────────────────────────────
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -49,12 +81,30 @@ WORKDIR=$(mktemp -d)
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
 
-echo "==> [1/6] Build the kernel wheel"
-cd "$KERNEL_DIR"
-rm -rf dist
-poetry build -f wheel
-WHEEL=$(ls "$KERNEL_DIR"/dist/*.whl | head -n1)
-echo "    wheel: $WHEEL"
+echo "==> [1/6] Resolve the kernel wheel (mode: ${MODE})"
+INSTALL_SPEC=""       # what pip installs to provide dotmac_kernel
+case "$MODE" in
+  source)
+    cd "$KERNEL_DIR"
+    rm -rf dist
+    poetry build -f wheel
+    WHEEL=$(ls "$KERNEL_DIR"/dist/*.whl | head -n1)
+    INSTALL_SPEC="$WHEEL"
+    echo "    built wheel: $WHEEL"
+    ;;
+  wheel)
+    # Resolve <dist-dir> relative to CWD or repo root.
+    [ -d "$DIST_DIR" ] || DIST_DIR="$REPO_ROOT/$DIST_DIR"
+    WHEEL=$(ls "$DIST_DIR"/*.whl 2>/dev/null | head -n1)
+    [ -n "$WHEEL" ] || { echo "no wheel found in $DIST_DIR" >&2; exit 1; }
+    INSTALL_SPEC="$WHEEL"
+    echo "    release wheel: $WHEEL"
+    ;;
+  pypi)
+    INSTALL_SPEC="dotmac-kernel==${PYPI_VERSION}"
+    echo "    from PyPI: --pre ${INSTALL_SPEC}"
+    ;;
+esac
 
 echo "==> [2/6] Create a CLEAN consumer virtualenv (isolated from the repo venv)"
 VENV="$WORKDIR/venv"
@@ -62,13 +112,13 @@ VENV="$WORKDIR/venv"
 VPY="$VENV/bin/python"
 "$VPY" -m pip install --quiet --upgrade pip
 
-echo "==> [3/6] Install the wheel + its declared deps into the clean venv"
+echo "==> [3/6] Install the kernel + its declared deps into the clean venv"
 # The wheel's METADATA carries the kernel's declared dependency closure
-# (fastapi, sqlalchemy, pydantic, pydantic-settings, jinja2, argon2-cffi) — pip
-# resolves those from the wheel alone, which is the "dep set is complete" proof.
-# Two runtime pieces are DELIBERATELY excluded from kernel deps as assembly/
-# deploy concerns (see packages/dotmac-kernel/pyproject.toml) and are supplied
-# HERE by the consumer, exactly as a real deployment would:
+# (fastapi, sqlalchemy, pydantic[email], pydantic-settings, jinja2, argon2-cffi) —
+# pip resolves those from the wheel/release alone, which is the "dep set is
+# complete" proof. Two runtime pieces are DELIBERATELY excluded from kernel deps
+# as assembly/deploy concerns (see packages/dotmac-kernel/pyproject.toml) and are
+# supplied HERE by the consumer, exactly as a real deployment would:
 #   - psycopg[binary] : the DB driver the postgresql+psycopg:// URL names.
 #                       SQLAlchemy imports it eagerly at create_engine() time
 #                       (dotmac_kernel.db builds the engine at import), so
@@ -78,7 +128,12 @@ echo "==> [3/6] Install the wheel + its declared deps into the clean venv"
 #                       in-process /health probe.
 # The workspace app/ is NOT installed and is NOT on sys.path — the whole point:
 # the consumer sees only the public kernel surface from site-packages.
-"$VPY" -m pip install --quiet "$WHEEL" "psycopg[binary]" httpx
+if [ "$MODE" = "pypi" ]; then
+  # --pre so the alpha (0.1.0aN) is installable; from the real index.
+  "$VPY" -m pip install --quiet --pre "$INSTALL_SPEC" "psycopg[binary]" httpx
+else
+  "$VPY" -m pip install --quiet "$INSTALL_SPEC" "psycopg[binary]" httpx
+fi
 
 echo "==> [4/6] Write the minimal EXTERNAL consumer app (public names only)"
 cat > "$WORKDIR/consumer_main.py" <<'PY'
@@ -95,12 +150,12 @@ PY
 
 echo "==> [5/6] Write the boot + package-data proof runner"
 cat > "$WORKDIR/consumer_check.py" <<'PY'
-"""Boot the external consumer app from the installed wheel and assert:
+"""Boot the external consumer app from the installed kernel and assert:
   1. GET /health == 200 (DB-free liveness, unreachable DATABASE_URL).
   2. The kernel and its packaged data resolve from site-packages (the installed
-     WHEEL), NOT from the repo source tree.
-  3. Templates / static (css SOURCE + js + fonts) / migrations 0001..0007 are
-     present as package data.
+     WHEEL/release), NOT from the repo source tree.
+  3. Templates / static (css source + js + fonts, and — in release mode — the
+     COMPILED css/main.css) / migrations 0001..0007 are present as package data.
 """
 
 import os
@@ -116,6 +171,7 @@ from consumer_main import app
 
 repo_root = Path(os.environ["REPO_ROOT"]).resolve()
 site_root = Path(sys.prefix).resolve()  # the clean venv
+require_compiled_css = os.environ.get("REQUIRE_COMPILED_CSS") == "1"
 
 
 def installed_from_wheel(p: Path) -> None:
@@ -146,9 +202,7 @@ print(f"    templates/base.html-> present ({templates_dir})")
 # ── 4. packaged STATIC resolves from the wheel ───────────────────────────────
 static_dir = ktpl.STATIC_DIR
 installed_from_wheel(static_dir)
-# The css SOURCE (Tailwind input) IS package data; the COMPILED static/css/main.css
-# is a gitignored build artifact absent from a source build of the wheel — so we
-# assert on the source + js + fonts, which are always shipped.
+# The css SOURCE (Tailwind input), js, and fonts are ALWAYS shipped.
 required = [
     "css/src/main.css",
     "js/htmx.min.js",
@@ -160,9 +214,19 @@ required = [
 for rel in required:
     assert (static_dir / rel).is_file(), f"static/{rel} missing from wheel"
 print(f"    static (css-src/js/fonts) -> {len(required)} required files present ({static_dir})")
+
+# The COMPILED web asset: REQUIRED in release mode (a published/built web kernel
+# must ship it), TOLERATED in source mode (gitignored build artifact not built).
 compiled = static_dir / "css" / "main.css"
-print(f"    static/css/main.css (compiled build artifact) -> "
-      f"{'present' if compiled.is_file() else 'absent (expected in a source build)'}")
+if require_compiled_css:
+    assert compiled.is_file(), (
+        "static/css/main.css MISSING — a release build must run `npm run css:build` "
+        "before `poetry build` so the compiled web asset ships"
+    )
+    print(f"    static/css/main.css (compiled) -> present [REQUIRED in release mode]")
+else:
+    print(f"    static/css/main.css (compiled build artifact) -> "
+          f"{'present' if compiled.is_file() else 'absent (tolerated in source mode)'}")
 
 # ── 5. packaged MIGRATIONS 0001..0007 resolve from the wheel ─────────────────
 versions_dir = kmig.versions_dir()
@@ -172,12 +236,13 @@ for n in ("0001", "0002", "0003", "0004", "0005", "0006", "0007"):
     assert any(f"_{n}_" in r for r in revs), f"migration {n} missing from wheel"
 print(f"    migrations 0001..0007 -> {len(revs)} revisions present ({versions_dir})")
 
-print("\nOK — kernel boots and resolves its package data from the installed wheel.")
+print("\nOK — kernel boots and resolves its package data from the installed kernel.")
 PY
 
-echo "==> [6/6] Boot the consumer from the installed wheel and run the proof"
+echo "==> [6/6] Boot the consumer from the installed kernel and run the proof"
 cd "$WORKDIR"
-DATABASE_URL="$CONSUMER_DB_URL" REPO_ROOT="$REPO_ROOT" "$VPY" consumer_check.py
+DATABASE_URL="$CONSUMER_DB_URL" REPO_ROOT="$REPO_ROOT" \
+  REQUIRE_COMPILED_CSS="$REQUIRE_COMPILED_CSS" "$VPY" consumer_check.py
 
 echo
-echo "PASS — empty-consumer wheel proof succeeded."
+echo "PASS — empty-consumer ${MODE} proof succeeded."
