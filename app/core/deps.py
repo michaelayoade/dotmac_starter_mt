@@ -22,19 +22,6 @@ def require_tenant(request: Request) -> Tenant:
     return tenant
 
 
-def require_platform(request: Request) -> None:
-    """For routes that operate platform-wide (no tenant context).
-
-    Real implementations should additionally check a `platform_admin` role on the
-    actor — stubbed here.
-    """
-    if getattr(request.state, "tenant", None) is not None:
-        raise HTTPException(
-            status_code=404,
-            detail="Platform routes are not available on tenant subdomains",
-        )
-
-
 def authenticate_request(request: Request, db: Session, *, token: str) -> Party | None:
     """The ONE token+session+party validation path — SoT for both the bearer
     (API) and cookie (web) auth flows.
@@ -156,7 +143,6 @@ __all__ = [
     "authenticate_request",
     "get_db",
     "get_platform_db",
-    "require_platform",
     "require_role",
     "require_tenant",
     "require_user_auth",

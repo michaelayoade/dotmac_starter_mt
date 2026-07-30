@@ -26,6 +26,7 @@ from app.core.middleware.csrf import CSRFMiddleware
 from app.core.middleware.observability import ObservabilityMiddleware
 from app.core.middleware.rate_limit import RateLimitMiddleware
 from app.core.middleware.tenant import TenantResolverMiddleware
+from app.core.platform_auth import platform_auth_router
 from app.core.templating import install_surface_globals
 from app.features import FEATURE_MODULES
 
@@ -133,6 +134,12 @@ def health() -> dict[str, str]:
     """Liveness — does not touch DB."""
     return {"status": "ok"}
 
+
+# Platform auth mounts DIRECTLY — not via a feature manifest. The manifest/
+# capability model is for tenant capabilities; the platform control plane
+# must exist even with every feature disabled (see app.core.platform_auth's
+# module docstring and ADR-0004).
+app.include_router(platform_auth_router)
 
 mount_features(
     app,

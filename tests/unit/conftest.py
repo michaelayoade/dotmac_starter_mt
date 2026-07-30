@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 # there about import-time engine creation in app.core.db.
 from app.core import (
     audit,  # noqa: F401
+    models_platform,  # noqa: F401
     settings_models,  # noqa: F401
 )
 from app.core.features import load_manifests

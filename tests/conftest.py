@@ -44,10 +44,20 @@ def admin_engine():
 
 @pytest.fixture(autouse=True)
 def _set_database_url(monkeypatch):
-    """Pin DATABASE_URL for the app under test to the TEST_DATABASE_URL."""
+    """Pin DATABASE_URL for the app under test to the TEST_DATABASE_URL.
+
+    PLATFORM_DATABASE_URL rides along from TEST_PLATFORM_DATABASE_URL (the
+    `platform_api` role — set by `make test-integration`) so platform routes
+    exercise the REAL platform grants: platform catalog tables are REVOKEd
+    from `app_user`, so running them on the app_user connection would fail
+    for the wrong reason (and hide a missing-grant bug in the right one).
+    """
     url = os.getenv("TEST_DATABASE_URL")
     if url:
         monkeypatch.setenv("DATABASE_URL", url)
+    platform_url = os.getenv("TEST_PLATFORM_DATABASE_URL")
+    if platform_url:
+        monkeypatch.setenv("PLATFORM_DATABASE_URL", platform_url)
     monkeypatch.setenv("PLATFORM_ROOT_DOMAIN", "localhost")
 
 

@@ -51,7 +51,7 @@ def issue_access_token(party_id: UUID, tenant_id: UUID) -> tuple[str, datetime]:
         "exp": int(expires_at.timestamp()),
         "jti": secrets.token_urlsafe(16),
     }
-    return _encode_jwt(payload), expires_at
+    return encode_jwt(payload), expires_at
 
 
 def decode_access_token(token: str) -> dict[str, object] | None:
@@ -80,7 +80,11 @@ def hash_token(token: str) -> str:
     ).hexdigest()
 
 
-def _encode_jwt(payload: dict[str, object]) -> str:
+def encode_jwt(payload: dict[str, object]) -> str:
+    """Encode+sign a JWT payload (HS256). Public because
+    `app.core.platform_auth` issues platform-audience tokens through the
+    same signer — one signing implementation, two token populations
+    distinguished by the `aud` claim."""
     header = {"alg": "HS256", "typ": "JWT"}
     header_b64 = _b64encode(json.dumps(header, separators=(",", ":")).encode())
     payload_b64 = _b64encode(json.dumps(payload, separators=(",", ":")).encode())
