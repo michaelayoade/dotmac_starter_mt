@@ -100,6 +100,8 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.models",
         "dotmac_kernel.models_platform",
         "dotmac_kernel.platform_auth",
+        "dotmac_kernel.providers",
+        "dotmac_kernel.providers.provisioning",
         "dotmac_kernel.query",
         "dotmac_kernel.security",
         "dotmac_kernel.settings_admin",
