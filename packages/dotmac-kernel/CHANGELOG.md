@@ -8,6 +8,17 @@ here.
 
 ## Unreleased
 
+### Fixed
+- **Vendored font weights are now the real distinct weights.** Every Outfit and
+  Plus Jakarta Sans weight had shipped as a byte-for-byte copy of the 400 file,
+  so bold/semibold text silently rendered at weight 400. Re-vendored per-weight
+  `woff2` (Latin subset, from `@fontsource`) for Outfit 400–800 and Plus Jakarta
+  Sans 400–700. `tests/architecture/test_vendored_fonts.py` guards against
+  byte-identical weights recurring, and the release inspection no longer needs to
+  ignore the `check-wheel-contents` duplicate-file warning. (Latin subset covers
+  the admin portal; extended glyphs such as ₦ via `latin-ext` are a follow-up if
+  UI review needs them.)
+
 ### Added
 - **`dotmac_kernel.money`** — exact money + FX primitives (WS4). `Money`
   (currency + quantized `Decimal`, never `float`; add/subtract/multiply,

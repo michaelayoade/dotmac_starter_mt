@@ -21,6 +21,15 @@ imports only names declared here.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Static type for consumers: `create_app` is provided lazily by `__getattr__`
+    # at runtime (kept out of the eager import path so `import dotmac_kernel`
+    # stays DB-free), but a type-checker must see its real signature rather than
+    # the `Any` a bare module `__getattr__` would yield.
+    from dotmac_kernel.app_factory import create_app as create_app
+
 # ── Curated, import-safe top-level API ──────────────────────────────────────
 # Only names whose defining module has no import-time engine/I/O side effect,
 # so `import dotmac_kernel` never requires DATABASE_URL. Engine-touching APIs
