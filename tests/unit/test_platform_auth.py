@@ -1,4 +1,4 @@
-"""Unit tests for `app.core.platform_auth` (control-plane security Task 1).
+"""Unit tests for `dotmac_kernel.platform_auth` (control-plane security Task 1).
 
 Postgres-level behavior (grants, deny-by-default through the full app) lives
 in `tests/test_platform_auth_denies.py`; these SQLite tests pin the guard's
@@ -14,13 +14,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from dotmac_kernel import platform_auth
+from dotmac_kernel.config import settings
+from dotmac_kernel.middleware.tenant import _is_platform_path
+from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
+from dotmac_kernel.security import hash_password, hash_token, issue_access_token
 from starlette.requests import Request
-
-from app.core import platform_auth
-from app.core.config import settings
-from app.core.middleware.tenant import _is_platform_path
-from app.core.models_platform import PlatformAdmin, PlatformSession
-from app.core.security import hash_password, hash_token, issue_access_token
 
 
 def _request(host: str) -> Request:
@@ -176,14 +175,14 @@ class TestLoginService:
         )
 
     def test_wrong_password_raises(self, db, admin):
-        from app.core.exceptions import UnauthorizedError
+        from dotmac_kernel.exceptions import UnauthorizedError
 
         with pytest.raises(UnauthorizedError):
             platform_auth.login(db, email=admin.email, password="wrong-password")
 
     def test_unknown_email_raises_after_dummy_verify(self, db, monkeypatch):
         """Constant-work miss path: the dummy verification actually runs."""
-        from app.core.exceptions import UnauthorizedError
+        from dotmac_kernel.exceptions import UnauthorizedError
 
         calls: list[str] = []
         real_verify = platform_auth.verify_password
@@ -244,7 +243,7 @@ class TestCliUpsert:
         assert len(admins) == 1
         assert admins[0].email == "boot@platform.example.com"
         assert admins[0].is_active is False
-        from app.core.security import verify_password
+        from dotmac_kernel.security import verify_password
 
         assert verify_password("second-password", admins[0].password_hash)
         assert not verify_password("first-password", admins[0].password_hash)

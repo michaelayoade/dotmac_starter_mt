@@ -5,7 +5,7 @@
 `Party.email` is looked up case-insensitively (the `parties` table's unique
 index is `lower(email)`-based) — `register`/`login` normalize the incoming
 address to lowercase before storing/querying it, via
-`app.core.identity.normalize_email`. Otherwise a user who registered with a
+`dotmac_kernel.identity.normalize_email`. Otherwise a user who registered with a
 mixed-case address could be locked out by logging in with the lowercase
 form (or vice versa).
 
@@ -23,13 +23,13 @@ log in with any string, by construction of that query.
 from __future__ import annotations
 
 import pytest
+from dotmac_kernel.exceptions import ForbiddenError, UnauthorizedError
+from dotmac_kernel.models import Party, PartyRole, PartyType, Tenant, UserCredential
+from dotmac_kernel.security import hash_password
+from dotmac_kernel.settings_models import DomainSetting, SettingDomain, SettingValueType
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ForbiddenError, UnauthorizedError
-from app.core.models import Party, PartyRole, PartyType, Tenant, UserCredential
-from app.core.security import hash_password
-from app.core.settings_models import DomainSetting, SettingDomain, SettingValueType
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import LoginRequest, RegisterRequest
 

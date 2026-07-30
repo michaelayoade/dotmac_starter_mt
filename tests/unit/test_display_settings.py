@@ -15,17 +15,11 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-import app.features.settings.spec  # noqa: F401 — registration side effect
-from app.core.deps import get_db
-from app.core.display import DisplaySettings
-from app.core.errors import register_error_handlers
-from app.core.exceptions import BadRequestError
-from app.core.models import (
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.display import DisplaySettings
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.exceptions import BadRequestError
+from dotmac_kernel.models import (
     Party,
     PartyPerson,
     PartyRole,
@@ -34,15 +28,21 @@ from app.core.models import (
     Tenant,
     UserCredential,
 )
-from app.core.security import hash_password
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import (
+from dotmac_kernel.security import hash_password
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import (
     get_spec,
     resolve_value,
     upsert_by_key,
     validate_spec_value,
 )
-from app.core.templating import templates
+from dotmac_kernel.templating import templates
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+import app.features.settings.spec  # noqa: F401 — registration side effect
 from app.features.auth.web import router as auth_web_router
 from app.features.rbac.web import router as rbac_web_router
 

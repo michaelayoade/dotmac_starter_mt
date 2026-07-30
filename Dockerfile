@@ -43,6 +43,11 @@ WORKDIR /srv/app
 
 RUN pip install --no-cache-dir poetry==${POETRY_VERSION}
 COPY pyproject.toml poetry.lock ./
+# The kernel is an editable path dependency (packages/dotmac-kernel); its
+# source must be present before `poetry install` so the develop install
+# resolves. Copied before the install layer, after the manifests, so the
+# dependency cache still keys on pyproject/lock.
+COPY packages ./packages
 RUN poetry install --only main --no-root --no-interaction
 
 COPY app ./app

@@ -5,11 +5,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from dotmac_kernel.models import Party, PartyType
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.models import Party, PartyType
 from tests.conftest import client_for, provision_and_login
 
 PASSWORD = "correct horse battery staple"

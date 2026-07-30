@@ -4,7 +4,7 @@ Ported from dotmac_sub:app/services/crud.py (org infrastructure source of
 truth). Tenancy scoping is NOT enforced by this class — it is enforced by
 Postgres row-level security (RLS) policies on the underlying tables. Callers
 must still go through a session that has the tenant context set (see
-`app.core.db.get_db`) for RLS to apply.
+`dotmac_kernel.db.get_db`) for RLS to apply.
 
 This class assumes UUID primary keys via the `uuid_pk()` convention, since
 `_get_or_404` coerces entity IDs via `UUID(str(...))` before lookup.
@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from typing import Any, Generic, TypeVar, cast
 from uuid import UUID
 
-from app.core.exceptions import NotFoundError
+from dotmac_kernel.exceptions import NotFoundError
 
 logger = logging.getLogger(__name__)
 

@@ -23,11 +23,11 @@ reverse — NEW email succeeds, OLD email 401s, in a single atomic
 
 from __future__ import annotations
 
+from dotmac_kernel.models import Party
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.models import Party
 from tests.conftest import client_for, provision_owner
 
 PASSWORD = "correct horse battery staple"
@@ -86,7 +86,7 @@ def _json_login(
 
     `csrf_token`: `CSRFMiddleware` double-submit-checks ANY non-safe method
     the moment the client carries ANY cookies at all (see
-    `app.core.middleware.csrf`), not just requests to `/admin/*` — so once a
+    `dotmac_kernel.middleware.csrf`), not just requests to `/admin/*` — so once a
     test client has done a `GET /admin/login` (picking up the `csrf_token`
     cookie) on its way to editing a party, every subsequent POST on that
     SAME client — including this plain JSON API call — needs the header too,

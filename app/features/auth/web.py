@@ -38,16 +38,16 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
+from dotmac_kernel.branding import get_request_branding
+from dotmac_kernel.config import settings
+from dotmac_kernel.deps import get_db, require_tenant
+from dotmac_kernel.models import Tenant
+from dotmac_kernel.templating import render
+from dotmac_kernel.web_deps import is_secure_request, safe_next_url
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.core.branding import get_request_branding
-from app.core.config import settings
-from app.core.deps import get_db, require_tenant
-from app.core.models import Tenant
-from app.core.templating import render
-from app.core.web_deps import is_secure_request, safe_next_url
 from app.features.auth import service as auth_service
 
 router = APIRouter(prefix="/admin", tags=["web"])
@@ -66,7 +66,7 @@ def login_page(
     # never goes through `require_web_auth` (call site 1/3); tenant is
     # already host-resolved (`require_tenant` above) so the tenant's saved
     # branding shows on ITS OWN login page even before anyone signs in. See
-    # `app.core.branding`'s module docstring for the full seam decision.
+    # `dotmac_kernel.branding`'s module docstring for the full seam decision.
     get_request_branding(request, db)
     return render(
         request,
@@ -109,7 +109,7 @@ async def login_submit(
         )
 
     # `quote()` unconditionally, matching the `WebAuthRedirect` handler's
-    # practice (`app.core.errors`) — defense-in-depth even though
+    # practice (`dotmac_kernel.errors`) — defense-in-depth even though
     # `safe_next_url` already constrains `next_url` to a same-origin path.
     response = RedirectResponse(url=quote(next_url, safe="/?=&"), status_code=302)
     response.set_cookie(
@@ -147,7 +147,7 @@ def logout(
     token = request.cookies.get(ACCESS_TOKEN_COOKIE)
     auth_service.web_logout(db, tenant, token)
     # `quote()` unconditionally, matching the `WebAuthRedirect` handler's
-    # practice (`app.core.errors`) — this Location is a hardcoded literal
+    # practice (`dotmac_kernel.errors`) — this Location is a hardcoded literal
     # today, but quoting keeps both `RedirectResponse` call sites in this
     # module consistent (defense-in-depth) rather than relying on the
     # literal never changing.

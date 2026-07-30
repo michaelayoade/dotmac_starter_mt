@@ -26,14 +26,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
-
-from app.core.db import conflict_savepoint
-from app.core.exceptions import ConflictError, ForbiddenError, UnauthorizedError
-from app.core.identity import normalize_email, person_display_name
-from app.core.models import (
+from dotmac_kernel.db import conflict_savepoint
+from dotmac_kernel.exceptions import ConflictError, ForbiddenError, UnauthorizedError
+from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.models import (
     AuthSession,
     Party,
     PartyPerson,
@@ -41,15 +37,19 @@ from app.core.models import (
     Tenant,
     UserCredential,
 )
-from app.core.security import (
+from dotmac_kernel.security import (
     hash_password,
     hash_token,
     issue_access_token,
     password_needs_rehash,
     verify_password,
 )
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import resolve_value
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import resolve_value
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from app.features.auth.schemas import LoginRequest, RegisterRequest
 
 # Constant-work login (Task 5): the no-such-party / org-party / no-credential
@@ -104,7 +104,7 @@ def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonVie
     # place an email is stored now, F2/Task 3: the credential row carries no
     # email of its own, so there is nothing left to keep in sync).
     # `normalize_email`/`person_display_name` are the single-owner
-    # implementations of these invariants (app.core.identity) — the parties
+    # implementations of these invariants (dotmac_kernel.identity) — the parties
     # service's create/update paths call the same two functions, so the two
     # writers can never independently drift (see docs/ARCHITECTURE.md's
     # "Known dual-writer: Parties" section).

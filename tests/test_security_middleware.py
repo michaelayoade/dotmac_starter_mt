@@ -8,9 +8,9 @@ from http import cookies
 from typing import Any
 from uuid import uuid4
 
-from app.core.middleware.csrf import CSRF_COOKIE, CSRFMiddleware
-from app.core.middleware.observability import ObservabilityMiddleware
-from app.core.middleware.rate_limit import RateLimitMiddleware
+from dotmac_kernel.middleware.csrf import CSRF_COOKIE, CSRFMiddleware
+from dotmac_kernel.middleware.observability import ObservabilityMiddleware
+from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 
 
 def test_csrf_sets_cookie_on_safe_request_and_blocks_cookie_post_without_header():
@@ -96,7 +96,7 @@ def test_csrf_failure_response_uses_error_envelope():
 
 
 def test_csrf_failure_html_negotiation_renders_branded_csrf_page():
-    """Same negotiation as app.core.errors._negotiate: a browser (Accept:
+    """Same negotiation as dotmac_kernel.errors._negotiate: a browser (Accept:
     text/html) gets the branded errors/csrf.html page, not the JSON envelope
     -- proving the middleware routes through the same decision point rather
     than hand-building its own response."""

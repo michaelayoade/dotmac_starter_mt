@@ -1,6 +1,6 @@
 """TDD for the settings spec registry + resolver (Task 4).
 
-`app.core.settings_resolver` holds the registry mechanism and resolution
+`dotmac_kernel.settings_resolver` holds the registry mechanism and resolution
 logic; `app.features.settings.spec` declares the three initial specs and
 registers them at import time (imported below purely for that side effect).
 
@@ -20,10 +20,9 @@ real constraint violation for the non-race paths.
 from __future__ import annotations
 
 import pytest
+from dotmac_kernel import settings_resolver as sr
+from dotmac_kernel.settings_models import DomainSetting, SettingDomain, SettingValueType
 from sqlalchemy import func, select
-
-from app.core import settings_resolver as sr
-from app.core.settings_models import DomainSetting, SettingDomain, SettingValueType
 
 # Import for the side effect: registers custom_fields/max_per_entity,
 # branding/ui_branding, audit/retention_days.

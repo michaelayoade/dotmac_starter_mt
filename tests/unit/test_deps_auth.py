@@ -1,4 +1,4 @@
-"""Unit coverage for `app.core.deps.require_user_auth` (Task 6 review, Minor 3).
+"""Unit coverage for `dotmac_kernel.deps.require_user_auth` (Task 6 review, Minor 3).
 
 `Party` (`party_type` person|organization) replaced the bare `Person` model.
 Only `party_type == person` parties can authenticate — `require_user_auth`
@@ -15,14 +15,19 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
+from dotmac_kernel.deps import get_db, require_user_auth
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import (
+    AuthSession,
+    Party,
+    PartyOrganization,
+    PartyType,
+    Tenant,
+)
+from dotmac_kernel.security import hash_token, issue_access_token
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-
-from app.core.deps import get_db, require_user_auth
-from app.core.errors import register_error_handlers
-from app.core.models import AuthSession, Party, PartyOrganization, PartyType, Tenant
-from app.core.security import hash_token, issue_access_token
 
 
 @pytest.fixture()

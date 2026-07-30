@@ -7,7 +7,7 @@ responses (tenant resolver, rate limit, CSRF). `_negotiate()` is the single
 place that decides JSON vs. branded HTML for that envelope; every handler
 below routes through it rather than constructing its own `JSONResponse`, so
 adding a new error type can never accidentally skip HTML negotiation. CSRF
-middleware (`app.core.middleware.csrf`) imports `_negotiate` directly since
+middleware (`dotmac_kernel.middleware.csrf`) imports `_negotiate` directly since
 it runs as raw ASGI, outside FastAPI's exception-handler machinery.
 
 Negotiation rule (deliberately simple — see module docstring in the task
@@ -32,7 +32,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.exceptions import (
+from dotmac_kernel.exceptions import (
     BadRequestError,
     ConflictError,
     DomainError,
@@ -40,12 +40,12 @@ from app.core.exceptions import (
     NotFoundError,
     UnauthorizedError,
 )
-from app.core.logging import request_id_var
-from app.core.templating import render
+from dotmac_kernel.logging import request_id_var
+from dotmac_kernel.templating import render
 
 # NOTE: `WebAuthRedirect` is deliberately NOT imported here at module scope —
 # see the function-local import inside `register_error_handlers` below for
-# why (avoids transitively building `app.core.db`'s engine at module-import
+# why (avoids transitively building `dotmac_kernel.db`'s engine at module-import
 # time from whatever `DATABASE_URL` happens to be set).
 
 logger = logging.getLogger(__name__)
@@ -145,7 +145,7 @@ def _negotiate(
     `env` is always the same envelope dict `envelope()` builds — HTML
     rendering shows exactly those fields (`code`, `message`, `request_id`),
     it never forks the envelope shape (see module docstring / SoT note in
-    `app.core.errors`'s docstring).
+    `dotmac_kernel.errors`'s docstring).
     """
     if not _wants_html(request):
         return JSONResponse(status_code=status_code, content=env, headers=headers)
@@ -163,34 +163,34 @@ def _negotiate(
 
 
 def register_error_handlers(app: FastAPI) -> None:
-    # Lazy, function-local import — NOT at module top. `app.core.web_deps`
-    # imports `app.core.deps`/`app.core.db`, and `app.core.db` builds a real
+    # Lazy, function-local import — NOT at module top. `dotmac_kernel.web_deps`
+    # imports `dotmac_kernel.deps`/`.db`, and `dotmac_kernel.db` builds a real
     # SQLAlchemy engine from `settings.database_url` at MODULE IMPORT TIME
-    # (see the backlog entry "Lazy engine construction in app/core/db.py" in
+    # (see the backlog entry "Lazy engine construction in dotmac_kernel.db" in
     # docs/superpowers/phase2-backlog.md — this deferred import works around
     # that same eager-construction issue rather than fixing it at the root).
-    # `app.core.errors` is imported very early and at plain module scope by
-    # `app.core.middleware.csrf` (for `_negotiate`/`envelope`) — which in
+    # `dotmac_kernel.errors` is imported very early and at plain module scope by
+    # `dotmac_kernel.middleware.csrf` (for `_negotiate`/`envelope`) — which in
     # turn is imported at COLLECTION time (before any test fixture, autouse
     # or not, has run) by `tests/test_security_middleware.py`'s top-level
-    # `from app.core.middleware.csrf import ...`. A module-level import here
-    # would transitively build `app.core.db`'s engine against whatever
+    # `from dotmac_kernel.middleware.csrf import ...`. A module-level import here
+    # would transitively build `dotmac_kernel.db`'s engine against whatever
     # `DATABASE_URL` happens to be set at collection time (the hermetic
     # placeholder from `tests/conftest.py`) — permanently, since Python
     # caches the module — breaking every later test that relies on
     # `tests/conftest.py::_set_database_url`'s per-test `monkeypatch.setenv`
-    # to point `app.core.db` at the real test Postgres. Deferring the import
+    # to point `dotmac_kernel.db` at the real test Postgres. Deferring the import
     # to here means it only resolves when `register_error_handlers(app)` is
     # actually CALLED (inside a fixture, after the monkeypatch has run), not
     # merely when this module is imported.
-    from app.core.web_deps import WebAuthRedirect
+    from dotmac_kernel.web_deps import WebAuthRedirect
 
     @app.exception_handler(WebAuthRedirect)
     async def _web_auth_redirect(request: Request, exc: WebAuthRedirect) -> Response:
         # Real 302 redirect to the login page — NOT routed through
         # `_negotiate` (that's for JSON-vs-HTML error *bodies*; a redirect
         # has no body to negotiate). `next_url` is quoted into the query
-        # string; `safe_next_url` (app.core.web_deps) already constrains
+        # string; `safe_next_url` (dotmac_kernel.web_deps) already constrains
         # what `next_url` can be when it originates from a user-supplied
         # `next` query param, but this handler quotes unconditionally since
         # `request.url.path` (the other caller) also needs safe encoding.

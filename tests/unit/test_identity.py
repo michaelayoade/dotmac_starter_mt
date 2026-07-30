@@ -1,4 +1,4 @@
-"""Unit coverage for `app.core.identity` (Task 5) — the single-owner
+"""Unit coverage for `dotmac_kernel.identity` (Task 5) — the single-owner
 implementations of the invariants the two `Party` writers
 (`app.features.auth.service.register` and `app.features.parties.service`'s
 create/update paths) must preserve identically: email normalization and the
@@ -7,7 +7,7 @@ person `display_name` projection.
 
 from __future__ import annotations
 
-from app.core.identity import normalize_email, person_display_name
+from dotmac_kernel.identity import normalize_email, person_display_name
 
 
 def test_normalize_email_lowercases() -> None:

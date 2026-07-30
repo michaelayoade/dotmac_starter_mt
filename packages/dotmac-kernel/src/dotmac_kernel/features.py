@@ -3,7 +3,7 @@
 Each package under app/features/ exports `feature: FeatureManifest` from its
 feature.py. Core features fail hard at startup; non-core features are fault-
 isolated (a broken optional feature logs and is skipped). Loading uses
-importlib so app.core never statically imports app.features (import-linter
+importlib so dotmac_kernel never statically imports app.features (import-linter
 enforces this).
 
 **Capability model (phase 2b.1 Task 1, findings F1 + F5).** A manifest
@@ -19,7 +19,7 @@ declares TWO independent router groups, not one:
   not `routers`.
 - `nav`: the sidebar entries this feature contributes (`NavItem`s), derived
   into the process-static `nav_items` Jinja global by
-  `app.core.templating.install_surface_globals` — the manifests are the ONE
+  `dotmac_kernel.templating.install_surface_globals` — the manifests are the ONE
   place a feature declares "I have a sidebar link", never a parallel
   hardcoded list in a template.
 
@@ -59,7 +59,7 @@ class NavItem:
     `feature` is left blank by the declaring `feature.py` (see e.g.
     `app.features.custom_fields.feature`) — the registry stamps it in when
     collecting nav items across manifests
-    (`app.core.templating.install_surface_globals`), so a feature never has
+    (`dotmac_kernel.templating.install_surface_globals`), so a feature never has
     to repeat its own name.
     """
 

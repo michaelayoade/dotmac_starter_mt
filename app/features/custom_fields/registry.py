@@ -1,6 +1,6 @@
 """Entity registry — which entities can carry custom fields.
 
-All currently registrable entities live in `app.core.models` (core owns the
+All currently registrable entities live in `dotmac_kernel.models` (core owns the
 identity/tenancy primitives; features never import each other), so this dict
 only ever needs a core import today. It is the extension point future
 features use to register their own models — service-layer validation
@@ -10,8 +10,8 @@ that isn't in this dict.
 
 from __future__ import annotations
 
-from app.core.exceptions import BadRequestError
-from app.core.models import Party
+from dotmac_kernel.exceptions import BadRequestError
+from dotmac_kernel.models import Party
 
 ENTITY_MODELS: dict[str, type] = {"party": Party}
 

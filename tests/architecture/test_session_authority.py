@@ -20,13 +20,20 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-APP_ROOT = Path(__file__).resolve().parent.parent.parent / "app"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+APP_ROOT = REPO_ROOT / "app"
+# Session construction lives in the kernel package now (dotmac_kernel/db.py);
+# both the kernel and the assembly are audited under this one contract.
+KERNEL_ROOT = REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel"
 
-# The session factories/constructors nobody outside app/core/db.py may CALL.
+# (root_dir, rel_prefix) pairs scanned by the audit.
+_SCANNED_TREES = ((APP_ROOT, "app"), (KERNEL_ROOT, "dotmac_kernel"))
+
+# The session factories/constructors nobody outside dotmac_kernel/db.py may CALL.
 _FORBIDDEN_CALLS = {"SessionLocal", "PlatformSessionLocal", "sessionmaker", "Session"}
 
 # The one module that owns session construction.
-_AUTHORITY = "app/core/db.py"
+_AUTHORITY = "dotmac_kernel/db.py"
 
 # Explicit, justified exceptions to the CALL rule (module-path suffix →
 # reason). Additions require a matching justification in ARCHITECTURE.md's
@@ -36,7 +43,7 @@ _CALL_ALLOWLIST = {
     # get_db-provided session can reach it; it opens a short read-only
     # session via `with SessionLocal() as db:` and owns that boundary
     # itself (same contract, different entry point). It never mutates.
-    "app/core/middleware/tenant.py",
+    "dotmac_kernel/middleware/tenant.py",
 }
 
 
@@ -75,11 +82,14 @@ def find_session_authority_violations(rel_path: str, source: str) -> list[str]:
 
 
 def _iter_app_modules():
-    for path in sorted(APP_ROOT.rglob("*.py")):
-        rel_path = "app/" + str(path.relative_to(APP_ROOT)).replace("\\", "/")
-        if rel_path == _AUTHORITY:
-            continue
-        yield rel_path, path.read_text()
+    for root, prefix in _SCANNED_TREES:
+        for path in sorted(root.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            rel_path = f"{prefix}/" + str(path.relative_to(root)).replace("\\", "/")
+            if rel_path == _AUTHORITY:
+                continue
+            yield rel_path, path.read_text()
 
 
 def test_only_core_db_constructs_sessions() -> None:
@@ -98,7 +108,7 @@ def test_checker_flags_a_violation() -> None:
     forbidden form; a compliant module is not."""
     bad = (
         "from sqlalchemy.orm import Session, sessionmaker\n"
-        "from app.core.db import SessionLocal, engine\n"
+        "from dotmac_kernel.db import SessionLocal, engine\n"
         "db = SessionLocal()\n"
         "factory = sessionmaker(bind=engine)\n"
         "s = Session(engine)\n"
@@ -115,11 +125,19 @@ def test_checker_flags_a_violation() -> None:
     assert find_session_authority_violations("app/features/fake/service.py", good) == []
 
 
+def _resolve(rel_path: str) -> Path:
+    """Map a `<prefix>/…` rel path back to its file under the scanned trees."""
+    for root, prefix in _SCANNED_TREES:
+        if rel_path.startswith(f"{prefix}/"):
+            return root / rel_path[len(prefix) + 1 :]
+    raise AssertionError(f"unknown tree for {rel_path}")
+
+
 def test_allowlist_is_still_needed() -> None:
     """Every allowlisted module must still contain the call it is excused
     for — a stale allowlist entry is a hole waiting for a regression."""
     for rel_path in _CALL_ALLOWLIST:
-        source = (APP_ROOT.parent / rel_path).read_text()
+        source = _resolve(rel_path).read_text()
         assert find_session_authority_violations("app/_probe_.py", source), (
             f"{rel_path} no longer constructs a session — remove it from "
             "_CALL_ALLOWLIST"

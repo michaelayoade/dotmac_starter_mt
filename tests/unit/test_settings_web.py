@@ -15,15 +15,11 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
-from app.core import settings_resolver as sr
-from app.core.audit import AuditEvent
-from app.core.deps import get_db
-from app.core.errors import register_error_handlers
-from app.core.models import (
+from dotmac_kernel import settings_resolver as sr
+from dotmac_kernel.audit import AuditEvent
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import (
     Party,
     PartyPerson,
     PartyRole,
@@ -32,9 +28,13 @@ from app.core.models import (
     Tenant,
     UserCredential,
 )
-from app.core.security import hash_password
-from app.core.settings_models import SettingDomain, SettingValueType
-from app.core.settings_resolver import resolve_value, upsert_by_key
+from dotmac_kernel.security import hash_password
+from dotmac_kernel.settings_models import SettingDomain, SettingValueType
+from dotmac_kernel.settings_resolver import resolve_value, upsert_by_key
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.features.auth.web import router as auth_web_router
 
 # Import for the side effect: registers custom_fields/max_per_entity,
@@ -417,7 +417,7 @@ def test_secret_edit_nonblank_submit_updates_stored_value(
 def test_branding_form_renders_current_effective_branding(
     web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    from app.core.branding import get_brand
+    from dotmac_kernel.branding import get_brand
 
     token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get("/admin/settings/branding", cookies={"access_token": token})
@@ -447,7 +447,7 @@ def test_branding_submit_writes_override_and_redirects(
     assert resp.headers["location"] == "/admin/settings/branding"
     assert resp.headers["hx-redirect"] == "/admin/settings/branding"
 
-    from app.core.branding import load_branding
+    from dotmac_kernel.branding import load_branding
 
     branding = load_branding(db, tenant_row.id)
     assert branding["name"] == "Acme Tenant"

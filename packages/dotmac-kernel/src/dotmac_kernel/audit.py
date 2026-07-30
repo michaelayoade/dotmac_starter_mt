@@ -1,7 +1,7 @@
 """Audit event model + write-side helpers.
 
 Cross-cutting: the audit trail is written from every domain (rbac, auth, ...),
-so the model and the write helper live in app.core. The audit *read* endpoint
+so the model and the write helper live in dotmac_kernel. The audit *read* endpoint
 stays in app.features.rbac.
 """
 
@@ -15,7 +15,7 @@ from sqlalchemy import DateTime, ForeignKey, String, Uuid, func
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from app.core.models import Base, uuid_pk
+from dotmac_kernel.models import Base, uuid_pk
 
 
 class AuditEvent(Base):

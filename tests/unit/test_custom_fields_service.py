@@ -13,12 +13,12 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from dotmac_kernel import settings_resolver as sr
+from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
+from dotmac_kernel.models import Party, Tenant
+from dotmac_kernel.settings_models import SettingDomain
 from sqlalchemy.orm import Session
 
-from app.core import settings_resolver as sr
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
-from app.core.models import Party, Tenant
-from app.core.settings_models import SettingDomain
 from app.features.custom_fields import service as cf_service
 from app.features.custom_fields.models import CustomFieldType
 from app.features.custom_fields.schemas import CustomFieldCreate

@@ -14,13 +14,13 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
+from dotmac_kernel.deps import get_db, require_user_auth
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import Party, PartyPerson, PartyRole, PartyType, Role, Tenant
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, require_user_auth
-from app.core.errors import register_error_handlers
-from app.core.models import Party, PartyPerson, PartyRole, PartyType, Role, Tenant
 from app.features.custom_fields.router import router as custom_fields_router
 
 # Import for the side effect: registers custom_fields/max_per_entity with the
@@ -136,8 +136,8 @@ def test_create_definition_limit_reached_is_bad_request(
     """`custom_fields/max_per_entity` (Task 5 setting) — set to 1 directly via
     the resolver (the settings router isn't mounted on this bare app), then
     prove the second create for the same entity_type 400s."""
-    from app.core import settings_resolver as sr
-    from app.core.settings_models import SettingDomain
+    from dotmac_kernel import settings_resolver as sr
+    from dotmac_kernel.settings_models import SettingDomain
 
     sr.upsert_by_key(
         db, SettingDomain.custom_fields, "max_per_entity", 1, tenant_id=tenant_row.id

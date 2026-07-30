@@ -1,9 +1,9 @@
 """Per-request tenant display settings (timezone + date/datetime formats).
 
-Mirrors app.core.branding: resolved at most once per request, memoized on
+Mirrors dotmac_kernel.branding: resolved at most once per request, memoized on
 `request.state.display`, warmed by `require_web_auth`. Templates consume it
 ONLY via the `local_datetime`/`local_date` Jinja filters registered in
-app.core.templating (governance:
+dotmac_kernel.templating (governance:
 tests/architecture/test_web_conventions.py::test_timestamp_renders_go_through_local_filters).
 
 The JSON API is deliberately untouched: responses remain ISO-8601 UTC.
@@ -20,8 +20,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import get_spec, resolve_value
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import get_spec, resolve_value
 
 _UTC = ZoneInfo("UTC")
 

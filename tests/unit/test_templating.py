@@ -1,11 +1,11 @@
-"""TDD for `app.core.templating.render()`'s per-request branding enrichment
+"""TDD for `dotmac_kernel.templating.render()`'s per-request branding enrichment
 (Task 4 / F4 fix).
 
 `render()` reads `request.state.branding` (set by
-`app.core.branding.get_request_branding`, memoized per request -- see
+`dotmac_kernel.branding.get_request_branding`, memoized per request -- see
 `tests/unit/test_branding.py` for that function's own coverage) and injects
 it into the template context as `brand`, UNLESS the caller's own `context`
-already defines a `brand` key -- see `app.core.templating`'s module
+already defines a `brand` key -- see `dotmac_kernel.templating`'s module
 docstring for the full precedence rule. These tests exercise `render()`
 directly with a minimal request-like stand-in (only `.state` is touched by
 `render()` and by the templates under test, so a duck-typed object is
@@ -19,8 +19,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.core.branding import get_brand
-from app.core.templating import render
+from dotmac_kernel.branding import get_brand
+from dotmac_kernel.templating import render
 
 
 def _fake_request(branding: dict | None = None):

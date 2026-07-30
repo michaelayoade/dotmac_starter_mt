@@ -1,7 +1,7 @@
 """Settings admin service — merge specs with effective values; validate + write updates.
 
 All `select()`/session-mutation calls for the settings domain live in
-`app.core.settings_resolver` (shared with `custom_fields`, which must consume
+`dotmac_kernel.settings_resolver` (shared with `custom_fields`, which must consume
 the same resolver — see that module's docstring). This service only shapes
 requests/responses around it, following the RBAC feature's router/service
 split.
@@ -9,12 +9,10 @@ split.
 
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
-
-from app.core.exceptions import NotFoundError
-from app.core.models import Tenant
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import (
+from dotmac_kernel.exceptions import NotFoundError
+from dotmac_kernel.models import Tenant
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import (
     SettingSpec,
     all_specs,
     get_spec,
@@ -22,6 +20,8 @@ from app.core.settings_resolver import (
     upsert_by_key,
     validate_spec_value,
 )
+from sqlalchemy.orm import Session
+
 from app.features.settings.schemas import SettingOut
 
 # Shown instead of a secret's real value whenever a tenant or platform row

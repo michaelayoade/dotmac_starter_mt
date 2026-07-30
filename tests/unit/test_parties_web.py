@@ -19,13 +19,9 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
-from app.core.deps import get_db
-from app.core.errors import register_error_handlers
-from app.core.models import (
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import (
     Party,
     PartyOrganization,
     PartyPerson,
@@ -35,7 +31,11 @@ from app.core.models import (
     Tenant,
     UserCredential,
 )
-from app.core.security import hash_password
+from dotmac_kernel.security import hash_password
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.features.auth.web import router as auth_web_router
 from app.features.parties.web import router as parties_web_router
 

@@ -50,17 +50,17 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from dotmac_kernel.deps import get_db, require_tenant
+from dotmac_kernel.exceptions import BadRequestError, ConflictError
+from dotmac_kernel.models import Tenant
+from dotmac_kernel.templating import render
+from dotmac_kernel.web_deps import require_web_auth
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.datastructures import FormData
 
-from app.core.deps import get_db, require_tenant
-from app.core.exceptions import BadRequestError, ConflictError
-from app.core.models import Tenant
-from app.core.templating import render
-from app.core.web_deps import require_web_auth
 from app.features.custom_fields import service as custom_fields_service
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
 from app.features.custom_fields.schemas import CustomFieldCreate, CustomFieldUpdate

@@ -35,10 +35,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
 
-from app.core.config import settings
-from app.core.db import SessionLocal
-from app.core.errors import envelope
-from app.core.models import Tenant, TenantDomain
+from dotmac_kernel.config import settings
+from dotmac_kernel.db import SessionLocal
+from dotmac_kernel.errors import envelope
+from dotmac_kernel.models import Tenant, TenantDomain
 
 logger = logging.getLogger(__name__)
 

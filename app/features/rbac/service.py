@@ -13,17 +13,17 @@ from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 from uuid import UUID
 
+from dotmac_kernel.audit import AuditEvent
+from dotmac_kernel.db import conflict_savepoint
+from dotmac_kernel.exceptions import ConflictError, NotFoundError
+from dotmac_kernel.models import Party, PartyRole, Role, Tenant
+from dotmac_kernel.query import apply_pagination, escape_like
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import resolve_value
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.audit import AuditEvent
-from app.core.db import conflict_savepoint
-from app.core.exceptions import ConflictError, NotFoundError
-from app.core.models import Party, PartyRole, Role, Tenant
-from app.core.query import apply_pagination, escape_like
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import resolve_value
 from app.features.rbac.schemas import RoleCreate, RoleGrantRequest
 
 # Fallback if the settings feature is disabled in this deployment — matches
@@ -83,13 +83,13 @@ def list_grantable_parties(
     `rbac`'s `web.py` cannot import `app.features.parties.service` (feature
     independence — features never import each other, per pyproject.toml's
     import-linter contract), so this queries the CORE `Party` model
-    directly — legal, since `Party` lives in `app.core.models` (see that
+    directly — legal, since `Party` lives in `dotmac_kernel.models` (see that
     module's docstring for why: it's the fleet-wide identity source of
     truth and both `deps`/`middleware` need to query it directly from core).
 
     Explicit tenant filter (same convention as `list_roles` above) plus RLS
     as the defense-in-depth backstop. LIKE-escaping via the shared
-    `app.core.query.escape_like` — see that helper's docstring for why it
+    `dotmac_kernel.query.escape_like` — see that helper's docstring for why it
     lives in core rather than being imported from parties' feature-private
     `_search_filter`.
     """

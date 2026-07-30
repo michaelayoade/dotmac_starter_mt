@@ -1,6 +1,6 @@
 """Domain settings model — tenant-scoped configuration keyed by (domain, key).
 
-Lives in `app.core` (not `app.features.settings`) even though it backs a
+Lives in `dotmac_kernel` (not `app.features.settings`) even though it backs a
 feature: the `custom_fields` feature (Task 4+) must consume the settings
 *resolver* (also core, Task 4), and features may never import each other. The
 settings FEATURE package (Tasks 4-6) owns only what nothing else needs — spec
@@ -31,7 +31,7 @@ from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Index, String, Text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.models import Base, TimestampMixin, uuid_pk
+from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
 
 
 class SettingDomain(str, enum.Enum):

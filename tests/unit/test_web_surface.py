@@ -21,7 +21,7 @@ the feature is off, and the sidebar must not link to it either.
 
 Nav derivation: `nav_items` (the sidebar's ONLY source, see
 `templates/components/sidebar.html`) is built entirely from ENABLED
-manifests' `.nav` sequences by `app.core.templating.install_surface_globals`
+manifests' `.nav` sequences by `dotmac_kernel.templating.install_surface_globals`
 — proven here by injecting a temporary manifest and observing its nav item
 appear, then disappear when that manifest is dropped/disabled.
 """
@@ -37,16 +37,16 @@ from collections.abc import Generator
 from types import SimpleNamespace
 
 import pytest
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.features import FeatureManifest, NavItem, load_manifests
+from dotmac_kernel.models import Party, PartyType, Tenant
+from dotmac_kernel.templating import install_surface_globals, render
+from dotmac_kernel.web_deps import require_web_auth
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db
-from app.core.errors import register_error_handlers
-from app.core.features import FeatureManifest, NavItem, load_manifests
-from app.core.models import Party, PartyType, Tenant
-from app.core.templating import install_surface_globals, render
-from app.core.web_deps import require_web_auth
 from app.features import FEATURE_MODULES
 from app.features.parties.web import router as parties_web_router
 
@@ -290,6 +290,6 @@ def test_nav_items_empty_when_web_disabled() -> None:
 
 
 def templates_nav_items() -> tuple[NavItem, ...]:
-    from app.core.templating import templates
+    from dotmac_kernel.templating import templates
 
     return templates.env.globals["nav_items"]

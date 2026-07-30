@@ -3,7 +3,7 @@
 Mirrors `app.features.parties.web`/`app.features.rbac.web`'s established
 shape — `require_web_auth` (+`require_tenant`) on every route, thin wrappers
 (no direct DB query in this file; all of that lives in
-`app.features.settings.service` / `app.core.settings_resolver`), `render()`
+`app.features.settings.service` / `dotmac_kernel.settings_resolver`), `render()`
 for every HTML response, hx-post + `HX-Redirect` on successful mutations,
 "re-render, don't redirect" at 200 on validation failures.
 
@@ -13,7 +13,7 @@ the task brief's file list for this feature is just `index.html`/
 specs across three domains as of this task) that a single full-page render
 per request is plenty, no htmx fragment swap needed.
 
-**`GET /admin/settings`** groups every registered spec (`app.core.
+**`GET /admin/settings`** groups every registered spec (`dotmac_kernel.
 settings_resolver.all_specs()`) by domain and resolves each one's effective
 value + source (tenant/platform/default) via the EXISTING
 `app.features.settings.service.list_settings` path — masking of secret
@@ -40,15 +40,15 @@ exposes the actual sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/
 into the `ui_branding` dict on submit, still through the SAME
 `service.update_setting` write path (SoT: one service, one write path, two
 edit UIs). It renders the CURRENT effective branding via
-`app.core.branding.load_branding(db, tenant.id)` — this is the first route
+`dotmac_kernel.branding.load_branding(db, tenant.id)` — this is the first route
 caller of that function (previously zero callers, per
 `docs/ARCHITECTURE.md`'s no-orphan-settings note) — and passes the result as
 this render's own `brand` context key, shadowing the process-global static
 `brand` template global for this response only (see
-`app.core.templating`'s module docstring for that split). The `custom_css`
+`dotmac_kernel.templating`'s module docstring for that split). The `custom_css`
 preview block is the ONE place in this app's templates that uses `| safe`:
 `load_branding` already ran the stored value through
-`app.core.branding.sanitize_branding_css` before this route ever sees it, so
+`dotmac_kernel.branding.sanitize_branding_css` before this route ever sees it, so
 by the time `branding.html` renders `brand.custom_css`, it is guaranteed
 scrubbed of `@import`/`javascript:`/`expression()`/`behavior:`/angle-bracket
 breakouts — see that template's inline comment at the `| safe` usage.
@@ -58,19 +58,19 @@ from __future__ import annotations
 
 import json
 
+from dotmac_kernel.audit import write_audit_event
+from dotmac_kernel.branding import load_branding
+from dotmac_kernel.deps import get_db, require_tenant
+from dotmac_kernel.exceptions import BadRequestError, NotFoundError
+from dotmac_kernel.models import Tenant
+from dotmac_kernel.settings_models import SettingDomain, SettingValueType
+from dotmac_kernel.settings_resolver import all_specs, get_spec
+from dotmac_kernel.templating import render
+from dotmac_kernel.web_deps import require_web_auth
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.core.audit import write_audit_event
-from app.core.branding import load_branding
-from app.core.deps import get_db, require_tenant
-from app.core.exceptions import BadRequestError, NotFoundError
-from app.core.models import Tenant
-from app.core.settings_models import SettingDomain, SettingValueType
-from app.core.settings_resolver import all_specs, get_spec
-from app.core.templating import render
-from app.core.web_deps import require_web_auth
 from app.features.settings import service as settings_service
 from app.features.settings.schemas import SettingOut
 

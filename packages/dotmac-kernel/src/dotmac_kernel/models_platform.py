@@ -16,7 +16,7 @@ These are PLATFORM catalog tables, like `tenants`/`tenant_domains`:
   platform-table allowlist with grant assertions.
 
 They live in `app/core/` (not a feature) for the same reason the guard does:
-`app.core.platform_auth.require_platform_admin` queries them, and the
+`dotmac_kernel.platform_auth.require_platform_admin` queries them, and the
 platform surface must exist even with every feature disabled.
 """
 
@@ -29,7 +29,7 @@ import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.models import Base, TimestampMixin, uuid_pk
+from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
 
 
 class PlatformAdmin(Base, TimestampMixin):
@@ -56,7 +56,7 @@ class PlatformAdmin(Base, TimestampMixin):
 class PlatformSession(Base, TimestampMixin):
     """Server-side session row backing a platform bearer token — same
     revocable-session shape as the tenant `AuthSession` (`token_hash` is the
-    HMAC from `app.core.security.hash_token`; the raw token is never stored).
+    HMAC from `dotmac_kernel.security.hash_token`; the raw token is never stored).
     """
 
     __tablename__ = "platform_sessions"

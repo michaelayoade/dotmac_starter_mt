@@ -19,14 +19,14 @@ that lives in `app.features.web.service`.
 
 from __future__ import annotations
 
+from dotmac_kernel.deps import get_db, require_tenant
+from dotmac_kernel.models import Tenant
+from dotmac_kernel.templating import render
+from dotmac_kernel.web_deps import require_web_auth
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, require_tenant
-from app.core.models import Tenant
-from app.core.templating import render
-from app.core.web_deps import require_web_auth
 from app.features.web import service as web_service
 
 router = APIRouter(prefix="/admin", tags=["web"])

@@ -45,7 +45,7 @@ jobs:
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
       - run: poetry install
-      - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov-report=term
+      - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term
 
   integration:
     runs-on: ubuntu-latest

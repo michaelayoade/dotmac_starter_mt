@@ -25,13 +25,9 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
-from app.core.deps import get_db
-from app.core.errors import register_error_handlers
-from app.core.models import (
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import (
     Party,
     PartyPerson,
     PartyRole,
@@ -40,10 +36,14 @@ from app.core.models import (
     Tenant,
     UserCredential,
 )
-from app.core.security import hash_password
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import upsert_by_key
-from app.core.web_deps import safe_next_url
+from dotmac_kernel.security import hash_password
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import upsert_by_key
+from dotmac_kernel.web_deps import safe_next_url
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.features.auth.web import router as auth_web_router
 
 # Import for the side effect: registers branding/ui_branding into the
@@ -271,8 +271,8 @@ def test_dashboard_rejects_non_admin_party(
     tenant_row: Tenant,
     non_admin_party: Party,
 ) -> None:
-    from app.core.models import AuthSession
-    from app.core.security import hash_token, issue_access_token
+    from dotmac_kernel.models import AuthSession
+    from dotmac_kernel.security import hash_token, issue_access_token
 
     token, expires_at = issue_access_token(non_admin_party.id, tenant_row.id)
     db.add(
@@ -423,7 +423,7 @@ def test_login_page_uses_static_brand_when_no_tenant_override(
     """No `ui_branding` override saved yet -- the login page still shows
     SOMETHING sane (the deployment-static brand), matching the pre-Task-4
     behavior for a tenant that never touched branding."""
-    from app.core.branding import get_brand
+    from dotmac_kernel.branding import get_brand
 
     resp = web_client.get("/admin/login")
     assert resp.status_code == 200

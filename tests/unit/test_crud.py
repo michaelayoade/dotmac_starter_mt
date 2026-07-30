@@ -1,8 +1,7 @@
 import pytest
-
-from app.core.crud import CRUDManager
-from app.core.exceptions import NotFoundError
-from app.core.models import Party, PartyType
+from dotmac_kernel.crud import CRUDManager
+from dotmac_kernel.exceptions import NotFoundError
+from dotmac_kernel.models import Party, PartyType
 
 
 class Parties(CRUDManager[Party]):

@@ -21,9 +21,8 @@ import json
 from collections.abc import Callable
 
 import pytest
-
-from app.core.middleware import tenant as tenant_module
-from app.core.middleware.tenant import TenantResolverMiddleware
+from dotmac_kernel.middleware import tenant as tenant_module
+from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
 
 
 async def _ok_inner_app(scope, receive, send) -> None:

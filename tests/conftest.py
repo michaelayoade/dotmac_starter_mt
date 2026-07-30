@@ -14,8 +14,8 @@ from __future__ import annotations
 import os
 
 # Must run before any `app.` import anywhere in the test session: importing a
-# feature's router — e.g. via app.core.features.load_manifests — transitively
-# imports app.core.db, which builds a SQLAlchemy engine from DATABASE_URL at
+# feature's router — e.g. via dotmac_kernel.features.load_manifests — transitively
+# imports dotmac_kernel.db, which builds a SQLAlchemy engine from DATABASE_URL at
 # import time. Set a well-formed placeholder with an unroutable port so that a
 # bare `pytest tests` collects hermetically (no .env / exported DATABASE_URL
 # required) and any accidental connection attempt fails fast. Integration runs
@@ -75,7 +75,7 @@ def admin_session(admin_engine) -> Generator[Session, None, None]:
 
 @pytest.fixture
 def tenant_a(admin_session: Session):
-    from app.core.models import Tenant
+    from dotmac_kernel.models import Tenant
 
     t = Tenant(slug="alpha", name="Alpha Test Tenant")
     admin_session.add(t)
@@ -88,7 +88,7 @@ def tenant_a(admin_session: Session):
 
 @pytest.fixture
 def tenant_b(admin_session: Session):
-    from app.core.models import Tenant
+    from dotmac_kernel.models import Tenant
 
     t = Tenant(slug="beta", name="Beta Test Tenant")
     admin_session.add(t)
@@ -193,7 +193,7 @@ def provision_owner(
     admin), so tests that used to register-their-first-user-as-admin
     provision an owner here instead and then just log in.
     """
-    from app.core.models import (
+    from dotmac_kernel.models import (
         Party,
         PartyPerson,
         PartyRole,
@@ -201,7 +201,7 @@ def provision_owner(
         Role,
         UserCredential,
     )
-    from app.core.security import hash_password
+    from dotmac_kernel.security import hash_password
 
     email = email.strip().lower()
     party = Party(
@@ -260,7 +260,7 @@ def open_registration(admin_session: Session, tenant) -> None:
     """Set `auth.registration_policy = open` for `tenant` (tenant-scoped
     `domain_settings` row) — for tests exercising the self-registration
     path, which is policy-CLOSED by default since Task 2."""
-    from app.core.settings_models import (
+    from dotmac_kernel.settings_models import (
         DomainSetting,
         SettingDomain,
         SettingValueType,

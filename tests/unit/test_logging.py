@@ -2,8 +2,8 @@ import asyncio
 import json
 import logging
 
-from app.core.logging import JsonLogFormatter, request_id_var
-from app.core.middleware.observability import ObservabilityMiddleware
+from dotmac_kernel.logging import JsonLogFormatter, request_id_var
+from dotmac_kernel.middleware.observability import ObservabilityMiddleware
 
 
 def test_json_formatter_emits_request_id_and_fields():

@@ -213,7 +213,7 @@ def test_registration_defaults_closed_and_opens_by_policy(
     assert closed.status_code == 403, closed.text
     assert closed.json()["message"] == "registration_closed"
 
-    from app.core.models import Tenant
+    from dotmac_kernel.models import Tenant
 
     tenant = admin_session.query(Tenant).filter_by(slug="prov-reg").one()
     open_registration(admin_session, tenant)

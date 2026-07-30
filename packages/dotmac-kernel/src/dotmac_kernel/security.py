@@ -20,7 +20,7 @@ from uuid import UUID
 from argon2 import PasswordHasher
 from argon2 import exceptions as argon2_exceptions
 
-from app.core.config import settings
+from dotmac_kernel.config import settings
 
 # Legacy scheme parameters — kept ONLY so pre-Task-5 hashes keep verifying
 # until their owner logs in and gets upgraded.
@@ -121,7 +121,7 @@ def hash_token(token: str) -> str:
 
 def encode_jwt(payload: dict[str, object]) -> str:
     """Encode+sign a JWT payload (HS256). Public because
-    `app.core.platform_auth` issues platform-audience tokens through the
+    `dotmac_kernel.platform_auth` issues platform-audience tokens through the
     same signer — one signing implementation, two token populations
     distinguished by the `aud` claim."""
     header = {"alg": "HS256", "typ": "JWT"}

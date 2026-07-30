@@ -1,6 +1,5 @@
+from dotmac_kernel.features import FeatureManifest, load_manifests, mount_features
 from fastapi import APIRouter, FastAPI
-
-from app.core.features import FeatureManifest, load_manifests, mount_features
 
 
 def test_load_manifests_reads_feature_attribute():

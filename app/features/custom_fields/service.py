@@ -7,7 +7,7 @@ logged in `docs/superpowers/upstream-findings.md`):
 
 1. **Per-entity limit enforcement** — ERP's `custom_fields/max_per_entity`
    setting existed in its spec registry but no code path ever read it.
-   `create_field` here resolves it via `app.core.settings_resolver.
+   `create_field` here resolves it via `dotmac_kernel.settings_resolver.
    resolve_value` and rejects creation once the tenant's active field count
    for that `entity_type` reaches it.
 2. **min_value/max_value enforcement for NUMBER/DECIMAL** — ERP's model
@@ -70,15 +70,15 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 from uuid import UUID
 
+from dotmac_kernel.db import conflict_savepoint
+from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import resolve_value
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.core.db import conflict_savepoint
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import resolve_value
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
 from app.features.custom_fields.registry import ENTITY_MODELS, resolve_entity
 from app.features.custom_fields.schemas import CustomFieldCreate

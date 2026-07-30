@@ -4,7 +4,7 @@ Finding F3 (post-merge review, `docs/superpowers/plans/2026-07-18-phase2b1-
 sot-composability.md` Task 2): every conflict site in `app/features/*`
 handled an expected `IntegrityError` with a bare `db.rollback()` before
 translating it to a `ConflictError`. `db.rollback()` rolls back the WHOLE
-transaction `get_db` (`app.core.db`) opened for this request — including
+transaction `get_db` (`dotmac_kernel.db`) opened for this request — including
 the `SET LOCAL app.current_tenant` it issued for RLS. Any DB access the web
 handler performs AFTER catching the `ConflictError` (re-rendering a form
 that reads an already-loaded ORM object's attributes, re-querying a list of
@@ -13,7 +13,7 @@ SECURITY fails closed: either an outright error re-loading an expired
 attribute (`ObjectDeletedError` -> unhandled 500) or a silently *empty*
 result set, depending on the exact access pattern.
 
-The fix (`app.core.db.conflict_savepoint`) wraps each conflict-prone
+The fix (`dotmac_kernel.db.conflict_savepoint`) wraps each conflict-prone
 mutation in a SAVEPOINT (`Session.begin_nested()`); on `IntegrityError` only
 the SAVEPOINT is rolled back — the outer transaction, and the `SET LOCAL`
 it carries, survive intact.
@@ -30,11 +30,11 @@ as every other canary in this directory).
 
 from __future__ import annotations
 
+from dotmac_kernel.models import Role
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.models import Role
 from tests.conftest import client_for, provision_owner
 
 PASSWORD = "correct horse battery staple"

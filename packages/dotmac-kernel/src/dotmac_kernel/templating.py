@@ -16,13 +16,13 @@ unported until a template actually calls it (avoids shipping untested
 surface area).
 
 `brand` (below) is the deployment-STATIC half of branding
-(`app.core.branding.get_brand()` — defaults < brand.json < env, cached for
+(`dotmac_kernel.branding.get_brand()` — defaults < brand.json < env, cached for
 the process lifetime; see that module's docstring). It is installed once as
 a template global, so every template can read `brand.name` etc. without a
 route passing it explicitly.
 
 The per-TENANT DB override (Task 4 / F4 fix) is resolved ONCE per request by
-`app.core.branding.get_request_branding` and cached on
+`dotmac_kernel.branding.get_request_branding` and cached on
 `request.state.branding` (see that module's docstring for the wiring/seam
 decision — `require_web_auth` + the two login-route call sites are the only
 places that populate it; routes never call it themselves and never change).
@@ -54,9 +54,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 
-from app.core.branding import get_brand
-from app.core.display import DisplaySettings, default_display
-from app.core.features import FeatureManifest, NavItem
+from dotmac_kernel.branding import get_brand
+from dotmac_kernel.display import DisplaySettings, default_display
+from dotmac_kernel.features import FeatureManifest, NavItem
 
 templates = Jinja2Templates(directory="templates")
 
@@ -101,7 +101,7 @@ def install_surface_globals(
     """Set the process-static `enabled_features`/`nav_items` Jinja globals
     from the loaded manifests — the ONE place templates learn which
     features are on and what the sidebar contains (F1/F5 capability model;
-    see `app.core.features`'s module docstring). Called once from
+    see `dotmac_kernel.features`'s module docstring). Called once from
     `app.main` (module import time, right after `load_manifests`) — config
     is process-static, so these globals are correct for the process
     lifetime; a config change requires a restart, same as every other
@@ -193,7 +193,7 @@ def render(
     `request` is threaded into the context automatically (Jinja2Templates'
     new-style call convention requires it as the first positional arg, and
     templates reference it directly — e.g. `request.url.path`). `status_code`
-    defaults to 200; branded HTML error pages (app.core.errors._negotiate)
+    defaults to 200; branded HTML error pages (dotmac_kernel.errors._negotiate)
     pass the envelope's real status (404, 500, ...) so the HTTP status line
     matches the JSON sibling response, not just the rendered body.
 

@@ -2,7 +2,7 @@
 
 An authenticated but NON-admin person-party cookie must get a 302 (never
 200 or 500) on every MUTATING `/admin/*` route. `require_web_auth`
-(`app.core.web_deps`) requires the "admin" role today — that requirement was
+(`dotmac_kernel.web_deps`) requires the "admin" role today — that requirement was
 previously proven for exactly one route
 (`tests/unit/test_web_login.py::test_dashboard_rejects_non_admin_party`,
 `GET /admin`). This file generalizes that proof to EVERY mutating admin
@@ -26,10 +26,10 @@ Requests are executed against a purpose-built minimal app (same pattern as
 `/admin/*` web router with `get_db` overridden to the in-memory SQLite `db`
 fixture and a thin middleware standing in for `TenantResolverMiddleware` —
 the production app's own middleware opens its own DB connection outside
-dependency injection (`app.core.middleware.tenant._resolve` calls
+dependency injection (`dotmac_kernel.middleware.tenant._resolve` calls
 `SessionLocal()` directly) and cannot run against SQLite. Because
 `app.include_router(router)` adds no extra prefix
-(`app.core.features.mount_features`), the paths on this minimal app are
+(`dotmac_kernel.features.mount_features`), the paths on this minimal app are
 byte-identical to the production app's — enumerating routes from one and
 executing requests against the other is safe.
 """
@@ -40,15 +40,15 @@ import re
 from collections.abc import Generator
 
 import pytest
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import AuthSession, Party, PartyPerson, PartyType, Tenant
+from dotmac_kernel.security import hash_token, issue_access_token
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db
-from app.core.errors import register_error_handlers
-from app.core.models import AuthSession, Party, PartyPerson, PartyType, Tenant
-from app.core.security import hash_token, issue_access_token
 from app.features.auth.web import router as auth_web_router
 from app.features.custom_fields.web import router as custom_fields_web_router
 from app.features.parties.web import router as parties_web_router

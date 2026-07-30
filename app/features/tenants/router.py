@@ -1,8 +1,8 @@
 """Platform-admin endpoints — provision, suspend, delete tenants.
 
 Reachable ONLY on the platform root domain (host-exact — see
-`app.core.middleware.tenant._is_platform_path`) and only by an
-authenticated platform admin (`app.core.platform_auth.require_platform_admin`,
+`dotmac_kernel.middleware.tenant._is_platform_path`) and only by an
+authenticated platform admin (`dotmac_kernel.platform_auth.require_platform_admin`,
 the router-level guard: separate platform identity, `aud="platform"` bearer
 token, live `platform_sessions` row). Uses `get_platform_db`, which connects
 as `platform_api` — an online role with explicit grants and no RLS bypass.
@@ -16,13 +16,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from dotmac_kernel.deps import get_platform_db
+from dotmac_kernel.models import Tenant
+from dotmac_kernel.models_platform import PlatformAdmin
+from dotmac_kernel.platform_auth import require_platform_admin
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_platform_db
-from app.core.models import Tenant
-from app.core.models_platform import PlatformAdmin
-from app.core.platform_auth import require_platform_admin
 from app.features.tenants import service as tenants_service
 from app.features.tenants.schemas import TenantProvision, TenantRead
 

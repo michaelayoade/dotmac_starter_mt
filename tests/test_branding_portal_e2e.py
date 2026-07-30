@@ -45,7 +45,7 @@ def _web_login(client: TestClient, email: str) -> str:
 def test_saved_branding_reflects_on_dashboard_and_own_login_but_not_other_tenant(
     app_client: TestClient, admin_session: Session, tenant_a, tenant_b
 ) -> None:
-    from app.core.branding import get_brand
+    from dotmac_kernel.branding import get_brand
 
     # -----------------------------------------------------------------
     # Tenant A: provision the admin (registration no longer grants admin,

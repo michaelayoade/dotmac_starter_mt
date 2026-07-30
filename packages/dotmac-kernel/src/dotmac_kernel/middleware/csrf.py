@@ -8,7 +8,7 @@ import secrets
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.core.errors import _negotiate, envelope
+from dotmac_kernel.errors import _negotiate, envelope
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 CSRF_COOKIE = "csrf_token"
@@ -31,7 +31,7 @@ class CSRFMiddleware:
             header_token = request.headers.get(CSRF_HEADER)
             if request.cookies and not _valid_csrf_token(cookie_token, header_token):
                 # Same negotiation as every other error response
-                # (app.core.errors._negotiate): browsers/HTMX (Accept:
+                # (dotmac_kernel.errors._negotiate): browsers/HTMX (Accept:
                 # text/html) get the branded errors/csrf.html page; API
                 # clients keep the plain JSON envelope, byte-identical to
                 # before this task.

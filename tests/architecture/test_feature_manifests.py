@@ -5,7 +5,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from app.core.features import FeatureManifest, NavItem, load_manifests
+from dotmac_kernel.features import FeatureManifest, NavItem, load_manifests
+
 from app.features import FEATURE_MODULES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -57,7 +58,7 @@ def test_contract_comparison_detects_drift() -> None:
 
 def test_main_does_not_hard_import_a_specific_feature_package() -> None:
     """Final-review Group 3: `app/main.py` seeds features generically via each
-    manifest's optional `seed` hook (`app.core.features.FeatureManifest.seed`,
+    manifest's optional `seed` hook (`dotmac_kernel.features.FeatureManifest.seed`,
     dispatched by `_run_enabled_seeds` over `load_manifests(FEATURE_MODULES)`)
     instead of hard-importing e.g. `app.features.settings.seed.
     seed_platform_defaults` — deleting or disabling a feature package must not

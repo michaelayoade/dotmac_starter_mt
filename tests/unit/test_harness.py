@@ -1,6 +1,5 @@
+from dotmac_kernel.models import Tenant
 from sqlalchemy import select
-
-from app.core.models import Tenant
 
 
 def test_tenant_row_visible_in_session(db, tenant_row):

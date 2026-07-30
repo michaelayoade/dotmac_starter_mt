@@ -3,11 +3,11 @@
 `Tenant`, `TenantDomain`, `Party` (+ subtype tables `PartyPerson`/
 `PartyOrganization`), `Role`, `PartyRole`, and `AuthSession` live here — not
 under `app/features/*` — because core code needs them directly:
-`app.core.deps` (the `require_*` route guards) queries `Party`, `AuthSession`,
-`Role`, and `PartyRole`, and `app.core.middleware.tenant` (the tenant resolver)
+`dotmac_kernel.deps` (the `require_*` route guards) queries `Party`, `AuthSession`,
+`Role`, and `PartyRole`, and `dotmac_kernel.middleware.tenant` (the tenant resolver)
 queries `Tenant`/`TenantDomain`. Core must not import features (import-linter
 enforces this), so these identity/tenancy primitives — genuinely cross-cutting,
-same rationale as `app.core.audit.AuditEvent` — live in core instead.
+same rationale as `dotmac_kernel.audit.AuditEvent` — live in core instead.
 
 **Party identity model (spec amendment 2026-07-17):** `Person` is replaced by
 `Party` (`party_type` person|organization) with subtype tables. This is the
@@ -238,7 +238,7 @@ class PartyOrganization(Base):
 class Role(Base, TimestampMixin):
     """Tenant-scoped role.
 
-    The audit event model lives in app.core.audit (cross-cutting write-side).
+    The audit event model lives in dotmac_kernel.audit (cross-cutting write-side).
     """
 
     __tablename__ = "roles"
@@ -299,7 +299,7 @@ class UserCredential(Base, TimestampMixin):
     import the `auth` feature (feature-independence contract) — so the model
     joins the other identity models under ADR-0002's placement rule (models
     needed across feature boundaries live in core). The `auth` feature keeps
-    ALL hashing/verification logic via `app.core.security`; only the table
+    ALL hashing/verification logic via `dotmac_kernel.security`; only the table
     definition moved.
 
     No `email` column (F2): `Party.email` is the single email authority —

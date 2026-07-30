@@ -30,13 +30,13 @@ import uuid
 from collections.abc import Generator
 
 import pytest
+from dotmac_kernel.models import Party
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.models import Party
 from tests.conftest import client_for, provision_and_login
 
 PASSWORD = "correct horse battery staple"
