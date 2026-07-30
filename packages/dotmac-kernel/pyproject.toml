@@ -25,7 +25,11 @@ include = [
 python = ">=3.12,<3.14"
 fastapi = "^0.115"
 sqlalchemy = "^2.0"
-pydantic = "^2.9"
+# `email` extra pulls email-validator — a REAL kernel runtime dep, not an
+# assembly concern: the kernel's own `platform_auth` public surface (mounted
+# directly by `create_app`) declares an `EmailStr` field, so the wheel cannot
+# build its public app without it (K4 empty-consumer proof caught this).
+pydantic = { version = "^2.9", extras = ["email"] }
 pydantic-settings = "^2.5"
 jinja2 = "^3.1"
 argon2-cffi = "^25.1.0"
