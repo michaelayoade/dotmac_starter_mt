@@ -11,6 +11,10 @@ packages = [{ include = "dotmac_kernel", from = "src" }]
 include = [
     { path = "src/dotmac_kernel/templates/**/*", format = ["sdist", "wheel"] },
     { path = "src/dotmac_kernel/static/**/*", format = ["sdist", "wheel"] },
+    # Kernel base Alembic migrations (0001–0007), shipped so a consuming
+    # assembly composes them via version_locations. The versions/ dir has no
+    # __init__ (Alembic convention), so declare it explicitly as package data.
+    { path = "src/dotmac_kernel/migrations/**/*", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]

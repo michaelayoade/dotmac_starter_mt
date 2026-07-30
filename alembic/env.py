@@ -1,6 +1,13 @@
-"""Alembic environment.
+"""Alembic environment — the reference ASSEMBLY's migration environment.
 
 Connects as app_admin (RLS bypass) — set MIGRATION_DATABASE_URL or DATABASE_URL.
+
+Composes two lineages (kernel-boundary Task 1c): the KERNEL base migrations
+(shipped as `dotmac_kernel` package data) and this assembly's own migrations
+(`alembic/versions`, currently the `a001` custom-fields adoption). The two
+directories are listed in `alembic.ini`'s `version_locations`; `target_metadata`
+below is composed from the kernel `Base` (all kernel models) PLUS the assembly's
+feature models, so autogenerate sees the whole schema.
 """
 
 from __future__ import annotations

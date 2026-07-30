@@ -1,5 +1,20 @@
 # Kernel / assembly migration split — design (pre-Task-1 gate)
 
+> **IMPLEMENTED 2026-07-30 (Task 1c).** Approach A′ shipped as designed; all seven rehearsals pass
+> against real Postgres (`tests/test_migration_split_rehearsals.py`, run by `make test-integration`).
+> Two benign, documented deviations found during implementation:
+> - **Revision id length.** Alembic's `alembic_version.version_num` is `varchar(32)`, so the assembly
+>   revision id is `a001_adopt_cfd` (≤32 chars); the file name stays descriptive
+>   (`a001_adopt_custom_field_definitions.py`).
+> - **Runtime `alembic_version` subsumes the kernel head.** Because `a001 depends_on 0007`, once `a001`
+>   is applied the version table holds only `{a001_adopt_cfd}` (a001 *implies* 0007), not both rows —
+>   while the assembly pins the latest kernel head. The STATIC graph still has two labelled heads
+>   (`kernel`=0007, `assembly`=a001), which is what rehearsal 7 asserts; both heads reappear in the
+>   version table only if the kernel ever advances past what a001 depends on. The rollback procedure
+>   (`alembic stamp kernel@head`) and its rehearsal are unaffected.
+>
+> The design below is otherwise as-shipped.
+
 > **Status:** design only — no migration edited, no code moved. Produced 2026-07-30 to satisfy the
 > gate raised on the Task 0 audit: splitting migration 0004 is not a file move, and existing v0.8
 > databases already at head `0007` have executed it. This doc specifies the revised lineage,

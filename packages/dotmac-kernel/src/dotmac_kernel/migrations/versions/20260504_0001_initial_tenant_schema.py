@@ -24,7 +24,11 @@ from alembic import op
 
 revision = "0001_initial_tenant_schema"
 down_revision = None
-branch_labels = None
+# Root of the KERNEL migration lineage (kernel-boundary Task 1c). The label
+# lets `alembic heads` report an expected head per lineage (kernel vs
+# assembly); adding it is metadata-only and does not change any DDL, so a
+# database already past 0001 is unaffected.
+branch_labels = ("kernel",)
 depends_on = None
 
 
