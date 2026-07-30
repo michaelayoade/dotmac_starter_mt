@@ -235,3 +235,5 @@ final review, PR. Reference-assembly version tracks separately.
 - **Compiled CSS is a gitignored build artifact** — the kernel wheel build must run the `npm run css:build`
   step (as the Dockerfile `css-builder` stage does) or ship the compiled `static/css/main.css`, or an
   installed kernel serves no stylesheet. Decide in Task 1.
+
+<!-- ci-canary: trigger re-registration probe 9c431f3 -->
