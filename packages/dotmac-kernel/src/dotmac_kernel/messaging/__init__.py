@@ -25,20 +25,29 @@ from dotmac_kernel.messaging.models import (
     InboxStatus,
     OutboxEvent,
     OutboxStatus,
+    PlatformInboxRecord,
 )
 from dotmac_kernel.messaging.outbox import enqueue_event
+from dotmac_kernel.messaging.platform import (
+    PlatformCommandHandler,
+    process_once_platform,
+)
 
 __all__ = [
     # envelope
     "CommandEnvelope",
-    # inbox / idempotent processing
+    # inbox / idempotent processing (tenant-scoped)
     "CommandHandler",
     "ProcessOutcome",
     "process_once",
+    # idempotent processing (platform-scoped)
+    "PlatformCommandHandler",
+    "process_once_platform",
     # outbox write side
     "enqueue_event",
     # persisted state
     "InboxRecord",
+    "PlatformInboxRecord",
     "InboxStatus",
     "OutboxEvent",
     "OutboxStatus",

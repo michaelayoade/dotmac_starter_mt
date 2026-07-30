@@ -17,9 +17,20 @@ here.
   Both tables are tenant-scoped with RLS (kernel migration `0008`). Submodule-only
   (pulls in the DB transaction authority). The outbox relay/dispatcher is a
   planned slice 2.
-- Kernel migration head advanced to `0008_outbox_inbox`; the assembly lineage
-  (`a001`) now pins an older kernel head, so a fully-migrated database reports
-  two lineage heads (`{0008, a001}`) and the assembly rollback stamp targets
+- **Platform-scoped audit + idempotency** — the platform-level counterparts to
+  the tenant-scoped audit/inbox, for platform actors operating on platform-level
+  resources (no tenant context): `write_platform_audit_event` +
+  `PlatformAuditEvent` (top-level, import-safe) record a platform audit trail
+  keyed to a `PlatformAdmin`; `dotmac_kernel.messaging.process_once_platform` +
+  `PlatformInboxRecord` process a platform command at most once per `command_id`
+  ALONE (globally unique, not per-tenant). Both back onto PLATFORM catalog tables
+  (kernel migration `0009`): no `tenant_id`, no RLS, GRANTed to
+  `platform_api`/`app_admin` and REVOKEd from `app_user`. Enables a
+  platform-level assembly (e.g. the vendor control plane) to get the same
+  idempotent-command + audit guarantees the tenant surface already has.
+- Kernel migration head advanced to `0009_platform_audit_inbox`; the assembly
+  lineage (`a001`) pins an older kernel head, so a fully-migrated database reports
+  two lineage heads (`{0009, a001}`) and the assembly rollback stamp targets
   `assembly@base` (branch-aware) rather than `kernel@head`.
 
 ## 0.1.0a1 — 2026-07-30

@@ -26,10 +26,13 @@ from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Uuid, func
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
+
+_JSON = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 
 class PlatformAdmin(Base, TimestampMixin):
@@ -78,7 +81,36 @@ class PlatformSession(Base, TimestampMixin):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class PlatformAuditEvent(Base):
+    """The PLATFORM-level audit trail — the platform-scoped counterpart to the
+    tenant-scoped `AuditEvent`. A platform actor (`PlatformAdmin`) operating on
+    platform-level resources has no tenant context, so those actions cannot be
+    recorded in `audit_events` (which requires a `tenant_id` and is RLS-scoped).
+    A platform catalog table like the others here: NO `tenant_id`, NO RLS,
+    GRANTed to `platform_api`/`app_admin` and REVOKEd from `app_user`. Immutable
+    (no `updated_at`)."""
+
+    __tablename__ = "platform_audit_events"
+
+    id: Mapped[UUID] = uuid_pk()
+    actor_admin_id: Mapped[UUID | None] = mapped_column(
+        Uuid(),
+        ForeignKey("platform_admins.id", ondelete="SET NULL"),
+        index=True,
+    )
+    action: Mapped[str] = mapped_column(String(120), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(120))
+    details: Mapped[dict[str, object]] = mapped_column(
+        _JSON, nullable=False, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 __all__ = [
     "PlatformAdmin",
     "PlatformSession",
+    "PlatformAuditEvent",
 ]
