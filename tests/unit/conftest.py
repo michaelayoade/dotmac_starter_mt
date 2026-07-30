@@ -20,15 +20,20 @@ from dotmac_kernel import (
     settings_models,  # noqa: F401
 )
 from dotmac_kernel.features import load_manifests
-from dotmac_kernel.models import Base, Party, PartyPerson, PartyType, Tenant
+from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
 from dotmac_kernel.templating import install_surface_globals
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+
+# The in-memory engine + savepoint-isolated session are the kernel's supported
+# test kit (`dotmac_kernel.testing`, kernel-boundary Task 5) — this assembly
+# consumes it instead of hand-rolling the harness it used to define here.
+from dotmac_kernel.testing import create_test_engine, isolated_session
+from sqlalchemy.orm import Session
 
 from app.features import FEATURE_MODULES
 
-# Import feature model modules so Base.metadata is fully populated
-# (UserCredential moved to dotmac_kernel.models in control-plane security Task 2).
+# Import feature model modules so Base.metadata is fully populated BEFORE
+# create_test_engine() runs create_all (UserCredential moved to
+# dotmac_kernel.models in control-plane security Task 2).
 from app.features.custom_fields import models as custom_fields  # noqa: F401
 
 
@@ -52,46 +57,21 @@ def _default_surface_globals():
 
 @pytest.fixture(scope="session")
 def unit_engine():
-    # `check_same_thread=False`: FastAPI's TestClient (used by tests/unit/
-    # test_settings_api.py to exercise the real guarded router) runs sync
-    # route dependencies in a worker thread via `run_in_threadpool`, but the
-    # `db` fixture below hands every test the SAME underlying connection
-    # object, opened once on the pytest thread. Plain pysqlite refuses to let
-    # a second thread touch a connection it didn't create; since our usage is
-    # always sequential (one caller at a time, never concurrent), this is
-    # safe to relax — same fix FastAPI's own testing docs recommend for
-    # sqlite `:memory:` engines exercised via TestClient.
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        future=True,
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
+    # The kit's create_test_engine() builds the in-memory SQLite engine and
+    # runs create_all over the (now fully imported) Base.metadata — same engine
+    # this conftest used to hand-build, including the check_same_thread=False
+    # relaxation TestClient needs. See dotmac_kernel.testing.harness.
+    engine = create_test_engine()
     yield engine
     engine.dispose()
 
 
 @pytest.fixture()
 def db(unit_engine) -> Generator[Session, None, None]:
-    connection = unit_engine.connect()
-    outer = connection.begin()
-    factory = sessionmaker(bind=connection, autocommit=False, autoflush=False)
-    session = factory()
-    # Restart a savepoint whenever service code commits, so the outer
-    # rollback still isolates the test.
-    connection.begin_nested()
-
-    @event.listens_for(session, "after_transaction_end")
-    def _restart_savepoint(sess, trans):
-        if trans.nested and not trans._parent.nested:
-            connection.begin_nested()
-
-    try:
+    # Savepoint-isolated session from the kit — a test is fully rolled back even
+    # if service code commits (dotmac_kernel.testing.harness.isolated_session).
+    with isolated_session(unit_engine) as session:
         yield session
-    finally:
-        session.close()
-        outer.rollback()
-        connection.close()
 
 
 @pytest.fixture()

@@ -72,6 +72,10 @@ exclude_dirs = [
     "tests",
     "alembic",
     "packages/dotmac-kernel/src/dotmac_kernel/migrations",
+    # The shipped test kit (kernel-boundary Task 5) is test-support code — its
+    # provider CONTRACT is expressed as asserts (the pytest idiom), same
+    # category as the excluded `tests/`, so B101 is expected, not a finding.
+    "packages/dotmac-kernel/src/dotmac_kernel/testing",
 ]
 
 [tool.pytest.ini_options]
