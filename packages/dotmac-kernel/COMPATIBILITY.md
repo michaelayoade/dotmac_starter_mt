@@ -58,6 +58,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession` |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
+| `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
+| `dotmac_kernel.providers.provisioning` | `ProvisioningProvider`, `ProvisioningRequest`, `ProvisioningStep`, `PlanResult`, `ApplyResult`, `ObserveResult`, `ProvisioningStatus`, `StepStatus`, `ProvisioningError`, `ProvisioningRetryableError`, `ProvisioningTerminalError`, `ProvisioningPlanError`, `ProvisioningApplyError`, `ProvisioningCancelled` |
 | `dotmac_kernel.query` | `apply_pagination`, `escape_like` |
 | `dotmac_kernel.security` | `hash_password`, `verify_password`, `password_needs_rehash`, `hash_token`, `issue_access_token`, `decode_access_token` |
 | `dotmac_kernel.settings_models` | `SettingDomain`, `SettingValueType` |
@@ -78,6 +80,58 @@ and may change or disappear without a deprecation cycle**.
   `settings_resolver` (so features can reach them without importing another
   feature) but are re-exported here to keep the write path from being mistaken
   for general API.
+
+### Provisioning provider (`dotmac_kernel.providers.provisioning`)
+
+The one provider seam pulled into the kernel alpha ahead of the general
+workstream-5 provider fill (ruling C6): a **product-neutral** provisioning
+contract the vendor control plane consumes so it never defines a local
+replacement. There are **no cloud, deployment, or fleet specifics** here — only
+the shape of the conversation. It is a contract, not a runner
+(contracts-not-implementations, same posture as `RateLimitStore`); concrete
+providers and fakes live outside the kernel. The canonical import is the
+submodule (`from dotmac_kernel.providers.provisioning import
+ProvisioningProvider`); `dotmac_kernel.providers` re-exports the same names.
+
+- **Protocol** — `ProvisioningProvider` (`typing.Protocol`, `runtime_checkable`)
+  with four methods, all keyed on opaque identifiers:
+  - `plan(request: ProvisioningRequest) -> PlanResult` — read-only; diff the
+    opaque desired-state `spec` and return ordered steps + a stable `plan_hash`.
+  - `apply(request: ProvisioningRequest) -> ApplyResult` — execute the plan;
+    idempotent by `operation_id`; may return a partial result.
+  - `observe(operation_id: str) -> ObserveResult` — read-only status snapshot.
+  - `cancel(operation_id: str) -> ObserveResult` — cooperative cancellation.
+- **Input** — `ProvisioningRequest(intent_id, spec, operation_id=None)`: an
+  opaque intent id, an opaque product-neutral desired-state `spec`
+  (`Mapping[str, object]`, never interpreted by the kernel), and the optional
+  idempotency/resume key.
+- **Result types (frozen)** — `PlanResult` (`intent_id`, `plan_hash`, `steps`),
+  `ApplyResult` (`intent_id`, `operation_id`, `plan_hash`, `status`, `steps`),
+  `ObserveResult` (`intent_id`, `operation_id`, `status`, `steps`, `plan_hash`).
+  Steps are `ProvisioningStep(step_id, status, detail)`. `ProvisioningStatus`
+  (`PENDING`/`IN_PROGRESS`/`PARTIAL`/`SUCCEEDED`/`FAILED`/`CANCELLED`) and
+  `StepStatus` are the status vocabularies. Convenience properties:
+  `PlanResult.is_noop`; `ApplyResult.{is_terminal, is_partial, succeeded,
+  outstanding_steps}`; `ObserveResult.{is_terminal, outstanding_steps}`;
+  `ProvisioningStep.is_settled`.
+- **Error hierarchy (stable API)** — `ProvisioningError` base with a
+  machine-readable `retryable` class attribute (unknown errors fail closed as
+  terminal). `ProvisioningRetryableError` (`retryable = True`) means the same
+  `operation_id` may be retried/resumed; `ProvisioningTerminalError`
+  (`retryable = False`) will not succeed on retry, with `ProvisioningPlanError`
+  (invalid spec) and `ProvisioningApplyError` (terminal mid-apply failure) as
+  its subclasses; `ProvisioningCancelled` is the cooperative-cancel outcome
+  raised by an in-flight `apply`.
+
+**Semantics encoded in the types:** *cancellation* is cooperative
+(`cancel()` signals, the operation settles to `CANCELLED`, `apply` may raise
+`ProvisioningCancelled`); *retry vs terminal* is the error hierarchy +
+`retryable`; *idempotency* is `operation_id` (re-`apply` with a seen id is a
+no-op returning the prior `ApplyResult`; a provider derives a stable id from
+`(intent_id, plan_hash)` when omitted); *partial results* are the explicit
+`PARTIAL` status + per-step breakdown that `observe` / re-`apply` reconcile via
+`outstanding_steps`. A concrete `FakeProvisioningProvider` + a parametrized
+contract suite are **not** here — they land in `dotmac_kernel.testing` (Task 5).
 
 ## Internal modules and names (do not import)
 
