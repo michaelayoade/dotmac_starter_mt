@@ -10,34 +10,35 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
 
 # DATABASE_URL is pinned to a hermetic placeholder in tests/conftest.py (the
 # root conftest), which pytest imports before this module — see the comment
-# there about import-time engine creation in app.core.db.
-from app.core import (
+# there about import-time engine creation in dotmac_kernel.db.
+from dotmac_kernel import (
     audit,  # noqa: F401
     models_platform,  # noqa: F401
     settings_models,  # noqa: F401
 )
-from app.core.features import load_manifests
-from app.core.models import Base, Party, PartyPerson, PartyType, Tenant
-from app.core.templating import install_surface_globals
+from dotmac_kernel.features import load_manifests
+from dotmac_kernel.models import Base, Party, PartyPerson, PartyType, Tenant
+from dotmac_kernel.templating import install_surface_globals
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+
 from app.features import FEATURE_MODULES
 
 # Import feature model modules so Base.metadata is fully populated
-# (UserCredential moved to app.core.models in control-plane security Task 2).
+# (UserCredential moved to dotmac_kernel.models in control-plane security Task 2).
 from app.features.custom_fields import models as custom_fields  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
 def _default_surface_globals():
     """`install_surface_globals` sets the process-static `enabled_features`/
-    `nav_items` Jinja globals (app.core.templating) — normally a side effect
+    `nav_items` Jinja globals (dotmac_kernel.templating) — normally a side effect
     of importing `app.main`. A unit test that builds its own throwaway app
     (bypassing app.main entirely) still renders real templates through the
-    shared `app.core.templating.templates` singleton, so those globals must
+    shared `dotmac_kernel.templating.templates` singleton, so those globals must
     default to "every feature enabled" deterministically here, regardless of
     import/test order or a previous test's disabled-feature override. Tests
     proving F1/F5 behavior call `install_surface_globals` again themselves,

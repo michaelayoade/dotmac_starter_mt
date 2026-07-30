@@ -30,4 +30,4 @@ class UnauthorizedError(DomainError):
 class ForbiddenError(DomainError):
     """Caller is authenticated (or identified) but the action is not allowed
     by policy — e.g. self-registration while `auth.registration_policy` is
-    `closed`. Maps to 403 in `app.core.errors`."""
+    `closed`. Maps to 403 in `dotmac_kernel.errors`."""

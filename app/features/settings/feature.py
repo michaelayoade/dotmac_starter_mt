@@ -1,7 +1,7 @@
 """Settings feature manifest.
 
-The model + resolver live in `app.core` (`app.core.settings_models`,
-`app.core.settings_resolver`) because the `custom_fields` feature must
+The model + resolver live in `dotmac_kernel` (`dotmac_kernel.settings_models`,
+`dotmac_kernel.settings_resolver`) because the `custom_fields` feature must
 consume them and features may never import each other. This package owns the
 spec declarations, seed data, and the tenant admin API (Task 5): `GET
 /settings/{domain}` (list every registered spec merged with the tenant's
@@ -10,7 +10,8 @@ override), both guarded by `require_tenant` + `require_role("admin")` — see
 `router.py`.
 """
 
-from app.core.features import FeatureManifest, NavItem
+from dotmac_kernel.features import FeatureManifest, NavItem
+
 from app.features.settings.router import router
 from app.features.settings.seed import seed_platform_defaults
 from app.features.settings.web import router as web_router

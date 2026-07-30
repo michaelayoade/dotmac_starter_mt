@@ -17,10 +17,10 @@ explicit-null guard on the non-nullable subtype fields
 from __future__ import annotations
 
 import pytest
+from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
+from dotmac_kernel.models import Party, PartyType, Tenant
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
-from app.core.models import Party, PartyType, Tenant
 from app.features.parties import service as parties_service
 from app.features.parties.schemas import (
     OrganizationPartyCreate,

@@ -1,9 +1,8 @@
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.exceptions import ConflictError, NotFoundError, UnauthorizedError
+from dotmac_kernel.middleware.observability import ObservabilityMiddleware
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-
-from app.core.errors import register_error_handlers
-from app.core.exceptions import ConflictError, NotFoundError, UnauthorizedError
-from app.core.middleware.observability import ObservabilityMiddleware
 
 
 def _make_app() -> FastAPI:
@@ -204,7 +203,7 @@ def test_html_client_401_preserves_www_authenticate_header():
 
 def test_html_client_render_failure_falls_back_to_json_envelope(monkeypatch, caplog):
     """When HTML rendering fails, a browser request gets the JSON envelope."""
-    from app.core import errors as errors_module
+    from dotmac_kernel import errors as errors_module
 
     # Monkeypatch render_error to throw an exception
     def broken_render_error(*args, **kwargs):
@@ -232,8 +231,8 @@ def test_csrf_middleware_render_failure_falls_back_to_json_envelope(
 ):
     """CSRF middleware (outside ExceptionMiddleware) also gets JSON fallback."""
 
-    from app.core import errors as errors_module
-    from app.core.middleware.csrf import CSRFMiddleware
+    from dotmac_kernel import errors as errors_module
+    from dotmac_kernel.middleware.csrf import CSRFMiddleware
 
     app = FastAPI()
     register_error_handlers(app)
@@ -269,7 +268,7 @@ def test_csrf_middleware_render_failure_falls_back_to_json_envelope(
 
 
 # NOTE: `request.state.branding` fallback/override behavior for HTML error
-# pages is exercised directly against `app.core.templating.render()` in
+# pages is exercised directly against `dotmac_kernel.templating.render()` in
 # `tests/unit/test_templating.py` (Task 4 / F4) -- none of this app's
 # `errors/*.html` templates actually surface `brand.name` in their body (the
 # `{% block title %}` that would show it is overridden by every status-code

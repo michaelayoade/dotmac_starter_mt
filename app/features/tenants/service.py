@@ -16,25 +16,21 @@ owner-side table is FORCE-RLS — the tenant context must be established
 explicitly (same `set_config(..., true)` idiom as `get_db`) after the tenant
 row is flushed and before any tenant-scoped write.
 
-`UserCredential` is composed from `app.core.models` (moved there this task —
+`UserCredential` is composed from `dotmac_kernel.models` (moved there this task —
 PORT-DELTA): `tenants` cannot import the `auth` feature, and core owns no
 feature logic, so the model joined the other identity models under
-ADR-0002's placement rule. Hashing stays in `app.core.security`.
+ADR-0002's placement rule. Hashing stays in `dotmac_kernel.security`.
 """
 
 from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
-
-from app.core.audit import write_audit_event
-from app.core.db import conflict_savepoint
-from app.core.exceptions import ConflictError, NotFoundError
-from app.core.identity import normalize_email, person_display_name
-from app.core.models import (
+from dotmac_kernel.audit import write_audit_event
+from dotmac_kernel.db import conflict_savepoint
+from dotmac_kernel.exceptions import ConflictError, NotFoundError
+from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.models import (
     Party,
     PartyPerson,
     PartyRole,
@@ -43,7 +39,11 @@ from app.core.models import (
     Tenant,
     UserCredential,
 )
-from app.core.security import hash_password
+from dotmac_kernel.security import hash_password
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from app.features.tenants.schemas import TenantProvision
 
 # Bound on the platform tenant listing (Task 2 step 4): closes the unbounded

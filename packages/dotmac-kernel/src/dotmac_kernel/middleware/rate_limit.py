@@ -31,7 +31,7 @@ from starlette.requests import Request
 from starlette.routing import Match
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.core.errors import envelope
+from dotmac_kernel.errors import envelope
 
 # Unmatched paths (no route template) collapse into this many hash buckets —
 # scanners can't mint per-URL keys, real 404 traffic still gets limited.

@@ -5,7 +5,7 @@ cookie path: provision an admin (`provision_owner`, `tests/conftest.py` —
 registration no longer grants admin, Task 2) + web-login on tenant A's
 host, then replay the
 resulting `access_token` cookie against tenant B's host. The shared
-`authenticate_request` seam (`app.core.deps`) checks the token's `tenant_id`
+`authenticate_request` seam (`dotmac_kernel.deps`) checks the token's `tenant_id`
 claim against `request.state.tenant` — resolved from tenant B's host by
 `TenantResolverMiddleware` — so the session must fail closed: a redirect
 to `/admin/login`, never the dashboard, and no tenant A data anywhere in

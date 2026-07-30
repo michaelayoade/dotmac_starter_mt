@@ -8,6 +8,12 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.14"
+# The kernel, consumed as a package boundary (develop=true: editable, no copied
+# modules, no import-path shims). It brings fastapi/sqlalchemy/pydantic/
+# pydantic-settings/jinja2/argon2-cffi transitively; the assembly still declares
+# the ones it uses directly below (uvicorn/gunicorn/psycopg/alembic/
+# python-multipart/email-validator).
+dotmac-kernel = { path = "packages/dotmac-kernel", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -64,7 +70,13 @@ addopts = "-q"
 pythonpath = ["."]
 
 [tool.importlinter]
-root_package = "app"
+root_packages = ["app", "dotmac_kernel"]
+
+[[tool.importlinter.contracts]]
+name = "Kernel must not import the assembly"
+type = "forbidden"
+source_modules = ["dotmac_kernel"]
+forbidden_modules = ["app"]
 
 [[tool.importlinter.contracts]]
 name = "Features are independent of each other"
@@ -79,11 +91,10 @@ modules = [
     "app.features.web",
 ]
 
-[[tool.importlinter.contracts]]
-name = "Core must not import features"
-type = "forbidden"
-source_modules = ["app.core"]
-forbidden_modules = ["app.features"]
+# The old "Core must not import features" contract is superseded by "Kernel
+# must not import the assembly" above: dotmac_kernel forbidden from importing
+# `app` at all (which includes app.features) — a stronger boundary now that the
+# kernel is a separate package, and it needs no app.core module to exist.
 
 [build-system]
 requires = ["poetry-core"]

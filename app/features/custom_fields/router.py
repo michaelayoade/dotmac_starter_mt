@@ -33,12 +33,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from dotmac_kernel.deps import get_db, require_role, require_tenant
+from dotmac_kernel.exceptions import BadRequestError
+from dotmac_kernel.models import Party, Tenant
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, require_role, require_tenant
-from app.core.exceptions import BadRequestError
-from app.core.models import Party, Tenant
 from app.features.custom_fields import service as custom_fields_service
 from app.features.custom_fields.models import CustomFieldDefinition
 from app.features.custom_fields.schemas import (

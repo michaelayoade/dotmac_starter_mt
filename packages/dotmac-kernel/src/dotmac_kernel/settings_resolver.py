@@ -1,6 +1,6 @@
 """Settings spec registry + tenant -> platform -> default resolver.
 
-Lives in `app.core` (not `app.features.settings`) even though the spec
+Lives in `dotmac_kernel` (not `app.features.settings`) even though the spec
 *declarations* and seed data live in the feature: a later task wires the
 `custom_fields` feature to consume `resolve_value` directly, and features may
 never import each other, so the resolver mechanics have to sit somewhere both
@@ -8,7 +8,7 @@ never import each other, so the resolver mechanics have to sit somewhere both
 settings/spec.py` DECLARES the initial `SettingSpec` instances and calls
 `register_specs` at import time; this module only owns the registry
 *mechanism* (register/get/all) plus resolution and the upsert/ensure helpers
-that operate on `app.core.settings_models.DomainSetting`.
+that operate on `dotmac_kernel.settings_models.DomainSetting`.
 
 No caching here: phase 1 has no Redis. Backlog: a Redis-backed settings cache
 lands in phase 3 (see `dotmac_sub:app/services/settings_cache.py` for the
@@ -34,8 +34,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import BadRequestError
-from app.core.settings_models import DomainSetting, SettingDomain, SettingValueType
+from dotmac_kernel.exceptions import BadRequestError
+from dotmac_kernel.settings_models import DomainSetting, SettingDomain, SettingValueType
 
 # Sentinel distinguishing "no default kwarg passed" from "default=None was
 # passed explicitly" in resolve_value.
@@ -364,7 +364,7 @@ def upsert_by_key(
     """Create or overwrite the (domain, key, tenant_id) row with `value`.
 
     `tenant_id=None` writes the PLATFORM row — only callers holding a
-    platform-role session (`app.core.db.PlatformSessionLocal` /
+    platform-role session (`dotmac_kernel.db.PlatformSessionLocal` /
     `get_platform_db`, i.e. the `platform_api` DB role) may pass `None`;
     `app_user` cannot write NULL-tenant rows (enforced by the settings
     migration's RLS policy), so a tenant-scoped session attempting this fails
@@ -424,7 +424,7 @@ def ensure_by_key(
     NEVER call `ensure_by_key` from a request-scoped `get_db` session — a
     full rollback there would discard that session's `SET LOCAL
     app.current_tenant` RLS context along with the race-loser's failed
-    INSERT, reintroducing finding F3 (see `app.core.db.conflict_savepoint`
+    INSERT, reintroducing finding F3 (see `dotmac_kernel.db.conflict_savepoint`
     and this repo's CLAUDE.md "Hard rules" entry on feature-service
     rollbacks) for any query run afterwards on the same session. If a
     request-scoped caller ever needs "insert if missing" semantics, wrap the

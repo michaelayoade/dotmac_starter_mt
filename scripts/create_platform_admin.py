@@ -3,7 +3,7 @@
 
 This is the ONLY way a platform admin comes into existence — there is
 deliberately no HTTP self-registration path for the platform control plane
-(see `app.core.platform_auth`'s module docstring and ADR-0004). Running this
+(see `dotmac_kernel.platform_auth`'s module docstring and ADR-0004). Running this
 script requires direct platform DB credentials, which puts it behind the
 same trust boundary as running migrations.
 
@@ -33,8 +33,8 @@ from sqlalchemy.orm import Session
 # Allow running as a plain script from the repo root.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.core.models_platform import PlatformAdmin
-from app.core.security import hash_password
+from dotmac_kernel.models_platform import PlatformAdmin
+from dotmac_kernel.security import hash_password
 
 
 def upsert_admin(

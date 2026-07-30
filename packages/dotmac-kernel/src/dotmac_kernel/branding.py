@@ -1,6 +1,6 @@
 """Branding resolution: deployment-static identity + per-tenant DB override.
 
-Two layers, deliberately kept separate (see `app.core.templating`'s module
+Two layers, deliberately kept separate (see `dotmac_kernel.templating`'s module
 docstring for how each is wired into template context):
 
 - `get_brand()` -- deployment-static identity (name, tagline, colors,
@@ -15,7 +15,7 @@ docstring for how each is wired into template context):
 
 - `load_branding(db, tenant_id)` -- the static brand, with any keys present
   in the tenant's `ui_branding` domain setting
-  (`app.core.settings_resolver.resolve_value(db, SettingDomain.branding,
+  (`dotmac_kernel.settings_resolver.resolve_value(db, SettingDomain.branding,
   "ui_branding", tenant_id=...)`) overlaid on top. Per-request, not cached.
   Ported from `dotmac_starter:app/services/branding.py::get_branding`
   (the DB-override merge), adapted from that single-tenant app's
@@ -45,7 +45,7 @@ the template context.
 2. A route-level dependency added to every individual web route --
    rejected for the same reason, worse (one call site per ROUTE, not per
    router).
-3. **Chosen**: `app.core.web_deps.require_web_auth` (already a dependency
+3. **Chosen**: `dotmac_kernel.web_deps.require_web_auth` (already a dependency
    of every authenticated `/admin/*` route -- one seam, zero new call
    sites) calls `get_request_branding` itself, populating
    `request.state.branding` before the route body runs. That covers every
@@ -53,7 +53,7 @@ the template context.
    HTML but never go through `require_web_auth` -- `GET`/`POST
    /admin/login` (`app.features.auth.web`) -- call it explicitly (2 call
    sites, commented at each). Total: 3 call sites for the whole app,
-   independent of how many features exist. `app.core.templating.render()`
+   independent of how many features exist. `dotmac_kernel.templating.render()`
    then reads `request.state.branding` centrally (see that module's
    docstring) -- routes never pass `brand` themselves unless they want to
    override it (e.g. the branding editor's live preview).
@@ -73,8 +73,8 @@ from uuid import UUID
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from app.core.settings_models import SettingDomain
-from app.core.settings_resolver import resolve_value
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import resolve_value
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +130,13 @@ def _config_path() -> Path:
     override = os.getenv("BRAND_CONFIG_PATH")
     if override:
         return Path(override)
-    # app/core/branding.py -> core -> app -> <repo root>
-    return Path(__file__).resolve().parents[2] / "brand.json"
+    # `brand.json` is ASSEMBLY-owned config (the kernel provides only the
+    # defaults + this loader). The kernel package must NOT resolve it relative
+    # to its own installed location — a pip-installed kernel lives outside the
+    # assembly. Look in the running assembly's working directory (its repo/
+    # deployment root); `BRAND_CONFIG_PATH` above is the explicit override for
+    # any other location.
+    return Path.cwd() / "brand.json"
 
 
 def _load_file() -> dict[str, object]:

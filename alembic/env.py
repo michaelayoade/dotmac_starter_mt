@@ -8,17 +8,17 @@ from __future__ import annotations
 import os
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
-
-from alembic import context
-from app.core import (
+from dotmac_kernel import (
     audit,  # noqa: F401  (register AuditEvent for autogenerate)
     models_platform,  # noqa: F401  (register PlatformAdmin/PlatformSession)
     settings_models,  # noqa: F401  (register DomainSetting)
 )
-from app.core.models import (  # registers Tenant/Party/Role/PartyRole/AuthSession/UserCredential
+from dotmac_kernel.models import (  # registers Tenant/Party/Role/PartyRole/AuthSession/UserCredential
     Base,
 )
+from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 from app.features.custom_fields import (
     models as custom_fields,  # noqa: F401  (register CustomFieldDefinition)
 )

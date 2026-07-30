@@ -26,10 +26,11 @@ lint-imports: ## Import boundary contracts
 	poetry run lint-imports
 format: ## Ruff format
 	poetry run ruff format .
-type-check: ## mypy
-	poetry run mypy app
-security: ## Bandit security scan
-	poetry run bandit -c pyproject.toml -r app
+KERNEL_SRC ?= packages/dotmac-kernel/src/dotmac_kernel
+type-check: ## mypy (assembly + kernel package)
+	poetry run mypy app $(KERNEL_SRC)
+security: ## Bandit security scan (assembly + kernel package)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC)
 check: lint lint-imports type-check security ## Lint + types + security
 	poetry run ruff format --check .
 

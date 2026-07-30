@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from dotmac_kernel.audit import AuditEvent, write_audit_event
+from dotmac_kernel.deps import get_db, require_role, require_tenant
+from dotmac_kernel.models import Party, Role, Tenant
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.audit import AuditEvent, write_audit_event
-from app.core.deps import get_db, require_role, require_tenant
-from app.core.models import Party, Role, Tenant
 from app.features.rbac import service as rbac_service
 from app.features.rbac.schemas import (
     AuditEventRead,

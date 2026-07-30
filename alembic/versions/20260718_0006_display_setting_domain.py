@@ -3,7 +3,7 @@
 Widens the `ck_domain_settings_domain` CHECK constraint on `domain_settings`
 to accept the new `display` domain (tenant-configurable timezone/date-format
 settings — see `app/features/settings/spec.py`). The ORM side
-(`app.core.settings_models.SettingDomain`) already derives its constraint
+(`dotmac_kernel.settings_models.SettingDomain`) already derives its constraint
 from the enum's members via `sa.Enum(..., native_enum=False)`, so that half
 only matters for `create_all` (unit SQLite / fresh installs); a real
 Postgres database still needs this migration to widen the existing

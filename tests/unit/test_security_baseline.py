@@ -12,16 +12,16 @@ import hashlib
 import secrets
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from app.core import security
-from app.core.middleware.rate_limit import MemoryStore, RateLimitMiddleware
-from app.core.middleware.security_headers import (
+from dotmac_kernel import security
+from dotmac_kernel.middleware.rate_limit import MemoryStore, RateLimitMiddleware
+from dotmac_kernel.middleware.security_headers import (
     _STRICT_CSP,
     SecurityHeadersMiddleware,
 )
-from app.core.models import Party, PartyPerson, PartyType, Tenant, UserCredential
+from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant, UserCredential
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.features.auth import service as auth_service
 from app.features.auth.schemas import LoginRequest
 
@@ -102,7 +102,7 @@ class TestLoginHardening:
         assert security.verify_password("legacy-password-123", credential.password_hash)
 
     def test_wrong_password_does_not_upgrade(self, db, tenant_with_legacy_credential):
-        from app.core.exceptions import UnauthorizedError
+        from dotmac_kernel.exceptions import UnauthorizedError
 
         tenant, credential = tenant_with_legacy_credential
         with pytest.raises(UnauthorizedError):
@@ -116,7 +116,7 @@ class TestLoginHardening:
     def test_unknown_email_burns_a_dummy_verification(self, db, monkeypatch):
         """Constant-work: the miss path must run exactly one verify, against
         the module dummy hash (asserted via counter, not wall-clock)."""
-        from app.core.exceptions import UnauthorizedError
+        from dotmac_kernel.exceptions import UnauthorizedError
 
         tenant = Tenant(slug="cw", name="Constant Work")
         db.add(tenant)

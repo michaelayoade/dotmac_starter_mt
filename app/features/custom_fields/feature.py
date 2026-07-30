@@ -10,7 +10,8 @@ page lazy-loads (cross-feature UI composition via a browser-side `hx-get`,
 not a Python import — see `web.py`'s module docstring).
 """
 
-from app.core.features import FeatureManifest, NavItem
+from dotmac_kernel.features import FeatureManifest, NavItem
+
 from app.features.custom_fields.router import router
 from app.features.custom_fields.web import router as web_router
 

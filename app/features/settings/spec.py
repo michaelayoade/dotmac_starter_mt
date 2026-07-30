@@ -1,9 +1,9 @@
 """Initial setting spec declarations for this app.
 
 Importing this module registers the specs with the core registry
-(`app.core.settings_resolver.register_specs`) as a side effect —
+(`dotmac_kernel.settings_resolver.register_specs`) as a side effect —
 `app/features/settings/__init__.py` imports this module, so anything that
-loads the `settings` feature package (e.g. `app.core.features.load_manifests`
+loads the `settings` feature package (e.g. `dotmac_kernel.features.load_manifests`
 importing `app.features.settings.feature`, which first imports the parent
 package) registers these as a byproduct.
 
@@ -17,8 +17,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.core.settings_models import SettingDomain, SettingValueType
-from app.core.settings_resolver import SettingSpec, register_specs
+from dotmac_kernel.settings_models import SettingDomain, SettingValueType
+from dotmac_kernel.settings_resolver import SettingSpec, register_specs
 
 
 def _validate_timezone(value: object) -> None:

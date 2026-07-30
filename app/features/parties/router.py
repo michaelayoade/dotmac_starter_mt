@@ -28,11 +28,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from dotmac_kernel.deps import get_db, require_role, require_tenant
+from dotmac_kernel.models import Party, PartyType, Tenant
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, require_role, require_tenant
-from app.core.models import Party, PartyType, Tenant
 from app.features.parties import service as parties_service
 from app.features.parties.schemas import (
     OrganizationPartyCreate,

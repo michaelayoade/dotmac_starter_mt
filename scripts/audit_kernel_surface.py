@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Deterministic kernel-surface audit (kernel-boundary plan, Task 0).
 
-Inventories every consumer of `app.core.*` across the repository and classifies
+Inventories every consumer of `dotmac_kernel.*` across the repository and classifies
 the surface so the package split (Task 1+) can be planned against facts, not
 assumptions. This script produces the DATA; the human-readable findings and the
 classification decisions live in
@@ -67,8 +67,8 @@ def _area_for(rel_path: str) -> str | None:
 
 
 def _core_module(name: str) -> str | None:
-    """Return the dotted app.core.* module a name refers to, or None."""
-    if name == "app.core" or name.startswith("app.core."):
+    """Return the dotted dotmac_kernel.* module a name refers to, or None."""
+    if name == "dotmac_kernel" or name.startswith("dotmac_kernel."):
         return name
     return None
 
@@ -78,7 +78,7 @@ class ImportRef:
     area: str
     rel_path: str
     lineno: int
-    module: str  # the app.core.* module
+    module: str  # the dotmac_kernel.* module
     symbol: str  # imported name, or "*"/"<module>" for module-form imports
 
 

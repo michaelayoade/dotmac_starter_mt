@@ -23,7 +23,7 @@ see docs/SECURITY.md "Content-Security-Policy rationale" for the audit):
   `x-data`/`x-show` expressions with `new Function`.
 - `style-src 'self' 'unsafe-inline'`: Tailwind + vendored fonts.css are
   local; 'unsafe-inline' covers the sanitized per-tenant `custom_css`
-  preview block (`app.core.branding.sanitize_branding_css` runs BEFORE it
+  preview block (`dotmac_kernel.branding.sanitize_branding_css` runs BEFORE it
   ever renders) and Alpine's style toggling (`x-show` sets inline styles).
 - `font-src 'self'`: fonts are VENDORED (static/fonts/, no-CDN standard) —
   no fonts.googleapis.com / fonts.gstatic.com origins.

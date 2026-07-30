@@ -1,6 +1,6 @@
 """TDD for the branding pipeline (Task 2).
 
-`app.core.branding.get_brand()` resolves deployment-static identity:
+`dotmac_kernel.branding.get_brand()` resolves deployment-static identity:
 built-in defaults < brand.json < same-named env var (ported from
 `dotmac_sub:app/services/branding_config.py`, same precedence/caching/
 `BRAND_CONFIG_PATH` override).
@@ -23,10 +23,9 @@ from __future__ import annotations
 import json
 
 import pytest
-
-from app.core import branding as branding_module
-from app.core.branding import get_brand, load_branding, sanitize_branding_css
-from app.core.settings_models import SettingDomain
+from dotmac_kernel import branding as branding_module
+from dotmac_kernel.branding import get_brand, load_branding, sanitize_branding_css
+from dotmac_kernel.settings_models import SettingDomain
 
 # Import for the side effect: registers branding/ui_branding into the
 # resolver registry (app.features.settings.spec, imported transitively).
@@ -142,7 +141,7 @@ def test_load_branding_returns_static_brand_when_no_override(db, tenant_row) -> 
 
 
 def test_load_branding_merges_tenant_override(db, tenant_row) -> None:
-    from app.core.settings_resolver import upsert_by_key
+    from dotmac_kernel.settings_resolver import upsert_by_key
 
     upsert_by_key(
         db,
@@ -160,8 +159,8 @@ def test_load_branding_merges_tenant_override(db, tenant_row) -> None:
 
 
 def test_load_branding_is_scoped_per_tenant(db, tenant_row) -> None:
-    from app.core.models import Tenant
-    from app.core.settings_resolver import upsert_by_key
+    from dotmac_kernel.models import Tenant
+    from dotmac_kernel.settings_resolver import upsert_by_key
 
     other = Tenant(slug="other", name="Other Tenant")
     db.add(other)
@@ -180,7 +179,7 @@ def test_load_branding_is_scoped_per_tenant(db, tenant_row) -> None:
 
 
 def test_load_branding_sanitizes_custom_css_in_override(db, tenant_row) -> None:
-    from app.core.settings_resolver import upsert_by_key
+    from dotmac_kernel.settings_resolver import upsert_by_key
 
     upsert_by_key(
         db,
@@ -200,7 +199,7 @@ def test_load_branding_ignores_unknown_override_keys(db, tenant_row) -> None:
     dict (stale shape, hand-crafted via the raw-JSON generic editor, a
     future field not yet wired) must never leak into the render context.
     """
-    from app.core.settings_resolver import upsert_by_key
+    from dotmac_kernel.settings_resolver import upsert_by_key
 
     upsert_by_key(
         db,
@@ -241,8 +240,8 @@ class _FakeRequest:
 
 
 def test_get_request_branding_resolves_tenant_override(db, tenant_row) -> None:
-    from app.core.branding import get_request_branding
-    from app.core.settings_resolver import upsert_by_key
+    from dotmac_kernel.branding import get_request_branding
+    from dotmac_kernel.settings_resolver import upsert_by_key
 
     upsert_by_key(
         db,
@@ -262,7 +261,7 @@ def test_get_request_branding_falls_back_to_static_when_no_tenant(db) -> None:
     """No tenant on `request.state` -- platform hosts, unresolved-tenant
     error contexts -- falls back to the deployment-static `get_brand()`,
     never a DB read."""
-    from app.core.branding import get_request_branding
+    from dotmac_kernel.branding import get_request_branding
 
     request = _FakeRequest(tenant=None)
     branding = get_request_branding(request, db)
@@ -278,7 +277,7 @@ def test_get_request_branding_memoizes_one_load_branding_call_per_request(
     same request (e.g. `require_web_auth` warms the cache, a route calls it
     again) -- the second call must return the cached
     `request.state.branding` without a second DB read."""
-    from app.core import branding as branding_mod
+    from dotmac_kernel import branding as branding_mod
 
     calls: list[int] = []
     real_load_branding = branding_mod.load_branding
@@ -362,12 +361,9 @@ def test_load_branding_failure_yields_static_branded_error_page(
     """
     from collections.abc import Generator
 
-    from fastapi import Depends, FastAPI, Request
-    from fastapi.testclient import TestClient
-
-    from app.core.deps import get_db
-    from app.core.errors import register_error_handlers
-    from app.core.models import (
+    from dotmac_kernel.deps import get_db
+    from dotmac_kernel.errors import register_error_handlers
+    from dotmac_kernel.models import (
         AuthSession,
         Party,
         PartyPerson,
@@ -375,8 +371,10 @@ def test_load_branding_failure_yields_static_branded_error_page(
         PartyType,
         Role,
     )
-    from app.core.security import hash_token, issue_access_token
-    from app.core.web_deps import require_web_auth
+    from dotmac_kernel.security import hash_token, issue_access_token
+    from dotmac_kernel.web_deps import require_web_auth
+    from fastapi import Depends, FastAPI, Request
+    from fastapi.testclient import TestClient
 
     # Set up admin party with token.
     party = Party(
@@ -406,7 +404,7 @@ def test_load_branding_failure_yields_static_branded_error_page(
     db.flush()
 
     # Mock load_branding to raise.
-    from app.core import branding as branding_mod
+    from dotmac_kernel import branding as branding_mod
 
     monkeypatch.setattr(
         branding_mod,

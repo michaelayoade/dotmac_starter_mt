@@ -19,12 +19,12 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
+from dotmac_kernel.deps import get_db, require_user_auth
+from dotmac_kernel.models import Party, PartyPerson, PartyRole, PartyType, Role, Tenant
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, require_user_auth
-from app.core.models import Party, PartyPerson, PartyRole, PartyType, Role, Tenant
 from app.features.parties.router import router as parties_router
 
 
@@ -65,7 +65,7 @@ def non_admin_person(db: Session, tenant_row: Tenant) -> Party:
 @pytest.fixture()
 def app_client(db: Session, tenant_row: Tenant, admin_person: Party) -> TestClient:
     app = FastAPI()
-    from app.core.errors import register_error_handlers
+    from dotmac_kernel.errors import register_error_handlers
 
     register_error_handlers(app)
     app.include_router(parties_router)

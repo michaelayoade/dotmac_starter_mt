@@ -1,9 +1,9 @@
 """Settings feature package.
 
 Importing this package registers the initial setting specs with the core
-registry (`app.core.settings_resolver`) as a side effect — see `spec.py`.
+registry (`dotmac_kernel.settings_resolver`) as a side effect — see `spec.py`.
 Anything that imports `app.features.settings.feature` (e.g.
-`app.core.features.load_manifests`) triggers this import first, since Python
+`dotmac_kernel.features.load_manifests`) triggers this import first, since Python
 always imports a parent package before a submodule.
 """
 

@@ -10,7 +10,7 @@ Must NOT run at import time — only from the lifespan callback — so that a
 bare `import app.main` (used by CI's docker-build health check and the
 `python -c "import app.main"` smoke check) never touches the database.
 
-Uses `app.core.db.platform_session` (the non-request platform-session
+Uses `dotmac_kernel.db.platform_session` (the non-request platform-session
 boundary) rather than the request-scoped `get_platform_db` FastAPI
 dependency, because this runs outside a request against the `platform_api`
 DB role — the only role permitted to write NULL-tenant rows on
@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import logging
 
-from app.core.db import platform_session
-from app.core.settings_resolver import all_specs, ensure_by_key
+from dotmac_kernel.db import platform_session
+from dotmac_kernel.settings_resolver import all_specs, ensure_by_key
 
 logger = logging.getLogger(__name__)
 

@@ -15,21 +15,21 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+from dotmac_kernel.config import settings, validate_settings
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.features import FeatureManifest, load_manifests, mount_features
+from dotmac_kernel.logging import setup_logging
+from dotmac_kernel.middleware.csrf import CSRFMiddleware
+from dotmac_kernel.middleware.observability import ObservabilityMiddleware
+from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
+from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
+from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
+from dotmac_kernel.platform_auth import platform_auth_router
+from dotmac_kernel.templating import install_surface_globals
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.core.config import settings, validate_settings
-from app.core.errors import register_error_handlers
-from app.core.features import FeatureManifest, load_manifests, mount_features
-from app.core.logging import setup_logging
-from app.core.middleware.csrf import CSRFMiddleware
-from app.core.middleware.observability import ObservabilityMiddleware
-from app.core.middleware.rate_limit import RateLimitMiddleware
-from app.core.middleware.security_headers import SecurityHeadersMiddleware
-from app.core.middleware.tenant import TenantResolverMiddleware
-from app.core.platform_auth import platform_auth_router
-from app.core.templating import install_surface_globals
 from app.features import FEATURE_MODULES
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ setup_logging()
 
 # Loaded once at import time (also used by `mount_features` below) — a
 # feature's own `feature.py` module is always imported here regardless of
-# whether it's disabled (see `app.core.features` docstring: fault isolation
+# whether it's disabled (see `dotmac_kernel.features` docstring: fault isolation
 # is mount-time only), but nothing about importing a manifest touches the
 # DB. Reused by `lifespan`'s seed dispatch so main.py never hard-imports a
 # specific feature's seed function (final-review Group 3) — deleting or
@@ -51,7 +51,7 @@ _manifests = load_manifests(FEATURE_MODULES)
 # the sidebar and any template's optional-slot conditional
 # (`{% if 'x' in enabled_features %}`). Must run before any template ever
 # renders, so it happens here at import time, right after `_manifests` is
-# built — see app.core.templating.install_surface_globals's docstring.
+# built — see dotmac_kernel.templating.install_surface_globals's docstring.
 install_surface_globals(_manifests, settings.disabled_feature_set, settings.web_enabled)
 
 
@@ -130,7 +130,7 @@ app.add_middleware(
 register_error_handlers(app)
 
 # Serves templates/base.html's <link>/<script> asset URLs (built by
-# `npm run css:build`; see app.core.templating.static_asset_url). No guard
+# `npm run css:build`; see dotmac_kernel.templating.static_asset_url). No guard
 # needed — static assets are public by nature and StaticFiles mounts a
 # Starlette `Mount`, not an `APIRoute`, so it's outside
 # tests/architecture/test_route_guards.py's route-guard sweep. Gated on
@@ -149,7 +149,7 @@ def health() -> dict[str, str]:
 
 # Platform auth mounts DIRECTLY — not via a feature manifest. The manifest/
 # capability model is for tenant capabilities; the platform control plane
-# must exist even with every feature disabled (see app.core.platform_auth's
+# must exist even with every feature disabled (see dotmac_kernel.platform_auth's
 # module docstring and ADR-0004).
 app.include_router(platform_auth_router)
 

@@ -12,7 +12,7 @@ required fix (see `.superpowers/sdd/task-3-report.md`'s fix note):
 module as `login()` — the cross-feature import into `app.features.auth`
 this module used to carry, and the `pyproject.toml` `ignore_imports`
 exception it required, are both gone); `safe_next_url`/`is_secure_request`
-now live in `app.core.web_deps` as generic HTTP utilities. Everything
+now live in `dotmac_kernel.web_deps` as generic HTTP utilities. Everything
 remaining here queries CORE models directly (`Party`, `Role`, `AuthSession`,
 `PartyPerson`) and touches no other feature package.
 """
@@ -22,10 +22,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from dotmac_kernel.models import AuthSession, Party, PartyPerson, Role, Tenant
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-
-from app.core.models import AuthSession, Party, PartyPerson, Role, Tenant
 
 
 @dataclass(frozen=True)

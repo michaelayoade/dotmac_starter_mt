@@ -14,7 +14,7 @@ members) with starter adaptations:
 - `css_class`/`show_in_print` are dropped — YAGNI for the starter.
 
 Field *values* live on the entity's own `custom_fields` JSONB column (see
-`Party.custom_fields` in `app.core.models`), keyed by `field_code`. This
+`Party.custom_fields` in `dotmac_kernel.models`), keyed by `field_code`. This
 table only defines the field *shape* (type, validation, display).
 """
 
@@ -28,6 +28,7 @@ from typing import Any
 from uuid import UUID
 
 import sqlalchemy as sa
+from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
 from sqlalchemy import (
     Boolean,
     ForeignKey,
@@ -39,8 +40,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
-
-from app.core.models import Base, TimestampMixin, uuid_pk
 
 
 class CustomFieldType(str, enum.Enum):

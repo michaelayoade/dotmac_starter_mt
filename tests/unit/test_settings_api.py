@@ -4,7 +4,7 @@ App-builder pattern from `tests/unit/test_errors.py` (bare `FastAPI()` +
 `register_error_handlers`), extended to exercise the real guarded router on
 in-memory SQLite: `get_db` and `require_user_auth` are overridden via
 `app.dependency_overrides` (both are plain module-level callables imported
-from `app.core.deps`, so overriding them here overrides every
+from `dotmac_kernel.deps`, so overriding them here overrides every
 `Depends(require_role("admin"))` closure that transitively depends on them
 too — there is no separate "override require_role" hook, since each
 `require_role(...)` call site produces its own closure object). A thin
@@ -24,16 +24,15 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
+from dotmac_kernel import settings_resolver as sr
+from dotmac_kernel.audit import AuditEvent
+from dotmac_kernel.deps import get_db, require_user_auth
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import Party, PartyPerson, PartyRole, PartyType, Role, Tenant
+from dotmac_kernel.settings_models import SettingDomain, SettingValueType
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-
-from app.core import settings_resolver as sr
-from app.core.audit import AuditEvent
-from app.core.deps import get_db, require_user_auth
-from app.core.errors import register_error_handlers
-from app.core.models import Party, PartyPerson, PartyRole, PartyType, Role, Tenant
-from app.core.settings_models import SettingDomain, SettingValueType
 
 # Import for the side effect: registers custom_fields/max_per_entity,
 # branding/ui_branding, audit/retention_days.

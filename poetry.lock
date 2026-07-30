@@ -433,6 +433,28 @@ trio = ["trio (>=0.30)"]
 wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
+name = "dotmac-kernel"
+version = "0.1.0a1"
+description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
+optional = false
+python-versions = ">=3.12,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+argon2-cffi = "^25.1.0"
+fastapi = "^0.115"
+jinja2 = "^3.1"
+pydantic = "^2.9"
+pydantic-settings = "^2.5"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-kernel"
+
+[[package]]
 name = "email-validator"
 version = "2.3.0"
 description = "A robust email address syntax and deliverability validation library."
@@ -2395,4 +2417,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "90574c1a5add223ddcf509e3a8539d1a06284bb02d8e85bdf6530a4bbd59f64a"
+content-hash = "c097d93ae9058a5c831b8e3fd58cf240be48585ccc663f48f9bf398e2725ab2b"

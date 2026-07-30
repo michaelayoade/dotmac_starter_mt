@@ -1,14 +1,14 @@
 """Feature services never call `db.rollback()` directly (F3 hard rule).
 
 A bare `db.rollback()` inside a feature's request-scoped conflict handling
-rolls back the ENTIRE transaction `app.core.db.get_db` opened for the
+rolls back the ENTIRE transaction `dotmac_kernel.db.get_db` opened for the
 request — including the `SET LOCAL app.current_tenant` it issued for RLS.
 Any query the caller's exception handler runs afterwards then runs with no
 tenant context, and FORCE ROW LEVEL SECURITY fails closed (see finding F3,
 `docs/superpowers/plans/2026-07-18-phase2b1-sot-composability.md` Task 2,
 and the canaries in `tests/test_conflict_rls_context.py`).
 
-`app.core.db.conflict_savepoint` is the one sanctioned pattern for an
+`dotmac_kernel.db.conflict_savepoint` is the one sanctioned pattern for an
 expected conflict (`with conflict_savepoint(db): db.flush()` inside a
 `try/except IntegrityError`): it rolls back only a SAVEPOINT, leaving the
 outer transaction + its `SET LOCAL` intact.
@@ -25,7 +25,7 @@ DISALLOWED = re.compile(r"\bdb\.rollback\(\)")
 # Files that are allowed a bare `db.rollback()` despite living under
 # app/features — each entry names a startup/maintenance task that owns its
 # OWN top-level session end-to-end (open -> commit-or-rollback -> close),
-# the same shape as app.core.db.get_db/get_platform_db themselves, rather
+# the same shape as dotmac_kernel.db.get_db/get_platform_db themselves, rather
 # than a mid-request conflict site sharing the request's `get_db` session
 # and its `SET LOCAL` tenant context. Nothing in this set translates the
 # rollback into a `ConflictError` for a caller to keep going after — it's a
@@ -56,6 +56,6 @@ def test_no_bare_rollback_in_feature_services() -> None:
             line = text.count("\n", 0, match.start()) + 1
             violations.append(f"{rel}:{line} -> bare db.rollback()")
     assert not violations, (
-        "feature services must use app.core.db.conflict_savepoint for "
+        "feature services must use dotmac_kernel.db.conflict_savepoint for "
         "expected conflicts, never a bare db.rollback() (F3):\n" + "\n".join(violations)
     )

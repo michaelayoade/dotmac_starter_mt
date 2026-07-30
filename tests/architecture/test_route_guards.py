@@ -91,9 +91,9 @@ def test_every_route_has_a_guard() -> None:
 # derived from a `require_` prefix match, hand-built precisely because
 # `require_tenant` also starts with `require_` and must NOT count as one of
 # these:
-#   - "require_user_auth" (app.core.deps): bearer-token JSON API guard —
+#   - "require_user_auth" (dotmac_kernel.deps): bearer-token JSON API guard —
 #     validates the token/session and returns the authenticated Party.
-#   - "require_role" (app.core.deps): `require_role(role_slug)` returns a
+#   - "require_role" (dotmac_kernel.deps): `require_role(role_slug)` returns a
 #     closure literally named `_dependency` (see that function), so this
 #     exact string never appears in `_guard_names` — it is listed here for
 #     documentation/future-proofing only (e.g. if a later refactor names the
@@ -101,9 +101,9 @@ def test_every_route_has_a_guard() -> None:
 #     `Depends(require_role(...))`-guarded route comes from that closure's
 #     own `Depends(require_user_auth)` sub-dependency, which DOES surface
 #     under its own name via `_guard_names`'s recursive walk.
-#   - "require_web_auth" (app.core.web_deps): cookie-based web-portal guard
+#   - "require_web_auth" (dotmac_kernel.web_deps): cookie-based web-portal guard
 #     — requires a valid session cookie AND the "admin" role.
-#   - "require_platform_admin" (app.core.platform_auth): THE platform guard
+#   - "require_platform_admin" (dotmac_kernel.platform_auth): THE platform guard
 #     (control-plane security Task 1) — host must equal the platform root
 #     domain exactly, bearer token must be a live platform session with
 #     `aud="platform"`, and the admin must be active. It replaced the old
@@ -149,7 +149,7 @@ MUTATING_ALLOWLIST = {
     # what `test_csrf_*` in `tests/test_security_middleware.py` proves, and
     # what makes this route safe to allowlist here.
     ("POST", "/admin/logout"),
-    # Platform login (`app.core.platform_auth.platform_auth_router`): the
+    # Platform login (`dotmac_kernel.platform_auth.platform_auth_router`): the
     # platform counterpart of `/auth/login` — this route IS how a platform
     # admin becomes authenticated, so it cannot require authentication. It
     # still carries `Depends(require_platform_host)` (host-exact: the login

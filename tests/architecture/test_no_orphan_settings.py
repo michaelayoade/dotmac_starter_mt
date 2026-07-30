@@ -2,7 +2,7 @@
 
 Adapted from `dotmac_sub:tests/architecture/test_no_orphan_settings.py`,
 simplified for this app's much smaller spec registry: instead of a `SETTINGS_SPECS`
-module-level list, specs register themselves into `app.core.settings_resolver`
+module-level list, specs register themselves into `dotmac_kernel.settings_resolver`
 (`register_specs`, called by `app/features/settings/spec.py` at import time) —
 see that module's docstring for why the registry mechanism lives in core while
 the declarations live in the feature.
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pathlib
 
-from app.core.settings_resolver import all_specs
+from dotmac_kernel.settings_resolver import all_specs
 
 # Import for the side effect: registers custom_fields/max_per_entity,
 # branding/ui_branding, audit/retention_days into the registry this test reads.
@@ -38,13 +38,15 @@ from app.features.settings import spec as _settings_spec  # noqa: F401
 _EXCLUDED_DIR_PREFIX = "app/features/settings/"
 # The resolver module's own docstrings/tests-support code reference keys in
 # prose/comments while implementing the mechanism, not consuming a value —
-# excluded for the same reason.
-_EXCLUDED_FILE = "app/core/settings_resolver.py"
+# excluded for the same reason. It moved to the kernel package in the
+# kernel-boundary split; kernel modules (display, branding) are legitimate
+# spec CONSUMERS, so the corpus scans the kernel too (see `_reader_corpus`).
+_EXCLUDED_FILE = "dotmac_kernel/settings_resolver.py"
 
 # Burn-down allowlist — do NOT add to this without a task/plan reference in
 # the comment; a new orphan should get a real consumer instead. EMPTY as of
 # plan 2b Task 2: `ui_branding` is now consumed by
-# `app.core.branding.load_branding` (`resolve_value(db, SettingDomain.branding,
+# `dotmac_kernel.branding.load_branding` (`resolve_value(db, SettingDomain.branding,
 # "ui_branding", ...)`).
 _ALLOWED_ORPHAN_SETTINGS: set[str] = set()
 
@@ -59,15 +61,25 @@ def _is_excluded(rel_path: str) -> bool:
 
 
 def _reader_corpus(root: pathlib.Path) -> str:
+    # (scan_dir, rel_prefix) — the assembly and the kernel package. Both hold
+    # legitimate spec consumers (features under app/; display + branding under
+    # the kernel), so a spec is only an orphan if NEITHER reads it.
+    trees = (
+        (root / "app", "app"),
+        (root / "packages/dotmac-kernel/src/dotmac_kernel", "dotmac_kernel"),
+    )
     chunks: list[str] = []
-    for path in (root / "app").rglob("*.py"):
-        rel = str(path.relative_to(root))
-        if _is_excluded(rel):
-            continue
-        try:
-            chunks.append(path.read_text(encoding="utf-8"))
-        except OSError:
-            continue
+    for scan_dir, prefix in trees:
+        for path in scan_dir.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            rel = f"{prefix}/" + str(path.relative_to(scan_dir)).replace("\\", "/")
+            if _is_excluded(rel):
+                continue
+            try:
+                chunks.append(path.read_text(encoding="utf-8"))
+            except OSError:
+                continue
     return "\n".join(chunks)
 
 

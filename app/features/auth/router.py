@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from dotmac_kernel.deps import get_db, require_tenant, require_user_auth
+from dotmac_kernel.models import Party, Tenant
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, require_tenant, require_user_auth
-from app.core.models import Party, Tenant
 from app.features.auth import service as auth_flows
 from app.features.auth.schemas import (
     CurrentUserResponse,

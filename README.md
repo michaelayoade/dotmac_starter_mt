@@ -154,7 +154,7 @@ Then, in order:
    `app/features/custom_fields/registry.py`'s `ENTITY_MODELS` (see the
    quick example below).
 3. **Register your own settings.** Add a `SettingSpec` to your feature's own
-   spec module and call `app.core.settings_resolver.register_specs([...])`
+   spec module and call `dotmac_kernel.settings_resolver.register_specs([...])`
    at import time (see `app/features/settings/spec.py` for the pattern). A
    spec with no real reader anywhere in the code fails the
    no-orphan-settings architecture test — wire the `resolve_value(...)`
@@ -268,7 +268,7 @@ productionize further, port what your project needs:
 - Profile generator, deployment-specific packaging, and CI profile matrix
 - Security headers
 - A self-service (non-admin) portal surface — today every `/admin/*` page
-  requires the `admin` role; see `app.core.web_deps.require_web_auth`'s
+  requires the `admin` role; see `dotmac_kernel.web_deps.require_web_auth`'s
   docstring for the phase-3 loosening plan
 
 Each port follows the pattern already established: add `tenant_id`, write
@@ -438,7 +438,7 @@ comma-separated `DISABLED_FEATURES` env var (see `.env.example`):
 export DISABLED_FEATURES="custom_fields,settings"
 ```
 
-`app.core.features.mount_features` skips any feature whose name is in this
+`dotmac_kernel.features.mount_features` skips any feature whose name is in this
 set — its routers (both JSON `routers` and HTML `web_routers`, see below)
 are never mounted, so its endpoints simply don't exist (404, not a guard
 failure). This is the fast path for "starting a project from this template"
@@ -483,7 +483,7 @@ entirely).
 | Prefix | Feature | Notes |
 |---|---|---|
 | `GET /health` | — | Liveness only, no DB touch, no guard (allowlisted). |
-| `POST /platform/auth/login`, `POST /platform/auth/logout` | — (core, `app.core.platform_auth`) | Platform-root-domain only; login is pre-auth (host-guarded), logout requires `require_platform_admin`. |
+| `POST /platform/auth/login`, `POST /platform/auth/logout` | — (core, `dotmac_kernel.platform_auth`) | Platform-root-domain only; login is pre-auth (host-guarded), logout requires `require_platform_admin`. |
 | `POST/GET /platform/tenants`, `GET /platform/tenants/{id}` | `tenants` | Platform-root-domain only, `require_platform_admin` (see ADR-0004); `POST` provisions tenant + owner atomically. |
 | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` | `auth` | Tenant-scoped JWT flows. |
 | `POST /parties/people`, `POST /parties/organizations`, `GET /parties`, `GET /parties/{id}`, `DELETE /parties/{id}` | `parties` | Identity CRUD for both party types. |
@@ -507,7 +507,7 @@ enforced by `tests/architecture/test_route_guards.py`.
 
 Every `/admin/*` route (except the login and logout routes) carries
 `require_web_auth`, which also requires the `admin` role — see
-`app.core.web_deps`.
+`dotmac_kernel.web_deps`.
 
 ## Run the cross-tenant tests
 

@@ -9,9 +9,9 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.db import get_db, get_platform_db
-from app.core.models import AuthSession, Party, PartyRole, PartyType, Role, Tenant
-from app.core.security import decode_access_token, hash_token
+from dotmac_kernel.db import get_db, get_platform_db
+from dotmac_kernel.models import AuthSession, Party, PartyRole, PartyType, Role, Tenant
+from dotmac_kernel.security import decode_access_token, hash_token
 
 
 def require_tenant(request: Request) -> Tenant:
@@ -29,7 +29,7 @@ def authenticate_request(request: Request, db: Session, *, token: str) -> Party 
     Pure predicate: returns the authenticated `Party` or `None` on ANY
     failure — it never raises. Callers decide how a `None` becomes a
     response: `require_user_auth` (below) turns it into a 401
-    `HTTPException`; `app.core.web_deps.require_web_auth` turns it into a
+    `HTTPException`; `dotmac_kernel.web_deps.require_web_auth` turns it into a
     `WebAuthRedirect` 302. This function does NOT resolve/require a tenant
     itself — it reads whatever `request.state.tenant` already holds (set by
     `TenantResolverMiddleware` before the route ever runs); if that's `None`

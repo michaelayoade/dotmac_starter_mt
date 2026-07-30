@@ -3,7 +3,7 @@
 Ported from `ST:app/web/deps.py` (`require_web_auth` + `WebAuthRedirect`
 302-on-failure pattern), adapted to this repo's `Party`/`AuthSession` shape
 and — the actual point of this module — routed through the SAME shared
-validation seam the bearer path uses (`app.core.deps.authenticate_request`),
+validation seam the bearer path uses (`dotmac_kernel.deps.authenticate_request`),
 so token/session/tenant/party_type checking has exactly ONE implementation
 for both the API (bearer header) and the web portal (cookie).
 
@@ -16,7 +16,7 @@ shape for phase 2b (every portal page is admin-only until phase 3 adds
 per-portal roles; see the inline comment below).
 
 It ALSO (Task 4 / F4 fix) is one of the three call sites for
-`app.core.branding.get_request_branding` — since every authenticated
+`dotmac_kernel.branding.get_request_branding` — since every authenticated
 `/admin/*` route already depends on this function, warming
 `request.state.branding` here is the single seam that covers the whole
 authenticated portal with zero per-route/per-router changes (see that
@@ -31,11 +31,11 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.branding import get_request_branding
-from app.core.db import get_db
-from app.core.deps import authenticate_request
-from app.core.display import get_request_display
-from app.core.models import PartyRole, Role
+from dotmac_kernel.branding import get_request_branding
+from dotmac_kernel.db import get_db
+from dotmac_kernel.deps import authenticate_request
+from dotmac_kernel.display import get_request_display
+from dotmac_kernel.models import PartyRole, Role
 
 
 def safe_next_url(url: str | None, default: str = "/admin") -> str:
@@ -71,7 +71,7 @@ def is_secure_request(request: Request) -> bool:
 class WebAuthRedirect(HTTPException):
     """Raised by `require_web_auth` on ANY auth failure.
 
-    Carries 302 semantics — `app.core.errors.register_error_handlers`
+    Carries 302 semantics — `dotmac_kernel.errors.register_error_handlers`
     registers a dedicated handler for this exception that issues a real
     `RedirectResponse` to `/admin/login?next=<safe next_url>` (the bare
     `HTTPException(302, ...)` FastAPI would otherwise render as a JSON/HTML
@@ -119,14 +119,14 @@ def require_web_auth(
 
     # Call site 1/3 (Task 4 / F4 fix) — warms `request.state.branding` for
     # every authenticated portal page in one place; see this module's and
-    # `app.core.branding`'s docstrings for the other two (login GET/POST).
+    # `dotmac_kernel.branding`'s docstrings for the other two (login GET/POST).
     get_request_branding(request, db)
 
     # Task 2 — warms `request.state.display` (tenant timezone/date/datetime
     # formats) for every authenticated portal page, same seam as branding
     # above. Login/error pages are NOT warmed on purpose (they render no
     # timestamps); the `local_datetime`/`local_date` filter fallback in
-    # `app.core.templating` covers any future accident.
+    # `dotmac_kernel.templating` covers any future accident.
     get_request_display(request, db)
 
     roles = list(

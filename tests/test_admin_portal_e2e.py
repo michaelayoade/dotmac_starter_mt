@@ -11,7 +11,7 @@ subsequent guarded GET redirects to login).
 
 CSRF cookie-ordering convention (`test_settings_isolation.py`'s docstring,
 `test_custom_fields_isolation.py`'s inline comment on the same subject):
-`CSRFMiddleware` (`app.core.middleware.csrf`) double-submit-checks any
+`CSRFMiddleware` (`dotmac_kernel.middleware.csrf`) double-submit-checks any
 non-safe method the moment a `csrf_token` cookie exists on the request.
 Every existing Postgres canary dodges this by doing every mutation on a
 client BEFORE that client's first GET. This test cannot do that — the whole

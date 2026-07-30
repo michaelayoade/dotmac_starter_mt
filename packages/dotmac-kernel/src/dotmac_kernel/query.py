@@ -20,7 +20,7 @@ from typing import TypeVar
 
 from sqlalchemy import Select
 
-from app.core.exceptions import BadRequestError
+from dotmac_kernel.exceptions import BadRequestError
 
 T = TypeVar("T")
 

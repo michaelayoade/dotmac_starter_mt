@@ -22,14 +22,10 @@ from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
-from app.core.audit import AuditEvent
-from app.core.deps import get_db
-from app.core.errors import register_error_handlers
-from app.core.models import (
+from dotmac_kernel.audit import AuditEvent
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import (
     Party,
     PartyPerson,
     PartyRole,
@@ -38,7 +34,11 @@ from app.core.models import (
     Tenant,
     UserCredential,
 )
-from app.core.security import hash_password
+from dotmac_kernel.security import hash_password
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.features.auth.web import router as auth_web_router
 from app.features.rbac.web import router as rbac_web_router
 
@@ -404,7 +404,7 @@ def test_role_grants_unknown_party_rerenders_200_with_error(
 def test_role_grants_duplicate_rerenders_200_with_conflict(
     web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    from app.core.models import PartyRole
+    from dotmac_kernel.models import PartyRole
 
     token = _login(web_client, provisioned_admin["email"])
     party = _make_party(db, tenant_row, "Ada Lovelace", "ada@example.com")

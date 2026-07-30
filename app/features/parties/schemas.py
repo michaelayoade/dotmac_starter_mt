@@ -24,9 +24,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from dotmac_kernel.models import PartyType
 from pydantic import BaseModel, EmailStr, Field
-
-from app.core.models import PartyType
 
 
 class PersonPartyCreate(BaseModel):
@@ -57,7 +56,7 @@ class PartyRead(BaseModel):
     id: UUID
     party_type: PartyType
     # Recomputed on every write (create AND update) by the shared
-    # `app.core.identity` helpers — parties/auth services are the single
+    # `dotmac_kernel.identity` helpers — parties/auth services are the single
     # write-owner of this projection now (Task 5); see docs/ARCHITECTURE.md's
     # "Known dual-writer: Parties" section.
     display_name: str

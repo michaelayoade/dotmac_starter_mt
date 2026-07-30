@@ -2,14 +2,14 @@
 
 Builds a throwaway FastAPI app (no DB, no app.main middleware stack — this
 is purely about the templating/asset pipeline) with one trivial route that
-renders `layouts/admin.html` through the real `app.core.templating.render`
+renders `layouts/admin.html` through the real `dotmac_kernel.templating.render`
 helper, and checks the rendered HTML carries the admin shell's load-bearing
 pieces: the sidebar nav, the page_title context contract, and the CSRF
 header-bridge <script> tag.
 
 Phase 2b.1 Task 1: the sidebar nav (and its active-item highlighting) is no
 longer driven by an `active_nav` context var — it derives entirely from the
-`nav_items` Jinja global (`app.core.templating.install_surface_globals`,
+`nav_items` Jinja global (`dotmac_kernel.templating.install_surface_globals`,
 set for every unit test by `tests/unit/conftest.py`'s autouse
 `_default_surface_globals` fixture) and path-matches against
 `request.url.path`. The trivial route below is mounted AT `/admin` itself
@@ -19,10 +19,9 @@ highlighting, not a synthetic one.
 
 from __future__ import annotations
 
+from dotmac_kernel.templating import render
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-
-from app.core.templating import render
 
 
 def _build_test_app() -> FastAPI:

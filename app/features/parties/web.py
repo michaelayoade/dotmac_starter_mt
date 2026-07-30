@@ -40,16 +40,16 @@ from __future__ import annotations
 import math
 from uuid import UUID
 
+from dotmac_kernel.deps import get_db, require_tenant
+from dotmac_kernel.exceptions import ConflictError
+from dotmac_kernel.models import Party, PartyType, Tenant
+from dotmac_kernel.templating import render
+from dotmac_kernel.web_deps import require_web_auth
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, require_tenant
-from app.core.exceptions import ConflictError
-from app.core.models import Party, PartyType, Tenant
-from app.core.templating import render
-from app.core.web_deps import require_web_auth
 from app.features.parties import service as parties_service
 from app.features.parties.schemas import (
     OrganizationPartyCreate,

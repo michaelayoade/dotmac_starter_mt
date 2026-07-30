@@ -14,7 +14,7 @@ from fastapi import Request
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import settings
+from dotmac_kernel.config import settings
 
 __all__ = [
     "conflict_savepoint",

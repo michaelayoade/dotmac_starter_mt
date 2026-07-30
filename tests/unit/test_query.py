@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from dotmac_kernel.exceptions import BadRequestError
+from dotmac_kernel.models import Party
+from dotmac_kernel.query import apply_ordering
 from sqlalchemy import select
-
-from app.core.exceptions import BadRequestError
-from app.core.models import Party
-from app.core.query import apply_ordering
 
 
 def test_apply_ordering_noop_when_order_by_none():

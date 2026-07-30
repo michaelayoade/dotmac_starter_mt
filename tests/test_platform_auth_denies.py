@@ -8,11 +8,11 @@ platform `aud="platform"` tokens) must never cross surfaces.
 Independence of the two layers matters and is pinned separately:
 - MIDDLEWARE: `/platform/*` on a host that is not the platform root domain is
   not a platform-valid path at all — 404 before any route runs
-  (`app.core.middleware.tenant._is_platform_path`, host-exact after Task 1;
+  (`dotmac_kernel.middleware.tenant._is_platform_path`, host-exact after Task 1;
   the pre-fix `startswith("/platform/")` branch let ANY host through, which
   is the captured "before" RED of `test_unknown_host_cannot_reach_platform_routes`).
 - GUARD: even a request that reaches the route needs a live platform-admin
-  bearer token (`app.core.platform_auth.require_platform_admin`) — host
+  bearer token (`dotmac_kernel.platform_auth.require_platform_admin`) — host
   re-checked (defense-in-depth), `aud="platform"` claim, live
   `platform_sessions` row, `is_active` admin.
 
@@ -45,14 +45,14 @@ def tenant_token(admin_session, tenant_a) -> str:
     """A valid TENANT access token (no `aud` claim) for tenant_a, built via
     direct admin-engine inserts so this fixture stays independent of the
     registration policy (Task 2 closes open registration by default)."""
-    from app.core.models import (
+    from dotmac_kernel.models import (
         AuthSession,
         Party,
         PartyPerson,
         PartyType,
         UserCredential,
     )
-    from app.core.security import hash_password, hash_token, issue_access_token
+    from dotmac_kernel.security import hash_password, hash_token, issue_access_token
 
     party = Party(
         tenant_id=tenant_a.id,

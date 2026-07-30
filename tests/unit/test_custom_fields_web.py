@@ -17,13 +17,9 @@ from collections.abc import Generator
 from uuid import uuid4
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
-from app.core.deps import get_db
-from app.core.errors import register_error_handlers
-from app.core.models import (
+from dotmac_kernel.deps import get_db
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import (
     Party,
     PartyPerson,
     PartyRole,
@@ -32,7 +28,11 @@ from app.core.models import (
     Tenant,
     UserCredential,
 )
-from app.core.security import hash_password
+from dotmac_kernel.security import hash_password
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
 from app.features.auth.web import router as auth_web_router
 from app.features.custom_fields import service as cf_service
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType

@@ -4,7 +4,7 @@
 (Task 6); this feature owns its own API shape (Task 7) — `create_person_party`
 and `create_organization_party` create a `Party` + its subtype row
 (`PartyPerson`/`PartyOrganization`) atomically via a single flush each
-(`get_db` owns the commit — see `app.core.db.get_db`), `list_parties` filters
+(`get_db` owns the commit — see `dotmac_kernel.db.get_db`), `list_parties` filters
 by `party_type` and paginates, and `Parties` (a `CRUDManager[Party]`) handles
 plain get/delete. All `select()`/session-mutation calls for the party domain
 live here — `app/features/parties/router.py` only resolves dependencies,
@@ -12,7 +12,7 @@ calls these functions, and shapes the response.
 
 `update_person_party`/`update_organization_party` (Task 5) close the
 `display_name` dual-writer SOT gap: both the create and update paths now
-recompute `display_name` via the shared `app.core.identity` helpers
+recompute `display_name` via the shared `dotmac_kernel.identity` helpers
 (`normalize_email`/`person_display_name`), so this module — together with
 `app.features.auth.service.register` — is the single write-owner of the
 projection. `party_type` is immutable on update (enforced by raising
@@ -24,16 +24,22 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from dotmac_kernel.crud import CRUDManager
+from dotmac_kernel.db import conflict_savepoint
+from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
+from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.models import (
+    Party,
+    PartyOrganization,
+    PartyPerson,
+    PartyType,
+    Tenant,
+)
+from dotmac_kernel.query import apply_pagination, escape_like
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.core.crud import CRUDManager
-from app.core.db import conflict_savepoint
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
-from app.core.identity import normalize_email, person_display_name
-from app.core.models import Party, PartyOrganization, PartyPerson, PartyType, Tenant
-from app.core.query import apply_pagination, escape_like
 from app.features.parties.schemas import (
     OrganizationPartyCreate,
     OrganizationPartyUpdate,
@@ -65,7 +71,7 @@ def create_person_party(
     party = Party(
         tenant_id=tenant.id,  # never from payload — always from request state
         party_type=PartyType.person,
-        # `app.core.identity.person_display_name` is the single-owner
+        # `dotmac_kernel.identity.person_display_name` is the single-owner
         # projection recompute — `update_person_party` below calls the same
         # helper, and so does `app.features.auth.service.register` (Task 5
         # closes the display_name dual-writer gap; see docs/ARCHITECTURE.md).
@@ -125,7 +131,7 @@ def update_person_party(
 ) -> Party:
     """Update subtype fields + email on a `party_type == person` `Party`,
     recomputing `display_name` from the (possibly just-updated) subtype
-    fields via the shared `app.core.identity.person_display_name` helper —
+    fields via the shared `dotmac_kernel.identity.person_display_name` helper —
     this function is now the single write-owner of the projection for the
     parties-service side (`app.features.auth.service.register` is the other
     writer, for the initial create-at-signup case only; see
@@ -238,7 +244,7 @@ def _search_filter(
     4) — one place for the filter shape so the count and the page of rows it
     paginates can never drift apart.
 
-    LIKE-escaping is `app.core.query.escape_like` (moved there in Task 6 so
+    LIKE-escaping is `dotmac_kernel.query.escape_like` (moved there in Task 6 so
     `rbac.service.list_grantable_parties` can share it — see that helper's
     docstring).
     """

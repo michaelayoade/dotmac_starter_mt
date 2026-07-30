@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "dotmac-kernel"
+version = "0.1.0a1"
+description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_kernel", from = "src" }]
+# Templates + static are shipped as package data (resolved by package path, not
+# CWD) — see Task 1b. Declared here ahead of that wiring so the wheel includes
+# them once they land under src/dotmac_kernel/.
+include = [
+    { path = "src/dotmac_kernel/templates/**/*", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_kernel/static/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# The kernel's real runtime dependencies, from the Task 0 surface audit
+# (third-party imports in the kernel modules). Deliberately excludes uvicorn
+# (server), psycopg (driver, loaded by DATABASE_URL), and python-multipart
+# (feature-route form parsing) — those are assembly/deploy concerns.
+python = ">=3.12,<3.14"
+fastapi = "^0.115"
+sqlalchemy = "^2.0"
+pydantic = "^2.9"
+pydantic-settings = "^2.5"
+jinja2 = "^3.1"
+argon2-cffi = "^25.1.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

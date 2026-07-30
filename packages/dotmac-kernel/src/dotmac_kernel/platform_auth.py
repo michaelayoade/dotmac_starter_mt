@@ -1,6 +1,6 @@
 """Platform-admin authentication — the ONE platform guard + its auth routes.
 
-Platform actors get their own identity (`app.core.models_platform`) and
+Platform actors get their own identity (`dotmac_kernel.models_platform`) and
 their own guard (`require_platform_admin`), deliberately separate from the
 tenant `Party`/`AuthSession` model — see that module's docstring and
 ADR-0004.
@@ -13,18 +13,18 @@ even with every feature disabled (`DISABLED_FEATURES=*`, `WEB_ENABLED=false`)
 or there would be no way to operate the deployment at all.
 
 Token model — one signer, two token populations that can never cross:
-- Tenant tokens (`app.core.security.issue_access_token`): `sub` = party id,
+- Tenant tokens (`dotmac_kernel.security.issue_access_token`): `sub` = party id,
   `tenant_id` claim, NO `aud` claim.
 - Platform tokens (`issue_platform_token` below): `sub` = platform-admin id,
   `aud="platform"`, no tenant claim.
 `require_platform_admin` rejects any token whose `aud` is not exactly
-`"platform"`, and `app.core.deps.authenticate_request` requires a matching
+`"platform"`, and `dotmac_kernel.deps.authenticate_request` requires a matching
 `tenant_id` claim platform tokens don't carry — so each surface structurally
 rejects the other population's tokens.
 
 Host model: platform routes resolve ONLY on `settings.platform_root_domain`.
 The middleware already refuses to treat `/platform/*` on any other host as
-platform-valid (`app.core.middleware.tenant._is_platform_path`, host-exact);
+platform-valid (`dotmac_kernel.middleware.tenant._is_platform_path`, host-exact);
 the guard re-checks the host itself as defense-in-depth so a middleware
 regression alone cannot re-expose the surface.
 
@@ -49,11 +49,11 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
-from app.core.db import get_platform_db
-from app.core.exceptions import UnauthorizedError
-from app.core.models_platform import PlatformAdmin, PlatformSession
-from app.core.security import (
+from dotmac_kernel.config import settings
+from dotmac_kernel.db import get_platform_db
+from dotmac_kernel.exceptions import UnauthorizedError
+from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
+from dotmac_kernel.security import (
     decode_access_token,
     encode_jwt,
     hash_password,
@@ -102,7 +102,7 @@ def issue_platform_token(admin_id: UUID) -> tuple[str, datetime]:
 def authenticate_platform_request(
     request: Request, db: Session, *, token: str
 ) -> PlatformAdmin | None:
-    """Pure predicate mirror of `app.core.deps.authenticate_request` for the
+    """Pure predicate mirror of `dotmac_kernel.deps.authenticate_request` for the
     platform surface: returns the authenticated `PlatformAdmin` or `None` on
     ANY failure — host mismatch, bad signature/expiry, wrong/missing `aud`,
     no live `platform_sessions` row, or inactive admin. Never raises."""

@@ -1,7 +1,7 @@
 """Task 4 review fix #1 (flag-off seed coverage), extended by final-review
 Group 3: `app.main`'s lifespan no longer hard-imports
 `app.features.settings.seed.seed_platform_defaults` — it iterates
-`app.core.features.load_manifests(FEATURE_MODULES)` and calls each ENABLED
+`dotmac_kernel.features.load_manifests(FEATURE_MODULES)` and calls each ENABLED
 manifest's optional `seed` hook (still gated by `settings.seed_on_startup`).
 `app.features.settings.feature.feature.seed` is the settings package's own
 hook now; deleting or disabling that feature must not crash import or run
@@ -26,10 +26,10 @@ import subprocess
 import sys
 
 import pytest
+from dotmac_kernel.features import FeatureManifest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app.core.features import FeatureManifest
 
 
 @pytest.fixture(autouse=True)

@@ -9,7 +9,7 @@ from uuid import uuid4
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.core.logging import request_id_var
+from dotmac_kernel.logging import request_id_var
 
 logger = logging.getLogger("app.requests")
 

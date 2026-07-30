@@ -22,10 +22,10 @@ behavior (nothing here talks to the DB or the app):
    preceding lines mentions "sanitiz" (sanitize/sanitizer/sanitized) —
    `templates/admin/settings/branding.html`'s `custom_css` preview is the
    one branding usage that passes (its value is already run through
-   `app.core.branding.sanitize_branding_css` before the template ever sees
+   `dotmac_kernel.branding.sanitize_branding_css` before the template ever sees
    it); anything else must fail until it's threaded through a real
    sanitizer the same way.
-4. Every `app/features/<name>/web.py` imports only `app.core.*` and its OWN
+4. Every `app/features/<name>/web.py` imports only `dotmac_kernel.*` and its OWN
    feature's `app.features.<name>.*` — belt-and-suspenders alongside the
    import-linter "Features are independent of each other" contract
    (`pyproject.toml`), which covers `router.py` too but is a config file, not
@@ -46,9 +46,8 @@ import ast
 import re
 from pathlib import Path
 
+from dotmac_kernel.templating import templates
 from jinja2 import nodes
-
-from app.core.templating import templates
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_ROOT = PROJECT_ROOT / "templates"
@@ -164,7 +163,7 @@ def test_safe_filter_only_used_with_a_sanitize_comment_nearby() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4. Every app/features/<name>/web.py imports only app.core + its own
+# 4. Every app/features/<name>/web.py imports only dotmac_kernel + its own
 #    feature.
 # ---------------------------------------------------------------------------
 
@@ -190,7 +189,7 @@ def _imported_module_names(path: Path) -> list[str]:
 
 
 def _is_allowed_app_import(module: str, own_feature: str) -> bool:
-    if module == "app.core" or module.startswith("app.core."):
+    if module == "dotmac_kernel" or module.startswith("dotmac_kernel."):
         return True
     own_prefix = f"app.features.{own_feature}"
     return module == own_prefix or module.startswith(f"{own_prefix}.")
@@ -206,10 +205,10 @@ def test_web_py_imports_only_its_own_feature_and_core() -> None:
             if not _is_allowed_app_import(module, own_feature):
                 violations.append(
                     f"{path.relative_to(PROJECT_ROOT)} imports {module!r} "
-                    f"(only app.core.* and app.features.{own_feature}.* allowed)"
+                    f"(only dotmac_kernel.* and app.features.{own_feature}.* allowed)"
                 )
     assert not violations, (
-        "web.py module(s) importing outside their own feature + app.core "
+        "web.py module(s) importing outside their own feature + dotmac_kernel "
         "(features must stay independent of each other):\n" + "\n".join(violations)
     )
 

@@ -1,5 +1,5 @@
-"""Unit coverage for `app.core.web_deps.require_web_auth` (cookie auth) and
-the `app.core.deps.authenticate_request` shared seam it rides on.
+"""Unit coverage for `dotmac_kernel.web_deps.require_web_auth` (cookie auth) and
+the `dotmac_kernel.deps.authenticate_request` shared seam it rides on.
 
 Companion to `tests/unit/test_deps_auth.py` (the bearer/`require_user_auth`
 side) — this file is the proof that the COOKIE path goes through the exact
@@ -13,13 +13,9 @@ from collections.abc import Generator
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import Depends, FastAPI, Request
-from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
-from app.core.deps import authenticate_request, get_db, require_user_auth
-from app.core.errors import register_error_handlers
-from app.core.models import (
+from dotmac_kernel.deps import authenticate_request, get_db, require_user_auth
+from dotmac_kernel.errors import register_error_handlers
+from dotmac_kernel.models import (
     AuthSession,
     Party,
     PartyOrganization,
@@ -29,8 +25,11 @@ from app.core.models import (
     Role,
     Tenant,
 )
-from app.core.security import hash_token, issue_access_token
-from app.core.web_deps import WebAuthRedirect, require_web_auth
+from dotmac_kernel.security import hash_token, issue_access_token
+from dotmac_kernel.web_deps import WebAuthRedirect, require_web_auth
+from fastapi import Depends, FastAPI, Request
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture()

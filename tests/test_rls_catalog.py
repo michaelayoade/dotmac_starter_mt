@@ -241,8 +241,9 @@ def test_metadata_matches_live_tables(admin_engine) -> None:
     missing a migration, or a migration-created table with no model, both
     fail here."""
     # Import every model-bearing module so metadata is fully populated.
-    from app.core import audit, models_platform, settings_models  # noqa: F401
-    from app.core.models import Base
+    from dotmac_kernel import audit, models_platform, settings_models  # noqa: F401
+    from dotmac_kernel.models import Base
+
     from app.features.custom_fields import models as custom_fields  # noqa: F401
 
     with admin_engine.connect() as conn:

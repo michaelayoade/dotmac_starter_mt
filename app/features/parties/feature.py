@@ -1,4 +1,5 @@
-from app.core.features import FeatureManifest, NavItem
+from dotmac_kernel.features import FeatureManifest, NavItem
+
 from app.features.parties.router import router
 from app.features.parties.web import router as web_router
 
