@@ -68,6 +68,10 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.settings_resolver` | `SettingSpec`, `register_specs`, `resolve_value` |
 | `dotmac_kernel.settings_admin` | `all_specs`, `get_spec`, `resolve_with_source`, `upsert_by_key`, `ensure_by_key`, `validate_spec_value` |
 | `dotmac_kernel.templating` | `render`, `install_surface_globals`, `static_dir` |
+| `dotmac_kernel.testing` | `create_test_engine`, `isolated_session`, `assembly_test_client`, `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding`, `FakeProvisioningProvider`, `check_provisioning_provider_contract` (see "Testing kit" below) |
+| `dotmac_kernel.testing.harness` | `create_test_engine`, `isolated_session`, `assembly_test_client` |
+| `dotmac_kernel.testing.fakes` | `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding` |
+| `dotmac_kernel.testing.provisioning` | `FakeProvisioningProvider`, `check_provisioning_provider_contract` |
 | `dotmac_kernel.web_deps` | `require_web_auth`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
 
 ### Composing an app: `ProductAssemblySpec` + `create_app`
@@ -146,7 +150,40 @@ no-op returning the prior `ApplyResult`; a provider derives a stable id from
 `(intent_id, plan_hash)` when omitted); *partial results* are the explicit
 `PARTIAL` status + per-step breakdown that `observe` / re-`apply` reconcile via
 `outstanding_steps`. A concrete `FakeProvisioningProvider` + a parametrized
-contract suite are **not** here — they land in `dotmac_kernel.testing` (Task 5).
+contract suite are **not** here — they live in `dotmac_kernel.testing`
+(see "Testing kit" below).
+
+### Testing kit (`dotmac_kernel.testing`)
+
+The kernel's **supported test kit** — a consumer assembly builds its unit tests
+on this instead of hand-rolling a harness. It is public API under this
+document's SemVer policy (its HTTP helper needs the `testing` extra:
+`pip install dotmac-kernel[testing]`, which adds `httpx`; the engine/session and
+fakes work without it). The package re-exports everything from three submodules:
+
+- **`harness`** — the in-memory-SQLite + savepoint-isolation wiring:
+  - `create_test_engine() -> Engine` — a fresh in-memory SQLite engine with
+    `Base.metadata` created. The **assembly must import its own feature models
+    first** so `Base.metadata` is fully populated (SQLite has no RLS — this is
+    for service-logic/unit tests; tenancy is proven separately on Postgres).
+  - `isolated_session(engine)` — a context-managed session wrapped in an outer
+    transaction + restarting SAVEPOINT, so a test rolls back even if service
+    code commits.
+  - `assembly_test_client(app, *, session)` — a context-managed `TestClient` for
+    a `create_app`-built app with `get_db`/`get_platform_db` overridden onto the
+    isolated session; overrides are removed on exit. (Needs the `testing` extra.)
+- **`fakes`** — deterministic fakes for the seams that exist today (no fakes for
+  protocols that do not yet exist): `FakeClock` (advanceable `now()`),
+  `FakeSeeder` (a recording/failing `FeatureManifest.seed` hook),
+  `InMemoryRateLimitStore` (the shipped `MemoryStore`, re-exported under a
+  test-facing name so tests use the SAME store the kernel ships), and
+  `fake_branding(**overrides)` (a fixed brand dict).
+- **`provisioning`** — `FakeProvisioningProvider` (a deterministic, in-memory
+  `ProvisioningProvider` with failure injection, call recording, and
+  partial/resume behavior) and `check_provisioning_provider_contract(factory)`,
+  the reusable assertion suite a consumer runs against THEIR provider factory to
+  prove it honors the protocol's determinism / idempotency / partial-resume /
+  cancellation semantics.
 
 ## Internal modules and names (do not import)
 

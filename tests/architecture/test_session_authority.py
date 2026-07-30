@@ -10,9 +10,13 @@ ever growing back.
 
 AST-based, not string-matching (module control-plane directive standard):
 a comment or docstring mentioning `SessionLocal()` must not trip it, and a
-call spelled `db.SessionLocal()` must. Scope is `app/` — tests and
-operator scripts (`scripts/`, migration-trust-boundary CLIs) are outside
-the request path this contract governs.
+call spelled `db.SessionLocal()` must. Scope is `app/` + the kernel package —
+tests, operator scripts (`scripts/`, migration-trust-boundary CLIs), and the
+shipped `dotmac_kernel.testing` kit are outside the request path this contract
+governs. The kit IS a session authority BY DESIGN — its `isolated_session`
+builds the savepoint-isolated test session a consumer's unit tests receive
+(the old `tests/unit/conftest.py` harness, now packaged) — so it is excluded
+here exactly like `tests/` is.
 """
 
 from __future__ import annotations
@@ -81,6 +85,12 @@ def find_session_authority_violations(rel_path: str, source: str) -> list[str]:
     return violations
 
 
+# Test-support subtrees inside the scanned kernel package that are out of the
+# contract's request-path scope — the shipped test kit is a session authority
+# by design (see module docstring), analogous to `tests/`.
+_UNSCANNED_PREFIXES = ("dotmac_kernel/testing/",)
+
+
 def _iter_app_modules():
     for root, prefix in _SCANNED_TREES:
         for path in sorted(root.rglob("*.py")):
@@ -88,6 +98,8 @@ def _iter_app_modules():
                 continue
             rel_path = f"{prefix}/" + str(path.relative_to(root)).replace("\\", "/")
             if rel_path == _AUTHORITY:
+                continue
+            if rel_path.startswith(_UNSCANNED_PREFIXES):
                 continue
             yield rel_path, path.read_text()
 

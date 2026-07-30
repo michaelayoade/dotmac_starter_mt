@@ -111,6 +111,10 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.settings_models",
         "dotmac_kernel.settings_resolver",
         "dotmac_kernel.templating",
+        "dotmac_kernel.testing",
+        "dotmac_kernel.testing.fakes",
+        "dotmac_kernel.testing.harness",
+        "dotmac_kernel.testing.provisioning",
         "dotmac_kernel.web_deps",
     }
 )
