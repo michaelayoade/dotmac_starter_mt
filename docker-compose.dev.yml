@@ -2,16 +2,30 @@
 #   APP_IMAGE=dotmac_starter_mt:dev docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 # (the `make docker-dev` target does this for you).
 #
+# RLS-ACTIVE DEV (control-plane security Task 3): the dev database runs the
+# SAME three-role model as production — scripts/dev-db-init.sh (initdb hook,
+# runs once per fresh data volume) creates app_user / platform_api /
+# app_admin, and the app/migrations connect as those roles, never as the
+# postgres superuser. Tenant isolation is therefore ENFORCED in dev.
+# Recreate the volume after pulling this change:
+#   docker compose -f docker-compose.dev.yml down -v
+#
 # Config knobs:
-#   DEV_DATABASE_URL   default postgresql+psycopg://postgres:postgres@postgres:5432/starter
+#   DEV_DATABASE_URL            default postgresql+psycopg://app_user:app_user@postgres:5432/starter
+#   DEV_PLATFORM_DATABASE_URL   default postgresql+psycopg://platform_api:platform_api@postgres:5432/starter
+#   DEV_MIGRATION_DATABASE_URL  default postgresql+psycopg://app_admin:app_admin@postgres:5432/starter
 #                       Compose does not reliably expand ${VAR:-default} substitutions
 #                       nested inside a larger interpolated string across two merged
-#                       files, so the connection string is one overridable var rather
-#                       than composed from DEV_DB_USER/DEV_DB_PASSWORD/etc pieces.
-#                       Override this directly if you need different dev DB creds —
-#                       just keep DEV_POSTGRES_* below in sync since they seed the
-#                       actual postgres container.
-#   DEV_POSTGRES_USER      default postgres
+#                       files, so each connection string is one overridable var rather
+#                       than composed from user/password pieces. Override these
+#                       directly if you need different dev DB creds — and keep the
+#                       DEV_*_PASSWORD vars below in sync, since they seed the roles
+#                       via scripts/dev-db-init.sh on first boot.
+#   DEV_APP_USER_PASSWORD / DEV_PLATFORM_API_PASSWORD / DEV_APP_ADMIN_PASSWORD
+#                       default app_user / platform_api / app_admin — dev-only
+#                       passwords for the three roles (localhost throwaway DB)
+#   DEV_POSTGRES_USER      default postgres (container superuser — initdb only;
+#                           the app never connects as it)
 #   DEV_POSTGRES_PASSWORD  default postgres
 #   DEV_POSTGRES_DB        default starter
 #   DEV_DB_PORT             default 5432 — host port the dev Postgres is published on
@@ -27,8 +41,9 @@ services:
     volumes:
       - ./app:/srv/app/app
     environment:
-      DATABASE_URL: ${DEV_DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/starter}
-      MIGRATION_DATABASE_URL: ${DEV_DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/starter}
+      DATABASE_URL: ${DEV_DATABASE_URL:-postgresql+psycopg://app_user:app_user@postgres:5432/starter}
+      PLATFORM_DATABASE_URL: ${DEV_PLATFORM_DATABASE_URL:-postgresql+psycopg://platform_api:platform_api@postgres:5432/starter}
+      MIGRATION_DATABASE_URL: ${DEV_MIGRATION_DATABASE_URL:-postgresql+psycopg://app_admin:app_admin@postgres:5432/starter}
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,6 +53,11 @@ services:
       POSTGRES_USER: ${DEV_POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${DEV_POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${DEV_POSTGRES_DB:-starter}
+      DEV_APP_USER_PASSWORD: ${DEV_APP_USER_PASSWORD:-app_user}
+      DEV_PLATFORM_API_PASSWORD: ${DEV_PLATFORM_API_PASSWORD:-platform_api}
+      DEV_APP_ADMIN_PASSWORD: ${DEV_APP_ADMIN_PASSWORD:-app_admin}
+    volumes:
+      - ./scripts/dev-db-init.sh:/docker-entrypoint-initdb.d/10-dev-db-init.sh:ro
     ports:
       - "${DEV_DB_PORT:-5432}:5432"
     healthcheck:
