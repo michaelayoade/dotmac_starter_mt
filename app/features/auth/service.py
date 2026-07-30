@@ -184,7 +184,7 @@ def login(db: Session, tenant: Tenant, payload: LoginRequest) -> LoginResult:
         # `Party.email == email`, because that's *exactly* the expression
         # the partial functional index `uq_parties_tenant_lower_email`
         # (`(tenant_id, lower(email)) WHERE email IS NOT NULL`, see
-        # `app/core/models.py::Party.__table_args__`) is built on. Postgres
+        # `dotmac_kernel/models.py::Party.__table_args__`) is built on. Postgres
         # only matches a functional index when the query's WHERE clause is
         # syntactically the same expression the index was created with — a
         # bare `Party.email == email` would silently fall back to a seq

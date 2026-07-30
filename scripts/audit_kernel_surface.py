@@ -14,7 +14,7 @@ unchanged tree yields byte-identical results (checked into CI intent later).
 Consumers are separated by AREA so a test-only or tooling-only import can never
 be mistaken for public kernel API:
 
-- ``kernel``          — ``app/core/**`` itself (the surface being audited)
+- ``kernel``          — ``dotmac_kernel/**`` itself (the surface being audited)
 - ``assembly``        — ``app/main.py`` + ``app/features/**`` (runtime that a
                         product assembly composes; imports here are the real
                         public-API pressure)
@@ -41,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Area classification is by path prefix, most specific first.
 _AREA_RULES: tuple[tuple[str, str], ...] = (
-    ("app/core/", "kernel"),
+    ("dotmac_kernel/", "kernel"),
     ("app/main.py", "assembly"),
     ("app/features/", "assembly"),
     ("app/__init__.py", "assembly"),

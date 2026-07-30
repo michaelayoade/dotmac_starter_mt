@@ -138,7 +138,7 @@ class GrantView(NamedTuple):
     joined projection (`PartyRole` + `Role.name`/`slug` + `Party.
     display_name`) so the template never has to resolve a bare `party_id`/
     `role_id` itself. There is no ORM relationship from `PartyRole` to
-    `Party`/`Role` (plain FK columns by design — see `app/core/models.py`),
+    `Party`/`Role` (plain FK columns by design — see `dotmac_kernel/models.py`),
     so `list_recent_grants` below does one explicit join, not lazy-loaded
     attribute access (no N+1).
     """

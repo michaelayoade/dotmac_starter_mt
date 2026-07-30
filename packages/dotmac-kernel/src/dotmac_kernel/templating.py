@@ -58,7 +58,23 @@ from dotmac_kernel.branding import get_brand
 from dotmac_kernel.display import DisplaySettings, default_display
 from dotmac_kernel.features import FeatureManifest, NavItem
 
-templates = Jinja2Templates(directory="templates")
+# Templates and static assets are shipped as KERNEL PACKAGE DATA and resolved
+# by package path — NOT the process CWD (kernel-boundary Task 1b). A
+# pip-installed kernel lives outside any assembly's working directory, so the
+# old `directory="templates"` / `Path("static/...")` CWD lookups would find
+# nothing. Anchor on this module's own location instead.
+_PKG_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = _PKG_DIR / "templates"
+STATIC_DIR = _PKG_DIR / "static"
+
+
+def static_dir() -> Path:
+    """The kernel's packaged `static/` directory — the assembly mounts this
+    (see `app.main`); resolved by package path so it works installed."""
+    return STATIC_DIR
+
+
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 def _context_display(context: Any) -> DisplaySettings:
@@ -156,8 +172,10 @@ def _asset_version(path: str) -> str:
     normalized = path.split("?", 1)[0].lstrip("/")
     if not normalized.startswith("static/"):
         return "missing"
+    # Resolve against the kernel's packaged static/ (package path), not CWD.
+    asset = _PKG_DIR / normalized
     try:
-        return sha256(Path(normalized).read_bytes()).hexdigest()[:12]
+        return sha256(asset.read_bytes()).hexdigest()[:12]
     except OSError:
         return "missing"
 

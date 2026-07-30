@@ -11,4 +11,4 @@ __pycache__
 .superpowers
 .github
 node_modules
-static/css/main.css
+packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css
