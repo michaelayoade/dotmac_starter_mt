@@ -31,12 +31,13 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
-from tests.conftest import client_for
+from app.core.models import Party
+from tests.conftest import client_for, provision_and_login
 
 PASSWORD = "correct horse battery staple"
 
@@ -279,33 +280,29 @@ def test_party_custom_fields_value_invisible_to_tenant_b(
 # ---------------------------------------------------------------------------
 
 
-def _register_and_login(client: TestClient, email: str) -> tuple[str, str]:
-    """Registers + logs in a new user, returning (access_token, party_id).
+def _provision_admin_and_login(
+    admin_session: Session, tenant, client: TestClient, email: str
+) -> tuple[str, str]:
+    """Provisions the tenant's admin and logs in, returning
+    (access_token, party_id).
 
-    The first registered user of a tenant is auto-assigned the "admin" role
-    (`app.features.auth.service._assign_first_user_admin`), so this doubles
-    as "register the tenant's admin" for the canary below — no separate
-    role-grant call needed.
+    Registration no longer grants any role (control-plane security Task 2:
+    admins are provisioned, not registered), so the admin party +
+    credential + "admin" role grant are created directly via the admin
+    engine (`provision_and_login`, `tests/conftest.py`). The party id is
+    read back through the same admin engine rather than `GET /auth/me` to
+    preserve this canary's mutations-before-any-GET CSRF ordering (see the
+    test docstring below).
     """
-    register = client.post(
-        "/auth/register",
-        json={
-            "email": email,
-            "password": PASSWORD,
-            "first_name": "Admin",
-            "last_name": "User",
-        },
-    )
-    assert register.status_code == 201, register.text
-    party_id = register.json()["id"]
-
-    login = client.post("/auth/login", json={"email": email, "password": PASSWORD})
-    assert login.status_code == 200, login.text
-    return login.json()["access_token"], party_id
+    token = provision_and_login(admin_session, tenant, client, email)
+    party_id = admin_session.scalars(
+        select(Party.id).where(Party.tenant_id == tenant.id, Party.email == email)
+    ).one()
+    return token, str(party_id)
 
 
 def test_eye_color_custom_field_end_to_end_canary(
-    app_client: TestClient, tenant_a, tenant_b
+    app_client: TestClient, admin_session: Session, tenant_a, tenant_b
 ) -> None:
     """Tenant A admin defines `eye_color` (SELECT, runtime data — no
     migration), sets it on a person-type party, reads it back; tenant B's
@@ -321,7 +318,9 @@ def test_eye_color_custom_field_end_to_end_canary(
     tenancy-related here; purely a TestClient/CSRF-cookie sequencing detail.
     """
     a = client_for(app_client, tenant_a.slug)
-    a_token, a_party_id = _register_and_login(a, "eyecolor-a@tenant-a.example.com")
+    a_token, a_party_id = _provision_admin_and_login(
+        admin_session, tenant_a, a, "eyecolor-a@tenant-a.example.com"
+    )
 
     create_resp = a.post(
         "/custom-fields/definitions",
@@ -362,7 +361,9 @@ def test_eye_color_custom_field_end_to_end_canary(
 
     # --- Tenant B: PUT before any GET, same CSRF-ordering reason. ---
     b = client_for(TestClient(app_client.app), tenant_b.slug)
-    b_token, b_party_id = _register_and_login(b, "eyecolor-b@tenant-b.example.org")
+    b_token, b_party_id = _provision_admin_and_login(
+        admin_session, tenant_b, b, "eyecolor-b@tenant-b.example.org"
+    )
 
     # Tenant B has no `eye_color` definition of its own yet, so setting it on
     # tenant B's own party is an unknown-field-code 400 — proving the

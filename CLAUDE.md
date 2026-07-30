@@ -15,7 +15,7 @@ when adding them; do not invent interim competing authorities.
 ## Layout
 
 - `app/core/` — config, db, models base, security, deps (route guards),
-  middleware, logging, errors, crud, unit_of_work, features registry, audit
+  middleware, logging, errors, crud, features registry, audit
   write-side. Core never imports `app/features` (import-linter contract
   "Core must not import features", `make lint-imports`).
 - `app/features/<name>/` — self-contained: `models.py`, `schemas.py`,
@@ -60,13 +60,18 @@ feature-local in `app/features/custom_fields/models.py` — nothing outside
 that feature touches it; field *values* live on the entity's own model
 (e.g. `Party.custom_fields` JSONB), resolved generically through the
 `ENTITY_MODELS` registry (see Extension points below). Everything else
-stays local to its feature — e.g. `UserCredential` lives in
-`app/features/auth/models.py` because nothing outside `auth` touches it; it
-references `parties`/`tenants` via string-form
-`ForeignKey`/`ForeignKeyConstraint`, no import needed. This is a deliberate
-deviation from "one model per feature package" — see ADR-0002. The full
-model-by-model provenance (owner + port source-of-truth) is the table in
-`docs/ARCHITECTURE.md` — don't duplicate it here.
+stays local to its feature. `UserCredential` MOVED to `app/core/models.py`
+(control-plane security Task 2, PORT-DELTA): atomic tenant provisioning
+(`tenants` feature) creates the owner credential in the same transaction,
+and features never import each other — so it joined the other identity
+models under the placement rule above; the `auth` feature keeps all
+hashing/verification via `app.core.security`. Platform-actor identity
+(`PlatformAdmin`/`PlatformSession`) lives in `app/core/models_platform.py`
+— platform catalog tables (no `tenant_id`, no RLS, revoked from
+`app_user`); see ADR-0004. This is a deliberate deviation from "one model
+per feature package" — see ADR-0002. The full model-by-model provenance
+(owner + port source-of-truth) is the table in `docs/ARCHITECTURE.md` —
+don't duplicate it here.
 
 ## Extension points
 
@@ -300,6 +305,12 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
 - Feature `service.py` functions never take `payload: Any` — every payload
   parameter is a concrete Pydantic schema.
   (`tests/unit/test_service_typing.py::test_no_any_typed_payloads_in_services`)
+- `app/core/db.py` is the ONE transaction authority: no module outside it
+  may call `SessionLocal()`/`PlatformSessionLocal()`/`sessionmaker(...)` or
+  construct `Session(...)`; boundaries (`get_db`/`get_platform_db`/
+  `platform_session`) own commit/rollback, services only mutate and flush.
+  See ARCHITECTURE.md's "Transaction authority" section.
+  (`tests/architecture/test_session_authority.py`)
 - Feature services never call `db.rollback()` directly. `get_db`
   (`app.core.db`) owns the request's transaction and issues `SET LOCAL
   app.current_tenant` on it for RLS; a bare `db.rollback()` on an expected

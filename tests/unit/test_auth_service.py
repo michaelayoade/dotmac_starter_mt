@@ -11,7 +11,8 @@ form (or vice versa).
 
 `login()` no longer reads a credential-local email copy at all (Task 3
 dropped the credential table's own email column entirely — see
-`app/features/auth/models.py` and `app/features/auth/service.py::login`'s
+`UserCredential` in `app/core/models.py`, moved there by control-plane
+security Task 2, and `app/features/auth/service.py::login`'s
 docstring): it resolves the `Party`
 by `(tenant, normalize_email(email), party_type=person)` first, then the
 credential row by `party_id`. `test_login_null_party_email_rejected` below
@@ -22,21 +23,43 @@ log in with any string, by construction of that query.
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import UnauthorizedError
-from app.core.models import Party, PartyType, Tenant
+from app.core.exceptions import ForbiddenError, UnauthorizedError
+from app.core.models import Party, PartyRole, PartyType, Tenant, UserCredential
 from app.core.security import hash_password
+from app.core.settings_models import DomainSetting, SettingDomain, SettingValueType
 from app.features.auth import service as auth_service
-from app.features.auth.models import UserCredential
 from app.features.auth.schemas import LoginRequest, RegisterRequest
 
+# Import for the side effect: registers the auth/registration_policy spec
+# into the settings resolver registry (register() resolves it).
+from app.features.settings import spec as _settings_spec  # noqa: F401
+
 PASSWORD = "correct horse battery staple"
+
+
+def _open_registration(db: Session, tenant: Tenant) -> None:
+    """Set `auth.registration_policy = open` for `tenant` — self-registration
+    is policy-CLOSED by default since control-plane security Task 2 (the
+    SQLite counterpart of `tests/conftest.py::open_registration`)."""
+    db.add(
+        DomainSetting(
+            tenant_id=tenant.id,
+            domain=SettingDomain.auth,
+            key="registration_policy",
+            value_type=SettingValueType.string,
+            value_text="open",
+        )
+    )
+    db.flush()
 
 
 def test_register_mixed_case_email_then_login_lowercase_succeeds(
     db: Session, tenant_row: Tenant
 ) -> None:
+    _open_registration(db, tenant_row)
     view = auth_service.register(
         db,
         tenant_row,
@@ -60,6 +83,7 @@ def test_register_mixed_case_email_then_login_lowercase_succeeds(
 def test_register_lowercase_then_login_mixed_case_succeeds(
     db: Session, tenant_row: Tenant
 ) -> None:
+    _open_registration(db, tenant_row)
     auth_service.register(
         db,
         tenant_row,
@@ -81,6 +105,7 @@ def test_register_lowercase_then_login_mixed_case_succeeds(
 def test_login_wrong_password_still_rejected_after_normalization(
     db: Session, tenant_row: Tenant
 ) -> None:
+    _open_registration(db, tenant_row)
     auth_service.register(
         db,
         tenant_row,
@@ -110,6 +135,7 @@ def test_login_null_party_email_rejected(db: Session, tenant_row: Tenant) -> Non
     canary `tests/test_auth_email_authority.py::
     test_nulled_party_email_disables_login`.
     """
+    _open_registration(db, tenant_row)
     view = auth_service.register(
         db,
         tenant_row,
@@ -175,3 +201,55 @@ def test_login_organization_party_same_email_rejected(
             tenant_row,
             LoginRequest(email="org-shared@example.com", password=PASSWORD),
         )
+
+
+def test_register_closed_policy_raises_forbidden(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Control-plane security Task 2: with no explicit
+    `auth.registration_policy = open` row, registration is CLOSED (the spec
+    default) and the service raises `ForbiddenError("registration_closed")`
+    before creating anything.
+    """
+    with pytest.raises(ForbiddenError, match="registration_closed"):
+        auth_service.register(
+            db,
+            tenant_row,
+            RegisterRequest(
+                email="closed@example.com",
+                password=PASSWORD,
+                first_name="Closed",
+                last_name="Door",
+            ),
+        )
+    # Nothing was created.
+    count = db.scalar(
+        select(func.count()).select_from(Party).where(Party.tenant_id == tenant_row.id)
+    )
+    assert count == 0
+
+
+def test_register_open_policy_grants_no_role(db: Session, tenant_row: Tenant) -> None:
+    """Task 2 deleted `_assign_first_user_admin` outright: even the FIRST
+    registered user of a tenant under an `open` policy is a PLAIN user —
+    no role grant of any kind. Admin/owner accounts are provisioned, not
+    registered.
+    """
+    _open_registration(db, tenant_row)
+    view = auth_service.register(
+        db,
+        tenant_row,
+        RegisterRequest(
+            email="plain@example.com",
+            password=PASSWORD,
+            first_name="Plain",
+            last_name="User",
+        ),
+    )
+    assert view.email == "plain@example.com"
+    grants = db.scalar(
+        select(func.count())
+        .select_from(PartyRole)
+        .where(PartyRole.tenant_id == tenant_row.id)
+    )
+    assert grants == 0

@@ -31,12 +31,19 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_db
 from app.core.errors import register_error_handlers
-from app.core.models import Party, PartyPerson, PartyType, Tenant
+from app.core.models import (
+    Party,
+    PartyPerson,
+    PartyRole,
+    PartyType,
+    Role,
+    Tenant,
+    UserCredential,
+)
+from app.core.security import hash_password
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import upsert_by_key
 from app.core.web_deps import safe_next_url
-from app.features.auth import service as auth_service
-from app.features.auth.schemas import RegisterRequest
 from app.features.auth.web import router as auth_web_router
 
 # Import for the side effect: registers branding/ui_branding into the
@@ -48,25 +55,35 @@ PASSWORD = "correct horse battery staple"
 
 
 @pytest.fixture()
-def registered_admin(db: Session, tenant_row: Tenant) -> dict:
-    """First registered user in a tenant auto-gets the admin role
-    (`app.features.auth.service._assign_first_user_admin`) — reuse that real
-    flow rather than hand-building a Party/Role/PartyRole trio, since it's
-    also proof `web_login` correctly threads through unchanged register/login
-    behavior.
+def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
+    """A provisioned admin — party + person + credential + "admin" role
+    grant, built directly on core models. Registration no longer grants any
+    role (control-plane security Task 2: admins are provisioned, not
+    registered), so this is the SQLite mirror of
+    `tests/conftest.py::provision_owner`.
     """
-    view = auth_service.register(
-        db,
-        tenant_row,
-        RegisterRequest(
-            email="admin@example.com",
-            password=PASSWORD,
-            first_name="Admin",
-            last_name="User",
-        ),
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Admin User",
+        email="admin@example.com",
     )
+    db.add(party)
+    db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Admin", last_name="User"))
+    db.add(
+        UserCredential(
+            tenant_id=tenant_row.id,
+            party_id=party.id,
+            password_hash=hash_password(PASSWORD),
+        )
+    )
+    role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
+    db.add(role)
+    db.flush()
+    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.commit()
-    return {"email": view.email, "party_id": view.id}
+    return {"email": party.email, "party_id": party.id}
 
 
 @pytest.fixture()
@@ -152,11 +169,11 @@ def test_login_page_sanitizes_next_query_param(web_client: TestClient) -> None:
 
 
 def test_post_bad_credentials_rerenders_200_no_cookie(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     resp = web_client.post(
         "/admin/login",
-        data={"username": registered_admin["email"], "password": "wrong-password"},
+        data={"username": provisioned_admin["email"], "password": "wrong-password"},
     )
     assert resp.status_code == 200
     assert "Invalid username or password" in resp.text
@@ -171,11 +188,11 @@ def test_post_missing_fields_rerenders_200_with_error(web_client: TestClient) ->
 
 
 def test_post_good_credentials_redirects_and_sets_cookie(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     resp = web_client.post(
         "/admin/login",
-        data={"username": registered_admin["email"], "password": PASSWORD},
+        data={"username": provisioned_admin["email"], "password": PASSWORD},
         follow_redirects=False,
     )
     assert resp.status_code == 302
@@ -190,12 +207,12 @@ def test_post_good_credentials_redirects_and_sets_cookie(
 
 
 def test_post_good_credentials_honors_safe_next(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     resp = web_client.post(
         "/admin/login",
         data={
-            "username": registered_admin["email"],
+            "username": provisioned_admin["email"],
             "password": PASSWORD,
             "next": "/admin/parties",
         },
@@ -206,12 +223,12 @@ def test_post_good_credentials_honors_safe_next(
 
 
 def test_post_good_credentials_rejects_unsafe_next(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     resp = web_client.post(
         "/admin/login",
         data={
-            "username": registered_admin["email"],
+            "username": provisioned_admin["email"],
             "password": PASSWORD,
             "next": "http://evil.example.com",
         },
@@ -233,11 +250,11 @@ def test_dashboard_without_cookie_redirects_to_login(web_client: TestClient) -> 
 
 
 def test_dashboard_with_valid_admin_cookie_renders_200(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     login = web_client.post(
         "/admin/login",
-        data={"username": registered_admin["email"], "password": PASSWORD},
+        data={"username": provisioned_admin["email"], "password": PASSWORD},
         follow_redirects=False,
     )
     token = login.cookies["access_token"]
@@ -285,11 +302,11 @@ def test_dashboard_rejects_non_admin_party(
 
 
 def test_logout_clears_cookie_and_redirects(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     login = web_client.post(
         "/admin/login",
-        data={"username": registered_admin["email"], "password": PASSWORD},
+        data={"username": provisioned_admin["email"], "password": PASSWORD},
         follow_redirects=False,
     )
     token = login.cookies["access_token"]
@@ -357,7 +374,7 @@ def test_login_page_reflects_tenant_saved_branding(
 
 
 def test_login_post_failure_rerender_reflects_tenant_saved_branding(
-    web_client: TestClient, db: Session, tenant_row: Tenant, registered_admin: dict
+    web_client: TestClient, db: Session, tenant_row: Tenant, provisioned_admin: dict
 ) -> None:
     upsert_by_key(
         db,
@@ -370,14 +387,14 @@ def test_login_post_failure_rerender_reflects_tenant_saved_branding(
 
     resp = web_client.post(
         "/admin/login",
-        data={"username": registered_admin["email"], "password": "wrong-password"},
+        data={"username": provisioned_admin["email"], "password": "wrong-password"},
     )
     assert resp.status_code == 200
     assert "Acme Tenant Brand" in resp.text
 
 
 def test_dashboard_sidebar_reflects_tenant_saved_branding(
-    web_client: TestClient, db: Session, tenant_row: Tenant, registered_admin: dict
+    web_client: TestClient, db: Session, tenant_row: Tenant, provisioned_admin: dict
 ) -> None:
     upsert_by_key(
         db,
@@ -390,7 +407,7 @@ def test_dashboard_sidebar_reflects_tenant_saved_branding(
 
     login = web_client.post(
         "/admin/login",
-        data={"username": registered_admin["email"], "password": PASSWORD},
+        data={"username": provisioned_admin["email"], "password": PASSWORD},
         follow_redirects=False,
     )
     token = login.cookies["access_token"]

@@ -248,9 +248,11 @@ DNS and customer PKI/manual certificates without any public ACME dependency.
 
 ```
 app/
-  core/          config, db, models base (+ 6 cross-cutting models), security,
+  core/          config, db, models base (+ cross-cutting identity models incl.
+                 UserCredential), models_platform (PlatformAdmin/PlatformSession),
+                 platform_auth (platform guard + auth routes), security,
                  deps (route guards), middleware/, logging, errors, crud,
-                 unit_of_work, features (manifest registry), audit,
+                 features (manifest registry), audit,
                  settings_models (DomainSetting), settings_resolver (spec
                  registry + tenant->platform->default resolver), templating
                  (Jinja env + render()), branding (static + per-tenant DB
@@ -932,7 +934,9 @@ made concrete — every model has exactly one declared owner.
 | `AuthSession` | `auth_sessions` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
 | `AuditEvent` | `audit_events` | core | dotmac_sub (`app/models/audit.py`, tenant-adapted) |
 | `DomainSetting` | `domain_settings` | core | dotmac_starter (`app/models/domain_settings.py`, tenant-adapted), with `CheckConstraint` restored from dotmac_sub |
-| `UserCredential` | `user_credentials` | auth | dotmac_sub (`app/models/auth.py`, tenant-adapted; `email` column dropped 2b.1-T3 — see "Auth credentials" ownership row and the F2 resolution note below) |
+| `UserCredential` | `user_credentials` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted; `email` column dropped 2b.1-T3 — see "Auth credentials" ownership row and the F2 resolution note below). PORT-DELTA (control-plane security Task 2): moved from the `auth` feature to core — atomic tenant provisioning (`tenants` feature) must create the owner credential and features never import each other, so the model joined the other identity models under ADR-0002's placement rule; hashing/verification stays in `app.core.security` |
+| `PlatformAdmin` | `platform_admins` | core | native (control-plane security Task 1, ADR-0004) — platform catalog table: no `tenant_id`, no RLS, GRANT `platform_api`/`app_admin` only, REVOKEd from `app_user` |
+| `PlatformSession` | `platform_sessions` | core | native (control-plane security Task 1, ADR-0004) — same grant model as `platform_admins` |
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
@@ -949,16 +953,18 @@ write:
 
 | Resource | Owning write path(s) |
 |---|---|
-| Tenants | `app.features.tenants.service.create_tenant` (platform-only; no update/delete service yet) |
+| Tenants | `app.features.tenants.service.provision_tenant` (platform-only, control-plane security Task 2 — one transaction creating tenant + owner party/person/credential + `admin` role grant + two audit events; no update/delete service yet) |
+| Platform admins | `scripts/create_platform_admin.py::upsert_admin` (CLI-only, platform/migration DB credentials — the same trust boundary as migrations; deliberately NO HTTP write path, see ADR-0004) |
+| Platform sessions | `app.core.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |
 | Tenant domains | none — no write path exists yet (rows would be inserted by a future custom-domain feature) |
 | Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` / `update_person_party` / `update_organization_party` (the `/parties` API + `/admin/parties/{id}/edit` web flow), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
 | `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `app.core.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
 | `Party.email` (the login identity) | **Single column, single authority as of 2b.1-T3 (finding F2, resolved)**: owner is parties+auth writers via `app.core.identity.normalize_email` — same dual-writer/shared-invariant shape as `display_name` above (`create_person_party`/`update_person_party`/`create_organization_party`/`update_organization_party` and `auth/service.py::register` all call it). `app.features.auth.service.login` READS this column directly (join by `party_id` to find the credential row) instead of a second `UserCredential.email` copy, which is GONE — see the F2 resolution note under "Known dual-writer: Parties" below. No repair path needed: there is only ever one column now, so there is nothing to drift or re-sync. |
-| Party role grants | `app.features.rbac.service.assign_role` (the `POST /rbac/role-grants` JSON API **and** the `POST /admin/role-grants` web form both call this same function) **and** `app.features.auth.service._assign_first_user_admin` (auto-assigns the tenant's first registered user the `admin` role — a second, narrower writer of the same table; see the RBAC follow-up in `docs/superpowers/phase2-backlog.md`) |
-| Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and implicitly `_assign_first_user_admin` (creates the tenant's `admin` role on first use if it doesn't exist yet) |
-| Auth credentials | `app.features.auth.service.register` (the only writer of the `password_hash` row — no credential-update/password-reset path yet, phase 2c). `Party.email` is a SEPARATE resource with its own row above (Parties) — `UserCredential` carries no email of its own as of 2b.1-T3 (F2): `login()` resolves `Party` by email first, then `UserCredential` by `party_id` only. |
+| Party role grants | `app.features.rbac.service.assign_role` (the `POST /rbac/role-grants` JSON API **and** the `POST /admin/role-grants` web form both call this same function) **and** `app.features.tenants.service.provision_tenant` (grants the provisioned owner the `admin` role inside the provisioning transaction). The race-prone `_assign_first_user_admin` first-registrant bootstrap is DELETED (control-plane security Task 2) — registration never grants a role |
+| Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and `app.features.tenants.service.provision_tenant` (creates the new tenant's `admin` role during provisioning) |
+| Auth credentials | `app.features.auth.service.register` (policy-gated self-registration, `auth.registration_policy` default `closed`) **and** `app.features.tenants.service.provision_tenant` (the owner credential, inside the provisioning transaction) — no credential-update/password-reset path yet, phase 2c. `Party.email` is a SEPARATE resource with its own row above (Parties) — `UserCredential` carries no email of its own as of 2b.1-T3 (F2): `login()` resolves `Party` by email first, then `UserCredential` by `party_id` only. |
 | Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `POST /admin/logout`, CSRF-protected as of 2b.1-T5/F7; the JSON API has no logout/revoke route of its own yet) |
-| Audit events | `app.core.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes) and `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor) |
+| Audit events | `app.core.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes), `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor), and `tenants/service.py::provision_tenant` (`platform.tenant.create` + `platform.tenant.owner_provision`, the platform actor named in `details.platform_actor` since platform admins are not tenant parties) |
 | Domain settings rows | `app.core.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
 | `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `app.core.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
@@ -967,10 +973,14 @@ write:
 
 ### Known dual-writer: Parties (auth register vs. parties service)
 
-Two service functions independently construct a `Party` + `PartyPerson`
+Three service functions independently construct a `Party` + `PartyPerson`
 row: `auth/service.py::register` (the `/auth/register` self-service signup
-flow, which also creates the `UserCredential` and first-admin role grant in
-the same transaction) and `parties/service.py::create_person_party` /
+flow — policy-gated `closed` by default since control-plane security Task 2,
+creates the `UserCredential` in the same transaction, and NEVER grants a
+role: the first-registrant admin bootstrap is deleted),
+`tenants/service.py::provision_tenant` (the platform provisioning flow —
+the only owner/admin-creation path, same `core/identity` invariants), and
+`parties/service.py::create_person_party` /
 `create_organization_party` / `update_person_party` /
 `update_organization_party` (the tenant-admin `/parties` API and the
 `/admin/parties/{id}/edit` web flow, Task 5). This is a **deliberate, not
@@ -1169,6 +1179,40 @@ is correlatable with the structured request log line. Services raise
 `test_routers_do_not_issue_direct_queries` — routers stay thin; the
 corollary is that error translation is centralized in `app/core/errors.py`,
 not scattered per-router).
+
+## Transaction authority (control-plane security Task 4)
+
+There is exactly ONE transaction authority in this codebase:
+`app/core/db.py`. The contract:
+
+- **The boundary owns commit/rollback.** `get_db` and `get_platform_db`
+  (request boundaries) and `platform_session` (the non-request boundary for
+  lifespan hooks/jobs) construct the session, commit on success, roll back
+  on error, and close. Nothing else does.
+- **Services only mutate and flush.** A feature service never calls
+  `db.commit()`, never calls `db.rollback()` directly (hard rule; see the
+  savepoint section below), and never constructs a session of its own.
+- **Expected conflicts use `conflict_savepoint`** — roll back the SAVEPOINT,
+  not the transaction (next section).
+- **No route, task, or service constructs an ad hoc session.** The old
+  `app/core/unit_of_work.py` (`UnitOfWork`, `ConcurrencyConflict`) was a
+  second, zero-consumer transaction authority — DELETED under the stronger
+  SoT rule (zero consumers → delete), not kept "just in case".
+- **Provisioning's `SET LOCAL` idiom:** platform-session code that must
+  write tenant-scoped rows (atomic tenant provisioning) establishes RLS
+  context ON the current transaction with
+  `db.execute(select(func.set_config("app.current_tenant", str(tenant.id),
+  True)))` after flushing the tenant row — same `set_config(..., is_local
+  := true)` idiom `get_db` uses, because `platform_api` has no BYPASSRLS.
+
+Enforced by `tests/architecture/test_session_authority.py` (AST-based: no
+module outside `app/core/db.py` may call `SessionLocal()`,
+`PlatformSessionLocal()`, `sessionmaker(...)`, or construct `Session(...)`;
+no feature module may import `sessionmaker`; sensitivity self-tested). The
+one allowlisted exception is `app/core/middleware/tenant.py`: the resolver
+runs before any route dependency exists, so it owns its own short
+read-only session boundary — the allowlist entry and this paragraph must
+stay in sync.
 
 ## Conflict handling: savepoints preserve RLS context (2b.1-T2, finding F3)
 

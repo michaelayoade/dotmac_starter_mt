@@ -4,10 +4,11 @@ exists, `login()` resolves the party by
 `(tenant, normalize_email(email), party_type=person)` and then finds the
 credential row by `party_id`.
 
-Drives the SAME cross-tenant admin-portal registration/login pattern as
-`tests/test_admin_portal_e2e.py` (register via the JSON API, web-login via
-the cookie form, CSRF header bridge captured off the first `GET
-/admin/login`), then edits the registrant's OWN party email through
+Drives the SAME cross-tenant admin-portal provisioning/login pattern as
+`tests/test_admin_portal_e2e.py` (provision the tenant's admin via
+`provision_owner` — registration no longer grants admin, Task 2 — then
+web-login via the cookie form, CSRF header bridge captured off the first
+`GET /admin/login`), then edits the admin's OWN party email through
 `POST /admin/parties/{party_id}/edit` (the only writer of `Party.email`
 post-registration — there is no JSON `PATCH /parties/{id}` route yet, see
 `docs/superpowers/phase2-backlog.md`).
@@ -23,28 +24,25 @@ reverse — NEW email succeeds, OLD email 401s, in a single atomic
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from tests.conftest import client_for
+from app.core.models import Party
+from tests.conftest import client_for, provision_owner
 
 PASSWORD = "correct horse battery staple"
 
 
-def _register_admin(client: TestClient, email: str) -> str:
-    """Register the tenant's first user (auto-admin) and return the new
-    party's id (`CurrentUserResponse.id`) — needed to drive the party-edit
-    web form below.
+def _provision_admin(admin_session: Session, tenant, email: str) -> str:
+    """Provision the tenant's admin (`provision_owner`, `tests/conftest.py` —
+    registration no longer grants admin, Task 2) and return the new party's
+    id — needed to drive the party-edit web form below.
     """
-    resp = client.post(
-        "/auth/register",
-        json={
-            "email": email,
-            "password": PASSWORD,
-            "first_name": "Admin",
-            "last_name": "User",
-        },
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["id"]
+    provision_owner(admin_session, tenant, email)
+    party_id = admin_session.scalars(
+        select(Party.id).where(Party.tenant_id == tenant.id, Party.email == email)
+    ).one()
+    return str(party_id)
 
 
 def _web_login(client: TestClient, email: str) -> str:
@@ -131,12 +129,12 @@ def _edit_party_email(
 
 
 def test_login_after_portal_email_change_uses_new_email_old_email_401s(
-    app_client: TestClient, tenant_a
+    app_client: TestClient, admin_session: Session, tenant_a
 ) -> None:
     a = client_for(app_client, tenant_a.slug)
     old_email = "authority-old@tenant-a.example.com"
     new_email = "authority-new@tenant-a.example.com"
-    party_id = _register_admin(a, old_email)
+    party_id = _provision_admin(admin_session, tenant_a, old_email)
 
     # Old email logs in fine before the edit.
     assert _json_login(a, old_email) == 200
@@ -154,25 +152,27 @@ def test_login_after_portal_email_change_uses_new_email_old_email_401s(
 
 
 def test_cross_tenant_same_email_login_unaffected(
-    app_client: TestClient, tenant_a, tenant_b
+    app_client: TestClient, admin_session: Session, tenant_a, tenant_b
 ) -> None:
-    """Two different tenants can each register the SAME email address (the
+    """Two different tenants can each hold the SAME email address (the
     parties uniqueness index is per-tenant, `(tenant_id, lower(email))`) —
     each tenant's login only ever sees its own party, no cross-tenant leak
     now that login resolves via a tenant-scoped Party query.
     """
     shared_email = "shared-authority@example.com"
     a = client_for(app_client, tenant_a.slug)
-    _register_admin(a, shared_email)
+    _provision_admin(admin_session, tenant_a, shared_email)
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
-    _register_admin(b, shared_email)
+    _provision_admin(admin_session, tenant_b, shared_email)
 
     assert _json_login(a, shared_email) == 200
     assert _json_login(b, shared_email) == 200
 
 
-def test_nulled_party_email_disables_login(app_client: TestClient, tenant_a) -> None:
+def test_nulled_party_email_disables_login(
+    app_client: TestClient, admin_session: Session, tenant_a
+) -> None:
     """Nulling a person party's email via the portal now disables login for
     that party outright (the login query is `Party.email ==
     normalize_email(email)` — a NULL row simply never matches any query
@@ -182,7 +182,7 @@ def test_nulled_party_email_disables_login(app_client: TestClient, tenant_a) -> 
     """
     a = client_for(app_client, tenant_a.slug)
     email = "authority-null@tenant-a.example.com"
-    party_id = _register_admin(a, email)
+    party_id = _provision_admin(admin_session, tenant_a, email)
 
     assert _json_login(a, email) == 200
 

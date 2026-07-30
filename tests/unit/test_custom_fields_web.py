@@ -23,9 +23,16 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_db
 from app.core.errors import register_error_handlers
-from app.core.models import Party, PartyType, Tenant
-from app.features.auth import service as auth_service
-from app.features.auth.schemas import RegisterRequest
+from app.core.models import (
+    Party,
+    PartyPerson,
+    PartyRole,
+    PartyType,
+    Role,
+    Tenant,
+    UserCredential,
+)
+from app.core.security import hash_password
 from app.features.auth.web import router as auth_web_router
 from app.features.custom_fields import service as cf_service
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
@@ -37,19 +44,33 @@ PASSWORD = "correct horse battery staple"
 
 
 @pytest.fixture()
-def registered_admin(db: Session, tenant_row: Tenant) -> dict:
-    view = auth_service.register(
-        db,
-        tenant_row,
-        RegisterRequest(
-            email="admin@example.com",
-            password=PASSWORD,
-            first_name="Admin",
-            last_name="User",
-        ),
+def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
+    """A provisioned admin — party + person + credential + "admin" role
+    grant, built directly on core models; registration no longer grants any
+    role (Task 2). Same fixture shape as tests/unit/test_web_login.py.
+    """
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Admin User",
+        email="admin@example.com",
     )
+    db.add(party)
+    db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Admin", last_name="User"))
+    db.add(
+        UserCredential(
+            tenant_id=tenant_row.id,
+            party_id=party.id,
+            password_hash=hash_password(PASSWORD),
+        )
+    )
+    role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
+    db.add(role)
+    db.flush()
+    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.commit()
-    return {"email": view.email, "party_id": view.id}
+    return {"email": party.email, "party_id": party.id}
 
 
 @pytest.fixture()
@@ -140,9 +161,9 @@ def test_values_panel_without_cookie_redirects_to_login(
 
 
 def test_index_full_page_renders_shell_and_table(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row)
     db.commit()
 
@@ -154,9 +175,9 @@ def test_index_full_page_renders_shell_and_table(
 
 
 def test_index_htmx_request_returns_table_fragment_only(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row)
     db.commit()
 
@@ -172,9 +193,9 @@ def test_index_htmx_request_returns_table_fragment_only(
 
 
 def test_index_shows_inactive_fields_with_deactivate_hidden(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     field = _make_field(db, tenant_row)
     cf_service.deactivate_field(db, tenant_row.id, field.id)
     db.commit()
@@ -186,14 +207,14 @@ def test_index_shows_inactive_fields_with_deactivate_hidden(
 
 
 def test_index_table_renders_visibility_badge_column(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
     """F6: `show_in_list` is otherwise a dead control — this "Visibility"
     column is its consumer (a per-row summary badge, not a filter). Assert
     the column header renders and that a field opted OUT of every surface
     (all three show_in_* flags False) still appears in the row — the badge
     summarizes visibility, it never hides the definition row itself."""
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(
         db,
         tenant_row,
@@ -216,8 +237,8 @@ def test_index_table_renders_visibility_badge_column(
 # ---------------------------------------------------------------------------
 
 
-def test_create_form_renders(web_client: TestClient, registered_admin: dict) -> None:
-    token = _login(web_client, registered_admin["email"])
+def test_create_form_renders(web_client: TestClient, provisioned_admin: dict) -> None:
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get(
         "/admin/custom-fields/create?entity_type=party",
         cookies={"access_token": token},
@@ -229,9 +250,9 @@ def test_create_form_renders(web_client: TestClient, registered_admin: dict) -> 
 
 
 def test_create_submit_success_redirects_to_index(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/custom-fields",
         data={
@@ -259,9 +280,9 @@ def test_create_submit_success_redirects_to_index(
 
 
 def test_create_submit_select_type_parses_options_text(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/custom-fields",
         data={
@@ -291,7 +312,7 @@ def test_create_submit_select_type_parses_options_text(
 
 
 def test_create_submit_select_without_options_rerenders_200_with_inline_error(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     """Task 7 review finding 3: the web form path surfaces
     `service.create_field`'s `BadRequestError` ("SELECT/MULTISELECT fields
@@ -299,7 +320,7 @@ def test_create_submit_select_without_options_rerenders_200_with_inline_error(
     conflict below — no options_text at all means `_parse_options` returns
     `None`, so this exercises the create-time guard end to end through the
     form."""
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/custom-fields",
         data={
@@ -318,9 +339,9 @@ def test_create_submit_select_without_options_rerenders_200_with_inline_error(
 
 
 def test_create_submit_validation_error_rerenders_200(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/custom-fields",
         data={
@@ -336,9 +357,9 @@ def test_create_submit_validation_error_rerenders_200(
 
 
 def test_create_submit_duplicate_code_rerenders_200_with_conflict(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row)
     db.commit()
 
@@ -364,9 +385,9 @@ def test_create_submit_duplicate_code_rerenders_200_with_conflict(
 
 
 def test_edit_form_renders_current_values_and_readonly_immutable_fields(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     field = _make_field(db, tenant_row)
     db.commit()
 
@@ -379,9 +400,9 @@ def test_edit_form_renders_current_values_and_readonly_immutable_fields(
 
 
 def test_edit_submit_updates_field_and_redirects(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     field = _make_field(db, tenant_row)
     db.commit()
 
@@ -406,9 +427,9 @@ def test_edit_submit_updates_field_and_redirects(
 
 
 def test_edit_submit_invalid_regex_rerenders_200_with_error(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     field = _make_field(db, tenant_row)
     db.commit()
 
@@ -428,9 +449,9 @@ def test_edit_submit_invalid_regex_rerenders_200_with_error(
 
 
 def test_edit_unknown_field_returns_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get(
         f"/admin/custom-fields/{uuid4()}/edit", cookies={"access_token": token}
     )
@@ -443,9 +464,9 @@ def test_edit_unknown_field_returns_404(
 
 
 def test_deactivate_soft_deletes_and_redirects(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     field = _make_field(db, tenant_row)
     db.commit()
 
@@ -467,9 +488,9 @@ def test_deactivate_soft_deletes_and_redirects(
 
 
 def test_values_panel_get_renders_definitions_and_current_values(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row)
     party = _make_party(db, tenant_row)
     cf_service.set_values(
@@ -490,9 +511,9 @@ def test_values_panel_get_renders_definitions_and_current_values(
 
 
 def test_values_panel_get_no_definitions_renders_empty_message(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_party(db, tenant_row)
     db.commit()
 
@@ -505,9 +526,9 @@ def test_values_panel_get_no_definitions_renders_empty_message(
 
 
 def test_values_panel_post_valid_updates_and_rerenders_fragment(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row)
     party = _make_party(db, tenant_row)
     db.commit()
@@ -526,9 +547,9 @@ def test_values_panel_post_valid_updates_and_rerenders_fragment(
 
 
 def test_values_panel_post_invalid_rerenders_200_with_inline_error(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row, is_required=True, field_code="required_field")
     party = _make_party(db, tenant_row)
     db.commit()
@@ -547,9 +568,9 @@ def test_values_panel_post_invalid_rerenders_200_with_inline_error(
 
 
 def test_values_panel_post_multiselect_getlist(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(
         db,
         tenant_row,
@@ -589,9 +610,9 @@ def test_values_panel_post_multiselect_getlist(
 
 
 def test_values_panel_edit_form_omits_show_in_form_false_field(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row, field_code="loyalty_tier", show_in_form=True)
     _make_field(
         db,
@@ -623,13 +644,13 @@ def test_values_panel_edit_form_omits_show_in_form_false_field(
 
 
 def test_values_panel_post_does_not_delete_hidden_from_form_field_value(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
     """CRITICAL regression pin (F6 brief): a field with `show_in_form=False`
     is absent from the submitted form entirely — `set_values`' merge
     semantics (absent key = untouched) must leave its stored value alone,
     not silently delete it just because this submit didn't mention it."""
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row, field_code="loyalty_tier", show_in_form=True)
     _make_field(db, tenant_row, field_code="internal_note", show_in_form=False)
     party = _make_party(db, tenant_row)
@@ -661,9 +682,9 @@ def test_values_panel_post_does_not_delete_hidden_from_form_field_value(
 
 
 def test_values_panel_detail_section_omits_show_in_detail_false_field(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(
         db,
         tenant_row,
@@ -699,9 +720,9 @@ def test_values_panel_detail_section_omits_show_in_detail_false_field(
 
 
 def test_values_panel_default_visibility_field_renders_once_in_form_only(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row)  # defaults: show_in_form=True, show_in_detail=True
     party = _make_party(db, tenant_row)
     cf_service.set_values(
@@ -724,11 +745,11 @@ def test_values_panel_default_visibility_field_renders_once_in_form_only(
 
 
 def test_values_panel_detail_only_field_renders_in_details_section(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
     """A detail-only field (`show_in_form=False`, `show_in_detail=True`) has
     no editable input, only the read-only "Details" row."""
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(
         db,
         tenant_row,
@@ -766,9 +787,9 @@ def test_values_panel_detail_only_field_renders_in_details_section(
 
 
 def test_values_panel_post_injected_hidden_field_key_is_silently_ignored(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_field(db, tenant_row, field_code="loyalty_tier", show_in_form=True)
     _make_field(db, tenant_row, field_code="internal_note", show_in_form=False)
     party = _make_party(db, tenant_row)
@@ -801,7 +822,7 @@ def test_values_panel_post_injected_hidden_field_key_is_silently_ignored(
 
 
 def test_values_panel_get_missing_party_returns_negotiated_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     """Task 7 review finding 2: `service._get_entity_row` raises
     `NotFoundError` when `db.get(model, entity_id)` returns `None` (a
@@ -809,7 +830,7 @@ def test_values_panel_get_missing_party_returns_negotiated_404(
     branded HTML 404 page (`register_error_handlers`'s `_negotiate`), never
     a raw 500 or a bare JSON envelope, since an htmx `Accept: text/html`
     request negotiates HTML."""
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get(
         f"/admin/custom-fields/party/{uuid4()}/values-panel",
         cookies={"access_token": token},
@@ -822,9 +843,9 @@ def test_values_panel_get_missing_party_returns_negotiated_404(
 
 
 def test_values_panel_post_missing_party_returns_negotiated_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         f"/admin/custom-fields/party/{uuid4()}/values-panel",
         data={},
@@ -838,13 +859,13 @@ def test_values_panel_post_missing_party_returns_negotiated_404(
 
 
 def test_parties_detail_page_contains_values_panel_hx_get_wiring(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
     """Proves the composition pattern's parties-side half: the detail page
     references the custom_fields feature's fragment route by URL only — see
     templates/admin/parties/detail.html.
     """
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_party(db, tenant_row)
     db.commit()
 

@@ -24,54 +24,20 @@ TEST_* URLs (see tests/conftest.py).
 
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+
+from tests.conftest import (
+    PLATFORM_ADMIN_EMAIL as _ADMIN_EMAIL,
+)
+from tests.conftest import (
+    PLATFORM_ADMIN_PASSWORD as _ADMIN_PASSWORD,
+)
+from tests.conftest import (
+    platform_login as _platform_login,
+)
 
 _PLATFORM_HOST = "localhost"  # conftest pins PLATFORM_ROOT_DOMAIN=localhost
-_ADMIN_EMAIL = "root@platform.example.com"
-_ADMIN_PASSWORD = "platform-canary-password"
-
-
-def _load_cli_module():
-    """Import scripts/create_platform_admin.py the way the happy-path canary
-    needs it: the CLI's `upsert_admin` IS the only bootstrap path (never an
-    HTTP self-registration route), so the canary proves that exact function
-    produces a login-able admin."""
-    path = (
-        Path(__file__).resolve().parent.parent / "scripts" / "create_platform_admin.py"
-    )
-    spec = importlib.util.spec_from_file_location("create_platform_admin", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-@pytest.fixture
-def platform_admin(admin_session):
-    """A platform admin created through the CLI's own upsert path."""
-    cli = _load_cli_module()
-    admin = cli.upsert_admin(
-        admin_session, email=_ADMIN_EMAIL, password=_ADMIN_PASSWORD, is_active=True
-    )
-    admin_session.commit()
-    yield admin
-    admin_session.execute(
-        text(
-            "DELETE FROM platform_sessions WHERE admin_id IN "
-            "(SELECT id FROM platform_admins WHERE email = :email)"
-        ),
-        {"email": _ADMIN_EMAIL},
-    )
-    admin_session.execute(
-        text("DELETE FROM platform_admins WHERE email = :email"),
-        {"email": _ADMIN_EMAIL},
-    )
-    admin_session.commit()
 
 
 @pytest.fixture
@@ -79,9 +45,14 @@ def tenant_token(admin_session, tenant_a) -> str:
     """A valid TENANT access token (no `aud` claim) for tenant_a, built via
     direct admin-engine inserts so this fixture stays independent of the
     registration policy (Task 2 closes open registration by default)."""
-    from app.core.models import AuthSession, Party, PartyPerson, PartyType
+    from app.core.models import (
+        AuthSession,
+        Party,
+        PartyPerson,
+        PartyType,
+        UserCredential,
+    )
     from app.core.security import hash_password, hash_token, issue_access_token
-    from app.features.auth.models import UserCredential
 
     party = Party(
         tenant_id=tenant_a.id,
@@ -113,16 +84,6 @@ def tenant_token(admin_session, tenant_a) -> str:
     admin_session.commit()
     # Cleanup rides on tenant_a's own teardown (DELETE FROM tenants cascades).
     return token
-
-
-def _platform_login(client: TestClient) -> str:
-    resp = client.post(
-        "/platform/auth/login",
-        json={"email": _ADMIN_EMAIL, "password": _ADMIN_PASSWORD},
-        headers={"Host": _PLATFORM_HOST},
-    )
-    assert resp.status_code == 200, resp.text
-    return resp.json()["access_token"]
 
 
 def test_unknown_host_cannot_reach_platform_routes(app_client: TestClient) -> None:

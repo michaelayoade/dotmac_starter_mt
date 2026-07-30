@@ -34,7 +34,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
-from tests.conftest import client_for
+from tests.conftest import client_for, provision_and_login
 
 
 @pytest.fixture(scope="module")
@@ -257,38 +257,24 @@ def test_platform_api_manages_only_null_tenant_rows(
 # Task 5 API-level canary: PUT/GET /settings/... through the real HTTP API.
 # ---------------------------------------------------------------------------
 
-_PASSWORD = "correct horse battery staple"
-
-
-def _register_and_login(client: TestClient, email: str) -> str:
-    register = client.post(
-        "/auth/register",
-        json={
-            "email": email,
-            "password": _PASSWORD,
-            "first_name": "Admin",
-            "last_name": "User",
-        },
-    )
-    assert register.status_code == 201, register.text
-
-    login = client.post("/auth/login", json={"email": email, "password": _PASSWORD})
-    assert login.status_code == 200, login.text
-    return login.json()["access_token"]
-
 
 def test_tenant_a_put_max_per_entity_does_not_affect_tenant_b(
     app_client: TestClient,
+    admin_session: Session,
     tenant_a,
     tenant_b,
 ) -> None:
     """The canary the settings API exists for: a tenant admin's `PUT` writes
     only THEIR row. `custom_fields/max_per_entity` defaults to 20 (see
     `app/features/settings/spec.py`) — tenant A overrides it to 5; tenant B
-    must keep resolving the spec default via `GET`, unaffected.
+    must keep resolving the spec default via `GET`, unaffected. Each
+    tenant's admin is provisioned via `provision_and_login`
+    (`tests/conftest.py`) — registration no longer grants admin (Task 2).
     """
     a = client_for(app_client, tenant_a.slug)
-    a_token = _register_and_login(a, "settings-a@tenant-a.example.com")
+    a_token = provision_and_login(
+        admin_session, tenant_a, a, "settings-a@tenant-a.example.com"
+    )
 
     put_resp = a.put(
         "/settings/custom_fields/max_per_entity",
@@ -300,7 +286,9 @@ def test_tenant_a_put_max_per_entity_does_not_affect_tenant_b(
     assert put_resp.json()["source"] == "tenant"
 
     b = client_for(TestClient(app_client.app), tenant_b.slug)
-    b_token = _register_and_login(b, "settings-b@tenant-b.example.org")
+    b_token = provision_and_login(
+        admin_session, tenant_b, b, "settings-b@tenant-b.example.org"
+    )
     b_list = b.get(
         "/settings/custom_fields", headers={"Authorization": f"Bearer {b_token}"}
     )
