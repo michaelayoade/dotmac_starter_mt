@@ -16,6 +16,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from dotmac_kernel.models import Base, uuid_pk
+from dotmac_kernel.models_platform import PlatformAuditEvent
 
 
 class AuditEvent(Base):
@@ -67,7 +68,32 @@ def write_audit_event(
     return event
 
 
+def write_platform_audit_event(
+    db: Session,
+    *,
+    actor_admin_id: UUID | None,
+    action: str,
+    entity_type: str,
+    entity_id: str | None = None,
+    details: dict[str, object] | None = None,
+) -> PlatformAuditEvent:
+    """Record a PLATFORM-level audit event (no tenant context). Same add/flush
+    contract as `write_audit_event`; the actor is a `PlatformAdmin`."""
+    event = PlatformAuditEvent(
+        actor_admin_id=actor_admin_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        details=details or {},
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
 __all__ = [
     "AuditEvent",
     "write_audit_event",
+    "PlatformAuditEvent",
+    "write_platform_audit_event",
 ]

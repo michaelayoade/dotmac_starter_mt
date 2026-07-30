@@ -40,11 +40,16 @@ _PLATFORM_READABLE = {
     "tenant_domains",
 }
 
-# Platform catalog tables app_user must not even SELECT (credential /
-# session material for platform actors; control-plane security Task 1).
+# Platform catalog tables app_user must not even SELECT: credential /
+# session material for platform actors (control-plane security Task 1) and
+# the platform-scoped audit + idempotency ledgers (0009) — records of
+# platform-level operations that carry no tenant and are fully REVOKEd from
+# the tenant application role.
 _PLATFORM_PRIVATE = {
     "platform_admins",
     "platform_sessions",
+    "platform_audit_events",
+    "platform_inbox_records",
 }
 
 # Bookkeeping, invisible to the app roles entirely.
@@ -240,8 +245,11 @@ def test_metadata_matches_live_tables(admin_engine) -> None:
     """`Base.metadata` == live schema (modulo infra bookkeeping): a model
     missing a migration, or a migration-created table with no model, both
     fail here."""
-    # Import every model-bearing module so metadata is fully populated.
+    # Import every model-bearing module so metadata is fully populated —
+    # explicitly, not relying on another test module having imported them first
+    # (messaging registers outbox_events/inbox_records/platform_inbox_records).
     from dotmac_kernel import audit, models_platform, settings_models  # noqa: F401
+    from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
     from dotmac_kernel.models import Base
 
     from app.features.custom_fields import models as custom_fields  # noqa: F401

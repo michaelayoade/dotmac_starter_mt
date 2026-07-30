@@ -81,6 +81,27 @@ class InboxRecord(Base, TimestampMixin):
     correlation_id: Mapped[str | None] = mapped_column(String(200))
 
 
+class PlatformInboxRecord(Base, TimestampMixin):
+    """The PLATFORM-level idempotency ledger — the platform-scoped counterpart to
+    `InboxRecord`. A platform command has no tenant, so its idempotency key is
+    `command_id` alone (globally unique, not per-tenant). A PLATFORM catalog
+    table: no `tenant_id`, no RLS, GRANTed to `platform_api`/`app_admin`."""
+
+    __tablename__ = "platform_inbox_records"
+    __table_args__ = (
+        UniqueConstraint("command_id", name="uq_platform_inbox_command_id"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    command_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    command_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    result: Mapped[dict] = mapped_column(
+        _JSON, nullable=False, default=dict, server_default=sa.text("'{}'")
+    )
+    correlation_id: Mapped[str | None] = mapped_column(String(200))
+
+
 class OutboxEvent(Base, TimestampMixin):
     """A domain event enqueued in the same transaction as its state change. The
     relay (slice 2) claims `pending` rows whose `available_at` has passed,
@@ -121,5 +142,6 @@ __all__ = [
     "OutboxStatus",
     "InboxStatus",
     "InboxRecord",
+    "PlatformInboxRecord",
     "OutboxEvent",
 ]

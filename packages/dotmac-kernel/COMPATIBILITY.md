@@ -40,7 +40,7 @@ and may change or disappear without a deprecation cycle**.
 |---|---|
 | `dotmac_kernel.app_factory` | `create_app`, `LayeredStaticFiles` |
 | `dotmac_kernel.assembly` | `ProductAssemblySpec` |
-| `dotmac_kernel.audit` | `AuditEvent`, `write_audit_event` |
+| `dotmac_kernel.audit` | `AuditEvent`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
 | `dotmac_kernel.crud` | `CRUDManager` |
@@ -51,11 +51,12 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
 | `dotmac_kernel.logging` | `setup_logging` |
-| `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `enqueue_event`, `InboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
+| `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.envelope` | `CommandEnvelope` |
 | `dotmac_kernel.messaging.inbox` | `process_once`, `ProcessOutcome`, `CommandHandler` |
 | `dotmac_kernel.messaging.outbox` | `enqueue_event` |
-| `dotmac_kernel.messaging.models` | `InboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` |
+| `dotmac_kernel.messaging.platform` | `process_once_platform`, `PlatformCommandHandler` |
+| `dotmac_kernel.messaging.models` | `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` |
 | `dotmac_kernel.middleware.csrf` | `CSRFMiddleware` |
 | `dotmac_kernel.middleware.observability` | `ObservabilityMiddleware` |
 | `dotmac_kernel.middleware.rate_limit` | `RateLimitMiddleware`, `RateLimitStore`, `MemoryStore` |
@@ -63,7 +64,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.middleware.tenant` | `TenantResolverMiddleware` |
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
-| `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession` |
+| `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
 | `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
@@ -213,13 +214,25 @@ level — import it directly (`from dotmac_kernel.messaging import ...`).
   the CALLER's transaction, so the event persists iff that transaction commits
   (atomic with the state change). A relay (WS3 slice 2) drains pending events
   out-of-band — the named reconciler for the side effect.
+- **Platform-scoped idempotent command** — the platform-level counterpart for a
+  platform actor operating on platform-level resources (no tenant context, so no
+  envelope). `process_once_platform(db, *, command_id, command_type, handler,
+  correlation_id=None) -> ProcessOutcome` runs `handler` (a
+  `PlatformCommandHandler`, `Callable[[Session], Mapping | None]`) AT MOST ONCE
+  per `command_id` ALONE (globally unique, not per-tenant) and records a
+  `PlatformInboxRecord`; a later delivery replays the result. Concurrency-safe via
+  the `uq_platform_inbox_command_id` constraint + the same SAVEPOINT-rollback of
+  the losing racer.
 - **Persisted state** — `InboxRecord` / `OutboxEvent` (both tenant-scoped,
-  RLS-protected, kernel migration `0008`); `InboxStatus` (`PROCESSED`/`FAILED`)
-  and `OutboxStatus` (`PENDING`/`SENT`/`FAILED`) status vocabularies.
+  RLS-protected, kernel migration `0008`); `PlatformInboxRecord` (a PLATFORM
+  catalog table — no `tenant_id`, no RLS, grants-not-RLS, kernel migration
+  `0009`); `InboxStatus` (`PROCESSED`/`FAILED`) and `OutboxStatus`
+  (`PENDING`/`SENT`/`FAILED`) status vocabularies.
 
-Transaction-authority contract: `process_once` / `enqueue_event` RECEIVE a
-`Session` and only `add`/`flush` — they never construct a session or
-`commit`/`rollback`; the request (or a `platform_session`) boundary owns that.
+Transaction-authority contract: `process_once` / `process_once_platform` /
+`enqueue_event` RECEIVE a `Session` and only `add`/`flush` — they never construct
+a session or `commit`/`rollback`; the request (or a `platform_session`) boundary
+owns that.
 
 ## Internal modules and names (do not import)
 

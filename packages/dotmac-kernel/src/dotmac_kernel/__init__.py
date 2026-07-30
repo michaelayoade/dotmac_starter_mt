@@ -35,7 +35,12 @@ if TYPE_CHECKING:
 # so `import dotmac_kernel` never requires DATABASE_URL. Engine-touching APIs
 # (db sessions, guards, middleware, platform auth) are submodule imports.
 from dotmac_kernel.assembly import ProductAssemblySpec
-from dotmac_kernel.audit import AuditEvent, write_audit_event
+from dotmac_kernel.audit import (
+    AuditEvent,
+    PlatformAuditEvent,
+    write_audit_event,
+    write_platform_audit_event,
+)
 from dotmac_kernel.config import Settings, settings, validate_settings
 from dotmac_kernel.exceptions import (
     BadRequestError,
@@ -116,6 +121,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.messaging.inbox",
         "dotmac_kernel.messaging.models",
         "dotmac_kernel.messaging.outbox",
+        "dotmac_kernel.messaging.platform",
         "dotmac_kernel.middleware.csrf",
         "dotmac_kernel.middleware.observability",
         "dotmac_kernel.middleware.rate_limit",
@@ -176,6 +182,8 @@ __all__ = [
     # audit
     "AuditEvent",
     "write_audit_event",
+    "PlatformAuditEvent",
+    "write_platform_audit_event",
     # config
     "Settings",
     "settings",
