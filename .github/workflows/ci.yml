@@ -88,6 +88,26 @@ jobs:
       - run: make test-db-down
         if: always()
 
+  consumer-boot:
+    runs-on: ubuntu-latest
+    # K4 empty-consumer WHEEL proof: build the kernel wheel, install it into a
+    # CLEAN virtualenv (NOT the repo venv), and prove an external consumer that
+    # imports only the public kernel surface boots and serves the DB-free
+    # /health from the installed wheel — no workspace `app/` on sys.path. Needs
+    # no Postgres: the consumer boots with a deliberately unreachable
+    # DATABASE_URL and /health never touches the DB. Poetry is installed only as
+    # the wheel BUILD tool; the consumer venv is separate and clean.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - run: bash scripts/consumer_boot_check.sh
+
   docker-build:
     runs-on: ubuntu-latest
     # Builds the prod image and health-gates it before merge. Port/tag are
