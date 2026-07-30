@@ -8,6 +8,13 @@ here.
 
 ## Unreleased
 
+## 0.1.0a2 — 2026-07-30
+
+Second alpha. Adds exact money/FX value objects and platform-scoped audit +
+idempotency primitives, corrects the vendored font weights, and advances the
+kernel migration head to `0009`. Additive over `0.1.0a1` — no breaking changes
+to the `0.1.0a1` public surface.
+
 ### Fixed
 - **Vendored font weights are now the real distinct weights.** Every Outfit and
   Plus Jakarta Sans weight had shipped as a byte-for-byte copy of the 400 file,
