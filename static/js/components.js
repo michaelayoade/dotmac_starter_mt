@@ -79,3 +79,26 @@ document.addEventListener('alpine:init', function () {
     });
 
 });
+
+// Toast bridge (moved here from an inline <script> in templates/base.html —
+// control-plane security Task 5: the Content-Security-Policy serves
+// script-src 'self' with no 'unsafe-inline', so no template may carry an
+// inline script block).
+window.showToast = function (message, type, duration) {
+    window.dispatchEvent(new CustomEvent('show-toast', {
+        detail: { message: message, type: type || 'info', duration: duration || 4000 }
+    }));
+};
+
+document.addEventListener('DOMContentLoaded', function () {
+    document.body.addEventListener('htmx:afterRequest', function (evt) {
+        var trigger = evt.detail.xhr.getResponseHeader('HX-Trigger');
+        if (!trigger) return;
+        try {
+            var data = JSON.parse(trigger);
+            if (data.showToast) {
+                window.dispatchEvent(new CustomEvent('show-toast', { detail: data.showToast }));
+            }
+        } catch (e) { /* HX-Trigger wasn't our JSON shape — ignore */ }
+    });
+});

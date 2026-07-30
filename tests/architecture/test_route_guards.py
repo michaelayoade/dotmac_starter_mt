@@ -103,16 +103,20 @@ def test_every_route_has_a_guard() -> None:
 #     under its own name via `_guard_names`'s recursive walk.
 #   - "require_web_auth" (app.core.web_deps): cookie-based web-portal guard
 #     — requires a valid session cookie AND the "admin" role.
-#   - "require_platform" (app.core.deps): platform-admin routes are not
-#     "authenticated as a party" in the tenant sense at all — they are
-#     scoped to the platform root domain instead of any tenant. Treating it
-#     as an auth-tier guard (rather than allowlisting every platform route)
-#     keeps `MUTATING_ALLOWLIST` reserved for genuinely pre-auth routes.
+#   - "require_platform_admin" (app.core.platform_auth): THE platform guard
+#     (control-plane security Task 1) — host must equal the platform root
+#     domain exactly, bearer token must be a live platform session with
+#     `aud="platform"`, and the admin must be active. It replaced the old
+#     unauthenticated `require_platform` stub, which asserted only "no
+#     tenant resolved" and authenticated NOBODY. NOTE: `require_platform_host`
+#     (same module) is NOT in this set on purpose — it is the pre-auth
+#     platform-surface check (host only, no actor), the platform analogue of
+#     `require_tenant`.
 AUTH_GUARD_NAMES = {
     "require_user_auth",
     "require_role",
     "require_web_auth",
-    "require_platform",
+    "require_platform_admin",
 }
 
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -145,6 +149,15 @@ MUTATING_ALLOWLIST = {
     # what `test_csrf_*` in `tests/test_security_middleware.py` proves, and
     # what makes this route safe to allowlist here.
     ("POST", "/admin/logout"),
+    # Platform login (`app.core.platform_auth.platform_auth_router`): the
+    # platform counterpart of `/auth/login` — this route IS how a platform
+    # admin becomes authenticated, so it cannot require authentication. It
+    # still carries `Depends(require_platform_host)` (host-exact: the login
+    # endpoint does not even exist off the platform root domain), which
+    # satisfies the any-`require_*` check above; this entry exempts it only
+    # from the auth-TIER requirement. POST /platform/auth/logout is
+    # deliberately NOT here — it carries `require_platform_admin`.
+    ("POST", "/platform/auth/login"),
 }
 
 

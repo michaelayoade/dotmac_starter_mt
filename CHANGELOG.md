@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.8.0 — 2026-07-30
+
+Control-plane security (plan
+`docs/superpowers/plans/2026-07-18-control-plane-security.md`, all seven
+tasks): the platform control plane is actually secured — independent
+platform-admin identity, exact-host platform routing, atomic audited tenant
+provisioning, RLS-active development, one transaction authority, and the
+security baseline that precedes the module control-plane program.
+Decisions recorded in ADR-0004.
+
+### Breaking
+- **`/platform/*` requires platform-admin authentication** and resolves
+  ONLY on `PLATFORM_ROOT_DOMAIN` (host-exact middleware + guard; the old
+  `startswith("/platform/")` any-host branch and the unauthenticated
+  `require_platform` stub are gone). Bootstrap the first admin with
+  `scripts/create_platform_admin.py` (CLI-only, migration trust boundary).
+- **`POST /platform/tenants` provisions atomically** — payload now requires
+  `owner_email`/`owner_password` (optional `owner_first_name`/
+  `owner_last_name`); one transaction creates tenant + owner party/person/
+  credential + `admin` role grant + two audit events naming the platform
+  actor. `TenantCreate {slug,name}` no longer exists.
+- **Registration is policy-closed by default**: `auth.registration_policy`
+  setting (`open`|`closed`, default `closed`) — closed returns 403
+  `registration_closed`; an open-policy registration creates a PLAIN user.
+  The race-prone `_assign_first_user_admin` first-registrant bootstrap is
+  deleted; platform provisioning is the only owner/admin-creation path.
+- **`UnitOfWork` deleted** (zero consumers): `app/core/db.py` is the one
+  transaction authority, enforced by an AST governance test
+  (`tests/architecture/test_session_authority.py`).
+- **Dev quickstart role change**: dev runs RLS-ACTIVE via the same three DB
+  roles as production (`scripts/dev-db-init.sh` initdb hook); recreate dev
+  volumes (`docker compose -f docker-compose.dev.yml down -v`). The
+  superuser dev flow (and its "RLS not enforced in dev" caveat) is gone.
+- **`UserCredential` moved to `app/core/models.py`** (PORT-DELTA; the
+  `app.features.auth.models` module is deleted).
+
+### Added
+- Platform identity: `platform_admins`/`platform_sessions` (migration 0007,
+  granted to `platform_api`/`app_admin` only, REVOKEd from `app_user`),
+  `require_platform_admin` guard (`aud="platform"` token separation),
+  `POST /platform/auth/login` + `/logout`, CLI bootstrap script.
+- Deny-by-default canaries (`tests/test_platform_auth_denies.py`) pinning
+  the middleware and guard layers independently; provisioning atomicity
+  canaries (`tests/test_tenant_provisioning.py`).
+- Dynamic RLS/grants catalog audit (`tests/test_rls_catalog.py`): RLS +
+  FORCE + policy + role hygiene + platform-table grants + composite
+  tenant FKs + metadata↔schema parity, sensitivity self-tested.
+- Security baseline: Argon2id password storage (OWASP parameters) with
+  legacy-PBKDF2 verify + upgrade-on-login; constant-work login miss paths;
+  `SecurityHeadersMiddleware` (headers + computed-strict CSP, zero external
+  origins — fonts now vendored under `static/fonts/`); bounded rate-limit
+  store contract (`RateLimitStore` protocol, LRU-capped `MemoryStore`,
+  route-template keys); `docs/SECURITY.md` with an honest ASVS 5.0 L2
+  mapping.
+- `GET /platform/tenants` pagination (`limit`/`offset`, clamped ≤200).
+- `app.core.db.platform_session` — the non-request platform-session
+  boundary (lifespan seeds/jobs).
+- Docs authority: ADR-0004 (platform control plane security), ADR-0001
+  amended to reality, `AGENTS.md` (canonical agent rules),
+  `CONTRIBUTING.md`, README documentation map.
+
 ## 0.7.0 — 2026-07-18
 
 Display settings: a tenant-configurable `display` `SettingDomain`

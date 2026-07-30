@@ -26,9 +26,35 @@ for the founding tenancy design, [`docs/adr/0002-starter-consolidation.md`](docs
 for how this repo became the org's one starter template,
 [`docs/adr/0003-unified-deployment-profiles.md`](docs/adr/0003-unified-deployment-profiles.md)
 for the accepted deployment-profile and commercial-module decisions,
+[`docs/adr/0004-platform-control-plane.md`](docs/adr/0004-platform-control-plane.md)
+for the platform control-plane security decisions,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full architecture
 reference (including the model provenance/ownership tables), and
-[`CLAUDE.md`](CLAUDE.md) for the agent-facing rules summary.
+[`AGENTS.md`](AGENTS.md) for the canonical agent-facing rules.
+
+## Documentation map
+
+The hierarchy, explicitly — when documents disagree, the higher authority
+for its scope wins and the stale one gets fixed:
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — **as-built truth**: what
+  the system actually does today (model provenance, ownership, transaction
+  authority, settings, portal).
+- [`docs/adr/`](docs/adr/) — **decisions + status**: why the system is
+  shaped this way; each ADR carries its status, and amendments are dated
+  notes, never rewritten history.
+- [`docs/superpowers/plans/`](docs/superpowers/plans/) (and `specs/`,
+  `reviews/`) — **non-authoritative intent**: how work was planned; never
+  cite a plan as proof of current behavior.
+- [`README.md`](README.md) (this file) — **onboarding**: what this is and
+  how to run it.
+- [`AGENTS.md`](AGENTS.md) — **agent rules**: the canonical, tool-neutral
+  hard-rules list with enforcing tests (`CLAUDE.md` indexes it and adds the
+  repo map + web-portal specifics).
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — **human dev rules**: gates,
+  test-first expectations, migration discipline, PR expectations.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — **security posture**: honest
+  OWASP ASVS 5.0 L2 mapping, CSP rationale, rate-limit store seam.
 
 ## Deployment direction (accepted; implementation planned)
 
@@ -258,39 +284,61 @@ with `--reload`:
 
 ```bash
 poetry install
-docker compose -f docker-compose.dev.yml up -d postgres   # DEV_DB_PORT/DEV_POSTGRES_* overridable
-# Point the app and alembic at the dev Postgres (matches the compose defaults above).
-# The initial migration must run as a superuser — it creates the app_user/platform_api/app_admin roles.
-export DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/starter
-export MIGRATION_DATABASE_URL="$DATABASE_URL"
+docker compose -f docker-compose.dev.yml up -d postgres   # DEV_DB_PORT/DEV_POSTGRES_*/DEV_*_PASSWORD overridable
+# The dev Postgres init hook (scripts/dev-db-init.sh, runs once per fresh
+# volume) creates the SAME three roles production uses — app_user (requests,
+# RLS-enforced), platform_api (platform routes), app_admin (migrations,
+# BYPASSRLS). No superuser anywhere in the dev flow.
+export DATABASE_URL=postgresql+psycopg://app_user:app_user@localhost:5432/starter
+export PLATFORM_DATABASE_URL=postgresql+psycopg://platform_api:platform_api@localhost:5432/starter
+export MIGRATION_DATABASE_URL=postgresql+psycopg://app_admin:app_admin@localhost:5432/starter
 poetry run alembic upgrade head
 make css-build   # builds static/css/main.css (Tailwind v4) — gitignored, build-only; re-run after editing static/css/src/main.css, or use `make css-watch` while iterating
 make dev   # or: poetry run uvicorn app.main:app --reload --port 8000
 ```
 
-In this quickstart flow, the app runs as the Postgres superuser, which
-bypasses Row-Level Security — tenant isolation is not enforced. Use
-`make test-db-up && make test-integration` to verify isolation in the
-integration suite; production must use the three-role setup from
-`.env.example`.
+Row-Level Security is ENFORCED in this flow — `make dev` runs with the same
+tenant isolation as production (`tests/test_rls_catalog.py` audits the live
+catalog: RLS + FORCE + policy + grants + composite FKs on every table). If
+you have a dev volume from before the three-role change, recreate it:
+`docker compose -f docker-compose.dev.yml down -v`.
+
+Platform routes require a platform admin (there is no HTTP self-registration
+for the control plane — the CLI is the only bootstrap path, behind the same
+trust boundary as migrations):
+
+```bash
+poetry run python scripts/create_platform_admin.py you@example.com   # prompts for a password
+PLATFORM_TOKEN=$(curl -s -X POST http://localhost:8000/platform/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"you@example.com","password":"<the password you set>"}' | jq -r .access_token)
+```
 
 In dev, browsers resolve `*.localhost` automatically:
 
 ```bash
-# Provision two tenants (as platform admin)
+# Provision two tenants — each atomically gets a login-able OWNER with the
+# admin role (registration is policy-closed by default; provisioning is the
+# only owner-creation path)
 curl -X POST http://localhost:8000/platform/tenants \
     -H "Content-Type: application/json" \
-    -d '{"slug":"acme","name":"ACME"}'
+    -H "Authorization: Bearer $PLATFORM_TOKEN" \
+    -d '{"slug":"acme","name":"ACME","owner_email":"admin@acme.com","owner_password":"correcthorsebatterystaple"}'
 curl -X POST http://localhost:8000/platform/tenants \
     -H "Content-Type: application/json" \
-    -d '{"slug":"widgets","name":"Widgets Inc"}'
+    -H "Authorization: Bearer $PLATFORM_TOKEN" \
+    -d '{"slug":"widgets","name":"Widgets Inc","owner_email":"admin@widgets.example","owner_password":"correcthorsebatterystaple"}'
 
-# Same Parties endpoint, different tenants
+# Log in as the ACME owner, then use the tenant-scoped API
+ACME_TOKEN=$(curl -s -X POST http://acme.localhost:8000/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"admin@acme.com","password":"correcthorsebatterystaple"}' | jq -r .access_token)
 curl -X POST http://acme.localhost:8000/parties/people \
     -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ACME_TOKEN" \
     -d '{"email":"alice@acme.com","first_name":"Alice","last_name":"A"}'
-curl http://acme.localhost:8000/parties     # sees Alice
-curl http://widgets.localhost:8000/parties  # sees nothing
+curl -H "Authorization: Bearer $ACME_TOKEN" http://acme.localhost:8000/parties     # sees Alice
+curl http://widgets.localhost:8000/parties  # 401 — and RLS isolates the data regardless
 ```
 
 ## Admin portal quickstart
@@ -309,18 +357,13 @@ make dev                # poetry run uvicorn app.main:app --reload --port 8000
 Then, in a browser (dev resolves `*.localhost` automatically, so no
 `/etc/hosts` edits needed):
 
-1. Register your first user — `/auth/register` is a JSON endpoint (no
-   portal signup form exists; every portal account starts as an API
-   registration), the same shape as the Quickstart above's
-   `/parties/people` example. The FIRST person registered in a tenant is
-   auto-assigned the `admin` role, which the portal requires:
-   ```bash
-   curl -X POST http://acme.localhost:8000/auth/register \
-       -H "Content-Type: application/json" \
-       -d '{"email":"admin@acme.com","password":"correcthorsebatterystaple","first_name":"Admin","last_name":"User"}'
-   ```
-2. Visit `http://acme.localhost:8000/admin/login` and sign in with that
-   email/password. The login form is HTMX (`hx-post`) with the CSRF
+1. Use the tenant's provisioned OWNER account (created atomically by the
+   `POST /platform/tenants` call in the Quickstart — it holds the `admin`
+   role the portal requires). There is no signup form and self-registration
+   (`/auth/register`) is policy-closed by default (`auth.registration_policy`
+   setting; a registered user is a plain user with no roles either way).
+2. Visit `http://acme.localhost:8000/admin/login` and sign in with the
+   owner email/password. The login form is HTMX (`hx-post`) with the CSRF
    header-bridge (`static/js/csrf.js`) wired automatically — nothing to
    configure.
 3. Land on `http://acme.localhost:8000/admin` — the dashboard, showing
@@ -333,8 +376,9 @@ Then, in a browser (dev resolves `*.localhost` automatically, so no
    `primary_color`/`accent_color`/`custom_css`), **Custom Fields**
    (definitions CRUD).
 5. `http://widgets.localhost:8000/admin` (a second tenant, its own
-   register+login) sees none of tenant A's data — same RLS isolation the
-   JSON API gets, proven end-to-end by `tests/test_admin_portal_e2e.py`.
+   provisioned owner login) sees none of tenant A's data — same RLS
+   isolation the JSON API gets, proven end-to-end by
+   `tests/test_admin_portal_e2e.py`.
 
 <!-- Screenshot: admin/dashboard.html — dashboard with stat cards -->
 <!-- Screenshot: admin/parties/detail.html — party detail + custom-fields values panel -->
@@ -439,7 +483,8 @@ entirely).
 | Prefix | Feature | Notes |
 |---|---|---|
 | `GET /health` | — | Liveness only, no DB touch, no guard (allowlisted). |
-| `POST/GET /platform/tenants`, `GET /platform/tenants/{id}` | `tenants` | Platform-root-domain only, `require_platform`. |
+| `POST /platform/auth/login`, `POST /platform/auth/logout` | — (core, `app.core.platform_auth`) | Platform-root-domain only; login is pre-auth (host-guarded), logout requires `require_platform_admin`. |
+| `POST/GET /platform/tenants`, `GET /platform/tenants/{id}` | `tenants` | Platform-root-domain only, `require_platform_admin` (see ADR-0004); `POST` provisions tenant + owner atomically. |
 | `POST /auth/register`, `POST /auth/login`, `GET /auth/me` | `auth` | Tenant-scoped JWT flows. |
 | `POST /parties/people`, `POST /parties/organizations`, `GET /parties`, `GET /parties/{id}`, `DELETE /parties/{id}` | `parties` | Identity CRUD for both party types. |
 | `POST/GET /rbac/roles`, `POST /rbac/role-grants`, `GET /rbac/audit-events` | `rbac` | Roles, grants, audit read — `require_role("admin")`. |

@@ -1,5 +1,12 @@
 # dotmac_starter_mt
 
+**Hard rules live in `AGENTS.md`** (tool-neutral, canonical — this file
+indexes them and adds repo-map/portal specifics). Docs hierarchy:
+`docs/ARCHITECTURE.md` = as-built truth; `docs/adr/` = decisions + status;
+`docs/superpowers/plans|specs/` = non-authoritative intent; `README.md` =
+onboarding; `CONTRIBUTING.md` = human dev rules; `docs/SECURITY.md` =
+security posture.
+
 The consolidated DotMac starter (spec:
 `docs/superpowers/specs/2026-07-17-starter-consolidation-design.md`, decision:
 `docs/adr/0002-starter-consolidation.md`). Multi-tenant always; a
@@ -15,7 +22,7 @@ when adding them; do not invent interim competing authorities.
 ## Layout
 
 - `app/core/` — config, db, models base, security, deps (route guards),
-  middleware, logging, errors, crud, unit_of_work, features registry, audit
+  middleware, logging, errors, crud, features registry, audit
   write-side. Core never imports `app/features` (import-linter contract
   "Core must not import features", `make lint-imports`).
 - `app/features/<name>/` — self-contained: `models.py`, `schemas.py`,
@@ -60,13 +67,18 @@ feature-local in `app/features/custom_fields/models.py` — nothing outside
 that feature touches it; field *values* live on the entity's own model
 (e.g. `Party.custom_fields` JSONB), resolved generically through the
 `ENTITY_MODELS` registry (see Extension points below). Everything else
-stays local to its feature — e.g. `UserCredential` lives in
-`app/features/auth/models.py` because nothing outside `auth` touches it; it
-references `parties`/`tenants` via string-form
-`ForeignKey`/`ForeignKeyConstraint`, no import needed. This is a deliberate
-deviation from "one model per feature package" — see ADR-0002. The full
-model-by-model provenance (owner + port source-of-truth) is the table in
-`docs/ARCHITECTURE.md` — don't duplicate it here.
+stays local to its feature. `UserCredential` MOVED to `app/core/models.py`
+(control-plane security Task 2, PORT-DELTA): atomic tenant provisioning
+(`tenants` feature) creates the owner credential in the same transaction,
+and features never import each other — so it joined the other identity
+models under the placement rule above; the `auth` feature keeps all
+hashing/verification via `app.core.security`. Platform-actor identity
+(`PlatformAdmin`/`PlatformSession`) lives in `app/core/models_platform.py`
+— platform catalog tables (no `tenant_id`, no RLS, revoked from
+`app_user`); see ADR-0004. This is a deliberate deviation from "one model
+per feature package" — see ADR-0002. The full model-by-model provenance
+(owner + port source-of-truth) is the table in `docs/ARCHITECTURE.md` —
+don't duplicate it here.
 
 ## Extension points
 
@@ -233,10 +245,11 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   `test_mutating_routes_require_an_auth_tier_guard`, requires every
   POST/PUT/PATCH/DELETE route to carry a guard from the hand-built
   `AUTH_GUARD_NAMES` set (`require_user_auth`, `require_role`,
-  `require_web_auth`, `require_platform` — deliberately NOT a `require_`
-  prefix match, since `require_tenant` would wrongly pass) unless it's in
-  `MUTATING_ALLOWLIST` (the genuinely pre-auth routes: `POST /auth/register`,
-  `POST /auth/login`, `POST /admin/login`, each commented inline with why).
+  `require_web_auth`, `require_platform_admin` — deliberately NOT a
+  `require_` prefix match, since `require_tenant` would wrongly pass) unless
+  it's in `MUTATING_ALLOWLIST` (the genuinely pre-auth routes:
+  `POST /auth/register`, `POST /auth/login`, `POST /admin/login`,
+  `POST /platform/auth/login`, each commented inline with why).
   A per-route non-admin sweep,
   `tests/unit/test_admin_route_sweep.py::test_non_admin_cookie_gets_redirected_not_200_or_500`,
   independently drives every mutating `/admin/*` route with an
@@ -272,91 +285,42 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
   for the write-loud/read-degrade validator split and the filter fallback
   invariant.
 
-## Hard rules (enforced — test/contract named per rule)
+## Hard rules — canonical list lives in `AGENTS.md`
 
-- Routers (`router.py`, `web.py`) never issue direct DB queries (no
-  `db.query(`, `db.execute(`, `select(`) — logic lives in `service.py`.
-  (`tests/architecture/test_thin_wrappers.py::test_routers_do_not_issue_direct_queries`)
-- A template renders a `*_at` timestamp ONLY through the `local_datetime`/
-  `local_date` Jinja filters (`app.core.templating`) — never a raw
-  attribute — so every rendered timestamp honors the viewing tenant's
-  display settings.
-  (`tests/architecture/test_web_conventions.py::test_timestamp_renders_go_through_local_filters`)
-- Every mounted route carries a `require_*` guard dependency (route-level or
-  router-level `dependencies=[...]`), or is in the explicit
-  `ALLOWLIST` with a comment explaining why it's unauthenticated.
-  (`tests/architecture/test_route_guards.py::test_every_route_has_a_guard`)
-- Every `app/features/<name>` package on disk is registered in
-  `app.features.FEATURE_MODULES` and exports a `feature.py` manifest named
-  after its package.
-  (`tests/architecture/test_feature_manifests.py`)
-- Features never import each other; core never imports features.
-  (`pyproject.toml` `[tool.importlinter]` contracts, `make lint-imports`)
-- The import-linter "Features are independent of each other" contract's
-  `modules` list stays byte-for-byte in sync with `FEATURE_MODULES` — a
-  feature registered in one but not the other would silently escape
-  `make lint-imports`.
-  (`tests/architecture/test_feature_manifests.py::test_importlinter_independence_contract_matches_feature_modules`)
-- Feature `service.py` functions never take `payload: Any` — every payload
-  parameter is a concrete Pydantic schema.
-  (`tests/unit/test_service_typing.py::test_no_any_typed_payloads_in_services`)
-- Feature services never call `db.rollback()` directly. `get_db`
-  (`app.core.db`) owns the request's transaction and issues `SET LOCAL
-  app.current_tenant` on it for RLS; a bare `db.rollback()` on an expected
-  conflict (duplicate email/slug/role-grant, etc.) rolls back that ENTIRE
-  transaction — wiping the tenant context along with it — so any query the
-  caller's exception handler runs afterwards (a web handler re-rendering a
-  form, re-listing recent grants) runs under FORCE RLS with no tenant set:
-  fail-closed to zero rows, or an `ObjectDeletedError` re-loading an
-  expired attribute (finding F3). Use `app.core.db.conflict_savepoint`
-  instead: `with conflict_savepoint(db): db.add(row); db.flush()` inside a
-  `try/except IntegrityError` — it rolls back only a SAVEPOINT, leaving the
-  outer transaction + its `SET LOCAL` intact. The mutation (`db.add`/
-  attribute assignment) must happen INSIDE the `with` block, not before
-  it — `Session.begin_nested()` auto-flushes any already-pending/dirty
-  objects while establishing the SAVEPOINT, so adding/mutating before
-  entering the block would let that pre-flush fail with no savepoint yet in
-  place to protect the outer transaction.
-  (`tests/architecture/test_no_feature_rollback.py`; canaries in
-  `tests/test_conflict_rls_context.py`)
-- Every registered `SettingSpec` key must have a real reader (a quoted-string
-  `resolve_value(...)`-style reference) somewhere under `app/` outside the
-  `settings` feature package and `app/core/settings_resolver.py` itself — a
-  setting nobody reads is a dead control. The allowlist for known,
-  intentionally-not-yet-wired keys is EMPTY as of plan 2b Task 2
-  (`ui_branding` was the one entry, now consumed by
-  `app.core.branding.load_branding`) and may only shrink, never grow,
-  without a task/plan reference.
-  (`tests/architecture/test_no_orphan_settings.py`)
-- Every tenant-scoped model: `tenant_id UUID NOT NULL REFERENCES tenants(id)`
-  + a composite unique on `(tenant_id, ...)` for anything unique-per-tenant,
-  and an RLS `ENABLE/FORCE ROW LEVEL SECURITY` + `CREATE POLICY` in the same
-  migration that creates the table (the settings table's `domain_settings`
-  is the one deliberate exception — `tenant_id` is nullable and it carries a
-  split read/write policy pair instead of a single policy; see
-  `docs/ARCHITECTURE.md`). Not statically checked — enforced by the
-  Postgres RLS integration canaries (`tests/test_cross_tenant_isolation.py`,
-  `tests/test_rbac_audit_isolation.py`, `tests/test_auth_tenant_claim.py`,
-  `tests/test_party_isolation.py`, `tests/test_settings_isolation.py`,
-  `tests/test_custom_fields_isolation.py`, `tests/test_web_auth_isolation.py`,
-  `tests/test_admin_portal_e2e.py`), which fail if isolation is
-  missing. Run these against real Postgres
-  (`make test-db-up && make test-integration`) — SQLite cannot enforce RLS.
-- Migrations run as `app_admin` (`MIGRATION_DATABASE_URL`), never on
-  container boot. The Dockerfile `CMD` only runs `uvicorn` — no `alembic`
-  step — and `scripts/deploy.sh` is the only place migrations run
-  (`alembic upgrade heads`, before recreating the app container). CI's
-  `docker-build` job health-gates a container booted with a deliberately
-  unreachable `DATABASE_URL`, which passes because `/health` is DB-free and
-  because the lifespan's feature-seed step (see below) attempts but never
-  blocks on the DB: a seed failure is caught, logged, and skipped so
-  startup always reaches the point where `/health` can serve.
-- New feature: create the package + `feature.py`, register it in
-  `app/features/__init__.py` (`FEATURE_MODULES`), add it to the
-  import-linter "Features are independent" contract in `pyproject.toml`,
-  and write the cross-tenant isolation test **first** (process discipline —
-  not mechanically enforced, but every existing feature follows it; see
-  `tests/test_cross_tenant_isolation.py` for the pattern).
+**`AGENTS.md` is the single source of truth for the hard rules** (each with
+its enforcing test/contract). This section is only an index — adapters
+point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
+`AGENTS.md` wins; fix the drift.
+
+1. Routers (`router.py`/`web.py`) never issue direct DB queries — logic in
+   `service.py` (`test_thin_wrappers.py`).
+2. Templates render `*_at` timestamps only via `local_datetime`/`local_date`
+   filters (`test_web_conventions.py`).
+3. Every route carries a `require_*` guard or a commented `ALLOWLIST` entry;
+   mutating routes need an `AUTH_GUARD_NAMES`-tier guard
+   (`test_route_guards.py`).
+4. Every feature package is registered and exports a matching manifest
+   (`test_feature_manifests.py`).
+5. Features never import each other; core never imports features
+   (import-linter, `make lint-imports`).
+6. Import-linter independence contract stays in byte-for-byte sync with
+   `FEATURE_MODULES` (`test_feature_manifests.py`).
+7. No `payload: Any` in feature services (`test_service_typing.py`).
+8. `app/core/db.py` is the one transaction authority
+   (`test_session_authority.py`; ARCHITECTURE.md § "Transaction authority").
+9. Feature services never call `db.rollback()` — use `conflict_savepoint`,
+   mutation INSIDE the `with` block (`test_no_feature_rollback.py`;
+   ARCHITECTURE.md § "Conflict handling" for the full F3 rationale).
+10. Every registered `SettingSpec` has a real reader; the unwired allowlist
+    is empty and only shrinks (`test_no_orphan_settings.py`).
+11. Tenant-scoped tables: `tenant_id NOT NULL` + composite uniques + RLS in
+    the same migration (`domain_settings` is the documented exception;
+    platform catalog tables get grants-not-RLS) — enforced on Postgres by
+    `tests/test_rls_catalog.py` + the per-feature isolation canaries.
+12. Migrations run as `app_admin`, never on container boot;
+    `scripts/deploy.sh` is the only production migration path.
+13. New feature: package + manifest + registry + import-linter contract +
+    cross-tenant isolation test FIRST.
 
 ## SOT-complete criteria
 
@@ -373,21 +337,18 @@ concrete evidence; open gaps against all five criteria are tracked in
 
 ## User rule: everything by config, no hardcoding
 
-Env-specific values are overridable variables with documented defaults, not
-literals buried in code: Make vars use `?=` (see `Makefile`'s
-`TEST_DB_PORT ?= 5433` etc.), compose files use `${VAR:-default}`, and
-`scripts/deploy.sh` sources `.env` then falls back to `: "${VAR:=default}"`.
-When adding a new environment-specific value, add it as an overridable knob
-in the same style — don't hardcode ports, hosts, image names, or paths.
+Canonical statement in `AGENTS.md` § "Everything by config". Short form:
+every env-specific value is an overridable knob with a documented default
+(`Settings`/`.env.example`, Make `?=`, compose `${VAR:-default}`,
+deploy-script `: "${VAR:=default}"`); prod-unsafe defaults go in
+`validate_settings`'s prod-fatal list. Never hardcode ports, hosts, image
+names, or paths.
 
 ## Commands
 
-- `make help` — list every target. `make check` before any commit (ruff
-  lint, import-linter, mypy, bandit, `ruff format --check`).
-- `make test-unit` (SQLite, fast — `tests/unit` + `tests/architecture`, no
-  DB required) / `make test-db-up && make test-integration && make
-  test-db-down` (Postgres RLS canaries; `TEST_DB_PORT` overridable if the
-  default port is taken, e.g. `TEST_DB_PORT=5437 make test-db-up`).
+- Validation gates (`make check`, `make test-unit`, `make test-db-up &&
+  make test-integration`): canonical list in `AGENTS.md` § "Validation
+  before any commit". `make help` lists every target.
 - `make dev` — run the dev server. `make css-build` (`npm install && npm run
   css:build`) compiles `static/css/src/main.css` (Tailwind v4, CSS-first —
   `@theme`/`@source`/`@custom-variant`, no `tailwind.config.js`) into

@@ -35,24 +35,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.models import Role
-from tests.conftest import client_for
+from tests.conftest import client_for, provision_owner
 
 PASSWORD = "correct horse battery staple"
-
-
-def _register_admin(client: TestClient, email: str) -> None:
-    """First registered user of a tenant auto-gets the "admin" role
-    (`app.features.auth.service._assign_first_user_admin`)."""
-    resp = client.post(
-        "/auth/register",
-        json={
-            "email": email,
-            "password": PASSWORD,
-            "first_name": "Admin",
-            "last_name": "User",
-        },
-    )
-    assert resp.status_code == 201, resp.text
 
 
 def _web_login(client: TestClient, email: str) -> str:
@@ -77,7 +62,7 @@ def _web_login(client: TestClient, email: str) -> str:
 
 
 def test_duplicate_email_edit_re_renders_with_tenant_context_intact(
-    app_client: TestClient, tenant_a
+    app_client: TestClient, admin_session: Session, tenant_a
 ) -> None:
     """(a) Web edit-to-duplicate-email conflict — parties.
 
@@ -91,7 +76,9 @@ def test_duplicate_email_edit_re_renders_with_tenant_context_intact(
     """
     a = client_for(app_client, tenant_a.slug)
     admin_email = "conflict-admin@tenant-a.example.com"
-    _register_admin(a, admin_email)
+    # Provisioned, not registered — registration no longer grants the
+    # "admin" role the web login below requires (Task 2).
+    provision_owner(admin_session, tenant_a, admin_email)
     csrf = _web_login(a, admin_email)
 
     create_a = a.post(
@@ -164,7 +151,7 @@ def test_duplicate_role_grant_re_renders_with_grants_list_populated(
     """
     a = client_for(app_client, tenant_a.slug)
     admin_email = "conflict-rbac-admin@tenant-a.example.com"
-    _register_admin(a, admin_email)
+    provision_owner(admin_session, tenant_a, admin_email)
     csrf = _web_login(a, admin_email)
 
     create_resp = a.post(

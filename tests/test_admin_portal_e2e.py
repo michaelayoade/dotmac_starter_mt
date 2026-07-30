@@ -2,7 +2,8 @@
 clickthrough over real Postgres/RLS, driven entirely through the HTTP
 surface a browser would use (cookies + HTML forms), not the JSON API.
 
-Register an admin via the API on tenant A, web (cookie) login, dashboard
+Provision an admin on tenant A (`provision_owner`, `tests/conftest.py` —
+registration no longer grants admin, Task 2), web (cookie) login, dashboard
 200, create a person party via the web form, define a custom field via the
 web form, set its value via the values panel, list settings — then a FRESH
 login on tenant B's host sees NONE of it, and logout kills the cookie (a
@@ -26,28 +27,11 @@ one captured value is valid for the whole session.
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
-from tests.conftest import client_for
+from tests.conftest import client_for, provision_owner
 
 PASSWORD = "correct horse battery staple"
-
-
-def _register_admin(client: TestClient, email: str) -> None:
-    """First registered user of a tenant auto-gets the "admin" role
-    (`app.features.auth.service._assign_first_user_admin`) — this doubles as
-    "register the tenant's admin", same convention as every other isolation
-    canary in this suite.
-    """
-    resp = client.post(
-        "/auth/register",
-        json={
-            "email": email,
-            "password": PASSWORD,
-            "first_name": "Admin",
-            "last_name": "User",
-        },
-    )
-    assert resp.status_code == 201, resp.text
 
 
 def _web_login(client: TestClient, email: str) -> str:
@@ -78,14 +62,14 @@ def _web_login(client: TestClient, email: str) -> str:
 
 
 def test_admin_portal_end_to_end_canary(
-    app_client: TestClient, tenant_a, tenant_b
+    app_client: TestClient, admin_session: Session, tenant_a, tenant_b
 ) -> None:
     # -----------------------------------------------------------------
-    # Tenant A: register, web login, dashboard.
+    # Tenant A: provision the admin, web login, dashboard.
     # -----------------------------------------------------------------
     a = client_for(app_client, tenant_a.slug)
     admin_email_a = "portal-admin-a@tenant-a.example.com"
-    _register_admin(a, admin_email_a)
+    provision_owner(admin_session, tenant_a, admin_email_a)
     csrf_a = _web_login(a, admin_email_a)
 
     dashboard_resp = a.get("/admin")
@@ -168,7 +152,7 @@ def test_admin_portal_end_to_end_canary(
     # -----------------------------------------------------------------
     b = client_for(TestClient(app_client.app), tenant_b.slug)
     admin_email_b = "portal-admin-b@tenant-b.example.org"
-    _register_admin(b, admin_email_b)
+    provision_owner(admin_session, tenant_b, admin_email_b)
     _web_login(b, admin_email_b)
 
     b_parties_resp = b.get("/admin/parties")

@@ -23,11 +23,18 @@ from app.core import settings_resolver as sr
 from app.core.audit import AuditEvent
 from app.core.deps import get_db
 from app.core.errors import register_error_handlers
-from app.core.models import Tenant
+from app.core.models import (
+    Party,
+    PartyPerson,
+    PartyRole,
+    PartyType,
+    Role,
+    Tenant,
+    UserCredential,
+)
+from app.core.security import hash_password
 from app.core.settings_models import SettingDomain, SettingValueType
 from app.core.settings_resolver import resolve_value, upsert_by_key
-from app.features.auth import service as auth_service
-from app.features.auth.schemas import RegisterRequest
 from app.features.auth.web import router as auth_web_router
 
 # Import for the side effect: registers custom_fields/max_per_entity,
@@ -39,19 +46,33 @@ PASSWORD = "correct horse battery staple"
 
 
 @pytest.fixture()
-def registered_admin(db: Session, tenant_row: Tenant) -> dict:
-    view = auth_service.register(
-        db,
-        tenant_row,
-        RegisterRequest(
-            email="admin@example.com",
-            password=PASSWORD,
-            first_name="Admin",
-            last_name="User",
-        ),
+def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
+    """A provisioned admin — party + person + credential + "admin" role
+    grant, built directly on core models; registration no longer grants any
+    role (Task 2). Same fixture shape as tests/unit/test_web_login.py.
+    """
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Admin User",
+        email="admin@example.com",
     )
+    db.add(party)
+    db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Admin", last_name="User"))
+    db.add(
+        UserCredential(
+            tenant_id=tenant_row.id,
+            party_id=party.id,
+            password_hash=hash_password(PASSWORD),
+        )
+    )
+    role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
+    db.add(role)
+    db.flush()
+    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.commit()
-    return {"email": view.email, "party_id": view.id}
+    return {"email": party.email, "party_id": party.id}
 
 
 @pytest.fixture()
@@ -118,9 +139,9 @@ def test_branding_form_without_cookie_redirects_to_login(
 
 
 def test_settings_index_renders_grouped_specs_with_source_badges(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get("/admin/settings", cookies={"access_token": token})
     assert resp.status_code == 200
     assert 'aria-label="Admin navigation"' in resp.text
@@ -131,9 +152,9 @@ def test_settings_index_renders_grouped_specs_with_source_badges(
 
 
 def test_settings_index_shows_tenant_source_after_override(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     upsert_by_key(
         db, SettingDomain.audit, "retention_days", 90, tenant_id=tenant_row.id
     )
@@ -146,7 +167,7 @@ def test_settings_index_shows_tenant_source_after_override(
 
 
 def test_settings_index_never_echoes_a_real_secret_value(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     """No registered spec is secret today, but the index must still never
     print a raw secret value — service.list_settings already masks it
@@ -154,7 +175,7 @@ def test_settings_index_never_echoes_a_real_secret_value(
     renders whatever the service returns for `is_secret` specs, not the raw
     stored value.
     """
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get("/admin/settings", cookies={"access_token": token})
     assert resp.status_code == 200
     # No spec is currently secret, so nothing to assert is masked — this is
@@ -163,9 +184,9 @@ def test_settings_index_never_echoes_a_real_secret_value(
 
 
 def test_settings_index_ui_branding_links_to_friendly_editor(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get("/admin/settings", cookies={"access_token": token})
     assert resp.status_code == 200
     assert "/admin/settings/branding" in resp.text
@@ -177,9 +198,9 @@ def test_settings_index_ui_branding_links_to_friendly_editor(
 
 
 def test_edit_form_renders_current_value(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get(
         "/admin/settings/audit/retention_days/edit", cookies={"access_token": token}
     )
@@ -189,9 +210,9 @@ def test_edit_form_renders_current_value(
 
 
 def test_edit_form_unknown_key_returns_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get(
         "/admin/settings/audit/does-not-exist/edit", cookies={"access_token": token}
     )
@@ -199,9 +220,9 @@ def test_edit_form_unknown_key_returns_404(
 
 
 def test_edit_form_unknown_domain_returns_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get(
         "/admin/settings/not-a-domain/some-key/edit",
         cookies={"access_token": token},
@@ -210,9 +231,9 @@ def test_edit_form_unknown_domain_returns_404(
 
 
 def test_edit_submit_writes_tenant_override_and_redirects(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/settings/audit/retention_days/edit",
         data={"value": "90"},
@@ -230,9 +251,9 @@ def test_edit_submit_writes_tenant_override_and_redirects(
 
 
 def test_edit_submit_invalid_value_rerenders_200_with_error(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/settings/audit/retention_days/edit",
         data={"value": "0"},  # below min_value=1
@@ -244,9 +265,9 @@ def test_edit_submit_invalid_value_rerenders_200_with_error(
 
 
 def test_edit_submit_writes_audit_event(
-    web_client: TestClient, registered_admin: dict, db: Session
+    web_client: TestClient, provisioned_admin: dict, db: Session
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     web_client.post(
         "/admin/settings/audit/retention_days/edit",
         data={"value": "120"},
@@ -284,12 +305,12 @@ def secret_spec():
 
 def test_secret_edit_form_never_renders_stored_value_or_mask(
     web_client: TestClient,
-    registered_admin: dict,
+    provisioned_admin: dict,
     db: Session,
     tenant_row: Tenant,
     secret_spec: sr.SettingSpec,
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     upsert_by_key(
         db,
         SettingDomain.auth,
@@ -314,12 +335,12 @@ def test_secret_edit_form_never_renders_stored_value_or_mask(
 
 def test_secret_edit_blank_submit_is_noop_no_write(
     web_client: TestClient,
-    registered_admin: dict,
+    provisioned_admin: dict,
     db: Session,
     tenant_row: Tenant,
     secret_spec: sr.SettingSpec,
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     upsert_by_key(
         db,
         SettingDomain.auth,
@@ -354,12 +375,12 @@ def test_secret_edit_blank_submit_is_noop_no_write(
 
 def test_secret_edit_nonblank_submit_updates_stored_value(
     web_client: TestClient,
-    registered_admin: dict,
+    provisioned_admin: dict,
     db: Session,
     tenant_row: Tenant,
     secret_spec: sr.SettingSpec,
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     upsert_by_key(
         db,
         SettingDomain.auth,
@@ -394,11 +415,11 @@ def test_secret_edit_nonblank_submit_updates_stored_value(
 
 
 def test_branding_form_renders_current_effective_branding(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     from app.core.branding import get_brand
 
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get("/admin/settings/branding", cookies={"access_token": token})
     assert resp.status_code == 200
     assert get_brand()["name"] in resp.text
@@ -406,9 +427,9 @@ def test_branding_form_renders_current_effective_branding(
 
 
 def test_branding_submit_writes_override_and_redirects(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/settings/branding",
         data={
@@ -434,7 +455,7 @@ def test_branding_submit_writes_override_and_redirects(
 
 
 def test_branding_form_after_submit_shows_sanitized_css_preview(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
     """`sanitize_branding_css` strips a dangerous pattern in place (verified
     directly in `tests/unit/test_branding.py`); an angle-bracket breakout
@@ -443,7 +464,7 @@ def test_branding_form_after_submit_shows_sanitized_css_preview(
     preview renders the sanitizer's OUTPUT (the safe rule survives, the
     dangerous one doesn't) rather than the raw stored value.
     """
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     web_client.post(
         "/admin/settings/branding",
         data={

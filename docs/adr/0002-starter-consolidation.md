@@ -127,3 +127,14 @@ The legacy `dotmac_starter` may remain available for simple or existing uses; th
 not require deleting or archiving it. It must not become a second destination for new
 capability, control-plane, or security architecture. See
 `docs/adr/0003-unified-deployment-profiles.md` for the governing decision.
+
+## Amendment 2026-07-30 — two ported details since superseded
+
+- The `UoW` (UnitOfWork) helper named in the `dotmac_sub` source row above was ported and
+  later DELETED (zero production consumers; control-plane security Task 4, ADR-0004 D9) —
+  `app/core/db.py` is the one transaction authority
+  (`docs/ARCHITECTURE.md` § "Transaction authority").
+- The deviation section's `UserCredential`-stays-in-`auth` example is superseded:
+  `UserCredential` moved to `app/core/models.py` (control-plane security Task 2 PORT-DELTA,
+  ADR-0004 D6) because atomic tenant provisioning composes it and features never import
+  each other. The placement *rule* it illustrates is unchanged.

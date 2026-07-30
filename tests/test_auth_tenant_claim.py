@@ -1,17 +1,27 @@
-"""Auth tenant-claim canaries."""
+"""Auth tenant-claim canaries.
+
+These deliberately keep exercising `/auth/register` (a registered user is a
+plain user — no role needed to hit `/auth/me`), so the tenant's
+`auth.registration_policy` is explicitly opened first via
+`open_registration` (`tests/conftest.py`) — registration defaults to
+closed since control-plane security Task 2.
+"""
 
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
-from tests.conftest import client_for
+from tests.conftest import client_for, open_registration
 
 
 def test_jwt_issued_for_tenant_a_rejected_on_tenant_b(
     app_client: TestClient,
+    admin_session: Session,
     tenant_a,
     tenant_b,
 ):
+    open_registration(admin_session, tenant_a)
     a = client_for(app_client, tenant_a.slug)
     register = a.post(
         "/auth/register",

@@ -44,10 +44,20 @@ def admin_engine():
 
 @pytest.fixture(autouse=True)
 def _set_database_url(monkeypatch):
-    """Pin DATABASE_URL for the app under test to the TEST_DATABASE_URL."""
+    """Pin DATABASE_URL for the app under test to the TEST_DATABASE_URL.
+
+    PLATFORM_DATABASE_URL rides along from TEST_PLATFORM_DATABASE_URL (the
+    `platform_api` role — set by `make test-integration`) so platform routes
+    exercise the REAL platform grants: platform catalog tables are REVOKEd
+    from `app_user`, so running them on the app_user connection would fail
+    for the wrong reason (and hide a missing-grant bug in the right one).
+    """
     url = os.getenv("TEST_DATABASE_URL")
     if url:
         monkeypatch.setenv("DATABASE_URL", url)
+    platform_url = os.getenv("TEST_PLATFORM_DATABASE_URL")
+    if platform_url:
+        monkeypatch.setenv("PLATFORM_DATABASE_URL", platform_url)
     monkeypatch.setenv("PLATFORM_ROOT_DOMAIN", "localhost")
 
 
@@ -101,3 +111,168 @@ def client_for(client: TestClient, tenant_slug: str) -> TestClient:
     """Wrap a TestClient so every request carries Host: {slug}.localhost."""
     client.headers.update({"Host": f"{tenant_slug}.localhost"})
     return client
+
+
+DEFAULT_TEST_PASSWORD = "correct horse battery staple"
+
+PLATFORM_ADMIN_EMAIL = "root@platform.example.com"
+PLATFORM_ADMIN_PASSWORD = "platform-canary-password"
+
+
+def load_platform_admin_cli():
+    """Import scripts/create_platform_admin.py — the CLI's `upsert_admin` IS
+    the only platform-admin bootstrap path (never HTTP), so platform tests
+    create admins through that exact function."""
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parent.parent / "scripts" / "create_platform_admin.py"
+    )
+    spec = importlib.util.spec_from_file_location("create_platform_admin", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def platform_admin(admin_session):
+    """A platform admin created through the CLI's own upsert path."""
+    from sqlalchemy import text as sa_text
+
+    cli = load_platform_admin_cli()
+    admin = cli.upsert_admin(
+        admin_session,
+        email=PLATFORM_ADMIN_EMAIL,
+        password=PLATFORM_ADMIN_PASSWORD,
+        is_active=True,
+    )
+    admin_session.commit()
+    yield admin
+    admin_session.execute(
+        sa_text(
+            "DELETE FROM platform_sessions WHERE admin_id IN "
+            "(SELECT id FROM platform_admins WHERE email = :email)"
+        ),
+        {"email": PLATFORM_ADMIN_EMAIL},
+    )
+    admin_session.execute(
+        sa_text("DELETE FROM platform_admins WHERE email = :email"),
+        {"email": PLATFORM_ADMIN_EMAIL},
+    )
+    admin_session.commit()
+
+
+def platform_login(client: TestClient) -> str:
+    """Log the shared `platform_admin` fixture's admin in on the platform
+    root host and return its bearer token."""
+    resp = client.post(
+        "/platform/auth/login",
+        json={"email": PLATFORM_ADMIN_EMAIL, "password": PLATFORM_ADMIN_PASSWORD},
+        headers={"Host": "localhost"},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["access_token"]
+
+
+def provision_owner(
+    admin_session: Session,
+    tenant,
+    email: str,
+    password: str = DEFAULT_TEST_PASSWORD,
+    *,
+    role_slug: str = "admin",
+) -> None:
+    """Create a login-able owner (party + person + credential + role grant)
+    for `tenant` via the admin engine — the test-side mirror of
+    `app.features.tenants.service.provision_tenant`.
+
+    Control-plane security Task 2 made platform provisioning the ONLY
+    owner-creation path (registration defaults to `closed` and never grants
+    admin), so tests that used to register-their-first-user-as-admin
+    provision an owner here instead and then just log in.
+    """
+    from app.core.models import (
+        Party,
+        PartyPerson,
+        PartyRole,
+        PartyType,
+        Role,
+        UserCredential,
+    )
+    from app.core.security import hash_password
+
+    email = email.strip().lower()
+    party = Party(
+        tenant_id=tenant.id,
+        party_type=PartyType.person,
+        display_name="Owner Account",
+        email=email,
+    )
+    admin_session.add(party)
+    admin_session.flush()
+    admin_session.add(
+        PartyPerson(party_id=party.id, first_name="Owner", last_name="Account")
+    )
+    admin_session.add(
+        UserCredential(
+            tenant_id=tenant.id,
+            party_id=party.id,
+            password_hash=hash_password(password),
+        )
+    )
+    from sqlalchemy import select
+
+    role = admin_session.scalars(
+        select(Role).where(Role.tenant_id == tenant.id).where(Role.slug == role_slug)
+    ).first()
+    if role is None:
+        role = Role(tenant_id=tenant.id, slug=role_slug, name=role_slug.title())
+        admin_session.add(role)
+        admin_session.flush()
+    admin_session.add(
+        PartyRole(tenant_id=tenant.id, party_id=party.id, role_id=role.id)
+    )
+    admin_session.commit()
+    # Cleanup rides on the tenant fixture's teardown (tenants delete cascades).
+
+
+def provision_and_login(
+    admin_session: Session,
+    tenant,
+    client: TestClient,
+    email: str,
+    password: str = DEFAULT_TEST_PASSWORD,
+) -> str:
+    """`provision_owner` + `/auth/login` on the tenant host → bearer token."""
+    provision_owner(admin_session, tenant, email, password)
+    login = client.post(
+        "/auth/login",
+        json={"email": email, "password": password},
+        headers={"Host": f"{tenant.slug}.localhost"},
+    )
+    assert login.status_code == 200, login.text
+    return login.json()["access_token"]
+
+
+def open_registration(admin_session: Session, tenant) -> None:
+    """Set `auth.registration_policy = open` for `tenant` (tenant-scoped
+    `domain_settings` row) — for tests exercising the self-registration
+    path, which is policy-CLOSED by default since Task 2."""
+    from app.core.settings_models import (
+        DomainSetting,
+        SettingDomain,
+        SettingValueType,
+    )
+
+    admin_session.add(
+        DomainSetting(
+            tenant_id=tenant.id,
+            domain=SettingDomain.auth,
+            key="registration_policy",
+            value_type=SettingValueType.string,
+            value_text="open",
+        )
+    )
+    admin_session.commit()

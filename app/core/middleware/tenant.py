@@ -131,7 +131,16 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
 
 
 def _is_platform_path(path: str, host: str, root: str) -> bool:
-    """Routes that are valid without a resolved tenant."""
-    if host == root:
-        return True
-    return path.startswith("/platform/") or path in _HEALTH_PATHS
+    """Requests that may proceed without a resolved tenant: ANY path on the
+    platform root host (platform routes; unresolved paths there 404 in
+    routing), plus the DB-free health paths on any host.
+
+    Host-exact by design (control-plane security Task 1): a `/platform/*`
+    request on a tenant or unknown host is NOT platform-valid — it 404s like
+    any other unresolved path. The previous `startswith("/platform/")`
+    branch passed `/platform/*` on ANY host, which let unknown hosts reach
+    platform routes; `require_platform_admin` re-checks the host as
+    defense-in-depth, but the middleware must not forward those requests in
+    the first place. See `PLATFORM_ROOT_DOMAIN` in `.env.example`.
+    """
+    return host == root or path in _HEALTH_PATHS

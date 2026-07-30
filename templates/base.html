@@ -6,10 +6,12 @@
     <meta name="htmx-config" content='{"defaultSwapStyle":"innerHTML"}' />
     <title>{% block title %}{{ brand.name if brand and brand.name else "Admin" }}{% endblock %}</title>
 
-    <!-- Fonts: Outfit (display) + Plus Jakarta Sans (body) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Fonts: Outfit (display) + Plus Jakarta Sans (body) — VENDORED
+         (static/fonts/, latin subset woff2) per the cross-Dotmac no-CDN
+         standard: external font hosts are a prod reliability + CSP surface
+         (control-plane security Task 5 dropped the fonts.googleapis.com /
+         fonts.gstatic.com origins from the Content-Security-Policy). -->
+    <link rel="stylesheet" href="{{ static_asset_url('/static/fonts/fonts.css') }}">
 
     <!-- Tailwind CSS (built from static/css/src/main.css via `npm run css:build`) -->
     <link rel="stylesheet" href="{{ static_asset_url('/static/css/main.css') }}">
@@ -71,25 +73,9 @@
         </template>
     </div>
 
-    <script>
-        window.showToast = function (message, type, duration) {
-            window.dispatchEvent(new CustomEvent('show-toast', {
-                detail: { message: message, type: type || 'info', duration: duration || 4000 }
-            }));
-        };
-
-        document.body.addEventListener('htmx:afterRequest', function (evt) {
-            var trigger = evt.detail.xhr.getResponseHeader('HX-Trigger');
-            if (!trigger) return;
-            try {
-                var data = JSON.parse(trigger);
-                if (data.showToast) {
-                    window.dispatchEvent(new CustomEvent('show-toast', { detail: data.showToast }));
-                }
-            } catch (e) { /* HX-Trigger wasn't our JSON shape — ignore */ }
-        });
-    </script>
-
+    <!-- No inline <script> blocks in any template: CSP serves script-src
+         'self' without 'unsafe-inline' (Task 5). The toast bridge that used
+         to live here is in static/js/components.js. -->
     {% block scripts %}{% endblock %}
 </body>
 </html>

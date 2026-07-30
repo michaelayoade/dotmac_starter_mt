@@ -1,9 +1,16 @@
 # ADR 0001 — Multi-Tenant Architecture
 
-**Status:** Accepted
+**Status:** Amended 2026-07-30 (originally Accepted 2026-05-04)
 **Date:** 2026-05-04
 **Supersedes:** N/A
 **Successor of:** None — this is the founding decision for `dotmac_starter_mt`.
+
+> **Amendment discipline:** the original text below is preserved as written —
+> history is not rewritten. Sections that no longer match the as-built system
+> carry a dated `Amended 2026-07-30` note; the consolidated list is in the
+> [Amendment 2026-07-30](#amendment-2026-07-30--as-built-reconciliation)
+> section at the end. `docs/ARCHITECTURE.md` is the as-built truth; where the
+> two disagree, ARCHITECTURE.md wins.
 
 ## Context
 
@@ -19,6 +26,13 @@ load-bearing structural property**, not an opt-in filter.
 ## Foundational Decisions
 
 ### D1. Identity model: tenant-local `Person`
+
+> **Amended 2026-07-30:** the tenant-local principle stands, but the bare
+> `Person` model was superseded by `Party` (`party_type` person|organization,
+> with `PartyPerson`/`PartyOrganization` subtype profile tables) — spec
+> amendment 2026-07-17, recorded in ADR-0002. See `docs/ARCHITECTURE.md`
+> § "Party family + subtype RLS" for the as-built model. Read `people` below
+> as `parties`.
 
 Each tenant has its own `people` rows. The same email can exist in two different tenants
 as two distinct people. There is **no global identity record** that spans tenants.
@@ -115,6 +129,18 @@ log structure, error handlers, observability) — but not migrations, models, or
 
 ### Tenant Resolver
 
+> **Amended 2026-07-30:** the middleware list below is design intent, not the
+> as-built stack. There is no `AuthMiddleware` — auth is a route *dependency*
+> (`app.core.deps.authenticate_request`, shared by bearer and cookie paths) —
+> and `SecurityHeadersMiddleware` + `ObservabilityMiddleware` were added later.
+> The actual execution order is documented in `docs/ARCHITECTURE.md`
+> § "Request flow / middleware order". The `require_platform_admin` described
+> below (a `tenant is None` check plus a "platform_admin role") was built
+> differently: platform actors have their own identity tables and guard,
+> entirely separate from tenant roles — see ADR-0004. Also, `/platform/*`
+> resolves ONLY on the exact platform root host (host-exact middleware +
+> guard defense-in-depth, ADR-0004 D3), which step 3 below did not require.
+
 Middleware order in `app/main.py`:
 
 1. `TrustedHostMiddleware` / ingress host validation — rejects unknown hosts and only
@@ -170,6 +196,13 @@ no tenant context set, then the new request's `get_db` sets its own. RLS policie
 `app_current_tenant_id()`, which wraps `current_setting('app.current_tenant', true)`,
 treats empty or malformed values as `NULL`, and lets RLS fail closed when context isn't set.
 
+> **Amended 2026-07-30:** the Celery pattern below was never built — there is
+> no `app/celery_app.py` and no task queue in this starter (not built; see
+> `docs/superpowers/phase2-backlog.md` and the README "What's NOT here yet"
+> list). The non-request session boundary that DOES exist is
+> `app.core.db.platform_session` (see `docs/ARCHITECTURE.md` § "Transaction
+> authority"); any future worker must go through it.
+
 Background tasks have a parallel pattern in `app/celery_app.py`:
 
 ```python
@@ -220,6 +253,15 @@ The migration template adds RLS in the same transaction as the table create. The
 
 ### Auth Flow
 
+> **Amended 2026-07-30:** holds in substance (the three-layer cross-tenant
+> defense below is real and canary-tested), with two model corrections:
+> `Person` is now `Party` (see D1's note), and `UserCredential` no longer
+> carries an email column — login resolves `Party` by
+> `(tenant_id, lower(email))` first, then the credential by `party_id`
+> (single email authority, 2b.1-T3/F2; see `docs/ARCHITECTURE.md`
+> § "Known dual-writer: Parties"). Platform tokens are a separate population
+> carrying `aud="platform"` and no tenant claim — ADR-0004 D4.
+
 JWT claims include both `sub` (person UUID) and `tenant_id` (UUID).
 
 `require_user_auth` dependency:
@@ -245,6 +287,17 @@ Even if they bypass that, the `AuthSession.tenant_id` check at step 3 catches it
 they bypass that, RLS at the DB layer ensures they see no `widgets` data. Three layers.
 
 ### Tenant Lifecycle
+
+> **Amended 2026-07-30:** the provisioning transaction below IS now built,
+> essentially as designed (control-plane security Task 2:
+> `app.features.tenants.service.provision_tenant` — one platform-session
+> transaction, `SET LOCAL app.current_tenant` after the tenant flush, owner
+> party + credential + admin role/grant + two audit events; ADR-0004 D6) —
+> except that credentials are supplied by the caller, never returned.
+> Suspension via `is_active` is enforced by the resolver as described. Hard
+> delete (GDPR) and data export remain NOT built — see the backlog. The
+> richer lifecycle state machines are an ADR-0003 target, not current
+> runtime.
 
 Provisioning:
 
@@ -278,6 +331,13 @@ Data export:
 
 ### Audit Log Immutability
 
+> **Amended 2026-07-30:** not built as designed — there is no
+> `app_user_audit_writer` role and no separate `audit_db` dependency. As
+> built, `app.core.audit.write_audit_event` is the single construction point
+> for `AuditEvent` rows, written on the request session under RLS
+> (`tests/test_rbac_audit_isolation.py`). Privilege-level append-only
+> enforcement remains open — see `docs/superpowers/phase2-backlog.md`.
+
 Audit events table is append-only by privilege:
 
 ```sql
@@ -292,6 +352,14 @@ Application code cannot mutate audit history even with a SQL injection bug.
 
 ### Per-Tenant Rate Limiting
 
+> **Amended 2026-07-30:** Redis was never shipped. As built
+> (control-plane security Task 5), rate limiting is a `RateLimitStore`
+> protocol with an LRU-bounded in-process `MemoryStore`
+> (`app/core/middleware/rate_limit.py`) keyed by tenant/client-ip/route
+> TEMPLATE; `RATE_LIMIT_REDIS_URL` is the reserved swap seam, with no redis
+> dependency (see `docs/SECURITY.md` § "Rate-limit store swap seam"). The
+> `tenant_settings.rate_limit_*` per-tenant overrides below do not exist.
+
 Redis key:
 
 ```
@@ -303,6 +371,11 @@ Tenant-specific limit overrides live in `tenant_settings.rate_limit_*` and fall 
 platform defaults.
 
 ### Background Jobs
+
+> **Amended 2026-07-30:** not built — no Celery, no `app/services/queue.py`,
+> no workers exist (see the Celery note under "DB Connection" above). The
+> design below is retained as intent for whichever project adds a queue; see
+> the backlog.
 
 Every `enqueue_task()` call requires a `tenant_id` (or explicit `is_platform_task=True`).
 Helpers in `app/services/queue.py`:
@@ -320,6 +393,10 @@ Workers refuse to run a task that touches tenant data without a `tenant_id` head
 
 ### WebSockets
 
+> **Amended 2026-07-30:** not built — there are no WebSocket endpoints and no
+> Redis pub/sub in this starter. Retained as design intent only; a project
+> adding WebSockets must heed the separate-ASGI-resolver-path warning below.
+
 Connection manager keys: `(tenant_id, person_id)`. Redis pub/sub channels:
 `ws:tenant:{tenant_id}:notifications`. A notification published to tenant A's channel is
 never delivered to tenant B's subscribers because they're on a different channel.
@@ -330,6 +407,10 @@ WebSocket scopes, so this is a separate ASGI/resolver path.
 
 ### File Storage
 
+> **Amended 2026-07-30:** not built — there is no `FileUploadService` and no
+> object storage integration (README "What's NOT here yet"). Retained as
+> design intent for a future file-upload feature.
+
 Object key structure: `tenants/{tenant_id}/{category}/{filename}`. The `tenant_id` prefix
 is enforced in `FileUploadService.upload()` — the service receives `tenant_id` from
 `request.state.tenant` (NOT from a request param) and prepends it. Path traversal guards
@@ -339,6 +420,16 @@ S3 bucket policies should additionally enforce `s3:prefix = "tenants/${aws:useri
 using per-tenant IAM roles (out of scope for v1, documented as upgrade path).
 
 ### Settings: Platform vs Tenant
+
+> **Amended 2026-07-30:** superseded by the settings-as-data design. A
+> `domain_settings` table DOES exist (`app/core/settings_models.py`,
+> `tenant_id` nullable: `NULL` rows are platform defaults writable only by
+> `platform_api`, with a split read/write RLS policy pair), resolved
+> tenant → platform → spec-default through a typed `SettingSpec` registry.
+> There are no `platform_settings`/`tenant_settings` tables. The "hard, not
+> soft" split below did not survive contact with the tenant-overridable-
+> default requirement. See `docs/ARCHITECTURE.md` § "Settings resolution
+> order + platform-row RLS design".
 
 - **Platform settings** (global): JWT signing keys, S3 backend config, trusted proxies,
   rate limit defaults. Stored in `platform_settings` table or env. Operator-controlled.
@@ -389,6 +480,15 @@ Documented to set expectations:
 
 ## Test Plan
 
+> **Amended 2026-07-30:** delivered and exceeded, with two file-name deltas:
+> `test_rls_enforced.py` became the far stronger dynamic catalog audit
+> `tests/test_rls_catalog.py` (RLS + FORCE + policy + grants + composite FKs
+> + metadata parity on every table, sensitivity self-tested) plus per-feature
+> isolation canaries (`tests/test_*_isolation.py`); `test_tenant_resolver.py`
+> exists as `tests/unit/test_tenant_middleware.py`. `test_audit_immutability.py`
+> was never written — its precondition (the audit-writer role) was not built;
+> see the Audit Log Immutability note above.
+
 Repo-level smoke tests:
 
 - `test_cross_tenant_isolation.py` — two tenants, can't read each other's people
@@ -416,3 +516,37 @@ These are tracked but deferred until a real product surfaces the requirement.
 
 - PostgreSQL RLS: https://www.postgresql.org/docs/current/ddl-rowsecurity.html
 - `dotmac_starter` (single-tenant predecessor): patterns copied where applicable
+
+## Amendment 2026-07-30 — as-built reconciliation
+
+Control-plane security Task 6
+(`docs/superpowers/plans/2026-07-18-control-plane-security.md`). The founding
+decisions D1–D4 stand: tenant-local identity, subdomain routing, shared DB +
+`tenant_id` + RLS with three Postgres roles, and a clean-slate repo all
+shipped and are canary-tested. The dated notes inline above reconcile the
+detailed designs with reality; in summary:
+
+- **`Person` → `Party`** (spec amendment 2026-07-17, ADR-0002): the identity
+  model is `Party` + subtype tables — see `docs/ARCHITECTURE.md` § "Party
+  family + subtype RLS".
+- **Platform control plane** is real and secured, but with its OWN identity
+  (`platform_admins`/`platform_sessions`), not a tenant-role — the governing
+  decision is **ADR-0004** (exact-host routing, `aud="platform"` token
+  separation, CLI-only bootstrap, atomic audited provisioning).
+- **Never built as described** (design intent retained, marked inline):
+  Celery background jobs/queue helpers, WebSockets + Redis pub/sub, file
+  storage, the `app_user_audit_writer` privilege-separated audit writer, and
+  Redis-backed rate limiting (a bounded in-process store with a documented
+  Redis swap seam shipped instead).
+- **Settings** are settings-as-data on a nullable-`tenant_id`
+  `domain_settings` table with split RLS policies — the "no domain_settings
+  table in v1" statement is superseded.
+- **Provisioning** landed essentially as designed (one atomic
+  platform-session transaction; ADR-0004 D6); hard delete and data export
+  remain open.
+- **Test plan** delivered with stronger equivalents (`tests/test_rls_catalog.py`
+  dynamic audit; per-feature isolation canaries); `test_audit_immutability.py`
+  tracks the unbuilt audit-writer role.
+
+Where this document and `docs/ARCHITECTURE.md` disagree, ARCHITECTURE.md (the
+as-built truth) governs.

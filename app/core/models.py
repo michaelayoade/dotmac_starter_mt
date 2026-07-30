@@ -289,6 +289,49 @@ class PartyRole(Base, TimestampMixin):
     role_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False, index=True)
 
 
+class UserCredential(Base, TimestampMixin):
+    """Password credential for a `party_type == person` `Party`.
+
+    MOVED here from `app/features/auth/models.py` (control-plane security
+    Task 2, PORT-DELTA): atomic tenant provisioning
+    (`app.features.tenants.service.provision_tenant`) must create the owner's
+    credential in the same transaction as the tenant, and `tenants` may not
+    import the `auth` feature (feature-independence contract) — so the model
+    joins the other identity models under ADR-0002's placement rule (models
+    needed across feature boundaries live in core). The `auth` feature keeps
+    ALL hashing/verification logic via `app.core.security`; only the table
+    definition moved.
+
+    No `email` column (F2): `Party.email` is the single email authority —
+    `login()` resolves the party by email first, then this table by
+    `party_id` only. See `docs/ARCHITECTURE.md`'s "Auth credentials" row.
+    """
+
+    __tablename__ = "user_credentials"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "party_id"],
+            ["parties.tenant_id", "parties.id"],
+            ondelete="CASCADE",
+            name="fk_user_credentials_tenant_party",
+        ),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    party_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        nullable=False,
+        index=True,
+    )
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
 class AuthSession(Base, TimestampMixin):
     __tablename__ = "auth_sessions"
     __table_args__ = (

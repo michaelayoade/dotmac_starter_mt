@@ -29,9 +29,16 @@ from sqlalchemy.orm import Session
 from app.core.audit import AuditEvent
 from app.core.deps import get_db
 from app.core.errors import register_error_handlers
-from app.core.models import Party, PartyType, Role, Tenant
-from app.features.auth import service as auth_service
-from app.features.auth.schemas import RegisterRequest
+from app.core.models import (
+    Party,
+    PartyPerson,
+    PartyRole,
+    PartyType,
+    Role,
+    Tenant,
+    UserCredential,
+)
+from app.core.security import hash_password
 from app.features.auth.web import router as auth_web_router
 from app.features.rbac.web import router as rbac_web_router
 
@@ -39,23 +46,33 @@ PASSWORD = "correct horse battery staple"
 
 
 @pytest.fixture()
-def registered_admin(db: Session, tenant_row: Tenant) -> dict:
-    """First registered user in a tenant auto-gets the admin role — reuse
-    the real register/login flow rather than hand-building a Party/Role/
-    PartyRole trio (same fixture shape as tests/unit/test_parties_web.py).
+def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
+    """A provisioned admin — party + person + credential + "admin" role
+    grant, built directly on core models; registration no longer grants any
+    role (Task 2). Same fixture shape as tests/unit/test_web_login.py.
     """
-    view = auth_service.register(
-        db,
-        tenant_row,
-        RegisterRequest(
-            email="admin@example.com",
-            password=PASSWORD,
-            first_name="Admin",
-            last_name="User",
-        ),
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Admin User",
+        email="admin@example.com",
     )
+    db.add(party)
+    db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Admin", last_name="User"))
+    db.add(
+        UserCredential(
+            tenant_id=tenant_row.id,
+            party_id=party.id,
+            password_hash=hash_password(PASSWORD),
+        )
+    )
+    role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
+    db.add(role)
+    db.flush()
+    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.commit()
-    return {"email": view.email, "party_id": view.id}
+    return {"email": party.email, "party_id": party.id}
 
 
 @pytest.fixture()
@@ -140,9 +157,9 @@ def test_audit_without_cookie_redirects_to_login(web_client: TestClient) -> None
 
 
 def test_roles_index_full_page_renders_shell_and_table(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_role(db, tenant_row, "editor")
     db.commit()
 
@@ -154,9 +171,9 @@ def test_roles_index_full_page_renders_shell_and_table(
 
 
 def test_roles_index_htmx_request_returns_table_fragment_only(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_role(db, tenant_row, "editor")
     db.commit()
 
@@ -172,9 +189,9 @@ def test_roles_index_htmx_request_returns_table_fragment_only(
 
 
 def test_roles_index_pagination_second_page(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     for i in range(25):
         _make_role(db, tenant_row, f"role-{i:02d}")
     db.commit()
@@ -203,9 +220,9 @@ def test_roles_index_pagination_second_page(
 
 
 def test_role_create_form_renders(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get("/admin/roles/create", cookies={"access_token": token})
     assert resp.status_code == 200
     assert 'hx-post="/admin/roles"' in resp.text
@@ -214,9 +231,9 @@ def test_role_create_form_renders(
 
 
 def test_role_create_success_redirects_to_index(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/roles",
         data={"slug": "support-agent", "name": "Support Agent"},
@@ -232,9 +249,9 @@ def test_role_create_success_redirects_to_index(
 
 
 def test_role_create_validation_error_rerenders_200(
-    web_client: TestClient, registered_admin: dict, db: Session
+    web_client: TestClient, provisioned_admin: dict, db: Session
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/roles",
         data={"slug": "", "name": "Support Agent"},
@@ -247,9 +264,9 @@ def test_role_create_validation_error_rerenders_200(
 
 
 def test_role_create_duplicate_slug_rerenders_200_with_conflict(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_role(db, tenant_row, "editor")
     db.commit()
 
@@ -264,9 +281,9 @@ def test_role_create_duplicate_slug_rerenders_200_with_conflict(
 
 
 def test_role_create_writes_audit_event(
-    web_client: TestClient, registered_admin: dict, db: Session
+    web_client: TestClient, provisioned_admin: dict, db: Session
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     web_client.post(
         "/admin/roles",
         data={"slug": "billing", "name": "Billing"},
@@ -284,9 +301,9 @@ def test_role_create_writes_audit_event(
 
 
 def test_role_grants_form_renders_parties_and_roles(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_party(db, tenant_row, "Ada Lovelace", "ada@example.com")
     _make_role(db, tenant_row, "editor")
     db.commit()
@@ -299,9 +316,9 @@ def test_role_grants_form_renders_parties_and_roles(
 
 
 def test_role_grants_search_filters_by_display_name_or_email(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_party(db, tenant_row, "Ada Lovelace", "ada@example.com")
     _make_party(db, tenant_row, "Grace Hopper", "grace@example.com")
     db.commit()
@@ -317,13 +334,13 @@ def test_role_grants_search_filters_by_display_name_or_email(
 
 
 def test_role_grants_search_escapes_like_wildcards(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
     """A literal "%" in the search term must not act as a LIKE wildcard —
     searching "50%" should not match a party named "50 Cent" or similar
     display names that merely start with "50".
     """
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_party(db, tenant_row, "50% Off Corp", "fifty@example.com")
     _make_party(db, tenant_row, "50 Cent Enterprises", "cent@example.com")
     db.commit()
@@ -339,9 +356,9 @@ def test_role_grants_search_escapes_like_wildcards(
 
 
 def test_role_grants_success_redirects_and_writes_audit_event(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_party(db, tenant_row, "Ada Lovelace", "ada@example.com")
     role = _make_role(db, tenant_row, "editor")
     db.commit()
@@ -365,9 +382,9 @@ def test_role_grants_success_redirects_and_writes_audit_event(
 
 
 def test_role_grants_unknown_party_rerenders_200_with_error(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     role = _make_role(db, tenant_row, "editor")
     db.commit()
 
@@ -385,11 +402,11 @@ def test_role_grants_unknown_party_rerenders_200_with_error(
 
 
 def test_role_grants_duplicate_rerenders_200_with_conflict(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
     from app.core.models import PartyRole
 
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_party(db, tenant_row, "Ada Lovelace", "ada@example.com")
     role = _make_role(db, tenant_row, "editor")
     db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
@@ -406,9 +423,9 @@ def test_role_grants_duplicate_rerenders_200_with_conflict(
 
 
 def test_role_grants_invalid_uuid_rerenders_200_with_field_error(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/role-grants",
         data={"party_id": "not-a-uuid", "role_id": "also-not-a-uuid"},
@@ -446,9 +463,9 @@ def _make_audit_event(
 
 
 def test_audit_index_full_page_renders_shell_and_table(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_audit_event(db, tenant_row, action="role.create", details={"slug": "editor"})
     db.commit()
 
@@ -460,9 +477,9 @@ def test_audit_index_full_page_renders_shell_and_table(
 
 
 def test_audit_index_htmx_request_returns_table_fragment_only(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_audit_event(db, tenant_row)
     db.commit()
 
@@ -477,10 +494,10 @@ def test_audit_index_htmx_request_returns_table_fragment_only(
 
 
 def test_audit_index_resolves_actor_display_name(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
-    admin_party_id = registered_admin["party_id"]
+    token = _login(web_client, provisioned_admin["email"])
+    admin_party_id = provisioned_admin["party_id"]
     _make_audit_event(db, tenant_row, actor_party_id=admin_party_id)
     _make_audit_event(db, tenant_row, actor_party_id=None)
     db.commit()
@@ -492,9 +509,9 @@ def test_audit_index_resolves_actor_display_name(
 
 
 def test_audit_index_renders_details_as_escaped_json(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_audit_event(db, tenant_row, details={"note": "<script>alert(1)</script>"})
     db.commit()
 
@@ -505,9 +522,9 @@ def test_audit_index_renders_details_as_escaped_json(
 
 
 def test_audit_index_pagination_boundary(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     for i in range(25):
         _make_audit_event(db, tenant_row, action=f"test.event.{i:02d}")
     db.commit()
@@ -543,9 +560,9 @@ def test_audit_index_pagination_boundary(
 
 
 def test_audit_index_excludes_events_older_than_retention_window(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     recent = _make_audit_event(db, tenant_row, action="recent.event")
     old = _make_audit_event(db, tenant_row, action="old.event")
     db.commit()

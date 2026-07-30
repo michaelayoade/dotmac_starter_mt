@@ -18,23 +18,11 @@ them) live in `tests/unit/test_web_login.py` and `tests/unit/test_branding.py`.
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
-from tests.conftest import client_for
+from tests.conftest import client_for, provision_owner
 
 PASSWORD = "correct horse battery staple"
-
-
-def _register_admin(client: TestClient, email: str) -> None:
-    resp = client.post(
-        "/auth/register",
-        json={
-            "email": email,
-            "password": PASSWORD,
-            "first_name": "Admin",
-            "last_name": "User",
-        },
-    )
-    assert resp.status_code == 201, resp.text
 
 
 def _web_login(client: TestClient, email: str) -> str:
@@ -55,17 +43,18 @@ def _web_login(client: TestClient, email: str) -> str:
 
 
 def test_saved_branding_reflects_on_dashboard_and_own_login_but_not_other_tenant(
-    app_client: TestClient, tenant_a, tenant_b
+    app_client: TestClient, admin_session: Session, tenant_a, tenant_b
 ) -> None:
     from app.core.branding import get_brand
 
     # -----------------------------------------------------------------
-    # Tenant A: register, web login, save branding via the REAL friendly
-    # editor form (the only route this app has for writing ui_branding).
+    # Tenant A: provision the admin (registration no longer grants admin,
+    # Task 2), web login, save branding via the REAL friendly editor form
+    # (the only route this app has for writing ui_branding).
     # -----------------------------------------------------------------
     a = client_for(app_client, tenant_a.slug)
     admin_email_a = "branding-admin-a@tenant-a.example.com"
-    _register_admin(a, admin_email_a)
+    provision_owner(admin_session, tenant_a, admin_email_a)
     csrf_a = _web_login(a, admin_email_a)
 
     branding_resp = a.post(
@@ -117,13 +106,14 @@ def test_saved_branding_reflects_on_dashboard_and_own_login_but_not_other_tenant
 
     # -----------------------------------------------------------------
     # Tenant B's dashboard (once it has its own admin) is likewise
-    # unaffected by tenant A's branding write. Register BEFORE this
-    # client's first GET (same CSRF-ordering convention as
+    # unaffected by tenant A's branding write. The admin is provisioned
+    # via the admin engine (no HTTP call), so this client's first request
+    # is still the `_web_login` GET (same CSRF-ordering convention as
     # `tests/test_admin_portal_e2e.py`'s tenant B section).
     # -----------------------------------------------------------------
     fresh_b = client_for(TestClient(app_client.app), tenant_b.slug)
     admin_email_b = "branding-admin-b@tenant-b.example.org"
-    _register_admin(fresh_b, admin_email_b)
+    provision_owner(admin_session, tenant_b, admin_email_b)
     _web_login(fresh_b, admin_email_b)
     dashboard_resp_b = fresh_b.get("/admin")
     assert dashboard_resp_b.status_code == 200

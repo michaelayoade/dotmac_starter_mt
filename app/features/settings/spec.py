@@ -79,6 +79,14 @@ def _validate_strftime(value: object) -> None:
 
 SPECS: list[SettingSpec] = [
     SettingSpec(
+        domain=SettingDomain.auth,
+        key="registration_policy",
+        value_type=SettingValueType.string,
+        default="closed",
+        allowed={"open", "closed"},
+        label="Self-registration policy (open | closed)",
+    ),
+    SettingSpec(
         domain=SettingDomain.custom_fields,
         key="max_per_entity",
         value_type=SettingValueType.integer,

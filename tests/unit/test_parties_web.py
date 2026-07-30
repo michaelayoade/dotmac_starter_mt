@@ -25,9 +25,17 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_db
 from app.core.errors import register_error_handlers
-from app.core.models import Party, PartyOrganization, PartyPerson, PartyType, Tenant
-from app.features.auth import service as auth_service
-from app.features.auth.schemas import RegisterRequest
+from app.core.models import (
+    Party,
+    PartyOrganization,
+    PartyPerson,
+    PartyRole,
+    PartyType,
+    Role,
+    Tenant,
+    UserCredential,
+)
+from app.core.security import hash_password
 from app.features.auth.web import router as auth_web_router
 from app.features.parties.web import router as parties_web_router
 
@@ -35,23 +43,33 @@ PASSWORD = "correct horse battery staple"
 
 
 @pytest.fixture()
-def registered_admin(db: Session, tenant_row: Tenant) -> dict:
-    """First registered user in a tenant auto-gets the admin role — reuse the
-    real register/login flow rather than hand-building a Party/Role/PartyRole
-    trio (same fixture shape as tests/unit/test_web_login.py).
+def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
+    """A provisioned admin — party + person + credential + "admin" role
+    grant, built directly on core models; registration no longer grants any
+    role (Task 2). Same fixture shape as tests/unit/test_web_login.py.
     """
-    view = auth_service.register(
-        db,
-        tenant_row,
-        RegisterRequest(
-            email="admin@example.com",
-            password=PASSWORD,
-            first_name="Admin",
-            last_name="User",
-        ),
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Admin User",
+        email="admin@example.com",
     )
+    db.add(party)
+    db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Admin", last_name="User"))
+    db.add(
+        UserCredential(
+            tenant_id=tenant_row.id,
+            party_id=party.id,
+            password_hash=hash_password(PASSWORD),
+        )
+    )
+    role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
+    db.add(role)
+    db.flush()
+    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.commit()
-    return {"email": view.email, "party_id": view.id}
+    return {"email": party.email, "party_id": party.id}
 
 
 @pytest.fixture()
@@ -152,9 +170,9 @@ def test_delete_without_cookie_redirects_to_login(
 
 
 def test_index_full_page_renders_shell_and_table(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     db.commit()
 
@@ -167,9 +185,9 @@ def test_index_full_page_renders_shell_and_table(
 
 
 def test_index_htmx_request_returns_table_fragment_only(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     db.commit()
 
@@ -185,9 +203,9 @@ def test_index_htmx_request_returns_table_fragment_only(
 
 
 def test_index_search_filters_by_display_name_or_email(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     _make_organization(db, tenant_row, "Widget Co")
     db.commit()
@@ -204,9 +222,9 @@ def test_index_search_filters_by_display_name_or_email(
 
 
 def test_index_party_type_filter(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     _make_organization(db, tenant_row, "Widget Co")
     db.commit()
@@ -223,12 +241,12 @@ def test_index_party_type_filter(
 
 
 def test_index_garbage_party_type_degrades_to_unfiltered(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
     """Bogus party_type (e.g., stale bookmark) degrades gracefully — returns
     200 with unfiltered list, not 422.
     """
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     _make_organization(db, tenant_row, "Widget Co")
     db.commit()
@@ -245,9 +263,9 @@ def test_index_garbage_party_type_degrades_to_unfiltered(
 
 
 def test_index_pagination_second_page(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     for i in range(25):
         _make_person(db, tenant_row, f"Person {i:02d}", f"person{i:02d}@example.com")
     db.commit()
@@ -276,9 +294,9 @@ def test_index_pagination_second_page(
 
 
 def test_create_form_renders_both_tabs(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get("/admin/parties/create", cookies={"access_token": token})
     assert resp.status_code == 200
     assert 'hx-post="/admin/parties/people"' in resp.text
@@ -293,9 +311,9 @@ def test_create_form_renders_both_tabs(
 
 
 def test_create_person_success_redirects_to_detail(
-    web_client: TestClient, registered_admin: dict, db: Session
+    web_client: TestClient, provisioned_admin: dict, db: Session
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/parties/people",
         data={
@@ -316,9 +334,9 @@ def test_create_person_success_redirects_to_detail(
 
 
 def test_create_person_validation_error_rerenders_200(
-    web_client: TestClient, registered_admin: dict, db: Session
+    web_client: TestClient, provisioned_admin: dict, db: Session
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/parties/people",
         data={"first_name": "", "last_name": "Hopper", "email": "grace@example.com"},
@@ -331,9 +349,9 @@ def test_create_person_validation_error_rerenders_200(
 
 
 def test_create_person_duplicate_email_rerenders_200_with_conflict(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_person(db, tenant_row, "Existing Person", "dup@example.com")
     db.commit()
 
@@ -353,9 +371,9 @@ def test_create_person_duplicate_email_rerenders_200_with_conflict(
 
 
 def test_create_organization_success_redirects_to_detail(
-    web_client: TestClient, registered_admin: dict, db: Session
+    web_client: TestClient, provisioned_admin: dict, db: Session
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/parties/organizations",
         data={"legal_name": "Acme Widgets Ltd."},
@@ -370,9 +388,9 @@ def test_create_organization_success_redirects_to_detail(
 
 
 def test_create_organization_validation_error_rerenders_200(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/parties/organizations",
         data={"legal_name": ""},
@@ -389,9 +407,9 @@ def test_create_organization_validation_error_rerenders_200(
 
 
 def test_detail_renders_person_fields(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     db.commit()
 
@@ -403,9 +421,9 @@ def test_detail_renders_person_fields(
 
 
 def test_detail_unknown_party_is_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get(
         "/admin/parties/00000000-0000-0000-0000-000000000000",
         cookies={"access_token": token},
@@ -419,9 +437,9 @@ def test_detail_unknown_party_is_404(
 
 
 def test_delete_redirects_to_index_and_removes_party(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     db.commit()
     party_id = party.id
@@ -442,9 +460,9 @@ def test_delete_redirects_to_index_and_removes_party(
 
 
 def test_delete_unknown_party_is_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/parties/00000000-0000-0000-0000-000000000000/delete",
         cookies={"access_token": token},
@@ -468,9 +486,9 @@ def test_edit_form_without_cookie_redirects_to_login(
 
 
 def test_edit_form_renders_person_fields(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     db.commit()
 
@@ -486,9 +504,9 @@ def test_edit_form_renders_person_fields(
 
 
 def test_edit_form_renders_organization_fields(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_organization(db, tenant_row, "Widget Co")
     db.commit()
 
@@ -502,9 +520,9 @@ def test_edit_form_renders_organization_fields(
 
 
 def test_edit_form_unknown_party_is_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.get(
         "/admin/parties/00000000-0000-0000-0000-000000000000/edit",
         cookies={"access_token": token},
@@ -513,9 +531,9 @@ def test_edit_form_unknown_party_is_404(
 
 
 def test_edit_person_success_redirects_and_recomputes_display_name(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     db.commit()
 
@@ -541,9 +559,9 @@ def test_edit_person_success_redirects_and_recomputes_display_name(
 
 
 def test_edit_person_validation_error_rerenders_200(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     db.commit()
 
@@ -562,9 +580,9 @@ def test_edit_person_validation_error_rerenders_200(
 
 
 def test_edit_person_duplicate_email_rerenders_200_with_conflict(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     _make_person(db, tenant_row, "Existing Person", "dup@example.com")
     party = _make_person(db, tenant_row, "Ada Lovelace", "ada@example.com")
     db.commit()
@@ -580,9 +598,9 @@ def test_edit_person_duplicate_email_rerenders_200_with_conflict(
 
 
 def test_edit_organization_success_redirects_and_recomputes_display_name(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_organization(db, tenant_row, "Widget Co")
     db.commit()
 
@@ -603,9 +621,9 @@ def test_edit_organization_success_redirects_and_recomputes_display_name(
 
 
 def test_edit_organization_validation_error_rerenders_200(
-    web_client: TestClient, registered_admin: dict, db: Session, tenant_row: Tenant
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     party = _make_organization(db, tenant_row, "Widget Co")
     db.commit()
 
@@ -620,9 +638,9 @@ def test_edit_organization_validation_error_rerenders_200(
 
 
 def test_edit_submit_unknown_party_is_404(
-    web_client: TestClient, registered_admin: dict
+    web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    token = _login(web_client, registered_admin["email"])
+    token = _login(web_client, provisioned_admin["email"])
     resp = web_client.post(
         "/admin/parties/00000000-0000-0000-0000-000000000000/edit",
         data={"first_name": "A", "last_name": "B", "email": "a@example.com"},

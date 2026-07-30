@@ -22,6 +22,7 @@ __all__ = [
     "get_db",
     "get_platform_db",
     "platform_engine",
+    "platform_session",
 ]
 
 engine = create_engine(
@@ -74,6 +75,28 @@ def get_platform_db() -> Generator[Session, None, None]:
     Uses PLATFORM_DATABASE_URL (platform_api role) if set, else DATABASE_URL for local
     development. This role must not have BYPASSRLS; migrations and offline maintenance
     use MIGRATION_DATABASE_URL separately.
+    """
+    db = PlatformSessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@contextmanager
+def platform_session() -> Generator[Session, None, None]:
+    """Non-request platform-session boundary (commit on success, rollback on
+    error) for code that runs OUTSIDE a request — lifespan seed hooks, jobs.
+
+    Exists so `app/core/db.py` stays the ONE module that constructs
+    sessions (see `tests/architecture/test_session_authority.py` and
+    ARCHITECTURE.md's "Transaction authority" section): callers get the
+    same owned-boundary contract as `get_platform_db`, without reaching for
+    `PlatformSessionLocal` themselves.
     """
     db = PlatformSessionLocal()
     try:

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 # there about import-time engine creation in app.core.db.
 from app.core import (
     audit,  # noqa: F401
+    models_platform,  # noqa: F401
     settings_models,  # noqa: F401
 )
 from app.core.features import load_manifests
@@ -25,8 +26,8 @@ from app.core.models import Base, Party, PartyPerson, PartyType, Tenant
 from app.core.templating import install_surface_globals
 from app.features import FEATURE_MODULES
 
-# Import feature model modules so Base.metadata is fully populated.
-from app.features.auth import models as auth  # noqa: F401
+# Import feature model modules so Base.metadata is fully populated
+# (UserCredential moved to app.core.models in control-plane security Task 2).
 from app.features.custom_fields import models as custom_fields  # noqa: F401
 
 

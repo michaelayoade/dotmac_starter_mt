@@ -38,3 +38,4 @@ htmlcov/
 # output is a build artifact, not source)
 node_modules/
 static/css/main.css
+.claude/worktrees/

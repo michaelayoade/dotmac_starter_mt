@@ -1,7 +1,9 @@
 """Web (cookie) auth tenant-isolation canary.
 
 Mirrors `tests/test_auth_tenant_claim.py` (the bearer-token version) for the
-cookie path: register + web-login on tenant A's host, then replay the
+cookie path: provision an admin (`provision_owner`, `tests/conftest.py` —
+registration no longer grants admin, Task 2) + web-login on tenant A's
+host, then replay the
 resulting `access_token` cookie against tenant B's host. The shared
 `authenticate_request` seam (`app.core.deps`) checks the token's `tenant_id`
 claim against `request.state.tenant` — resolved from tenant B's host by
@@ -16,29 +18,22 @@ actually exist per-tenant — this exercises the full stack, not a mock).
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
-from tests.conftest import client_for
+from tests.conftest import client_for, provision_owner
 
 PASSWORD = "correct horse battery staple"
 
 
 def test_web_login_cookie_from_tenant_a_rejected_on_tenant_b_host(
     app_client: TestClient,
+    admin_session: Session,
     tenant_a,
     tenant_b,
 ) -> None:
     a = client_for(app_client, tenant_a.slug)
 
-    register = a.post(
-        "/auth/register",
-        json={
-            "email": "web-canary@tenant-a.example.com",
-            "password": PASSWORD,
-            "first_name": "Web",
-            "last_name": "Canary",
-        },
-    )
-    assert register.status_code == 201, register.text
+    provision_owner(admin_session, tenant_a, "web-canary@tenant-a.example.com")
 
     login = a.post(
         "/admin/login",
@@ -69,6 +64,7 @@ def test_web_login_cookie_from_tenant_a_rejected_on_tenant_b_host(
 
 def test_web_logout_only_revokes_the_calling_tenants_session(
     app_client: TestClient,
+    admin_session: Session,
     tenant_a,
     tenant_b,
 ) -> None:
@@ -77,16 +73,7 @@ def test_web_logout_only_revokes_the_calling_tenants_session(
     (the lookup is tenant-scoped) and must not affect tenant A's ability to
     keep using its own, still-valid session."""
     a = client_for(app_client, tenant_a.slug)
-    register = a.post(
-        "/auth/register",
-        json={
-            "email": "logout-canary@tenant-a.example.com",
-            "password": PASSWORD,
-            "first_name": "Logout",
-            "last_name": "Canary",
-        },
-    )
-    assert register.status_code == 201, register.text
+    provision_owner(admin_session, tenant_a, "logout-canary@tenant-a.example.com")
 
     login = a.post(
         "/admin/login",

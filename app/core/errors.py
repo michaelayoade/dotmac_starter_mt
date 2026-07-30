@@ -36,6 +36,7 @@ from app.core.exceptions import (
     BadRequestError,
     ConflictError,
     DomainError,
+    ForbiddenError,
     NotFoundError,
     UnauthorizedError,
 )
@@ -213,6 +214,10 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(UnauthorizedError)
     async def _unauthorized(request: Request, exc: UnauthorizedError) -> Response:
         return _negotiate(request, 401, _envelope("unauthorized", str(exc)))
+
+    @app.exception_handler(ForbiddenError)
+    async def _forbidden(request: Request, exc: ForbiddenError) -> Response:
+        return _negotiate(request, 403, _envelope("forbidden", str(exc)))
 
     @app.exception_handler(DomainError)
     async def _domain(request: Request, exc: DomainError) -> Response:

@@ -1,11 +1,12 @@
 """FastAPI app entrypoint.
 
 Middleware order (outermost → innermost):
-1. ObservabilityMiddleware — request id + structured request logs
-2. TrustedHostMiddleware — drops requests to unknown hosts (prod)
-3. TenantResolverMiddleware — sets request.state.tenant
-4. RateLimitMiddleware — tenant/ip/path keyed budget
-5. CSRFMiddleware — double-submit guard for browser-cookie flows
+1. SecurityHeadersMiddleware — security headers + CSP on EVERY response
+2. ObservabilityMiddleware — request id + structured request logs
+3. TrustedHostMiddleware — drops requests to unknown hosts (prod)
+4. TenantResolverMiddleware — sets request.state.tenant
+5. RateLimitMiddleware — tenant/ip/route-template keyed budget (bounded store)
+6. CSRFMiddleware — double-submit guard for browser-cookie flows
 """
 
 from __future__ import annotations
@@ -25,7 +26,9 @@ from app.core.logging import setup_logging
 from app.core.middleware.csrf import CSRFMiddleware
 from app.core.middleware.observability import ObservabilityMiddleware
 from app.core.middleware.rate_limit import RateLimitMiddleware
+from app.core.middleware.security_headers import SecurityHeadersMiddleware
 from app.core.middleware.tenant import TenantResolverMiddleware
+from app.core.platform_auth import platform_auth_router
 from app.core.templating import install_surface_globals
 from app.features import FEATURE_MODULES
 
@@ -99,6 +102,7 @@ app.add_middleware(
     enabled=settings.rate_limit_enabled,
     requests=settings.rate_limit_requests,
     window_seconds=settings.rate_limit_window_seconds,
+    max_keys=settings.rate_limit_max_keys,
 )
 
 app.add_middleware(TenantResolverMiddleware)
@@ -111,6 +115,15 @@ if settings.trusted_hosts:
 app.add_middleware(
     ObservabilityMiddleware,
     trust_inbound_request_id=settings.trust_inbound_request_id,
+)
+
+# OUTERMOST (added last → runs first): every response — including middleware
+# short-circuits (tenant 404s, 429s) and error pages — carries the security
+# headers + CSP. See app/core/middleware/security_headers.py.
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    enabled=settings.security_headers_enabled,
+    content_security_policy=settings.content_security_policy,
 )
 
 
@@ -133,6 +146,12 @@ def health() -> dict[str, str]:
     """Liveness — does not touch DB."""
     return {"status": "ok"}
 
+
+# Platform auth mounts DIRECTLY — not via a feature manifest. The manifest/
+# capability model is for tenant capabilities; the platform control plane
+# must exist even with every feature disabled (see app.core.platform_auth's
+# module docstring and ADR-0004).
+app.include_router(platform_auth_router)
 
 mount_features(
     app,

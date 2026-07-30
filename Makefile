@@ -5,6 +5,10 @@ TEST_DB_USER ?= app_user
 TEST_DB_PASSWORD ?= app_user
 TEST_DB_ADMIN_USER ?= postgres
 TEST_DB_ADMIN_PASSWORD ?= postgres
+# platform_api role for the app's PLATFORM_DATABASE_URL in integration runs —
+# the test compose uses trust auth, so the password value is irrelevant there.
+TEST_DB_PLATFORM_USER ?= platform_api
+TEST_DB_PLATFORM_PASSWORD ?= platform_api
 TEST_DB_HOST ?= localhost
 TEST_DB_NAME ?= starter_test
 
@@ -34,6 +38,7 @@ test-unit: ## Fast SQLite unit + architecture tests
 	poetry run pytest tests/unit tests/architecture -q
 test-integration: ## Postgres RLS tests (needs test-db-up)
 	TEST_DATABASE_URL=postgresql+psycopg://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
+	TEST_PLATFORM_DATABASE_URL=postgresql+psycopg://$(TEST_DB_PLATFORM_USER):$(TEST_DB_PLATFORM_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	TEST_MIGRATION_DATABASE_URL=postgresql+psycopg://$(TEST_DB_ADMIN_USER):$(TEST_DB_ADMIN_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME) \
 	poetry run pytest tests -q --ignore=tests/unit --ignore=tests/architecture
 test: test-unit ## Default test suite

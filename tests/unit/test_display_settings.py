@@ -25,7 +25,16 @@ from app.core.deps import get_db
 from app.core.display import DisplaySettings
 from app.core.errors import register_error_handlers
 from app.core.exceptions import BadRequestError
-from app.core.models import PartyRole, Tenant
+from app.core.models import (
+    Party,
+    PartyPerson,
+    PartyRole,
+    PartyType,
+    Role,
+    Tenant,
+    UserCredential,
+)
+from app.core.security import hash_password
 from app.core.settings_models import SettingDomain
 from app.core.settings_resolver import (
     get_spec,
@@ -34,8 +43,6 @@ from app.core.settings_resolver import (
     validate_spec_value,
 )
 from app.core.templating import templates
-from app.features.auth import service as auth_service
-from app.features.auth.schemas import RegisterRequest
 from app.features.auth.web import router as auth_web_router
 from app.features.rbac.web import router as rbac_web_router
 
@@ -209,23 +216,35 @@ class TestLocalFilters:
 
 
 @pytest.fixture()
-def registered_admin(db: Session, tenant_row: Tenant) -> dict:
-    """First registered user in a tenant auto-gets the admin role — this
-    also creates the PartyRole grant row the grants page's recent-grants
-    list renders, so no separate rbac.assign_role call is needed.
+def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
+    """A provisioned admin — party + person + credential + "admin" role
+    grant, built directly on core models; registration no longer grants any
+    role (Task 2). The PartyRole grant row created here is also what the
+    grants page's recent-grants list renders, so no separate
+    rbac.assign_role call is needed.
     """
-    view = auth_service.register(
-        db,
-        tenant_row,
-        RegisterRequest(
-            email="admin@example.com",
-            password=PASSWORD,
-            first_name="Admin",
-            last_name="User",
-        ),
+    party = Party(
+        tenant_id=tenant_row.id,
+        party_type=PartyType.person,
+        display_name="Admin User",
+        email="admin@example.com",
     )
+    db.add(party)
+    db.flush()
+    db.add(PartyPerson(party_id=party.id, first_name="Admin", last_name="User"))
+    db.add(
+        UserCredential(
+            tenant_id=tenant_row.id,
+            party_id=party.id,
+            password_hash=hash_password(PASSWORD),
+        )
+    )
+    role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
+    db.add(role)
+    db.flush()
+    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.commit()
-    return {"email": view.email, "party_id": view.id}
+    return {"email": party.email, "party_id": party.id}
 
 
 @pytest.fixture()
@@ -263,7 +282,7 @@ class TestGrantsPageUsesTenantDisplay:
         web_client: TestClient,
         db: Session,
         tenant_row: Tenant,
-        registered_admin: dict,
+        provisioned_admin: dict,
     ) -> None:
         upsert_by_key(
             db,
@@ -280,7 +299,7 @@ class TestGrantsPageUsesTenantDisplay:
             tenant_id=tenant_row.id,
         )
         db.commit()
-        token = _login(web_client, registered_admin["email"])
+        token = _login(web_client, provisioned_admin["email"])
         resp = web_client.get("/admin/role-grants", cookies={"access_token": token})
         assert resp.status_code == 200
         # Test files may query directly (thin-wrapper rule scopes to app/).
