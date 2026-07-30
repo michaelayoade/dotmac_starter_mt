@@ -363,3 +363,20 @@ class AuthSession(Base, TimestampMixin):
         DateTime(timezone=True), nullable=False
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+__all__ = [
+    "Base",
+    "TimestampMixin",
+    "uuid_pk",
+    "Tenant",
+    "TenantDomain",
+    "Party",
+    "PartyType",
+    "PartyPerson",
+    "PartyOrganization",
+    "Role",
+    "PartyRole",
+    "AuthSession",
+    "UserCredential",
+]

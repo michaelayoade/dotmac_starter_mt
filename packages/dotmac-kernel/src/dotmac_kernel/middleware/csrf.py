@@ -63,3 +63,8 @@ def _valid_csrf_token(cookie_token: str | None, header_token: str | None) -> boo
     if not cookie_token or not header_token:
         return False
     return hmac.compare_digest(cookie_token, header_token)
+
+
+__all__ = [
+    "CSRFMiddleware",
+]

@@ -76,3 +76,9 @@ class PlatformSession(Base, TimestampMixin):
         DateTime(timezone=True), nullable=False
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+__all__ = [
+    "PlatformAdmin",
+    "PlatformSession",
+]

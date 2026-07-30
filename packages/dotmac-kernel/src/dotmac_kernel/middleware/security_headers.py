@@ -111,3 +111,8 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+__all__ = [
+    "SecurityHeadersMiddleware",
+]

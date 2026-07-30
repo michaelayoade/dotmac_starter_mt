@@ -65,3 +65,9 @@ def write_audit_event(
     db.add(event)
     db.flush()
     return event
+
+
+__all__ = [
+    "AuditEvent",
+    "write_audit_event",
+]

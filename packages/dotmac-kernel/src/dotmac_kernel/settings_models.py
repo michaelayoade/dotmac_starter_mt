@@ -122,3 +122,9 @@ class DomainSetting(Base, TimestampMixin):
     )
     is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+__all__ = [
+    "SettingDomain",
+    "SettingValueType",
+]

@@ -150,3 +150,8 @@ class CRUDManager(Generic[TModel]):
             db.commit()
         else:
             db.flush()
+
+
+__all__ = [
+    "CRUDManager",
+]

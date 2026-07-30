@@ -244,3 +244,10 @@ def platform_logout(
 ) -> Response:
     logout(db, token=_bearer_token(authorization))
     return Response(status_code=204)
+
+
+__all__ = [
+    "require_platform_admin",
+    "platform_auth_router",
+    "PLATFORM_AUDIENCE",
+]

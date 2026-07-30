@@ -63,8 +63,8 @@ from dotmac_kernel.branding import load_branding
 from dotmac_kernel.deps import get_db, require_tenant
 from dotmac_kernel.exceptions import BadRequestError, NotFoundError
 from dotmac_kernel.models import Tenant
+from dotmac_kernel.settings_admin import all_specs, get_spec
 from dotmac_kernel.settings_models import SettingDomain, SettingValueType
-from dotmac_kernel.settings_resolver import all_specs, get_spec
 from dotmac_kernel.templating import render
 from dotmac_kernel.web_deps import require_web_auth
 from fastapi import APIRouter, Depends, Request

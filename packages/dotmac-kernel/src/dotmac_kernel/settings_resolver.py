@@ -459,3 +459,10 @@ def ensure_by_key(
             return raced
         raise
     return row
+
+
+__all__ = [
+    "SettingSpec",
+    "register_specs",
+    "resolve_value",
+]

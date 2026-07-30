@@ -122,3 +122,11 @@ def mount_features(
             if manifest.core:
                 raise
             logger.exception("Optional feature %s failed to mount", manifest.name)
+
+
+__all__ = [
+    "FeatureManifest",
+    "NavItem",
+    "load_manifests",
+    "mount_features",
+]
