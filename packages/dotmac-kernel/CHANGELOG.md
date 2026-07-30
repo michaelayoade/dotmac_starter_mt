@@ -9,6 +9,13 @@ here.
 ## Unreleased
 
 ### Added
+- **`dotmac_kernel.money`** — exact money + FX primitives (WS4). `Money`
+  (currency + quantized `Decimal`, never `float`; add/subtract/multiply,
+  comparison, and `allocate`/`split` that distribute the rounding remainder so
+  parts sum back exactly), `Currency` (ISO-4217 code + minor units) with a small
+  registry + `currency(code)` lookup, and `ExchangeRate` (immutable, timestamped,
+  sourced snapshot; `convert` applies it with explicit rounding). Pure values —
+  import-safe and re-exported at the top level.
 - **`dotmac_kernel.messaging`** — transactional outbox/inbox + idempotent command
   envelope (WS3, slice 1). `CommandEnvelope` + `process_once` process a command
   at most once per `(tenant_id, command_id)` (the `inbox_records` ledger replays
