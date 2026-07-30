@@ -20,6 +20,7 @@ from dotmac_kernel import (
     settings_models,  # noqa: F401
 )
 from dotmac_kernel.features import load_manifests
+from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
 from dotmac_kernel.templating import install_surface_globals
 

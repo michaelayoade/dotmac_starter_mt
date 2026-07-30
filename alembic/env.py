@@ -20,6 +20,9 @@ from dotmac_kernel import (
     models_platform,  # noqa: F401  (register PlatformAdmin/PlatformSession)
     settings_models,  # noqa: F401  (register DomainSetting)
 )
+from dotmac_kernel.messaging import (
+    models as messaging_models,  # noqa: F401  (register InboxRecord/OutboxEvent)
+)
 from dotmac_kernel.models import (  # registers Tenant/Party/Role/PartyRole/AuthSession/UserCredential
     Base,
 )

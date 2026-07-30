@@ -51,6 +51,11 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
 | `dotmac_kernel.logging` | `setup_logging` |
+| `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `enqueue_event`, `InboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
+| `dotmac_kernel.messaging.envelope` | `CommandEnvelope` |
+| `dotmac_kernel.messaging.inbox` | `process_once`, `ProcessOutcome`, `CommandHandler` |
+| `dotmac_kernel.messaging.outbox` | `enqueue_event` |
+| `dotmac_kernel.messaging.models` | `InboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` |
 | `dotmac_kernel.middleware.csrf` | `CSRFMiddleware` |
 | `dotmac_kernel.middleware.observability` | `ObservabilityMiddleware` |
 | `dotmac_kernel.middleware.rate_limit` | `RateLimitMiddleware`, `RateLimitStore`, `MemoryStore` |
@@ -184,6 +189,36 @@ fakes work without it). The package re-exports everything from three submodules:
   the reusable assertion suite a consumer runs against THEIR provider factory to
   prove it honors the protocol's determinism / idempotency / partial-resume /
   cancellation semantics.
+
+### Outbox/inbox + idempotent commands (`dotmac_kernel.messaging`)
+
+The kernel primitive for exactly-once command processing and atomic event
+emission (WS3). Submodule-only (like `deps`): the write helpers pull in the DB
+transaction authority, so `messaging` is NOT re-exported at the DB-free top
+level — import it directly (`from dotmac_kernel.messaging import ...`).
+
+- **Idempotent command** — `CommandEnvelope(command_id, command_type, tenant_id,
+  payload, actor_party_id=None, correlation_id=None, issued_at=None)` (frozen)
+  wraps a command whose `command_id` is its per-tenant idempotency key.
+  `process_once(db, envelope, handler) -> ProcessOutcome` runs `handler` (a
+  `CommandHandler`, `Callable[[Session, CommandEnvelope], Mapping | None]`) AT
+  MOST ONCE per `(tenant_id, command_id)`: the first delivery runs it and records
+  an `InboxRecord` with the result; a later delivery replays that result without
+  re-running. `ProcessOutcome(command_id, status, result)` exposes
+  `was_duplicate`. Concurrency-safe via the `uq_inbox_records_tenant_command_id`
+  constraint + a SAVEPOINT rollback of the losing racer.
+- **Transactional outbox** — `enqueue_event(db, *, tenant_id, event_type,
+  payload=None, correlation_id=None) -> OutboxEvent` inserts a `pending` event in
+  the CALLER's transaction, so the event persists iff that transaction commits
+  (atomic with the state change). A relay (WS3 slice 2) drains pending events
+  out-of-band — the named reconciler for the side effect.
+- **Persisted state** — `InboxRecord` / `OutboxEvent` (both tenant-scoped,
+  RLS-protected, kernel migration `0008`); `InboxStatus` (`PROCESSED`/`FAILED`)
+  and `OutboxStatus` (`PENDING`/`SENT`/`FAILED`) status vocabularies.
+
+Transaction-authority contract: `process_once` / `enqueue_event` RECEIVE a
+`Session` and only `add`/`flush` — they never construct a session or
+`commit`/`rollback`; the request (or a `platform_session`) boundary owns that.
 
 ## Internal modules and names (do not import)
 

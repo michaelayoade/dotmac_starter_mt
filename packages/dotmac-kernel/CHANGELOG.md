@@ -6,6 +6,22 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased
+
+### Added
+- **`dotmac_kernel.messaging`** — transactional outbox/inbox + idempotent command
+  envelope (WS3, slice 1). `CommandEnvelope` + `process_once` process a command
+  at most once per `(tenant_id, command_id)` (the `inbox_records` ledger replays
+  a duplicate's result); `enqueue_event` writes an `outbox_events` row in the
+  caller's transaction so an event is persisted iff the state change commits.
+  Both tables are tenant-scoped with RLS (kernel migration `0008`). Submodule-only
+  (pulls in the DB transaction authority). The outbox relay/dispatcher is a
+  planned slice 2.
+- Kernel migration head advanced to `0008_outbox_inbox`; the assembly lineage
+  (`a001`) now pins an older kernel head, so a fully-migrated database reports
+  two lineage heads (`{0008, a001}`) and the assembly rollback stamp targets
+  `assembly@base` (branch-aware) rather than `kernel@head`.
+
 ## 0.1.0a1 — 2026-07-30
 
 First published release — the **alpha** of the DotMac platform kernel extracted
