@@ -237,3 +237,5 @@ final review, PR. Reference-assembly version tracks separately.
   installed kernel serves no stylesheet. Decide in Task 1.
 
 <!-- ci-canary: trigger re-registration probe 9c431f3 -->
+
+<!-- ci-canary: post-fix synchronize probe 083550 -->
