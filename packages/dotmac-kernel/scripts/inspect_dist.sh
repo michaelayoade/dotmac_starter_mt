@@ -78,13 +78,13 @@ if "dotmac_kernel/static/css/main.css" not in names:
 print("    templates/, static/ (+fonts +compiled main.css), migrations/ all present")
 PY
 # check-wheel-contents catches empty dirs / stray top-level / duplicate paths.
-# Two warnings are KNOWN-ACCEPTABLE for this package and ignored deliberately:
+# One warning is KNOWN-ACCEPTABLE and ignored deliberately:
 #   W004 — Alembic version files (dotmac_kernel/migrations/versions/2026….py)
 #          start with a date and are NOT importable module paths BY DESIGN
 #          (Alembic loads them by file path, not import). Always expected.
-#   W002 — the vendored woff2 weights are byte-identical (a pre-existing
-#          font-vendoring dup, tracked separately, not a packaging fault).
-"$PY" -m check_wheel_contents --ignore W002,W004 "$WHEEL"
+# (W002 duplicate-files is NOT ignored: the vendored font weights are now the
+# real distinct weights — guarded by tests/architecture/test_vendored_fonts.py.)
+"$PY" -m check_wheel_contents --ignore W004 "$WHEEL"
 
 echo "==> [5/5] No assembly / no secrets leaked (wheel + sdist)"
 WHEEL="$WHEEL" "$PY" - <<'PY'
