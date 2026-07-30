@@ -92,7 +92,7 @@ def platform_session() -> Generator[Session, None, None]:
     """Non-request platform-session boundary (commit on success, rollback on
     error) for code that runs OUTSIDE a request — lifespan seed hooks, jobs.
 
-    Exists so `app/core/db.py` stays the ONE module that constructs
+    Exists so `dotmac_kernel/db.py` stays the ONE module that constructs
     sessions (see `tests/architecture/test_session_authority.py` and
     ARCHITECTURE.md's "Transaction authority" section): callers get the
     same owned-boundary contract as `get_platform_db`, without reaching for

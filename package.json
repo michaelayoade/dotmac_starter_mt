@@ -4,8 +4,8 @@
   "description": "Tailwind CSS build for the dotmac_starter_mt admin web UI",
   "private": true,
   "scripts": {
-    "css:build": "npx tailwindcss -i ./static/css/src/main.css -o ./static/css/main.css --minify",
-    "css:watch": "npx tailwindcss -i ./static/css/src/main.css -o ./static/css/main.css --watch",
+    "css:build": "npx tailwindcss -i ./packages/dotmac-kernel/src/dotmac_kernel/static/css/src/main.css -o ./packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css --minify",
+    "css:watch": "npx tailwindcss -i ./packages/dotmac-kernel/src/dotmac_kernel/static/css/src/main.css -o ./packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css --watch",
     "build": "npm run css:build",
     "dev": "npm run css:watch"
   },

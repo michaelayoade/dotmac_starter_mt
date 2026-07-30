@@ -15,7 +15,7 @@ These are PLATFORM catalog tables, like `tenants`/`tenant_domains`:
   RLS catalog test (control-plane security Task 3) encodes this as the
   platform-table allowlist with grant assertions.
 
-They live in `app/core/` (not a feature) for the same reason the guard does:
+They live in `dotmac_kernel/` (not a feature) for the same reason the guard does:
 `dotmac_kernel.platform_auth.require_platform_admin` queries them, and the
 platform surface must exist even with every feature disabled.
 """

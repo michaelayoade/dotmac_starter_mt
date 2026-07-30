@@ -25,7 +25,7 @@ from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
 from dotmac_kernel.platform_auth import platform_auth_router
-from dotmac_kernel.templating import install_surface_globals
+from dotmac_kernel.templating import install_surface_globals, static_dir
 from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -119,7 +119,7 @@ app.add_middleware(
 
 # OUTERMOST (added last → runs first): every response — including middleware
 # short-circuits (tenant 404s, 429s) and error pages — carries the security
-# headers + CSP. See app/core/middleware/security_headers.py.
+# headers + CSP. See dotmac_kernel/middleware/security_headers.py.
 app.add_middleware(
     SecurityHeadersMiddleware,
     enabled=settings.security_headers_enabled,
@@ -138,7 +138,11 @@ register_error_handlers(app)
 # API-only mode, so the mount simply doesn't exist — WEB_ENABLED=false pins
 # zero /static routes, not just zero /admin routes.
 if settings.web_enabled:
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    # The kernel's packaged static/ (resolved by package path, not CWD, so a
+    # pip-installed kernel serves its own assets). Task 3's create_app will
+    # layer an assembly static dir over this; for now the assembly mounts the
+    # kernel's.
+    app.mount("/static", StaticFiles(directory=str(static_dir())), name="static")
 
 
 @app.get("/health")

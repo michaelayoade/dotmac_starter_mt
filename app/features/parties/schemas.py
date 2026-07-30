@@ -13,7 +13,7 @@ party can never become an organization, enforced in `service.py` by raising
 convention `delete_party` already uses). Every field is optional so callers
 can `model_dump(exclude_unset=True)` and only touch what was actually sent —
 but `first_name`/`last_name`/`legal_name` are NOT NULLABLE columns
-(`PartyPerson`/`PartyOrganization`, see `app/core/models.py`), so
+(`PartyPerson`/`PartyOrganization`, see `dotmac_kernel/models.py`), so
 `service.py`'s update functions reject an explicit `null` for those three
 the same way `custom_fields/router.py`'s `NOT_NULLABLE_FIELDS` guard rejects
 one for its own non-nullable columns — the schema alone can't express

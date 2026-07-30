@@ -48,7 +48,7 @@ from app.features.parties.schemas import (
 )
 
 # SoT: `PartyPerson.first_name`/`last_name` and `PartyOrganization.legal_name`
-# are `nullable=False` columns (app/core/models.py). The corresponding
+# are `nullable=False` columns (dotmac_kernel/models.py). The corresponding
 # `*Update` schema fields are typed `str | None = None` purely so
 # `model_dump(exclude_unset=True)` can distinguish "not sent" from "sent" —
 # not because the column accepts NULL. Same convention (and same reason) as

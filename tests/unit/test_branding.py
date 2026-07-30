@@ -8,7 +8,7 @@ built-in defaults < brand.json < same-named env var (ported from
 `load_branding(db, tenant_id)` layers a per-tenant DB override
 (`resolve_value(db, SettingDomain.branding, "ui_branding", ...)`, ported from
 `dotmac_starter:app/services/branding.py::get_branding`) on top of the static
-brand -- the split documented in `app/core/templating.py`: the `brand`
+brand -- the split documented in `dotmac_kernel/templating.py`: the `brand`
 template global is the static part, `load_branding` is for routes that need
 the tenant override.
 

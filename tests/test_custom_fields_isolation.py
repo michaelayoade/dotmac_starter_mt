@@ -311,7 +311,7 @@ def test_eye_color_custom_field_end_to_end_canary(
 
     NOTE on request ordering: every mutating call (POST/PUT) on a given
     client happens BEFORE that client's first GET. `CSRFMiddleware`
-    (`app/core/middleware/csrf.py`) double-submit-checks any non-safe method
+    (`dotmac_kernel/middleware/csrf.py`) double-submit-checks any non-safe method
     once a `csrf_token` cookie exists (a GET response sets one), and this
     test sends no `x-csrf-token` header — same ordering constraint already
     followed by `tests/test_settings_isolation.py`'s API canary. Nothing

@@ -3,7 +3,7 @@
 `_HEALTH_PATHS` short-circuits `TenantResolverMiddleware.dispatch` before it
 ever calls `self._resolve()` (and therefore `SessionLocal()`), because health
 probes must succeed even when the DB is unreachable (see
-app/core/middleware/tenant.py's module docstring and the "/health does not
+dotmac_kernel/middleware/tenant.py's module docstring and the "/health does not
 touch DB" contract referenced there). This file drives the real middleware
 over a raw ASGI scope (mirroring tests/unit/test_logging.py's middleware
 test) to prove:

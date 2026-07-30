@@ -98,7 +98,7 @@ def test_no_new_orphan_settings() -> None:
         "Registered setting(s) with no reader (dead control): "
         f"{sorted(new_orphans)}. Either read the value somewhere (as a "
         "quoted literal) outside app/features/settings/ and "
-        "app/core/settings_resolver.py so it changes real behavior, or drop "
+        "dotmac_kernel/settings_resolver.py so it changes real behavior, or drop "
         "it from the spec registry. Do not add to _ALLOWED_ORPHAN_SETTINGS."
     )
 

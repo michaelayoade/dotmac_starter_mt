@@ -1,6 +1,6 @@
 """One transaction authority (control-plane security Task 4).
 
-`app/core/db.py` is the ONLY module that may construct DB sessions.
+`dotmac_kernel/db.py` is the ONLY module that may construct DB sessions.
 Everything else receives a session at its boundary (`get_db` /
 `get_platform_db`, which own commit/rollback) and only mutates + flushes;
 expected conflicts use `conflict_savepoint`. `UnitOfWork` — a second,
@@ -68,7 +68,7 @@ def find_session_authority_violations(rel_path: str, source: str) -> list[str]:
             if name in _FORBIDDEN_CALLS and rel_path not in _CALL_ALLOWLIST:
                 violations.append(
                     f"{rel_path}:{node.lineno} calls {name}(...) — session "
-                    "construction belongs to app/core/db.py only"
+                    "construction belongs to dotmac_kernel/db.py only"
                 )
         elif isinstance(node, ast.ImportFrom):
             if node.module and "sqlalchemy" in node.module and is_feature_module:
@@ -98,7 +98,7 @@ def test_only_core_db_constructs_sessions() -> None:
         violations.extend(find_session_authority_violations(rel_path, source))
     assert not violations, (
         "Session-construction outside the one transaction authority "
-        "(app/core/db.py):\n" + "\n".join(violations)
+        "(dotmac_kernel/db.py):\n" + "\n".join(violations)
     )
 
 

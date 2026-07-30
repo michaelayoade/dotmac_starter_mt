@@ -30,11 +30,11 @@ class Settings(BaseSettings):
     # RESERVED swap seam (contracts-not-implementations): a Redis-backed
     # RateLimitStore for multi-process deployments. No redis dependency
     # ships with the starter; setting this has no effect until a project
-    # provides the store implementation. See app/core/middleware/rate_limit.py.
+    # provides the store implementation. See dotmac_kernel/middleware/rate_limit.py.
     rate_limit_redis_url: str = ""
     # Security response headers (Task 5). Disable only when a fronting
     # proxy owns these headers. Empty CSP = the computed strict default in
-    # app/core/middleware/security_headers.py.
+    # dotmac_kernel/middleware/security_headers.py.
     security_headers_enabled: bool = True
     content_security_policy: str = ""
     trust_inbound_request_id: bool = False

@@ -15,7 +15,7 @@ boundary) rather than the request-scoped `get_platform_db` FastAPI
 dependency, because this runs outside a request against the `platform_api`
 DB role — the only role permitted to write NULL-tenant rows on
 `domain_settings` (see the settings migration's RLS policy). Session
-construction itself stays in `app/core/db.py` — the one transaction
+construction itself stays in `dotmac_kernel/db.py` — the one transaction
 authority (`tests/architecture/test_session_authority.py`).
 """
 

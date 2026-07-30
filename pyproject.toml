@@ -52,6 +52,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106"]
 "alembic/*" = ["E501"]
+# Kernel base migrations moved here from alembic/versions in the kernel split
+# (Task 1c) — same Alembic-file relaxations apply (long DDL literals).
+"packages/dotmac-kernel/src/dotmac_kernel/migrations/*" = ["E501"]
 "scripts/*" = ["S603", "S607"]  # trusted local ops tooling invoking git/docker
 
 [tool.mypy]
@@ -62,7 +65,14 @@ check_untyped_defs = true
 warn_unused_ignores = true
 
 [tool.bandit]
-exclude_dirs = ["tests", "alembic"]
+# Alembic migrations (assembly `alembic/` + the kernel base migrations, which
+# moved into the package in Task 1c) build DDL from in-code constants, not
+# user input — excluded from the SQL-string heuristics like `alembic/`.
+exclude_dirs = [
+    "tests",
+    "alembic",
+    "packages/dotmac-kernel/src/dotmac_kernel/migrations",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -11,7 +11,7 @@ form (or vice versa).
 
 `login()` no longer reads a credential-local email copy at all (Task 3
 dropped the credential table's own email column entirely — see
-`UserCredential` in `app/core/models.py`, moved there by control-plane
+`UserCredential` in `dotmac_kernel/models.py`, moved there by control-plane
 security Task 2, and `app/features/auth/service.py::login`'s
 docstring): it resolves the `Party`
 by `(tenant, normalize_email(email), party_type=person)` first, then the

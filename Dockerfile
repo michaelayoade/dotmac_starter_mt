@@ -25,8 +25,12 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY static ./static
-COPY templates ./templates
+# Templates + static are kernel package data now (Task 1b). css:build reads
+# from / writes into the package's static/css, and its `@source` directives
+# scan the sibling templates/ and static/js — copy both trees to their package
+# path so the relative scans resolve.
+COPY packages/dotmac-kernel/src/dotmac_kernel/static ./packages/dotmac-kernel/src/dotmac_kernel/static
+COPY packages/dotmac-kernel/src/dotmac_kernel/templates ./packages/dotmac-kernel/src/dotmac_kernel/templates
 RUN npm run css:build
 
 FROM python:3.12-slim
@@ -53,8 +57,14 @@ RUN poetry install --only main --no-root --no-interaction
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini VERSION brand.json ./
-COPY templates ./templates
-COPY --from=css-builder /build/static ./static
+# templates/ and static/ (js, css sources) arrived under ./packages via the
+# `COPY packages` layer above (they are kernel package data). The compiled
+# Tailwind CSS is a gitignored build artifact — overlay it from css-builder
+# into the package's static tree so the installed kernel serves a real
+# stylesheet.
+COPY --from=css-builder \
+    /build/packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css \
+    ./packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css
 
 EXPOSE ${APP_PORT}
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT}
