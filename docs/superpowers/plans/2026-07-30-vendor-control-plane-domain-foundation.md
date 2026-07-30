@@ -529,6 +529,25 @@ define a competing public contract.
 
 ## Sequencing — the first executable slice
 
+> **Amendment 2026-07-30 (D0 reconciliation — reconciles this 0–7 table with the 0–6 revised
+> sequence below).** The `0.1.0a1` kernel alpha is the **focused** alpha defined by the
+> kernel-boundary plan's Tasks 2–6 (+ ruling C6): `ProductAssemblySpec`, `create_app`,
+> `dotmac_kernel.testing` (harness + fakes), and the `ProvisioningProvider` protocol +
+> `FakeProvisioningProvider` + contract suite. It does **not** ship a module/capability
+> registry, outbox/inbox, deployment-profile registry, money/FX, signed-licence,
+> entitlement-evaluator, or health/heartbeat contract. **Therefore prerequisite 2 below
+> overstated the alpha** where it names "module registry/capability catalogue, outbox/inbox" as
+> part of it — those are later workstreams (deployment plan WS1 / WS3), not the alpha, and the
+> alpha must not be silently expanded to include them. **Canonical alpha-era step count is
+> 0–6** (see the revised sequence below); **step 7 (observed health) is deferred** until the
+> health/heartbeat-envelope contract (program WS5 / deployment plan WS11) publishes. Against the
+> focused alpha, only **steps 0 and 1 are unlocked end-to-end**, plus **step 6's
+> `ProvisioningProvider` execution seam** (exercisable in isolation against the fake); steps 2–5
+> and 7 remain design-only pending their named workstreams. Per-step contract mapping and the
+> full ruling:
+> [`../reviews/2026-07-30-vendor-dependency-reconciliation.md`](../reviews/2026-07-30-vendor-dependency-reconciliation.md).
+> Read the 0–7 table below as the fuller domain enumeration, not the alpha-era build order.
+
 Prerequisites (none of this slice starts before all three hold):
 
 1. Control-plane security plan merged (platform identity, exact-host routing, RLS-active dev).
@@ -600,6 +619,19 @@ record, those documents remain authoritative for their scope.
   "Platform administration" ambiguity in favor of the Lane B assembly's own portal.)
 
 ## Revised program sequence (per the C6 correction)
+
+> **Amendment 2026-07-30 (D0 reconciliation).** "Implement executable slice steps 0–6" (step 5
+> below) fixes the canonical alpha-era **step count** at 0–6 (step 7 / observed health deferred
+> — see the amendment on the first-slice table above). It does **not** mean all of steps 0–6
+> build immediately on the focused alpha: the focused `0.1.0a1` (`ProductAssemblySpec`,
+> `create_app`, `dotmac_kernel.testing`, `ProvisioningProvider` protocol+fake+suite) genuinely
+> unlocks only **steps 0 and 1**, plus **step 6's `ProvisioningProvider` execution seam** (the
+> one thing C6 pulled forward for step 6). Steps 2–5 stay design-only until their named
+> workstreams publish — most universally the transactional outbox/inbox (deployment plan WS3)
+> and the capability catalogue + deployment-profile registry (WS1); step 2 additionally the
+> money/FX primitives (WS4). Do not expand `0.1.0a1` to unblock them. Step-to-contract matrix
+> and ruling:
+> [`../reviews/2026-07-30-vendor-dependency-reconciliation.md`](../reviews/2026-07-30-vendor-dependency-reconciliation.md).
 
 1. Finish and merge the control-plane security work (v0.8.0).
 2. Amend ADR-0003, the deployment-profiles plan, kernel-boundary Tasks 3/5, and this design
