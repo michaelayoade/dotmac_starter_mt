@@ -68,6 +68,14 @@ from dotmac_kernel.models import (
     uuid_pk,
 )
 from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
+from dotmac_kernel.money import (
+    Currency,
+    CurrencyMismatchError,
+    ExchangeRate,
+    Money,
+    MoneyError,
+    currency,
+)
 from dotmac_kernel.query import apply_pagination, escape_like
 from dotmac_kernel.security import (
     hash_password,
@@ -116,6 +124,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.migrations",
         "dotmac_kernel.models",
         "dotmac_kernel.models_platform",
+        "dotmac_kernel.money",
         "dotmac_kernel.platform_auth",
         "dotmac_kernel.providers",
         "dotmac_kernel.providers.provisioning",
@@ -202,6 +211,13 @@ __all__ = [
     "UserCredential",
     "PlatformAdmin",
     "PlatformSession",
+    # money / FX primitives
+    "Money",
+    "Currency",
+    "currency",
+    "ExchangeRate",
+    "MoneyError",
+    "CurrencyMismatchError",
     # query
     "apply_pagination",
     "escape_like",
