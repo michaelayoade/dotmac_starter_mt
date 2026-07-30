@@ -4,6 +4,18 @@
 
 **Goal:** `dotmac_starter_mt` becomes a publishable kernel package plus a reference application assembly, proven by an empty assembly that boots without copying source.
 
+> **Amendment 2026-07-30 (ruling C6 — `ProvisioningProvider` pulled into kernel alpha).** The
+> vendor control plane's first executable slice needs a fake `ProvisioningProvider`, but this
+> plan's Task 5 said "Do NOT invent fakes for provider interfaces that don't exist yet". Michael
+> ruled (C6): pull a **product-neutral `ProvisioningProvider` protocol — typed plan/apply/observe
+> results, stable errors, a fake, and a parametrized contract suite — into the kernel alpha**, so
+> the control plane consumes it and never defines a local replacement. Keep fleet workflows and
+> cloud-specific operations OUT of the kernel (those are the vendor control plane's, rulings
+> C1/C7). This is the one provider seam brought forward ahead of the general workstream-5 fill;
+> the "don't invent fakes for not-yet-existing seams" rule still governs every OTHER provider.
+> Tasks 3 and 5 below carry the concrete deltas. Full text:
+> `docs/superpowers/plans/2026-07-30-vendor-control-plane-domain-foundation.md` § "Ownership rulings".
+
 **Architecture:** Monorepo split: `packages/dotmac-kernel/` holds the kernel (today's `app/core` — config, db/RLS, models base + identity models, security, platform auth, deps/guards, middleware stack, errors, templating, settings resolver, features registry, audit); the repo root `app/` becomes the REFERENCE ASSEMBLY (feature packages + a `ProductAssemblySpec` + thin `main.py` calling `dotmac_kernel.create_app(spec)`). The public import surface is explicit and governance-tested — the reference app itself may only import supported public names, making the repo its own first consumer. `ProductAssemblySpec` declares what an assembly IS (modules, providers, settings overrides, branding, deployment profile ref — forward-compatible with the ModuleManifest expansion of workstream 3). The testing kit (`dotmac_kernel.testing`) ships the assembly harness + fake providers so consumers contract-test without a real Postgres or real providers.
 
 **Tech Stack:** Poetry path dependency (workspace-style) now; PyPI-able metadata from day one (distribution workstream 6 does the actual publishing). No new runtime deps.
@@ -51,6 +63,7 @@
 ### Task 3: ProductAssemblySpec + create_app
 
 - [ ] `dotmac_kernel.assembly.ProductAssemblySpec` (frozen dataclass): `name`, `modules: Sequence[FeatureManifest]` (accepts today's manifests; field named `modules` for forward-compat with ModuleManifest), `settings_overrides: Mapping[str, object]`, `branding: BrandSpec | None`, `providers: Mapping[str, object]` (interface-keyed, empty today — the seam workstream 5 fills), `web_enabled`, `disabled_modules`.
+- [ ] **(Amendment 2026-07-30, ruling C6)** Publish the `ProvisioningProvider` PROTOCOL in the alpha — `dotmac_kernel.providers.provisioning`: the `ProvisioningProvider` protocol + typed `PlanResult`/`ApplyResult`/`ObserveResult` + a stable error hierarchy. Product-neutral (no cloud/fleet specifics). This is the one provider interface brought forward ahead of the general workstream-5 fill because the vendor control plane's slice depends on it; every OTHER provider seam still stays empty until workstream 5.
 - [ ] `dotmac_kernel.create_app(spec: ProductAssemblySpec) -> FastAPI`: everything `app/main.py` does today (middleware stack, error handlers, mounting, surface globals, platform auth surface, lifespan/seed) driven from the spec instead of module-level imports of `app.features`. `app/main.py` shrinks to: build the reference `ProductAssemblySpec` (in `app/assembly.py`, listing the seven reference modules) + `app = create_app(assembly)`. `FEATURE_MODULES` string list becomes the reference assembly's concern, not the kernel's.
 - [ ] Existing behavior byte-identical: full suite green, route inventory diffed empty (dump `app.routes` before/after — commit the proof).
 
@@ -62,7 +75,7 @@
 ### Task 5: Fake-provider contract-test kit (`dotmac_kernel.testing`)
 
 - [ ] Harness: `assembly_test_client(spec, *, db_url="sqlite in-memory") -> TestClient` (what tests/unit/conftest.py hand-builds today, packaged: create_all, tenant-inject middleware stand-in, dependency overrides, surface globals) — then REFACTOR the repo's own unit conftest to consume it (the kit's first consumer is this repo; no parallel harness maintained).
-- [ ] Fakes for every provider seam that EXISTS at milestone 1 (from Task 3's `providers` mapping + audit): at minimum `FakeClock`, `FakeSeeder`, in-memory `RateLimitStore` (the Task-5 control-plane contract), fake branding loader. Do NOT invent fakes for provider interfaces that don't exist yet (workstream 5) — the kit grows with the seams (contracts-not-implementations rule).
+- [ ] Fakes for every provider seam that EXISTS at milestone 1 (from Task 3's `providers` mapping + audit): at minimum `FakeClock`, `FakeSeeder`, in-memory `RateLimitStore` (the Task-5 control-plane contract), fake branding loader, and **(amendment 2026-07-30, ruling C6) `FakeProvisioningProvider` + its parametrized `dotmac_kernel.testing.contract` provisioning suite** (the vendor control plane's slice step 6 runs against this fake). Do NOT invent fakes for provider interfaces that don't exist yet (workstream 5) — the kit grows with the seams (contracts-not-implementations rule); `ProvisioningProvider` is in only because ruling C6 pulled its protocol forward into Task 3.
 - [ ] Contract tests consumers can run: `dotmac_kernel.testing.contract` — parametrizable suites asserting a provider implementation honors its interface (pattern established with RateLimitStore: run the same suite against the memory store and any consumer-supplied store).
 - [ ] Kit documented in COMPATIBILITY.md as public surface.
 

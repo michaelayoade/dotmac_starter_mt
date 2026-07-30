@@ -1,9 +1,32 @@
 # ADR 0003 — One Starter, Composable Deployment Profiles
 
-**Status:** Accepted
+**Status:** Accepted (Amended 2026-07-30)
 **Date:** 2026-07-18
 **Supersedes:** ADR-0002's 2026-07-18 deployment-positioning amendment for new development
 **Extends:** ADR-0001 multi-tenancy and the module/plugin control-plane directive
+
+> **Amendment 2026-07-30 (vendor control-plane ownership rulings C1–C7).** While designing the
+> vendor control-plane domain foundation
+> (`docs/superpowers/plans/2026-07-30-vendor-control-plane-domain-foundation.md`), seven
+> ownership ambiguities between this ADR, the deployment-profiles plan, and the kernel-boundary
+> plan were surfaced and ruled on by Michael. The load-bearing clarifications:
+> - **The topology diagram below expresses LOGICAL composition, not a monorepo requirement**
+>   (ruling C5). The vendor control plane is a **separate maintained repository** — recommended
+>   `dotmac_vendor_control_plane` — that pins released kernel/module versions. It is not a
+>   package directory inside this repo.
+> - **The kernel owns reusable protocols and primitives only.** Fleet `Deployment`,
+>   provisioning requests/steps/approvals, desired/observed state, and fleet history are owned
+>   by the vendor control plane, not the kernel/starter (ruling C1). Support-access enforcement
+>   contracts are kernel; the request/consent/break-glass workflow is the control plane (C2).
+>   Fleet/support/maintenance/incident admin surfaces belong to the control-plane portal; the
+>   kernel supplies only auth + portal-composition machinery (C7).
+> - **A release-channel pin never authorizes a deployment.** It is desired state only under
+>   `vendor automatic` update authority; under `customer-approved`/`offline bundle` it is an
+>   offer (rulings C3, consistent with the update-authority axis already in this ADR).
+> - **The `ProvisioningProvider` protocol (protocol + typed plan/apply/observe results + stable
+>   errors + fake + contract suite) moves into the kernel alpha** (ruling C6); the control plane
+>   consumes it and never defines a local replacement.
+> See the plan's "Ownership rulings" section for the full text.
 
 ## Context
 
@@ -101,11 +124,15 @@ the kernel and its commercial/deployment tables do not belong in every generated
 The maintained topology is:
 
 ```text
-dotmac_starter_mt / platform packages
-  ├── vendor_control_plane assembly (accounts, contracts, fleet, licences, vendor billing)
+dotmac_starter_mt / platform packages   (kernel + optional modules; published, versioned)
+  ├── dotmac_vendor_control_plane   (SEPARATE repo — accounts, contracts, fleet, licences, vendor billing)
   ├── dotmac_sub assembly (ISP subscriber and network operations)
   └── dotmac_erp assembly (ERP domains)
 ```
+
+> Amended 2026-07-30 (C5): this is LOGICAL composition — each assembly is its own maintained
+> repository pinning released kernel/module versions, NOT a package directory under this repo.
+> The vendor control plane's recommended repository name is `dotmac_vendor_control_plane`.
 
 These are durable products, not long-lived Git branches of one copied application. A
 temporary integration branch is normal delivery mechanics, but the ISP path adapts the

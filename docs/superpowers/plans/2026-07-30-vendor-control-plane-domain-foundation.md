@@ -557,49 +557,58 @@ vendor invoicing, public signup, and any production fleet mutation. Support acce
 licensing are designed here so their state machines are settled before their first
 implementation — designing them late is what produces backdoors.
 
-## Conflicts with existing checked-in plans (reported, not resolved)
+## Ownership rulings (Michael, 2026-07-30 — C1–C7 resolved)
 
-These need Michael's ruling; this design states the assumption it made so the assumption is
-visible, but it does not claim authority to settle them.
+The seven ownership ambiguities this design surfaced were ruled on by Michael on
+2026-07-30. They are now **decisions**, not open assumptions; the design above is written to
+them. Each ruling also amends the checked-in document it touches (ADR-0003, the
+deployment-profiles plan, and kernel-boundary Tasks 3/5) — this section is the discovery
+record, those documents remain authoritative for their scope.
 
-- **C1 — Deployment/fleet tables sit in a Lane A workstream.** Deployment plan Workstream 11
-  says "Add a `ProvisioningProvider` and durable deployment workflow owned by the platform
-  control plane" and names `Deployment`, `DeploymentArtifact`, `ProvisioningRequest`,
-  `ProvisioningStep`, `InfrastructureResourceRef`, while Lane A states "The starter does not
-  own … fleet deployments". The workstreams are not labelled by lane. *Assumption made here:*
-  the **protocols** are kernel/Lane A; the **tables and workflow** are Lane B. Needs
-  ratification.
-- **C2 — `SupportAccessGrant` has two candidate homes.** Program workstream 5 lists "Support
-  access grants" as a kernel operational contract; deployment plan Workstream 11 lists
-  `SupportAccessGrant`/`SupportSession` as records to add. *Assumption made here:* the kernel
-  publishes the grant/enforcement contract consumed by data planes; the control plane owns
-  the request/consent/break-glass workflow records. Needs ratification.
-- **C3 — `ReleaseChannel`/`RolloutWave` vs the update-authority axis.** ADR-0003 makes update
-  authority an independent axis (`vendor automatic` / `customer-approved` / `offline bundle`),
-  but Workstream 11 places channels and waves in the control plane without saying what a pin
-  means when the customer holds update authority. *Assumption made here:* a pin is desired
-  state only under vendor update authority; otherwise it is an offer requiring a customer
-  approval record.
-- **C4 — Who initiates entitlement projection is unspecified.** Workstream 2 gives
-  `tenant_entitlement_grants` a `contract` source, but the contract lives in the control plane
-  and the table lives in the data plane. *Assumption made here (per the Dotmac
-  app-independence standard):* the control plane delivers a signed licence or an authenticated
-  API call; the data plane's own module writes the row and acknowledges. This needs an
-  approved, checked-in contract before implementation.
-- **C5 — Lane B's home is undecided.** The deployment plan says "a separate maintained product
-  repository **or** assembly package"; ADR-0003's topology diagram shows
-  `vendor_control_plane assembly` under the platform packages. This design is deliberately
-  repo-neutral. A decision is required before step 0 of the slice.
-- **C6 — Sharpest dependency conflict: no `ProvisioningProvider` at kernel alpha.** The
-  kernel-boundary plan (Task 5) explicitly says "Do NOT invent fakes for provider interfaces
-  that don't exist yet (workstream 5)", and `ProductAssemblySpec.providers` is "empty today".
-  But the first executable slice's step 6 requires a fake provisioning provider. Either
-  workstream 5 publishes `ProvisioningProvider` before Lane B step 6, or Lane B defines the
-  protocol locally — which would violate the never-redefine-a-kernel-contract rule.
-  *Recommendation:* pull the `ProvisioningProvider` protocol (protocol only, plus its fake and
-  contract suite) forward into kernel alpha; run Lane B steps 0–5 in the meantime.
-- **C7 — Fleet/support admin surfaces are listed under "Platform administration".** Deployment
-  plan Workstream 12 places fleet inventory, support access, and incident surfaces in the
-  platform administration surface list, which reads as the starter's admin portal. Same
-  ambiguity family as C1. *Assumption made here:* those surfaces belong to the Lane B assembly's
-  own admin portal, built on the kernel's portal machinery.
+- **C1 — Fleet tables → vendor control plane.** The **kernel** owns reusable protocols and
+  primitives only. The **vendor control plane** owns `Deployment`, provisioning requests,
+  steps, approvals, desired/observed state, and fleet history. (Resolves the Workstream-11
+  lane ambiguity: tables + workflow are Lane B; the starter/kernel owns no fleet deployments.)
+- **C2 — Support grants → split by concern.** The **vendor control plane** owns the canonical
+  request, consent, grant, revocation, and session **workflow**. The **kernel** owns grant
+  **claims, verification, enforcement decisions, and audit hooks** (the enforcement contract a
+  data plane consumes). The design's two-home split is ratified as-is.
+- **C3 — Channels never authorize deployment.** `ReleaseChannel`/`RolloutWave` never authorize
+  a deployment by themselves. Under **vendor-automatic** authority a deployment may advance
+  through policy gates; **customer-approved** requires an exact approval; **offline** produces
+  a signed bundle and observes acknowledgement. A channel pin is desired state ONLY under
+  vendor-automatic authority — otherwise it is an offer.
+- **C4 — Entitlements: control plane delivers, data plane writes.** The **control plane
+  initiates** signed/versioned delivery. The **product data plane verifies it and is the ONLY
+  writer of `tenant_entitlement_grants`**, then acknowledges the applied version/digest.
+  (Consistent with the Dotmac app-independence standard; a checked-in delivery contract is
+  still required before implementation.)
+- **C5 — Separate repository.** Lane B lives in its **own maintained repository —
+  `dotmac_vendor_control_plane`** (recommended name). ADR-0003's topology diagram expresses
+  **logical composition, not a monorepo requirement**. This resolves the step-0 blocker.
+- **C6 — `ProvisioningProvider` → kernel alpha (approved with correction).** Pull a
+  **product-neutral `ProvisioningProvider` protocol, typed plan/apply/observe results, stable
+  errors, a fake, and a parametrized contract suite into the kernel alpha**. Keep fleet
+  workflows and cloud-specific operations OUT of the kernel. **Correction to the design's
+  original recommendation:** Lane B must **not** define a local replacement, and executable
+  slice steps 0–5 **cannot** run "in the meantime" — step 0 requires the published kernel
+  alpha. Domain design, contract examples, and acceptance scenarios may continue meanwhile.
+  (See the revised sequencing below.)
+- **C7 — Fleet/support admin surfaces → vendor-control-plane portal.** Fleet, support,
+  maintenance, and incident pages belong to the **vendor-control-plane portal**. The kernel
+  supplies authentication and portal-composition machinery only. (Resolves the Workstream-12
+  "Platform administration" ambiguity in favor of the Lane B assembly's own portal.)
+
+## Revised program sequence (per the C6 correction)
+
+1. Finish and merge the control-plane security work (v0.8.0).
+2. Amend ADR-0003, the deployment-profiles plan, kernel-boundary Tasks 3/5, and this design
+   with the C1–C7 rulings.
+3. Build and publish the kernel alpha containing `ProductAssemblySpec` AND `ProvisioningProvider`
+   (protocol + typed results + stable errors + fake + contract suite).
+4. Create the `dotmac_vendor_control_plane` repository.
+5. Implement executable slice steps 0–6 against that pinned kernel alpha and its fake provider.
+
+Until step 3 ships, Lane B is **design-only** — domain modelling, contract examples, and
+acceptance scenarios. No executable slice step (including step 0) runs before the kernel alpha
+is published.
