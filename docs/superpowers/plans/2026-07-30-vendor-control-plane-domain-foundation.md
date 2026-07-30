@@ -1,5 +1,14 @@
 # Vendor Control Plane — Domain Foundation Design (Lane B)
 
+> **➡️ MOVED (2026-07-30).** The authoritative vendor-control-plane design and code
+> now live in their own repository: **`michaelayoade/dotmac_vendor_control_plane`**
+> (ruling C5 — a separate repo consuming the pinned kernel, not this reference
+> assembly). See that repo's `docs/ARCHITECTURE.md` + `docs/adr/0001` for the
+> as-built foundation (slices 1–2: the vendor `ProductAssemblySpec` booting via
+> `create_app`, the D1–D5 boundary tests, fake-only providers). This document is
+> retained as the historical Lane B design record; the repo is the source of
+> truth going forward.
+
 > **Status:** Design only. No application code is authorized by this document. It is the
 > domain foundation for Lane B of
 > [`2026-07-18-deployment-profiles-commercial-platform.md`](2026-07-18-deployment-profiles-commercial-platform.md)
