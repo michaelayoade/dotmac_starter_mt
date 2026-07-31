@@ -42,14 +42,15 @@ _PLATFORM_READABLE = {
 
 # Platform catalog tables app_user must not even SELECT: credential /
 # session material for platform actors (control-plane security Task 1) and
-# the platform-scoped audit + idempotency ledgers (0009) — records of
-# platform-level operations that carry no tenant and are fully REVOKEd from
-# the tenant application role.
+# the platform-scoped audit + idempotency ledgers (0009) + the platform outbox
+# (0012) — records of platform-level operations that carry no tenant and are
+# fully REVOKEd from the tenant application role.
 _PLATFORM_PRIVATE = {
     "platform_admins",
     "platform_sessions",
     "platform_audit_events",
     "platform_inbox_records",
+    "platform_outbox_events",
 }
 
 # Bookkeeping, invisible to the app roles entirely.

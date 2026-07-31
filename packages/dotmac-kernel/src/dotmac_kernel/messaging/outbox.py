@@ -17,7 +17,11 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from dotmac_kernel.messaging.models import OutboxEvent, OutboxStatus
+from dotmac_kernel.messaging.models import (
+    OutboxEvent,
+    OutboxStatus,
+    PlatformOutboxEvent,
+)
 
 
 def enqueue_event(
@@ -44,4 +48,28 @@ def enqueue_event(
     return event
 
 
-__all__ = ["enqueue_event"]
+def enqueue_platform_event(
+    db: Session,
+    *,
+    event_type: str,
+    payload: Mapping[str, object] | None = None,
+    correlation_id: str | None = None,
+) -> PlatformOutboxEvent:
+    """Enqueue a `pending` PLATFORM outbox event in the caller's platform
+    transaction. Like `enqueue_event` but tenant-free: the control-plane fact
+    commits atomically with the platform state change it accompanies (e.g. a
+    contract transition) and is delivered later by the platform relay. RECEIVES
+    a `Session`, only `add`/`flush` — never commits (transaction-authority)."""
+    event = PlatformOutboxEvent(
+        event_type=event_type,
+        payload=dict(payload or {}),
+        status=OutboxStatus.PENDING.value,
+        attempts=0,
+        correlation_id=correlation_id,
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+__all__ = ["enqueue_event", "enqueue_platform_event"]

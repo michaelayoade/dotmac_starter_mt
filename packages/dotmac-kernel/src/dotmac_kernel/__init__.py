@@ -114,7 +114,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a6"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -142,6 +142,8 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.messaging.models",
         "dotmac_kernel.messaging.outbox",
         "dotmac_kernel.messaging.platform",
+        "dotmac_kernel.messaging.platform_relay",
+        "dotmac_kernel.messaging.platform_worker",
         "dotmac_kernel.messaging.relay",
         "dotmac_kernel.messaging.worker",
         "dotmac_kernel.middleware.csrf",

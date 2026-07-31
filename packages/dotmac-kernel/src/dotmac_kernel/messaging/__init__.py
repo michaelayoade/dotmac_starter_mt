@@ -26,11 +26,20 @@ from dotmac_kernel.messaging.models import (
     OutboxEvent,
     OutboxStatus,
     PlatformInboxRecord,
+    PlatformOutboxEvent,
 )
-from dotmac_kernel.messaging.outbox import enqueue_event
+from dotmac_kernel.messaging.outbox import enqueue_event, enqueue_platform_event
 from dotmac_kernel.messaging.platform import (
     PlatformCommandHandler,
     process_once_platform,
+)
+from dotmac_kernel.messaging.platform_relay import (
+    ClaimedPlatformEvent,
+    claim_platform_batch,
+)
+from dotmac_kernel.messaging.platform_worker import (
+    LoggingPlatformTransport,
+    PlatformDeliveryTransport,
 )
 from dotmac_kernel.messaging.relay import (
     ClaimedEvent,
@@ -57,8 +66,9 @@ __all__ = [
     # idempotent processing (platform-scoped)
     "PlatformCommandHandler",
     "process_once_platform",
-    # outbox write side
+    # outbox write side (tenant + platform)
     "enqueue_event",
+    "enqueue_platform_event",
     # relay / dispatcher (slice 2)
     "RelayPolicy",
     "ClaimedEvent",
@@ -71,10 +81,16 @@ __all__ = [
     "LoggingTransport",
     "run_once",
     "run_forever",
+    # platform relay (separate table + dispatcher; reuses the same engine)
+    "ClaimedPlatformEvent",
+    "claim_platform_batch",
+    "PlatformDeliveryTransport",
+    "LoggingPlatformTransport",
     # persisted state
     "InboxRecord",
     "PlatformInboxRecord",
     "InboxStatus",
     "OutboxEvent",
+    "PlatformOutboxEvent",
     "OutboxStatus",
 ]

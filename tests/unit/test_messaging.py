@@ -14,7 +14,9 @@ from dotmac_kernel.messaging import (
     CommandEnvelope,
     OutboxEvent,
     OutboxStatus,
+    PlatformOutboxEvent,
     enqueue_event,
+    enqueue_platform_event,
     process_once,
 )
 from dotmac_kernel.messaging.models import InboxRecord
@@ -143,3 +145,38 @@ def test_process_once_distinct_command_ids_each_run(
             handler,
         )
     assert calls == ["a", "b", "c"]
+
+
+# ── platform outbox ──────────────────────────────────────────────────────────
+def test_enqueue_platform_event_writes_pending_row_without_tenant(db: Session) -> None:
+    ev = enqueue_platform_event(
+        db,
+        event_type="contract.activated",
+        payload={"contract_id": "c1"},
+        correlation_id="corr-1",
+    )
+    assert ev.id is not None
+    assert ev.status == OutboxStatus.PENDING.value
+    assert ev.attempts == 0
+    assert ev.event_type == "contract.activated"
+    assert ev.payload == {"contract_id": "c1"}
+    assert ev.correlation_id == "corr-1"
+    assert not hasattr(ev, "tenant_id")  # platform events are tenant-free
+    fetched = db.execute(
+        select(PlatformOutboxEvent).where(PlatformOutboxEvent.id == ev.id)
+    ).scalar_one()
+    assert fetched.event_type == "contract.activated"
+
+
+def test_enqueue_platform_event_rolls_back_atomically(db: Session) -> None:
+    """The event is durable iff the caller's transaction commits — a rollback
+    drops it (the atomic guarantee ContractService relies on)."""
+    ev = enqueue_platform_event(db, event_type="contract.submitted")
+    ev_id = ev.id
+    db.rollback()
+    assert (
+        db.execute(
+            select(PlatformOutboxEvent).where(PlatformOutboxEvent.id == ev_id)
+        ).first()
+        is None
+    )
