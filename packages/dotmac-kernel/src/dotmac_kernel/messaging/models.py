@@ -150,10 +150,55 @@ class OutboxEvent(Base, TimestampMixin):
     leased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class PlatformOutboxEvent(Base, TimestampMixin):
+    """A PLATFORM-scoped domain event — the platform peer of `OutboxEvent`.
+
+    A platform event has NO tenant: it is a control-plane fact (e.g. a vendor
+    contract transition) enqueued in the same transaction as its state change.
+    So this is a PLATFORM catalog table — **no `tenant_id`, no tenant FK, no
+    RLS** — GRANTed to `platform_api`/`app_admin`, REVOKEd from `app_user`
+    (migration 0012). The platform relay drains it with the same
+    leasing/backoff/dead-letter engine as the tenant relay, on a SEPARATE table
+    and a separate dispatcher role (`platform_outbox_dispatcher`)."""
+
+    __tablename__ = "platform_outbox_events"
+    __table_args__ = (
+        # The relay scans by (status, available_at); index it for cheap claims.
+        Index(
+            "ix_platform_outbox_events_status_available_at", "status", "available_at"
+        ),
+        # Stale-lease reclaim scans claimed rows by lease age.
+        Index("ix_platform_outbox_events_status_leased_at", "status", "leased_at"),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    event_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    payload: Mapped[dict] = mapped_column(
+        _JSON, nullable=False, default=dict, server_default=sa.text("'{}'")
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=OutboxStatus.PENDING.value
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=sa.text("0")
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    correlation_id: Mapped[str | None] = mapped_column(String(200))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    # Relay lease (same engine as OutboxEvent): a platform dispatcher claims a
+    # row by stamping these; a stale lease (older than the timeout) is reclaimable.
+    leased_by: Mapped[str | None] = mapped_column(String(200))
+    leased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 __all__ = [
     "OutboxStatus",
     "InboxStatus",
     "InboxRecord",
     "PlatformInboxRecord",
     "OutboxEvent",
+    "PlatformOutboxEvent",
 ]

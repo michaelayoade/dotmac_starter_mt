@@ -8,6 +8,42 @@ here.
 
 ## Unreleased
 
+## 0.1.0a6 — 2026-07-31
+
+Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
+of the tenant outbox/relay, so a platform-scoped owner (e.g. a vendor
+ContractService) can emit a durable control-plane event ATOMICALLY with its state
+change and have it delivered out-of-band. A SEPARATE table and a SEPARATE
+dispatcher role; the a5 leasing/backoff/dead-letter engine is reused, never
+combined with the tenant table. Advances the kernel migration head to `0012`.
+
+### Added
+- **Platform outbox storage + write side** (`dotmac_kernel.messaging`).
+  `PlatformOutboxEvent` — a PLATFORM catalog table (**no `tenant_id`, no tenant FK,
+  no RLS**; GRANTed to `platform_api`/`app_admin`, REVOKEd from `app_user`) carrying
+  the relay lease columns. `enqueue_platform_event(db, *, event_type, payload,
+  correlation_id)` flushes a `pending` row into the caller's platform transaction —
+  the same atomic guarantee as `enqueue_event`, tenant-free.
+- **Platform relay security + functions** (kernel migration `0012`). A dedicated
+  **`platform_outbox_dispatcher`** role (LOGIN, **not** BYPASSRLS/superuser, **no
+  table privilege**), DISTINCT from both `platform_api` and the tenant
+  `outbox_dispatcher`, may only `EXECUTE` two hardened, schema-qualified
+  `SECURITY DEFINER` functions owned by `app_admin` — `claim_platform_outbox_batch`
+  (atomic `FOR UPDATE SKIP LOCKED` claim incl. stale-lease reclaim) and
+  `settle_platform_outbox_event`.
+- **Platform relay behavior** (`dotmac_kernel.messaging.platform_relay`). Typed
+  `claim_platform_batch` / `record_success` / `record_failure` and
+  `ClaimedPlatformEvent` (no `tenant_id`). REUSES the tenant relay engine —
+  `RelayPolicy`, `FailureOutcome`, and the backoff policy are imported, not
+  duplicated.
+- **Platform relay worker** (`dotmac_kernel.messaging.platform_worker`). Strict
+  connection separation adapted to the platform plane: the `platform_outbox_dispatcher`
+  connection only claims/settles; delivery runs on a SEPARATE `platform_api`
+  session (the identity `process_once_platform` consumers use) with NO tenant
+  context. `PlatformDeliveryTransport` protocol + `LoggingPlatformTransport`;
+  `run_once`/`run_forever`; `scripts/run_platform_relay.py` entrypoint. At-least-once
+  with one active claim per lease; consumers dedupe via `process_once_platform`.
+
 ## 0.1.0a5 — 2026-07-31
 
 Fifth alpha. Completes **WS3 slice 2 — the outbox relay**: the leasing

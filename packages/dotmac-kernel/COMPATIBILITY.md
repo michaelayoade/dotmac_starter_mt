@@ -53,14 +53,16 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
 | `dotmac_kernel.logging` | `setup_logging` |
-| `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
+| `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `PlatformOutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.envelope` | `CommandEnvelope` |
 | `dotmac_kernel.messaging.inbox` | `process_once`, `ProcessOutcome`, `CommandHandler` |
-| `dotmac_kernel.messaging.outbox` | `enqueue_event` |
+| `dotmac_kernel.messaging.outbox` | `enqueue_event`, `enqueue_platform_event` |
 | `dotmac_kernel.messaging.platform` | `process_once_platform`, `PlatformCommandHandler` |
 | `dotmac_kernel.messaging.relay` | `RelayPolicy`, `ClaimedEvent`, `FailureOutcome`, `claim_batch`, `record_success`, `record_failure` (WS3 relay behavior; dispatcher-bound session; see "Outbox/inbox" below) |
+| `dotmac_kernel.messaging.platform_relay` | `ClaimedPlatformEvent`, `claim_platform_batch`, `record_success`, `record_failure` (platform relay behavior; reuses `relay`'s `RelayPolicy`/`FailureOutcome`/backoff; `platform_outbox_dispatcher`-bound session) |
 | `dotmac_kernel.messaging.worker` | `DeliveryTransport`, `LoggingTransport`, `run_once`, `run_forever` (WS3 relay polling worker; receives session factories, never builds engines; run via `scripts/run_relay.py`) |
-| `dotmac_kernel.messaging.models` | `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` |
+| `dotmac_kernel.messaging.platform_worker` | `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `run_once`, `run_forever` (platform relay worker; dispatcher claims/settles, delivery on a separate `platform_api` session with no tenant context; run via `scripts/run_platform_relay.py`) |
+| `dotmac_kernel.messaging.models` | `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `PlatformOutboxEvent`, `InboxStatus`, `OutboxStatus` |
 | `dotmac_kernel.middleware.csrf` | `CSRFMiddleware` |
 | `dotmac_kernel.middleware.observability` | `ObservabilityMiddleware` |
 | `dotmac_kernel.middleware.rate_limit` | `RateLimitMiddleware`, `RateLimitStore`, `MemoryStore` |
