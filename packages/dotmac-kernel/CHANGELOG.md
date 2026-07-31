@@ -18,8 +18,15 @@ here.
   (atomic `FOR UPDATE SKIP LOCKED` claim incl. stale-lease reclaim) and
   `settle_outbox_event` (records an outcome only for a row the caller holds a live
   lease on). The dispatcher's cross-tenant reach is confined to those two
-  functions; a direct table read/write is `permission denied`. The relay's typed
-  Python API + retry/backoff/dead-letter policy land in PR 2.
+  functions; a direct table read/write is `permission denied`.
+- **WS3 relay behavior** (slice 2, PR 2; `dotmac_kernel.messaging.relay`). Typed
+  operations over the claim/settle functions: `claim_batch` (leases a batch as
+  `ClaimedEvent`s, each carrying `tenant_id`), `record_success` (→ `sent`), and
+  `record_failure` (increments attempts, then backs off `pending` or dead-letters
+  `dead` at `max_attempts`) — the retry/backoff/dead-letter **policy**
+  (`RelayPolicy`) lives here; the SQL functions stay mechanical. Receives a
+  dispatcher-bound `Session` and only executes (the worker owns the transaction).
+  At-least-once, one active claim per lease. The polling worker process is PR 3.
 
 Fourth alpha. Adds WS2 tenant entitlements (the data-plane's grant store +
 explainable evaluator). Advances the kernel migration head to `0010`.
