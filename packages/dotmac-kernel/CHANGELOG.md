@@ -8,6 +8,11 @@ here.
 
 ## Unreleased
 
+## 0.1.0a4 — 2026-07-31
+
+Fourth alpha. Adds WS2 tenant entitlements (the data-plane's grant store +
+explainable evaluator). Advances the kernel migration head to `0010`.
+
 ### Added
 - **WS2 — tenant entitlements** (`dotmac_kernel.entitlements`). The data-plane's
   single entitlement authority: `TenantEntitlementGrant` (tenant-scoped,
