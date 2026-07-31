@@ -85,6 +85,15 @@ class FeatureManifest:
     # never has to hard-import a specific feature's seed function (final-
     # review Group 3). Most features have no seed data and leave this None.
     seed: Callable[[], None] | None = None
+    # Capability codes this module DECLARES (WS1 capability catalogue). A
+    # capability like "inventory.use" is the code-authoritative statement that a
+    # module's capability physically exists; downstream authorities (entitlement
+    # grants, deployment profiles) may only reference DECLARED codes — they may
+    # never invent one. The manifest is the single declaration point; see
+    # `dotmac_kernel.capabilities.CapabilityCatalogue`. Forward-compatible with
+    # the eventual `ModuleManifest` expansion (which folds this in alongside
+    # `code`/`version`/`contract_version`/`permissions`).
+    capabilities: Sequence[str] = field(default_factory=tuple)
 
 
 def load_manifests(module_names: Sequence[str]) -> list[FeatureManifest]:

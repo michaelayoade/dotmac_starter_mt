@@ -41,6 +41,11 @@ from dotmac_kernel.audit import (
     write_audit_event,
     write_platform_audit_event,
 )
+from dotmac_kernel.capabilities import (
+    CapabilityCatalogue,
+    DuplicateCapabilityError,
+    UndeclaredCapabilityError,
+)
 from dotmac_kernel.config import Settings, settings, validate_settings
 from dotmac_kernel.exceptions import (
     BadRequestError,
@@ -81,6 +86,13 @@ from dotmac_kernel.money import (
     MoneyError,
     currency,
 )
+from dotmac_kernel.profiles import (
+    DeploymentProfileRegistry,
+    DeploymentProfileSpec,
+    DuplicateProfileError,
+    ProfileValidationReport,
+    UnknownProfileError,
+)
 from dotmac_kernel.query import apply_pagination, escape_like
 from dotmac_kernel.security import (
     hash_password,
@@ -107,6 +119,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.assembly",
         "dotmac_kernel.audit",
         "dotmac_kernel.branding",
+        "dotmac_kernel.capabilities",
         "dotmac_kernel.config",
         "dotmac_kernel.crud",
         "dotmac_kernel.db",
@@ -200,6 +213,16 @@ __all__ = [
     "NavItem",
     "load_manifests",
     "mount_features",
+    # capability catalogue (WS1)
+    "CapabilityCatalogue",
+    "DuplicateCapabilityError",
+    "UndeclaredCapabilityError",
+    # deployment-profile registry (WS1)
+    "DeploymentProfileSpec",
+    "DeploymentProfileRegistry",
+    "ProfileValidationReport",
+    "DuplicateProfileError",
+    "UnknownProfileError",
     # identity
     "normalize_email",
     "person_display_name",

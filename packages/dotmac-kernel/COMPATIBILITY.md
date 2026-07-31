@@ -42,6 +42,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.assembly` | `ProductAssemblySpec` |
 | `dotmac_kernel.audit` | `AuditEvent`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
+| `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
 | `dotmac_kernel.crud` | `CRUDManager` |
 | `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `conflict_savepoint`, `engine`, `platform_engine` |
@@ -66,6 +67,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
+| `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
 | `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
 | `dotmac_kernel.providers.provisioning` | `ProvisioningProvider`, `ProvisioningRequest`, `ProvisioningStep`, `PlanResult`, `ApplyResult`, `ObserveResult`, `ProvisioningStatus`, `StepStatus`, `ProvisioningError`, `ProvisioningRetryableError`, `ProvisioningTerminalError`, `ProvisioningPlanError`, `ProvisioningApplyError`, `ProvisioningCancelled` |
@@ -233,6 +235,38 @@ Transaction-authority contract: `process_once` / `process_once_platform` /
 `enqueue_event` RECEIVE a `Session` and only `add`/`flush` — they never construct
 a session or `commit`/`rollback`; the request (or a `platform_session`) boundary
 owns that.
+
+### Capability catalogue + deployment profiles (WS1)
+
+Two pure, in-memory code contracts (no database, no fleet state). They
+**describe**; they never **grant** or **deploy**.
+
+- **Capability catalogue** (`dotmac_kernel.capabilities`) — a module declares its
+  capability codes on `FeatureManifest.capabilities` (e.g. `"inventory.use"`).
+  `CapabilityCatalogue.from_manifests(...)` builds the catalogue; construction
+  fails closed on a duplicate code (one owning module per code).
+  `is_declared`/`require`/`owner`/`codes` answer "is this code real, and whose is
+  it?". **Boundary:** the catalogue *describes supported capabilities* — it does
+  NOT grant entitlement. A capability code may only be *referenced* by a grant or
+  a profile; it may never be **invented** outside a manifest. Applied entitlement
+  is data-plane-owned; commercial allocation is vendor-control-plane-owned.
+- **Deployment-profile registry** (`dotmac_kernel.profiles`) —
+  `DeploymentProfileSpec` is a frozen, **versioned** declaration over independent
+  axes (required/forbidden module codes; one provider name per seam;
+  locale/currency/legal/residency). `(code, version)` is the stable identifier
+  consumers pin to; a profile's effective set changes only via an explicit
+  version bump. `DeploymentProfileRegistry` enforces unique `code`, answers
+  `is_valid_code`, and `validate(...)` runs a **deterministic, fail-closed** check
+  (sorted errors) that a required module is enabled, no forbidden module is
+  installed, and every named provider resolves — returning a
+  `ProfileValidationReport` with a human-readable `render()`. **Boundary:** a
+  profile *describes desired composition + constraints*; it is NOT a fleet
+  deployment and NOT an update authority, and feature code must never branch on a
+  profile string.
+
+Stable identifiers (capability codes; `(profile code, version)`), deterministic
+resolution, and the version rule above are part of the public contract and are
+covered by consumer tests.
 
 ## Internal modules and names (do not import)
 

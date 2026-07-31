@@ -8,6 +8,26 @@ here.
 
 ## Unreleased
 
+### Added
+- **WS1 — capability catalogue + deployment-profile registry** (pure, in-memory
+  code contracts; no database, no fleet state). They *describe*, never *grant* or
+  *deploy*.
+  - `dotmac_kernel.capabilities` — `CapabilityCatalogue.from_manifests(...)` over
+    a module's declared `FeatureManifest.capabilities` codes (e.g.
+    `"inventory.use"`); `is_declared`/`require`/`owner`/`codes`. Fails closed on a
+    duplicate code. A capability code may only be *referenced* by a grant/profile,
+    never invented outside a manifest — the catalogue does not grant entitlement.
+  - `dotmac_kernel.profiles` — `DeploymentProfileSpec` (frozen, **versioned**
+    declaration over independent axes: required/forbidden modules, one provider
+    per seam, locale/currency/legal/residency) + `DeploymentProfileRegistry`
+    (unique `code`, `is_valid_code`, deterministic fail-closed `validate(...)`
+    returning a `ProfileValidationReport.render()`). `(code, version)` is the
+    stable identifier; the effective set changes only via an explicit version
+    bump. A profile describes desired composition, not a fleet deployment.
+  - New optional `FeatureManifest.capabilities` field (defaults `()`), the single
+    declaration point for capability codes — forward-compatible with the eventual
+    `ModuleManifest` expansion.
+
 ## 0.1.0a2 — 2026-07-30
 
 Second alpha. Adds exact money/FX value objects and platform-scoped audit +
