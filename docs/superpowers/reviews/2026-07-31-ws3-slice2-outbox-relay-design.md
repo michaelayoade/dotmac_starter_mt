@@ -1,9 +1,12 @@
 # WS3 slice 2 — outbox relay / dispatcher: security design
 
-> **Status:** Design only (2026-07-31). No implementation is authorized by this
-> document. It is the focused design the relay's privileged cross-tenant drain
-> requires before any code lands, per Michael's directive: the drain "must not
-> become a generic RLS bypass or reuse platform/app-admin authority."
+> **Status:** Implementation brief (2026-07-31). The security boundary AND the
+> mechanism/runtime are now RULED (see "Decisions"): hardened `SECURITY DEFINER`
+> claim/settle functions with `EXECUTE`-only dispatcher privileges (no direct
+> table access), a separate polling worker first, and delivery on an ordinary
+> tenant-scoped connection. This is the brief WS3 relay (→ 0.1.0a5) implements;
+> it satisfies the directive that the drain "must not become a generic RLS bypass
+> or reuse platform/app-admin authority."
 
 ## Problem
 
@@ -32,32 +35,43 @@ existing roles and used by nothing else:
 | `app_admin` | migrations, `BYPASSRLS`, schema owner | **No** — `BYPASSRLS` on the *whole database* is exactly the generic bypass to avoid. |
 | **`outbox_dispatcher`** (new) | the relay only | **Yes**, and ONLY as scoped below. |
 
-`outbox_dispatcher` is **not** `BYPASSRLS`. Its cross-tenant reach is confined to
-the outbox table alone by one of two mechanisms (decision at implementation, the
-first is preferred):
+`outbox_dispatcher` is **not** `BYPASSRLS`, and — per Michael's ruling
+(2026-07-31) — it has **no direct table privilege on `outbox_events` at all**. Its
+only power is `EXECUTE` on two hardened, schema-qualified `SECURITY DEFINER`
+functions:
 
-1. **Scoped RLS policy (preferred).** `outbox_events` keeps RLS `ENABLE`d +
-   `FORCE`d. Add a policy that grants `outbox_dispatcher` (only) `USING (true)` on
-   `outbox_events` — i.e. the dispatcher sees all tenants' rows *for this one
-   table*. It has **no** privilege (no `GRANT`, no policy) on any other
-   tenant-scoped table, so it cannot read parties, subscribers, settings, etc.
-   The bypass is table-local and role-local, auditable in one policy.
-2. **`SECURITY DEFINER` claim function.** A single `claim_outbox_batch(n)`
-   function owned by `app_admin`, `SECURITY DEFINER`, that performs the atomic
-   claim and returns the batch. `outbox_dispatcher` gets `EXECUTE` on that
-   function and on nothing else. The cross-tenant reach lives entirely inside one
-   reviewed function body.
+- **`claim_outbox_batch(worker_id text, batch int) -> setof outbox_events`** —
+  atomically claims a batch of ready rows (the leasing query below) and returns
+  them. Owned by `app_admin`, `SECURITY DEFINER`, `SET search_path = ''` (fully
+  schema-qualified body), so it runs with the owner's privilege inside a single
+  reviewed function body — not with the caller's.
+- **`settle_outbox_event(id uuid, outcome text, err text) -> void`** — records
+  the terminal/retry outcome for one already-claimed event (`sent` / backoff to
+  `pending` / `dead`). The dispatcher can settle only rows it holds a live lease
+  on (the function checks `leased_by`).
 
-Either way the invariant holds: **the dispatcher role can touch `outbox_events`
-and nothing else.** A dispatcher connection that tries to `SELECT` a tenant
-business table gets "permission denied" — proven by a least-privilege test.
+`outbox_dispatcher` gets `EXECUTE` on **exactly these two functions and nothing
+else** — no `GRANT` and no RLS policy on `outbox_events` or any other table. The
+cross-tenant reach lives entirely inside the two function bodies, which are the
+single audited surface. A dispatcher connection that tries to `SELECT`/`UPDATE`
+`outbox_events` directly — or any tenant business table — gets "permission
+denied". (The earlier "scoped RLS policy with `USING (true)`" alternative is
+**rejected**: a broad table-local read is a wider surface than a narrowly scoped
+claim/settle operation, which is what the security directive requires.)
+
+Invariant, proven by a least-privilege test: **the dispatcher can only
+`claim_outbox_batch` / `settle_outbox_event`; it has zero direct DML on any
+table.**
 
 ## Atomic leasing (no double-delivery, safe concurrency)
 
-Multiple dispatcher workers may run. Claiming uses `FOR UPDATE SKIP LOCKED` so
-workers never block each other and never claim the same row twice:
+Multiple dispatcher workers may run. Claiming is the **body of
+`claim_outbox_batch`** (a `SECURITY DEFINER` function — the dispatcher never runs
+this SQL directly) and uses `FOR UPDATE SKIP LOCKED` so workers never block each
+other and never claim the same row twice:
 
 ```sql
+-- inside claim_outbox_batch(:worker_id, :batch), SECURITY DEFINER
 UPDATE outbox_events
    SET status = 'claimed', leased_by = :worker_id, leased_at = now()
  WHERE id IN (
@@ -126,11 +140,12 @@ committed; the relay guarantees it is *eventually delivered at least once*.
 
 ## Acceptance tests (must exist before slice 2 is "done")
 
-1. **Least privilege:** an `outbox_dispatcher` connection can claim/update
-   `outbox_events` but gets `permission denied` on `parties`/`domain_settings`/
-   any tenant table.
+1. **Least privilege:** an `outbox_dispatcher` connection may only `EXECUTE`
+   `claim_outbox_batch` / `settle_outbox_event`; a direct
+   `SELECT`/`UPDATE outbox_events` — or any tenant table (`parties`,
+   `domain_settings`, …) — gets `permission denied`.
 2. **Concurrent claim, no double-delivery:** N workers over M rows deliver each
-   row exactly once (SKIP LOCKED).
+   row exactly once (the `SKIP LOCKED` claim inside `claim_outbox_batch`).
 3. **Crash recovery:** a stale `claimed` row is reclaimed after `lease_timeout`.
 4. **Retry + dead-letter:** a failing event backs off, then lands in `dead` with
    `last_error` after `max_attempts`, retained.
@@ -140,13 +155,21 @@ committed; the relay guarantees it is *eventually delivered at least once*.
 6. **`outbox_dispatcher` is not `BYPASSRLS`/superuser** (role-hygiene check,
    alongside the existing `app_user`/`platform_api` checks in the RLS catalog).
 
-## Open decisions for implementation
+## Decisions (ruled 2026-07-31) and remaining knobs
 
-- Scoped RLS policy vs `SECURITY DEFINER` claim function (prefer the policy).
-- Relay runtime: in-process worker vs separate process; `LISTEN/NOTIFY` wakeups
-  vs polling `available_at`.
-- `lease_timeout`, `max_attempts`, backoff curve, and `sent`-retention as config
-  knobs with prod-safe defaults.
+**Ruled:**
+- **Privilege mechanism:** hardened, schema-qualified `SECURITY DEFINER`
+  `claim_outbox_batch` / `settle_outbox_event` functions; `outbox_dispatcher` gets
+  `EXECUTE`-only and **no direct table privilege**. The broad table-local RLS
+  policy is rejected.
+- **Runtime:** a **separate polling worker** first (polls `available_at`), not an
+  in-process worker. `LISTEN/NOTIFY` is a later latency optimization, not slice 2.
+- **Delivery role:** the dispatcher connection **only claims/settles**; delivery
+  runs on an ordinary tenant-scoped connection (context restored to the event's
+  tenant) or hands off to an external transport — never the dispatcher's reach.
 
-These are settled when slice 2 is scheduled; this document fixes the security
+**Remaining knobs** (config with prod-safe defaults, settled at implementation):
+`lease_timeout`, `max_attempts`, backoff curve, poll interval, `sent`-retention.
+
+This document fixes the security
 boundary they must respect.
