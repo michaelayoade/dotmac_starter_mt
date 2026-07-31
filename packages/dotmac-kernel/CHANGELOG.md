@@ -8,6 +8,14 @@ here.
 
 ## Unreleased
 
+## 0.1.0a5 — 2026-07-31
+
+Fifth alpha. Completes **WS3 slice 2 — the outbox relay**: the leasing
+schema + `outbox_dispatcher` security boundary (SECURITY DEFINER claim/settle,
+EXECUTE-only), the typed relay behavior (claim/success/failure + retry/backoff/
+dead-letter), and the polling worker (strict dispatcher/tenant connection
+separation, clean shutdown). Advances the kernel migration head to `0011`.
+
 ### Added
 - **WS3 relay leasing schema + security** (slice 2, PR 1; kernel migration
   `0011`). `outbox_events` gains lease columns (`leased_by`/`leased_at`) + a
