@@ -193,7 +193,7 @@ def test_rehearsal_1_fresh_empty_assembly(scratch_db: str) -> None:
     assert _table_exists(scratch_db, "platform_audit_events")
     assert _table_exists(scratch_db, "platform_inbox_records")
     assert _table_exists(scratch_db, "tenant_entitlement_grants")
-    assert _versions(scratch_db) == {"0011_outbox_relay_leasing"}
+    assert _versions(scratch_db) == {"0012_platform_outbox"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ def test_rehearsal_2_fresh_reference_assembly(scratch_db: str) -> None:
     # does NOT depend on — so both lineage heads now appear, exactly the case the
     # split design anticipated ("if the kernel advances past what a001 depends
     # on, both heads would appear").
-    assert _versions(scratch_db) == {"0011_outbox_relay_leasing", "a001_adopt_cfd"}
+    assert _versions(scratch_db) == {"0012_platform_outbox", "a001_adopt_cfd"}
     # RLS + grants correct: FORCE RLS on, the isolation policy present, and
     # app_user holds DML (a proxy for the full contract the migration verifies).
     assert _q(
@@ -244,7 +244,7 @@ def _simulate_v08(url: str) -> None:
     # kernel@head is now 0011 (relay leasing added atop 0010 entitlements),
     # but a001 is un-recorded — the "table present, a001 not recorded" state adoption
     # repairs.
-    assert _versions(url) == {"0011_outbox_relay_leasing"}
+    assert _versions(url) == {"0012_platform_outbox"}
 
 
 def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
@@ -273,7 +273,7 @@ def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
     # a001 subsumes only 0007 (its depends_on pin); the kernel head has advanced
     # to 0011, so both lineage heads appear (see rehearsal 2).
     _upgrade(scratch_db, "heads")
-    assert _versions(scratch_db) == {"0011_outbox_relay_leasing", "a001_adopt_cfd"}
+    assert _versions(scratch_db) == {"0012_platform_outbox", "a001_adopt_cfd"}
     # Data survived untouched.
     assert _q(scratch_db, "SELECT count(*) FROM custom_field_definitions") == 1
     assert (
@@ -379,13 +379,13 @@ def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
     # head (0008); `kernel@head` no longer collapses a001 now the kernel lineage
     # has advanced past a001's `depends_on` pin.
     _stamp(scratch_db, "assembly@base")
-    assert _versions(scratch_db) == {"0011_outbox_relay_leasing"}
+    assert _versions(scratch_db) == {"0012_platform_outbox"}
     assert _table_exists(scratch_db, "custom_field_definitions")
 
     # Now the kernel-only migrator succeeds: it sees only the kernel head (0008),
     # which it knows — a001 is no longer recorded.
     _upgrade(scratch_db, "heads", version_locations=_kernel_only_locations())
-    assert _versions(scratch_db) == {"0011_outbox_relay_leasing"}
+    assert _versions(scratch_db) == {"0012_platform_outbox"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -403,12 +403,12 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
 
     heads = set(script.get_heads())
     assert heads == {
-        "0011_outbox_relay_leasing",
+        "0012_platform_outbox",
         "a001_adopt_cfd",
     }, f"unexpected head set: {heads}"
 
     # Each head carries the expected branch label.
     kernel_head = script.get_revision("kernel@head")
     assembly_head = script.get_revision("assembly@head")
-    assert kernel_head.revision == "0011_outbox_relay_leasing"
+    assert kernel_head.revision == "0012_platform_outbox"
     assert assembly_head.revision == "a001_adopt_cfd"
