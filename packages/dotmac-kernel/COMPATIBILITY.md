@@ -58,6 +58,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.messaging.inbox` | `process_once`, `ProcessOutcome`, `CommandHandler` |
 | `dotmac_kernel.messaging.outbox` | `enqueue_event` |
 | `dotmac_kernel.messaging.platform` | `process_once_platform`, `PlatformCommandHandler` |
+| `dotmac_kernel.messaging.relay` | `RelayPolicy`, `ClaimedEvent`, `FailureOutcome`, `claim_batch`, `record_success`, `record_failure` (WS3 relay behavior; dispatcher-bound session; see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.models` | `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `InboxStatus`, `OutboxStatus` |
 | `dotmac_kernel.middleware.csrf` | `CSRFMiddleware` |
 | `dotmac_kernel.middleware.observability` | `ObservabilityMiddleware` |

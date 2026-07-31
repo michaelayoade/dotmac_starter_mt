@@ -32,6 +32,14 @@ from dotmac_kernel.messaging.platform import (
     PlatformCommandHandler,
     process_once_platform,
 )
+from dotmac_kernel.messaging.relay import (
+    ClaimedEvent,
+    FailureOutcome,
+    RelayPolicy,
+    claim_batch,
+    record_failure,
+    record_success,
+)
 
 __all__ = [
     # envelope
@@ -45,6 +53,13 @@ __all__ = [
     "process_once_platform",
     # outbox write side
     "enqueue_event",
+    # relay / dispatcher (slice 2)
+    "RelayPolicy",
+    "ClaimedEvent",
+    "FailureOutcome",
+    "claim_batch",
+    "record_success",
+    "record_failure",
     # persisted state
     "InboxRecord",
     "PlatformInboxRecord",
