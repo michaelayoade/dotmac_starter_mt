@@ -8,6 +8,21 @@ here.
 
 ## Unreleased
 
+### Added
+- **WS2 — tenant entitlements** (`dotmac_kernel.entitlements`). The data-plane's
+  single entitlement authority: `TenantEntitlementGrant` (tenant-scoped,
+  RLS-protected; kernel migration `0010`) is the grant store a commercial
+  allocation projects into; `grant_entitlement(...)` writes a grant and REQUIRES
+  the capability code be **declared** (WS1 — validated against a
+  `CapabilityCatalogue`, never invented by a row); `is_entitled(...)` is the
+  explainable, purely-local evaluator (`EntitlementDecision` with a stable
+  `reason`) — it never calls a payment/licence provider. Allocation (what a tenant
+  is entitled to) stays vendor-owned; this is only evaluation (whether a request
+  is allowed). No parallel `tenant_module_entitlements` table.
+- Kernel migration head advanced to `0010_tenant_entitlements`; the assembly
+  lineage (`a001`) still pins an older head, so a fully-migrated database now
+  reports `{0010, a001}`.
+
 ## 0.1.0a3 — 2026-07-31
 
 Third alpha. Adds the WS1 capability catalogue + deployment-profile registry

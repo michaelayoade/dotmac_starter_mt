@@ -44,6 +44,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
+| `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
 | `dotmac_kernel.crud` | `CRUDManager` |
 | `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `conflict_savepoint`, `engine`, `platform_engine` |
 | `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
