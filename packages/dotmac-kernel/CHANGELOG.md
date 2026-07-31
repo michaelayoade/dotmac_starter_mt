@@ -8,6 +8,12 @@ here.
 
 ## Unreleased
 
+## 0.1.0a3 — 2026-07-31
+
+Third alpha. Adds the WS1 capability catalogue + deployment-profile registry
+(pure in-memory contracts). Additive over `0.1.0a2` — no breaking changes, no new
+migrations (the kernel head stays `0009`).
+
 ### Added
 - **WS1 — capability catalogue + deployment-profile registry** (pure, in-memory
   code contracts; no database, no fleet state). They *describe*, never *grant* or
