@@ -8,7 +8,18 @@ here.
 
 ## Unreleased
 
-## 0.1.0a4 — 2026-07-31
+### Added
+- **WS3 relay leasing schema + security** (slice 2, PR 1; kernel migration
+  `0011`). `outbox_events` gains lease columns (`leased_by`/`leased_at`) + a
+  stale-lease index and the `OutboxStatus` vocabulary gains `claimed`/`dead`. A
+  dedicated **`outbox_dispatcher`** role (LOGIN, **not** BYPASSRLS/superuser, **no
+  table privilege**) may only `EXECUTE` two hardened, schema-qualified
+  `SECURITY DEFINER` functions owned by `app_admin` — `claim_outbox_batch`
+  (atomic `FOR UPDATE SKIP LOCKED` claim incl. stale-lease reclaim) and
+  `settle_outbox_event` (records an outcome only for a row the caller holds a live
+  lease on). The dispatcher's cross-tenant reach is confined to those two
+  functions; a direct table read/write is `permission denied`. The relay's typed
+  Python API + retry/backoff/dead-letter policy land in PR 2.
 
 Fourth alpha. Adds WS2 tenant entitlements (the data-plane's grant store +
 explainable evaluator). Advances the kernel migration head to `0010`.

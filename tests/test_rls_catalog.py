@@ -169,8 +169,10 @@ def audit_live_catalog(conn) -> list[str]:
                     "policy — unscoped tenant data"
                 )
 
-    # Role hygiene: the two online roles can never bypass RLS.
-    for role in ("app_user", "platform_api"):
+    # Role hygiene: the online roles can never bypass RLS (the relay dispatcher
+    # included — its cross-tenant reach is confined to the claim/settle functions,
+    # never a role-level BYPASSRLS).
+    for role in ("app_user", "platform_api", "outbox_dispatcher"):
         row = conn.execute(
             text(
                 "SELECT rolbypassrls, rolsuper FROM pg_roles " "WHERE rolname = :role"

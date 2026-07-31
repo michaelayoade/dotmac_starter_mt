@@ -40,11 +40,17 @@ _JSON = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 
 class OutboxStatus(str, Enum):
-    """Lifecycle of an outbox event (the relay in slice 2 advances it)."""
+    """Lifecycle of an outbox event, advanced by the relay (slice 2):
+    ``pending`` → ``claimed`` (leased by a dispatcher worker) → ``sent`` on
+    delivery, or back to ``pending`` for a retry (backoff), or ``dead`` after
+    max attempts (a retained dead-letter). ``failed`` is the legacy terminal
+    kept for compatibility."""
 
     PENDING = "pending"
+    CLAIMED = "claimed"
     SENT = "sent"
     FAILED = "failed"
+    DEAD = "dead"
 
 
 class InboxStatus(str, Enum):
@@ -111,6 +117,8 @@ class OutboxEvent(Base, TimestampMixin):
     __table_args__ = (
         # The relay scans by (status, available_at); index it for cheap claims.
         Index("ix_outbox_events_status_available_at", "status", "available_at"),
+        # Stale-lease reclaim scans claimed rows by lease age.
+        Index("ix_outbox_events_status_leased_at", "status", "leased_at"),
     )
 
     id: Mapped[UUID] = uuid_pk()
@@ -136,6 +144,10 @@ class OutboxEvent(Base, TimestampMixin):
     correlation_id: Mapped[str | None] = mapped_column(String(200))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(String(500))
+    # Relay lease (slice 2): a dispatcher worker claims a row by stamping these;
+    # a stale lease (leased_at older than the timeout) is reclaimable.
+    leased_by: Mapped[str | None] = mapped_column(String(200))
+    leased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 __all__ = [
