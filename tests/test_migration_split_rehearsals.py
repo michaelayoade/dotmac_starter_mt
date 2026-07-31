@@ -185,14 +185,15 @@ def test_rehearsal_1_fresh_empty_assembly(scratch_db: str) -> None:
     _upgrade(scratch_db, "kernel@head")
     assert _column_exists(scratch_db, "parties", "custom_fields")
     assert not _table_exists(scratch_db, "custom_field_definitions")
-    # Kernel head advanced to 0009 (platform audit/inbox); the 0008 outbox/inbox
+    # Kernel head advanced to 0010 (tenant entitlements); the 0008 outbox/inbox
     # tables and the 0009 platform tables all exist, the assembly's
     # custom_field_definitions still does not.
     assert _table_exists(scratch_db, "outbox_events")
     assert _table_exists(scratch_db, "inbox_records")
     assert _table_exists(scratch_db, "platform_audit_events")
     assert _table_exists(scratch_db, "platform_inbox_records")
-    assert _versions(scratch_db) == {"0009_platform_audit_inbox"}
+    assert _table_exists(scratch_db, "tenant_entitlement_grants")
+    assert _versions(scratch_db) == {"0010_tenant_entitlements"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -206,11 +207,11 @@ def test_rehearsal_2_fresh_reference_assembly(scratch_db: str) -> None:
     # The kernel schema is fully applied (platform_admins is 0007's table).
     assert _table_exists(scratch_db, "platform_admins")
     # Runtime version table: a001 `depends_on` 0007 subsumes ONLY the kernel head
-    # it pins. The kernel has since advanced to 0009 (platform audit/inbox), which a001
+    # it pins. The kernel has since advanced to 0010 (tenant entitlements), which a001
     # does NOT depend on — so both lineage heads now appear, exactly the case the
     # split design anticipated ("if the kernel advances past what a001 depends
     # on, both heads would appear").
-    assert _versions(scratch_db) == {"0009_platform_audit_inbox", "a001_adopt_cfd"}
+    assert _versions(scratch_db) == {"0010_tenant_entitlements", "a001_adopt_cfd"}
     # RLS + grants correct: FORCE RLS on, the isolation policy present, and
     # app_user holds DML (a proxy for the full contract the migration verifies).
     assert _q(
@@ -240,10 +241,10 @@ def _simulate_v08(url: str) -> None:
     # collapses it now the kernel head (0008) has advanced past a001's pin.
     _stamp(url, "assembly@base")
     assert _table_exists(url, "custom_field_definitions")
-    # kernel@head is now 0009 (the outbox/inbox + platform tables also exist), but
-    # a001 is un-recorded — the "table present, a001 not recorded" state adoption
+    # kernel@head is now 0010 (outbox/inbox + platform + entitlement tables exist),
+    # but a001 is un-recorded — the "table present, a001 not recorded" state adoption
     # repairs.
-    assert _versions(url) == {"0009_platform_audit_inbox"}
+    assert _versions(url) == {"0010_tenant_entitlements"}
 
 
 def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
@@ -270,9 +271,9 @@ def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
 
     # Adopt: a001 sees the table, verifies the full contract, records itself.
     # a001 subsumes only 0007 (its depends_on pin); the kernel head has advanced
-    # to 0009, so both lineage heads appear (see rehearsal 2).
+    # to 0010, so both lineage heads appear (see rehearsal 2).
     _upgrade(scratch_db, "heads")
-    assert _versions(scratch_db) == {"0009_platform_audit_inbox", "a001_adopt_cfd"}
+    assert _versions(scratch_db) == {"0010_tenant_entitlements", "a001_adopt_cfd"}
     # Data survived untouched.
     assert _q(scratch_db, "SELECT count(*) FROM custom_field_definitions") == 1
     assert (
@@ -378,13 +379,13 @@ def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
     # head (0008); `kernel@head` no longer collapses a001 now the kernel lineage
     # has advanced past a001's `depends_on` pin.
     _stamp(scratch_db, "assembly@base")
-    assert _versions(scratch_db) == {"0009_platform_audit_inbox"}
+    assert _versions(scratch_db) == {"0010_tenant_entitlements"}
     assert _table_exists(scratch_db, "custom_field_definitions")
 
     # Now the kernel-only migrator succeeds: it sees only the kernel head (0008),
     # which it knows — a001 is no longer recorded.
     _upgrade(scratch_db, "heads", version_locations=_kernel_only_locations())
-    assert _versions(scratch_db) == {"0009_platform_audit_inbox"}
+    assert _versions(scratch_db) == {"0010_tenant_entitlements"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -402,12 +403,12 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
 
     heads = set(script.get_heads())
     assert heads == {
-        "0009_platform_audit_inbox",
+        "0010_tenant_entitlements",
         "a001_adopt_cfd",
     }, f"unexpected head set: {heads}"
 
     # Each head carries the expected branch label.
     kernel_head = script.get_revision("kernel@head")
     assembly_head = script.get_revision("assembly@head")
-    assert kernel_head.revision == "0009_platform_audit_inbox"
+    assert kernel_head.revision == "0010_tenant_entitlements"
     assert assembly_head.revision == "a001_adopt_cfd"

@@ -47,6 +47,12 @@ from dotmac_kernel.capabilities import (
     UndeclaredCapabilityError,
 )
 from dotmac_kernel.config import Settings, settings, validate_settings
+from dotmac_kernel.entitlements import (
+    EntitlementDecision,
+    TenantEntitlementGrant,
+    grant_entitlement,
+    is_entitled,
+)
 from dotmac_kernel.exceptions import (
     BadRequestError,
     ConflictError,
@@ -124,6 +130,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.crud",
         "dotmac_kernel.db",
         "dotmac_kernel.deps",
+        "dotmac_kernel.entitlements",
         "dotmac_kernel.errors",
         "dotmac_kernel.exceptions",
         "dotmac_kernel.features",
@@ -223,6 +230,11 @@ __all__ = [
     "ProfileValidationReport",
     "DuplicateProfileError",
     "UnknownProfileError",
+    # entitlements (WS2)
+    "TenantEntitlementGrant",
+    "EntitlementDecision",
+    "grant_entitlement",
+    "is_entitled",
     # identity
     "normalize_email",
     "person_display_name",
