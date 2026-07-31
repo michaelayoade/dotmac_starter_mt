@@ -26,7 +26,15 @@ here.
   `dead` at `max_attempts`) — the retry/backoff/dead-letter **policy**
   (`RelayPolicy`) lives here; the SQL functions stay mechanical. Receives a
   dispatcher-bound `Session` and only executes (the worker owns the transaction).
-  At-least-once, one active claim per lease. The polling worker process is PR 3.
+  At-least-once, one active claim per lease.
+- **WS3 relay worker** (slice 2, PR 3; `dotmac_kernel.messaging.worker` +
+  `scripts/run_relay.py`). The separate polling process: `run_once`/`run_forever`
+  claim a batch and deliver each event through a `DeliveryTransport` (Protocol;
+  `LoggingTransport` is a reference). **Strict connection separation** — the
+  dispatcher connection only claims/settles; each delivery's product reads use a
+  **separate tenant-scoped connection** whose RLS context is restored to the
+  event's own tenant. Clean SIGTERM/SIGINT shutdown. The worker module receives
+  session factories and never builds an engine (the entrypoint script does).
 
 Fourth alpha. Adds WS2 tenant entitlements (the data-plane's grant store +
 explainable evaluator). Advances the kernel migration head to `0010`.
