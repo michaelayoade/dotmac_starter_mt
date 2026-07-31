@@ -143,6 +143,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.messaging.outbox",
         "dotmac_kernel.messaging.platform",
         "dotmac_kernel.messaging.relay",
+        "dotmac_kernel.messaging.worker",
         "dotmac_kernel.middleware.csrf",
         "dotmac_kernel.middleware.observability",
         "dotmac_kernel.middleware.rate_limit",

@@ -131,9 +131,7 @@ def upgrade() -> None:
     # needs privilege on the table. It owns the schema in production; in a
     # postgres-owned test cluster it does not, so grant it explicitly (app_admin is
     # the BYPASSRLS migrator — this widens nothing for online roles).
-    op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON outbox_events TO app_admin;"
-    )
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON outbox_events TO app_admin;")
 
     # Own the functions as app_admin (the migration role differs across
     # environments), then hand the dispatcher EXECUTE-ONLY — nothing on any table.

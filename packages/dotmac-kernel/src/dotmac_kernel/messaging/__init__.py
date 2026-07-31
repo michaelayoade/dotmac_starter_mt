@@ -40,6 +40,12 @@ from dotmac_kernel.messaging.relay import (
     record_failure,
     record_success,
 )
+from dotmac_kernel.messaging.worker import (
+    DeliveryTransport,
+    LoggingTransport,
+    run_forever,
+    run_once,
+)
 
 __all__ = [
     # envelope
@@ -60,6 +66,11 @@ __all__ = [
     "claim_batch",
     "record_success",
     "record_failure",
+    # relay worker (polling process + transport)
+    "DeliveryTransport",
+    "LoggingTransport",
+    "run_once",
+    "run_forever",
     # persisted state
     "InboxRecord",
     "PlatformInboxRecord",
