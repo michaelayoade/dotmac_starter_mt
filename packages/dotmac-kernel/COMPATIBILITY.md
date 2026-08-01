@@ -8,7 +8,9 @@ document is its prose companion. The governance test
 `tests/architecture/test_kernel_public_surface.py` enforces that the reference
 assembly imports only what is documented here.
 
-Current kernel version: **0.1.0a1** (pre-release).
+The current kernel version is the `[tool.poetry] version` in this package's
+`pyproject.toml` (pre-release `0.x` alphas; per-release notes in
+`CHANGELOG.md`) — it is deliberately not repeated here, where it would drift.
 
 ## What is public
 
@@ -296,7 +298,7 @@ covered by consumer tests.
 - **MINOR** — additive: new public names/modules, new optional parameters.
 - **PATCH** — bug fixes with no public-surface change.
 
-**Pre-1.0 (`0.x`, incl. the `0.1.0a1` alpha):** the surface is still settling;
+**Pre-1.0 (`0.x`, incl. the current alphas):** the surface is still settling;
 a `0.MINOR` bump may carry breaking changes, each called out in the kernel
 `CHANGELOG`. The public surface and this document are nonetheless authoritative
 for what is *intended* to be stable.
