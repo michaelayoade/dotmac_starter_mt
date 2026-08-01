@@ -8,6 +8,48 @@ here.
 
 ## Unreleased
 
+## 0.1.0a7 — 2026-08-01
+
+Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
+signed/versioned licence delivery (design brief:
+`docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
+**verifies only**: issuance and private-key custody stay in the vendor control
+plane; a product data plane verifies a delivered envelope, projects the
+verified capabilities into its OWN local WS2 grants, and acknowledges the
+applied version + digest. No migration — the kernel head stays `0012` (the
+receiver owns its durable applied/revocation state).
+
+### Added
+- **WS8 — signed-licence verification** (`dotmac_kernel.licensing`,
+  submodule-only). DSSE-style `dotmac-licence-envelope/1` (Ed25519 signatures
+  over the exact payload **bytes**; payload parsed only after a signature
+  verifies; `payload_digest` = sha256 of those bytes is the replay/ack
+  identity). `LicenceKeyRing` with `active`/`retired`/`revoked` rotation
+  states (retired still verifies, revoked never does, unknown keys and
+  duplicate ids fail closed). `verify_licence(...)` — fail-closed, offline,
+  deterministic (injected clock): contractual check order envelope → signature
+  → parse → revocation → deployment binding (optional + `require_binding`) →
+  validity (`valid`/`in_grace` grace window; absent `expires_at` = perpetual)
+  → replay/rollback vs the receiver's `AppliedLicence` (stale version
+  rejected; same version+digest = idempotent reapply; same version, different
+  digest = hard conflict). `verify_revocation_list(...)` — signed, monotonic
+  `dotmac-licence-revocation/1` over the same envelope. Shared
+  `LicenceAcknowledgement` value object; `LicenceError` subclass names are the
+  stable rejection reasons.
+- **Test signer** (`dotmac_kernel.testing.licensing.FakeLicenceSigner`) —
+  ephemeral, per-instance, in-memory Ed25519 signer for vendor-plane and
+  product tests; the only private key anywhere in the kernel.
+- **`licensing` extra** — `pip install dotmac-kernel[licensing]` pulls
+  `cryptography`; the module imports it lazily, so everything but signature
+  verification works without it and verification without it raises
+  `VerificationUnavailableError` (fail closed). The `testing` extra now also
+  includes `cryptography` for the fake signer.
+
+### Fixed
+- `COMPATIBILITY.md`/`README.md` no longer hardcode a "current version" (both
+  had drifted, still claiming `0.1.0a1`); they now point at `pyproject.toml` /
+  this changelog.
+
 ## 0.1.0a6 — 2026-07-31
 
 Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
