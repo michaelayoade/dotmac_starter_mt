@@ -339,18 +339,30 @@ def test_rehearsal_4_adoption_drift_guard(scratch_db: str, mutation: str) -> Non
 def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -> None:
     _upgrade(scratch_db, "heads")
     assert _table_exists(scratch_db, "custom_field_definitions")
+    assert _table_exists(scratch_db, "tenant_applied_licences")
 
-    # Without the authorization flag: refuses (RuntimeError), table intact.
+    # Without the authorization flags: refuses (RuntimeError), tables intact.
+    # a002 (applied licences) guards its drop first in the downgrade path,
+    # then a001 guards custom_field_definitions — each has its own flag.
     monkeypatch.delenv("DOTMAC_ALLOW_DESTRUCTIVE_CF_DOWNGRADE", raising=False)
+    monkeypatch.delenv("DOTMAC_ALLOW_DESTRUCTIVE_LICENCE_DOWNGRADE", raising=False)
     with pytest.raises(RuntimeError):
         _downgrade(scratch_db, "assembly@base")
     assert _table_exists(scratch_db, "custom_field_definitions")
-    assert "a001_adopt_cfd" in _versions(scratch_db)
+    assert _table_exists(scratch_db, "tenant_applied_licences")
+    assert "a002_applied_licences" in _versions(scratch_db)
 
-    # With the flag (approved runbook): drops.
+    # a002 authorized alone: a001 still refuses; the CF table survives.
+    monkeypatch.setenv("DOTMAC_ALLOW_DESTRUCTIVE_LICENCE_DOWNGRADE", "1")
+    with pytest.raises(RuntimeError):
+        _downgrade(scratch_db, "assembly@base")
+    assert _table_exists(scratch_db, "custom_field_definitions")
+
+    # With both flags (approved runbook): drops both.
     monkeypatch.setenv("DOTMAC_ALLOW_DESTRUCTIVE_CF_DOWNGRADE", "1")
     _downgrade(scratch_db, "assembly@base")
     assert not _table_exists(scratch_db, "custom_field_definitions")
+    assert not _table_exists(scratch_db, "tenant_applied_licences")
     # The kernel column is untouched.
     assert _column_exists(scratch_db, "parties", "custom_fields")
 
@@ -361,24 +373,25 @@ def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -
 
 
 def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
-    # New code deployed: a001 recorded.
+    # New code deployed: the assembly head (a002, subsuming a001) recorded.
     _upgrade(scratch_db, "heads")
-    assert "a001_adopt_cfd" in _versions(scratch_db)
+    assert "a002_applied_licences" in _versions(scratch_db)
 
     # NEGATIVE CONTROL: the old v0.8 migrator (kernel-only version_locations,
-    # no a001 script) run against this database — reproduces the real failure
-    # `deploy.sh <old-tag>` would hit: alembic cannot locate the recorded a001.
+    # no assembly scripts) run against this database — reproduces the real
+    # failure `deploy.sh <old-tag>` would hit: alembic cannot locate the
+    # recorded assembly head.
     from alembic.util.exc import CommandError
 
     with pytest.raises(CommandError) as exc:
         _upgrade(scratch_db, "heads", version_locations=_kernel_only_locations())
-    assert "a001" in str(exc.value).lower() or "locate" in str(exc.value).lower()
+    assert "a002" in str(exc.value).lower() or "locate" in str(exc.value).lower()
 
     # THE ROLLBACK PROCEDURE (new code): un-record the assembly branch via a
-    # branch-aware stamp to `assembly@base`, table preserved — NOT a downgrade
-    # (that would drop the table). This removes ONLY a001 and leaves the kernel
-    # head (0008); `kernel@head` no longer collapses a001 now the kernel lineage
-    # has advanced past a001's `depends_on` pin.
+    # branch-aware stamp to `assembly@base`, tables preserved — NOT a downgrade
+    # (that would drop them). This removes the whole assembly branch (a001 +
+    # a002) and leaves the kernel head; `kernel@head` no longer collapses the
+    # branch now the kernel lineage has advanced past a001's `depends_on` pin.
     _stamp(scratch_db, "assembly@base")
     assert _versions(scratch_db) == {"0012_platform_outbox"}
     assert _table_exists(scratch_db, "custom_field_definitions")
@@ -405,7 +418,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     heads = set(script.get_heads())
     assert heads == {
         "0012_platform_outbox",
-        "a001_adopt_cfd",
+        "a002_applied_licences",
     }, f"unexpected head set: {heads}"
 
     # Each head carries the expected branch label.
