@@ -15,7 +15,8 @@ Boundary: the kernel never imports a product assembly (`app`, feature packages)
 — assemblies consume the kernel, not the reverse. Enforced by the repo's
 import-linter contracts.
 
-Status: `0.1.0a1` pre-release, extracted from `dotmac_starter_mt` app/core in
-the kernel-boundary program (Task 1). The public surface (`__all__` /
-`COMPATIBILITY.md`), `ProductAssemblySpec`/`create_app`, and the
-`dotmac_kernel.testing` contract-test kit land in Tasks 2–6.
+Status: `0.x` pre-release (the current version is `pyproject.toml`'s
+`[tool.poetry] version`; per-release notes in `CHANGELOG.md`), extracted from
+`dotmac_starter_mt` app/core in the kernel-boundary program. The public surface
+(`__all__` / `COMPATIBILITY.md`), `ProductAssemblySpec`/`create_app`, and the
+`dotmac_kernel.testing` contract-test kit shipped in Tasks 2–6.
