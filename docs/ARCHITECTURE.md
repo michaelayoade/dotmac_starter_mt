@@ -944,6 +944,7 @@ made concrete — every model has exactly one declared owner.
 | `PlatformAdmin` | `platform_admins` | core | native (control-plane security Task 1, ADR-0004) — platform catalog table: no `tenant_id`, no RLS, GRANT `platform_api`/`app_admin` only, REVOKEd from `app_user` |
 | `PlatformSession` | `platform_sessions` | core | native (control-plane security Task 1, ADR-0004) — same grant model as `platform_admins` |
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
+| `TenantAppliedLicence` | `tenant_applied_licences` | licensing | native (WS8 reference receiver, assembly migration `a002`) — the receiver-owned durable replay record the kernel verifier deliberately does not store; one row per `(tenant_id, licence_id)` lineage, upserted on each applied version |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
