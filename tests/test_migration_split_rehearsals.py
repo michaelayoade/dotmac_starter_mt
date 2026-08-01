@@ -425,4 +425,4 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     kernel_head = script.get_revision("kernel@head")
     assembly_head = script.get_revision("assembly@head")
     assert kernel_head.revision == "0012_platform_outbox"
-    assert assembly_head.revision == "a001_adopt_cfd"
+    assert assembly_head.revision == "a002_applied_licences"
