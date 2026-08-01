@@ -37,12 +37,18 @@ path dependency — the assembly imports `dotmac_kernel.*`, never a copied modul
   `feature.py` (exports `feature: FeatureManifest`). Features never import
   each other (import-linter contract "Features are independent of each
   other"); cross-feature references use FK strings / UUID columns, never a
-  Python import. Seven registered today: `tenants`, `auth`, `parties`,
+  Python import. Eight registered today: `tenants`, `auth`, `parties`,
   `rbac`, `settings` (tenant-scoped settings-as-data admin API —
   spec/seed/router/schemas only; the registry/resolver mechanics it depends
   on live in core, see below), `custom_fields` (definitions CRUD + values on
   a registered entity's `custom_fields` JSONB column — 13 field types,
-  zero-migration field creation), `web` (`core=False`, deletable — the
+  zero-migration field creation), `licensing` (the WS8 reference receiver:
+  verifies a vendor-signed licence envelope via `dotmac_kernel.licensing`,
+  projects it into local WS2 grants, keeps the durable
+  `TenantAppliedLicence` replay record — assembly migration `a002` — and
+  returns the version/digest acknowledgement; trust config via
+  `LICENCE_VERIFICATION_KEYS`/`LICENCE_DEPLOYMENT_ID`/
+  `LICENCE_REQUIRE_BINDING` env knobs), `web` (`core=False`, deletable — the
   admin-portal dashboard shell; `DISABLED_FEATURES=web` drops only `GET
   /admin`, every other feature's own `/admin/*` routes and the API stay up —
   see "Extension points" below for `WEB_ENABLED`, the different,

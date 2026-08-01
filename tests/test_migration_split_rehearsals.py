@@ -210,8 +210,8 @@ def test_rehearsal_2_fresh_reference_assembly(scratch_db: str) -> None:
     # it pins. The kernel has since advanced to 0011 (outbox relay leasing), which a001
     # does NOT depend on — so both lineage heads now appear, exactly the case the
     # split design anticipated ("if the kernel advances past what a001 depends
-    # on, both heads would appear").
-    assert _versions(scratch_db) == {"0012_platform_outbox", "a001_adopt_cfd"}
+    # on, both heads would appear"). The assembly head is a002 (applied licences).
+    assert _versions(scratch_db) == {"0012_platform_outbox", "a002_applied_licences"}
     # RLS + grants correct: FORCE RLS on, the isolation policy present, and
     # app_user holds DML (a proxy for the full contract the migration verifies).
     assert _q(
@@ -271,9 +271,10 @@ def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
 
     # Adopt: a001 sees the table, verifies the full contract, records itself.
     # a001 subsumes only 0007 (its depends_on pin); the kernel head has advanced
-    # to 0011, so both lineage heads appear (see rehearsal 2).
+    # to 0011, so both lineage heads appear (see rehearsal 2). The assembly
+    # lineage continues to a002 (applied licences) on the same upgrade.
     _upgrade(scratch_db, "heads")
-    assert _versions(scratch_db) == {"0012_platform_outbox", "a001_adopt_cfd"}
+    assert _versions(scratch_db) == {"0012_platform_outbox", "a002_applied_licences"}
     # Data survived untouched.
     assert _q(scratch_db, "SELECT count(*) FROM custom_field_definitions") == 1
     assert (

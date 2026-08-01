@@ -20,4 +20,10 @@ feature = FeatureManifest(
     routers=[router],
     web_routers=[web_router],
     nav=[NavItem("Custom Fields", "/admin/custom-fields")],
+    # WS1: this module's licensable capability code (referenced by entitlement
+    # grants / licences, e.g. the WS8 receiver in app/features/licensing —
+    # declared here because a capability code may never be invented outside
+    # its owning module's manifest). Declaration describes; it does not gate:
+    # request-time enforcement via `is_entitled` is future, contract-gated work.
+    capabilities=("custom_fields.use",),
 )

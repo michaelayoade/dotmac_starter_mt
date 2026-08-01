@@ -36,6 +36,7 @@ from app.features import FEATURE_MODULES
 # create_test_engine() runs create_all (UserCredential moved to
 # dotmac_kernel.models in control-plane security Task 2).
 from app.features.custom_fields import models as custom_fields  # noqa: F401
+from app.features.licensing import models as licensing_models  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
