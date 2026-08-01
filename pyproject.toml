@@ -37,6 +37,7 @@ pytest-cov = "^7.1.0"
 import-linter = "^2.13"
 bandit = "^1.9.4"
 pre-commit = "^4.6.0"
+cryptography = "^45"
 
 [tool.ruff]
 line-length = 88

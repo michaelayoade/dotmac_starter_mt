@@ -54,6 +54,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
+| `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
 | `dotmac_kernel.logging` | `setup_logging` |
 | `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `PlatformOutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.envelope` | `CommandEnvelope` |
@@ -84,9 +85,10 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.settings_resolver` | `SettingSpec`, `register_specs`, `resolve_value` |
 | `dotmac_kernel.settings_admin` | `all_specs`, `get_spec`, `resolve_with_source`, `upsert_by_key`, `ensure_by_key`, `validate_spec_value` |
 | `dotmac_kernel.templating` | `render`, `install_surface_globals`, `static_dir` |
-| `dotmac_kernel.testing` | `create_test_engine`, `isolated_session`, `assembly_test_client`, `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding`, `FakeProvisioningProvider`, `check_provisioning_provider_contract` (see "Testing kit" below) |
+| `dotmac_kernel.testing` | `create_test_engine`, `isolated_session`, `assembly_test_client`, `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding`, `FakeProvisioningProvider`, `check_provisioning_provider_contract`, `FakeLicenceSigner` (see "Testing kit" below) |
 | `dotmac_kernel.testing.harness` | `create_test_engine`, `isolated_session`, `assembly_test_client` |
 | `dotmac_kernel.testing.fakes` | `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding` |
+| `dotmac_kernel.testing.licensing` | `FakeLicenceSigner` (ephemeral in-memory Ed25519 test signer — the ONLY signer in the kernel; needs the `cryptography` dependency at instantiation) |
 | `dotmac_kernel.testing.provisioning` | `FakeProvisioningProvider`, `check_provisioning_provider_contract` |
 | `dotmac_kernel.web_deps` | `require_web_auth`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
 
@@ -200,6 +202,13 @@ fakes work without it). The package re-exports everything from three submodules:
   the reusable assertion suite a consumer runs against THEIR provider factory to
   prove it honors the protocol's determinism / idempotency / partial-resume /
   cancellation semantics.
+- **`licensing`** — `FakeLicenceSigner`: signs licence payloads /
+  revocation lists with an **ephemeral, per-instance, in-memory Ed25519 key**
+  (the only private key anywhere in the kernel — never persisted, never a real
+  issuer key), so vendor-plane and product tests can build valid and
+  deliberately-broken envelopes for `dotmac_kernel.licensing` without key
+  custody. Instantiation needs the `cryptography` package (the `testing` extra
+  now includes it, as does `licensing`).
 
 ### Outbox/inbox + idempotent commands (`dotmac_kernel.messaging`)
 
@@ -274,6 +283,48 @@ Two pure, in-memory code contracts (no database, no fleet state). They
 Stable identifiers (capability codes; `(profile code, version)`), deterministic
 resolution, and the version rule above are part of the public contract and are
 covered by consumer tests.
+
+### Signed-licence verification (WS8, `dotmac_kernel.licensing`)
+
+The kernel slice of signed/versioned licence delivery (design brief:
+`docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
+**verifies only** — issuance and private-key custody are vendor-control-plane
+concerns; a product data plane verifies a delivered envelope, projects the
+verified capabilities into its OWN local WS2 grants (`grant_entitlement`), and
+acknowledges the applied `(licence_id, licence_version, digest)`.
+
+- **Envelope** — DSSE-style `dotmac-licence-envelope/1`: signatures over the
+  exact payload **bytes** (no canonical-JSON step); the payload is parsed only
+  after a signature verifies; `payload_digest` (sha256 of those bytes) is the
+  identity used by replay protection and acknowledgement. Ed25519 only.
+- **Keyring** — `LicenceKey`/`LicenceKeyRing` with `KeyStatus`
+  `active`/`retired`/`revoked` rotation semantics (`retired` still verifies —
+  rotation overlap; `revoked` never does; unknown keys fail closed; duplicate
+  `key_id` fails ring construction).
+- **`verify_licence(envelope, *, keyring, now, expected_deployment_id,
+  require_binding, applied, revoked_licence_ids)`** — fail-closed, offline,
+  deterministic (the clock is always injected). Check order is contractual:
+  envelope shape → signature → payload parse → licence revocation → deployment
+  binding → validity (`valid`/`in_grace`; absent `expires_at` = perpetual) →
+  replay/rollback against the receiver's `AppliedLicence` record (stale
+  version rejected; same version+digest is an idempotent `reapplied`; same
+  version, different digest is a hard conflict). Returns `VerifiedLicence`;
+  raises a `LicenceError` subclass whose NAME is the stable rejection reason.
+- **`verify_revocation_list`** — signed `dotmac-licence-revocation/1` over the
+  same envelope mechanics, with monotonic `list_version` (a stale list cannot
+  un-revoke; equal version is an idempotent re-import).
+- **`LicenceAcknowledgement`** — the shared cross-plane ack value object
+  (`applied`/`rejected` + reason); its transport is vendor/product-owned.
+- **Dependency** — Ed25519 needs `cryptography`, installed via the
+  `licensing` extra (`pip install dotmac-kernel[licensing]`). The module
+  imports it lazily: types/parsing/digests work without it, and signature
+  verification without it raises `VerificationUnavailableError` (fail closed).
+  Submodule-only by design (like `messaging`) — nothing licensing-related is
+  re-exported at the top level.
+- **Boundaries** — no signing API (the testing kit's `FakeLicenceSigner` is an
+  ephemeral in-memory test key, never a real issuer key), no storage/tables,
+  no delivery transport, no entitlement writes, no interpretation of the
+  document's `constraints`.
 
 ## Internal modules and names (do not import)
 
