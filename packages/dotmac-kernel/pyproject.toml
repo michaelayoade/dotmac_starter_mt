@@ -56,15 +56,22 @@ httpx = { version = "^0.27", optional = true }
 # imports Ed25519 lazily, so the module works without this; SIGNATURE
 # verification (and the testing kit's FakeLicenceSigner) needs it. Installed
 # via the `licensing` extra; a SaaS-profile assembly that never verifies a
-# licence carries no compiled crypto dependency.
-cryptography = { version = ">=43", optional = true }
+# licence carries no compiled crypto dependency. Floor >=42: every Ed25519
+# API used dates from cryptography 2.6; the full licensing suite passes on
+# 42.0.8 (dotmac_sub's exact pin — a >=43 floor would force a product
+# upgrade for no behavioural reason). Proven by the kernel-floors CI job.
+cryptography = { version = ">=42", optional = true }
 
 [tool.poetry.extras]
 # `pip install dotmac-kernel[testing]` — the supported test kit
-# (`dotmac_kernel.testing`) plus its HTTP-client dependency and the
-# FakeLicenceSigner's crypto dependency.
-testing = ["httpx", "cryptography"]
-# `pip install dotmac-kernel[licensing]` — WS8 signed-licence verification.
+# (`dotmac_kernel.testing`) plus its HTTP-client dependency. Deliberately
+# does NOT pull cryptography: the ordinary fakes/harness/provisioning kit
+# never touches it, and a product consuming only the test kit must not
+# inherit the licensing crypto stack. FakeLicenceSigner is the one member
+# that needs it — install `[testing,licensing]` to use it.
+testing = ["httpx"]
+# `pip install dotmac-kernel[licensing]` — WS8 signed-licence verification
+# (and the testing kit's FakeLicenceSigner).
 licensing = ["cryptography"]
 
 [build-system]

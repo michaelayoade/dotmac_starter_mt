@@ -359,7 +359,17 @@ acknowledges the applied `(licence_id, licence_version, digest)`.
 ## Dependency floors — and what they do and do not promise
 
 The kernel declares `fastapi>=0.111,<0.116`, `pydantic>=2.7.4,<3.0`,
-`pydantic-settings>=2.2,<3.0`, `python>=3.12,<3.14`.
+`pydantic-settings>=2.2,<3.0`, `python>=3.12,<3.14`, and (optional, via the
+`licensing` extra) `cryptography>=42` — every Ed25519 API the kernel uses
+predates 42, and the full licensing suite passes on 42.0.8, dotmac_sub's
+exact production pin; the floor-proof job pins that version.
+
+**Extras are split by consumer need.** `[testing]` pulls only `httpx` (the
+TestClient stack); the ordinary fakes/harness/provisioning kit never touches
+cryptography, so a product consuming the test kit does not inherit the
+licensing crypto stack. `[licensing]` pulls `cryptography` and is also what
+`FakeLicenceSigner` needs — install `[testing,licensing]` to use the fake
+signer.
 
 **Scope of the claim.** The floor is proven for the surface a product assembly
 is permitted to import — models, `money`, `capabilities`, `profiles`,

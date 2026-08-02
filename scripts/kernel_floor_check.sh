@@ -17,6 +17,8 @@ set -euo pipefail
 FLOOR_FASTAPI="${FLOOR_FASTAPI:-0.111.0}"
 FLOOR_PYDANTIC="${FLOOR_PYDANTIC:-2.7.4}"
 FLOOR_PYDANTIC_SETTINGS="${FLOOR_PYDANTIC_SETTINGS:-2.2.1}"
+# dotmac_sub's exact production pin — the reason the floor is >=42.
+FLOOR_CRYPTOGRAPHY="${FLOOR_CRYPTOGRAPHY:-42.0.8}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 kernel_dir="${repo_root}/packages/dotmac-kernel"
@@ -47,7 +49,8 @@ pip install --quiet --upgrade pip
 pip install --quiet \
   "fastapi==${FLOOR_FASTAPI}" \
   "pydantic==${FLOOR_PYDANTIC}" \
-  "pydantic-settings==${FLOOR_PYDANTIC_SETTINGS}"
+  "pydantic-settings==${FLOOR_PYDANTIC_SETTINGS}" \
+  "cryptography==${FLOOR_CRYPTOGRAPHY}"
 pip install --quiet "${wheel}[licensing]"
 
 echo "==> Verifying the floors actually held"

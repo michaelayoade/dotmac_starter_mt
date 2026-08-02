@@ -48,6 +48,43 @@ migration; the kernel head stays `0012`.
   — none of which a vendor can infer, because "we published it" says nothing
   about what a deployment holds.
 
+### Changed
+- **Dependency floors widened** to `fastapi>=0.111,<0.116`,
+  `pydantic>=2.7.4,<3.0`, `pydantic-settings>=2.2,<3.0`. The previous
+  `^0.115`/`^2.9` floors were driven by the kernel's own app/runtime modules —
+  which product assemblies' architecture guards forbid them from importing —
+  and so excluded dotmac_sub/dotmac_erp (fastapi 0.111.0 / pydantic 2.7.4)
+  from consuming contracts that never touch FastAPI. A lowered floor is a
+  support claim, so it is proven, not asserted: the required `kernel-floors`
+  CI job (`scripts/kernel_floor_check.sh`) installs the built wheel into a
+  clean venv with the floor versions pinned exactly and constructs each
+  supported contract with no `DATABASE_URL` present. See COMPATIBILITY.md
+  "Dependency floors" for the scope of the claim.
+- **Optional `cryptography` floor lowered to `>=42`** — every Ed25519 API the
+  kernel uses predates 42, and the full licensing suite passes on 42.0.8
+  (dotmac_sub's exact pin); the floor-proof job pins that version.
+- **Extras split**: `[testing]` now pulls only `httpx`; `cryptography` moves
+  exclusively to `[licensing]`. The ordinary fakes/harness/provisioning kit
+  never touches cryptography, and a product consuming only the test kit must
+  not inherit the licensing crypto stack. `FakeLicenceSigner` needs
+  `[testing,licensing]`.
+
+### Fixed
+- **`dotmac_kernel.testing` no longer needs `DATABASE_URL` to import** (a7
+  release defect): `harness` imported `dotmac_kernel.deps` at module scope,
+  building the SQLAlchemy engine at import time, so even the fakes were
+  unreachable without a database. The deps import moved inside
+  `assembly_test_client`, the only helper that builds a real app.
+- **`dotmac_kernel.profiles` added to `SUPPORTED_MODULES`** (a7 release
+  defect): the WS1 registry was exported top-level but its submodule was
+  undocumented, making the import path COMPATIBILITY.md documents technically
+  unsupported.
+- `tests/unit/test_tenant_middleware.py`'s fake ASGI client now sends
+  `http.disconnect` after its request message. Starlette 0.37 (the
+  fastapi-0.111 floor) awaits the disconnect and raises on a fake that
+  replays `http.request` forever — the old fake made the full suite lie at
+  the floor. Harness fidelity only; no middleware behavior change.
+
 ## 0.1.0a7 — 2026-08-01
 
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
