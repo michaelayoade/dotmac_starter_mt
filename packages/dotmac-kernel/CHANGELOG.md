@@ -67,7 +67,8 @@ migration; the kernel head stays `0012`.
   supported contract with no `DATABASE_URL` present. See COMPATIBILITY.md
   "Dependency floors" for the scope of the claim.
 - **Optional `cryptography` floor lowered to `>=42`** — every Ed25519 API the
-  kernel uses predates 42, and the full licensing suite passes on 42.0.8
+  kernel uses predates 42, and the floor probe signs and verifies a licence and
+  a revocation list on 42.0.8
   (dotmac_sub's exact pin); the floor-proof job pins that version.
 - **Extras split**: `[testing]` now pulls only `httpx`; `cryptography` moves
   exclusively to `[licensing]`. The ordinary fakes/harness/provisioning kit

@@ -359,10 +359,12 @@ acknowledges the applied `(licence_id, licence_version, digest)`.
 ## Dependency floors — and what they do and do not promise
 
 The kernel declares `fastapi>=0.111,<0.116`, `pydantic>=2.7.4,<3.0`,
-`pydantic-settings>=2.2,<3.0`, `python>=3.12,<3.14`, and (optional, via the
+`pydantic-settings>=2.2,<3.0`, `python>=3.11,<3.14`, and (optional, via the
 `licensing` extra) `cryptography>=42` — every Ed25519 API the kernel uses
-predates 42, and the full licensing suite passes on 42.0.8, dotmac_sub's
-exact production pin; the floor-proof job pins that version.
+predates 42, and the floor probe SIGNS AND VERIFIES a licence and a revocation
+list on 42.0.8, dotmac_sub's exact production pin. That is the extent of the
+claim: the kernel's own full licensing test suite runs on the current
+cryptography in this repo's CI, not at the floor.
 
 **Extras are split by consumer need.** `[testing]` pulls only `httpx` (the
 TestClient stack); the ordinary fakes/harness/provisioning kit never touches
@@ -371,14 +373,27 @@ licensing crypto stack. `[licensing]` pulls `cryptography` and is also what
 `FakeLicenceSigner` needs — install `[testing,licensing]` to use the fake
 signer.
 
-**Scope of the claim.** The floor is proven for the surface a product assembly
-is permitted to import — models, `money`, `capabilities`, `profiles`,
-`licensing`, `entitlements`, `identity`, `query`, `exceptions`, and the
-settings contracts. These are stdlib + SQLAlchemy + pydantic only. The
-kernel's own app/runtime modules (`app_factory`, `platform_auth`, the
-middleware stack) are exercised by this repo's full CI on the current
-versions, not at the floor; an assembly that mounts `create_app` should track
-a current FastAPI rather than sit at the floor.
+**Scope of the claim.** The floor is proven for exactly the union of the two
+adopting products' kernel allowlists, and nothing wider:
+
+| Module | Exercised at the floor by |
+|---|---|
+| `assembly` | constructing a `ProductAssemblySpec` |
+| `capabilities` | building a catalogue and requiring a declared code |
+| `features` | building a `FeatureManifest` |
+| `money` | exact addition and an `ExchangeRate` conversion |
+| `profiles` | building a spec + registry and reading provider selections |
+| `providers.provisioning` | the protocol, `FakeProvisioningProvider`, and the reusable contract suite |
+| `licensing` | signing AND verifying a licence and a revocation list, plus an applied-state round-trip |
+| `testing` | engine, isolated session, and the fakes — with no `DATABASE_URL` |
+
+Everything else in this document — including `db`, `deps`, `app_factory`,
+`platform_auth`, the middleware stack, `crud`, `templating`, `branding`,
+`settings_admin`, `messaging` and `audit` — is NOT covered by the floor
+proof. Those are exercised by this repo's full CI on current versions, and
+both products' architecture guards forbid importing them anyway. An assembly
+that mounts `create_app` should track a current FastAPI rather than sit at the
+floor.
 
 **Why it is a floor and not a preference.** Products adopting the kernel
 selectively (`dotmac_sub`, `dotmac_erp`) pin fastapi 0.111.0 / pydantic 2.7.4.

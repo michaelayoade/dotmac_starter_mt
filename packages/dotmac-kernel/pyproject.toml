@@ -62,9 +62,10 @@ httpx = { version = "^0.27", optional = true }
 # verification (and the testing kit's FakeLicenceSigner) needs it. Installed
 # via the `licensing` extra; a SaaS-profile assembly that never verifies a
 # licence carries no compiled crypto dependency. Floor >=42: every Ed25519
-# API used dates from cryptography 2.6; the full licensing suite passes on
-# 42.0.8 (dotmac_sub's exact pin — a >=43 floor would force a product
-# upgrade for no behavioural reason). Proven by the kernel-floors CI job.
+# API used dates from cryptography 2.6; the floor probe signs AND verifies a
+# licence and a revocation list on 42.0.8 (dotmac_sub's exact pin — a >=43
+# floor would force a product upgrade for no behavioural reason). The kernel's
+# own full licensing suite runs on current cryptography, not at the floor.
 cryptography = { version = ">=42", optional = true }
 
 [tool.poetry.extras]
