@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.features.licensing.config import ReceiverConfig, load_receiver_config
 from app.features.licensing.models import TenantAppliedLicence
+from app.features.licensing.revocation import stored_revoked_ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,10 @@ def apply_licence(
     catalogue = catalogue or _assembly_catalogue()
     now = now or datetime.now(UTC)
 
+    # The locally imported revocation set is part of every verification: a
+    # revoked lineage must stay unusable at ANY version, with no network call.
+    revoked_ids = stored_revoked_ids(db, tenant_id=tenant_id)
+
     try:
         # First pass establishes signature + document; the replay guard needs
         # the lineage id from the document to load our applied record.
@@ -115,6 +120,7 @@ def apply_licence(
             now=now,
             expected_deployment_id=config.deployment_id,
             require_binding=config.require_binding,
+            revoked_licence_ids=revoked_ids,
         )
         record = db.execute(
             sa.select(TenantAppliedLicence).where(
@@ -129,6 +135,7 @@ def apply_licence(
                 now=now,
                 expected_deployment_id=config.deployment_id,
                 require_binding=config.require_binding,
+                revoked_licence_ids=revoked_ids,
                 applied=AppliedLicence(
                     licence_id=record.licence_id,
                     licence_version=record.licence_version,

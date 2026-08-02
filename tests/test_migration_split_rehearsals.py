@@ -211,7 +211,7 @@ def test_rehearsal_2_fresh_reference_assembly(scratch_db: str) -> None:
     # does NOT depend on — so both lineage heads now appear, exactly the case the
     # split design anticipated ("if the kernel advances past what a001 depends
     # on, both heads would appear"). The assembly head is a002 (applied licences).
-    assert _versions(scratch_db) == {"0012_platform_outbox", "a002_applied_licences"}
+    assert _versions(scratch_db) == {"0012_platform_outbox", "a003_revocation_lists"}
     # RLS + grants correct: FORCE RLS on, the isolation policy present, and
     # app_user holds DML (a proxy for the full contract the migration verifies).
     assert _q(
@@ -274,7 +274,7 @@ def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
     # to 0011, so both lineage heads appear (see rehearsal 2). The assembly
     # lineage continues to a002 (applied licences) on the same upgrade.
     _upgrade(scratch_db, "heads")
-    assert _versions(scratch_db) == {"0012_platform_outbox", "a002_applied_licences"}
+    assert _versions(scratch_db) == {"0012_platform_outbox", "a003_revocation_lists"}
     # Data survived untouched.
     assert _q(scratch_db, "SELECT count(*) FROM custom_field_definitions") == 1
     assert (
@@ -340,19 +340,23 @@ def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -
     _upgrade(scratch_db, "heads")
     assert _table_exists(scratch_db, "custom_field_definitions")
     assert _table_exists(scratch_db, "tenant_applied_licences")
+    assert _table_exists(scratch_db, "tenant_revocation_lists")
 
     # Without the authorization flags: refuses (RuntimeError), tables intact.
-    # a002 (applied licences) guards its drop first in the downgrade path,
-    # then a001 guards custom_field_definitions — each has its own flag.
+    # a003 (revocation lists) guards its drop first in the downgrade path, then
+    # a002 (applied licences) — both share the LICENCE flag, since dropping
+    # either re-opens a licensing hole and it is one operator decision — then
+    # a001 guards custom_field_definitions behind its own flag.
     monkeypatch.delenv("DOTMAC_ALLOW_DESTRUCTIVE_CF_DOWNGRADE", raising=False)
     monkeypatch.delenv("DOTMAC_ALLOW_DESTRUCTIVE_LICENCE_DOWNGRADE", raising=False)
     with pytest.raises(RuntimeError):
         _downgrade(scratch_db, "assembly@base")
     assert _table_exists(scratch_db, "custom_field_definitions")
     assert _table_exists(scratch_db, "tenant_applied_licences")
-    assert "a002_applied_licences" in _versions(scratch_db)
+    assert _table_exists(scratch_db, "tenant_revocation_lists")
+    assert "a003_revocation_lists" in _versions(scratch_db)
 
-    # a002 authorized alone: a001 still refuses; the CF table survives.
+    # Licence drops authorized alone: a001 still refuses; the CF table survives.
     monkeypatch.setenv("DOTMAC_ALLOW_DESTRUCTIVE_LICENCE_DOWNGRADE", "1")
     with pytest.raises(RuntimeError):
         _downgrade(scratch_db, "assembly@base")
@@ -363,6 +367,7 @@ def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -
     _downgrade(scratch_db, "assembly@base")
     assert not _table_exists(scratch_db, "custom_field_definitions")
     assert not _table_exists(scratch_db, "tenant_applied_licences")
+    assert not _table_exists(scratch_db, "tenant_revocation_lists")
     # The kernel column is untouched.
     assert _column_exists(scratch_db, "parties", "custom_fields")
 
@@ -375,7 +380,7 @@ def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -
 def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
     # New code deployed: the assembly head (a002, subsuming a001) recorded.
     _upgrade(scratch_db, "heads")
-    assert "a002_applied_licences" in _versions(scratch_db)
+    assert "a003_revocation_lists" in _versions(scratch_db)
 
     # NEGATIVE CONTROL: the old v0.8 migrator (kernel-only version_locations,
     # no assembly scripts) run against this database — reproduces the real
@@ -418,11 +423,11 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     heads = set(script.get_heads())
     assert heads == {
         "0012_platform_outbox",
-        "a002_applied_licences",
+        "a003_revocation_lists",
     }, f"unexpected head set: {heads}"
 
     # Each head carries the expected branch label.
     kernel_head = script.get_revision("kernel@head")
     assembly_head = script.get_revision("assembly@head")
     assert kernel_head.revision == "0012_platform_outbox"
-    assert assembly_head.revision == "a002_applied_licences"
+    assert assembly_head.revision == "a003_revocation_lists"
