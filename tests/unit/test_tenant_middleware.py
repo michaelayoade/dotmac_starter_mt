@@ -47,8 +47,18 @@ def _drive(
     proves what the middleware set on `request.state`.
     """
 
+    # A faithful ASGI client: one request message, then disconnect. Starlette
+    # 0.37 (the fastapi-0.111 floor) awaits the disconnect after the response
+    # and raises on a fake that replays `http.request` forever.
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"", "more_body": False},
+            {"type": "http.disconnect"},
+        ]
+    )
+
     async def receive() -> dict[str, object]:
-        return {"type": "http.request", "body": b"", "more_body": False}
+        return next(messages, {"type": "http.disconnect"})
 
     status: dict[str, int] = {}
 
@@ -139,8 +149,16 @@ def test_unresolved_tenant_404_uses_error_envelope(
 
     messages: list[dict[str, object]] = []
 
+    # Same faithful request-then-disconnect sequence as `_drive` (see there).
+    inbound = iter(
+        [
+            {"type": "http.request", "body": b"", "more_body": False},
+            {"type": "http.disconnect"},
+        ]
+    )
+
     async def receive() -> dict[str, object]:
-        return {"type": "http.request", "body": b"", "more_body": False}
+        return next(inbound, {"type": "http.disconnect"})
 
     async def send(message: dict[str, object]) -> None:
         messages.append(message)

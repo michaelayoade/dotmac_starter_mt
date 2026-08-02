@@ -114,7 +114,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a7"
+__version__ = "0.1.0a8"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -157,6 +157,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.models_platform",
         "dotmac_kernel.money",
         "dotmac_kernel.platform_auth",
+        "dotmac_kernel.profiles",
         "dotmac_kernel.providers",
         "dotmac_kernel.providers.provisioning",
         "dotmac_kernel.query",

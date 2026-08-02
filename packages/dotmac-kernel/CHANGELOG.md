@@ -8,6 +8,90 @@ here.
 
 ## Unreleased
 
+## 0.1.0a8 — 2026-08-02
+
+Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
+value object a deployment uses to report what it is actually running. No
+migration; the kernel head stays `0012`.
+
+### Added
+- **`ReceiverAppliedState`** (`dotmac_kernel.licensing`) + `applied_state_payload`
+  / `parse_applied_state`, `APPLIED_STATE_SCHEMA`
+  (`dotmac-licence-applied-state/1`) and the `UNKNOWN_DIGEST` sentinel.
+  Carries the deployment ref, licence id/version/digest, **keyring
+  generation**, **applied revocation-list version**, an `observed_at`
+  timestamp, and a `report_id` idempotency key (delivery is at-least-once and
+  identical content may legitimately repeat — a NEW `report_id` with identical
+  content is a new observation, not a replay). Every field is a **claim**:
+  authentication and proof happen at the vendor plane, which verifies who sent
+  the report and matches the digest against what it issued; the report itself
+  proves nothing. `revocation_list_version` of `None` means no list imported —
+  deliberately distinct from version 0.
+
+  Both outcomes are first-class: `status="applied"` requires a real committed
+  identity (`licence_version >= 1`, a real digest), while `status="rejected"`
+  requires a `reason` and stays representable when the envelope never
+  validated (`licence_version=0`, `digest=UNKNOWN_DIGEST` — the encoding the
+  reference receiver's rejected acknowledgements already carry). The timestamp
+  is `observed_at`, not "applied_at", because a rejected attempt applied
+  nothing. `.acknowledgement` subsumes the narrower `LicenceAcknowledgement`
+  for both statuses, so the existing ack path keeps working unchanged.
+
+  Validation is strict, fail-closed (`MalformedAppliedStateError`) and lives
+  in ONE place (`__post_init__`): direct construction and parsing give
+  identical guarantees, so a producer can never build-and-serialise a report
+  the other plane would reject. Unknown fields are ignored so a newer receiver
+  cannot break an older vendor.
+
+  This closes the channel three WS8 gaps depended on: acknowledgements the
+  vendor can authenticate, keyring-uptake lag, and revocation-application lag
+  — none of which a vendor can infer, because "we published it" says nothing
+  about what a deployment holds.
+
+### Changed
+- **Dependency floors widened** to `fastapi>=0.111,<0.116`,
+  `pydantic>=2.7.4,<3.0`, `pydantic-settings>=2.2,<3.0`, `cryptography>=42`,
+  and **`python>=3.11`** (was `>=3.12`). Every floor matches a real consumer
+  pin: fastapi 0.111.0 / pydantic 2.7.4 / cryptography 42.0.8 are `dotmac_sub`'s
+  production versions, and both products declare `python>=3.11`. Nothing in the
+  kernel needs 3.12 (`StrEnum` and `datetime.UTC` are 3.11; no PEP 695
+  generics), so the 3.12 floor would have forced an interpreter upgrade in two
+  products to consume contracts that do not require one. The previous
+  `^0.115`/`^2.9` floors were driven by the kernel's own app/runtime modules —
+  which product assemblies' architecture guards forbid them from importing —
+  and so excluded dotmac_sub/dotmac_erp (fastapi 0.111.0 / pydantic 2.7.4)
+  from consuming contracts that never touch FastAPI. A lowered floor is a
+  support claim, so it is proven, not asserted: the required `kernel-floors`
+  CI job (`scripts/kernel_floor_check.sh`) installs the built wheel into a
+  clean venv with the floor versions pinned exactly and constructs each
+  supported contract with no `DATABASE_URL` present. See COMPATIBILITY.md
+  "Dependency floors" for the scope of the claim.
+- **Optional `cryptography` floor lowered to `>=42`** — every Ed25519 API the
+  kernel uses predates 42, and the floor probe signs and verifies a licence and
+  a revocation list on 42.0.8
+  (dotmac_sub's exact pin); the floor-proof job pins that version.
+- **Extras split**: `[testing]` now pulls only `httpx`; `cryptography` moves
+  exclusively to `[licensing]`. The ordinary fakes/harness/provisioning kit
+  never touches cryptography, and a product consuming only the test kit must
+  not inherit the licensing crypto stack. `FakeLicenceSigner` needs
+  `[testing,licensing]`.
+
+### Fixed
+- **`dotmac_kernel.testing` no longer needs `DATABASE_URL` to import** (a7
+  release defect): `harness` imported `dotmac_kernel.deps` at module scope,
+  building the SQLAlchemy engine at import time, so even the fakes were
+  unreachable without a database. The deps import moved inside
+  `assembly_test_client`, the only helper that builds a real app.
+- **`dotmac_kernel.profiles` added to `SUPPORTED_MODULES`** (a7 release
+  defect): the WS1 registry was exported top-level but its submodule was
+  undocumented, making the import path COMPATIBILITY.md documents technically
+  unsupported.
+- `tests/unit/test_tenant_middleware.py`'s fake ASGI client now sends
+  `http.disconnect` after its request message. Starlette 0.37 (the
+  fastapi-0.111 floor) awaits the disconnect and raises on a fake that
+  replays `http.request` forever — the old fake made the full suite lie at
+  the floor. Harness fidelity only; no middleware behavior change.
+
 ## 0.1.0a7 — 2026-08-01
 
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of

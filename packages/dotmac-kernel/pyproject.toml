@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-kernel"
-version = "0.1.0a7"
+version = "0.1.0a8"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -26,15 +26,31 @@ include = [
 # (third-party imports in the kernel modules). Deliberately excludes uvicorn
 # (server), psycopg (driver, loaded by DATABASE_URL), and python-multipart
 # (feature-route form parsing) — those are assembly/deploy concerns.
-python = ">=3.12,<3.14"
-fastapi = "^0.115"
+# Floor 3.11 to match dotmac_sub and dotmac_erp, which both declare >=3.11.
+# Nothing in the kernel needs 3.12: `StrEnum` and `datetime.UTC` are 3.11, and
+# there are no PEP 695 generics or 3.12-only stdlib calls. A 3.12 floor would
+# have forced an interpreter upgrade in two products to consume contracts that
+# do not require it. Proven on BOTH interpreters by the kernel-floors matrix.
+python = ">=3.11,<3.14"
+# FLOORS, not preferences. Every kernel module a product assembly is permitted
+# to import (models, money, capabilities, profiles, licensing, entitlements,
+# identity, query, exceptions, settings contracts) is stdlib + sqlalchemy +
+# pydantic only. The strict `^0.115` floor was driven by the kernel's own
+# app/runtime modules, which those products' architecture guards already forbid
+# them from importing — so it excluded dotmac_sub and dotmac_erp (fastapi
+# 0.111.0 / pydantic 2.7.4) from the adoption programme for no behavioural
+# reason. Widened deliberately, and PROVEN by the required `kernel-floors` CI
+# job that installs the wheel at the exact floor and exercises the supported
+# surface; without that job this range would be an assertion rather than a
+# claim. See COMPATIBILITY.md § "Dependency floors".
+fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 # `email` extra pulls email-validator — a REAL kernel runtime dep, not an
 # assembly concern: the kernel's own `platform_auth` public surface (mounted
 # directly by `create_app`) declares an `EmailStr` field, so the wheel cannot
 # build its public app without it (K4 empty-consumer proof caught this).
-pydantic = { version = "^2.9", extras = ["email"] }
-pydantic-settings = "^2.5"
+pydantic = { version = ">=2.7.4,<3.0", extras = ["email"] }
+pydantic-settings = ">=2.2,<3.0"
 jinja2 = "^3.1"
 argon2-cffi = "^25.1.0"
 # Optional — only `dotmac_kernel.testing.assembly_test_client` needs the HTTP
@@ -45,15 +61,23 @@ httpx = { version = "^0.27", optional = true }
 # imports Ed25519 lazily, so the module works without this; SIGNATURE
 # verification (and the testing kit's FakeLicenceSigner) needs it. Installed
 # via the `licensing` extra; a SaaS-profile assembly that never verifies a
-# licence carries no compiled crypto dependency.
-cryptography = { version = ">=43", optional = true }
+# licence carries no compiled crypto dependency. Floor >=42: every Ed25519
+# API used dates from cryptography 2.6; the floor probe signs AND verifies a
+# licence and a revocation list on 42.0.8 (dotmac_sub's exact pin — a >=43
+# floor would force a product upgrade for no behavioural reason). The kernel's
+# own full licensing suite runs on current cryptography, not at the floor.
+cryptography = { version = ">=42", optional = true }
 
 [tool.poetry.extras]
 # `pip install dotmac-kernel[testing]` — the supported test kit
-# (`dotmac_kernel.testing`) plus its HTTP-client dependency and the
-# FakeLicenceSigner's crypto dependency.
-testing = ["httpx", "cryptography"]
-# `pip install dotmac-kernel[licensing]` — WS8 signed-licence verification.
+# (`dotmac_kernel.testing`) plus its HTTP-client dependency. Deliberately
+# does NOT pull cryptography: the ordinary fakes/harness/provisioning kit
+# never touches it, and a product consuming only the test kit must not
+# inherit the licensing crypto stack. FakeLicenceSigner is the one member
+# that needs it — install `[testing,licensing]` to use it.
+testing = ["httpx"]
+# `pip install dotmac-kernel[licensing]` — WS8 signed-licence verification
+# (and the testing kit's FakeLicenceSigner).
 licensing = ["cryptography"]
 
 [build-system]

@@ -31,6 +31,7 @@ import binascii
 import enum
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -38,6 +39,17 @@ from datetime import datetime, timedelta
 ENVELOPE_SCHEMA = "dotmac-licence-envelope/1"
 LICENCE_SCHEMA = "dotmac-licence/1"
 REVOCATION_SCHEMA = "dotmac-licence-revocation/1"
+APPLIED_STATE_SCHEMA = "dotmac-licence-applied-state/1"
+
+# The digest a receiver reports when an envelope never validated far enough to
+# have one. A sentinel rather than an empty string so it can never be mistaken
+# for a real digest, and so an `applied` claim carrying it is rejectable.
+UNKNOWN_DIGEST = "unknown"
+
+# A real digest is exactly what `payload_digest` produces. Validating the SHAPE
+# (not just non-emptiness) stops a report claiming applied state under a
+# placeholder that merely looks populated.
+_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 _ALGORITHM = "ed25519"
 
@@ -110,6 +122,14 @@ class VerificationUnavailableError(LicenceError):
 
 class DuplicateKeyError(LicenceError):
     """A keyring was constructed with two keys sharing a ``key_id``."""
+
+
+class MalformedAppliedStateError(LicenceError):
+    """A receiver-applied-state report is structurally invalid. Raised by
+    BOTH direct construction and parsing — the two paths share one validator,
+    so a producer can never build a report the other plane would reject.
+    Fail closed: a report that cannot be trusted is rejected here rather than
+    half-interpreted by whichever plane reads it next."""
 
 
 # ── Keyring ─────────────────────────────────────────────────────────────────
@@ -255,6 +275,219 @@ class LicenceAcknowledgement:
     def __post_init__(self) -> None:
         if self.status not in ("applied", "rejected"):
             raise ValueError("status must be 'applied' or 'rejected'")
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiverAppliedState:
+    """What a deployment reports about the licence state it is running.
+
+    The cross-plane channel behind three gaps the vendor cannot close alone: an
+    acknowledgement it can authenticate, and the two uptake versions — keyring
+    generation and applied revocation-list version — that "we published it"
+    says nothing about. Delivery proves a transport moved bytes; only this says
+    what a deployment actually holds.
+
+    Every field is a CLAIM. The vendor authenticates the reporter and matches
+    `digest` against what it issued; nothing is trusted on the report alone.
+    `report_id` is the idempotency key, because delivery is at-least-once and
+    two scheduled observations of unchanged state are genuinely DISTINCT
+    reports — deduping on content would make a healthy deployment look silent.
+
+    `revocation_list_version` of ``None`` means NO list imported, deliberately
+    distinct from version 0: "never received one" and "received an empty one"
+    are different operational states, and conflating them hides a deployment
+    that has never been reached.
+
+    `keyring_generation` of ``None`` means NO keyring provisioned, mirroring the
+    same distinction. That state is real and worth reporting: a deployment
+    without a keyring can verify nothing, so it can only ever report
+    rejections — and an operator needs to see the difference between "never
+    provisioned" and "provisioned but failing". It is therefore REQUIRED to be
+    a real generation on an `applied` report: nothing can have been applied
+    without a keyring that verified it.
+
+    Status semantics — both outcomes are first-class. ``status="applied"``
+    asserts a COMMITTED ``(licence_id, licence_version, digest)``:
+    ``licence_version`` >= 1 and a real digest (never ``UNKNOWN_DIGEST``).
+    ``status="rejected"`` requires a ``reason`` (a stable ``LicenceError``
+    subclass name) and stays representable when the envelope never validated:
+    ``licence_version=0`` (no verified version claim) with
+    ``digest=UNKNOWN_DIGEST`` when the payload bytes could not be recovered —
+    exactly the identity the reference receiver's rejected acknowledgements
+    already carry. The timestamp is ``observed_at`` — when the deployment
+    recorded the state it reports — deliberately NOT "applied_at", because a
+    rejected attempt applied nothing.
+
+    Validation lives HERE, in one place, so a report built directly carries
+    exactly the guarantees of one parsed off the wire — there is no
+    constructable-but-unparseable report a producer could serialise and have
+    the other plane reject.
+    """
+
+    report_id: str
+    deployment_ref: str
+    licence_id: str
+    licence_version: int
+    digest: str
+    keyring_generation: int | None
+    revocation_list_version: int | None
+    observed_at: datetime
+    status: str
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        _text_field("report_id", self.report_id)
+        _text_field("deployment_ref", self.deployment_ref)
+        _text_field("licence_id", self.licence_id)
+        _text_field("digest", self.digest)
+        if self.keyring_generation is not None:
+            _count_field("keyring_generation", self.keyring_generation, minimum=1)
+        if self.revocation_list_version is not None:
+            _count_field(
+                "revocation_list_version", self.revocation_list_version, minimum=0
+            )
+        if not isinstance(self.observed_at, datetime):
+            raise MalformedAppliedStateError("'observed_at' must be a datetime")
+        if self.observed_at.utcoffset() is None:
+            raise MalformedAppliedStateError("'observed_at' must be timezone-aware")
+        if self.status not in ("applied", "rejected"):
+            raise MalformedAppliedStateError(
+                f"'status' must be 'applied' or 'rejected', got {self.status!r}"
+            )
+        if self.status == "applied":
+            # An `applied` claim asserts a COMMITTED (version, digest). Version
+            # 0 and the unknown-digest sentinel are what a receiver reports when
+            # nothing verified, so allowing them here would let a non-event be
+            # recorded as applied state.
+            _count_field("licence_version", self.licence_version, minimum=1)
+            if not _DIGEST_PATTERN.match(self.digest):
+                raise MalformedAppliedStateError(
+                    "an 'applied' report needs a real digest "
+                    "('sha256:' + 64 hex chars); a placeholder that merely "
+                    "looks populated would assert applied state for nothing"
+                )
+            if self.keyring_generation is None:
+                raise MalformedAppliedStateError(
+                    "an 'applied' report needs a keyring generation — nothing "
+                    "can have been applied without a keyring that verified it"
+                )
+            # A REASON on an applied report is a contradiction: `reason` is the
+            # rejection code, so carrying one would let a report be simultaneously
+            # accepted and explained-away, and readers would disagree about which
+            # half to believe.
+            if self.reason is not None:
+                raise MalformedAppliedStateError(
+                    "an 'applied' report must not carry a 'reason' — that field "
+                    "explains a REJECTION, and a report cannot be both"
+                )
+        else:
+            _count_field("licence_version", self.licence_version, minimum=0)
+            # A rejection with no reason is unexplainable at the other end, and
+            # the receiver always has one (a stable kernel error-class name).
+            if not isinstance(self.reason, str) or not self.reason:
+                raise MalformedAppliedStateError(
+                    "a 'rejected' report must carry a non-empty 'reason'"
+                )
+            if self.digest == UNKNOWN_DIGEST and self.licence_version != 0:
+                # No verified identity means no verified VERSION either; a
+                # positive version beside the sentinel is a claim the receiver
+                # could not have established.
+                raise MalformedAppliedStateError(
+                    "a rejection carrying the unknown-digest sentinel must "
+                    "report licence_version 0 — an unverified envelope yields "
+                    "no version to claim"
+                )
+            if self.digest != UNKNOWN_DIGEST and not _DIGEST_PATTERN.match(self.digest):
+                raise MalformedAppliedStateError(
+                    "a rejection's digest must be either the unknown-digest "
+                    "sentinel or a real 'sha256:' + 64 hex digest"
+                )
+
+    @property
+    def acknowledgement(self) -> LicenceAcknowledgement:
+        """The narrower ack this report subsumes, so the existing
+        acknowledgement path keeps working unchanged — valid for rejected
+        reports too, including the no-verified-identity case."""
+        return LicenceAcknowledgement(
+            licence_id=self.licence_id,
+            licence_version=self.licence_version,
+            digest=self.digest,
+            status=self.status,
+            reason=self.reason,
+            deployment_id=self.deployment_ref,
+        )
+
+
+def _text_field(name: str, value: object) -> str:
+    if not isinstance(value, str) or not value:
+        raise MalformedAppliedStateError(f"'{name}' must be a non-empty string")
+    return value
+
+
+def _count_field(name: str, value: object, *, minimum: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+        raise MalformedAppliedStateError(f"'{name}' must be an integer >= {minimum}")
+    return value
+
+
+def applied_state_payload(state: ReceiverAppliedState) -> dict[str, object]:
+    """Serialise for transport. Every value is JSON-safe — a datetime left in
+    place would fail at whichever transport carries this."""
+    return {
+        "schema": APPLIED_STATE_SCHEMA,
+        "report_id": state.report_id,
+        "deployment_ref": state.deployment_ref,
+        "licence_id": state.licence_id,
+        "licence_version": state.licence_version,
+        "digest": state.digest,
+        "keyring_generation": state.keyring_generation,
+        "revocation_list_version": state.revocation_list_version,
+        "observed_at": state.observed_at.isoformat(),
+        "status": state.status,
+        "reason": state.reason,
+    }
+
+
+def parse_applied_state(payload: Mapping[str, object]) -> ReceiverAppliedState:
+    """Strictly parse a report.
+
+    Structural checks happen here; FIELD validity is delegated to the value
+    object's own validator, so the wire path and the construction path cannot
+    drift apart. Unknown fields are IGNORED — a newer receiver must not break
+    an older vendor — but never absorbed into the record.
+    """
+    if not isinstance(payload, Mapping):
+        raise MalformedAppliedStateError("applied-state payload must be an object")
+    if payload.get("schema") != APPLIED_STATE_SCHEMA:
+        raise MalformedAppliedStateError(
+            f"unknown applied-state schema: {payload.get('schema')!r}"
+        )
+
+    observed_raw = payload.get("observed_at")
+    if not isinstance(observed_raw, str):
+        raise MalformedAppliedStateError("'observed_at' must be an ISO-8601 string")
+    try:
+        observed_at = datetime.fromisoformat(observed_raw)
+    except ValueError as exc:
+        raise MalformedAppliedStateError(
+            "'observed_at' is not a valid timestamp"
+        ) from exc
+
+    status = payload.get("status")
+    return ReceiverAppliedState(
+        report_id=payload.get("report_id"),  # type: ignore[arg-type]
+        deployment_ref=payload.get("deployment_ref"),  # type: ignore[arg-type]
+        licence_id=payload.get("licence_id"),  # type: ignore[arg-type]
+        licence_version=payload.get("licence_version"),  # type: ignore[arg-type]
+        digest=payload.get("digest"),  # type: ignore[arg-type]
+        keyring_generation=payload.get("keyring_generation"),  # type: ignore[arg-type]
+        revocation_list_version=payload.get(  # type: ignore[arg-type]
+            "revocation_list_version"
+        ),
+        observed_at=observed_at,
+        status=status,  # type: ignore[arg-type]
+        reason=payload.get("reason"),  # type: ignore[arg-type]
+    )
 
 
 # ── Digest ──────────────────────────────────────────────────────────────────
@@ -646,6 +879,11 @@ __all__ = [
     "VerifiedLicence",
     "RevocationList",
     "LicenceAcknowledgement",
+    "ReceiverAppliedState",
+    "APPLIED_STATE_SCHEMA",
+    "UNKNOWN_DIGEST",
+    "applied_state_payload",
+    "parse_applied_state",
     # operations
     "payload_digest",
     "verify_licence",
@@ -665,4 +903,5 @@ __all__ = [
     "StaleRevocationListError",
     "VerificationUnavailableError",
     "DuplicateKeyError",
+    "MalformedAppliedStateError",
 ]

@@ -8,6 +8,13 @@ SQLite has no RLS — this harness is for service-logic/unit tests; tenancy
 enforcement is proven separately against real Postgres. `create_test_engine`
 does `Base.metadata.create_all`, so the ASSEMBLY must import its own feature
 models before calling it (that populates the shared `Base.metadata`).
+
+`dotmac_kernel.deps` is imported INSIDE `assembly_test_client`, not at module
+scope. Importing it pulls `dotmac_kernel.db`, which constructs the SQLAlchemy
+engine from `DATABASE_URL` at import — which made `import
+dotmac_kernel.testing` fail outright without a database, so a consumer could
+not reach the fakes or the in-memory engine (neither of which needs one). Only
+the TestClient helper, which is building a real app anyway, pays that cost.
 """
 
 from __future__ import annotations
@@ -20,7 +27,6 @@ from fastapi import FastAPI
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
-from dotmac_kernel.deps import get_db, get_platform_db
 from dotmac_kernel.models import Base
 
 if TYPE_CHECKING:
@@ -71,11 +77,14 @@ def assembly_test_client(app: FastAPI, *, session: Session) -> Iterator[TestClie
     dependencies overridden to `session` (the isolated test session). Overrides
     are removed on exit so the app is left clean.
 
-    `TestClient` (and its `httpx` dependency) is imported lazily so `import
-    dotmac_kernel.testing` — and the engine/session/fakes it exposes — stays
-    usable without the test HTTP stack; install `dotmac-kernel[testing]` to use
-    this helper."""
+    `TestClient` (and its `httpx` dependency) and `dotmac_kernel.deps` are both
+    imported lazily, so `import dotmac_kernel.testing` — and the engine,
+    session and fakes it exposes — stays usable without the test HTTP stack AND
+    without `DATABASE_URL`; install `dotmac-kernel[testing]` to use this
+    helper."""
     from fastapi.testclient import TestClient
+
+    from dotmac_kernel.deps import get_db, get_platform_db
 
     deps: list[Callable[..., object]] = [get_db, get_platform_db]
     for dep in deps:
