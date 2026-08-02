@@ -385,13 +385,21 @@ selectively (`dotmac_sub`, `dotmac_erp`) pin fastapi 0.111.0 / pydantic 2.7.4.
 A `^0.115` floor excluded them from consuming *contracts* that never touch
 FastAPI at all, which is a packaging accident rather than a compatibility fact.
 
-**How the claim is kept honest.** The required `kernel-floors` CI job builds
-the wheel, installs it into a clean virtualenv with the floor versions pinned
-EXACTLY (and fails if the resolver upgrades past them, which would make the
-check vacuous), then constructs — not merely imports — each supported contract
-with no `DATABASE_URL` present. Lowering a floor without that job would convert
-a clean resolve-time failure into a runtime one for exactly the consumers the
-lowering is meant to serve.
+**How the claim is kept honest.** The required `kernel-floors` CI job runs on
+BOTH 3.11 and 3.12. It builds the wheel, installs it with `[testing,licensing]`
+into a clean virtualenv with all four floors pinned EXACTLY — failing if the
+resolver moves past any of them, which would make the check vacuous — then
+CONSTRUCTS, not merely imports, the union of the two products' kernel
+allowlists (`assembly`, `capabilities`, `features`, `licensing`, `money` incl.
+`ExchangeRate`, `profiles`, `providers.provisioning` incl. the fake and the
+reusable contract suite, and `testing`), with no `DATABASE_URL` present. The
+licensing leg SIGNS and VERIFIES a licence and a revocation list rather than
+merely building keys, because a crypto backend only fails when it is used.
+
+Lowering a floor without that job would convert a clean resolve-time failure
+into a runtime one for exactly the consumers the lowering is meant to serve.
+Writing the probe immediately caught four API misuses in it — which is the
+level of coverage the claim needs to be worth anything.
 
 ## Versioning & deprecation policy
 

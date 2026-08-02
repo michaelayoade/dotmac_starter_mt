@@ -50,7 +50,13 @@ migration; the kernel head stays `0012`.
 
 ### Changed
 - **Dependency floors widened** to `fastapi>=0.111,<0.116`,
-  `pydantic>=2.7.4,<3.0`, `pydantic-settings>=2.2,<3.0`. The previous
+  `pydantic>=2.7.4,<3.0`, `pydantic-settings>=2.2,<3.0`, `cryptography>=42`,
+  and **`python>=3.11`** (was `>=3.12`). Every floor matches a real consumer
+  pin: fastapi 0.111.0 / pydantic 2.7.4 / cryptography 42.0.8 are `dotmac_sub`'s
+  production versions, and both products declare `python>=3.11`. Nothing in the
+  kernel needs 3.12 (`StrEnum` and `datetime.UTC` are 3.11; no PEP 695
+  generics), so the 3.12 floor would have forced an interpreter upgrade in two
+  products to consume contracts that do not require one. The previous
   `^0.115`/`^2.9` floors were driven by the kernel's own app/runtime modules —
   which product assemblies' architecture guards forbid them from importing —
   and so excluded dotmac_sub/dotmac_erp (fastapi 0.111.0 / pydantic 2.7.4)

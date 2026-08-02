@@ -27,6 +27,10 @@ from dotmac_kernel.licensing import (
 )
 
 NOW = datetime(2026, 8, 2, 12, 0, 0, tzinfo=UTC)
+# A REAL digest shape: `payload_digest` produces sha256: + 64 hex chars. Using a
+# placeholder here would have let the fixture assert applied state under a
+# digest the receiver could never have computed.
+DIGEST = "sha256:" + "ab" * 32
 
 
 def _state(**over) -> ReceiverAppliedState:
@@ -35,7 +39,7 @@ def _state(**over) -> ReceiverAppliedState:
         "deployment_ref": "edge-site-1",
         "licence_id": "lic-1",
         "licence_version": 3,
-        "digest": "sha256:abcd",
+        "digest": DIGEST,
         "keyring_generation": 2,
         "revocation_list_version": 5,
         "observed_at": NOW,
@@ -59,6 +63,11 @@ FIELD_BREAKAGES: list[dict[str, object]] = [
     {"licence_version": True},
     {"digest": ""},
     {"digest": UNKNOWN_DIGEST},  # an 'applied' claim needs the real digest
+    {"digest": "sha256:x"},  # ...and a REAL one, not merely a populated string
+    {"digest": "sha256:" + "zz" * 32},  # right length, not hex
+    {"digest": "ab" * 32},  # right hex, missing the algorithm prefix
+    {"keyring_generation": None},  # nothing is applied without a keyring
+    {"reason": "BadSignatureError"},  # an 'applied' report explains nothing
     {"keyring_generation": 0},
     {"keyring_generation": "2"},
     {"revocation_list_version": -1},
@@ -71,9 +80,24 @@ FIELD_BREAKAGES: list[dict[str, object]] = [
     {"status": "rejected", "reason": ""},
 ]
 
+# Rejection-shaped invalids: a rejection is the ONLY status these can occur
+# under, so they are checked separately from the `applied` fixture above.
+REJECTION_BREAKAGES: list[dict[str, object]] = [
+    # No verified identity means no verified VERSION either.
+    {
+        "status": "rejected",
+        "reason": "MalformedLicenceError",
+        "digest": UNKNOWN_DIGEST,
+        "licence_version": 4,
+    },
+    # A rejection may carry a real digest, but not a malformed one.
+    {"status": "rejected", "reason": "StaleLicenceError", "digest": "sha256:x"},
+]
+
 # Wire-only invalids: things that can only go wrong on a serialised payload.
 WIRE_BREAKAGES: list[dict[str, object]] = [
     *FIELD_BREAKAGES,
+    *REJECTION_BREAKAGES,
     {"schema": "dotmac-licence-applied-state/999"},
     {"schema": None},
 ]
@@ -175,7 +199,7 @@ def test_the_acknowledgement_projection_is_valid_for_both_statuses() -> None:
     applied AND rejected reports — including the no-verified-identity
     rejection — so the existing ack path keeps working unchanged."""
     applied_ack = _state().acknowledgement
-    assert (applied_ack.status, applied_ack.digest) == ("applied", "sha256:abcd")
+    assert (applied_ack.status, applied_ack.digest) == ("applied", DIGEST)
     assert applied_ack.deployment_id == "edge-site-1"
 
     rejected_ack = _state(
@@ -202,7 +226,7 @@ def test_malformed_reports_fail_closed_on_parse(breakage: dict[str, object]) -> 
         parse_applied_state(payload)
 
 
-@pytest.mark.parametrize("breakage", FIELD_BREAKAGES)
+@pytest.mark.parametrize("breakage", [*FIELD_BREAKAGES, *REJECTION_BREAKAGES])
 def test_invalid_direct_construction_raises_exactly_like_parse(
     breakage: dict[str, object],
 ) -> None:
@@ -238,3 +262,50 @@ def test_unknown_fields_are_ignored_not_trusted() -> None:
     parsed = parse_applied_state(payload)
     assert not hasattr(parsed, "future_field")
     assert parsed == _state()
+
+
+# ── Contradictions the gates closed ─────────────────────────────────────────
+
+
+def test_an_applied_report_cannot_also_carry_a_rejection_reason() -> None:
+    """`reason` explains a REJECTION. Carrying one on an accepted report would
+    let a single report be simultaneously applied and explained-away, and two
+    readers could reasonably believe opposite halves."""
+    with pytest.raises(MalformedAppliedStateError, match="must not carry"):
+        _state(reason="BadSignatureError")
+
+
+def test_an_applied_report_needs_a_real_digest_not_a_populated_string() -> None:
+    """A shape check, not an emptiness check: `sha256:x` is populated and
+    meaningless, and accepting it would record applied state for a digest the
+    receiver could never have produced."""
+    with pytest.raises(MalformedAppliedStateError, match="real digest"):
+        _state(digest="sha256:x")
+
+
+def test_a_deployment_with_no_keyring_can_only_report_rejections() -> None:
+    """`keyring_generation=None` means nothing is provisioned — a real state an
+    operator must be able to see, and one in which verification cannot succeed.
+    So it is reportable on a rejection and refused on an applied claim."""
+    rejected = _state(
+        status="rejected",
+        reason="UnknownKeyError",
+        keyring_generation=None,
+        licence_version=0,
+        digest=UNKNOWN_DIGEST,
+    )
+    assert rejected.keyring_generation is None
+    assert parse_applied_state(applied_state_payload(rejected)) == rejected
+
+    with pytest.raises(MalformedAppliedStateError, match="keyring generation"):
+        _state(keyring_generation=None)
+
+
+def test_an_unverified_rejection_cannot_claim_a_version() -> None:
+    with pytest.raises(MalformedAppliedStateError, match="licence_version 0"):
+        _state(
+            status="rejected",
+            reason="BadSignatureError",
+            digest=UNKNOWN_DIGEST,
+            licence_version=9,
+        )

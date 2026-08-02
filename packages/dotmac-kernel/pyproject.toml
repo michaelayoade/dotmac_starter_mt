@@ -26,7 +26,12 @@ include = [
 # (third-party imports in the kernel modules). Deliberately excludes uvicorn
 # (server), psycopg (driver, loaded by DATABASE_URL), and python-multipart
 # (feature-route form parsing) — those are assembly/deploy concerns.
-python = ">=3.12,<3.14"
+# Floor 3.11 to match dotmac_sub and dotmac_erp, which both declare >=3.11.
+# Nothing in the kernel needs 3.12: `StrEnum` and `datetime.UTC` are 3.11, and
+# there are no PEP 695 generics or 3.12-only stdlib calls. A 3.12 floor would
+# have forced an interpreter upgrade in two products to consume contracts that
+# do not require it. Proven on BOTH interpreters by the kernel-floors matrix.
+python = ">=3.11,<3.14"
 # FLOORS, not preferences. Every kernel module a product assembly is permitted
 # to import (models, money, capabilities, profiles, licensing, entitlements,
 # identity, query, exceptions, settings contracts) is stdlib + sqlalchemy +

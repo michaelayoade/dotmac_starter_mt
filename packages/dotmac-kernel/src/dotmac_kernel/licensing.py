@@ -31,6 +31,7 @@ import binascii
 import enum
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -44,6 +45,11 @@ APPLIED_STATE_SCHEMA = "dotmac-licence-applied-state/1"
 # have one. A sentinel rather than an empty string so it can never be mistaken
 # for a real digest, and so an `applied` claim carrying it is rejectable.
 UNKNOWN_DIGEST = "unknown"
+
+# A real digest is exactly what `payload_digest` produces. Validating the SHAPE
+# (not just non-emptiness) stops a report claiming applied state under a
+# placeholder that merely looks populated.
+_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 _ALGORITHM = "ed25519"
 
@@ -292,6 +298,14 @@ class ReceiverAppliedState:
     are different operational states, and conflating them hides a deployment
     that has never been reached.
 
+    `keyring_generation` of ``None`` means NO keyring provisioned, mirroring the
+    same distinction. That state is real and worth reporting: a deployment
+    without a keyring can verify nothing, so it can only ever report
+    rejections — and an operator needs to see the difference between "never
+    provisioned" and "provisioned but failing". It is therefore REQUIRED to be
+    a real generation on an `applied` report: nothing can have been applied
+    without a keyring that verified it.
+
     Status semantics — both outcomes are first-class. ``status="applied"``
     asserts a COMMITTED ``(licence_id, licence_version, digest)``:
     ``licence_version`` >= 1 and a real digest (never ``UNKNOWN_DIGEST``).
@@ -315,7 +329,7 @@ class ReceiverAppliedState:
     licence_id: str
     licence_version: int
     digest: str
-    keyring_generation: int
+    keyring_generation: int | None
     revocation_list_version: int | None
     observed_at: datetime
     status: str
@@ -326,7 +340,8 @@ class ReceiverAppliedState:
         _text_field("deployment_ref", self.deployment_ref)
         _text_field("licence_id", self.licence_id)
         _text_field("digest", self.digest)
-        _count_field("keyring_generation", self.keyring_generation, minimum=1)
+        if self.keyring_generation is not None:
+            _count_field("keyring_generation", self.keyring_generation, minimum=1)
         if self.revocation_list_version is not None:
             _count_field(
                 "revocation_list_version", self.revocation_list_version, minimum=0
@@ -345,13 +360,26 @@ class ReceiverAppliedState:
             # nothing verified, so allowing them here would let a non-event be
             # recorded as applied state.
             _count_field("licence_version", self.licence_version, minimum=1)
-            if self.digest == UNKNOWN_DIGEST:
+            if not _DIGEST_PATTERN.match(self.digest):
                 raise MalformedAppliedStateError(
-                    "an 'applied' report cannot carry the unknown-digest "
-                    "sentinel — it asserts a committed projection"
+                    "an 'applied' report needs a real digest "
+                    "('sha256:' + 64 hex chars); a placeholder that merely "
+                    "looks populated would assert applied state for nothing"
                 )
+            if self.keyring_generation is None:
+                raise MalformedAppliedStateError(
+                    "an 'applied' report needs a keyring generation — nothing "
+                    "can have been applied without a keyring that verified it"
+                )
+            # A REASON on an applied report is a contradiction: `reason` is the
+            # rejection code, so carrying one would let a report be simultaneously
+            # accepted and explained-away, and readers would disagree about which
+            # half to believe.
             if self.reason is not None:
-                _text_field("reason", self.reason)
+                raise MalformedAppliedStateError(
+                    "an 'applied' report must not carry a 'reason' — that field "
+                    "explains a REJECTION, and a report cannot be both"
+                )
         else:
             _count_field("licence_version", self.licence_version, minimum=0)
             # A rejection with no reason is unexplainable at the other end, and
@@ -359,6 +387,20 @@ class ReceiverAppliedState:
             if not isinstance(self.reason, str) or not self.reason:
                 raise MalformedAppliedStateError(
                     "a 'rejected' report must carry a non-empty 'reason'"
+                )
+            if self.digest == UNKNOWN_DIGEST and self.licence_version != 0:
+                # No verified identity means no verified VERSION either; a
+                # positive version beside the sentinel is a claim the receiver
+                # could not have established.
+                raise MalformedAppliedStateError(
+                    "a rejection carrying the unknown-digest sentinel must "
+                    "report licence_version 0 — an unverified envelope yields "
+                    "no version to claim"
+                )
+            if self.digest != UNKNOWN_DIGEST and not _DIGEST_PATTERN.match(self.digest):
+                raise MalformedAppliedStateError(
+                    "a rejection's digest must be either the unknown-digest "
+                    "sentinel or a real 'sha256:' + 64 hex digest"
                 )
 
     @property
