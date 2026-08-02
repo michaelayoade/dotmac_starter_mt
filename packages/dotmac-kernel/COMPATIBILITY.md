@@ -54,7 +54,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
-| `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `ReceiverAppliedState`, `APPLIED_STATE_SCHEMA`, `applied_state_payload`, `parse_applied_state`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
+| `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `ReceiverAppliedState`, `APPLIED_STATE_SCHEMA`, `UNKNOWN_DIGEST`, `applied_state_payload`, `parse_applied_state`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
 | `dotmac_kernel.logging` | `setup_logging` |
 | `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `PlatformOutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.envelope` | `CommandEnvelope` |
@@ -316,15 +316,22 @@ acknowledges the applied `(licence_id, licence_version, digest)`.
 - **`LicenceAcknowledgement`** — the shared cross-plane ack value object
   (`applied`/`rejected` + reason); its transport is vendor/product-owned.
 - **`ReceiverAppliedState`** (+ `applied_state_payload` / `parse_applied_state`,
-  schema `dotmac-licence-applied-state/1`) — what a deployment reports it has
-  ACTUALLY applied: proven deployment ref, licence id/version/digest, keyring
-  generation, applied revocation-list version (`None` = none imported, which is
-  deliberately distinct from version 0), timestamp, and a `report_id`
-  idempotency key. Every field is a CLAIM the vendor authenticates and matches
-  against what it issued. This is the channel that lets a vendor measure
-  keyring-uptake and revocation-application lag, which it cannot infer from its
-  own publishing. Parsing is strict and fail-closed; unknown fields are ignored
-  so a newer receiver cannot break an older vendor.
+  schema `dotmac-licence-applied-state/1`, sentinel `UNKNOWN_DIGEST`) — what a
+  deployment reports about the licence state it is running: deployment ref,
+  licence id/version/digest, keyring generation, applied revocation-list
+  version (`None` = none imported, which is deliberately distinct from
+  version 0), an `observed_at` timestamp, and a `report_id` idempotency key.
+  Every field is a CLAIM — authentication and proof happen at the vendor
+  plane, which verifies who sent the report and matches the digest against
+  what it issued; nothing is trusted on the report's own say-so.
+  `status="applied"` requires a real committed identity (version >= 1, real
+  digest); `status="rejected"` requires a `reason` and remains representable
+  when the envelope never validated (version 0, `UNKNOWN_DIGEST`). This is
+  the channel that lets a vendor measure keyring-uptake and
+  revocation-application lag, which it cannot infer from its own publishing.
+  Validation is strict, fail-closed, and identical for direct construction
+  and parsing; unknown fields are ignored so a newer receiver cannot break an
+  older vendor.
 - **Dependency** — Ed25519 needs `cryptography`, installed via the
   `licensing` extra (`pip install dotmac-kernel[licensing]`). The module
   imports it lazily: types/parsing/digests work without it, and signature
@@ -348,6 +355,33 @@ acknowledges the applied `(licence_id, licence_version, digest)`.
   (`render`, `install_surface_globals`, `setup_logging`); never construct a
   second Jinja environment or reach the singletons directly.
 - Every underscore-prefixed name in any module is private.
+
+## Dependency floors — and what they do and do not promise
+
+The kernel declares `fastapi>=0.111,<0.116`, `pydantic>=2.7.4,<3.0`,
+`pydantic-settings>=2.2,<3.0`, `python>=3.12,<3.14`.
+
+**Scope of the claim.** The floor is proven for the surface a product assembly
+is permitted to import — models, `money`, `capabilities`, `profiles`,
+`licensing`, `entitlements`, `identity`, `query`, `exceptions`, and the
+settings contracts. These are stdlib + SQLAlchemy + pydantic only. The
+kernel's own app/runtime modules (`app_factory`, `platform_auth`, the
+middleware stack) are exercised by this repo's full CI on the current
+versions, not at the floor; an assembly that mounts `create_app` should track
+a current FastAPI rather than sit at the floor.
+
+**Why it is a floor and not a preference.** Products adopting the kernel
+selectively (`dotmac_sub`, `dotmac_erp`) pin fastapi 0.111.0 / pydantic 2.7.4.
+A `^0.115` floor excluded them from consuming *contracts* that never touch
+FastAPI at all, which is a packaging accident rather than a compatibility fact.
+
+**How the claim is kept honest.** The required `kernel-floors` CI job builds
+the wheel, installs it into a clean virtualenv with the floor versions pinned
+EXACTLY (and fails if the resolver upgrades past them, which would make the
+check vacuous), then constructs — not merely imports — each supported contract
+with no `DATABASE_URL` present. Lowering a floor without that job would convert
+a clean resolve-time failure into a runtime one for exactly the consumers the
+lowering is meant to serve.
 
 ## Versioning & deprecation policy
 

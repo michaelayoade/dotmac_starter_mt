@@ -27,14 +27,25 @@ include = [
 # (server), psycopg (driver, loaded by DATABASE_URL), and python-multipart
 # (feature-route form parsing) — those are assembly/deploy concerns.
 python = ">=3.12,<3.14"
-fastapi = "^0.115"
+# FLOORS, not preferences. Every kernel module a product assembly is permitted
+# to import (models, money, capabilities, profiles, licensing, entitlements,
+# identity, query, exceptions, settings contracts) is stdlib + sqlalchemy +
+# pydantic only. The strict `^0.115` floor was driven by the kernel's own
+# app/runtime modules, which those products' architecture guards already forbid
+# them from importing — so it excluded dotmac_sub and dotmac_erp (fastapi
+# 0.111.0 / pydantic 2.7.4) from the adoption programme for no behavioural
+# reason. Widened deliberately, and PROVEN by the required `kernel-floors` CI
+# job that installs the wheel at the exact floor and exercises the supported
+# surface; without that job this range would be an assertion rather than a
+# claim. See COMPATIBILITY.md § "Dependency floors".
+fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 # `email` extra pulls email-validator — a REAL kernel runtime dep, not an
 # assembly concern: the kernel's own `platform_auth` public surface (mounted
 # directly by `create_app`) declares an `EmailStr` field, so the wheel cannot
 # build its public app without it (K4 empty-consumer proof caught this).
-pydantic = { version = "^2.9", extras = ["email"] }
-pydantic-settings = "^2.5"
+pydantic = { version = ">=2.7.4,<3.0", extras = ["email"] }
+pydantic-settings = ">=2.2,<3.0"
 jinja2 = "^3.1"
 argon2-cffi = "^25.1.0"
 # Optional — only `dotmac_kernel.testing.assembly_test_client` needs the HTTP

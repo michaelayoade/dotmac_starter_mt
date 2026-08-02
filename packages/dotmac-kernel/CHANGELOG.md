@@ -16,22 +16,37 @@ migration; the kernel head stays `0012`.
 
 ### Added
 - **`ReceiverAppliedState`** (`dotmac_kernel.licensing`) + `applied_state_payload`
-  / `parse_applied_state` and `APPLIED_STATE_SCHEMA`
-  (`dotmac-licence-applied-state/1`). Carries proven deployment ref, licence
-  id/version/digest, **keyring generation**, **applied revocation-list version**,
+  / `parse_applied_state`, `APPLIED_STATE_SCHEMA`
+  (`dotmac-licence-applied-state/1`) and the `UNKNOWN_DIGEST` sentinel.
+  Carries the deployment ref, licence id/version/digest, **keyring
+  generation**, **applied revocation-list version**, an `observed_at`
   timestamp, and a `report_id` idempotency key (delivery is at-least-once and
-  identical content may legitimately repeat). `revocation_list_version` of
-  `None` means no list imported — deliberately distinct from version 0.
-  `.acknowledgement` subsumes the narrower `LicenceAcknowledgement`, so the
-  existing ack path keeps working unchanged.
-  Parsing is strict and fail-closed (`MalformedAppliedStateError`); unknown
-  fields are ignored so a newer receiver cannot break an older vendor, and
-  validation runs on construction as well as on parse.
+  identical content may legitimately repeat — a NEW `report_id` with identical
+  content is a new observation, not a replay). Every field is a **claim**:
+  authentication and proof happen at the vendor plane, which verifies who sent
+  the report and matches the digest against what it issued; the report itself
+  proves nothing. `revocation_list_version` of `None` means no list imported —
+  deliberately distinct from version 0.
 
-  This closes the channel three WS8 gaps depended on: acknowledgements that can
-  prove identity, keyring-uptake lag, and revocation-application lag — none of
-  which a vendor can infer, because "we published it" says nothing about what a
-  deployment holds.
+  Both outcomes are first-class: `status="applied"` requires a real committed
+  identity (`licence_version >= 1`, a real digest), while `status="rejected"`
+  requires a `reason` and stays representable when the envelope never
+  validated (`licence_version=0`, `digest=UNKNOWN_DIGEST` — the encoding the
+  reference receiver's rejected acknowledgements already carry). The timestamp
+  is `observed_at`, not "applied_at", because a rejected attempt applied
+  nothing. `.acknowledgement` subsumes the narrower `LicenceAcknowledgement`
+  for both statuses, so the existing ack path keeps working unchanged.
+
+  Validation is strict, fail-closed (`MalformedAppliedStateError`) and lives
+  in ONE place (`__post_init__`): direct construction and parsing give
+  identical guarantees, so a producer can never build-and-serialise a report
+  the other plane would reject. Unknown fields are ignored so a newer receiver
+  cannot break an older vendor.
+
+  This closes the channel three WS8 gaps depended on: acknowledgements the
+  vendor can authenticate, keyring-uptake lag, and revocation-application lag
+  — none of which a vendor can infer, because "we published it" says nothing
+  about what a deployment holds.
 
 ## 0.1.0a7 — 2026-08-01
 

@@ -29,6 +29,7 @@ import sqlalchemy as sa
 from dotmac_kernel.capabilities import CapabilityCatalogue, UndeclaredCapabilityError
 from dotmac_kernel.entitlements import TenantEntitlementGrant, grant_entitlement
 from dotmac_kernel.licensing import (
+    UNKNOWN_DIGEST,
     AppliedLicence,
     LicenceAcknowledgement,
     LicenceError,
@@ -70,8 +71,9 @@ def _best_effort_identity(envelope: Mapping[str, object]) -> tuple[str, int, str
     """Identifiers for a REJECTED ack. The envelope failed verification, so
     these are unverified claims — safe only because the ack is explicitly
     `rejected` and the vendor plane flags unknown digests; a report needs a
-    subject even when the document is bad."""
-    licence_id, version, digest = "unknown", 0, "unknown"
+    subject even when the document is bad. Version 0 + `UNKNOWN_DIGEST` is
+    the same rejected-report encoding `ReceiverAppliedState` represents."""
+    licence_id, version, digest = "unknown", 0, UNKNOWN_DIGEST
     try:
         payload_b64 = envelope.get("payload_b64")
         if isinstance(payload_b64, str):

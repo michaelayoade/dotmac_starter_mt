@@ -1,13 +1,15 @@
 """Canary tests for the WS8 receiver-applied-state contract.
 
 Written before the implementation, per the kernel slice convention. This is the
-value object both planes speak when a deployment reports what it has ACTUALLY
-applied — the missing channel behind three open gaps: acknowledgements that
-cannot prove identity, keyring-uptake lag, and revocation-application lag.
+value object both planes speak when a deployment reports what it is ACTUALLY
+running — the missing channel behind three open gaps: acknowledgements the
+vendor cannot authenticate, keyring-uptake lag, and revocation-application lag.
 
-The contract's whole job is to carry claims that the VENDOR will verify, so the
-parsing is strict and fail-closed: a report that cannot be trusted must be
-rejected here rather than half-interpreted downstream.
+The contract's whole job is to carry claims that the VENDOR will verify, so
+validation is strict and fail-closed — and it lives in ONE place
+(`ReceiverAppliedState.__post_init__`): a report built directly carries exactly
+the guarantees of one parsed off the wire, so a producer can never
+construct-and-serialise a report the other plane would reject.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from datetime import UTC, datetime
 import pytest
 from dotmac_kernel.licensing import (
     APPLIED_STATE_SCHEMA,
+    UNKNOWN_DIGEST,
     MalformedAppliedStateError,
     ReceiverAppliedState,
     applied_state_payload,
@@ -35,11 +38,45 @@ def _state(**over) -> ReceiverAppliedState:
         "digest": "sha256:abcd",
         "keyring_generation": 2,
         "revocation_list_version": 5,
-        "applied_at": NOW,
+        "observed_at": NOW,
         "status": "applied",
     }
     fields.update(over)
     return ReceiverAppliedState(**fields)  # type: ignore[arg-type]
+
+
+# Field-level invalids: every one must fail identically whether it arrives on
+# the wire (parse) or is built directly (construction) — the parity the single
+# validator exists to guarantee.
+FIELD_BREAKAGES: list[dict[str, object]] = [
+    {"report_id": ""},
+    {"report_id": None},
+    {"deployment_ref": ""},
+    {"licence_id": ""},
+    {"licence_version": 0},  # an 'applied' claim needs a real version
+    {"licence_version": -1},
+    {"licence_version": "3"},
+    {"licence_version": True},
+    {"digest": ""},
+    {"digest": UNKNOWN_DIGEST},  # an 'applied' claim needs the real digest
+    {"keyring_generation": 0},
+    {"keyring_generation": "2"},
+    {"revocation_list_version": -1},
+    {"revocation_list_version": "5"},
+    {"observed_at": "not-a-timestamp"},
+    {"observed_at": None},
+    {"status": "maybe"},
+    {"status": ""},
+    {"status": "rejected"},  # a rejection without a 'reason' is unexplainable
+    {"status": "rejected", "reason": ""},
+]
+
+# Wire-only invalids: things that can only go wrong on a serialised payload.
+WIRE_BREAKAGES: list[dict[str, object]] = [
+    *FIELD_BREAKAGES,
+    {"schema": "dotmac-licence-applied-state/999"},
+    {"schema": None},
+]
 
 
 # ── Round-trip ──────────────────────────────────────────────────────────────
@@ -85,13 +122,20 @@ def test_a_deployment_that_has_imported_no_revocation_list_reports_null() -> Non
     assert parse_applied_state(applied_state_payload(state)) == state
 
 
-def test_report_id_is_the_idempotency_key() -> None:
+def test_same_report_id_and_content_is_the_idempotent_replay() -> None:
     """Delivery is at-least-once, so the same report will arrive twice; the
-    vendor dedupes on this rather than on content, which may legitimately
-    repeat."""
-    first = _state(report_id="rep-1")
-    second = _state(report_id="rep-1")
-    assert first.report_id == second.report_id == "rep-1"
+    vendor dedupes on `report_id`, and an identical redelivery is equal in
+    every field."""
+    assert _state(report_id="rep-1") == _state(report_id="rep-1")
+
+
+def test_identical_content_under_different_report_ids_is_two_reports() -> None:
+    """Dedupe keys on `report_id`, never on content: two scheduled
+    observations of the same unchanged state are DISTINCT reports, and
+    conflating them would make a deployment look silent."""
+    first, second = _state(report_id="rep-1"), _state(report_id="rep-2")
+    assert first != second
+    assert applied_state_payload(first) != applied_state_payload(second)
 
 
 def test_a_rejected_report_carries_its_reason() -> None:
@@ -100,62 +144,90 @@ def test_a_rejected_report_carries_its_reason() -> None:
     assert parse_applied_state(applied_state_payload(state)).status == "rejected"
 
 
-# ── Strict, fail-closed parsing ─────────────────────────────────────────────
+def test_a_rejected_report_for_an_envelope_that_never_validated_round_trips() -> None:
+    """The reference receiver's rejected ack for a malformed envelope carries
+    licence_version 0 and the `UNKNOWN_DIGEST` sentinel — there is no verified
+    identity to report. The contract must represent exactly that, or the
+    honest rejection would be unreportable."""
+    state = _state(
+        status="rejected",
+        reason="MalformedLicenceError",
+        licence_id="unknown",
+        licence_version=0,
+        digest=UNKNOWN_DIGEST,
+    )
+    parsed = parse_applied_state(applied_state_payload(state))
+    assert parsed == state
+    assert (parsed.licence_version, parsed.digest) == (0, UNKNOWN_DIGEST)
 
 
-@pytest.mark.parametrize(
-    "breakage",
-    [
-        {"schema": "dotmac-licence-applied-state/999"},
-        {"schema": None},
-        {"report_id": ""},
-        {"report_id": None},
-        {"deployment_ref": ""},
-        {"licence_id": ""},
-        {"licence_version": 0},
-        {"licence_version": -1},
-        {"licence_version": "3"},
-        {"licence_version": True},
-        {"digest": ""},
-        {"keyring_generation": 0},
-        {"keyring_generation": "2"},
-        {"revocation_list_version": -1},
-        {"revocation_list_version": "5"},
-        {"applied_at": "not-a-timestamp"},
-        {"applied_at": None},
-        {"status": "maybe"},
-        {"status": ""},
-    ],
-)
-def test_malformed_reports_fail_closed(breakage: dict[str, object]) -> None:
+def test_an_applied_report_cannot_claim_a_rejected_attempts_identity() -> None:
+    """`status="applied"` asserts a committed (version, digest); version 0 or
+    the unknown-digest sentinel would label a non-event as applied state."""
+    with pytest.raises(MalformedAppliedStateError):
+        _state(licence_version=0)
+    with pytest.raises(MalformedAppliedStateError):
+        _state(digest=UNKNOWN_DIGEST)
+
+
+def test_the_acknowledgement_projection_is_valid_for_both_statuses() -> None:
+    """`.acknowledgement` must construct a valid `LicenceAcknowledgement` for
+    applied AND rejected reports — including the no-verified-identity
+    rejection — so the existing ack path keeps working unchanged."""
+    applied_ack = _state().acknowledgement
+    assert (applied_ack.status, applied_ack.digest) == ("applied", "sha256:abcd")
+    assert applied_ack.deployment_id == "edge-site-1"
+
+    rejected_ack = _state(
+        status="rejected",
+        reason="BadSignatureError",
+        licence_version=0,
+        digest=UNKNOWN_DIGEST,
+    ).acknowledgement
+    assert (rejected_ack.status, rejected_ack.reason) == (
+        "rejected",
+        "BadSignatureError",
+    )
+    assert (rejected_ack.licence_version, rejected_ack.digest) == (0, UNKNOWN_DIGEST)
+
+
+# ── Strict, fail-closed validation — identical on both paths ────────────────
+
+
+@pytest.mark.parametrize("breakage", WIRE_BREAKAGES)
+def test_malformed_reports_fail_closed_on_parse(breakage: dict[str, object]) -> None:
     payload = applied_state_payload(_state())
     payload.update(breakage)
     with pytest.raises(MalformedAppliedStateError):
         parse_applied_state(payload)
 
 
+@pytest.mark.parametrize("breakage", FIELD_BREAKAGES)
+def test_invalid_direct_construction_raises_exactly_like_parse(
+    breakage: dict[str, object],
+) -> None:
+    """Construction parity: a producer building the value object directly hits
+    the SAME error the receiving plane's parser would raise — there is no
+    constructable-but-unparseable report."""
+    with pytest.raises(MalformedAppliedStateError):
+        _state(**breakage)
+
+
 def test_a_naive_timestamp_is_rejected() -> None:
     """Cross-plane timestamps must be unambiguous; a naive one silently means
     whatever the reader's timezone happens to be."""
     payload = applied_state_payload(_state())
-    payload["applied_at"] = "2026-08-02T12:00:00"
+    payload["observed_at"] = "2026-08-02T12:00:00"
     with pytest.raises(MalformedAppliedStateError):
         parse_applied_state(payload)
+    with pytest.raises(MalformedAppliedStateError):
+        _state(observed_at=datetime(2026, 8, 2, 12, 0, 0))
 
 
 def test_a_non_object_payload_is_rejected() -> None:
     for payload in ([], "applied", 7, None):
         with pytest.raises(MalformedAppliedStateError):
             parse_applied_state(payload)  # type: ignore[arg-type]
-
-
-def test_construction_validates_too() -> None:
-    """The value object cannot be built invalid, so code that constructs one
-    directly gets the same guarantees as code that parses one."""
-    with pytest.raises(ValueError, match="status"):
-        _state(status="perhaps")
-    with pytest.raises(ValueError, match="timezone-aware"):
-        _state(applied_at=datetime(2026, 8, 2, 12, 0, 0))
 
 
 def test_unknown_fields_are_ignored_not_trusted() -> None:
