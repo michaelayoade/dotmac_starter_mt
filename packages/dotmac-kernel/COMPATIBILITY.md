@@ -54,7 +54,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
-| `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
+| `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `ReceiverAppliedState`, `APPLIED_STATE_SCHEMA`, `applied_state_payload`, `parse_applied_state`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
 | `dotmac_kernel.logging` | `setup_logging` |
 | `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `PlatformOutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.envelope` | `CommandEnvelope` |
@@ -315,6 +315,16 @@ acknowledges the applied `(licence_id, licence_version, digest)`.
   un-revoke; equal version is an idempotent re-import).
 - **`LicenceAcknowledgement`** — the shared cross-plane ack value object
   (`applied`/`rejected` + reason); its transport is vendor/product-owned.
+- **`ReceiverAppliedState`** (+ `applied_state_payload` / `parse_applied_state`,
+  schema `dotmac-licence-applied-state/1`) — what a deployment reports it has
+  ACTUALLY applied: proven deployment ref, licence id/version/digest, keyring
+  generation, applied revocation-list version (`None` = none imported, which is
+  deliberately distinct from version 0), timestamp, and a `report_id`
+  idempotency key. Every field is a CLAIM the vendor authenticates and matches
+  against what it issued. This is the channel that lets a vendor measure
+  keyring-uptake and revocation-application lag, which it cannot infer from its
+  own publishing. Parsing is strict and fail-closed; unknown fields are ignored
+  so a newer receiver cannot break an older vendor.
 - **Dependency** — Ed25519 needs `cryptography`, installed via the
   `licensing` extra (`pip install dotmac-kernel[licensing]`). The module
   imports it lazily: types/parsing/digests work without it, and signature

@@ -38,6 +38,7 @@ from datetime import datetime, timedelta
 ENVELOPE_SCHEMA = "dotmac-licence-envelope/1"
 LICENCE_SCHEMA = "dotmac-licence/1"
 REVOCATION_SCHEMA = "dotmac-licence-revocation/1"
+APPLIED_STATE_SCHEMA = "dotmac-licence-applied-state/1"
 
 _ALGORITHM = "ed25519"
 
@@ -110,6 +111,12 @@ class VerificationUnavailableError(LicenceError):
 
 class DuplicateKeyError(LicenceError):
     """A keyring was constructed with two keys sharing a ``key_id``."""
+
+
+class MalformedAppliedStateError(LicenceError):
+    """A receiver-applied-state report is structurally invalid. Fail closed:
+    a report that cannot be trusted is rejected here rather than
+    half-interpreted by whichever plane reads it next."""
 
 
 # ── Keyring ─────────────────────────────────────────────────────────────────
@@ -255,6 +262,140 @@ class LicenceAcknowledgement:
     def __post_init__(self) -> None:
         if self.status not in ("applied", "rejected"):
             raise ValueError("status must be 'applied' or 'rejected'")
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiverAppliedState:
+    """What a deployment reports it has ACTUALLY applied.
+
+    The cross-plane channel behind three gaps the vendor cannot close alone: an
+    acknowledgement that proves who sent it, and the two uptake versions —
+    keyring generation and applied revocation-list version — that "we published
+    it" says nothing about. Delivery proves a transport moved bytes; only this
+    says what a deployment is running.
+
+    Every field here is a CLAIM. The vendor authenticates the reporter and
+    matches `digest` against what it issued; nothing is trusted on the strength
+    of the report alone. `report_id` is the idempotency key, because delivery
+    is at-least-once and identical content may legitimately repeat.
+
+    `revocation_list_version` of ``None`` means the deployment has imported NO
+    list — deliberately distinct from version 0, since "never received one" and
+    "received an empty one" are different operational states.
+    """
+
+    report_id: str
+    deployment_ref: str
+    licence_id: str
+    licence_version: int
+    digest: str
+    keyring_generation: int
+    revocation_list_version: int | None
+    applied_at: datetime
+    status: str
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        # Validating on construction as well as on parse means code that builds
+        # a report directly gets the same guarantees as code that receives one.
+        if self.status not in ("applied", "rejected"):
+            raise ValueError("status must be 'applied' or 'rejected'")
+        if self.applied_at.utcoffset() is None:
+            raise ValueError("'applied_at' must be timezone-aware")
+
+    @property
+    def acknowledgement(self) -> LicenceAcknowledgement:
+        """The narrower ack this report subsumes, so the existing
+        acknowledgement path keeps working unchanged."""
+        return LicenceAcknowledgement(
+            licence_id=self.licence_id,
+            licence_version=self.licence_version,
+            digest=self.digest,
+            status=self.status,
+            reason=self.reason,
+            deployment_id=self.deployment_ref,
+        )
+
+
+def applied_state_payload(state: ReceiverAppliedState) -> dict[str, object]:
+    """Serialise for transport. Every value is JSON-safe — a datetime left in
+    place would fail at whichever transport carries this."""
+    return {
+        "schema": APPLIED_STATE_SCHEMA,
+        "report_id": state.report_id,
+        "deployment_ref": state.deployment_ref,
+        "licence_id": state.licence_id,
+        "licence_version": state.licence_version,
+        "digest": state.digest,
+        "keyring_generation": state.keyring_generation,
+        "revocation_list_version": state.revocation_list_version,
+        "applied_at": state.applied_at.isoformat(),
+        "status": state.status,
+        "reason": state.reason,
+    }
+
+
+def parse_applied_state(payload: Mapping[str, object]) -> ReceiverAppliedState:
+    """Strictly parse a report. Unknown fields are IGNORED (a newer receiver
+    must not break an older vendor) but never absorbed into the record."""
+    if not isinstance(payload, Mapping):
+        raise MalformedAppliedStateError("applied-state payload must be an object")
+    if payload.get("schema") != APPLIED_STATE_SCHEMA:
+        raise MalformedAppliedStateError(
+            f"unknown applied-state schema: {payload.get('schema')!r}"
+        )
+
+    def _text(name: str) -> str:
+        value = payload.get(name)
+        if not isinstance(value, str) or not value:
+            raise MalformedAppliedStateError(f"'{name}' must be a non-empty string")
+        return value
+
+    def _count(name: str, *, minimum: int) -> int:
+        value = payload.get(name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+            raise MalformedAppliedStateError(
+                f"'{name}' must be an integer >= {minimum}"
+            )
+        return value
+
+    revocation_version = payload.get("revocation_list_version")
+    if revocation_version is not None:
+        revocation_version = _count("revocation_list_version", minimum=0)
+
+    applied_raw = payload.get("applied_at")
+    if not isinstance(applied_raw, str):
+        raise MalformedAppliedStateError("'applied_at' must be an ISO-8601 string")
+    try:
+        applied_at = datetime.fromisoformat(applied_raw)
+    except ValueError as exc:
+        raise MalformedAppliedStateError(
+            "'applied_at' is not a valid timestamp"
+        ) from exc
+    if applied_at.utcoffset() is None:
+        raise MalformedAppliedStateError("'applied_at' must be timezone-aware")
+
+    status = _text("status")
+    if status not in ("applied", "rejected"):
+        raise MalformedAppliedStateError(
+            f"'status' must be 'applied' or 'rejected', got {status!r}"
+        )
+    reason = payload.get("reason")
+    if reason is not None and (not isinstance(reason, str) or not reason):
+        raise MalformedAppliedStateError("'reason' must be a non-empty string or null")
+
+    return ReceiverAppliedState(
+        report_id=_text("report_id"),
+        deployment_ref=_text("deployment_ref"),
+        licence_id=_text("licence_id"),
+        licence_version=_count("licence_version", minimum=1),
+        digest=_text("digest"),
+        keyring_generation=_count("keyring_generation", minimum=1),
+        revocation_list_version=revocation_version,
+        applied_at=applied_at,
+        status=status,
+        reason=reason,
+    )
 
 
 # ── Digest ──────────────────────────────────────────────────────────────────
@@ -646,6 +787,10 @@ __all__ = [
     "VerifiedLicence",
     "RevocationList",
     "LicenceAcknowledgement",
+    "ReceiverAppliedState",
+    "APPLIED_STATE_SCHEMA",
+    "applied_state_payload",
+    "parse_applied_state",
     # operations
     "payload_digest",
     "verify_licence",
@@ -665,4 +810,5 @@ __all__ = [
     "StaleRevocationListError",
     "VerificationUnavailableError",
     "DuplicateKeyError",
+    "MalformedAppliedStateError",
 ]
