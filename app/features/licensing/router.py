@@ -14,11 +14,14 @@ from dotmac_kernel.models import Party, Tenant
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.features.licensing import revocation as licensing_revocation
 from app.features.licensing import service as licensing_service
 from app.features.licensing.schemas import (
     AcknowledgementOut,
     ApplyLicenceRequest,
     ApplyLicenceResponse,
+    ImportRevocationListRequest,
+    ImportRevocationListResponse,
 )
 
 router = APIRouter(
@@ -67,4 +70,45 @@ def apply_licence(
         revoked_codes=list(result.revoked_codes),
         validity=result.validity,
         reapplied=result.reapplied,
+    )
+
+
+@router.post("/revocations/import", response_model=ImportRevocationListResponse)
+def import_revocation_list(
+    payload: ImportRevocationListRequest,
+    db: Session = Depends(get_db),
+    tenant: Tenant = Depends(require_tenant),
+    actor: Party = Depends(require_role("admin")),
+) -> ImportRevocationListResponse:
+    """Import a signed revocation list. Accepted imports revoke matching local
+    grants IMMEDIATELY — deferring to the next licence application would leave
+    a revoked customer entitled indefinitely."""
+    result = licensing_revocation.import_revocation_list(
+        db, tenant_id=tenant.id, envelope=payload.envelope
+    )
+    write_audit_event(
+        db,
+        tenant_id=tenant.id,
+        actor_party_id=actor.id,
+        action=(
+            "licence.revocation_imported"
+            if result.accepted
+            else "licence.revocation_rejected"
+        ),
+        entity_type="licence_revocation_list",
+        entity_id=str(result.list_version or "none"),
+        details={
+            "accepted": result.accepted,
+            "list_version": result.list_version,
+            "revoked_licence_ids": list(result.revoked_licence_ids),
+            "revoked_codes": list(result.revoked_codes),
+            "reason": result.reason,
+        },
+    )
+    return ImportRevocationListResponse(
+        accepted=result.accepted,
+        list_version=result.list_version,
+        revoked_licence_ids=list(result.revoked_licence_ids),
+        revoked_codes=list(result.revoked_codes),
+        reason=result.reason,
     )

@@ -46,8 +46,11 @@ path dependency — the assembly imports `dotmac_kernel.*`, never a copied modul
   verifies a vendor-signed licence envelope via `dotmac_kernel.licensing`,
   projects it into local WS2 grants, keeps the durable
   `TenantAppliedLicence` replay record — assembly migration `a002` — and
-  returns the version/digest acknowledgement; trust config via
-  `LICENCE_VERIFICATION_KEYS`/`LICENCE_DEPLOYMENT_ID`/
+  returns the version/digest acknowledgement; also imports signed revocation
+  lists (`TenantRevocationList`, migration `a003`), which revoke matching
+  grants IMMEDIATELY and are fed into every later `verify_licence`, with
+  accepted imports required to be a superset of the stored set; trust config
+  via `LICENCE_VERIFICATION_KEYS`/`LICENCE_DEPLOYMENT_ID`/
   `LICENCE_REQUIRE_BINDING` env knobs), `web` (`core=False`, deletable — the
   admin-portal dashboard shell; `DISABLED_FEATURES=web` drops only `GET
   /admin`, every other feature's own `/admin/*` routes and the API stay up —
