@@ -271,24 +271,6 @@ class LicenceAcknowledgement:
             raise ValueError("status must be 'applied' or 'rejected'")
 
 
-UNKNOWN_DIGEST = "unknown"
-"""Sentinel digest for a REJECTED report whose envelope payload bytes could
-not be recovered — the encoding the reference receiver's rejected
-acknowledgements already carry. Never valid on an ``applied`` report."""
-
-
-def _state_text(value: object, name: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise MalformedAppliedStateError(f"'{name}' must be a non-empty string")
-    return value
-
-
-def _state_count(value: object, name: str, *, minimum: int) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
-        raise MalformedAppliedStateError(f"'{name}' must be an integer >= {minimum}")
-    return value
-
-
 @dataclass(frozen=True, slots=True)
 class ReceiverAppliedState:
     """What a deployment reports about the licence state it is running.
@@ -857,7 +839,6 @@ __all__ = [
     "LicenceAcknowledgement",
     "ReceiverAppliedState",
     "APPLIED_STATE_SCHEMA",
-    "UNKNOWN_DIGEST",
     "UNKNOWN_DIGEST",
     "applied_state_payload",
     "parse_applied_state",
