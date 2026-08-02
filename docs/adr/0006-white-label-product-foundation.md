@@ -310,6 +310,107 @@ entirely on convention. Unlike a revision-ID clash, which fails loudly at
 table, and an ORM class mapped to a differently-shaped existing table reads wrong
 rows. No module composition should ship before D1 is answered.
 
+### Decision amendment — 2026-08-02 (D1–D8 resolved)
+
+The owner delegated these eight decisions after reviewing the F0 evidence. The
+original questions above are retained as the historical decision record; the
+rulings below are normative for F2–P1.
+
+#### D1 — a dedicated Postgres schema per stateful module; registered migration prefixes
+
+Every independently installed stateful module owns one immutable Postgres
+schema namespace. The namespace is assigned in the module registry, uses the
+form `mod_<short_code>`, and is never inferred from a display name. Module
+models, migrations, foreign keys, policies, functions, and raw SQL fully
+qualify their schema; they never depend on `search_path`. A stateless module
+declares no database namespace.
+
+`public` remains the compatibility namespace for the existing kernel and the
+one host assembly. It is not available to installable modules. Existing ERP or
+Sub tables do not become module tables merely because their code is extracted:
+the extraction's expand/contract migration must create or adopt the assigned
+module schema explicitly. Until that cutover is proven, the source product and
+the candidate module are not composable in one database.
+
+Each migration owner also receives an immutable, globally unique short prefix
+from the registry. Revision IDs use `<prefix>_<sequence>_<slug>` within
+Alembic's version-column length; the module lineage has its own base and branch
+label, and cross-lineage ordering uses `depends_on`, never `down_revision`.
+The existing composed `alembic_version` table remains the migration truth;
+manifest-to-branch attribution makes its rows explainable. A composed CI gate
+must load every selected version location and reject duplicate revisions,
+prefixes, branch labels, schema claims, or table ownership before an image can
+be built. The post-migration live-catalog gate applies the kernel RLS/grant
+contract across every registered module schema.
+
+#### D2 — kernel WS8 is the sole target licence protocol
+
+The signed, versioned WS8 licence, applied-state, keyring, and revocation
+contracts survive. ERP's existing format is legacy input only: ERP E10 must
+inventory it, issue or map replacement WS8 state, shadow-verify the cutover,
+and retire the old verifier and writer. There is no permanent dual-authority or
+"accept either forever" mode.
+
+#### D3 — `dotmac-ui` is toolchain-agnostic to consumers
+
+`dotmac-ui` may use Tailwind v4 to build its own released assets, but its public
+contract is compiled, versioned CSS/assets, semantic tokens, stable component
+classes/data attributes, and Jinja/HTMX APIs. A consumer does not run the UI
+package through its own Tailwind compiler and does not need the same Tailwind
+major. ERP may migrate from Tailwind v3 separately; that migration is not an
+adoption prerequisite.
+
+#### D4 — the `dotmac-*` licence schema IDs remain permanent protocol identifiers
+
+The schema IDs identify the software/protocol vendor, not the deployment's
+display brand. White-labelling must not rewrite signed protocol identity.
+They therefore remain stable for version 1 and may change only for a real,
+versioned protocol break with an explicit compatibility window — never as an
+OEM cosmetic substitution.
+
+#### D5 — allow `dotmac_ui` through a narrow, explicit consumer boundary
+
+Product architecture allowlists will admit the released top-level `dotmac_ui`
+public surface in the same change that introduces a real consumer. This does
+not grant modules access to kernel templating or branding internals and does
+not permit arbitrary presentation packages. The ledger, import guard, wheel
+consumer proof, and supported UI-contract range must move together.
+
+#### D6 — facet prefixes are deployment-static, not tenant-runtime settings
+
+HTML facet mount prefixes are assembly/profile configuration resolved at
+startup, with `/admin` retained as the default. Templates and redirects use
+named route generation rather than literal prefixes. Prefixes must be absolute,
+normalized, unique, non-overlapping, and outside reserved API/platform paths.
+They cannot vary by tenant inside one running assembly. Versioned JSON API
+prefixes remain protocol contracts and are not rebranded.
+
+#### D7 — kernel owns a composed strict CSP contract, not one fleet product's string
+
+The kernel supplies a deny-by-default CSP baseline and a typed composition
+mechanism for requirements declared by trusted installed packages and the
+assembly. Modules and tenants cannot contribute raw directives or arbitrary
+origins. The resolved policy is deterministic and inspectable, and unsafe
+directives, wildcards, CDNs, and runtime per-tenant origins fail the supported
+profile gate unless an explicit temporary compatibility ADR names their owner
+and retirement condition.
+
+The starter policy is the target posture, not something silently imposed on an
+incompatible ERP deployment. ERP must vendor its jsDelivr dependencies and
+runtime Google Fonts, remove `unsafe-eval`, and pass report-only canaries before
+enforcement. Sub gains the composed policy through the same compatibility
+gate. `dotmac-ui` ships self-hosted, CSP-compatible assets.
+
+#### D8 — no tenant-supplied raw CSS is a fleet-wide standard
+
+Tenant/operator brand customization is an allowlisted, typed token set with
+contrast and URL validation. Trusted CSS exists only in versioned theme/UI
+packages. Starter and ERP stop accepting new raw-CSS writes; existing values
+are retained only as migration evidence until they are exported, mapped to
+tokens where possible, and explicitly retired. Unrepresentable rules are
+reported to the operator and are never silently copied or silently discarded.
+Sub's token-only pipeline is the reference posture.
+
 ### Live defects found while taking the inventory (owned elsewhere)
 
 F0 is documentation-only and fixed nothing. Three defects surfaced that are
