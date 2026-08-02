@@ -1,12 +1,6 @@
-# S0 — dotmac_sub adoption preparation (historical alpha preparation)
+# S0 — dotmac_sub adoption preparation (design / tests-design only)
 
-> **Status:** superseded for execution on 2026-08-02 by
-> [`2026-08-02-dotmac-sub-kernel-improvements.md`](2026-08-02-dotmac-sub-kernel-improvements.md).
-> Retained as historical evidence of the pre-alpha preparation; its unresolved-input and
-> proposed-surface claims must not override current `dotmac_sub` as-built documentation or
-> the released kernel compatibility contract.
->
-> This document was checked-in intent produced in
+> **Status:** preparation, not execution. This document is checked-in intent produced in
 > `dotmac_starter_mt` to make a *later* `dotmac_sub`-repo adoption lane fast and safe. It
 > maps Sub's `subscriber_management` product onto the kernel's **proposed** `ProductAssemblySpec`
 > so that when kernel Task 3 lands and the `0.1.0a1` alpha publishes, the Sub lane already knows

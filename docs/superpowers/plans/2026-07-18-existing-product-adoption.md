@@ -3,15 +3,6 @@
 > **Status:** Accepted migration direction; discovery and implementation not started.
 > ADR-0003 owns the platform/reuse decisions. This plan applies them to existing products
 > without a rewrite or shared production database.
->
-> **2026-08-02 execution split:** the shared decisions and prohibited approaches in this
-> document remain in force. Current executable sequencing is now maintained separately in
-> [`2026-08-02-dotmac-sub-kernel-improvements.md`](2026-08-02-dotmac-sub-kernel-improvements.md)
-> and
-> [`2026-08-02-dotmac-erp-kernel-improvements.md`](2026-08-02-dotmac-erp-kernel-improvements.md),
-> based on the live product SOT maps and released kernel `0.1.0a7`. Where an older discovery
-> statement here conflicts with those products' checked-in as-built documentation, the
-> product documentation is authoritative.
 
 ## Recon basis
 
