@@ -3,6 +3,9 @@
 **Hard rules live in `AGENTS.md`** (tool-neutral, canonical — this file
 indexes them and adds repo-map/portal specifics). Docs hierarchy:
 `docs/ARCHITECTURE.md` = as-built truth; `docs/adr/` = decisions + status;
+`docs/inventories/` = dated cross-repo as-built characterization (starter,
+Sub, ERP, vendor control plane) — facts, not mandates, and explicitly not a
+licence to extract shared code (see ADR-0006 § "The extraction rule");
 `docs/superpowers/plans|specs/` = non-authoritative intent; `README.md` =
 onboarding; `CONTRIBUTING.md` = human dev rules; `docs/SECURITY.md` =
 security posture.
