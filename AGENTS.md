@@ -72,6 +72,15 @@ specifics) points here and must never fork these rules.
     `CMD` only runs `uvicorn`; `scripts/deploy.sh` is the only place
     migrations run in production. The same migration that creates a table
     creates its RLS and grants.
+13. **Cross-repository engineering governance is pinned and required.**
+    `.dotmac/standards-profile.json` names this repository's declared authority
+    and fully typed contract surfaces, and pins the accepted Governance source
+    by exact commit. The `Dotmac engineering standards` CI job must execute the
+    Governance action at that same commit; a mutable tag/branch, copied policy,
+    candidate mode, missing job, or source/profile revision mismatch is not an
+    admissible substitute. Product CI is evidence only for the product revision
+    it evaluated. (`.github/workflows/engineering-standards.yml`; Governance
+    ADR 0006 in `michaelayoade/dotmac_governance`)
 
 ## Everything by config — no hardcoding
 
