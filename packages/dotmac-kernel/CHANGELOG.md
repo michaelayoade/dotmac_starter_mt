@@ -8,6 +8,13 @@ here.
 
 ## Unreleased
 
+## 0.1.0a9 — 2026-08-03
+
+Ninth alpha. Adds the **applied-state envelope** — the structure a deployment
+signs to prove WHO is reporting what it has applied, unblocking the WS8
+production-readiness gate (ADR-0007). No migration; the kernel head stays
+`0012`.
+
 ### Added
 - **Applied-state envelope** (`dotmac_kernel.licensing`, ADR-0007) — the
   structure a DEPLOYMENT signs to prove who is reporting, the mirror of the
