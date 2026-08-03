@@ -33,11 +33,16 @@ Three failure modes have to be designed out before that gate can open:
    `deployment_id`. If the ingestion path is allowed to read identity from the
    body, deployment binding becomes decorative: anyone who can reach the
    endpoint can activate any deployment's licence by naming it.
-2. **A credential the vendor could use to impersonate a deployment.** A shared
-   secret — even hashed at rest — is a verifier held by the party being reported
-   to. A control-plane database compromise then yields the ability to
-   manufacture "the fleet applied it" evidence for licences that were never
-   applied.
+2. **A credential the vendor could replay or that leaves no portable
+   evidence.** A shared bearer secret is transmitted on every request, so it
+   exists in more places than the deployment: proxies, logs, and — as the
+   2026-08-02 delivery review found — persisted error text. It also produces no
+   artifact anyone else can check: "this deployment said so" is a claim only the
+   vendor's own records support.
+
+   To be precise about what a shared secret does *not* cost: a properly hashed,
+   high-entropy bearer token does **not** leak from a database dump. That
+   argument was overstated in an earlier draft of this ADR and is withdrawn.
 3. **Replay presented as fresh application.** Delivery is at-least-once and a
    signed request can be captured and re-sent verbatim; the signature stays
    valid because the bytes are unchanged. Without an idempotency contract, a
@@ -48,9 +53,30 @@ Three failure modes have to be designed out before that gate can open:
 ### 1. Identity is an Ed25519 signature; the vendor holds only public keys
 
 Each deployment holds a unique Ed25519 private key. Its **public** key is
-registered against the authoritative deployment. The control plane never holds
-material capable of impersonating a deployment, and no secret crosses the wire,
-so none can be logged, echoed into a stored error code, or captured at a proxy.
+registered against the authoritative deployment.
+
+The accurate advantages over a shared secret are these four, and they are the
+reasons of record:
+
+1. **Public-only vendor custody.** The control plane stores nothing capable of
+   impersonating a deployment. Not because a hashed secret would leak — it
+   would not — but because there is simply no verifier-usable material to
+   protect, which removes a whole class of custody obligation rather than
+   discharging it.
+2. **Portable signed evidence.** A signed report is checkable by anyone holding
+   the public key, including an auditor, the deployment's own operator, or a
+   third party in a dispute. A bearer-authenticated request produces only the
+   vendor's assertion that it happened.
+3. **Cleaner rotation.** Overlapping public keys need no coordinated secret
+   handover; the deployment cuts over on its own schedule and the old key is
+   retired afterwards, while remaining attributable for what it already signed.
+4. **Offline verification.** Reports can be verified without a live call to
+   whatever holds the credential, which matches the rest of WS8 — offline
+   licence verification is already the design.
+
+No secret crosses the wire either, so none can be logged, echoed into a stored
+error code, or captured at a proxy — a concrete failure the 2026-08-02 delivery
+review found with caller-supplied bearer material.
 
 Private keys are read **once** from a configured file materialised from OpenBao,
 exactly as licence signing keys already are (`ConfiguredLicenceSigner`). They are
@@ -69,6 +95,15 @@ Activation requires a **one-time, expiry-bound challenge**: the vendor issues a
 nonce, the deployment signs it, and only a correct signature moves the key
 `pending → active`. The challenge is single-use and expires, so a captured
 challenge response cannot be replayed to activate a key later.
+
+The challenge is a **typed, versioned** structure
+(`dotmac-deployment-challenge/1`), not a bare nonce, and every field is bound
+into its signing input: `challenge_id` (the single-use handle the issuer
+retires), `key_id` and `deployment_ref` (so a response is evidence for *this*
+registration and cannot be carried to another), the nonce itself, and
+`expires_at` (so a stale challenge cannot be silently extended by the caller).
+Expiry is checked before the signature, because "expired" and "bad signature"
+send an operator to completely different places.
 
 ### 3. Applied state travels in its own signed envelope
 
@@ -94,6 +129,30 @@ Verification resolves `key_id → deployment_ref`, and **that** result becomes
 `authenticated_deployment_ref`. Identity is derived from the material that
 verified, never from a field the caller chose. `key_id` is therefore globally
 unique across deployments.
+
+**`key_id` is part of the signed bytes.** It cannot merely travel beside the
+payload. Because `key_id` is what resolves to an identity, leaving it unsigned
+makes that identity forgeable by anyone who can get one public key registered
+twice: register the same public key under a second `key_id` mapping to another
+deployment, replay a captured report with `key_id` swapped, and the signature
+still verifies — the key material is identical — so the report is attributed to
+the attacker's chosen deployment. This was demonstrated against the first
+implementation of this ADR and is now pinned by a canary.
+
+Note the weaker check that does *not* catch it: substituting a **different**
+key fails for the trivial reason that its signature does not verify. Only
+identical material under two ids exposes the hole.
+
+The signing input is therefore **canonical and length-delimited** —
+`domain ‖ len(key_id) ‖ key_id ‖ len(payload) ‖ payload` — because plain
+concatenation is ambiguous: `("a", "bc")` and `("ab", "c")` would otherwise
+produce identical bytes and let one signature serve two different pairs.
+
+**Defence in depth at the registry.** The vendor additionally enforces globally
+unique **public-key fingerprints**, so the same material cannot be registered
+twice under different ids in the first place. Signing `key_id` makes the
+substitution unexploitable; the fingerprint constraint makes the precondition
+unreachable. Both, because either alone is one mistake away from the exploit.
 
 A body-claimed `deployment_ref` that differs from the proven one is
 **quarantined** as `deployment_mismatch` — recorded as evidence, activating

@@ -205,26 +205,5 @@ class FakeDeploymentSigner:
         """
         return self._private_key.sign(payload)
 
-    def seal_raw(self, payload: bytes) -> dict[str, object]:
-        """Seal arbitrary bytes as a well-formed, correctly-signed envelope.
-
-        Lets a test prove the envelope is a carrier, not an escape hatch: a
-        perfectly signed envelope whose payload is not a valid report must
-        still fail, because verification ends in the value object's own
-        validator.
-        """
-        from dotmac_kernel.licensing import (
-            APPLIED_STATE_ENVELOPE_SCHEMA,
-            applied_state_signing_input,
-        )
-
-        signature = self._private_key.sign(applied_state_signing_input(payload))
-        return {
-            "schema": APPLIED_STATE_ENVELOPE_SCHEMA,
-            "key_id": self.key_id,
-            "payload_b64": _b64url(payload),
-            "signature_b64": _b64url(signature),
-        }
-
 
 __all__ = ["FakeDeploymentSigner", "FakeLicenceSigner"]

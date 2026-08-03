@@ -23,30 +23,46 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
   custody, so one trust structure covering both would let either party's key
   speak for the other.
 
-  `seal_applied_state` / `verify_applied_state` /
-  `parse_applied_state_envelope`, the `AppliedStateSigner` protocol,
-  `VerifiedAppliedState`, `APPLIED_STATE_ENVELOPE_SCHEMA`
-  (`dotmac-applied-state-envelope/1`), and the two signing-input functions with
-  their domain separators — `applied_state_signing_input`
-  (`APPLIED_STATE_DOMAIN`) and `deployment_challenge_signing_input`
-  (`DEPLOYMENT_CHALLENGE_DOMAIN`).
+  Fully typed and immutable: `AppliedStateEnvelope` (with `to_wire`/`from_wire`
+  for transport), `DeploymentVerificationKey` (carrying the `deployment_ref` a
+  `key_id` resolves to), `VerifiedAppliedState` (exposing the PROVEN
+  `deployment_ref` plus `claim_matches_proof`), the `AppliedStateSigner`
+  protocol, `seal_applied_state` / `verify_applied_state`, and
+  `APPLIED_STATE_ENVELOPE_SCHEMA` (`dotmac-applied-state-envelope/1`).
 
-  The signature covers the EXACT payload bytes, carried as base64 inside the
-  envelope, so nothing re-serialises a payload to verify it. `key_id` sits
-  outside the signed payload — the verifier needs it to find the key — and
-  resolves to the reporting identity; the payload's `deployment_ref` stays a
-  claim the consumer compares and quarantines on mismatch.
+  The signature covers the EXACT payload bytes, carried as bytes on the
+  envelope, so nothing re-serialises a payload to verify it.
+
+  **`key_id` is signed, not merely carried.** Because `key_id` resolves to a
+  deployment identity, leaving it unsigned made that identity forgeable:
+  registering the SAME public key under a second `key_id` mapping to another
+  deployment, then replaying a captured report with `key_id` swapped, verified
+  successfully and attributed the report to the attacker's deployment. Found by
+  review against the first implementation and now pinned by a canary. Note the
+  weaker check that misses it — substituting a *different* key fails trivially,
+  because its signature does not verify; only identical material under two ids
+  exposes the hole. `applied_state_signing_input(key_id, payload)` is therefore
+  canonical and length-delimited, since plain concatenation would let `("a",
+  "bc")` and `("ab", "c")` share signing bytes.
 
   Two domains, not one: the possession challenge is signed by the same key over
   a vendor-chosen nonce, which would otherwise be a forgery oracle for reports.
+- **`DeploymentPossessionChallenge`** — the typed, versioned
+  (`dotmac-deployment-challenge/1`) proof-of-possession that moves a registered
+  key from `pending` to `active`. Binds `challenge_id`, `key_id`,
+  `deployment_ref`, a nonce with a minimum length, and a timezone-aware
+  `expires_at` into its signing input, so a response is evidence for exactly one
+  registration and cannot be carried to another or silently extended.
+  `verify_possession` checks expiry BEFORE the signature — "expired" and "bad
+  signature" send an operator to different places.
 
   The kernel owns the contract, the serialization and the conformance vectors.
   It owns NO production key custody and ships no production signer, exactly as
   it ships none for licences.
 - **`FakeDeploymentSigner`** (`dotmac_kernel.testing`) — the deployment-side
   counterpart to `FakeLicenceSigner`, ephemeral in-memory Ed25519. Includes
-  `sign_raw`/`seal_raw`, which exist so canaries can prove the domain separator
-  and the envelope's validation are load-bearing rather than decorative.
+  `sign_raw`, which exists so a canary can prove the domain and key-id bindings
+  are load-bearing rather than decorative.
 
 ## 0.1.0a8 — 2026-08-02
 
