@@ -441,14 +441,26 @@ source, not accepted on report.
    so the two disagree: in a multi-organization deployment this one can serve
    and then cache one organization's value for another.
 
-3. **`dotmac_sub` has three writers for logo/favicon/colours** —
-   `brand_profiles`, the `comms` settings rows, and
-   `web_system_company_info.py` (which writes `domain_settings` by raw SQL,
-   bypassing its own spec registry), with
+3. **`dotmac_sub` has multiple writers for logo/favicon/colours**, alongside
    `sync_platform_brand_from_legacy_settings` as an unfinished one-way
    migration. Consolidating on `BrandProfile` without finishing that migration
    inherits a dangling legacy writer — a direct violation of SOT-complete
    criterion 5.
+
+   > **Corrected 2026-08-03, on evidence.** The original wording named
+   > `web_system_company_info.py` as the third writer and described it as raw
+   > SQL bypassing the spec registry. Both halves were wrong: it uses the ORM,
+   > and it writes no logo/favicon/colour key at all, so it was never the
+   > branding violation. (It *is* a spec-bypassing settings writer — the
+   > `company_*` keys have no `SettingSpec` — which is a separate finding.) The
+   > actual dangling branding writer, which the inventory missed, is the
+   > **generic comms settings form**
+   > (`web_system_settings_forms.process_settings_update`): it wrote all 13
+   > branding keys with none of the owner's validators, skipped the
+   > managed-asset delete leg, reset absent keys to spec defaults, and never
+   > projected onto `BrandProfile`. Consolidated on branch
+   > `chore/branding-writer-consolidation` (`20ad2a4f7`). This is why an
+   > inventory is evidence to act on, not evidence to trust.
 
 Recording them here is the deliverable. Fixing 1 and 2 is `dotmac_erp` work and
 should not wait on this programme.

@@ -1539,12 +1539,22 @@ per-domain map — contrast ERP's `DOMAIN_TTL_CONFIG`). Methods `get` :47, `set`
    `sync_platform_brand_from_legacy_settings` (`brand_profiles.py:289-320`)
    exists to copy one into the other — an explicit, in-flight migration between
    two live writers.
-7. **Direct, spec-bypassing SQL against `domain_settings`** —
-   `app/services/web_system_company_info.py:36-83` selects and upserts rows in
-   the `billing` domain by hand (`COMPANY_KEYS` :18-34), with no `SettingSpec`,
-   no validation, and no resolver. Company legal name, email, phone, postal
-   address, VAT number, registration ID, and bank details — all brand-bearing —
-   live here.
+7. **Spec-bypassing writer against `domain_settings`** —
+   `app/services/web_system_company_info.py:36-83` upserts rows in the `billing`
+   domain by hand (`COMPANY_KEYS` :18-34), with no `SettingSpec`, no validation,
+   and no resolver. Company legal name, email, phone, postal address, VAT
+   number, registration ID, and bank details — all brand-bearing — live here.
+
+   > **Corrected 2026-08-03, on evidence** (this entry originally said "direct
+   > SQL" and was cited elsewhere as Sub's third logo/favicon/colour writer):
+   > it uses the ORM (`DomainSetting(...)` + `db.add`), not raw SQL, and it
+   > writes **no** logo, favicon, or colour key — so it was never the branding
+   > source-of-truth violation, though it *is* genuinely spec-bypassing, which
+   > is what this entry is really about. The dangling branding writer this
+   > inventory MISSED is the generic comms settings form
+   > (`web_system_settings_forms.process_settings_update`), which wrote all 13
+   > branding keys with none of the owner's validators. See ADR-0006's
+   > "Live defects" §3 and branch `chore/branding-writer-consolidation`.
 8. `config/` directory: `config/freeradius/*` (radiusd.conf, dictionary,
    mods-enabled/sql, sites-enabled, schema.sql + 3 upgrade SQL files,
    sql/admin_schema.sql), `config/promtail/promtail-config.yml`,
