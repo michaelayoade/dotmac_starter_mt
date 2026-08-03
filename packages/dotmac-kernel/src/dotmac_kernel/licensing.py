@@ -35,11 +35,24 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Protocol
 
 ENVELOPE_SCHEMA = "dotmac-licence-envelope/1"
 LICENCE_SCHEMA = "dotmac-licence/1"
 REVOCATION_SCHEMA = "dotmac-licence-revocation/1"
 APPLIED_STATE_SCHEMA = "dotmac-licence-applied-state/1"
+APPLIED_STATE_ENVELOPE_SCHEMA = "dotmac-applied-state-envelope/1"
+
+# Domain separation (ADR-0007). Every applied-state signature is computed over
+# this prefix followed by the exact payload bytes, so a signature the
+# deployment's key produced for ANY other purpose cannot be replayed as an
+# applied-state report. Without it, any protocol that has a deployment sign
+# caller-influenced bytes becomes a forgery oracle for this one.
+#
+# The trailing NUL is what makes the prefix unambiguous: it cannot occur in the
+# label, so no payload can be crafted whose leading bytes complete a different
+# domain string. Changing this value is a wire-compatibility break.
+APPLIED_STATE_DOMAIN = b"dotmac-ws8-applied-state/1\x00"
 
 # The digest a receiver reports when an envelope never validated far enough to
 # have one. A sentinel rather than an empty string so it can never be mistaken
@@ -499,6 +512,168 @@ def payload_digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+# ── Applied-state envelope (ADR-0007) ───────────────────────────────────────
+#
+# The envelope a DEPLOYMENT signs to prove who is reporting — the mirror image
+# of the licence envelope the vendor signs to prove what was issued. They are
+# deliberately separate structures: they travel in opposite directions and are
+# signed by different parties with different key custody, so one trust
+# structure covering both would let either party's key speak for the other.
+#
+# The kernel owns this contract and the vectors that prove both planes agree.
+# It ships NO production signer, exactly as it ships none for licences.
+
+
+def applied_state_signing_input(payload: bytes) -> bytes:
+    """The exact bytes an applied-state signature is computed over.
+
+    A function rather than an inline concatenation so the vendor's verifier and
+    the receiver's signer cannot drift: both call this, and the conformance
+    vector pins its output.
+    """
+    return APPLIED_STATE_DOMAIN + payload
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedAppliedState:
+    """A report whose signature verified, plus the key that verified it.
+
+    `key_id` is the ONLY identity input the vendor may trust: it resolves to a
+    registered deployment. `state.deployment_ref` is the reporter's claim,
+    carried so the vendor can compare the two and quarantine a contradiction —
+    never so it can be used in place of the resolved identity.
+    """
+
+    state: ReceiverAppliedState
+    key_id: str
+    payload: bytes
+
+
+def _required_envelope_str(envelope: Mapping[str, object], name: str) -> str:
+    value = envelope.get(name)
+    if not isinstance(value, str) or not value:
+        raise MalformedAppliedStateError(
+            f"applied-state envelope needs a non-empty {name!r}"
+        )
+    return value
+
+
+def parse_applied_state_envelope(
+    envelope: Mapping[str, object] | str | bytes,
+) -> tuple[str, bytes, bytes]:
+    """Structurally validate an envelope, returning ``(key_id, payload, sig)``.
+
+    Deliberately separate from verification: the caller must read ``key_id``
+    BEFORE it can look up a key, and separating the two keeps that ordering
+    explicit instead of hiding a partial parse inside the verifier.
+    """
+    if isinstance(envelope, str | bytes):
+        try:
+            parsed = json.loads(envelope)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise MalformedAppliedStateError(
+                f"applied-state envelope is not valid JSON: {exc}"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise MalformedAppliedStateError("applied-state envelope must be an object")
+        envelope = parsed
+    if not isinstance(envelope, Mapping):
+        raise MalformedAppliedStateError("applied-state envelope must be an object")
+    if envelope.get("schema") != APPLIED_STATE_ENVELOPE_SCHEMA:
+        raise MalformedAppliedStateError(
+            f"unknown applied-state envelope schema: {envelope.get('schema')!r}"
+        )
+
+    key_id = _required_envelope_str(envelope, "key_id")
+    payload_b64 = _required_envelope_str(envelope, "payload_b64")
+    signature_b64 = _required_envelope_str(envelope, "signature_b64")
+    try:
+        payload = _b64url_decode(payload_b64)
+        signature = _b64url_decode(signature_b64)
+    except MalformedLicenceError as exc:
+        # Re-typed: a malformed applied-state envelope is an applied-state
+        # fault, and callers catch one error type for this whole path.
+        raise MalformedAppliedStateError(str(exc)) from None
+    return key_id, payload, signature
+
+
+def verify_applied_state(
+    envelope: Mapping[str, object] | str | bytes,
+    *,
+    public_keys: Mapping[str, str],
+) -> VerifiedAppliedState:
+    """Verify a deployment's applied-state report.
+
+    `public_keys` maps ``key_id`` → raw base64url Ed25519 public key. Only keys
+    the caller considers usable RIGHT NOW belong in it: key status, validity
+    windows and revocation are the registry's decisions, not this function's,
+    and passing a revoked key here would verify it.
+
+    Fails closed on every path: unknown key, bad signature, or a payload that
+    is not a valid report.
+    """
+    key_id, payload, signature = parse_applied_state_envelope(envelope)
+
+    public_key_b64 = public_keys.get(key_id)
+    if public_key_b64 is None:
+        raise UnknownKeyError(f"no registered applied-state key {key_id!r}")
+
+    key = LicenceKey(key_id=key_id, public_key_b64=public_key_b64)
+    if not _ed25519_verifies(key, signature, applied_state_signing_input(payload)):
+        raise BadSignatureError(
+            f"applied-state signature did not verify under key {key_id!r}"
+        )
+
+    try:
+        document = json.loads(payload)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise MalformedAppliedStateError(
+            f"applied-state payload is not valid JSON: {exc}"
+        ) from exc
+    state = parse_applied_state(document)
+    return VerifiedAppliedState(state=state, key_id=key_id, payload=payload)
+
+
+class AppliedStateSigner(Protocol):
+    """What sealing needs from a deployment's key — and nothing more.
+
+    No key export and no rotation control: those are custody concerns owned by
+    the product receiver, which loads the private key once from a configured
+    file materialised from OpenBao. The kernel never sees where it came from.
+    """
+
+    @property
+    def key_id(self) -> str: ...
+
+    def sign(self, data: bytes) -> bytes: ...
+
+
+def seal_applied_state(
+    state: ReceiverAppliedState, *, signer: AppliedStateSigner
+) -> dict[str, object]:
+    """Serialise and sign a report.
+
+    Serialisation is CANONICAL (`sort_keys`, no incidental whitespace) so the
+    same report seals to the same bytes everywhere. That is not what makes
+    verification safe — the envelope carries the exact signed bytes, so the
+    verifier never re-encodes anything — but it makes the conformance vectors
+    reproducible across processes and languages.
+    """
+    payload = json.dumps(
+        applied_state_payload(state), sort_keys=True, separators=(",", ":")
+    ).encode()
+    signature = signer.sign(applied_state_signing_input(payload))
+    return {
+        "schema": APPLIED_STATE_ENVELOPE_SCHEMA,
+        # OUTSIDE the signed payload by necessity: the verifier needs it to
+        # find the key before it can verify anything. Substituting it is still
+        # caught, because the wrong key simply fails to verify.
+        "key_id": signer.key_id,
+        "payload_b64": base64.urlsafe_b64encode(payload).rstrip(b"=").decode(),
+        "signature_b64": base64.urlsafe_b64encode(signature).rstrip(b"=").decode(),
+    }
+
+
 # ── Envelope handling ───────────────────────────────────────────────────────
 
 
@@ -882,6 +1057,15 @@ __all__ = [
     "ReceiverAppliedState",
     "APPLIED_STATE_SCHEMA",
     "UNKNOWN_DIGEST",
+    # applied-state envelope (ADR-0007)
+    "APPLIED_STATE_ENVELOPE_SCHEMA",
+    "APPLIED_STATE_DOMAIN",
+    "AppliedStateSigner",
+    "VerifiedAppliedState",
+    "applied_state_signing_input",
+    "parse_applied_state_envelope",
+    "seal_applied_state",
+    "verify_applied_state",
     "applied_state_payload",
     "parse_applied_state",
     # operations

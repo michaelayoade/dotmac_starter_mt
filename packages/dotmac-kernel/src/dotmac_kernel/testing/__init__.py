@@ -20,7 +20,10 @@ from dotmac_kernel.testing.harness import (
     create_test_engine,
     isolated_session,
 )
-from dotmac_kernel.testing.licensing import FakeLicenceSigner
+from dotmac_kernel.testing.licensing import (
+    FakeDeploymentSigner,
+    FakeLicenceSigner,
+)
 from dotmac_kernel.testing.provisioning import (
     FakeProvisioningProvider,
     check_provisioning_provider_contract,
@@ -41,5 +44,6 @@ __all__ = [
     "check_provisioning_provider_contract",
     # licensing (WS8) — the class imports lazily; INSTANTIATION needs the
     # `cryptography` package (`licensing`/`testing` extra)
+    "FakeDeploymentSigner",
     "FakeLicenceSigner",
 ]

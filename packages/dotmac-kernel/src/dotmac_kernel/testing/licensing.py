@@ -152,4 +152,79 @@ class FakeLicenceSigner:
         )
 
 
-__all__ = ["FakeLicenceSigner"]
+class FakeDeploymentSigner:
+    """Signs applied-state envelopes with an ephemeral in-memory Ed25519 key.
+
+    The DEPLOYMENT-side counterpart to `FakeLicenceSigner`: it plays the
+    receiver proving its identity, where that one plays the vendor proving
+    issuance. Kept as a separate class rather than a flag on the other because
+    the two sign different structures, in different directions, under different
+    key custody — and a single class would invite a test to sign a licence with
+    a deployment key, which is precisely the confusion ADR-0007's separate
+    envelope exists to prevent.
+
+    Production key custody belongs to the product receiver (a private key read
+    once from a configured file materialised from OpenBao). Nothing here is
+    ever a real deployment key.
+    """
+
+    def __init__(self, key_id: str = "fake-deployment-key-1") -> None:
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                Ed25519PrivateKey,
+            )
+        except ImportError as exc:  # pragma: no cover — needs an extra-less env
+            raise VerificationUnavailableError(
+                "FakeDeploymentSigner needs the 'cryptography' package — install "
+                "the dotmac-kernel[licensing] (or [testing]) extra"
+            ) from exc
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding,
+            PublicFormat,
+        )
+
+        self.key_id = key_id
+        self._private_key = Ed25519PrivateKey.generate()
+        self.public_key_b64 = _b64url(
+            self._private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        )
+
+    def sign(self, data: bytes) -> bytes:
+        """Sign exactly the bytes given — `seal_applied_state` supplies the
+        domain-separated signing input."""
+        return self._private_key.sign(data)
+
+    # ── deliberately-wrong helpers, for the fail-closed canaries ────────────
+
+    def sign_raw(self, payload: bytes) -> bytes:
+        """Sign a payload WITHOUT the domain separator.
+
+        Exists so a test can prove the separator is load-bearing rather than
+        decorative: this signature is valid Ed25519 over the payload and must
+        still be refused.
+        """
+        return self._private_key.sign(payload)
+
+    def seal_raw(self, payload: bytes) -> dict[str, object]:
+        """Seal arbitrary bytes as a well-formed, correctly-signed envelope.
+
+        Lets a test prove the envelope is a carrier, not an escape hatch: a
+        perfectly signed envelope whose payload is not a valid report must
+        still fail, because verification ends in the value object's own
+        validator.
+        """
+        from dotmac_kernel.licensing import (
+            APPLIED_STATE_ENVELOPE_SCHEMA,
+            applied_state_signing_input,
+        )
+
+        signature = self._private_key.sign(applied_state_signing_input(payload))
+        return {
+            "schema": APPLIED_STATE_ENVELOPE_SCHEMA,
+            "key_id": self.key_id,
+            "payload_b64": _b64url(payload),
+            "signature_b64": _b64url(signature),
+        }
+
+
+__all__ = ["FakeDeploymentSigner", "FakeLicenceSigner"]
