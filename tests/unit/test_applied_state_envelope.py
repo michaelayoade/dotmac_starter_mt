@@ -31,11 +31,13 @@ import pytest
 from dotmac_kernel.licensing import (
     APPLIED_STATE_DOMAIN,
     APPLIED_STATE_ENVELOPE_SCHEMA,
+    DEPLOYMENT_CHALLENGE_DOMAIN,
     BadSignatureError,
     MalformedAppliedStateError,
     ReceiverAppliedState,
     UnknownKeyError,
     applied_state_signing_input,
+    deployment_challenge_signing_input,
     parse_applied_state_envelope,
     seal_applied_state,
     verify_applied_state,
@@ -266,6 +268,38 @@ def test_unknown_envelope_fields_are_ignored_not_trusted(signer) -> None:
 
 
 # ── Conformance vectors ─────────────────────────────────────────────────────
+
+
+def test_challenge_and_applied_state_domains_are_distinct(signer) -> None:
+    """The possession challenge is signed by the SAME key, so it needs its own
+    domain. A challenge nonce is a value the vendor chooses and the deployment
+    signs blindly — the exact shape of a forgery oracle. Sharing one domain
+    would let a "challenge" whose bytes are a valid applied-state payload yield
+    a signature that verifies as a report the deployment never made."""
+    assert DEPLOYMENT_CHALLENGE_DOMAIN != APPLIED_STATE_DOMAIN
+
+    payload = base64.urlsafe_b64decode(
+        seal_applied_state(_state(), signer=signer)["payload_b64"] + "=="
+    )
+    # The vendor hands back exactly the bytes of a real report as a "nonce".
+    challenge_signature = signer.sign(deployment_challenge_signing_input(payload))
+    forged = {
+        "schema": APPLIED_STATE_ENVELOPE_SCHEMA,
+        "key_id": signer.key_id,
+        "payload_b64": base64.urlsafe_b64encode(payload).rstrip(b"=").decode(),
+        "signature_b64": base64.urlsafe_b64encode(challenge_signature)
+        .rstrip(b"=")
+        .decode(),
+    }
+    with pytest.raises(BadSignatureError):
+        verify_applied_state(forged, public_keys={signer.key_id: signer.public_key_b64})
+
+
+def test_challenge_signing_input_is_stable() -> None:
+    assert (
+        deployment_challenge_signing_input(b"nonce-1")
+        == b"dotmac-ws8-deployment-challenge/1\x00nonce-1"
+    )
 
 
 def test_signing_input_is_stable_for_a_fixed_payload() -> None:

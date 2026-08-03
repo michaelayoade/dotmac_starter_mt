@@ -54,6 +54,14 @@ APPLIED_STATE_ENVELOPE_SCHEMA = "dotmac-applied-state-envelope/1"
 # domain string. Changing this value is a wire-compatibility break.
 APPLIED_STATE_DOMAIN = b"dotmac-ws8-applied-state/1\x00"
 
+# The possession challenge (ADR-0007 §2) is signed by the same deployment key,
+# so it needs its OWN domain. Sharing one would defeat the separation: a
+# challenge nonce is a value the vendor chooses and the deployment signs
+# blindly, which is exactly the shape of a forgery oracle — with a single
+# domain, a "challenge" whose bytes happen to be a valid applied-state payload
+# would yield a signature that verifies as a report the deployment never made.
+DEPLOYMENT_CHALLENGE_DOMAIN = b"dotmac-ws8-deployment-challenge/1\x00"
+
 # The digest a receiver reports when an envelope never validated far enough to
 # have one. A sentinel rather than an empty string so it can never be mistaken
 # for a real digest, and so an `applied` claim carrying it is rejectable.
@@ -522,6 +530,17 @@ def payload_digest(payload: bytes) -> str:
 #
 # The kernel owns this contract and the vectors that prove both planes agree.
 # It ships NO production signer, exactly as it ships none for licences.
+
+
+def deployment_challenge_signing_input(nonce: bytes) -> bytes:
+    """The exact bytes a deployment signs to prove it holds a registered key.
+
+    Separate from `applied_state_signing_input` by domain, so neither signature
+    can ever be presented as the other. The vendor issues the nonce and stores
+    it; the kernel only pins how it is signed, so both planes compute the same
+    bytes without the kernel holding any credential state.
+    """
+    return DEPLOYMENT_CHALLENGE_DOMAIN + nonce
 
 
 def applied_state_signing_input(payload: bytes) -> bytes:
@@ -1060,9 +1079,11 @@ __all__ = [
     # applied-state envelope (ADR-0007)
     "APPLIED_STATE_ENVELOPE_SCHEMA",
     "APPLIED_STATE_DOMAIN",
+    "DEPLOYMENT_CHALLENGE_DOMAIN",
     "AppliedStateSigner",
     "VerifiedAppliedState",
     "applied_state_signing_input",
+    "deployment_challenge_signing_input",
     "parse_applied_state_envelope",
     "seal_applied_state",
     "verify_applied_state",
