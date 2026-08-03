@@ -8,6 +8,39 @@ here.
 
 ## Unreleased
 
+### Added
+- **Applied-state envelope** (`dotmac_kernel.licensing`, ADR-0007) — the
+  structure a DEPLOYMENT signs to prove who is reporting, the mirror of the
+  licence envelope the vendor signs to prove what was issued. Deliberately a
+  separate structure: the two travel in opposite directions under different key
+  custody, so one trust structure covering both would let either party's key
+  speak for the other.
+
+  `seal_applied_state` / `verify_applied_state` /
+  `parse_applied_state_envelope`, the `AppliedStateSigner` protocol,
+  `VerifiedAppliedState`, `APPLIED_STATE_ENVELOPE_SCHEMA`
+  (`dotmac-applied-state-envelope/1`), and the two signing-input functions with
+  their domain separators — `applied_state_signing_input`
+  (`APPLIED_STATE_DOMAIN`) and `deployment_challenge_signing_input`
+  (`DEPLOYMENT_CHALLENGE_DOMAIN`).
+
+  The signature covers the EXACT payload bytes, carried as base64 inside the
+  envelope, so nothing re-serialises a payload to verify it. `key_id` sits
+  outside the signed payload — the verifier needs it to find the key — and
+  resolves to the reporting identity; the payload's `deployment_ref` stays a
+  claim the consumer compares and quarantines on mismatch.
+
+  Two domains, not one: the possession challenge is signed by the same key over
+  a vendor-chosen nonce, which would otherwise be a forgery oracle for reports.
+
+  The kernel owns the contract, the serialization and the conformance vectors.
+  It owns NO production key custody and ships no production signer, exactly as
+  it ships none for licences.
+- **`FakeDeploymentSigner`** (`dotmac_kernel.testing`) — the deployment-side
+  counterpart to `FakeLicenceSigner`, ephemeral in-memory Ed25519. Includes
+  `sign_raw`/`seal_raw`, which exist so canaries can prove the domain separator
+  and the envelope's validation are load-bearing rather than decorative.
+
 ## 0.1.0a8 — 2026-08-02
 
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
