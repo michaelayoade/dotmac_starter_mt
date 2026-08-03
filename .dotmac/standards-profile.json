@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "profile_id": "dotmac-starter-engineering-standards",
+  "repository": {
+    "canonical_url": "https://github.com/michaelayoade/dotmac_starter_mt",
+    "default_branch": "main"
+  },
+  "governance_model": {
+    "kind": "pinned",
+    "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
+    "revision": "be1c33fd337a4490a96125d9c31889fae0b09513",
+    "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
+    "status": "accepted"
+  },
+  "enforcement_mode": "required",
+  "authorities": [
+    {
+      "authority_id": "licence-application",
+      "subject": "Receiver-side verification and atomic projection of a signed licence into local entitlements and applied lineage state.",
+      "protected_resources": [
+        "licence-application-decision",
+        "licence-applied-lineage-projection"
+      ],
+      "owner_component": "licensing-service",
+      "owner_implementation": "app/features/licensing/service.py",
+      "decision_interface": "app.features.licensing.service.apply_licence",
+      "canonical_writer_paths": ["app/features/licensing/service.py"],
+      "adapter_paths": ["app/features/licensing/router.py"],
+      "drift_test_paths": [
+        "tests/unit/test_licensing_receiver.py",
+        "tests/unit/test_licence_ack_commit_contract.py"
+      ]
+    }
+  ],
+  "typed_contract_surfaces": [
+    {
+      "surface_id": "licence-application-service-contract",
+      "paths": ["app/features/licensing/service.py"],
+      "require_public_annotations": true,
+      "forbid_any": true,
+      "require_immutable_records": true
+    }
+  ]
+}
