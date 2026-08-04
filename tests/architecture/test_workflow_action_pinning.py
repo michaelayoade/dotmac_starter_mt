@@ -115,8 +115,8 @@ def test_poetry_comes_only_from_the_hash_locked_bootstrap() -> None:
 
 def test_every_python_version_ci_uses_has_its_own_lock() -> None:
     """pip resolves a DIFFERENT dependency set per interpreter — on 3.11 Poetry
-    additionally needs backports.tarfile, importlib_metadata and zipp, and does
-    not need packaging. Reusing one lock on another interpreter fails
+    additionally needs backports.tarfile, importlib_metadata and zipp (49
+    packages vs 46). Reusing one lock on another interpreter fails
     `--require-hashes` with a missing requirement, which would break the
     kernel-floors matrix that deliberately runs both."""
     used = _python_versions_used()

@@ -10,10 +10,9 @@
 #
 # ONE FILE PER PYTHON MINOR. pip resolves a different dependency SET per
 # interpreter: on 3.11 Poetry additionally needs backports.tarfile,
-# importlib_metadata and zipp, and does not need packaging. Reusing one
-# interpreter's lock on another fails --require-hashes with a missing
-# requirement, which would break the kernel-floors matrix that deliberately
-# runs both.
+# importlib_metadata and zipp (49 packages vs 46). Reusing one interpreter's
+# lock on another fails --require-hashes with a missing requirement, which
+# would break the kernel-floors matrix that deliberately runs both.
 #
 # WHY A CONTAINER, and why linux/amd64:
 #
@@ -56,9 +55,17 @@ for minor in "${PYTHON_MINORS[@]}"; do
 done
 
 echo
-echo "Verify before committing — for EACH interpreter:"
+echo "Verify before committing — for EACH interpreter, INTO A FRESH VENV:"
+echo
+echo "  The venv is not a nicety. Installing into the image's site-packages"
+echo "  lets anything already present satisfy a requirement, so a lock with a"
+echo "  MISSING package still appears to install — which is exactly how a lock"
+echo "  omitting 'packaging' passed local verification and then failed on a CI"
+echo "  runner, where nothing is pre-installed."
+echo
 for minor in "${PYTHON_MINORS[@]}"; do
   out="${HERE}/poetry-requirements-py${minor/./}.txt"
   echo "  docker run --rm -i --platform linux/amd64 -v ${out}:/r.txt:ro python:${minor}-slim \\"
-  echo "    sh -c 'pip install -q --require-hashes --only-binary=:all: -r /r.txt && poetry --version'"
+  echo "    sh -c 'python -m venv /v && /v/bin/pip install -q --require-hashes \\"
+  echo "           --only-binary=:all: -r /r.txt && /v/bin/poetry --version'"
 done

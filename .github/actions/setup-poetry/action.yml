@@ -24,10 +24,10 @@ description: >-
 #
 # ONE LOCK PER PYTHON MINOR, and that is not incidental. pip resolves a
 # different dependency SET per interpreter: on 3.11 Poetry additionally needs
-# backports.tarfile, importlib_metadata and zipp, and does not need packaging.
-# A single 3.12 lock used on 3.11 fails `--require-hashes` with a missing
-# requirement — fails closed, but it would break the kernel-floors matrix,
-# which deliberately runs BOTH interpreters.
+# backports.tarfile, importlib_metadata and zipp (49 packages vs 46). A single
+# 3.12 lock used on 3.11 fails `--require-hashes` with a missing requirement —
+# fails closed, but it would break the kernel-floors matrix, which deliberately
+# runs BOTH interpreters.
 #
 # Regenerate with .github/bootstrap/regenerate.sh.
 
