@@ -168,7 +168,11 @@ class FakeDeploymentSigner:
     ever a real deployment key.
     """
 
-    def __init__(self, key_id: str = "fake-deployment-key-1") -> None:
+    def __init__(
+        self,
+        key_id: str = "fake-deployment-key-1",
+        deployment_ref: str = "fake-deployment",
+    ) -> None:
         try:
             from cryptography.hazmat.primitives.asymmetric.ed25519 import (
                 Ed25519PrivateKey,
@@ -184,6 +188,9 @@ class FakeDeploymentSigner:
         )
 
         self.key_id = key_id
+        # Both halves of the identity: a signer that knows only its key id
+        # cannot refuse a challenge naming a foreign deployment.
+        self.deployment_ref = deployment_ref
         self._private_key = Ed25519PrivateKey.generate()
         self.public_key_b64 = _b64url(
             self._private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)

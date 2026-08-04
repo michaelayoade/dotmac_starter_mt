@@ -1,15 +1,20 @@
 name: Release kernel
 
-# Kernel-boundary Task 6 — publish `dotmac-kernel` to PyPI via OIDC Trusted
-# Publishing (R0, ratified 2026-07-30). Protected workflow_dispatch, NOT a tag
-# trigger: a maintainer starts it deliberately with an explicit version.
+# Kernel-boundary Task 6 — publish `dotmac-kernel` to the PRIVATE Forgejo index
+# at registry.dotmac.io (R0, ratified 2026-07-30). Protected workflow_dispatch,
+# NOT a tag trigger: a maintainer starts it deliberately with an explicit
+# version.
 #
 # Flow: build (on the exact current protected-main SHA; npm css:build ->
 # poetry build -> inspect bytes -> smoke the built wheel) -> publish (the SAME
-# bytes, OIDC, `pypi-release` environment, Michael's approval) -> verify (install
-# the PUBLISHED release from PyPI, smoke it, and only THEN tag the published SHA).
+# bytes, `registry-release` environment, Michael's approval, and a RE-check that
+# the approved SHA is still main's tip) -> verify (install the PUBLISHED release
+# from the Forgejo index, smoke it, and only THEN tag the published SHA).
 #
-# No PyPI token or GitHub secret anywhere: `id-token: write` on `publish` only.
+# Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release` environment
+# secret sourced from OpenBao — see the `publish` job for the path and the
+# OIDC-based hardening this phase defers. Not PyPI, and not OIDC Trusted
+# Publishing: an earlier version of this header claimed both, which is wrong.
 # Every action is pinned to a reviewed full commit SHA (immutable) per GitHub
 # secure-use guidance; the trailing comment records the human-readable version.
 
@@ -99,6 +104,26 @@ jobs:
     permissions:
       contents: read
     steps:
+      # RE-check freshness AFTER the approval wait, before anything is
+      # published. `build` proved this run was main's tip at dispatch time, but
+      # a protected environment can sit pending for hours or days — and the
+      # approval is a decision about a SHA, not about a run id. Without this,
+      # commits landing during the wait are silently absent from a release that
+      # then claims to be current, and the tag `verify` writes would point at a
+      # SHA that is no longer the tip. First step in the job, so it fails
+      # before the artifact is fetched or the publish token is used.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Re-assert the approved SHA is still the current protected main
+        run: |
+          git fetch --no-tags origin main
+          MAIN_SHA="$(git rev-parse origin/main)"
+          if [ "${GITHUB_SHA}" != "${MAIN_SHA}" ]; then
+            echo "::error::main moved during the approval wait — approved ${GITHUB_SHA}, current origin/main ${MAIN_SHA}. Re-dispatch on the current tip."
+            exit 1
+          fi
+          echo "still current main after approval: ${MAIN_SHA}"
       - name: Download the exact built bytes
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
