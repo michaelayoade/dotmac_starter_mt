@@ -15,8 +15,12 @@ name: Release kernel
 # secret sourced from OpenBao — see the `publish` job for the path and the
 # OIDC-based hardening this phase defers. Not PyPI, and not OIDC Trusted
 # Publishing: an earlier version of this header claimed both, which is wrong.
-# Every action is pinned to a reviewed full commit SHA (immutable) per GitHub
-# secure-use guidance; the trailing comment records the human-readable version.
+# Every THIRD-PARTY action is pinned to a reviewed full commit SHA (immutable)
+# per GitHub secure-use guidance; the trailing comment records the
+# human-readable version. Local composite actions (`./.github/actions/...`) need
+# no SHA — they are this repository's own code at this commit. Poetry comes from
+# the hash-locked bootstrap (`./.github/actions/setup-poetry`), the same one CI
+# uses, so the release path and CI cannot drift apart on the installer.
 
 on:
   workflow_dispatch:
@@ -48,10 +52,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
-      - uses: snok/install-poetry@a783c322200f0519c7926aa6faa857c4e23e9263 # v1
-        with:
-          virtualenvs-create: true
-          virtualenvs-in-project: true
+      - uses: ./.github/actions/setup-poetry
 
       # The dispatched version must equal the package metadata — no inference.
       - name: Assert version input matches package metadata
