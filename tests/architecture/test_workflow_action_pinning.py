@@ -37,12 +37,28 @@ _USES = re.compile(r"^\s*-?\s*uses:\s*(?P<ref>[^\s#]+)")
 _SETUP_PY_VERSION = re.compile(r'python-version:\s*"?(?P<v>3\.\d+)"?')
 
 
+def _workflow_files() -> list[Path]:
+    """Every file GitHub would treat as a workflow or a local action manifest.
+
+    BOTH extensions, RECURSIVELY. GitHub accepts `.yml` and `.yaml` for
+    workflows, and `action.yml` or `action.yaml` for action metadata — so a
+    checker scanning only `*.yml` one directory deep can be bypassed by a
+    perfectly valid `.yaml` file, which would then escape every assertion in
+    this module. That is not hypothetical laxity: it is a silent hole in a
+    supply-chain guard.
+    """
+    files: list[Path] = []
+    for ext in ("yml", "yaml"):
+        files += WORKFLOWS.rglob(f"*.{ext}")
+        files += ACTIONS.rglob(f"action.{ext}")
+    return sorted(set(files))
+
+
 def _iter_uses() -> list[tuple[str, str]]:
     """(source file, `uses:` value) for every step in every workflow and every
     local composite action."""
     found: list[tuple[str, str]] = []
-    files = sorted(WORKFLOWS.glob("*.yml")) + sorted(ACTIONS.glob("*/action.yml"))
-    for path in files:
+    for path in _workflow_files():
         rel = str(path.relative_to(REPO))
         for line in path.read_text().splitlines():
             match = _USES.match(line)
@@ -55,7 +71,9 @@ def _python_versions_used() -> set[str]:
     """Every concrete Python minor a workflow sets up, including matrix values
     (which appear as a literal list, e.g. `["3.11", "3.12"]`)."""
     versions: set[str] = set()
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    for path in _workflow_files():
+        if ACTIONS in path.parents:
+            continue  # action manifests do not set up interpreters
         text = path.read_text()
         versions.update(m.group("v") for m in _SETUP_PY_VERSION.finditer(text))
         for line in text.splitlines():
@@ -132,6 +150,67 @@ def test_every_python_version_ci_uses_has_its_own_lock() -> None:
         ".github/bootstrap/regenerate.sh and regenerate — do NOT reuse another "
         "interpreter's lock."
     )
+
+
+def test_the_bootstrap_installs_into_a_fresh_venv_not_the_interpreter() -> None:
+    """pip leaves an already-satisfied requirement untouched, and hashes cover
+    archives being INSTALLED — not packages already on disk. Installing into
+    the interpreter's own site-packages therefore verifies nothing on a
+    persistent runner, which is what happened on the self-hosted runner on
+    2026-08-04: every package "already satisfied", nothing downloaded, no hash
+    checked. Only a freshly created venv makes skipping impossible."""
+    action = (ACTIONS / "setup-poetry" / "action.yml").read_text()
+    assert 'rm -rf "$venv"' in action, "the venv is not recreated, so pip may skip"
+    assert "python -m venv" in action, "no venv is created"
+    assert (
+        '"$venv/bin/python" -m pip install' in action
+    ), "pip must install into the venv's interpreter, not the job's"
+    assert "--require-hashes" in action
+    assert (
+        'echo "${venv}/bin" >> "$GITHUB_PATH"' in action
+    ), "the verified venv is never published on PATH"
+    assert (
+        "command -v poetry" in action
+    ), "nothing asserts that the poetry on PATH is the verified one"
+
+
+def test_a_dot_yaml_workflow_cannot_bypass_the_checks() -> None:
+    """Sensitivity proof for the extension coverage.
+
+    GitHub runs `.yaml` workflows exactly as it runs `.yml`. A checker that
+    scanned only `*.yml` would let a valid `.yaml` file carry a mutable action
+    ref past every assertion here — so prove the discovery actually picks one
+    up, rather than trusting the glob by inspection.
+    """
+    probe = WORKFLOWS / "_pinning_probe_.yaml"
+    probe.write_text(
+        "name: probe\njobs:\n  p:\n    steps:\n"
+        "      - uses: snok/install-poetry@v1\n"
+    )
+    try:
+        assert probe in _workflow_files(), ".yaml workflows are not discovered"
+        refs = [uses for rel, uses in _iter_uses() if "_pinning_probe_" in rel]
+        assert refs == [
+            "snok/install-poetry@v1"
+        ], "a .yaml workflow's `uses:` was not read"
+    finally:
+        probe.unlink(missing_ok=True)
+
+
+def test_a_dot_yaml_action_manifest_is_also_scanned() -> None:
+    """Same hole one level down: action metadata may be `action.yaml`."""
+    probe_dir = ACTIONS / "_pinning_probe_"
+    probe = probe_dir / "action.yaml"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    probe.write_text(
+        "name: probe\nruns:\n  using: composite\n  steps:\n"
+        "      - uses: some/action@main\n"
+    )
+    try:
+        assert probe in _workflow_files(), "action.yaml manifests are not scanned"
+    finally:
+        probe.unlink(missing_ok=True)
+        probe_dir.rmdir()
 
 
 def test_every_bootstrap_lock_is_fully_hash_pinned() -> None:
