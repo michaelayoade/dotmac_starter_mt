@@ -54,7 +54,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
-| `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `ReceiverAppliedState`, `APPLIED_STATE_SCHEMA`, `UNKNOWN_DIGEST`, `applied_state_payload`, `parse_applied_state`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses, and the ADR-0007 applied-state envelope: `APPLIED_STATE_ENVELOPE_SCHEMA`, `APPLIED_STATE_DOMAIN`, `DEPLOYMENT_CHALLENGE_DOMAIN`, `DEPLOYMENT_CHALLENGE_SCHEMA`, `DEPLOYMENT_RESPONSE_SCHEMA`, `AppliedStateEnvelope`, `AppliedStateSigner`, `DeploymentVerificationKey`, `VerifiedAppliedState`, `DeploymentPossessionChallenge`, `DeploymentPossessionResponse`, `VerifiedDeploymentPossession`, `applied_state_signing_input`, `seal_applied_state`, `verify_applied_state`, `answer_possession_challenge`, `verify_possession` (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
+| `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `ReceiverAppliedState`, `APPLIED_STATE_SCHEMA`, `UNKNOWN_DIGEST`, `applied_state_payload`, `parse_applied_state`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses, and the ADR-0007 applied-state envelope: `APPLIED_STATE_ENVELOPE_SCHEMA`, `APPLIED_STATE_DOMAIN`, `DEPLOYMENT_CHALLENGE_DOMAIN`, `DEPLOYMENT_CHALLENGE_SCHEMA`, `DEPLOYMENT_RESPONSE_SCHEMA`, `AppliedStateEnvelope`, `DeploymentSigner`, `DeploymentVerificationKey`, `VerifiedAppliedState`, `DeploymentPossessionChallenge`, `DeploymentPossessionResponse`, `VerifiedDeploymentPossession`, `applied_state_signing_input`, `seal_applied_state`, `verify_applied_state`, `answer_possession_challenge`, `verify_possession` (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
 | `dotmac_kernel.logging` | `setup_logging` |
 | `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `PlatformOutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.envelope` | `CommandEnvelope` |
@@ -364,6 +364,12 @@ acknowledges the applied `(licence_id, licence_version, digest)`.
   `VerifiedDeploymentPossession`. Consuming the single-use challenge and
   activating the key are the vendor's to do, atomically — the kernel proves
   possession and retires nothing.
+- **`DeploymentSigner` owns both halves of the identity** — `key_id` AND
+  `deployment_ref`. `seal_applied_state` and `answer_possession_challenge`
+  both verify both BEFORE calling `sign`: a deployment never signs a statement
+  about another deployment, and because these signatures are portable evidence
+  a third party can check, the refusal has to precede the signature rather
+  than discard it afterwards.
 - **Dependency** — Ed25519 needs `cryptography`, installed via the
   `licensing` extra (`pip install dotmac-kernel[licensing]`). The module
   imports it lazily: types/parsing/digests work without it, and signature

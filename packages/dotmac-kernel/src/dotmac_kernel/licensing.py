@@ -760,8 +760,24 @@ def verify_applied_state(
     )
 
 
-class AppliedStateSigner(Protocol):
-    """What sealing needs from a deployment's key — and nothing more.
+class DeploymentSigner(Protocol):
+    """A deployment's signing IDENTITY — both halves of it.
+
+    It owns `key_id` **and** `deployment_ref` independently, because a signer
+    that knows only its key id cannot tell whether the thing it is about to
+    sign speaks for the right deployment. Everything the deployment signs binds
+    both, so a signer holding only one of them can be walked into attesting to
+    the other: hand it a challenge naming its own `key_id` but a foreign
+    `deployment_ref` and it produces a signed statement that this key proved
+    possession for someone else's deployment. That artifact is *portable
+    signed evidence* (ADR-0007 §1) — checkable by any third party — which makes
+    it worse than a local mistake.
+
+    Hence the rule this protocol exists to make expressible: **never sign a
+    statement you cannot attest to.** Both `seal_applied_state` and
+    `answer_possession_challenge` verify both halves BEFORE calling `sign`, so
+    the private key is never applied to a foreign claim at all — refusing after
+    signing would be too late, the signature would already exist.
 
     No key export and no rotation control: those are custody concerns owned by
     the product receiver, which loads the private key once from a configured
@@ -771,13 +787,42 @@ class AppliedStateSigner(Protocol):
     @property
     def key_id(self) -> str: ...
 
+    @property
+    def deployment_ref(self) -> str: ...
+
     def sign(self, data: bytes) -> bytes: ...
 
 
+def _assert_signer_owns(
+    signer: DeploymentSigner, *, key_id: str, deployment_ref: str, what: str
+) -> None:
+    """Refuse to sign anything the signer's identity does not cover.
+
+    Checked BEFORE `sign` is ever called — see `DeploymentSigner`. Both halves,
+    independently: matching `key_id` alone is what let a challenge for a
+    foreign `deployment_ref` be signed.
+    """
+    if signer.key_id != key_id:
+        raise DeploymentMismatchError(
+            f"{what} is for key {key_id!r}, but the signer holds " f"{signer.key_id!r}"
+        )
+    if signer.deployment_ref != deployment_ref:
+        raise DeploymentMismatchError(
+            f"{what} is for deployment {deployment_ref!r}, but the signer "
+            f"speaks for {signer.deployment_ref!r} — a deployment never signs "
+            "a statement about another deployment"
+        )
+
+
 def seal_applied_state(
-    state: ReceiverAppliedState, *, signer: AppliedStateSigner
+    state: ReceiverAppliedState, *, signer: DeploymentSigner
 ) -> AppliedStateEnvelope:
     """Serialise and sign a report.
+
+    Refuses a report claiming another deployment, before signing: a receiver
+    reports its OWN state, and sealing a foreign claim would mint signed
+    evidence for a deployment this key does not speak for. The verifier would
+    quarantine it (`claim_matches_proof`), but the artifact should never exist.
 
     Serialisation is CANONICAL (`sort_keys`, no incidental whitespace) so the
     same report seals to the same bytes everywhere. That is not what makes
@@ -785,6 +830,12 @@ def seal_applied_state(
     verifier never re-encodes anything — but it makes the conformance vectors
     reproducible across processes and languages.
     """
+    _assert_signer_owns(
+        signer,
+        key_id=signer.key_id,
+        deployment_ref=state.deployment_ref,
+        what="this report",
+    )
     payload = json.dumps(
         applied_state_payload(state), sort_keys=True, separators=(",", ":")
     ).encode()
@@ -1033,7 +1084,7 @@ class VerifiedDeploymentPossession:
 
 
 def answer_possession_challenge(
-    challenge: DeploymentPossessionChallenge, *, signer: AppliedStateSigner
+    challenge: DeploymentPossessionChallenge, *, signer: DeploymentSigner
 ) -> DeploymentPossessionResponse:
     """Sign a challenge with the deployment's key.
 
@@ -1042,12 +1093,19 @@ def answer_possession_challenge(
     response naming a key other than the one that signed it is refused by the
     verifier, and that failure is far cheaper to prevent here than to diagnose
     from the other side of the wire.
+
+    It checks BOTH halves of the signer's identity before signing. Checking
+    `key_id` alone was a real defect: a challenge naming this signer's key but
+    a foreign `deployment_ref` was signed happily, minting portable evidence
+    that this key proved possession for another deployment. The verifier would
+    refuse to activate on it, but the deployment must not produce it at all.
     """
-    if signer.key_id != challenge.key_id:
-        raise DeploymentMismatchError(
-            f"challenge {challenge.challenge_id!r} is for key "
-            f"{challenge.key_id!r}, but the signer holds {signer.key_id!r}"
-        )
+    _assert_signer_owns(
+        signer,
+        key_id=challenge.key_id,
+        deployment_ref=challenge.deployment_ref,
+        what=f"challenge {challenge.challenge_id!r}",
+    )
     return DeploymentPossessionResponse(
         challenge_id=challenge.challenge_id,
         key_id=challenge.key_id,
@@ -1509,7 +1567,7 @@ __all__ = [
     "DEPLOYMENT_CHALLENGE_SCHEMA",
     "DEPLOYMENT_RESPONSE_SCHEMA",
     "AppliedStateEnvelope",
-    "AppliedStateSigner",
+    "DeploymentSigner",
     "DeploymentPossessionChallenge",
     "DeploymentPossessionResponse",
     "DeploymentVerificationKey",

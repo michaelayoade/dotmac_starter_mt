@@ -129,6 +129,18 @@ because the challenge's signing input binds them. A response naming another
 challenge or key is therefore a **mismatch**, reported as such rather than as a
 signature failure.
 
+**A signer never signs a statement it cannot attest to.** The deployment's
+signing identity owns `key_id` **and** `deployment_ref`, independently, and
+refuses either mismatch *before* the private key is applied. A signer that
+knows only its key id can be walked into attesting to the other half: hand it a
+challenge naming its own `key_id` but a foreign `deployment_ref` and it
+produces a signed statement that this key proved possession for someone else's
+deployment. Verification refuses to activate on that — the registration names a
+different deployment — but §1 sells these signatures as *portable evidence any
+third party can check*, so the artifact must never exist. Refusing after
+signing is not equivalent: the signature has already been computed. The same
+guard applies to sealing a report, since a receiver reports its own state.
+
 The vendor transaction is: load the stored challenge, compare identifiers,
 verify expiry and signature, then **atomically** consume the challenge and
 activate the pending key. The kernel returns a `VerifiedDeploymentPossession`

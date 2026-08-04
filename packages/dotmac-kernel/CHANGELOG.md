@@ -26,7 +26,7 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
   Fully typed and immutable: `AppliedStateEnvelope` (with `to_wire`/`from_wire`
   for transport), `DeploymentVerificationKey` (carrying the `deployment_ref` a
   `key_id` resolves to), `VerifiedAppliedState` (exposing the PROVEN
-  `deployment_ref` plus `claim_matches_proof`), the `AppliedStateSigner`
+  `deployment_ref` plus `claim_matches_proof`), the `DeploymentSigner`
   protocol, `seal_applied_state` / `verify_applied_state`, and
   `APPLIED_STATE_ENVELOPE_SCHEMA` (`dotmac-applied-state-envelope/1`).
 
@@ -75,6 +75,20 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
   `VerifiedDeploymentPossession` returns the proven `deployment_ref`, the
   `key_id` to activate and the `challenge_id` to consume — the vendor does both
   atomically; the kernel retires nothing.
+- **`DeploymentSigner` owns BOTH halves of a deployment's identity** (renamed
+  from `AppliedStateSigner`, which no longer described it). It carries
+  `deployment_ref` alongside `key_id`, and both `seal_applied_state` and
+  `answer_possession_challenge` verify both BEFORE calling `sign`.
+
+  Checking `key_id` alone was a demonstrated defect: a challenge naming the
+  signer's own key but a foreign `deployment_ref` was signed happily, minting
+  a portable signed statement that this key proved possession for another
+  deployment. The verifier refuses to activate on it, but ADR-0007 §1 sells
+  these signatures as evidence any third party can check, so the artifact must
+  never be produced. The rule the protocol now makes expressible: never sign a
+  statement you cannot attest to. Refusal happens before `sign` — a signature
+  discarded afterwards has still been computed — and a canary drives both
+  paths with a signer that raises if invoked at all.
 
   The kernel owns the contract, the serialization and the conformance vectors.
   It owns NO production key custody and ships no production signer, exactly as

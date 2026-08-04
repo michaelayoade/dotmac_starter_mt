@@ -78,7 +78,25 @@ def _state(**over) -> ReceiverAppliedState:
 
 @pytest.fixture
 def signer() -> FakeDeploymentSigner:
-    return FakeDeploymentSigner(key_id=KEY_ID)
+    return FakeDeploymentSigner(key_id=KEY_ID, deployment_ref=DEP)
+
+
+class ExplodingSigner:
+    """A signer whose private key MUST never be applied.
+
+    The guards run before `sign`, and that ordering is the whole point: a
+    refusal that happened after signing would be too late, because the
+    signature would already exist and be portable evidence. Only a signer that
+    detonates on use can prove the key was never touched — a mock that merely
+    records the call would let a "signed then discarded" implementation pass.
+    """
+
+    def __init__(self, key_id: str = KEY_ID, deployment_ref: str = DEP) -> None:
+        self.key_id = key_id
+        self.deployment_ref = deployment_ref
+
+    def sign(self, data: bytes) -> bytes:
+        raise AssertionError("the signer was invoked for a statement it cannot attest")
 
 
 @pytest.fixture
@@ -262,15 +280,25 @@ def test_a_challenge_response_cannot_be_replayed_as_a_report(signer, key) -> Non
 # ── 3. key_id resolves identity; deployment_ref is only a claim ─────────────
 
 
-def test_a_claimed_deployment_ref_is_carried_but_never_authoritative(
-    signer, key
-) -> None:
+def test_a_claimed_deployment_ref_is_carried_but_never_authoritative(signer) -> None:
     """The report preserves the claim so the vendor can compare it against the
-    identity resolved from `key_id` and quarantine a contradiction."""
-    envelope = seal_applied_state(
-        _state(deployment_ref="claimed-elsewhere"), signer=signer
+    identity resolved from `key_id` and quarantine a contradiction.
+
+    Sealed by a signer that BELIEVES it speaks for `claimed-elsewhere` while
+    the vendor's registration maps its `key_id` to `edge-site-1` — a
+    misconfigured or hostile receiver. An honest one cannot build this envelope
+    at all (`seal_applied_state` refuses a foreign claim), but the verifier
+    must still handle it, because refusing to produce a thing is not the same
+    as being safe when someone else produces it.
+    """
+    liar = FakeDeploymentSigner(key_id=KEY_ID, deployment_ref="claimed-elsewhere")
+    registered = DeploymentVerificationKey(
+        key_id=KEY_ID, public_key_b64=liar.public_key_b64, deployment_ref=DEP
     )
-    verified = verify_applied_state(envelope, keys=[key])
+    envelope = seal_applied_state(
+        _state(deployment_ref="claimed-elsewhere"), signer=liar
+    )
+    verified = verify_applied_state(envelope, keys=[registered])
     assert verified.state.deployment_ref == "claimed-elsewhere"
     assert verified.deployment_ref == DEP
     assert verified.claim_matches_proof is False
@@ -543,6 +571,53 @@ def test_signing_a_challenge_for_another_key_is_refused_at_the_receiver(signer) 
     """Caught on the way out, not diagnosed from the other side of the wire."""
     with pytest.raises(DeploymentMismatchError):
         answer_possession_challenge(_challenge(key_id="not-this-signer"), signer=signer)
+
+
+def test_signing_a_challenge_for_a_FOREIGN_DEPLOYMENT_is_refused(signer) -> None:
+    """THE gap this guard exists to close.
+
+    Checking `key_id` alone was not enough: a challenge naming this signer's
+    own key but a foreign `deployment_ref` was signed happily, minting a
+    portable signed statement that this key proved possession for someone
+    else's deployment. The verifier refuses to ACTIVATE on it — the key's
+    registration names a different deployment — but ADR-0007 §1 sells these
+    signatures as evidence any third party can check, so the artifact must
+    never be produced in the first place.
+    """
+    with pytest.raises(DeploymentMismatchError):
+        answer_possession_challenge(
+            _challenge(deployment_ref="foreign-deployment"), signer=signer
+        )
+
+
+def test_the_signer_is_never_invoked_for_a_foreign_deployment() -> None:
+    """Refusal happens BEFORE `sign`, not after. A signature discarded after
+    the fact has still been computed; this proves the key is never applied."""
+    with pytest.raises(DeploymentMismatchError):
+        answer_possession_challenge(
+            _challenge(deployment_ref="foreign-deployment"), signer=ExplodingSigner()
+        )
+    with pytest.raises(DeploymentMismatchError):
+        answer_possession_challenge(
+            _challenge(key_id="not-this-signer"), signer=ExplodingSigner()
+        )
+
+
+def test_sealing_a_report_claiming_another_deployment_is_refused() -> None:
+    """Same invariant on the report path: a receiver reports its OWN state.
+    The verifier would quarantine a foreign claim via `claim_matches_proof`,
+    but the signed artifact should never exist."""
+    with pytest.raises(DeploymentMismatchError):
+        seal_applied_state(
+            _state(deployment_ref="foreign-deployment"), signer=ExplodingSigner()
+        )
+
+
+def test_a_signer_owns_both_halves_of_its_identity(signer) -> None:
+    """The protocol carries `deployment_ref` alongside `key_id`, because a
+    signer that knows only its key id cannot refuse a foreign deployment."""
+    assert signer.key_id == KEY_ID
+    assert signer.deployment_ref == DEP
 
 
 @pytest.mark.parametrize(
