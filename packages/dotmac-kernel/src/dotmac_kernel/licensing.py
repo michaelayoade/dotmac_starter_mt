@@ -35,11 +35,44 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Protocol
 
 ENVELOPE_SCHEMA = "dotmac-licence-envelope/1"
 LICENCE_SCHEMA = "dotmac-licence/1"
 REVOCATION_SCHEMA = "dotmac-licence-revocation/1"
 APPLIED_STATE_SCHEMA = "dotmac-licence-applied-state/1"
+APPLIED_STATE_ENVELOPE_SCHEMA = "dotmac-applied-state-envelope/1"
+
+# Domain separation (ADR-0007). Every applied-state signature is computed over
+# this prefix followed by the exact payload bytes, so a signature the
+# deployment's key produced for ANY other purpose cannot be replayed as an
+# applied-state report. Without it, any protocol that has a deployment sign
+# caller-influenced bytes becomes a forgery oracle for this one.
+#
+# The trailing NUL is what makes the prefix unambiguous: it cannot occur in the
+# label, so no payload can be crafted whose leading bytes complete a different
+# domain string. Changing this value is a wire-compatibility break.
+APPLIED_STATE_DOMAIN = b"dotmac-ws8-applied-state/1\x00"
+
+# The possession challenge (ADR-0007 §2) is signed by the same deployment key,
+# so it needs its OWN domain. Sharing one would defeat the separation: a
+# challenge nonce is a value the vendor chooses and the deployment signs
+# blindly, which is exactly the shape of a forgery oracle — with a single
+# domain, a "challenge" whose bytes happen to be a valid applied-state payload
+# would yield a signature that verifies as a report the deployment never made.
+DEPLOYMENT_CHALLENGE_DOMAIN = b"dotmac-ws8-deployment-challenge/1\x00"
+DEPLOYMENT_CHALLENGE_SCHEMA = "dotmac-deployment-challenge/1"
+
+# The ANSWER travels under its own schema. It shares the challenge's domain
+# separator on purpose — both are the same signature over the same bytes, and
+# the response adds no bytes of its own — but it is a distinct wire structure,
+# because a challenge and its answer are different documents with different
+# authors and must be told apart by a reader that holds only one of them.
+DEPLOYMENT_RESPONSE_SCHEMA = "dotmac-deployment-possession-response/1"
+
+# A challenge nonce shorter than this is guessable enough that a response
+# could be precomputed before the challenge is even issued.
+_MIN_NONCE_BYTES = 16
 
 # The digest a receiver reports when an envelope never validated far enough to
 # have one. A sentinel rather than an empty string so it can never be mistaken
@@ -499,7 +532,594 @@ def payload_digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+# ── Applied-state envelope (ADR-0007) ───────────────────────────────────────
+#
+# The envelope a DEPLOYMENT signs to prove who is reporting — the mirror image
+# of the licence envelope the vendor signs to prove what was issued. They are
+# deliberately separate structures: they travel in opposite directions and are
+# signed by different parties with different key custody, so one trust
+# structure covering both would let either party's key speak for the other.
+#
+# The kernel owns this contract and the vectors that prove both planes agree.
+# It ships NO production signer, exactly as it ships none for licences.
+
+
+def _length_prefixed(*parts: bytes) -> bytes:
+    """Unambiguously concatenate fields for signing.
+
+    Each part is preceded by its 4-byte big-endian length, so no two different
+    field tuples can ever produce the same bytes. Plain concatenation is
+    ambiguous — ``key_id="a"`` + ``payload=b"bc"`` and ``key_id="ab"`` +
+    ``payload=b"c"`` would be indistinguishable, which is a signature-splicing
+    hole rather than a theoretical nicety.
+    """
+    return b"".join(len(part).to_bytes(4, "big") + part for part in parts)
+
+
+def applied_state_signing_input(key_id: str, payload: bytes) -> bytes:
+    """The exact bytes an applied-state signature is computed over.
+
+    Binds `key_id` INTO the signature. It cannot merely travel beside the
+    payload: `key_id` is what resolves to a deployment identity, so leaving it
+    unsigned makes the identity forgeable by anyone who can get one public key
+    registered twice.
+
+    The concrete attack, before this binding existed: register the SAME public
+    key under a second `key_id` that maps to a different deployment, then
+    replay a captured report with `key_id` swapped. The signature still
+    verified — the key material was identical — and the report was attributed
+    to the attacker's chosen deployment. Signing `key_id` makes that
+    substitution fail, because the signed bytes no longer match.
+
+    A function rather than an inline concatenation so the vendor's verifier and
+    the receiver's signer cannot drift: both call this, and the conformance
+    vector pins its output.
+    """
+    return APPLIED_STATE_DOMAIN + _length_prefixed(key_id.encode("utf-8"), payload)
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentVerificationKey:
+    """A registered deployment key, as the verifier needs it.
+
+    Carries the `deployment_ref` because resolving `key_id` → deployment IS the
+    identity decision (ADR-0007 §4). Returning a bare "signature ok" and
+    leaving the caller to look the ref up separately is what allows the two to
+    disagree; bundling them means a verified report always names the identity
+    the key is registered to.
+
+    Only keys the registry considers usable RIGHT NOW should be constructed
+    here: status, validity windows and revocation are the registry's decisions,
+    not this module's.
+    """
+
+    key_id: str
+    public_key_b64: str
+    deployment_ref: str
+
+    def __post_init__(self) -> None:
+        for name in ("key_id", "public_key_b64", "deployment_ref"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value:
+                raise MalformedAppliedStateError(
+                    f"a deployment verification key needs a non-empty {name!r}"
+                )
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedStateEnvelope:
+    """A sealed applied-state report: `key_id`, exact payload bytes, signature.
+
+    Immutable, and it carries BYTES rather than a parsed object on purpose —
+    the signature is over those exact bytes, so anything that re-serialises a
+    parsed payload to verify it has already lost the guarantee.
+    """
+
+    key_id: str
+    payload: bytes
+    signature: bytes
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.key_id, str) or not self.key_id:
+            raise MalformedAppliedStateError(
+                "an applied-state envelope needs a non-empty 'key_id'"
+            )
+        for name in ("payload", "signature"):
+            value = getattr(self, name)
+            if not isinstance(value, bytes) or not value:
+                raise MalformedAppliedStateError(
+                    f"an applied-state envelope needs non-empty {name!r} bytes"
+                )
+
+    def to_wire(self) -> dict[str, str]:
+        """The JSON-safe transport form. Every value is a string, so it
+        survives any JSON transport without a custom encoder."""
+        return {
+            "schema": APPLIED_STATE_ENVELOPE_SCHEMA,
+            "key_id": self.key_id,
+            "payload_b64": _b64url_encode(self.payload),
+            "signature_b64": _b64url_encode(self.signature),
+        }
+
+    @classmethod
+    def from_wire(
+        cls, wire: Mapping[str, object] | str | bytes
+    ) -> AppliedStateEnvelope:
+        """Structurally validate a transport form. Fail-closed on every path.
+
+        Deliberately separate from verification: the caller must read `key_id`
+        BEFORE it can look up a key, and keeping the two apart makes that
+        ordering explicit instead of hiding a partial parse in the verifier.
+        """
+        if isinstance(wire, str | bytes):
+            try:
+                parsed = json.loads(wire)
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise MalformedAppliedStateError(
+                    f"applied-state envelope is not valid JSON: {exc}"
+                ) from exc
+            wire = parsed
+        if not isinstance(wire, Mapping):
+            raise MalformedAppliedStateError("applied-state envelope must be an object")
+        if wire.get("schema") != APPLIED_STATE_ENVELOPE_SCHEMA:
+            raise MalformedAppliedStateError(
+                f"unknown applied-state envelope schema: {wire.get('schema')!r}"
+            )
+
+        key_id = _required_wire_str(wire, "key_id")
+        try:
+            payload = _b64url_decode(_required_wire_str(wire, "payload_b64"))
+            signature = _b64url_decode(_required_wire_str(wire, "signature_b64"))
+        except MalformedLicenceError as exc:
+            # Re-typed: a malformed applied-state envelope is an applied-state
+            # fault, so callers catch ONE error type for this whole path.
+            raise MalformedAppliedStateError(str(exc)) from None
+        return cls(key_id=key_id, payload=payload, signature=signature)
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedAppliedState:
+    """A report whose signature verified, plus the key that verified it.
+
+    `deployment_ref` is the PROVEN identity, resolved from the signed `key_id`.
+    `state.deployment_ref` is the reporter's own claim, carried so the vendor
+    can compare the two and quarantine a contradiction — never so it can be
+    used in place of the resolved identity.
+    """
+
+    state: ReceiverAppliedState
+    key: DeploymentVerificationKey
+    payload: bytes
+
+    @property
+    def deployment_ref(self) -> str:
+        """The identity the signature PROVED."""
+        return self.key.deployment_ref
+
+    @property
+    def key_id(self) -> str:
+        return self.key.key_id
+
+    @property
+    def claim_matches_proof(self) -> bool:
+        """Whether the report's own `deployment_ref` agrees with the proven
+        one. False is a quarantine case (ADR-0007 §4), not a rejection to
+        resolve in the caller's favour."""
+        return self.state.deployment_ref == self.key.deployment_ref
+
+
+def _required_wire_str(
+    wire: Mapping[str, object], name: str, context: str = "applied-state envelope"
+) -> str:
+    value = wire.get(name)
+    if not isinstance(value, str) or not value:
+        raise MalformedAppliedStateError(f"{context} needs a non-empty {name!r}")
+    return value
+
+
+def verify_applied_state(
+    envelope: AppliedStateEnvelope | Mapping[str, object] | str | bytes,
+    *,
+    keys: Iterable[DeploymentVerificationKey],
+) -> VerifiedAppliedState:
+    """Verify a deployment's applied-state report.
+
+    `keys` are the registrations the caller considers usable RIGHT NOW — key
+    status, validity windows and revocation are the registry's decisions, and
+    passing a revoked key here would verify it.
+
+    Fails closed on every path: unknown key, bad signature, or a payload that
+    is not a valid report.
+    """
+    sealed = (
+        envelope
+        if isinstance(envelope, AppliedStateEnvelope)
+        else AppliedStateEnvelope.from_wire(envelope)
+    )
+
+    registered = {key.key_id: key for key in keys}
+    key = registered.get(sealed.key_id)
+    if key is None:
+        raise UnknownKeyError(f"no registered applied-state key {sealed.key_id!r}")
+
+    signing_input = applied_state_signing_input(sealed.key_id, sealed.payload)
+    licence_key = LicenceKey(key_id=key.key_id, public_key_b64=key.public_key_b64)
+    if not _ed25519_verifies(licence_key, sealed.signature, signing_input):
+        raise BadSignatureError(
+            f"applied-state signature did not verify under key {sealed.key_id!r}"
+        )
+
+    try:
+        document = json.loads(sealed.payload)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise MalformedAppliedStateError(
+            f"applied-state payload is not valid JSON: {exc}"
+        ) from exc
+    return VerifiedAppliedState(
+        state=parse_applied_state(document), key=key, payload=sealed.payload
+    )
+
+
+class AppliedStateSigner(Protocol):
+    """What sealing needs from a deployment's key — and nothing more.
+
+    No key export and no rotation control: those are custody concerns owned by
+    the product receiver, which loads the private key once from a configured
+    file materialised from OpenBao. The kernel never sees where it came from.
+    """
+
+    @property
+    def key_id(self) -> str: ...
+
+    def sign(self, data: bytes) -> bytes: ...
+
+
+def seal_applied_state(
+    state: ReceiverAppliedState, *, signer: AppliedStateSigner
+) -> AppliedStateEnvelope:
+    """Serialise and sign a report.
+
+    Serialisation is CANONICAL (`sort_keys`, no incidental whitespace) so the
+    same report seals to the same bytes everywhere. That is not what makes
+    verification safe — the envelope carries the exact signed bytes, so the
+    verifier never re-encodes anything — but it makes the conformance vectors
+    reproducible across processes and languages.
+    """
+    payload = json.dumps(
+        applied_state_payload(state), sort_keys=True, separators=(",", ":")
+    ).encode()
+    signature = signer.sign(applied_state_signing_input(signer.key_id, payload))
+    return AppliedStateEnvelope(
+        key_id=signer.key_id, payload=payload, signature=signature
+    )
+
+
+# ── Possession challenge (ADR-0007 §2) ──────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentPossessionChallenge:
+    """A one-time, expiry-bound proof-of-possession request.
+
+    Registration proves only that someone submitted a public key; this is what
+    proves the deployment holds the matching private half, and a key stays
+    `pending` until it succeeds.
+
+    Every binding here is load-bearing:
+
+    - `key_id` and `deployment_ref` — a signed response is evidence for THIS
+      key on THIS deployment, so a response cannot be carried to another
+      registration.
+    - `challenge_id` — the single-use handle the issuer retires on completion,
+      so a captured response cannot be replayed into a later activation.
+    - `expires_at` — bounds how long a captured response stays useful. It is
+      signed, so a stale challenge cannot be silently extended by the caller.
+
+    The kernel pins only the SHAPE and how it is signed. Issuing, storing,
+    retiring and expiring belong to the vendor's credential registry, so no
+    credential state enters the kernel.
+    """
+
+    challenge_id: str
+    key_id: str
+    deployment_ref: str
+    nonce: bytes
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        for name in ("challenge_id", "key_id", "deployment_ref"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value:
+                raise MalformedAppliedStateError(
+                    f"a possession challenge needs a non-empty {name!r}"
+                )
+        if not isinstance(self.nonce, bytes) or len(self.nonce) < _MIN_NONCE_BYTES:
+            raise MalformedAppliedStateError(
+                f"a possession challenge needs at least {_MIN_NONCE_BYTES} "
+                "bytes of nonce — a short or predictable nonce lets a response "
+                "be precomputed"
+            )
+        if not isinstance(self.expires_at, datetime):
+            raise MalformedAppliedStateError("'expires_at' must be a datetime")
+        if self.expires_at.tzinfo is None:
+            raise MalformedAppliedStateError(
+                "'expires_at' must be timezone-aware — a naive expiry silently "
+                "means whichever zone the reader happens to be in"
+            )
+
+    def is_expired(self, now: datetime) -> bool:
+        return now >= self.expires_at
+
+    def signing_input(self) -> bytes:
+        """The exact bytes the deployment signs to answer this challenge.
+
+        Domain-separated from applied state and length-delimited across every
+        binding, so a challenge response can never be presented as a report and
+        no two different challenges share signing bytes.
+        """
+        return DEPLOYMENT_CHALLENGE_DOMAIN + _length_prefixed(
+            DEPLOYMENT_CHALLENGE_SCHEMA.encode("utf-8"),
+            self.challenge_id.encode("utf-8"),
+            self.key_id.encode("utf-8"),
+            self.deployment_ref.encode("utf-8"),
+            self.nonce,
+            self.expires_at.isoformat().encode("utf-8"),
+        )
+
+    def to_wire(self) -> dict[str, str]:
+        return {
+            "schema": DEPLOYMENT_CHALLENGE_SCHEMA,
+            "challenge_id": self.challenge_id,
+            "key_id": self.key_id,
+            "deployment_ref": self.deployment_ref,
+            "nonce_b64": _b64url_encode(self.nonce),
+            "expires_at": self.expires_at.isoformat(),
+        }
+
+    @classmethod
+    def from_wire(
+        cls, wire: Mapping[str, object] | str | bytes
+    ) -> DeploymentPossessionChallenge:
+        if isinstance(wire, str | bytes):
+            try:
+                wire = json.loads(wire)
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise MalformedAppliedStateError(
+                    f"possession challenge is not valid JSON: {exc}"
+                ) from exc
+        if not isinstance(wire, Mapping):
+            raise MalformedAppliedStateError("possession challenge must be an object")
+        if wire.get("schema") != DEPLOYMENT_CHALLENGE_SCHEMA:
+            raise MalformedAppliedStateError(
+                f"unknown possession-challenge schema: {wire.get('schema')!r}"
+            )
+        context = "possession challenge"
+        expires_raw = _required_wire_str(wire, "expires_at", context)
+        try:
+            expires_at = datetime.fromisoformat(expires_raw)
+        except ValueError as exc:
+            raise MalformedAppliedStateError(
+                "'expires_at' is not a valid timestamp"
+            ) from exc
+        try:
+            nonce = _b64url_decode(_required_wire_str(wire, "nonce_b64", context))
+        except MalformedLicenceError as exc:
+            raise MalformedAppliedStateError(str(exc)) from None
+        return cls(
+            challenge_id=_required_wire_str(wire, "challenge_id", context),
+            key_id=_required_wire_str(wire, "key_id", context),
+            deployment_ref=_required_wire_str(wire, "deployment_ref", context),
+            nonce=nonce,
+            expires_at=expires_at,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentPossessionResponse:
+    """A deployment's answer to one challenge: which challenge, which key, and
+    the signature over that challenge's signing input.
+
+    It carries **nothing else**, and that is the contract. The nonce, the
+    deployment and the expiry live in the challenge the vendor issued and
+    STORED; the vendor loads its own copy to verify. A response that also
+    carried them would invite a verifier to read a binding from the answer
+    instead of from the record — the same substitution of a claim for a proof
+    that ADR-0007 §4 rules out for applied state. `from_wire` therefore
+    REJECTS those fields rather than ignoring them: a field accepted today and
+    ignored is a field something reads tomorrow.
+
+    `challenge_id` and `key_id` are not new authority either. They are routing
+    — they tell the vendor which stored challenge to load — and verification
+    then requires them to match that record exactly. The signature itself
+    commits to both, because the challenge's signing input binds them.
+    """
+
+    challenge_id: str
+    key_id: str
+    signature: bytes
+
+    #: Wire fields a response must never carry — see the class docstring.
+    _FORBIDDEN_WIRE_FIELDS = ("nonce_b64", "nonce", "deployment_ref", "expires_at")
+
+    def __post_init__(self) -> None:
+        for name in ("challenge_id", "key_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value:
+                raise MalformedAppliedStateError(
+                    f"a possession response needs a non-empty {name!r}"
+                )
+        if not isinstance(self.signature, bytes) or not self.signature:
+            raise MalformedAppliedStateError(
+                "a possession response needs non-empty 'signature' bytes"
+            )
+
+    def to_wire(self) -> dict[str, str]:
+        return {
+            "schema": DEPLOYMENT_RESPONSE_SCHEMA,
+            "challenge_id": self.challenge_id,
+            "key_id": self.key_id,
+            "signature_b64": _b64url_encode(self.signature),
+        }
+
+    @classmethod
+    def from_wire(
+        cls, wire: Mapping[str, object] | str | bytes
+    ) -> DeploymentPossessionResponse:
+        if isinstance(wire, str | bytes):
+            try:
+                wire = json.loads(wire)
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise MalformedAppliedStateError(
+                    f"possession response is not valid JSON: {exc}"
+                ) from exc
+        if not isinstance(wire, Mapping):
+            raise MalformedAppliedStateError("possession response must be an object")
+        if wire.get("schema") != DEPLOYMENT_RESPONSE_SCHEMA:
+            raise MalformedAppliedStateError(
+                f"unknown possession-response schema: {wire.get('schema')!r}"
+            )
+        echoed = [name for name in cls._FORBIDDEN_WIRE_FIELDS if name in wire]
+        if echoed:
+            raise MalformedAppliedStateError(
+                f"possession response must not carry {', '.join(echoed)} — the "
+                "issued challenge is authoritative for the nonce, deployment "
+                "and expiry, and a response that restates them invites a "
+                "verifier to trust the answer over the record"
+            )
+        context = "possession response"
+        try:
+            signature = _b64url_decode(
+                _required_wire_str(wire, "signature_b64", context)
+            )
+        except MalformedLicenceError as exc:
+            raise MalformedAppliedStateError(str(exc)) from None
+        return cls(
+            challenge_id=_required_wire_str(wire, "challenge_id", context),
+            key_id=_required_wire_str(wire, "key_id", context),
+            signature=signature,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedDeploymentPossession:
+    """A possession proof that held — the successful result of
+    `verify_possession`, which returns this instead of `None`.
+
+    A returned value rather than "it did not raise" so the caller's next two
+    steps have something to act on: consuming the challenge and activating the
+    key both need the identity that was PROVEN, and reading it back off the
+    inputs re-opens the question of which input was authoritative.
+    """
+
+    challenge: DeploymentPossessionChallenge
+    key: DeploymentVerificationKey
+    verified_at: datetime
+
+    @property
+    def challenge_id(self) -> str:
+        """The single-use handle the vendor must now consume, atomically with
+        activating the key — the kernel proves possession, it does not retire
+        anything."""
+        return self.challenge.challenge_id
+
+    @property
+    def key_id(self) -> str:
+        return self.key.key_id
+
+    @property
+    def deployment_ref(self) -> str:
+        """The identity the signature PROVED."""
+        return self.key.deployment_ref
+
+
+def answer_possession_challenge(
+    challenge: DeploymentPossessionChallenge, *, signer: AppliedStateSigner
+) -> DeploymentPossessionResponse:
+    """Sign a challenge with the deployment's key.
+
+    The receiver-side counterpart to `verify_possession`. It exists so a
+    receiver never hand-assembles the response and gets `key_id` wrong: a
+    response naming a key other than the one that signed it is refused by the
+    verifier, and that failure is far cheaper to prevent here than to diagnose
+    from the other side of the wire.
+    """
+    if signer.key_id != challenge.key_id:
+        raise DeploymentMismatchError(
+            f"challenge {challenge.challenge_id!r} is for key "
+            f"{challenge.key_id!r}, but the signer holds {signer.key_id!r}"
+        )
+    return DeploymentPossessionResponse(
+        challenge_id=challenge.challenge_id,
+        key_id=challenge.key_id,
+        signature=signer.sign(challenge.signing_input()),
+    )
+
+
+def verify_possession(
+    challenge: DeploymentPossessionChallenge,
+    response: DeploymentPossessionResponse | Mapping[str, object] | str | bytes,
+    *,
+    key: DeploymentVerificationKey,
+    now: datetime,
+) -> VerifiedDeploymentPossession:
+    """Check a challenge response; raise on every failure.
+
+    `challenge` is the vendor's OWN stored record, not anything the caller
+    supplied alongside the response — that is what makes the response's two
+    identifiers mere routing.
+
+    Checks run structural → temporal → cryptographic, so a failure names the
+    thing that is actually wrong:
+
+    1. The challenge's bindings against the key being activated. A response is
+       evidence for the key and deployment named IN the challenge; accepting
+       it elsewhere would let one valid response activate an unrelated key.
+    2. The response's identifiers against that challenge — a response for a
+       different challenge or key is a mismatch, not a bad signature.
+    3. Expiry, BEFORE the signature, so an expired challenge is reported as
+       expired: the two send an operator to completely different places.
+    4. The signature.
+    """
+    answer = (
+        response
+        if isinstance(response, DeploymentPossessionResponse)
+        else DeploymentPossessionResponse.from_wire(response)
+    )
+
+    if challenge.key_id != key.key_id or challenge.deployment_ref != key.deployment_ref:
+        raise DeploymentMismatchError(
+            f"challenge {challenge.challenge_id!r} was issued for "
+            f"{challenge.key_id!r}/{challenge.deployment_ref!r}, not "
+            f"{key.key_id!r}/{key.deployment_ref!r}"
+        )
+    if (
+        answer.challenge_id != challenge.challenge_id
+        or answer.key_id != challenge.key_id
+    ):
+        raise DeploymentMismatchError(
+            f"possession response names {answer.challenge_id!r}/{answer.key_id!r}, "
+            f"but the stored challenge is {challenge.challenge_id!r}/"
+            f"{challenge.key_id!r}"
+        )
+    if challenge.is_expired(now):
+        raise LicenceExpiredError(
+            f"possession challenge {challenge.challenge_id!r} expired at "
+            f"{challenge.expires_at.isoformat()}"
+        )
+    licence_key = LicenceKey(key_id=key.key_id, public_key_b64=key.public_key_b64)
+    if not _ed25519_verifies(licence_key, answer.signature, challenge.signing_input()):
+        raise BadSignatureError(
+            f"possession response for {challenge.challenge_id!r} did not verify"
+        )
+    return VerifiedDeploymentPossession(challenge=challenge, key=key, verified_at=now)
+
+
 # ── Envelope handling ───────────────────────────────────────────────────────
+
+
+def _b64url_encode(data: bytes) -> str:
+    """Unpadded base64url — the encoding every kernel envelope field uses."""
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
 def _b64url_decode(value: str) -> bytes:
@@ -882,6 +1502,24 @@ __all__ = [
     "ReceiverAppliedState",
     "APPLIED_STATE_SCHEMA",
     "UNKNOWN_DIGEST",
+    # applied-state envelope (ADR-0007)
+    "APPLIED_STATE_ENVELOPE_SCHEMA",
+    "APPLIED_STATE_DOMAIN",
+    "DEPLOYMENT_CHALLENGE_DOMAIN",
+    "DEPLOYMENT_CHALLENGE_SCHEMA",
+    "DEPLOYMENT_RESPONSE_SCHEMA",
+    "AppliedStateEnvelope",
+    "AppliedStateSigner",
+    "DeploymentPossessionChallenge",
+    "DeploymentPossessionResponse",
+    "DeploymentVerificationKey",
+    "VerifiedAppliedState",
+    "VerifiedDeploymentPossession",
+    "applied_state_signing_input",
+    "answer_possession_challenge",
+    "seal_applied_state",
+    "verify_applied_state",
+    "verify_possession",
     "applied_state_payload",
     "parse_applied_state",
     # operations

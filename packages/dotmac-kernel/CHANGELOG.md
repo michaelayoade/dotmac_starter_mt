@@ -8,6 +8,82 @@ here.
 
 ## Unreleased
 
+## 0.1.0a9 — 2026-08-03
+
+Ninth alpha. Adds the **applied-state envelope** — the structure a deployment
+signs to prove WHO is reporting what it has applied, unblocking the WS8
+production-readiness gate (ADR-0007). No migration; the kernel head stays
+`0012`.
+
+### Added
+- **Applied-state envelope** (`dotmac_kernel.licensing`, ADR-0007) — the
+  structure a DEPLOYMENT signs to prove who is reporting, the mirror of the
+  licence envelope the vendor signs to prove what was issued. Deliberately a
+  separate structure: the two travel in opposite directions under different key
+  custody, so one trust structure covering both would let either party's key
+  speak for the other.
+
+  Fully typed and immutable: `AppliedStateEnvelope` (with `to_wire`/`from_wire`
+  for transport), `DeploymentVerificationKey` (carrying the `deployment_ref` a
+  `key_id` resolves to), `VerifiedAppliedState` (exposing the PROVEN
+  `deployment_ref` plus `claim_matches_proof`), the `AppliedStateSigner`
+  protocol, `seal_applied_state` / `verify_applied_state`, and
+  `APPLIED_STATE_ENVELOPE_SCHEMA` (`dotmac-applied-state-envelope/1`).
+
+  The signature covers the EXACT payload bytes, carried as bytes on the
+  envelope, so nothing re-serialises a payload to verify it.
+
+  **`key_id` is signed, not merely carried.** Because `key_id` resolves to a
+  deployment identity, leaving it unsigned made that identity forgeable:
+  registering the SAME public key under a second `key_id` mapping to another
+  deployment, then replaying a captured report with `key_id` swapped, verified
+  successfully and attributed the report to the attacker's deployment. Found by
+  review against the first implementation and now pinned by a canary. Note the
+  weaker check that misses it — substituting a *different* key fails trivially,
+  because its signature does not verify; only identical material under two ids
+  exposes the hole. `applied_state_signing_input(key_id, payload)` is therefore
+  canonical and length-delimited, since plain concatenation would let `("a",
+  "bc")` and `("ab", "c")` share signing bytes.
+
+  Two domains, not one: the possession challenge is signed by the same key over
+  a vendor-chosen nonce, which would otherwise be a forgery oracle for reports.
+- **`DeploymentPossessionChallenge`** — the typed, versioned
+  (`dotmac-deployment-challenge/1`) proof-of-possession that moves a registered
+  key from `pending` to `active`. Binds `challenge_id`, `key_id`,
+  `deployment_ref`, a nonce with a minimum length, and a timezone-aware
+  `expires_at` into its signing input, so a response is evidence for exactly one
+  registration and cannot be carried to another or silently extended.
+  `verify_possession` checks expiry BEFORE the signature — "expired" and "bad
+  signature" send an operator to different places.
+- **`DeploymentPossessionResponse` + `VerifiedDeploymentPossession`** — the
+  answer is typed and versioned too (`dotmac-deployment-possession-response/1`),
+  and `verify_possession` returns a value instead of `None`. A bare signature
+  was cryptographically sufficient — every binding is in the challenge — but it
+  carried no schema, so it could not be versioned, told apart from any other
+  signature, or read by a consumer holding only the wire form; a naked
+  signature between two planes is the one place Dotmac's typed-contract
+  standard would have been broken.
+
+  The response carries ONLY `challenge_id`, `key_id` and the signature, and
+  `from_wire` REJECTS one that echoes the nonce, deployment or expiry — the
+  issuer's stored challenge is authoritative for those, and a field accepted
+  and ignored today is a field something reads tomorrow. The two identifiers
+  are routing, not authority: verification requires them to match the stored
+  record, and a response naming another challenge or key is a MISMATCH rather
+  than a signature failure. `answer_possession_challenge` builds one on the
+  receiver side (refusing to sign for a key the signer does not hold).
+  `VerifiedDeploymentPossession` returns the proven `deployment_ref`, the
+  `key_id` to activate and the `challenge_id` to consume — the vendor does both
+  atomically; the kernel retires nothing.
+
+  The kernel owns the contract, the serialization and the conformance vectors.
+  It owns NO production key custody and ships no production signer, exactly as
+  it ships none for licences.
+- **`FakeDeploymentSigner`** (`dotmac_kernel.testing`) — the deployment-side
+  counterpart to `FakeLicenceSigner`, ephemeral in-memory Ed25519. Includes
+  `sign_raw`, which exists so a canary can prove the domain and key-id bindings
+  are load-bearing rather than decorative.
+
 ## 0.1.0a8 — 2026-08-02
 
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
