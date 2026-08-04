@@ -40,14 +40,7 @@ jobs:
       # Fail closed unless THIS run is the exact current tip of protected main
       # (not merely an ancestor) — a stale or side-branch dispatch cannot publish.
       - name: Assert run is on the current protected main SHA
-        run: |
-          git fetch --no-tags origin main
-          MAIN_SHA="$(git rev-parse origin/main)"
-          if [ "${GITHUB_SHA}" != "${MAIN_SHA}" ]; then
-            echo "::error::run SHA ${GITHUB_SHA} != current origin/main ${MAIN_SHA}"
-            exit 1
-          fi
-          echo "on current main: ${MAIN_SHA}"
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -116,14 +109,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Re-assert the approved SHA is still the current protected main
-        run: |
-          git fetch --no-tags origin main
-          MAIN_SHA="$(git rev-parse origin/main)"
-          if [ "${GITHUB_SHA}" != "${MAIN_SHA}" ]; then
-            echo "::error::main moved during the approval wait — approved ${GITHUB_SHA}, current origin/main ${MAIN_SHA}. Re-dispatch on the current tip."
-            exit 1
-          fi
-          echo "still current main after approval: ${MAIN_SHA}"
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
       - name: Download the exact built bytes
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
