@@ -55,6 +55,26 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
   registration and cannot be carried to another or silently extended.
   `verify_possession` checks expiry BEFORE the signature — "expired" and "bad
   signature" send an operator to different places.
+- **`DeploymentPossessionResponse` + `VerifiedDeploymentPossession`** — the
+  answer is typed and versioned too (`dotmac-deployment-possession-response/1`),
+  and `verify_possession` returns a value instead of `None`. A bare signature
+  was cryptographically sufficient — every binding is in the challenge — but it
+  carried no schema, so it could not be versioned, told apart from any other
+  signature, or read by a consumer holding only the wire form; a naked
+  signature between two planes is the one place Dotmac's typed-contract
+  standard would have been broken.
+
+  The response carries ONLY `challenge_id`, `key_id` and the signature, and
+  `from_wire` REJECTS one that echoes the nonce, deployment or expiry — the
+  issuer's stored challenge is authoritative for those, and a field accepted
+  and ignored today is a field something reads tomorrow. The two identifiers
+  are routing, not authority: verification requires them to match the stored
+  record, and a response naming another challenge or key is a MISMATCH rather
+  than a signature failure. `answer_possession_challenge` builds one on the
+  receiver side (refusing to sign for a key the signer does not hold).
+  `VerifiedDeploymentPossession` returns the proven `deployment_ref`, the
+  `key_id` to activate and the `challenge_id` to consume — the vendor does both
+  atomically; the kernel retires nothing.
 
   The kernel owns the contract, the serialization and the conformance vectors.
   It owns NO production key custody and ships no production signer, exactly as

@@ -28,20 +28,25 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from dotmac_kernel import licensing
 from dotmac_kernel.licensing import (
     APPLIED_STATE_DOMAIN,
     APPLIED_STATE_ENVELOPE_SCHEMA,
     DEPLOYMENT_CHALLENGE_DOMAIN,
     DEPLOYMENT_CHALLENGE_SCHEMA,
+    DEPLOYMENT_RESPONSE_SCHEMA,
     AppliedStateEnvelope,
     BadSignatureError,
     DeploymentMismatchError,
     DeploymentPossessionChallenge,
+    DeploymentPossessionResponse,
     DeploymentVerificationKey,
     LicenceExpiredError,
     MalformedAppliedStateError,
     ReceiverAppliedState,
     UnknownKeyError,
+    VerifiedDeploymentPossession,
+    answer_possession_challenge,
     applied_state_signing_input,
     seal_applied_state,
     verify_applied_state,
@@ -374,9 +379,30 @@ def _challenge(**over) -> DeploymentPossessionChallenge:
 
 def test_a_valid_possession_response_is_accepted(signer, key) -> None:
     challenge = _challenge()
-    verify_possession(
-        challenge, signer.sign(challenge.signing_input()), key=key, now=NOW
+    proof = verify_possession(
+        challenge,
+        answer_possession_challenge(challenge, signer=signer),
+        key=key,
+        now=NOW,
     )
+    assert isinstance(proof, VerifiedDeploymentPossession)
+
+
+def test_the_result_carries_what_the_vendor_transaction_needs(signer, key) -> None:
+    """Success returns a VALUE, not just "it did not raise": consuming the
+    challenge and activating the key both need the proven identity, and reading
+    it back off the inputs would re-open which input was authoritative."""
+    challenge = _challenge()
+    proof = verify_possession(
+        challenge,
+        answer_possession_challenge(challenge, signer=signer),
+        key=key,
+        now=NOW,
+    )
+    assert proof.challenge_id == "c-1"  # the handle to consume, atomically
+    assert proof.key_id == KEY_ID  # the pending key to activate
+    assert proof.deployment_ref == DEP  # the PROVEN identity
+    assert proof.verified_at == NOW
 
 
 def test_an_expired_challenge_is_refused_even_with_a_valid_signature(
@@ -386,7 +412,7 @@ def test_an_expired_challenge_is_refused_even_with_a_valid_signature(
     with pytest.raises(LicenceExpiredError):
         verify_possession(
             challenge,
-            signer.sign(challenge.signing_input()),
+            answer_possession_challenge(challenge, signer=signer),
             key=key,
             now=NOW + timedelta(hours=1),
         )
@@ -402,8 +428,162 @@ def test_a_response_cannot_be_carried_to_another_registration(signer) -> None:
     )
     with pytest.raises(DeploymentMismatchError):
         verify_possession(
-            challenge, signer.sign(challenge.signing_input()), key=other_key, now=NOW
+            challenge,
+            answer_possession_challenge(challenge, signer=signer),
+            key=other_key,
+            now=NOW,
         )
+
+
+# ── The typed possession RESPONSE ───────────────────────────────────────────
+
+
+def test_a_response_wire_form_round_trips(signer) -> None:
+    response = answer_possession_challenge(_challenge(), signer=signer)
+    wire = response.to_wire()
+    json.dumps(wire)  # JSON-safe: every value is a string
+    assert wire["schema"] == DEPLOYMENT_RESPONSE_SCHEMA
+    assert DeploymentPossessionResponse.from_wire(wire) == response
+
+
+def test_a_wire_response_verifies_exactly_like_a_typed_one(signer, key) -> None:
+    """The verifier accepts the transport form, so a vendor endpoint need not
+    hand-parse before it can check anything."""
+    challenge = _challenge()
+    wire = answer_possession_challenge(challenge, signer=signer).to_wire()
+    assert verify_possession(challenge, wire, key=key, now=NOW).deployment_ref == DEP
+    assert (
+        verify_possession(challenge, json.dumps(wire), key=key, now=NOW).key_id
+        == KEY_ID
+    )
+
+
+def test_the_response_is_immutable(signer) -> None:
+    response = answer_possession_challenge(_challenge(), signer=signer)
+    with pytest.raises(AttributeError):
+        response.key_id = "other"  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        response.signature = b"x"  # type: ignore[misc]
+
+
+def test_the_verified_result_is_immutable(signer, key) -> None:
+    challenge = _challenge()
+    proof = verify_possession(
+        challenge,
+        answer_possession_challenge(challenge, signer=signer),
+        key=key,
+        now=NOW,
+    )
+    with pytest.raises(AttributeError):
+        proof.key = None  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    "echoed",
+    [
+        {"nonce_b64": "AAAA"},
+        {"nonce": "0123456789abcdef"},
+        {"deployment_ref": "attacker-deployment"},
+        {"expires_at": "2099-01-01T00:00:00+00:00"},
+    ],
+)
+def test_a_response_may_not_echo_the_challenges_own_bindings(signer, echoed) -> None:
+    """The STORED challenge is authoritative for the nonce, deployment and
+    expiry. A response restating them is refused rather than ignored: a field
+    accepted and ignored today is a field something reads tomorrow — which is
+    exactly how a claim gets substituted for a proof."""
+    wire = answer_possession_challenge(_challenge(), signer=signer).to_wire() | echoed
+    with pytest.raises(MalformedAppliedStateError):
+        DeploymentPossessionResponse.from_wire(wire)
+
+
+def test_a_response_naming_another_challenge_is_a_mismatch_not_a_bad_signature(
+    signer, key
+) -> None:
+    """Routing failure and forgery are different operator problems. The
+    identifiers are routing — the signature commits to them via the challenge's
+    signing input — so a mismatch must say so."""
+    challenge = _challenge()
+    other = _challenge(challenge_id="c-2")
+    with pytest.raises(DeploymentMismatchError):
+        verify_possession(
+            challenge,
+            answer_possession_challenge(other, signer=signer),
+            key=key,
+            now=NOW,
+        )
+
+
+def test_a_response_naming_another_key_is_a_mismatch(signer, key) -> None:
+    challenge = _challenge()
+    forged = DeploymentPossessionResponse(
+        challenge_id=challenge.challenge_id,
+        key_id="other-key",
+        signature=signer.sign(challenge.signing_input()),
+    )
+    with pytest.raises(DeploymentMismatchError):
+        verify_possession(challenge, forged, key=key, now=NOW)
+
+
+def test_a_response_signed_for_a_different_challenge_fails_verification(
+    signer, key
+) -> None:
+    """Identifiers can be made to line up; the signature cannot. A response
+    that names the right challenge but signed a different one is a forgery."""
+    forged = DeploymentPossessionResponse(
+        challenge_id="c-1",
+        key_id=KEY_ID,
+        signature=signer.sign(_challenge(nonce=b"fedcba9876543210").signing_input()),
+    )
+    with pytest.raises(BadSignatureError):
+        verify_possession(_challenge(), forged, key=key, now=NOW)
+
+
+def test_signing_a_challenge_for_another_key_is_refused_at_the_receiver(signer) -> None:
+    """Caught on the way out, not diagnosed from the other side of the wire."""
+    with pytest.raises(DeploymentMismatchError):
+        answer_possession_challenge(_challenge(key_id="not-this-signer"), signer=signer)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"challenge_id": ""},
+        {"key_id": ""},
+        {"signature": b""},
+        {"signature": "not-bytes"},
+    ],
+)
+def test_malformed_responses_fail_closed(kwargs) -> None:
+    fields: dict[str, object] = {
+        "challenge_id": "c-1",
+        "key_id": KEY_ID,
+        "signature": b"sig",
+    }
+    fields.update(kwargs)
+    with pytest.raises(MalformedAppliedStateError):
+        DeploymentPossessionResponse(**fields)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "breakage",
+    [
+        {"schema": "dotmac-deployment-possession-response/2"},
+        {"schema": DEPLOYMENT_CHALLENGE_SCHEMA},  # the wrong document entirely
+        {"challenge_id": ""},
+        {"signature_b64": "not base64!!"},
+    ],
+)
+def test_malformed_response_wire_forms_fail_closed(signer, breakage) -> None:
+    wire = answer_possession_challenge(_challenge(), signer=signer).to_wire() | breakage
+    with pytest.raises(MalformedAppliedStateError):
+        DeploymentPossessionResponse.from_wire(wire)
+
+
+def test_a_non_object_response_is_rejected() -> None:
+    for wire in ("[]", "null", b"not json"):
+        with pytest.raises(MalformedAppliedStateError):
+            DeploymentPossessionResponse.from_wire(wire)
 
 
 def test_each_challenge_has_distinct_signing_bytes() -> None:
@@ -453,6 +633,31 @@ def test_applied_state_signing_input_is_stable() -> None:
     assert applied_state_signing_input("k", b"abc") == (
         b"dotmac-ws8-applied-state/1\x00" b"\x00\x00\x00\x01k" b"\x00\x00\x00\x03abc"
     )
+
+
+def test_the_wire_schemas_are_pinned_and_distinct() -> None:
+    """Pinned as VALUES, like the domains: a challenge and its answer are
+    different documents and a reader holding only one must be able to tell."""
+    assert DEPLOYMENT_CHALLENGE_SCHEMA == "dotmac-deployment-challenge/1"
+    assert DEPLOYMENT_RESPONSE_SCHEMA == "dotmac-deployment-possession-response/1"
+    assert DEPLOYMENT_CHALLENGE_SCHEMA != DEPLOYMENT_RESPONSE_SCHEMA
+
+
+def test_the_possession_contract_is_reachable_from_the_public_surface() -> None:
+    """The vendor control plane may import ONLY the kernel's public surface
+    (its D5 deny-case), so a name missing from `__all__` is a name V6 cannot
+    legally consume — an export gap that would surface as a vendor-side lint
+    failure long after this release."""
+    for name in (
+        "DEPLOYMENT_RESPONSE_SCHEMA",
+        "DeploymentPossessionChallenge",
+        "DeploymentPossessionResponse",
+        "VerifiedDeploymentPossession",
+        "answer_possession_challenge",
+        "verify_possession",
+    ):
+        assert name in licensing.__all__, f"{name} is not exported"
+        assert hasattr(licensing, name)
 
 
 def test_challenge_signing_input_is_stable() -> None:

@@ -105,6 +105,36 @@ registration and cannot be carried to another), the nonce itself, and
 Expiry is checked before the signature, because "expired" and "bad signature"
 send an operator to completely different places.
 
+The **response is typed and versioned too**
+(`dotmac-deployment-possession-response/1`), not a bare signature. A raw
+signature is cryptographically sufficient — every binding is already in the
+challenge — but it is not a contract: it carries no schema, so it cannot be
+versioned, told apart from any other signature, or read by a consumer that
+holds only the wire form. Dotmac's cross-plane standard is typed, versioned
+contracts, and a signature travelling naked between two planes is the one
+place that standard would have been broken.
+
+The response carries **only** `challenge_id`, `key_id` and the signature. It
+does **not** restate the nonce, the deployment or the expiry: the issuer's
+**stored** challenge is authoritative for those, and a response that echoed
+them would invite a verifier to read a binding from the answer instead of from
+the record — the same substitution of a claim for a proof that §4 rules out
+for applied state. Those fields are therefore **rejected**, not ignored: a
+field accepted and ignored today is a field something reads tomorrow.
+
+The two identifiers are not new authority either. They are **routing** — they
+tell the vendor which stored challenge to load — and verification then requires
+them to match that record exactly. The signature already commits to both,
+because the challenge's signing input binds them. A response naming another
+challenge or key is therefore a **mismatch**, reported as such rather than as a
+signature failure.
+
+The vendor transaction is: load the stored challenge, compare identifiers,
+verify expiry and signature, then **atomically** consume the challenge and
+activate the pending key. The kernel returns a `VerifiedDeploymentPossession`
+carrying the proven identity and the handle to consume; it retires nothing and
+holds no credential state.
+
 ### 3. Applied state travels in its own signed envelope
 
 `ReceiverAppliedState` is carried in a **distinct signed envelope** that names
@@ -117,6 +147,24 @@ The signature additionally covers a **WS8-specific domain separator**, so a
 signature produced for one purpose can never be replayed as another. Without it,
 any other protocol that has the deployment sign caller-influenced bytes becomes
 an oracle for forging applied-state reports.
+
+**The outbox stores the sealed envelope, not the intent to build one.** The
+receiver seals the report inside the same transaction that commits the
+entitlement change and the applied-state record, and persists **those exact
+bytes** — envelope and signature — in the outbox. The relay publishes what is
+stored, after commit. It never reconstructs a report from current state, and it
+never re-signs or changes `key_id` on a retry.
+
+Reconstructing at publish time would defeat the whole contract: the report
+would describe whatever the deployment looks like when the relay happens to
+run, not the state that was committed, so a retry after a later change would
+publish a report for a transition that never happened — and it would do so
+under a valid signature, which is exactly the shape of evidence the vendor is
+being asked to trust. Re-signing on retry has the same defect in miniature: a
+key rotated between attempts would attribute one committed fact to two
+identities. A retry must be byte-identical, which is also what makes
+`(authenticated_deployment_ref, report_id)` idempotent rather than a conflict
+(§5).
 
 This is deliberately a **separate envelope from the licence envelope**. They
 travel in opposite directions, are signed by different parties with different
