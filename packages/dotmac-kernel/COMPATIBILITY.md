@@ -73,10 +73,13 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.middleware.security_headers` | `SecurityHeadersMiddleware` |
 | `dotmac_kernel.middleware.tenant` | `TenantResolverMiddleware` |
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
+| `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
+| `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE` (the post-migration live-catalog contract — see the same section) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
+| `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
 | `dotmac_kernel.permissions` | `PermissionSpec`, `PermissionCatalogue`, `DuplicatePermissionError`, `UndeclaredPermissionError`, `install_permissions`, `active_permissions` (permission catalogue; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
@@ -104,7 +107,8 @@ it never grants entitlement and it never deploys anything.
 
 - **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
   `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
-  `permissions`, `audit_actions`, `core`, `enabled_by_default`, `seed`. `code`
+  `permissions`, `audit_actions`, `short_code`, `migration_prefix`,
+  `migration_branch`, `tables`, `core`, `enabled_by_default`, `seed`. `code`
   is the stable identifier every other authority references (a dependency edge,
   a profile's required/forbidden set, a capability owner). `version` is the module's own release version;
   `contract_version` is the kernel manifest generation it was built against —
@@ -122,6 +126,11 @@ it never grants entitlement and it never deploys anything.
     actual path (`a -> b -> a`).
 
   All four share the `ModuleRegistryError` base and are `ValueError`s.
+  Construction ALSO assigns database namespaces — it builds a
+  `NamespaceRegistry` from the manifests plus the kernel's allocation ledger
+  (see "Database namespaces and migration lineage" below), so a contested or
+  unallocated namespace raises a `NamespaceError` subclass here too. Read it
+  back with `namespaces()`.
 - **Deterministic startup order** — `startup_order()` is a pure function of
   (declaration order, dependency edges): dependencies first, **declaration order
   as the tiebreak**. Declaration order, not alphabetical, on purpose: an
@@ -135,10 +144,11 @@ it never grants entitlement and it never deploys anything.
   closed if an enabled module depends on one that is not enabled** — installed
   is not sufficient; "dependencies satisfied" means the dependency is running.
 - **Inventory** — `inventory(disabled)` returns `ModuleInventoryEntry` rows
-  (`code`, `version`, `contract_version`, `dependencies`, `core`, `enabled`)
-  sorted by code so two deployments' inventories are diffable;
-  `inventory_payload(disabled)` is the JSON-safe diagnostics document
-  (`kernel_contract_version`, `modules`, `startup_order`). The kernel supplies
+  (`code`, `version`, `contract_version`, `dependencies`, `core`, `enabled`,
+  `db_schema`, `migration_branch`) sorted by code so two deployments'
+  inventories are diffable; `inventory_payload(disabled)` is the JSON-safe
+  diagnostics document (`kernel_contract_version`, `modules`, `startup_order`,
+  `migration_owners`). The kernel supplies
   the CONTRACT, not an endpoint: public `/health` stays liveness-only and
   discloses none of it, and the authenticated platform diagnostics surface is
   the control plane's own step, composing this payload.
@@ -148,7 +158,8 @@ it never grants entitlement and it never deploys anything.
 **Compatibility with `FeatureManifest`.** `FeatureManifest` remains fully
 supported and unchanged. The registry accepts either shape — freely mixed in one
 assembly — and adapts a feature via `ModuleManifest.from_feature(manifest, *,
-version=UNVERSIONED, contract_version=..., dependencies=())`, which carries every
+version=UNVERSIONED, contract_version=..., dependencies=(), short_code=None,
+migration_prefix=None, migration_branch=None, tables=())`, which carries every
 field across and invents nothing (`UNVERSIONED` is `"0.0.0"`, a real sortable
 version that reads as "not declared yet"; the keywords let an assembly pin a
 version or declare edges for a package it has not migrated). In the other
@@ -164,6 +175,78 @@ later program steps, and the same directive requires CI to fail when "a
 declaration has no consumer" — each field lands with the registry code that
 derives behavior from it, as `permissions` and `audit_actions` did in step 3
 (below).
+
+### Database namespaces and migration lineage (`dotmac_kernel.namespaces`, `dotmac_kernel.migrations.gate`, `dotmac_kernel.migrations.catalog`)
+
+ADR-0006 **D1**. One immutable Postgres schema and one immutable migration
+lineage identity per **stateful** module; a **stateless** module declares none.
+
+**Schema assignment.** A stateful module declares a `short_code` on its
+manifest; its schema is the derived, read-only `ModuleManifest.db_schema`,
+always `mod_<short_code>` and always built through `module_schema()`. It is
+never inferred from `code`, `name`, or any brand string, and there is no
+settable schema attribute to re-point at runtime. `public` (`HOST_SCHEMA`)
+stays the **compatibility** namespace of the kernel and the one host assembly
+and is not available to installable modules — claiming it raises
+`HostSchemaClaimError`.
+
+**Full qualification.** Module models, migrations, foreign keys, policies,
+functions and raw SQL name their schema explicitly; nothing may rely on
+`search_path`, which is connection state anything can change. `qualified()`
+builds `schema.table`; `schema_table_args(schema)` is the `__table_args__`
+fragment that binds a SQLAlchemy model to a module schema.
+
+**Migration identity.** Each owner receives an immutable, globally unique short
+`prefix` and `branch_label`. Revision ids are `<prefix>_<sequence>_<slug>`,
+built by `revision_id()`, which **raises rather than truncating** past
+`MAX_REVISION_ID_LENGTH` — Alembic declares `alembic_version.version_num` as
+`String(32)`, so an over-long id fails at `alembic upgrade` against a real
+database, not at authoring time. Each module lineage has its own base and
+branch label; cross-lineage ordering uses `depends_on`, never `down_revision`.
+
+**Where immutability is enforced.** `MIGRATION_OWNER_LEDGER` is the checked-in,
+kernel-shipped allocation record — the kernel is the shared dependency, so this
+is the one table where "globally unique across Dotmac repos" can be true.
+`NamespaceRegistry.from_manifests` validates the entire ledger even when an
+allocated owner is not installed, then refuses a stateful module absent from it
+(`UnallocatedNamespaceError`) or differing from it in schema, prefix or branch
+label (`NamespaceAllocationError`). Changing a row is therefore a visible
+kernel diff plus a release.
+
+**`NamespaceRegistry`** is construction-is-validation and rejects a duplicate
+schema claim (`DuplicateSchemaError`), migration prefix
+(`DuplicateMigrationPrefixError`), branch label (`DuplicateBranchLabelError`)
+or table (`DuplicateTableOwnerError`). `ModuleRegistry` builds one during its
+own construction and exposes it via `namespaces()`.
+
+**The composed CI gate** (`dotmac_kernel.migrations.gate.run_gate`) is the
+build-time enforcement: it loads every selected version location — resolved
+from the deployment's own Alembic config via `version_locations_from_ini()` —
+and rejects duplicate revisions, unregistered or mismatched prefixes,
+duplicate/foreign branch labels, duplicate schema claims and duplicate table
+ownership, plus lineage-root, `down_revision`-crossing, id-length and
+`schema=` qualification faults. The scanner follows local `upgrade()` helpers,
+understands typed Alembic metadata and D1 schema constants, checks inline and
+imperative foreign keys, and rejects schema-qualified writes aimed at another
+owner. It is a pure **AST** scan: nothing is imported and no database is
+touched, so it runs in the same cheap CI step as lint and fails **before an
+image can be built**. Locations are attributed to owners through the lineage
+root's branch label, which is also what makes an `alembic_version` row
+explainable (`GateReport.attribution`).
+
+**The post-migration live-catalog gate**
+(`dotmac_kernel.migrations.catalog.audit_live_schemas`) applies the kernel's
+RLS/grant contract across every registered module schema after migrations run.
+It is deliberately split into parameterised SQL builders (`catalog_queries()`;
+`:schema` is always a bind parameter) and a pure decision function
+(`audit_snapshot(SchemaSnapshot)`), so the contract is exercisable from
+synthetic snapshots without Postgres.
+
+**Two grandfathered lineages.** `kernel` and `assembly` predate D1; their
+revision ids are already recorded in live `alembic_version` rows, so
+`MigrationOwner.legacy_revision_pattern` keeps their original format and
+exempts them from the strict id and `schema=` rules. Their tables legitimately
+live in `public`. Every installable module gets the strict rules.
 
 ### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`)
 

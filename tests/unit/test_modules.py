@@ -380,7 +380,25 @@ def test_inventory_payload_is_json_safe_and_complete() -> None:
         "dependencies": ["base"],
         "core": True,
         "enabled": True,
+        # D1: stateless modules declare no namespace and own no lineage.
+        "db_schema": None,
+        "migration_branch": None,
     }
+    # D1 item 5: the attribution that explains every `alembic_version` row.
+    assert payload["migration_owners"] == [
+        {
+            "owner": "assembly",
+            "prefix": "a",
+            "branch_label": "assembly",
+            "db_schema": None,
+        },
+        {
+            "owner": "kernel",
+            "prefix": "k",
+            "branch_label": "kernel",
+            "db_schema": None,
+        },
+    ]
 
 
 # ── Every registry error is one catchable family ────────────────────────────

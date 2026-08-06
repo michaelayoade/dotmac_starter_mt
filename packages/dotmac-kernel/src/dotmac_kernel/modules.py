@@ -56,6 +56,15 @@ from typing import Final
 from fastapi import APIRouter
 
 from dotmac_kernel.features import FeatureManifest, NavItem
+from dotmac_kernel.namespaces import (
+    HOST_SCHEMA,
+    MigrationOwner,
+    NamespaceRegistry,
+    module_schema,
+    validate_branch_label,
+    validate_migration_prefix,
+    validate_short_code,
+)
 from dotmac_kernel.permissions import PermissionSpec
 
 # The module-contract generation this kernel implements. A module declares the
@@ -134,6 +143,27 @@ class ModuleManifest:
     # Audit actions this module declares and owns. Enforced at the write by
     # `dotmac_kernel.audit.write_audit_event`; see `dotmac_kernel.audit_actions`.
     audit_actions: Sequence[str] = field(default_factory=tuple)
+    # ── D1: database namespace + migration lineage identity (ADR-0006) ──────
+    # `short_code` is the registry-ALLOCATED database identity of a STATEFUL
+    # module (see `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER`). Its schema
+    # is the derived, read-only `db_schema` property — `mod_<short_code>` — so
+    # there is no settable schema attribute anything can re-point at runtime,
+    # and the namespace is never inferred from `code` or any display name.
+    # A STATELESS module leaves all four fields at their defaults: it declares
+    # no database namespace at all.
+    short_code: str | None = None
+    # Immutable, globally unique short prefix for this owner's revision ids
+    # (`<prefix>_<sequence>_<slug>`). Allocated in the same ledger row.
+    migration_prefix: str | None = None
+    # The module lineage's own Alembic branch label. Defaults to `code`; an
+    # explicit value exists so a module whose code is not a legal label (or
+    # which must keep a historical label through a rename) can still declare
+    # one. Globally unique — it is how an `alembic_version` row is attributed.
+    migration_branch: str | None = None
+    # The unqualified tables this module OWNS inside its schema. The composed
+    # migration gate rejects a create outside this declaration; the live-catalog
+    # gate checks the declaration in both directions after migrations run.
+    tables: Sequence[str] = field(default_factory=tuple)
     core: bool = True
     enabled_by_default: bool = True
     seed: Callable[[], None] | None = None
@@ -153,8 +183,86 @@ class ModuleManifest:
             "capabilities",
             "permissions",
             "audit_actions",
+            "tables",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        self._validate_namespace()
+
+    def _validate_namespace(self) -> None:
+        """Stateful and stateless are the only two coherent shapes (D1).
+
+        A module either declares a full database identity (short code AND
+        migration prefix, from one ledger row) or none of it. A half-declared
+        module — tables with no schema, a prefix with no namespace — would
+        write into `public`, which is exactly the compatibility namespace D1
+        closes to installable modules.
+        """
+        stateful_signals = (
+            self.short_code is not None,
+            self.migration_prefix is not None,
+            bool(self.tables),
+        )
+        if not any(stateful_signals):
+            if self.migration_branch is not None:
+                raise ModuleRegistryError(
+                    f"module {self.code!r} declares a migration branch but no "
+                    "database namespace — a stateless module owns no lineage"
+                )
+            return
+        if self.short_code is None:
+            raise ModuleRegistryError(
+                f"module {self.code!r} declares migration/table state but no "
+                f"`short_code`, so its tables would land in {HOST_SCHEMA!r} — "
+                "the compatibility namespace, which is not available to "
+                "installable modules (ADR-0006 D1)"
+            )
+        if self.migration_prefix is None:
+            raise ModuleRegistryError(
+                f"module {self.code!r} owns schema {self.db_schema!r} but "
+                "declares no `migration_prefix` — a stateful module needs a "
+                "lineage of its own"
+            )
+        validate_short_code(self.short_code)
+        validate_migration_prefix(self.migration_prefix)
+        validate_branch_label(self.migration_branch or self.code)
+        seen: set[str] = set()
+        for table in self.tables:
+            if table in seen:
+                raise ModuleRegistryError(
+                    f"module {self.code!r} declares table {table!r} twice"
+                )
+            seen.add(table)
+
+    # ── D1 derived views ────────────────────────────────────────────────────
+
+    @property
+    def db_schema(self) -> str | None:
+        """The module's immutable Postgres schema, or `None` if stateless.
+
+        Derived, read-only, and built only by `namespaces.module_schema` — the
+        `mod_` form is structural, not a convention a manifest can opt out of.
+        """
+        return None if self.short_code is None else module_schema(self.short_code)
+
+    @property
+    def is_stateful(self) -> bool:
+        """True when this module owns a database namespace."""
+        return self.short_code is not None
+
+    def migration_owner(self) -> MigrationOwner | None:
+        """This module's migration-lineage owner, or `None` if stateless.
+
+        Declaration only — `NamespaceRegistry.from_manifests` is what checks it
+        against the immutable ledger allocation.
+        """
+        if self.short_code is None or self.migration_prefix is None:
+            return None
+        return MigrationOwner(
+            owner=self.code,
+            prefix=self.migration_prefix,
+            branch_label=self.migration_branch or self.code,
+            db_schema=module_schema(self.short_code),
+        )
 
     # ── Compatibility aliases ───────────────────────────────────────────────
     # Read-only views under the `FeatureManifest` names, so every existing
@@ -180,19 +288,30 @@ class ModuleManifest:
         version: str = UNVERSIONED,
         contract_version: int = KERNEL_MODULE_CONTRACT_VERSION,
         dependencies: Sequence[str] = (),
+        short_code: str | None = None,
+        migration_prefix: str | None = None,
+        migration_branch: str | None = None,
+        tables: Sequence[str] = (),
     ) -> ModuleManifest:
         """Adapt a `FeatureManifest` into a `ModuleManifest`.
 
         The keyword arguments exist so an assembly can enrich a feature it has
         not yet migrated (pin a real version, declare its edges) without
         rewriting the feature package. Defaults preserve today's meaning
-        exactly: no declared version, no dependencies.
+        exactly: no declared version, no dependencies, and — for D1 — no
+        database namespace, which is correct for a host-assembly feature: its
+        tables live in the `public` compatibility namespace, owned by the
+        `assembly` migration owner, not by the feature.
         """
         return cls(
             code=manifest.name,
             version=version,
             contract_version=contract_version,
             dependencies=dependencies,
+            short_code=short_code,
+            migration_prefix=migration_prefix,
+            migration_branch=migration_branch,
+            tables=tables,
             api_routers=manifest.routers,
             web_routers=manifest.web_routers,
             nav=manifest.nav,
@@ -224,6 +343,11 @@ class ModuleInventoryEntry:
     dependencies: tuple[str, ...]
     core: bool
     enabled: bool
+    # D1: the module's Postgres schema (`None` = stateless), and the branch
+    # label its `alembic_version` rows carry. Reported so an operator can
+    # explain any row in the composed version table from the inventory alone.
+    db_schema: str | None = None
+    migration_branch: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         """JSON-safe row — the shape a diagnostics payload embeds."""
@@ -234,6 +358,8 @@ class ModuleInventoryEntry:
             "dependencies": list(self.dependencies),
             "core": self.core,
             "enabled": self.enabled,
+            "db_schema": self.db_schema,
+            "migration_branch": self.migration_branch,
         }
 
 
@@ -242,11 +368,19 @@ class ModuleRegistry:
 
     Construction is validation: a registry that exists is a module set that
     passed every check (unique codes, supported contract versions, satisfied
-    dependencies, acyclic). All four failures raise a `ModuleRegistryError`
-    subclass — fail closed, never a partially-loaded deployment.
+    dependencies, acyclic, coherent database namespaces). Module failures raise
+    a `ModuleRegistryError` subclass; namespace failures raise a
+    `dotmac_kernel.namespaces.NamespaceError` subclass — fail closed either
+    way, never a partially-loaded deployment.
+
+    D1 (ADR-0006): this registry is also where a module's database namespace
+    and migration prefix are ASSIGNED. It builds a `NamespaceRegistry` from the
+    installed manifests plus the kernel's immutable allocation ledger, so a
+    module that invented, re-pointed, or contested a namespace cannot be
+    registered at all.
     """
 
-    __slots__ = ("_by_code", "_order")
+    __slots__ = ("_by_code", "_namespaces", "_order")
 
     def __init__(
         self,
@@ -261,6 +395,7 @@ class ModuleRegistry:
         self._check_unique_codes(declared)
         self._check_contract_versions(declared, supported_contract_versions)
         self._check_dependencies_installed(declared)
+        self._namespaces: NamespaceRegistry = NamespaceRegistry.from_manifests(declared)
         self._order: tuple[ModuleManifest, ...] = self._topological_order(declared)
         self._by_code: dict[str, ModuleManifest] = {m.code: m for m in self._order}
 
@@ -385,6 +520,12 @@ class ModuleRegistry:
         """Every INSTALLED module, dependencies first (see module docstring)."""
         return self._order
 
+    def namespaces(self) -> NamespaceRegistry:
+        """The validated D1 namespace/migration-owner composition for this
+        module set — what the composed migration gate and the post-migration
+        live-catalog gate both read."""
+        return self._namespaces
+
     def codes(self) -> frozenset[str]:
         """Every installed module code."""
         return frozenset(self._by_code)
@@ -455,6 +596,10 @@ class ModuleRegistry:
                 dependencies=tuple(m.dependencies),
                 core=m.core,
                 enabled=m.code in enabled,
+                db_schema=m.db_schema,
+                migration_branch=(
+                    (m.migration_branch or m.code) if m.is_stateful else None
+                ),
             )
             for m in sorted(self._order, key=lambda m: m.code)
         )
@@ -474,6 +619,19 @@ class ModuleRegistry:
             "kernel_contract_version": KERNEL_MODULE_CONTRACT_VERSION,
             "modules": [entry.as_dict() for entry in self.inventory(disabled)],
             "startup_order": [m.code for m in self.enabled_order(disabled)],
+            # D1 item 5: `alembic_version` stays the migration truth, and this
+            # is the attribution that makes its rows explainable — every branch
+            # label in the composed version table maps to exactly one owner and
+            # (for a module) one schema.
+            "migration_owners": [
+                {
+                    "owner": owner.owner,
+                    "prefix": owner.prefix,
+                    "branch_label": owner.branch_label,
+                    "db_schema": owner.db_schema,
+                }
+                for owner in sorted(self._namespaces.owners(), key=lambda o: o.owner)
+            ],
         }
 
 

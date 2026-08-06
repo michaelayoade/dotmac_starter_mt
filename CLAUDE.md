@@ -345,7 +345,13 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     has a real consumer (`test_manifest_declarations.py`).
 13. Migrations run as `app_admin`, never on container boot;
     `scripts/deploy.sh` is the only production migration path.
-14. Cross-repository engineering governance is pinned by exact commit and the
+14. Each stateful module has one immutable `mod_<short_code>` schema and one
+    registered migration lineage; `public` is reserved for the kernel and host
+    assembly. Module SQL is fully schema-qualified, and the composed static and
+    live-catalog gates enforce revision, namespace, and table ownership
+    (`test_namespaces.py`, `test_migration_gate.py`,
+    `test_live_catalog_contract.py`, `test_module_schema_catalog.py`).
+15. Cross-repository engineering governance is pinned by exact commit and the
     product workflow must execute that same accepted revision
     (`.dotmac/standards-profile.json`, `engineering-standards.yml`).
 

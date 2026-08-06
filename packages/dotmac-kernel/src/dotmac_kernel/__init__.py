@@ -115,6 +115,28 @@ from dotmac_kernel.money import (
     MoneyError,
     currency,
 )
+from dotmac_kernel.namespaces import (
+    HOST_SCHEMA,
+    MAX_REVISION_ID_LENGTH,
+    MIGRATION_OWNER_LEDGER,
+    DuplicateBranchLabelError,
+    DuplicateMigrationPrefixError,
+    DuplicateSchemaError,
+    DuplicateTableOwnerError,
+    HostSchemaClaimError,
+    InvalidMigrationPrefixError,
+    InvalidRevisionIdError,
+    InvalidSchemaError,
+    MigrationOwner,
+    NamespaceAllocationError,
+    NamespaceError,
+    NamespaceRegistry,
+    UnallocatedNamespaceError,
+    module_schema,
+    qualified,
+    revision_id,
+    schema_table_args,
+)
 from dotmac_kernel.permissions import (
     DuplicatePermissionError,
     PermissionCatalogue,
@@ -145,7 +167,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a11"
+__version__ = "0.1.0a12"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -185,10 +207,13 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.middleware.security_headers",
         "dotmac_kernel.middleware.tenant",
         "dotmac_kernel.migrations",
+        "dotmac_kernel.migrations.catalog",
+        "dotmac_kernel.migrations.gate",
         "dotmac_kernel.models",
         "dotmac_kernel.models_platform",
         "dotmac_kernel.modules",
         "dotmac_kernel.money",
+        "dotmac_kernel.namespaces",
         "dotmac_kernel.permissions",
         "dotmac_kernel.platform_auth",
         "dotmac_kernel.profiles",
@@ -275,6 +300,27 @@ __all__ = [
     "MissingModuleDependencyError",
     "ModuleDependencyCycleError",
     "UnknownModuleError",
+    # database namespaces + migration lineage identity (ADR-0006 D1)
+    "HOST_SCHEMA",
+    "MAX_REVISION_ID_LENGTH",
+    "MIGRATION_OWNER_LEDGER",
+    "MigrationOwner",
+    "NamespaceRegistry",
+    "module_schema",
+    "qualified",
+    "schema_table_args",
+    "revision_id",
+    "NamespaceError",
+    "InvalidSchemaError",
+    "InvalidMigrationPrefixError",
+    "InvalidRevisionIdError",
+    "DuplicateSchemaError",
+    "DuplicateMigrationPrefixError",
+    "DuplicateBranchLabelError",
+    "DuplicateTableOwnerError",
+    "UnallocatedNamespaceError",
+    "NamespaceAllocationError",
+    "HostSchemaClaimError",
     # capability catalogue (WS1)
     "CapabilityCatalogue",
     "DuplicateCapabilityError",

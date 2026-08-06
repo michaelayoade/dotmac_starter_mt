@@ -1252,6 +1252,53 @@ supported as the raw role check; both share one `_holds_any_role` query. The
 `rbac` feature's JSON routes are migrated to `require_permission`; every other
 feature still uses `require_role` and migrates one at a time.
 
+## Module database namespaces and migration lineage (ADR-0006 D1)
+
+As-built in kernel `0.1.0a12`. The authority is `dotmac_kernel.namespaces`; the
+build-time enforcement is `dotmac_kernel.migrations.gate`; the post-migration
+enforcement is `dotmac_kernel.migrations.catalog`.
+
+| Concern | Owner | Enforced by |
+|---|---|---|
+| Which schema a module owns | `ModuleManifest.short_code` → derived read-only `db_schema` = `mod_<short_code>` | frozen dataclass + `module_schema()` as the only builder |
+| That the allocation never moves | `namespaces.MIGRATION_OWNER_LEDGER` (checked-in, kernel-shipped) | unconditional whole-ledger validation, then `NamespaceRegistry.from_manifests` → `UnallocatedNamespaceError` / `NamespaceAllocationError` |
+| No two owners share a schema / prefix / branch label / table | `NamespaceRegistry` | construction raises `DuplicateSchemaError` / `DuplicateMigrationPrefixError` / `DuplicateBranchLabelError` / `DuplicateTableOwnerError` |
+| Coherent composed migration graph | `migrations.gate.run_gate` | `make migration-gate` (in `make check`; the CI `quality` matrix, which `docker-build` now `needs`) |
+| Live RLS/grant contract per module schema | `migrations.catalog.audit_live_schemas` | `tests/test_module_schema_catalog.py` (Postgres) |
+
+**`public` is a compatibility namespace, not a shared one.** It belongs to the
+kernel and to this one host assembly — every feature in `app/features/` is a
+host feature whose tables live there, owned by the `assembly` migration owner,
+and none declares a `short_code`. An installable module may not claim it
+(`HostSchemaClaimError`), and that closure is what makes the verified cross-repo
+collisions in `docs/inventories/migration-collisions.md` (`parties`,
+`audit_events`, `roles`, `user_credentials`, …) structurally impossible rather
+than merely unlikely.
+
+**Attribution, not a second map.** Each version location is attributed to an
+owner through its lineage root's branch label. `alembic_version` remains the
+migration truth, and `ModuleRegistry.inventory_payload()["migration_owners"]`
+plus `GateReport.attribution` are what make an individual row in it explainable.
+
+**Static enforcement follows the real upgrade path.** The composed gate walks
+local helpers reachable from `upgrade()`, resolves typed Alembic metadata and
+module-level `module_schema()` constants, checks both imperative and inline
+foreign keys, and rejects a fully qualified DDL operation when its target is
+another owner's schema. An empty manifest `tables` declaration means “owns no
+tables”; it is never an allow-all escape hatch. The live gate then checks the
+manifest against the migrated catalog in both directions. The host `public`
+audit remains a separate policy adapter because it owns explicit platform and
+split-policy exceptions, but it reuses the kernel catalog's UNIQUE-constraint
+query and enforces the same composite-unique rule for tenant-scoped tables.
+
+**Two grandfathered lineages.** `kernel` (`0001_initial_tenant_schema` …
+`0012_platform_outbox`) and `assembly` (`a001_adopt_cfd` …
+`a003_revocation_lists`) predate D1. Their ids are already recorded in live
+`alembic_version` rows, so `MigrationOwner.legacy_revision_pattern` preserves
+their original format and exempts them from the strict
+`<prefix>_<sequence>_<slug>` and `schema=` rules. Every installable module gets
+the strict rules; no existing revision was renamed.
+
 ## Feature-mount sequence
 
 0. `dotmac_kernel.create_app` builds a `ModuleRegistry` from `spec.modules`

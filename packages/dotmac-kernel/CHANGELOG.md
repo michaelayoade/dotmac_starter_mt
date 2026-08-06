@@ -8,6 +8,104 @@ here.
 
 ## Unreleased
 
+## 0.1.0a12 — 2026-08-06
+
+Twelfth alpha. Adds **per-module Postgres schema namespaces and registered
+Alembic migration prefixes** — D1 of the white-label foundation programme
+(ADR-0006 § "Decision amendment — 2026-08-02"), the last blocker for stateful
+module composition. No migration; the kernel head stays `0012` and every
+existing revision id is unchanged.
+
+### Added
+- **`dotmac_kernel.namespaces`** — the D1 authority. One immutable
+  `mod_<short_code>` Postgres schema per STATEFUL module, plus an immutable,
+  globally unique short migration prefix and branch label per migration owner.
+  `NamespaceRegistry` is construction-is-validation, like `PermissionCatalogue`
+  before it: it refuses a composition with a duplicate schema claim
+  (`DuplicateSchemaError`), duplicate migration prefix
+  (`DuplicateMigrationPrefixError`), duplicate branch label
+  (`DuplicateBranchLabelError`) or contested table (`DuplicateTableOwnerError`).
+
+  This answers verified evidence, not a hypothetical:
+  `docs/inventories/migration-collisions.md` found `starter ∩ ERP` colliding on
+  `audit_events`, `domain_settings`, `people`, `person_roles`, `roles`,
+  `user_credentials` and `starter ∩ Sub` on `parties`, `party_roles` — sixteen
+  of seventeen duplicate names same-name/**different-shape**, the failure mode
+  that corrupts quietly rather than erroring loudly.
+
+- **`MIGRATION_OWNER_LEDGER`** — the checked-in, kernel-shipped allocation
+  record, and the reason "globally unique" can be true across Dotmac repos: the
+  kernel is the shared dependency, so allocations are registered once. A
+  stateful module absent from it (`UnallocatedNamespaceError`) or contradicting
+  it (`NamespaceAllocationError`) cannot be registered. Ships with the two host
+  owners only — `kernel` and `assembly`, both writing to `public`.
+
+- **`ModuleManifest` D1 declaration fields** — `short_code`,
+  `migration_prefix`, `migration_branch`, `tables`. `db_schema` is a *derived,
+  read-only* property built only through `module_schema()`, so a namespace can
+  never be inferred from a display name and there is no settable attribute to
+  re-point at runtime. A manifest is either fully stateful or fully stateless;
+  a half-declaration (tables with no schema) is rejected, because its tables
+  would land in `public`.
+
+- **`ModuleRegistry` now assigns namespaces.** It builds the `NamespaceRegistry`
+  during construction and exposes it via `namespaces()`; `inventory_payload()`
+  gained a `migration_owners` block and each inventory row a `db_schema` /
+  `migration_branch`, so any `alembic_version` row is explainable from the
+  inventory alone.
+
+- **`dotmac_kernel.migrations.gate`** — the composed CI gate. Statically (AST,
+  no imports, no database) loads every selected version location and rejects
+  duplicate revisions, unregistered/duplicate prefixes, duplicate branch
+  labels, duplicate schema claims and duplicate table ownership; it also
+  enforces one lineage root per owner, `down_revision` never crossing owners
+  (cross-lineage ordering is `depends_on`), revision ids inside
+  `alembic_version.version_num`'s **VARCHAR(32)**, and module DDL that names
+  its schema instead of relying on `search_path`. Locations are attributed to
+  owners through their lineage root's branch label, so there is no second
+  location→owner map to drift from `alembic.ini`.
+
+- **`dotmac_kernel.migrations.catalog`** — the post-migration live-catalog
+  contract, applying the kernel RLS/grant rules across every registered module
+  schema: RLS ENABLEd + FORCEd, a policy present, `tenant_id NOT NULL` (or the
+  EXISTS-join subtype pattern), unique constraints that include `tenant_id`,
+  composite tenant FKs, manifest-vs-live table ownership, and no module table
+  squatting in `public`. Split into parameterised SQL builders plus a pure
+  `audit_snapshot` decision function, so the contract is fully unit-testable
+  without Postgres.
+
+- **`revision_id(prefix, sequence, slug)`**, `qualified()`,
+  `schema_table_args()` — the helpers that make the `<prefix>_<sequence>_<slug>`
+  format and full schema qualification the path of least resistance.
+  `revision_id` raises rather than truncating past 32 characters, a limit that
+  otherwise surfaces only mid-deploy against a real database.
+
+### Enforcement hardening
+- The allocation ledger is validated as a whole even when an allocated module
+  is not installed, so fleet-wide schema/prefix/branch uniqueness cannot hide
+  a collision in two dormant rows.
+- The static migration scanner follows local `upgrade()` helpers, understands
+  typed Alembic metadata and `module_schema()` constants, checks imperative and
+  inline foreign keys, treats an empty `tables` declaration as owning nothing,
+  and rejects a qualified DDL write aimed at another module's schema.
+- The host `public`-schema audit now consumes the kernel catalog's canonical
+  UNIQUE-constraint query and enforces the composite-unique rule it already
+  claimed under hard rule 11; its sensitivity canary covers the failure path.
+
+### Compatibility
+- **`public` is a compatibility namespace, not a shared one.** It remains the
+  kernel's and the one host assembly's, and is explicitly unavailable to
+  installable modules (`HostSchemaClaimError`).
+- **The `kernel` and `assembly` lineages are grandfathered.** Their revision
+  ids (`0001_initial_tenant_schema`, `a001_adopt_cfd`, …) are already recorded
+  in live `alembic_version` rows, so they keep their original format via
+  `MigrationOwner.legacy_revision_pattern` and are exempt from the strict
+  `<prefix>_<sequence>_<slug>` and `schema=` rules. Every installable module
+  gets the strict rules.
+- Purely additive: no existing public name changed, and every existing manifest
+  (including a plain `FeatureManifest`) is stateless under D1 and validates
+  unchanged.
+
 ## 0.1.0a11 — 2026-08-06
 
 > **Amended 2026-08-03.** `active_audit_actions()` no longer defaults to an

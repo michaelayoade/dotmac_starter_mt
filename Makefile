@@ -31,7 +31,10 @@ type-check: ## mypy (assembly + kernel package)
 	poetry run mypy app $(KERNEL_SRC)
 security: ## Bandit security scan (assembly + kernel package)
 	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC)
-check: lint lint-imports type-check security ## Lint + types + security
+ALEMBIC_INI ?= alembic.ini
+migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
+	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
+check: lint lint-imports type-check security migration-gate ## Lint + types + security + migration composition
 	poetry run ruff format --check .
 
 ##@ Testing
@@ -84,6 +87,6 @@ bump-version: ## Bump semver: make bump-version part=patch|minor|major
 deploy: ## Deploy tag: make deploy TAG=sha-abc123
 	IMAGE_NAME=$(IMAGE_NAME) APP_PORT=$(APP_PORT) ./scripts/deploy.sh $(TAG)
 
-.PHONY: help lint lint-imports format type-check security check test test-unit \
+.PHONY: help lint lint-imports format type-check security migration-gate check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
 	css-build css-watch docker-build docker-dev bump-version deploy

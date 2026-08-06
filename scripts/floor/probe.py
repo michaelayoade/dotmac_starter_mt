@@ -19,6 +19,8 @@ from decimal import Decimal
 
 import dotmac_kernel
 from dotmac_kernel import (
+    HOST_SCHEMA,
+    MIGRATION_OWNER_LEDGER,
     UNVERSIONED,
     AuditActionRegistry,
     CapabilityCatalogue,
@@ -26,16 +28,25 @@ from dotmac_kernel import (
     DeploymentProfileSpec,
     ExchangeRate,
     FeatureManifest,
+    HostSchemaClaimError,
+    InvalidRevisionIdError,
+    MigrationOwner,
     MissingModuleDependencyError,
     ModuleManifest,
     ModuleRegistry,
     Money,
+    NamespaceRegistry,
     PermissionCatalogue,
     PermissionSpec,
     ProductAssemblySpec,
+    UnallocatedNamespaceError,
     UndeclaredAuditActionError,
     UndeclaredPermissionError,
     currency,
+    module_schema,
+    qualified,
+    revision_id,
+    schema_table_args,
 )
 from dotmac_kernel.licensing import (
     UNKNOWN_DIGEST,
@@ -108,6 +119,44 @@ except MissingModuleDependencyError:
     pass
 else:  # pragma: no cover - the probe fails loudly instead
     raise AssertionError("ModuleRegistry accepted a missing dependency")
+
+# D1 (ADR-0006): database namespaces + migration lineage identity. Same
+# category as `modules` — a pure contract both products consume the moment they
+# extract a STATEFUL module — so the floor claim must cover it. Build a real
+# allocation, prove the schema derives, prove the 32-char revision-id budget
+# bites, and prove an UNALLOCATED module fails closed.
+assert module_schema("bill") == "mod_bill"
+assert qualified("mod_bill", "invoices") == "mod_bill.invoices"
+assert schema_table_args("mod_bill") == {"schema": "mod_bill"}
+assert revision_id("bl", 1, "invoices") == "bl_0001_invoices"
+allocated = MigrationOwner(
+    owner="m4", prefix="bl", branch_label="m4", db_schema=module_schema("bill")
+)
+stateful = ModuleManifest(
+    code="m4",
+    version="1.0.0",
+    short_code="bill",
+    migration_prefix="bl",
+    tables=("invoices",),
+)
+assert stateful.db_schema == "mod_bill"
+namespaces = NamespaceRegistry.from_manifests(
+    [stateful], ledger=(*MIGRATION_OWNER_LEDGER, allocated)
+)
+assert namespaces.module_schemas() == ("mod_bill",)
+for call, namespace_error in (
+    (lambda: revision_id("bl", 1, "x" * 40), InvalidRevisionIdError),
+    (lambda: schema_table_args(HOST_SCHEMA), HostSchemaClaimError),
+    (lambda: NamespaceRegistry.from_manifests([stateful]), UnallocatedNamespaceError),
+):
+    try:
+        call()
+    except namespace_error:
+        pass
+    else:  # pragma: no cover - the probe fails loudly instead
+        raise AssertionError(
+            f"namespaces accepted what {namespace_error.__name__} forbids"
+        )
 
 # Manifest declaration catalogues (module control-plane step 3): a spec only
 # fails when it is BUILT and a catalogue only fails when it is QUERIED, so build

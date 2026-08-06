@@ -82,7 +82,26 @@ specifics) points here and must never fork these rules.
     `CMD` only runs `uvicorn`; `scripts/deploy.sh` is the only place
     migrations run in production. The same migration that creates a table
     creates its RLS and grants.
-14. **Cross-repository engineering governance is pinned and required.**
+14. **One namespace and one migration lineage per stateful module**
+    (ADR-0006 D1). A STATEFUL module declares `short_code` +
+    `migration_prefix` on its `ModuleManifest`, both allocated in
+    `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER`; its schema is the
+    derived `mod_<short_code>`, never inferred from a display name and never
+    re-pointed. A STATELESS module declares neither. `public` stays the
+    compatibility namespace of the kernel + this one host assembly and is
+    NOT available to installable modules. Module models, migrations, FKs,
+    policies and raw SQL fully qualify their schema — never `search_path`.
+    Revision ids are `<prefix>_<sequence>_<slug>` and must fit
+    `alembic_version.version_num`'s VARCHAR(32); each module lineage has its
+    own base and branch label, and cross-lineage ordering uses `depends_on`,
+    never `down_revision`. The composed gate (`make migration-gate`, also in
+    `make check` and in CI *before* `docker-build`) rejects duplicate
+    revisions, prefixes, branch labels, schema claims and table ownership.
+    (`tests/unit/test_namespaces.py`, `tests/unit/test_migration_gate.py`,
+    `tests/unit/test_live_catalog_contract.py`;
+    `tests/test_module_schema_catalog.py` is the post-migration live-catalog
+    gate on Postgres.)
+15. **Cross-repository engineering governance is pinned and required.**
     `.dotmac/standards-profile.json` names this repository's declared authority
     and fully typed contract surfaces, and pins the accepted Governance source
     by exact commit. The `Dotmac engineering standards` CI job must execute the
@@ -102,7 +121,8 @@ default in production are added to `validate_settings`'s prod-fatal list.
 
 ## Validation before any commit
 
-- `make check` — ruff lint, import-linter, mypy, bandit, format check.
+- `make check` — ruff lint, import-linter, mypy, bandit, the composed
+  migration gate (ADR-0006 D1), format check.
 - `make test-unit` — SQLite-fast: `tests/unit` + `tests/architecture`.
 - `make test-db-up && make test-integration && make test-db-down` —
   Postgres RLS canaries (`TEST_DB_PORT` overridable).

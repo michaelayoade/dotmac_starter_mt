@@ -233,11 +233,11 @@ productionize further, port what your project needs:
   `docs/adr/`, not here)
 - File uploads, notifications, scheduler
 - Manifest-owned declaration catalogues for settings, typed feature flags,
-  entity types, and jobs, plus migration/health validation and the
-  effective-capability admin UI described by the module control-plane
+  entity types, and jobs, plus runtime migration-current/health evidence and
+  the effective-capability admin UI described by the module control-plane
   directive. The validating module, permission, and audit-action registries,
-  tenant-local entitlement grants, and their explainable evaluator already
-  exist in the kernel.
+  per-module schema/migration ownership gates, tenant-local entitlement grants,
+  and their explainable evaluator already exist in the kernel.
 - Runtime selection/wiring of the typed deployment-profile contracts, plus a
   provider registry for SaaS, dedicated, on-premise/air-gapped, OEM, and
   API-only packaging

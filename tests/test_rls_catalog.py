@@ -25,6 +25,7 @@ Requires real Postgres (`make test-db-up` / `make test-integration`).
 
 from __future__ import annotations
 
+from dotmac_kernel.migrations.catalog import TENANT_COLUMN, catalog_queries
 from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
@@ -118,6 +119,14 @@ def _foreign_keys(conn) -> list[tuple[str, str, list[str], str]]:
         )
     ).all()
     return [(r[0], r[1], list(r[2]), r[3]) for r in rows]
+
+
+def _unique_constraints(conn) -> list[tuple[str, str, list[str]]]:
+    """The shared kernel query, adapted to the host `public` namespace."""
+    rows = conn.execute(
+        text(catalog_queries()["unique_constraints"]), {"schema": "public"}
+    ).all()
+    return [(r[0], r[1], list(r[2] or ())) for r in rows]
 
 
 def audit_live_catalog(conn) -> list[str]:
@@ -235,6 +244,19 @@ def audit_live_catalog(conn) -> list[str]:
                 f"{table}.{conname} -> {ref_table}: tenant-scoped FK must be "
                 f"composite with tenant_id (has {cols})"
             )
+
+    # Composite-unique rule: business uniqueness on a tenant-scoped table
+    # includes the discriminator, or one tenant's value blocks another's
+    # insert. This is deliberately derived from the same scoped set as the FK
+    # rule, so platform catalog constraints remain outside the tenant contract.
+    for relation, conname, cols in _unique_constraints(conn):
+        table = relation.rpartition(".")[2].strip('"')
+        if table not in scoped or TENANT_COLUMN in cols:
+            continue
+        violations.append(
+            f"{table}.{conname}: unique constraint on {cols} omits "
+            f"{TENANT_COLUMN} — one tenant's value blocks another tenant's insert"
+        )
     return violations
 
 
@@ -277,7 +299,9 @@ def test_audit_flags_a_broken_table(admin_engine) -> None:
             conn.execute(
                 text(
                     "CREATE TABLE _rls_canary_probe ("
-                    "id uuid PRIMARY KEY, tenant_id uuid NOT NULL)"
+                    "id uuid PRIMARY KEY, tenant_id uuid NOT NULL, "
+                    "number text NOT NULL, CONSTRAINT uq_rls_canary_number "
+                    "UNIQUE (number))"
                 )
             )
             # ... and a grant-boundary breach (GRANT is transactional too):
@@ -288,6 +312,11 @@ def test_audit_flags_a_broken_table(admin_engine) -> None:
             assert probe_hits, (
                 "the catalog audit failed to flag a tenant-scoped table "
                 "with no RLS — the checker is blind"
+            )
+            unique_hits = [v for v in violations if "uq_rls_canary_number" in v]
+            assert unique_hits, (
+                "the public-schema audit failed to flag a tenant-scoped "
+                "unique constraint without tenant_id — the checker is blind"
             )
             grant_hits = [
                 v for v in violations if "platform_admins" in v and "SELECT" in v
