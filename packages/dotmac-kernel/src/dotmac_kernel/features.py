@@ -1,5 +1,13 @@
 """Feature-manifest registry.
 
+**Superseded, not removed:** `dotmac_kernel.modules.ModuleManifest` is the
+versioned expansion of `FeatureManifest` (module control-plane directive step 2)
+and adds `version`, `contract_version`, and `dependencies` on top of everything
+here. `FeatureManifest` remains fully supported — the registry adapts one
+automatically (`ModuleManifest.from_feature`) — so an assembly migrates its
+feature packages one at a time, or not at all. Everything below still describes
+the shared surface both manifests present.
+
 Each package under app/features/ exports `feature: FeatureManifest` from its
 feature.py. Core features fail hard at startup; non-core features are fault-
 isolated (a broken optional feature logs and is skipped). Loading uses
@@ -46,8 +54,12 @@ import importlib
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, FastAPI
+
+if TYPE_CHECKING:  # avoids a runtime cycle: `modules` imports this module
+    from dotmac_kernel.modules import ModuleManifest
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +102,8 @@ class FeatureManifest:
     # module's capability physically exists; downstream authorities (entitlement
     # grants, deployment profiles) may only reference DECLARED codes — they may
     # never invent one. The manifest is the single declaration point; see
-    # `dotmac_kernel.capabilities.CapabilityCatalogue`. Forward-compatible with
-    # the eventual `ModuleManifest` expansion (which folds this in alongside
-    # `code`/`version`/`contract_version`/`permissions`).
+    # `dotmac_kernel.capabilities.CapabilityCatalogue`. Carried through
+    # unchanged by `ModuleManifest.from_feature`.
     capabilities: Sequence[str] = field(default_factory=tuple)
 
 
@@ -110,12 +121,18 @@ def load_manifests(module_names: Sequence[str]) -> list[FeatureManifest]:
 def mount_features(
     app: FastAPI,
     *,
-    manifests: Sequence[FeatureManifest],
+    manifests: Sequence[FeatureManifest | ModuleManifest],
     disabled: set[str],
     web_enabled: bool,
 ) -> None:
     """Mount every enabled feature's `routers` (always) and `web_routers`
     (only when `web_enabled` — the F1 surface switch; see module docstring).
+
+    Accepts a `ModuleManifest` too: its `name`/`routers` compatibility aliases
+    (see `dotmac_kernel.modules`) mean this consumer needed no other change when
+    the module registry landed. `create_app` now passes the registry's
+    dependency-ordered, enabled-only sequence; the per-manifest checks below
+    stay as the belt-and-braces guarantee for a direct caller.
     """
     for manifest in manifests:
         if manifest.name in disabled or not manifest.enabled_by_default:

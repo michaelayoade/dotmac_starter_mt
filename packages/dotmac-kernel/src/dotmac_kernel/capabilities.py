@@ -1,9 +1,10 @@
 """Capability catalogue (WS1) — the code-authoritative set of capability codes.
 
 A *capability code* (e.g. ``"inventory.use"``) is a module's declaration, on its
-``FeatureManifest.capabilities``, that a capability physically exists. This module
-builds the catalogue of those declarations and is the ONE place that answers
-"is this code real?".
+manifest's ``capabilities`` (either a ``ModuleManifest`` or a not-yet-migrated
+``FeatureManifest`` — both are accepted), that a capability physically exists.
+This module builds the catalogue of those declarations and is the ONE place that
+answers "is this code real?".
 
 The load-bearing invariant (deployment-profiles plan): **capability codes are
 declared by manifests and may never be invented anywhere else** — an entitlement
@@ -20,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from dotmac_kernel.features import FeatureManifest
+from dotmac_kernel.modules import AnyManifest
 
 
 class DuplicateCapabilityError(ValueError):
@@ -45,9 +46,7 @@ class CapabilityCatalogue:
         self._owner_by_code: dict[str, str] = dict(owner_by_code)
 
     @classmethod
-    def from_manifests(
-        cls, manifests: Iterable[FeatureManifest]
-    ) -> CapabilityCatalogue:
+    def from_manifests(cls, manifests: Iterable[AnyManifest]) -> CapabilityCatalogue:
         owner_by_code: dict[str, str] = {}
         for manifest in manifests:
             for code in manifest.capabilities:

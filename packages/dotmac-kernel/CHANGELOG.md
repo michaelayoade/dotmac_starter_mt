@@ -8,6 +8,81 @@ here.
 
 ## Unreleased
 
+## 0.1.0a10 — 2026-08-06
+
+Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
+control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
+authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
+head stays `0012`.
+
+### Added
+- **`dotmac_kernel.modules`** — `ModuleManifest`, the versioned expansion of
+  `FeatureManifest` (`code`, `version`, `contract_version`, `dependencies` on
+  top of the existing router/nav/capability/seed surface), and `ModuleRegistry`,
+  the one authority on whether an installed module set is coherent.
+
+  Construction IS validation, fail-closed on four independent checks, each with
+  its own named error under a shared `ModuleRegistryError` base: a duplicate
+  `code` (`DuplicateModuleError`), a `contract_version` outside
+  `SUPPORTED_MODULE_CONTRACT_VERSIONS` (`ModuleContractVersionError`), a
+  dependency on a code that is not installed (`MissingModuleDependencyError`),
+  and a dependency cycle (`ModuleDependencyCycleError`, whose message names the
+  actual path rather than merely asserting one exists).
+
+  `startup_order()` is a pure function of (declaration order, dependency edges):
+  dependencies first, **declaration order as the tiebreak**. Declaration order,
+  not alphabetical, is load-bearing — an assembly's module list is a deliberate
+  mount order and route matching is first-match-wins, so adopting the registry
+  must not silently reorder an assembly whose modules declare no dependencies.
+  For every `FeatureManifest` shipping today that means the order is provably
+  identical to before.
+
+  `enabled_codes`/`enabled_order` make "deployment-enabled" one definition
+  instead of three, and `enabled_order` fails closed when an enabled module
+  depends on one that is NOT enabled: installed is not sufficient, and disabling
+  a module something else needs is a misconfiguration that belongs at startup,
+  not in a mystery 500.
+
+  `inventory()` / `inventory_payload()` expose the installed-module/version
+  inventory (`ModuleInventoryEntry`: code, version, contract version,
+  dependencies, core, enabled) for health and diagnostics — sorted by code so
+  two deployments' inventories are diffable.
+
+- **`create_app` validates modules before mounting anything.** `spec.modules` is
+  built into a `ModuleRegistry` first, so an incoherent set stops the boot
+  rather than producing a half-mounted app, and surface globals, mounting, and
+  seeds all walk that single deterministic order. The validated registry and its
+  inventory are published on `app.state.module_registry` /
+  `app.state.module_inventory`.
+
+  Public `/health` is deliberately unchanged: it stays DB-free liveness and
+  discloses nothing about what is installed. The kernel ships the inventory
+  CONTRACT; the authenticated platform diagnostics surface is the control
+  plane's own program step and composes `inventory_payload()`.
+
+### Changed
+- **`ProductAssemblySpec.modules` accepts `ModuleManifest` and `FeatureManifest`,
+  freely mixed** (`AnyManifest`), which is what makes migrating an assembly's
+  feature packages incremental. Same widening for `mount_features`,
+  `install_surface_globals`, and `CapabilityCatalogue.from_manifests`.
+
+### Compatibility
+- **No breaking change.** `FeatureManifest` and every existing consumer keep
+  working untouched, two ways: the registry adapts a feature automatically
+  (`ModuleManifest.from_feature`, which carries every field across and invents
+  neither a version nor a dependency — an unversioned module records the
+  `UNVERSIONED` sentinel `"0.0.0"`), and `ModuleManifest` exposes read-only
+  `name`/`routers` aliases for `code`/`api_routers` so manifest-walking code
+  needs no call-site change.
+- The directive's `permissions`, `settings`, `feature_flags`, `audit_actions`,
+  `entity_types`, and `health_checks` manifest fields are deliberately NOT added
+  yet. They belong to later program steps, and the same directive requires CI to
+  fail when "a declaration has no consumer" — each lands with the registry code
+  that derives behavior from it.
+- The `kernel-floors` job now constructs a module graph, asserts its order,
+  serializes the inventory, and proves a missing dependency fails closed at the
+  floor.
+
 ## 0.1.0a9 — 2026-08-03
 
 Ninth alpha. Adds the **applied-state envelope** — the structure a deployment

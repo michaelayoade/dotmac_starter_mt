@@ -74,6 +74,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
+| `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
@@ -92,6 +93,75 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.testing.provisioning` | `FakeProvisioningProvider`, `check_provisioning_provider_contract` |
 | `dotmac_kernel.web_deps` | `require_web_auth`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
 
+### Module manifest and registry (`dotmac_kernel.modules`)
+
+The versioned module declaration and the one authority on whether an installed
+module set is coherent (module control-plane directive step 2). Pure and
+in-memory, like `capabilities` and `profiles`: it **describes installed code**;
+it never grants entitlement and it never deploys anything.
+
+- **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
+  `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`, `core`,
+  `enabled_by_default`, `seed`. `code` is the stable identifier every other
+  authority references (a dependency edge, a profile's required/forbidden set, a
+  capability owner). `version` is the module's own release version;
+  `contract_version` is the kernel manifest generation it was built against —
+  independent facts, and only the latter gates loading.
+- **`ModuleRegistry(manifests)`** — construction IS validation, fail-closed on
+  all four:
+  - a duplicate `code` → `DuplicateModuleError`;
+  - a `contract_version` outside `SUPPORTED_MODULE_CONTRACT_VERSIONS` →
+    `ModuleContractVersionError` (the kernel's own generation is
+    `KERNEL_MODULE_CONTRACT_VERSION`; the supported set is a constructor
+    keyword, so supporting two generations is a rollout rather than a flag day);
+  - a dependency on a code that is not installed →
+    `MissingModuleDependencyError`;
+  - a dependency cycle → `ModuleDependencyCycleError`, whose message names the
+    actual path (`a -> b -> a`).
+
+  All four share the `ModuleRegistryError` base and are `ValueError`s.
+- **Deterministic startup order** — `startup_order()` is a pure function of
+  (declaration order, dependency edges): dependencies first, **declaration order
+  as the tiebreak**. Declaration order, not alphabetical, on purpose: an
+  assembly's module list is a deliberate mount order (route matching is
+  first-match-wins), so adopting the registry must not silently reorder an
+  assembly whose modules declare no dependencies. Same manifests in, same order
+  out, every boot.
+- **Deployment enablement** — `enabled_codes(disabled)` is the single definition
+  of enabled (not in `disabled`, and not `enabled_by_default=False`).
+  `enabled_order(disabled)` filters the startup order to those and **fails
+  closed if an enabled module depends on one that is not enabled** — installed
+  is not sufficient; "dependencies satisfied" means the dependency is running.
+- **Inventory** — `inventory(disabled)` returns `ModuleInventoryEntry` rows
+  (`code`, `version`, `contract_version`, `dependencies`, `core`, `enabled`)
+  sorted by code so two deployments' inventories are diffable;
+  `inventory_payload(disabled)` is the JSON-safe diagnostics document
+  (`kernel_contract_version`, `modules`, `startup_order`). The kernel supplies
+  the CONTRACT, not an endpoint: public `/health` stays liveness-only and
+  discloses none of it, and the authenticated platform diagnostics surface is
+  the control plane's own step, composing this payload.
+- **Lookup** — `codes()`, `is_installed(code)`, `get(code)` (raising
+  `UnknownModuleError`).
+
+**Compatibility with `FeatureManifest`.** `FeatureManifest` remains fully
+supported and unchanged. The registry accepts either shape — freely mixed in one
+assembly — and adapts a feature via `ModuleManifest.from_feature(manifest, *,
+version=UNVERSIONED, contract_version=..., dependencies=())`, which carries every
+field across and invents nothing (`UNVERSIONED` is `"0.0.0"`, a real sortable
+version that reads as "not declared yet"; the keywords let an assembly pin a
+version or declare edges for a package it has not migrated). In the other
+direction, `ModuleManifest` exposes read-only `name`/`routers` properties
+aliasing `code`/`api_routers`, so `mount_features`,
+`install_surface_globals`, and `CapabilityCatalogue.from_manifests` take a
+module manifest without a call-site change. `AnyManifest` is the union type used
+in those signatures.
+
+**Deliberately not declared yet.** The directive's manifest sketch also lists
+`permissions`, `settings`, `feature_flags`, `audit_actions`, `entity_types`, and
+`health_checks`. Those belong to later program steps, and the same directive
+requires CI to fail when "a declaration has no consumer" — each field lands with
+the registry code that derives behavior from it.
+
 ### Composing an app: `ProductAssemblySpec` + `create_app`
 
 A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAssemblySpec`
@@ -99,11 +169,20 @@ A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAs
 `disabled_modules`, `assembly_template_dir`, `assembly_static_dir`, `assembly_migrations`)
 and calls `dotmac_kernel.create_app(spec) -> FastAPI` (also reachable as
 `from dotmac_kernel import create_app`; it is lazily loaded so `import dotmac_kernel`
-stays DB-free). `create_app` wires logging, the lifespan (config validation + feature
-seeds), the middleware stack, error handlers, `/health`, the platform-auth surface, the
-static mount, and feature mounting. `assembly_template_dir`/`assembly_static_dir` layer the
+stays DB-free). `create_app` wires logging, module-registry validation, the lifespan
+(config validation + module seeds), the middleware stack, error handlers, `/health`, the
+platform-auth surface, the static mount, and module mounting.
+`assembly_template_dir`/`assembly_static_dir` layer the
 assembly's own templates/static OVER the kernel's (first-match-wins, via `use_assembly_templates`
 and `LayeredStaticFiles`).
+
+`spec.modules` accepts `ModuleManifest`s and/or `FeatureManifest`s. `create_app`
+validates them into a `ModuleRegistry` **before mounting anything** — an
+incoherent set raises a `ModuleRegistryError` at boot rather than surfacing as a
+mystery 500 — then drives surface globals, mounting, and seeds from that one
+deterministic order. The validated registry and its inventory are published on
+`app.state.module_registry` / `app.state.module_inventory` for a product's own
+health/diagnostics surface.
 
 ### Settings: two distinct surfaces
 
@@ -419,6 +498,7 @@ adopting products' kernel allowlists, and nothing wider:
 | `assembly` | constructing a `ProductAssemblySpec` |
 | `capabilities` | building a catalogue and requiring a declared code |
 | `features` | building a `FeatureManifest` |
+| `modules` | building a dependency graph, asserting the order, serializing the inventory, and proving a missing dependency fails closed |
 | `money` | exact addition and an `ExchangeRate` conversion |
 | `profiles` | building a spec + registry and reading provider selections |
 | `providers.provisioning` | the protocol, `FakeProvisioningProvider`, and the reusable contract suite |
@@ -443,9 +523,10 @@ BOTH 3.11 and 3.12. It builds the wheel, installs it with `[testing,licensing]`
 into a clean virtualenv with all four floors pinned EXACTLY — failing if the
 resolver moves past any of them, which would make the check vacuous — then
 CONSTRUCTS, not merely imports, the union of the two products' kernel
-allowlists (`assembly`, `capabilities`, `features`, `licensing`, `money` incl.
-`ExchangeRate`, `profiles`, `providers.provisioning` incl. the fake and the
-reusable contract suite, and `testing`), with no `DATABASE_URL` present. The
+allowlists (`assembly`, `capabilities`, `features`, `licensing`, `modules`,
+`money` incl. `ExchangeRate`, `profiles`, `providers.provisioning` incl. the
+fake and the reusable contract suite, and `testing`), with no `DATABASE_URL`
+present. The
 licensing leg SIGNS and VERIFIES a licence and a revocation list rather than
 merely building keys, because a crypto backend only fails when it is used.
 

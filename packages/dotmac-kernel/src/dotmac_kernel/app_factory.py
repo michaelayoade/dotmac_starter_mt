@@ -3,10 +3,17 @@
 
 This is everything the reference `app/main.py` used to do at module scope, moved
 into the kernel and driven by the spec instead of module-level imports of the
-assembly's features: logging, surface globals, the lifespan (config validation +
-feature seeds), the middleware stack, error handlers, the platform-auth surface,
-the static mount (with assembly-over-kernel override), and feature mounting. A
-product's `main.py` shrinks to building one spec and calling this.
+assembly's features: logging, module-registry validation, surface globals, the
+lifespan (config validation + module seeds), the middleware stack, error
+handlers, the platform-auth surface, the static mount (with
+assembly-over-kernel override), and module mounting. A product's `main.py`
+shrinks to building one spec and calling this.
+
+Module validation happens FIRST and fails closed: `ModuleRegistry(spec.modules)`
+(see `dotmac_kernel.modules`) proves the installed set is coherent and yields
+the deterministic startup order every later step consumes — surface globals,
+mounting, and seeds all walk that same order, so there is one answer to "what
+runs, in what sequence".
 
 Re-exported as `dotmac_kernel.create_app`.
 """
@@ -25,13 +32,14 @@ from fastapi.staticfiles import StaticFiles
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.config import settings, validate_settings
 from dotmac_kernel.errors import register_error_handlers
-from dotmac_kernel.features import FeatureManifest, mount_features
+from dotmac_kernel.features import mount_features
 from dotmac_kernel.logging import setup_logging
 from dotmac_kernel.middleware.csrf import CSRFMiddleware
 from dotmac_kernel.middleware.observability import ObservabilityMiddleware
 from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
+from dotmac_kernel.modules import AnyManifest, ModuleRegistry
 from dotmac_kernel.platform_auth import platform_auth_router
 from dotmac_kernel.templating import (
     install_surface_globals,
@@ -53,7 +61,7 @@ class LayeredStaticFiles(StaticFiles):
 
 
 async def _run_enabled_seeds(
-    manifests: Sequence[FeatureManifest], disabled: Set[str]
+    manifests: Sequence[AnyManifest], disabled: Set[str]
 ) -> None:
     """Run each enabled manifest's seed hook off the event loop. DEFERRED,
     NON-FATAL: a failed seed (e.g. an unreachable DATABASE_URL) must never stop
@@ -72,15 +80,41 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     """Compose a FastAPI application for `spec`. Behavior is identical to the
     pre-Task-3 `app/main.py` when given the reference spec; the spec's
     `assembly_template_dir`/`assembly_static_dir` add assembly-over-kernel
-    overrides, and `disabled_modules`/`web_enabled` drive the surface."""
+    overrides, and `disabled_modules`/`web_enabled` drive the surface.
+
+    `spec.modules` is validated into a `ModuleRegistry` first and mounted in its
+    deterministic startup order. For modules declaring no dependencies (every
+    `FeatureManifest` today) that order is exactly the declaration order, so
+    adding the registry does not move a single route.
+
+    Raises `dotmac_kernel.modules.ModuleRegistryError` (a `ValueError`) if the
+    module set is incoherent."""
     setup_logging()
 
-    manifests = list(spec.modules)
     disabled = set(spec.disabled_modules)
     web_enabled = spec.web_enabled
 
+    # VALIDATE BEFORE ANYTHING IS MOUNTED (module control-plane directive step
+    # 2). Construction of the registry IS the validation — unique codes,
+    # supported contract versions, installed dependencies, no cycles — and
+    # `enabled_order` additionally proves every enabled module's dependencies
+    # are themselves enabled in THIS deployment. Any of those failing raises a
+    # `ModuleRegistryError` here, before a single route exists, rather than
+    # surfacing as a mystery 500 later.
+    registry = ModuleRegistry(spec.modules)
+    manifests = list(registry.startup_order())
+    enabled_manifests = list(registry.enabled_order(disabled))
+    logger.info(
+        "Module startup order (%d of %d enabled): %s",
+        len(enabled_manifests),
+        len(manifests),
+        ", ".join(f"{m.code}@{m.version}" for m in enabled_manifests) or "(none)",
+    )
+
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
-    # before any template renders.
+    # before any template renders. Fed the FULL installed set in startup order
+    # (it applies the same enabled rule itself), so the sidebar order matches
+    # the mount order instead of being derived separately.
     install_surface_globals(manifests, disabled, web_enabled)
 
     # Assembly-over-kernel template precedence (ChoiceLoader), if the assembly
@@ -95,10 +129,19 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
                 raise RuntimeError(f"Configuration error: {err}")
             logger.warning("Config: %s", err)
         if settings.seed_on_startup:
-            await _run_enabled_seeds(manifests, disabled)
+            await _run_enabled_seeds(enabled_manifests, disabled)
         yield
 
     app = FastAPI(title=spec.name, lifespan=lifespan)
+
+    # Installed-module inventory for health/diagnostics consumers. The kernel
+    # exposes the CONTRACT on app state, not an endpoint: public `/health` below
+    # is liveness only and must disclose nothing about what is installed, and an
+    # authenticated platform diagnostics surface is the control plane's own
+    # step. A product composes `inventory_payload()` into whichever surface its
+    # deployment profile permits.
+    app.state.module_registry = registry
+    app.state.module_inventory = registry.inventory(disabled)
 
     # FastAPI/Starlette runs the LAST added middleware first — order preserved
     # from the reference app (innermost CSRF → outermost SecurityHeaders).
@@ -151,7 +194,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     mount_features(
         app,
-        manifests=manifests,
+        manifests=enabled_manifests,
         disabled=disabled,
         web_enabled=web_enabled,
     )

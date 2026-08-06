@@ -31,8 +31,12 @@ path dependency — the assembly imports `dotmac_kernel.*`, never a copied modul
 
 - `dotmac_kernel` (the kernel package) — config, db, models base, security,
   platform auth, deps (route guards), middleware, logging, errors, crud,
-  features registry, audit write-side, templating, settings resolver,
-  branding, identity. The kernel never imports `app` (import-linter contract
+  features registry, module registry (`modules`: the versioned
+  `ModuleManifest` + the `ModuleRegistry` that validates unique codes,
+  contract compatibility, dependencies and cycles, and derives the
+  deterministic startup order `create_app` mounts in), audit write-side,
+  templating, settings resolver, branding, identity. The kernel never
+  imports `app` (import-linter contract
   "Kernel must not import the assembly", `make lint-imports`).
 - `app/features/<name>/` — self-contained: `models.py`, `schemas.py`,
   `service.py`, `router.py` (JSON API), `web.py` (HTML/HTMX admin-portal

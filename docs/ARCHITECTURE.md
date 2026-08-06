@@ -11,14 +11,15 @@ that target.
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
 The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
-`WEB_ENABLED`; the kernel also ships the capability catalogue, a pure typed
+`WEB_ENABLED`; the kernel also ships a validating
+`ModuleManifest`/`ModuleRegistry`, the capability catalogue, a pure typed
 deployment-profile registry, tenant-local WS2 entitlement grants/evaluation,
 and WS8 licence verification, revocation, and authenticated applied-state
 contracts. The reference assembly owns the durable licence/revocation receiver
-state and thin apply/import adapters. It does **not** yet implement
-`ModuleManifest`/`ModuleRegistry`, runtime profile/provider selection, the
-complete effective-capability availability lifecycle, subscriptions, billing,
-or metering. The target architecture is authoritative in
+state and thin apply/import adapters. It does **not** yet implement runtime
+profile/provider selection, the complete effective-capability availability
+lifecycle, subscriptions, billing, or metering. The target architecture is
+authoritative in
 [`ADR-0003`](adr/0003-unified-deployment-profiles.md); ADR-0006 owns its package
 and presentation boundaries, with delivery gates in the
 [`deployment profiles and commercial platform plan`](superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md).
@@ -267,7 +268,8 @@ packages/dotmac-kernel/          the kernel package (distribution dotmac-kernel,
                  UserCredential), models_platform (PlatformAdmin/PlatformSession),
                  platform_auth (platform guard + auth routes), security,
                  deps (route guards), middleware/, logging, errors, crud,
-                 features (manifest registry), audit,
+                 features (manifest registry), modules (versioned ModuleManifest
+                 + validating ModuleRegistry), audit,
                  settings_models (DomainSetting), settings_resolver (spec
                  registry + tenant->platform->default resolver), templating
                  (Jinja env + render()), branding (static + per-tenant DB
@@ -1151,18 +1153,90 @@ tenants(id)`, a composite unique for anything unique-per-tenant, and
 `USING/WITH CHECK` policy on `tenant_id = app_current_tenant_id()`, applied
 in the same migration that creates the table.
 
+## Module registry (module control-plane step 2)
+
+`dotmac_kernel.modules` holds `ModuleManifest` — the **versioned** expansion of
+`FeatureManifest`, adding `code`, `version`, `contract_version`, and
+`dependencies` — and `ModuleRegistry`, the single authority on whether the
+installed module set is coherent. Both are pure and in-memory (same posture as
+`capabilities` and `profiles`): they DESCRIBE installed code. They never grant
+entitlement (WS2 owns that) and never deploy anything (the vendor control plane
+owns that).
+
+**Construction is validation.** `ModuleRegistry(manifests)` fails closed on four
+independent checks, each with its own named error under a shared
+`ModuleRegistryError` (all `ValueError`s):
+
+| Check | Error | Why it must be fatal |
+|---|---|---|
+| Duplicate `code` | `DuplicateModuleError` | A code with two owners has no single authority — every downstream reference (dependency edge, profile set, capability owner) becomes ambiguous. |
+| `contract_version` outside `SUPPORTED_MODULE_CONTRACT_VERSIONS` | `ModuleContractVersionError` | A module built for a different manifest generation would load half-understood. The supported set is a constructor keyword, so supporting two generations is a rollout, not a flag day. |
+| Dependency on a code that is not installed | `MissingModuleDependencyError` | The dependent's routes would 500 at the first request that crosses the edge. |
+| Dependency cycle | `ModuleDependencyCycleError` | No startup order exists. The message names the actual path (`a -> b -> a`), not merely "a cycle exists". |
+
+**Deterministic startup order.** `startup_order()` is a pure function of
+(declaration order, dependency edges): dependencies first, **declaration order
+as the tiebreak**. Declaration order — not alphabetical — is load-bearing:
+`FEATURE_MODULES` is a deliberate mount order and FastAPI route matching is
+first-match-wins, so adopting the registry must not silently reorder an assembly
+whose modules declare no dependencies. Every manifest shipping today declares
+none, so the order is provably identical to before the registry existed
+(`tests/unit/test_create_app.py::test_reference_assembly_route_order_is_unchanged_by_the_registry`).
+
+**Installed vs. enabled are different facts.** `enabled_codes(disabled)` is the
+one definition of enabled (not in `DISABLED_FEATURES`, and not
+`enabled_by_default=False`). `enabled_order(disabled)` filters the startup order
+to those and **fails closed when an enabled module depends on one that is not
+enabled** — "dependencies satisfied" means the dependency is actually running,
+not merely present on disk.
+
+**Inventory for health/diagnostics.** `inventory(disabled)` returns
+`ModuleInventoryEntry` rows (code, version, contract version, dependencies,
+core, enabled) sorted by CODE, so two deployments' inventories are diffable;
+`inventory_payload(disabled)` is the JSON-safe document
+(`kernel_contract_version`, `modules`, `startup_order`). `create_app` publishes
+both on `app.state.module_registry` / `app.state.module_inventory`. Public
+`/health` deliberately does NOT report any of it — it is liveness only (see
+"Health bypass"), and exposing the installed-module set there would hand an
+unauthenticated caller a deployment fingerprint. The authenticated platform
+diagnostics surface is a later program step and composes this payload.
+
+**`FeatureManifest` still works, unchanged.** The registry accepts either shape,
+freely mixed in one assembly, so feature packages migrate one at a time (or not
+at all):
+
+- forward — `ModuleManifest.from_feature(manifest, *, version, contract_version,
+  dependencies)` carries every field across and invents nothing; an unversioned
+  module records the `UNVERSIONED` sentinel `"0.0.0"`. The keyword arguments let
+  the assembly pin a version or declare edges for a package it has not migrated.
+- backward — `ModuleManifest` exposes read-only `name`/`routers` properties
+  aliasing `code`/`api_routers`, so `mount_features`,
+  `install_surface_globals`, and `CapabilityCatalogue.from_manifests` accept a
+  module manifest with no call-site change. `AnyManifest` is the union used in
+  those signatures.
+
+The directive's `permissions`, `settings`, `feature_flags`, `audit_actions`,
+`entity_types`, and `health_checks` manifest fields are deliberately absent
+until the registry code that consumes them lands — the same directive requires
+CI to fail when "a declaration has no consumer", and shipping six inert fields
+would be exactly that.
+
 ## Feature-mount sequence
 
+0. `dotmac_kernel.create_app` builds a `ModuleRegistry` from `spec.modules`
+   FIRST and derives the startup order from it (see "Module registry" above).
+   An incoherent module set raises here, before a single route is mounted.
+   Steps 2–3 and 6 below all walk that one order.
 1. `app/main.py` imports `FEATURE_MODULES` from `app/features/__init__.py`
    — a plain list of dotted module paths (currently `tenants`, `auth`,
-   `parties`, `rbac`, `settings`, `custom_fields`, `web`).
+   `parties`, `rbac`, `settings`, `custom_fields`, `licensing`, `web`).
 2. `dotmac_kernel.features.load_manifests(FEATURE_MODULES)` imports each
    `<module>.feature` submodule via `importlib` (so core never statically
    imports `app.features`) and collects its `feature: FeatureManifest`
    (`name`, `routers`, `web_routers`, `nav`, `core: bool`,
    `enabled_by_default: bool` — see "Capability model" above for the
    `web_routers`/`nav` fields).
-3. `dotmac_kernel.features.mount_features(app, manifests=..., disabled=settings.disabled_feature_set, web_enabled=settings.web_enabled)`
+3. `dotmac_kernel.features.mount_features(app, manifests=registry.enabled_order(disabled), disabled=settings.disabled_feature_set, web_enabled=settings.web_enabled)`
    mounts each enabled manifest's `routers` via `app.include_router(...)`
    unconditionally, then its `web_routers` ONLY `if web_enabled`, skipping
    the whole manifest if its name is in `DISABLED_FEATURES` or its

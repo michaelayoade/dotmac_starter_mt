@@ -84,6 +84,21 @@ from dotmac_kernel.models import (
     uuid_pk,
 )
 from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
+from dotmac_kernel.modules import (
+    KERNEL_MODULE_CONTRACT_VERSION,
+    SUPPORTED_MODULE_CONTRACT_VERSIONS,
+    UNVERSIONED,
+    AnyManifest,
+    DuplicateModuleError,
+    MissingModuleDependencyError,
+    ModuleContractVersionError,
+    ModuleDependencyCycleError,
+    ModuleInventoryEntry,
+    ModuleManifest,
+    ModuleRegistry,
+    ModuleRegistryError,
+    UnknownModuleError,
+)
 from dotmac_kernel.money import (
     Currency,
     CurrencyMismatchError,
@@ -114,7 +129,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a9"
+__version__ = "0.1.0a10"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -155,6 +170,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.migrations",
         "dotmac_kernel.models",
         "dotmac_kernel.models_platform",
+        "dotmac_kernel.modules",
         "dotmac_kernel.money",
         "dotmac_kernel.platform_auth",
         "dotmac_kernel.profiles",
@@ -222,11 +238,25 @@ __all__ = [
     "ConflictError",
     "UnauthorizedError",
     "ForbiddenError",
-    # features
+    # features (the pre-ModuleManifest surface — still fully supported)
     "FeatureManifest",
     "NavItem",
     "load_manifests",
     "mount_features",
+    # module manifest + registry (module control-plane step 2)
+    "ModuleManifest",
+    "ModuleRegistry",
+    "ModuleInventoryEntry",
+    "AnyManifest",
+    "KERNEL_MODULE_CONTRACT_VERSION",
+    "SUPPORTED_MODULE_CONTRACT_VERSIONS",
+    "UNVERSIONED",
+    "ModuleRegistryError",
+    "DuplicateModuleError",
+    "ModuleContractVersionError",
+    "MissingModuleDependencyError",
+    "ModuleDependencyCycleError",
+    "UnknownModuleError",
     # capability catalogue (WS1)
     "CapabilityCatalogue",
     "DuplicateCapabilityError",
