@@ -17,9 +17,12 @@ different code path.
 
 For new development, the accepted direction is to use this same foundation
 for vendor SaaS, dedicated hosted, self-hosted/on-premise, OEM, and
-single-tenant deployments. That profile/provider architecture is planned,
-not current runtime behavior; today the repo has only the feature manifest,
-`DISABLED_FEATURES`, and `WEB_ENABLED` composition seams.
+single-tenant deployments. The foundation is partially implemented rather
+than merely planned: the versioned kernel and reference assembly now ship
+capability/profile contracts, tenant-local entitlements, and a WS8 licence
+receiver alongside `FeatureManifest`, `DISABLED_FEATURES`, and `WEB_ENABLED`.
+The manifest-driven module registry, runtime provider selection, and complete
+effective-capability lifecycle remain follow-on work.
 
 See [`docs/adr/0001-multi-tenant-architecture.md`](docs/adr/0001-multi-tenant-architecture.md)
 for the founding tenancy design, [`docs/adr/0002-starter-consolidation.md`](docs/adr/0002-starter-consolidation.md)
@@ -28,6 +31,10 @@ for how this repo became the org's one starter template,
 for the accepted deployment-profile and commercial-module decisions,
 [`docs/adr/0004-platform-control-plane.md`](docs/adr/0004-platform-control-plane.md)
 for the platform control-plane security decisions,
+[`docs/adr/0005-forgejo-private-registry.md`](docs/adr/0005-forgejo-private-registry.md)
+for kernel artifact distribution, and
+[`docs/adr/0006-white-label-product-foundation.md`](docs/adr/0006-white-label-product-foundation.md)
+for the package/module/theme/brand/facet boundaries and extraction rule,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full architecture
 reference (including the model provenance/ownership tables), and
 [`AGENTS.md`](AGENTS.md) for the canonical agent-facing rules.
@@ -43,6 +50,9 @@ for its scope wins and the stale one gets fixed:
 - [`docs/adr/`](docs/adr/) — **decisions + status**: why the system is
   shaped this way; each ADR carries its status, and amendments are dated
   notes, never rewritten history.
+- [`docs/inventories/`](docs/inventories/) — **dated characterization**:
+  cross-repository facts captured at named revisions. Inventories are evidence,
+  not mandates, and similarity recorded there does not authorize extraction.
 - [`docs/superpowers/plans/`](docs/superpowers/plans/) (and `specs/`,
   `reviews/`) — **non-authoritative intent**: how work was planned; never
   cite a plan as proof of current behavior.
@@ -221,14 +231,17 @@ productionize further, port what your project needs:
   (phase 2c on this repo's own roadmap; fleet-specific rationale lives in
   `docs/adr/`, not here)
 - File uploads, notifications, scheduler
-- The manifest-driven module/plugin registry, tenant entitlements, typed
-  feature flags, dependency/health/migration validation, and effective-
-  capability admin UI described by the module control-plane directive
-- Typed deployment profiles and provider registry for SaaS, dedicated,
-  on-premise/air-gapped, OEM, and API-only packaging
-- Versioned platform-kernel/module distribution, thin product assemblies,
-  automated dependency-update PRs, signed releases/offline bundles, and the
-  cross-product compatibility matrix needed for one fix to propagate safely
+- The manifest-driven module/plugin registry, typed feature flags,
+  dependency/health/migration validation, and effective-capability admin UI
+  described by the module control-plane directive. Tenant-local entitlement
+  grants and their explainable evaluator already exist in the kernel.
+- Runtime selection/wiring of the typed deployment-profile contracts, plus a
+  provider registry for SaaS, dedicated, on-premise/air-gapped, OEM, and
+  API-only packaging
+- Versioned optional-module distribution, automated dependency-update PRs,
+  signed images/offline bundles, and the cross-product compatibility matrix
+  needed for one fix to propagate safely. The versioned `dotmac-kernel`, thin
+  `ProductAssemblySpec`, wheel proof, and exact alpha release path exist today.
 - Incremental ERP/subscriber-management assembly adoption, including a dedicated-
   per-ISP path and the separate tenant-safety program required before shared
   multi-ISP SaaS
@@ -262,11 +275,11 @@ productionize further, port what your project needs:
   verification, ingress reconciliation, TLS issue/renew/revoke, canonical-host
   policy, and production proxy/header trust configuration. The resolver and
   `TenantDomain` model exist today, but no safe write/reconciliation path does.
-- Optional subscription, billing, metering, signed-licensing, and OEM
-  delegation modules; none should be inferred from the presence of
-  entitlements
+- Optional subscription, billing, metering, and complete OEM delegation/
+  commercial-lifecycle modules. WS8 verification, revocation, applied-state
+  contracts, the reference receiver, and tenant-local entitlements exist, but
+  they do not imply those optional commercial modules.
 - Profile generator, deployment-specific packaging, and CI profile matrix
-- Security headers
 - A self-service (non-admin) portal surface — today every `/admin/*` page
   requires the `admin` role; see `dotmac_kernel.web_deps.require_web_auth`'s
   docstring for the phase-3 loosening plan

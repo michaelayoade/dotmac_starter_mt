@@ -4,16 +4,23 @@ This expands the `CLAUDE.md` summary. See `docs/adr/0001-multi-tenant-architectu
 for the founding tenancy design and `docs/adr/0002-starter-consolidation.md`
 for how this repo came to be the org's one starter. ADR-0003 defines the
 accepted, not-yet-implemented profile-driven direction for SaaS, dedicated,
-self-hosted/on-premise, OEM, and single-tenant deployments.
+self-hosted/on-premise, OEM, and single-tenant deployments. ADR-0006 fixes the
+package/module/theme/brand/facet ownership boundaries and extraction rule for
+that target.
 
-## Target deployment profiles and commercial authorities (accepted; not implemented)
+## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
 The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
-`WEB_ENABLED`; it does **not** yet implement `DeploymentProfile`, a provider
-registry, tenant entitlements, subscriptions, billing, metering, or signed
-licensing. The target architecture is authoritative in
-[`ADR-0003`](adr/0003-unified-deployment-profiles.md), with delivery gates in
-the
+`WEB_ENABLED`; the kernel also ships the capability catalogue, a pure typed
+deployment-profile registry, tenant-local WS2 entitlement grants/evaluation,
+and WS8 licence verification, revocation, and authenticated applied-state
+contracts. The reference assembly owns the durable licence/revocation receiver
+state and thin apply/import adapters. It does **not** yet implement
+`ModuleManifest`/`ModuleRegistry`, runtime profile/provider selection, the
+complete effective-capability availability lifecycle, subscriptions, billing,
+or metering. The target architecture is authoritative in
+[`ADR-0003`](adr/0003-unified-deployment-profiles.md); ADR-0006 owns its package
+and presentation boundaries, with delivery gates in the
 [`deployment profiles and commercial platform plan`](superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md).
 
 New deployment types compose modules and providers across independent axes
@@ -171,13 +178,16 @@ post-incident corrective work.
 
 ### Target cross-project reuse and frontend surfaces
 
-Cloning this repository currently creates an independent source snapshot; later
-fixes do not propagate automatically. The target separates a versioned platform
-kernel, versioned optional modules, thin product assemblies, and deployment
-profiles. Maintained products pin signed releases; automated update PRs rebuild
-and run each product's profile/lifecycle/migration tests before rollout. A fix is
-implemented once but deployed deliberately—never injected silently into running
-systems.
+Cloning this repository still creates an independent source snapshot; later
+fixes do not propagate automatically. The repository now separates a versioned,
+publishable `dotmac-kernel` from this thin reference assembly and proves the
+built wheel in a clean consumer environment. The remaining target adds
+versioned optional modules and `dotmac-ui`, resolved deployment profiles, and
+product adoption through exact released pins. Maintained products use automated
+update PRs to rebuild and run profile/lifecycle/migration tests before rollout.
+A fix is implemented once but deployed deliberately—never injected silently
+into running systems. ADR-0006 owns the package direction and forbids extraction
+based on similarity alone.
 
 ERP and ISP subscriber management remain separate product assemblies/data planes
 even when they consume the same kernel. ERP `Organization` is the natural tenant
