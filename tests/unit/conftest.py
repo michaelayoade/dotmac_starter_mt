@@ -19,9 +19,11 @@ from dotmac_kernel import (
     models_platform,  # noqa: F401
     settings_models,  # noqa: F401
 )
+from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.features import load_manifests
 from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
+from dotmac_kernel.permissions import PermissionCatalogue, install_permissions
 from dotmac_kernel.templating import install_surface_globals
 
 # The in-memory engine + savepoint-isolated session are the kernel's supported
@@ -37,6 +39,24 @@ from app.features import FEATURE_MODULES
 # dotmac_kernel.models in control-plane security Task 2).
 from app.features.custom_fields import models as custom_fields  # noqa: F401
 from app.features.licensing import models as licensing_models  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def _default_declaration_catalogues():
+    """Install the process-active permission catalogue + audit-action registry.
+
+    Same reasoning as `_default_surface_globals` below, for the module
+    control-plane step-3 declarations: `create_app` installs both, but a unit
+    test that mounts a router on a bare `FastAPI()` never calls it — and both
+    default to EMPTY (deny/reject everything), so without this every
+    `require_permission` guard would 500 and every `write_audit_event` would
+    raise. Re-installed before EVERY test so a previous test that built an app
+    from a narrower module set (e.g. `tests/unit/test_create_app.py`) cannot
+    leave a truncated catalogue behind.
+    """
+    manifests = load_manifests(FEATURE_MODULES)
+    install_permissions(PermissionCatalogue.from_manifests(manifests))
+    install_audit_actions(AuditActionRegistry.from_manifests(manifests))
 
 
 @pytest.fixture(autouse=True)

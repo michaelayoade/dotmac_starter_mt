@@ -8,11 +8,14 @@ configuration, and its own template/static/migration directories, and
 is the single declaration point — a product's `main.py` shrinks to building one
 spec and calling `create_app`.
 
-Fields are forward-compatible with the module control-plane program: `modules`
-carries today's `FeatureManifest`s (the field is named `modules` for the
-eventual `ModuleManifest` expansion); `settings_overrides`, `branding`, and
-`providers` are declared here so a downstream assembly can supply them even
-where the reference assembly leaves them empty.
+`modules` carries the assembly's manifests — `ModuleManifest`s and/or
+not-yet-migrated `FeatureManifest`s, freely mixed. `create_app` validates them
+into a `ModuleRegistry` (`dotmac_kernel.modules`) before mounting anything, so
+an incoherent module set (duplicate code, unsupported contract version, missing
+dependency, cycle) fails at startup rather than at first request.
+`settings_overrides`, `branding`, and `providers` are declared here so a
+downstream assembly can supply them even where the reference assembly leaves
+them empty.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from dotmac_kernel.features import FeatureManifest
+from dotmac_kernel.modules import AnyManifest
 
 
 @dataclass(frozen=True)
@@ -34,9 +37,13 @@ class ProductAssemblySpec:
     `__post_init__`."""
 
     name: str
-    # The assembly's feature manifests (already loaded, e.g. via
+    # The assembly's module manifests (already loaded, e.g. via
     # `load_manifests(FEATURE_MODULES)`). FEATURE_MODULES stays assembly-owned.
-    modules: Sequence[FeatureManifest] = ()
+    # Either shape is accepted: a `ModuleManifest` (versioned, with declared
+    # dependencies) or a not-yet-migrated `FeatureManifest`, which `create_app`
+    # adapts when it builds the `ModuleRegistry`. The two may be MIXED in one
+    # assembly — that is what makes migrating feature packages incremental.
+    modules: Sequence[AnyManifest] = ()
     # Per-deployment setting overrides applied on top of env/defaults. Declared
     # for downstream assemblies; the reference assembly leaves it empty.
     settings_overrides: Mapping[str, object] = field(default_factory=dict)

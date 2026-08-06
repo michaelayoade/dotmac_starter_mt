@@ -43,13 +43,14 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.app_factory` | `create_app`, `LayeredStaticFiles` |
 | `dotmac_kernel.assembly` | `ProductAssemblySpec` |
 | `dotmac_kernel.audit` | `AuditEvent`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
+| `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
 | `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
 | `dotmac_kernel.crud` | `CRUDManager` |
 | `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `conflict_savepoint`, `engine`, `platform_engine` |
-| `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
+| `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
 | `dotmac_kernel.errors` | `register_error_handlers` |
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
@@ -72,10 +73,15 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.middleware.security_headers` | `SecurityHeadersMiddleware` |
 | `dotmac_kernel.middleware.tenant` | `TenantResolverMiddleware` |
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
+| `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
+| `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE` (the post-migration live-catalog contract — see the same section) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
+| `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
+| `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
+| `dotmac_kernel.permissions` | `PermissionSpec`, `PermissionCatalogue`, `DuplicatePermissionError`, `UndeclaredPermissionError`, `install_permissions`, `active_permissions` (permission catalogue; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
 | `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
 | `dotmac_kernel.providers.provisioning` | `ProvisioningProvider`, `ProvisioningRequest`, `ProvisioningStep`, `PlanResult`, `ApplyResult`, `ObserveResult`, `ProvisioningStatus`, `StepStatus`, `ProvisioningError`, `ProvisioningRetryableError`, `ProvisioningTerminalError`, `ProvisioningPlanError`, `ProvisioningApplyError`, `ProvisioningCancelled` |
@@ -92,6 +98,200 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.testing.provisioning` | `FakeProvisioningProvider`, `check_provisioning_provider_contract` |
 | `dotmac_kernel.web_deps` | `require_web_auth`, `is_secure_request`, `safe_next_url`, `WebAuthRedirect` |
 
+### Module manifest and registry (`dotmac_kernel.modules`)
+
+The versioned module declaration and the one authority on whether an installed
+module set is coherent (module control-plane directive step 2). Pure and
+in-memory, like `capabilities` and `profiles`: it **describes installed code**;
+it never grants entitlement and it never deploys anything.
+
+- **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
+  `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
+  `permissions`, `audit_actions`, `short_code`, `migration_prefix`,
+  `migration_branch`, `tables`, `core`, `enabled_by_default`, `seed`. `code`
+  is the stable identifier every other authority references (a dependency edge,
+  a profile's required/forbidden set, a capability owner). `version` is the module's own release version;
+  `contract_version` is the kernel manifest generation it was built against —
+  independent facts, and only the latter gates loading.
+- **`ModuleRegistry(manifests)`** — construction IS validation, fail-closed on
+  all four:
+  - a duplicate `code` → `DuplicateModuleError`;
+  - a `contract_version` outside `SUPPORTED_MODULE_CONTRACT_VERSIONS` →
+    `ModuleContractVersionError` (the kernel's own generation is
+    `KERNEL_MODULE_CONTRACT_VERSION`; the supported set is a constructor
+    keyword, so supporting two generations is a rollout rather than a flag day);
+  - a dependency on a code that is not installed →
+    `MissingModuleDependencyError`;
+  - a dependency cycle → `ModuleDependencyCycleError`, whose message names the
+    actual path (`a -> b -> a`).
+
+  All four share the `ModuleRegistryError` base and are `ValueError`s.
+  Construction ALSO assigns database namespaces — it builds a
+  `NamespaceRegistry` from the manifests plus the kernel's allocation ledger
+  (see "Database namespaces and migration lineage" below), so a contested or
+  unallocated namespace raises a `NamespaceError` subclass here too. Read it
+  back with `namespaces()`.
+- **Deterministic startup order** — `startup_order()` is a pure function of
+  (declaration order, dependency edges): dependencies first, **declaration order
+  as the tiebreak**. Declaration order, not alphabetical, on purpose: an
+  assembly's module list is a deliberate mount order (route matching is
+  first-match-wins), so adopting the registry must not silently reorder an
+  assembly whose modules declare no dependencies. Same manifests in, same order
+  out, every boot.
+- **Deployment enablement** — `enabled_codes(disabled)` is the single definition
+  of enabled (not in `disabled`, and not `enabled_by_default=False`).
+  `enabled_order(disabled)` filters the startup order to those and **fails
+  closed if an enabled module depends on one that is not enabled** — installed
+  is not sufficient; "dependencies satisfied" means the dependency is running.
+- **Inventory** — `inventory(disabled)` returns `ModuleInventoryEntry` rows
+  (`code`, `version`, `contract_version`, `dependencies`, `core`, `enabled`,
+  `db_schema`, `migration_branch`) sorted by code so two deployments'
+  inventories are diffable; `inventory_payload(disabled)` is the JSON-safe
+  diagnostics document (`kernel_contract_version`, `modules`, `startup_order`,
+  `migration_owners`). The kernel supplies
+  the CONTRACT, not an endpoint: public `/health` stays liveness-only and
+  discloses none of it, and the authenticated platform diagnostics surface is
+  the control plane's own step, composing this payload.
+- **Lookup** — `codes()`, `is_installed(code)`, `get(code)` (raising
+  `UnknownModuleError`).
+
+**Compatibility with `FeatureManifest`.** `FeatureManifest` remains fully
+supported and unchanged. The registry accepts either shape — freely mixed in one
+assembly — and adapts a feature via `ModuleManifest.from_feature(manifest, *,
+version=UNVERSIONED, contract_version=..., dependencies=(), short_code=None,
+migration_prefix=None, migration_branch=None, tables=())`, which carries every
+field across and invents nothing (`UNVERSIONED` is `"0.0.0"`, a real sortable
+version that reads as "not declared yet"; the keywords let an assembly pin a
+version or declare edges for a package it has not migrated). In the other
+direction, `ModuleManifest` exposes read-only `name`/`routers` properties
+aliasing `code`/`api_routers`, so `mount_features`,
+`install_surface_globals`, and `CapabilityCatalogue.from_manifests` take a
+module manifest without a call-site change. `AnyManifest` is the union type used
+in those signatures.
+
+**Deliberately not declared yet.** The directive's manifest sketch also lists
+`settings`, `feature_flags`, `entity_types`, and `health_checks`. Those belong to
+later program steps, and the same directive requires CI to fail when "a
+declaration has no consumer" — each field lands with the registry code that
+derives behavior from it, as `permissions` and `audit_actions` did in step 3
+(below).
+
+### Database namespaces and migration lineage (`dotmac_kernel.namespaces`, `dotmac_kernel.migrations.gate`, `dotmac_kernel.migrations.catalog`)
+
+ADR-0006 **D1**. One immutable Postgres schema and one immutable migration
+lineage identity per **stateful** module; a **stateless** module declares none.
+
+**Schema assignment.** A stateful module declares a `short_code` on its
+manifest; its schema is the derived, read-only `ModuleManifest.db_schema`,
+always `mod_<short_code>` and always built through `module_schema()`. It is
+never inferred from `code`, `name`, or any brand string, and there is no
+settable schema attribute to re-point at runtime. `public` (`HOST_SCHEMA`)
+stays the **compatibility** namespace of the kernel and the one host assembly
+and is not available to installable modules — claiming it raises
+`HostSchemaClaimError`.
+
+**Full qualification.** Module models, migrations, foreign keys, policies,
+functions and raw SQL name their schema explicitly; nothing may rely on
+`search_path`, which is connection state anything can change. `qualified()`
+builds `schema.table`; `schema_table_args(schema)` is the `__table_args__`
+fragment that binds a SQLAlchemy model to a module schema.
+
+**Migration identity.** Each owner receives an immutable, globally unique short
+`prefix` and `branch_label`. Revision ids are `<prefix>_<sequence>_<slug>`,
+built by `revision_id()`, which **raises rather than truncating** past
+`MAX_REVISION_ID_LENGTH` — Alembic declares `alembic_version.version_num` as
+`String(32)`, so an over-long id fails at `alembic upgrade` against a real
+database, not at authoring time. Each module lineage has its own base and
+branch label; cross-lineage ordering uses `depends_on`, never `down_revision`.
+
+**Where immutability is enforced.** `MIGRATION_OWNER_LEDGER` is the checked-in,
+kernel-shipped allocation record — the kernel is the shared dependency, so this
+is the one table where "globally unique across Dotmac repos" can be true.
+`NamespaceRegistry.from_manifests` validates the entire ledger even when an
+allocated owner is not installed, then refuses a stateful module absent from it
+(`UnallocatedNamespaceError`) or differing from it in schema, prefix or branch
+label (`NamespaceAllocationError`). Changing a row is therefore a visible
+kernel diff plus a release.
+
+**`NamespaceRegistry`** is construction-is-validation and rejects a duplicate
+schema claim (`DuplicateSchemaError`), migration prefix
+(`DuplicateMigrationPrefixError`), branch label (`DuplicateBranchLabelError`)
+or table (`DuplicateTableOwnerError`). `ModuleRegistry` builds one during its
+own construction and exposes it via `namespaces()`.
+
+**The composed CI gate** (`dotmac_kernel.migrations.gate.run_gate`) is the
+build-time enforcement: it loads every selected version location — resolved
+from the deployment's own Alembic config via `version_locations_from_ini()` —
+and rejects duplicate revisions, unregistered or mismatched prefixes,
+duplicate/foreign branch labels, duplicate schema claims and duplicate table
+ownership, plus lineage-root, `down_revision`-crossing, id-length and
+`schema=` qualification faults. The scanner follows local `upgrade()` helpers,
+understands typed Alembic metadata and D1 schema constants, checks inline and
+imperative foreign keys, and rejects schema-qualified writes aimed at another
+owner. It is a pure **AST** scan: nothing is imported and no database is
+touched, so it runs in the same cheap CI step as lint and fails **before an
+image can be built**. Locations are attributed to owners through the lineage
+root's branch label, which is also what makes an `alembic_version` row
+explainable (`GateReport.attribution`).
+
+**The post-migration live-catalog gate**
+(`dotmac_kernel.migrations.catalog.audit_live_schemas`) applies the kernel's
+RLS/grant contract across every registered module schema after migrations run.
+It is deliberately split into parameterised SQL builders (`catalog_queries()`;
+`:schema` is always a bind parameter) and a pure decision function
+(`audit_snapshot(SchemaSnapshot)`), so the contract is exercisable from
+synthetic snapshots without Postgres.
+
+**Two grandfathered lineages.** `kernel` and `assembly` predate D1; their
+revision ids are already recorded in live `alembic_version` rows, so
+`MigrationOwner.legacy_revision_pattern` keeps their original format and
+exempts them from the strict id and `schema=` rules. Their tables legitimately
+live in `public`. Every installable module gets the strict rules.
+
+### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`)
+
+Module control-plane directive step 3. Both are sibling catalogues of
+`dotmac_kernel.capabilities.CapabilityCatalogue` — same shape, same fail-closed
+posture, same invariant: **a code is declared by exactly one module's manifest
+and may never be invented anywhere else.** Pure and in-memory; no engine, no I/O.
+
+- **`PermissionSpec(code, description="", default_roles=("admin",))`** — one
+  permission a module owns. `default_roles` is the code-declared default binding
+  (the role slugs whose holders satisfy it), the same relationship a
+  `SettingSpec.default` has to a `domain_settings` row; it must be non-empty.
+- **`PermissionCatalogue.from_manifests(manifests)`** — construction IS
+  validation: a code declared by two modules raises `DuplicatePermissionError`.
+  `require(code)` returns the declared spec or raises
+  `UndeclaredPermissionError`; `is_declared`/`spec`/`owner`/`codes` read it.
+- **`AuditActionRegistry.from_manifests(manifests)`** — the same, for the
+  free-text-no-longer `audit_events.action` vocabulary:
+  `DuplicateAuditActionError` on two owners, `require(action)` raising
+  `UndeclaredAuditActionError`, plus `is_declared`/`owner`/`actions`.
+- **Process-active install.** `install_permissions` / `install_audit_actions`
+  set the process-active catalogue and registry; `active_permissions` /
+  `active_audit_actions` read them. `create_app` installs both from the INSTALLED
+  module set before mounting anything. Permissions default to EMPTY so an
+  uninstalled authorization catalogue denies safely. Audit actions distinguish
+  NOT INSTALLED (`AuditActionsNotInstalledError`) from INSTALLED-EMPTY (every
+  write is undeclared). A consumer that builds an app by hand (a test mounting a
+  router on a bare `FastAPI()`) must install them itself, exactly as it must call
+  `install_surface_globals`.
+
+**The consumers, which is why the fields exist at all:**
+
+- `dotmac_kernel.deps.require_permission(code)` is the route guard. It resolves
+  the declared spec at request time and requires the actor to hold one of its
+  `default_roles`, 403 otherwise — a strict generalisation of `require_role`,
+  which remains supported and is the raw role check underneath. The returned
+  dependency carries the code, and `create_app` walks every MOUNTED route and
+  raises `UndeclaredPermissionError` at boot if any references a code the
+  catalogue does not declare.
+- `dotmac_kernel.audit.write_audit_event` validates `action` against the active
+  registry **before** it adds anything to the session, so a rejected write leaves
+  no partial state. `write_platform_audit_event` is deliberately NOT validated
+  this way: platform actions are written by the kernel's own control plane, which
+  has no module manifest to declare them on.
+
 ### Composing an app: `ProductAssemblySpec` + `create_app`
 
 A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAssemblySpec`
@@ -99,11 +299,20 @@ A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAs
 `disabled_modules`, `assembly_template_dir`, `assembly_static_dir`, `assembly_migrations`)
 and calls `dotmac_kernel.create_app(spec) -> FastAPI` (also reachable as
 `from dotmac_kernel import create_app`; it is lazily loaded so `import dotmac_kernel`
-stays DB-free). `create_app` wires logging, the lifespan (config validation + feature
-seeds), the middleware stack, error handlers, `/health`, the platform-auth surface, the
-static mount, and feature mounting. `assembly_template_dir`/`assembly_static_dir` layer the
+stays DB-free). `create_app` wires logging, module-registry validation, the lifespan
+(config validation + module seeds), the middleware stack, error handlers, `/health`, the
+platform-auth surface, the static mount, and module mounting.
+`assembly_template_dir`/`assembly_static_dir` layer the
 assembly's own templates/static OVER the kernel's (first-match-wins, via `use_assembly_templates`
 and `LayeredStaticFiles`).
+
+`spec.modules` accepts `ModuleManifest`s and/or `FeatureManifest`s. `create_app`
+validates them into a `ModuleRegistry` **before mounting anything** — an
+incoherent set raises a `ModuleRegistryError` at boot rather than surfacing as a
+mystery 500 — then drives surface globals, mounting, and seeds from that one
+deterministic order. The validated registry and its inventory are published on
+`app.state.module_registry` / `app.state.module_inventory` for a product's own
+health/diagnostics surface.
 
 ### Settings: two distinct surfaces
 
@@ -419,6 +628,7 @@ adopting products' kernel allowlists, and nothing wider:
 | `assembly` | constructing a `ProductAssemblySpec` |
 | `capabilities` | building a catalogue and requiring a declared code |
 | `features` | building a `FeatureManifest` |
+| `modules` | building a dependency graph, asserting the order, serializing the inventory, and proving a missing dependency fails closed |
 | `money` | exact addition and an `ExchangeRate` conversion |
 | `profiles` | building a spec + registry and reading provider selections |
 | `providers.provisioning` | the protocol, `FakeProvisioningProvider`, and the reusable contract suite |
@@ -443,9 +653,10 @@ BOTH 3.11 and 3.12. It builds the wheel, installs it with `[testing,licensing]`
 into a clean virtualenv with all four floors pinned EXACTLY — failing if the
 resolver moves past any of them, which would make the check vacuous — then
 CONSTRUCTS, not merely imports, the union of the two products' kernel
-allowlists (`assembly`, `capabilities`, `features`, `licensing`, `money` incl.
-`ExchangeRate`, `profiles`, `providers.provisioning` incl. the fake and the
-reusable contract suite, and `testing`), with no `DATABASE_URL` present. The
+allowlists (`assembly`, `capabilities`, `features`, `licensing`, `modules`,
+`money` incl. `ExchangeRate`, `profiles`, `providers.provisioning` incl. the
+fake and the reusable contract suite, and `testing`), with no `DATABASE_URL`
+present. The
 licensing leg SIGNS and VERIFIES a licence and a revocation list rather than
 merely building keys, because a crypto backend only fails when it is used.
 

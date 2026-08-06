@@ -16,9 +16,10 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
-from dotmac_kernel import ProductAssemblySpec, create_app
+from dotmac_kernel import NavItem, ProductAssemblySpec, create_app
 from dotmac_kernel.app_factory import LayeredStaticFiles
 from dotmac_kernel.features import FeatureManifest
+from dotmac_kernel.modules import UNVERSIONED
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
@@ -143,3 +144,192 @@ def _reference_modules() -> list[FeatureManifest]:
     from app.features import FEATURE_MODULES
 
     return list(load_manifests(FEATURE_MODULES))
+
+
+# ---------------------------------------------------------------------------
+# Module registry wiring (module control-plane directive step 2).
+#
+# `create_app` validates `spec.modules` into a `ModuleRegistry` BEFORE mounting
+# anything, mounts in the registry's deterministic startup order, and publishes
+# the installed-module inventory on app state for health/diagnostics.
+# ---------------------------------------------------------------------------
+
+
+def test_reference_assembly_route_order_is_unchanged_by_the_registry():
+    """The registry must not reorder an assembly whose modules declare no
+    dependencies — route matching is first-match-wins, so a reordering here
+    would be a silent behavior change, not a refactor."""
+    from dotmac_kernel.modules import ModuleRegistry
+
+    modules = _reference_modules()
+    registry = ModuleRegistry(modules)
+    assert [m.code for m in registry.startup_order()] == [m.name for m in modules]
+
+
+def test_create_app_publishes_the_module_inventory_on_app_state():
+    from dotmac_kernel.modules import ModuleManifest, ModuleRegistry
+
+    spec = ProductAssemblySpec(
+        name="inv",
+        modules=[
+            ModuleManifest(code="base", version="1.0.0"),
+            ModuleManifest(code="top", version="2.3.1", dependencies=("base",)),
+        ],
+    )
+    app = create_app(spec)
+
+    assert isinstance(app.state.module_registry, ModuleRegistry)
+    by_code = {e.code: e for e in app.state.module_inventory}
+    assert by_code["top"].version == "2.3.1"
+    assert by_code["top"].dependencies == ("base",)
+    assert by_code["base"].enabled is True
+
+
+def test_health_does_not_disclose_the_module_inventory():
+    """Public `/health` is liveness ONLY. Exposing what is installed there
+    would hand an unauthenticated caller a deployment fingerprint; the
+    inventory is reached through app state / an authenticated surface."""
+    app = create_app(ProductAssemblySpec(name="h", modules=_reference_modules()))
+    with TestClient(app) as client:
+        body = client.get("/health").json()
+    assert body == {"status": "ok"}
+
+
+def test_disabled_module_is_installed_but_not_enabled_in_the_inventory():
+    modules = _reference_modules()
+    app = create_app(
+        ProductAssemblySpec(
+            name="d", modules=modules, disabled_modules=frozenset({"parties"})
+        )
+    )
+    by_code = {e.code: e for e in app.state.module_inventory}
+    assert by_code["parties"].enabled is False
+    assert by_code["auth"].enabled is True
+
+
+def test_create_app_fails_closed_on_an_incoherent_module_set():
+    """Validation happens before any route is mounted — a broken module set
+    must stop the boot, not produce a half-mounted app."""
+    from dotmac_kernel.modules import (
+        MissingModuleDependencyError,
+        ModuleDependencyCycleError,
+        ModuleManifest,
+    )
+
+    with pytest.raises(MissingModuleDependencyError):
+        create_app(
+            ProductAssemblySpec(
+                name="missing",
+                modules=[ModuleManifest(code="a", version="1", dependencies=("gone",))],
+            )
+        )
+
+    with pytest.raises(ModuleDependencyCycleError):
+        create_app(
+            ProductAssemblySpec(
+                name="cycle",
+                modules=[
+                    ModuleManifest(code="a", version="1", dependencies=("b",)),
+                    ModuleManifest(code="b", version="1", dependencies=("a",)),
+                ],
+            )
+        )
+
+
+def test_create_app_rejects_disabling_a_dependency_something_else_needs():
+    from dotmac_kernel.modules import MissingModuleDependencyError, ModuleManifest
+
+    with pytest.raises(MissingModuleDependencyError):
+        create_app(
+            ProductAssemblySpec(
+                name="dis",
+                modules=[
+                    ModuleManifest(code="base", version="1"),
+                    ModuleManifest(code="top", version="1", dependencies=("base",)),
+                ],
+                disabled_modules=frozenset({"base"}),
+            )
+        )
+
+
+def test_mixed_feature_and_module_assembly_boots():
+    """The migration path, end to end: an assembly halfway through migrating its
+    packages holds both manifest shapes at once, and every surface (routes, nav
+    globals, /health) still comes up."""
+    from dotmac_kernel.modules import ModuleManifest
+    from fastapi import APIRouter
+
+    legacy_api, modern_api, modern_web = APIRouter(), APIRouter(), APIRouter()
+
+    @legacy_api.get("/legacy-thing")
+    def legacy_thing():
+        return {}
+
+    @modern_api.get("/modern-thing")
+    def modern_thing():
+        return {}
+
+    @modern_web.get("/admin/modern")
+    def modern_admin():
+        return {}
+
+    app = create_app(
+        ProductAssemblySpec(
+            name="mixed",
+            modules=[
+                FeatureManifest(name="legacy", routers=[legacy_api]),
+                ModuleManifest(
+                    code="modern",
+                    version="1.2.0",
+                    dependencies=("legacy",),
+                    api_routers=[modern_api],
+                    web_routers=[modern_web],
+                    nav=[NavItem("Modern", "/admin/modern")],
+                ),
+            ],
+        )
+    )
+    with TestClient(app) as client:
+        assert client.get("/health").json() == {"status": "ok"}
+    assert {"/legacy-thing", "/modern-thing", "/admin/modern"} <= _paths(app)
+
+    by_code = {e.code: e for e in app.state.module_inventory}
+    # The unmigrated feature records no invented version; the migrated one does.
+    assert by_code["legacy"].version == UNVERSIONED
+    assert by_code["modern"].version == "1.2.0"
+    # And the cross-shape dependency edge is honoured in the mount order.
+    assert [m.code for m in app.state.module_registry.startup_order()] == [
+        "legacy",
+        "modern",
+    ]
+
+
+def test_module_manifest_routers_mount_like_feature_routers():
+    """A `ModuleManifest`'s `api_routers`/`web_routers` reach the app through
+    the same mount path a `FeatureManifest` uses — the compatibility aliases
+    are load-bearing, not decorative."""
+    from dotmac_kernel.modules import ModuleManifest
+    from fastapi import APIRouter
+
+    api, web = APIRouter(), APIRouter()
+
+    @api.get("/mod-api")
+    def mod_api():
+        return {}
+
+    @web.get("/admin/mod-web")
+    def mod_web():
+        return {}
+
+    manifest = ModuleManifest(
+        code="modtest", version="1.0.0", api_routers=[api], web_routers=[web]
+    )
+    paths = _paths(create_app(ProductAssemblySpec(name="m", modules=[manifest])))
+    assert {"/mod-api", "/admin/mod-web"} <= paths
+
+    api_only = _paths(
+        create_app(
+            ProductAssemblySpec(name="m2", modules=[manifest], web_enabled=False)
+        )
+    )
+    assert "/mod-api" in api_only and "/admin/mod-web" not in api_only

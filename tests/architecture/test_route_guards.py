@@ -101,6 +101,12 @@ def test_every_route_has_a_guard() -> None:
 #     `Depends(require_role(...))`-guarded route comes from that closure's
 #     own `Depends(require_user_auth)` sub-dependency, which DOES surface
 #     under its own name via `_guard_names`'s recursive walk.
+#   - "require_permission" (dotmac_kernel.deps): `require_permission(code)` — the
+#     declaration-driven guard (module control-plane step 3). Same closure
+#     situation as `require_role` above: the returned callable is named
+#     `_dependency`, so this exact string never appears in `_guard_names`, and
+#     the REAL enforcement comes from its own `Depends(require_user_auth)`
+#     sub-dependency. Listed here for documentation/future-proofing.
 #   - "require_web_auth" (dotmac_kernel.web_deps): cookie-based web-portal guard
 #     — requires a valid session cookie AND the "admin" role.
 #   - "require_platform_admin" (dotmac_kernel.platform_auth): THE platform guard
@@ -115,6 +121,7 @@ def test_every_route_has_a_guard() -> None:
 AUTH_GUARD_NAMES = {
     "require_user_auth",
     "require_role",
+    "require_permission",
     "require_web_auth",
     "require_platform_admin",
 }

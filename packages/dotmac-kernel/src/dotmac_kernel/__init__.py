@@ -41,6 +41,14 @@ from dotmac_kernel.audit import (
     write_audit_event,
     write_platform_audit_event,
 )
+from dotmac_kernel.audit_actions import (
+    AuditActionRegistry,
+    AuditActionsNotInstalledError,
+    DuplicateAuditActionError,
+    UndeclaredAuditActionError,
+    active_audit_actions,
+    install_audit_actions,
+)
 from dotmac_kernel.capabilities import (
     CapabilityCatalogue,
     DuplicateCapabilityError,
@@ -84,6 +92,21 @@ from dotmac_kernel.models import (
     uuid_pk,
 )
 from dotmac_kernel.models_platform import PlatformAdmin, PlatformSession
+from dotmac_kernel.modules import (
+    KERNEL_MODULE_CONTRACT_VERSION,
+    SUPPORTED_MODULE_CONTRACT_VERSIONS,
+    UNVERSIONED,
+    AnyManifest,
+    DuplicateModuleError,
+    MissingModuleDependencyError,
+    ModuleContractVersionError,
+    ModuleDependencyCycleError,
+    ModuleInventoryEntry,
+    ModuleManifest,
+    ModuleRegistry,
+    ModuleRegistryError,
+    UnknownModuleError,
+)
 from dotmac_kernel.money import (
     Currency,
     CurrencyMismatchError,
@@ -91,6 +114,36 @@ from dotmac_kernel.money import (
     Money,
     MoneyError,
     currency,
+)
+from dotmac_kernel.namespaces import (
+    HOST_SCHEMA,
+    MAX_REVISION_ID_LENGTH,
+    MIGRATION_OWNER_LEDGER,
+    DuplicateBranchLabelError,
+    DuplicateMigrationPrefixError,
+    DuplicateSchemaError,
+    DuplicateTableOwnerError,
+    HostSchemaClaimError,
+    InvalidMigrationPrefixError,
+    InvalidRevisionIdError,
+    InvalidSchemaError,
+    MigrationOwner,
+    NamespaceAllocationError,
+    NamespaceError,
+    NamespaceRegistry,
+    UnallocatedNamespaceError,
+    module_schema,
+    qualified,
+    revision_id,
+    schema_table_args,
+)
+from dotmac_kernel.permissions import (
+    DuplicatePermissionError,
+    PermissionCatalogue,
+    PermissionSpec,
+    UndeclaredPermissionError,
+    active_permissions,
+    install_permissions,
 )
 from dotmac_kernel.profiles import (
     DeploymentProfileRegistry,
@@ -114,7 +167,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a9"
+__version__ = "0.1.0a12"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -124,6 +177,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.app_factory",
         "dotmac_kernel.assembly",
         "dotmac_kernel.audit",
+        "dotmac_kernel.audit_actions",
         "dotmac_kernel.branding",
         "dotmac_kernel.capabilities",
         "dotmac_kernel.config",
@@ -153,9 +207,14 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.middleware.security_headers",
         "dotmac_kernel.middleware.tenant",
         "dotmac_kernel.migrations",
+        "dotmac_kernel.migrations.catalog",
+        "dotmac_kernel.migrations.gate",
         "dotmac_kernel.models",
         "dotmac_kernel.models_platform",
+        "dotmac_kernel.modules",
         "dotmac_kernel.money",
+        "dotmac_kernel.namespaces",
+        "dotmac_kernel.permissions",
         "dotmac_kernel.platform_auth",
         "dotmac_kernel.profiles",
         "dotmac_kernel.providers",
@@ -222,15 +281,64 @@ __all__ = [
     "ConflictError",
     "UnauthorizedError",
     "ForbiddenError",
-    # features
+    # features (the pre-ModuleManifest surface — still fully supported)
     "FeatureManifest",
     "NavItem",
     "load_manifests",
     "mount_features",
+    # module manifest + registry (module control-plane step 2)
+    "ModuleManifest",
+    "ModuleRegistry",
+    "ModuleInventoryEntry",
+    "AnyManifest",
+    "KERNEL_MODULE_CONTRACT_VERSION",
+    "SUPPORTED_MODULE_CONTRACT_VERSIONS",
+    "UNVERSIONED",
+    "ModuleRegistryError",
+    "DuplicateModuleError",
+    "ModuleContractVersionError",
+    "MissingModuleDependencyError",
+    "ModuleDependencyCycleError",
+    "UnknownModuleError",
+    # database namespaces + migration lineage identity (ADR-0006 D1)
+    "HOST_SCHEMA",
+    "MAX_REVISION_ID_LENGTH",
+    "MIGRATION_OWNER_LEDGER",
+    "MigrationOwner",
+    "NamespaceRegistry",
+    "module_schema",
+    "qualified",
+    "schema_table_args",
+    "revision_id",
+    "NamespaceError",
+    "InvalidSchemaError",
+    "InvalidMigrationPrefixError",
+    "InvalidRevisionIdError",
+    "DuplicateSchemaError",
+    "DuplicateMigrationPrefixError",
+    "DuplicateBranchLabelError",
+    "DuplicateTableOwnerError",
+    "UnallocatedNamespaceError",
+    "NamespaceAllocationError",
+    "HostSchemaClaimError",
     # capability catalogue (WS1)
     "CapabilityCatalogue",
     "DuplicateCapabilityError",
     "UndeclaredCapabilityError",
+    # permission catalogue (module control-plane step 3)
+    "PermissionSpec",
+    "PermissionCatalogue",
+    "DuplicatePermissionError",
+    "UndeclaredPermissionError",
+    "install_permissions",
+    "active_permissions",
+    # audit-action registry (module control-plane step 3)
+    "AuditActionRegistry",
+    "AuditActionsNotInstalledError",
+    "DuplicateAuditActionError",
+    "UndeclaredAuditActionError",
+    "install_audit_actions",
+    "active_audit_actions",
     # deployment-profile registry (WS1)
     "DeploymentProfileSpec",
     "DeploymentProfileRegistry",

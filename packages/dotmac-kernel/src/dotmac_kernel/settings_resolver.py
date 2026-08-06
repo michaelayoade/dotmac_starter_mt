@@ -10,9 +10,25 @@ settings/spec.py` DECLARES the initial `SettingSpec` instances and calls
 *mechanism* (register/get/all) plus resolution and the upsert/ensure helpers
 that operate on `dotmac_kernel.settings_models.DomainSetting`.
 
-No caching here: phase 1 has no Redis. Backlog: a Redis-backed settings cache
-lands in phase 3 (see `dotmac_sub:app/services/settings_cache.py` for the
-shape to port when that lands).
+No caching here: phase 1 has no Redis. A Redis-backed settings cache is
+backlogged for phase 3.
+
+**DO NOT port `dotmac_sub:app/services/settings_cache.py`'s key shape.** This
+docstring used to name it as "the shape to port", which would have introduced a
+cross-tenant leak into the kernel. Its key is `f"{PREFIX}{domain}:{key}"` — no
+scope segment — which is correct THERE (a single-scope settings table) and
+catastrophic here, where `domain_settings` rows are tenant-scoped. The identical
+omission in `dotmac_erp`'s copy served one organization's stored values to every
+other organization, deployment-wide, because Redis is shared across all workers.
+
+Whatever lands must: take a REQUIRED tenant argument (never an optional one
+defaulting to unscoped); carry the scope in the key in a form a tenant cannot
+occupy (`…:tenant=<uuid>` vs a literal `…:platform`); expose the platform read
+as a SEPARATELY NAMED function rather than `tenant_id=None` through this same
+one; and invalidate scope-correctly. Note that `resolve_value(..., tenant_id=
+None)` is the platform path through the shared function today — the moment a
+cache exists, that `None` becomes a legitimate-looking key value, so the split
+has to happen with the cache, not after it.
 
 Race-safety and precedence mechanics are ported from
 `dotmac_sub:app/services/domain_settings.py::ensure_by_key` and

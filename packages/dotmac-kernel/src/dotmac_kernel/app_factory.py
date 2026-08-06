@@ -3,10 +3,17 @@
 
 This is everything the reference `app/main.py` used to do at module scope, moved
 into the kernel and driven by the spec instead of module-level imports of the
-assembly's features: logging, surface globals, the lifespan (config validation +
-feature seeds), the middleware stack, error handlers, the platform-auth surface,
-the static mount (with assembly-over-kernel override), and feature mounting. A
-product's `main.py` shrinks to building one spec and calling this.
+assembly's features: logging, module-registry validation, surface globals, the
+lifespan (config validation + module seeds), the middleware stack, error
+handlers, the platform-auth surface, the static mount (with
+assembly-over-kernel override), and module mounting. A product's `main.py`
+shrinks to building one spec and calling this.
+
+Module validation happens FIRST and fails closed: `ModuleRegistry(spec.modules)`
+(see `dotmac_kernel.modules`) proves the installed set is coherent and yields
+the deterministic startup order every later step consumes — surface globals,
+mounting, and seeds all walk that same order, so there is one answer to "what
+runs, in what sequence".
 
 Re-exported as `dotmac_kernel.create_app`.
 """
@@ -23,15 +30,23 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from dotmac_kernel.assembly import ProductAssemblySpec
+from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.config import settings, validate_settings
 from dotmac_kernel.errors import register_error_handlers
-from dotmac_kernel.features import FeatureManifest, mount_features
+from dotmac_kernel.features import mount_features
 from dotmac_kernel.logging import setup_logging
 from dotmac_kernel.middleware.csrf import CSRFMiddleware
 from dotmac_kernel.middleware.observability import ObservabilityMiddleware
 from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
+from dotmac_kernel.modules import AnyManifest, ModuleRegistry
+from dotmac_kernel.permissions import (
+    PERMISSION_CODE_ATTR,
+    PermissionCatalogue,
+    UndeclaredPermissionError,
+    install_permissions,
+)
 from dotmac_kernel.platform_auth import platform_auth_router
 from dotmac_kernel.templating import (
     install_surface_globals,
@@ -53,7 +68,7 @@ class LayeredStaticFiles(StaticFiles):
 
 
 async def _run_enabled_seeds(
-    manifests: Sequence[FeatureManifest], disabled: Set[str]
+    manifests: Sequence[AnyManifest], disabled: Set[str]
 ) -> None:
     """Run each enabled manifest's seed hook off the event loop. DEFERRED,
     NON-FATAL: a failed seed (e.g. an unreachable DATABASE_URL) must never stop
@@ -68,19 +83,104 @@ async def _run_enabled_seeds(
                 logger.warning("Feature %s seed skipped: %s", manifest.name, exc)
 
 
+def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
+    """(route label, permission code) for every code a MOUNTED route references.
+
+    Scoped to this app's routes, not a process-wide tally of every
+    `require_permission` call ever imported: an assembly that imports a module's
+    routers without mounting them must not be failed for a code it never
+    exposes. `require_permission` stamps the code on the dependency callable it
+    returns (`PERMISSION_CODE_ATTR`); this walks each route's dependency tree
+    and reads it back.
+    """
+    found: list[tuple[str, str]] = []
+    for route in app.routes:
+        dependant = getattr(route, "dependant", None)
+        if dependant is None:
+            continue
+        codes: set[str] = set()
+        stack = list(dependant.dependencies)
+        while stack:
+            dep = stack.pop()
+            code = getattr(dep.call, PERMISSION_CODE_ATTR, None)
+            if isinstance(code, str):
+                codes.add(code)
+            stack.extend(dep.dependencies)
+        methods = sorted(getattr(route, "methods", None) or {"?"})
+        label = f"{'/'.join(methods)} {getattr(route, 'path', '?')}"
+        found.extend((label, code) for code in sorted(codes))
+    return found
+
+
+def _validate_referenced_permissions(
+    app: FastAPI, catalogue: PermissionCatalogue
+) -> None:
+    """Fail the BOOT when a mounted route requires a permission no installed
+    module declares. Without this a typo'd code is invisible until the first
+    request reaches that route — and then denies it, which reads as a
+    permissions bug rather than a declaration bug."""
+    undeclared = [
+        (label, code)
+        for label, code in _referenced_permissions(app)
+        if not catalogue.is_declared(code)
+    ]
+    if undeclared:
+        listed = ", ".join(f"{label} -> {code!r}" for label, code in undeclared)
+        raise UndeclaredPermissionError(
+            f"route(s) require a permission code no installed module declares: "
+            f"{listed} — declare it on the owning module's manifest "
+            "(`permissions=(PermissionSpec(...),)`)"
+        )
+
+
 def create_app(spec: ProductAssemblySpec) -> FastAPI:
     """Compose a FastAPI application for `spec`. Behavior is identical to the
     pre-Task-3 `app/main.py` when given the reference spec; the spec's
     `assembly_template_dir`/`assembly_static_dir` add assembly-over-kernel
-    overrides, and `disabled_modules`/`web_enabled` drive the surface."""
+    overrides, and `disabled_modules`/`web_enabled` drive the surface.
+
+    `spec.modules` is validated into a `ModuleRegistry` first and mounted in its
+    deterministic startup order. For modules declaring no dependencies (every
+    `FeatureManifest` today) that order is exactly the declaration order, so
+    adding the registry does not move a single route.
+
+    Raises `dotmac_kernel.modules.ModuleRegistryError` (a `ValueError`) if the
+    module set is incoherent."""
     setup_logging()
 
-    manifests = list(spec.modules)
     disabled = set(spec.disabled_modules)
     web_enabled = spec.web_enabled
 
+    # VALIDATE BEFORE ANYTHING IS MOUNTED (module control-plane directive step
+    # 2). Construction of the registry IS the validation — unique codes,
+    # supported contract versions, installed dependencies, no cycles — and
+    # `enabled_order` additionally proves every enabled module's dependencies
+    # are themselves enabled in THIS deployment. Any of those failing raises a
+    # `ModuleRegistryError` here, before a single route exists, rather than
+    # surfacing as a mystery 500 later.
+    registry = ModuleRegistry(spec.modules)
+    manifests = list(registry.startup_order())
+    enabled_manifests = list(registry.enabled_order(disabled))
+    logger.info(
+        "Module startup order (%d of %d enabled): %s",
+        len(enabled_manifests),
+        len(manifests),
+        ", ".join(f"{m.code}@{m.version}" for m in enabled_manifests) or "(none)",
+    )
+
+    # Process-active declaration catalogues (module control-plane step 3), built
+    # from the INSTALLED set — not the enabled subset: disabling a module must
+    # not turn a real permission code or audit action into an undeclared one for
+    # whatever is still running. Installed BEFORE anything is mounted, because
+    # both are read at request/write time by code the mount produces.
+    permission_catalogue = PermissionCatalogue.from_manifests(manifests)
+    install_permissions(permission_catalogue)
+    install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
-    # before any template renders.
+    # before any template renders. Fed the FULL installed set in startup order
+    # (it applies the same enabled rule itself), so the sidebar order matches
+    # the mount order instead of being derived separately.
     install_surface_globals(manifests, disabled, web_enabled)
 
     # Assembly-over-kernel template precedence (ChoiceLoader), if the assembly
@@ -95,10 +195,19 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
                 raise RuntimeError(f"Configuration error: {err}")
             logger.warning("Config: %s", err)
         if settings.seed_on_startup:
-            await _run_enabled_seeds(manifests, disabled)
+            await _run_enabled_seeds(enabled_manifests, disabled)
         yield
 
     app = FastAPI(title=spec.name, lifespan=lifespan)
+
+    # Installed-module inventory for health/diagnostics consumers. The kernel
+    # exposes the CONTRACT on app state, not an endpoint: public `/health` below
+    # is liveness only and must disclose nothing about what is installed, and an
+    # authenticated platform diagnostics surface is the control plane's own
+    # step. A product composes `inventory_payload()` into whichever surface its
+    # deployment profile permits.
+    app.state.module_registry = registry
+    app.state.module_inventory = registry.inventory(disabled)
 
     # FastAPI/Starlette runs the LAST added middleware first — order preserved
     # from the reference app (innermost CSRF → outermost SecurityHeaders).
@@ -151,10 +260,14 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     mount_features(
         app,
-        manifests=manifests,
+        manifests=enabled_manifests,
         disabled=disabled,
         web_enabled=web_enabled,
     )
+
+    # AFTER mounting: every route that now exists must reference only declared
+    # permission codes. Fails the boot, before the app is ever returned.
+    _validate_referenced_permissions(app, permission_catalogue)
     return app
 
 

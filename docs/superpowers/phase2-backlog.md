@@ -227,12 +227,19 @@ here so all seven are discoverable as closed in one place:
 - Settings: `_normalize_for_db` None-handling for json/boolean types → clean BadRequestError
   at the settings API boundary (owned by T5's validation; verify it landed there).
 - Settings cache (Redis) with invalidation on write — phase 3, alongside Celery/Redis
-  infra (noted in `app/core/settings_resolver.py`'s module docstring; no caching exists
-  yet, every `resolve_value` call hits Postgres). This is also the fix for 2b.1-T4's
+  infra (noted in `dotmac_kernel/settings_resolver.py`'s module docstring; no caching
+  exists yet, every `resolve_value` call hits Postgres). This is also the fix for 2b.1-T4's
   (F4) one-extra-DB-read-per-authenticated-web-request cost (`get_request_branding` ->
   `load_branding` -> `resolve_value`) — request-scoped memoization (landed in T4) avoids
   N reads per request, but every request still pays one; the Redis cache below removes
   even that.
+  **The key MUST carry tenant scope.** This entry previously pointed at
+  `dotmac_sub:app/services/settings_cache.py` as the shape to port; that key has no scope
+  segment, which is correct for Sub's single-scope table and is a cross-tenant leak in a
+  `tenant_id`-scoped kernel — the same omission in `dotmac_erp`'s copy served one
+  organization's values to every other, deployment-wide. See the resolver docstring for
+  the four required properties, and note that splitting the platform read out of
+  `resolve_value(..., tenant_id=None)` has to happen WITH the cache, not after it.
 - ~~RBAC: consider `require_user_auth` (not admin) for `GET /rbac/roles` when 2b builds
   role-assignment dropdowns.~~ — **moot as of 2b-T6**: the role-grant web dropdown
   (`/admin/role-grants`) calls `rbac_service.list_roles` directly, server-side — it

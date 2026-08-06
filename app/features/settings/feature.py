@@ -22,4 +22,9 @@ feature = FeatureManifest(
     web_routers=[web_router],
     nav=[NavItem("Settings", "/admin/settings")],
     seed=seed_platform_defaults,
+    # One action for both surfaces: the JSON `PUT /settings/{domain}/{key}` and
+    # the `/admin/settings` screens write the SAME `settings.update` action, so
+    # the trail reads identically however the change arrived (module
+    # control-plane directive step 3).
+    audit_actions=["settings.update"],
 )

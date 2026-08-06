@@ -56,7 +56,8 @@ from jinja2 import ChoiceLoader, FileSystemLoader, pass_context
 
 from dotmac_kernel.branding import get_brand
 from dotmac_kernel.display import DisplaySettings, default_display
-from dotmac_kernel.features import FeatureManifest, NavItem
+from dotmac_kernel.features import NavItem
+from dotmac_kernel.modules import AnyManifest
 
 # Templates and static assets are shipped as KERNEL PACKAGE DATA and resolved
 # by package path — NOT the process CWD (kernel-boundary Task 1b). A
@@ -126,7 +127,7 @@ templates.env.filters["local_date"] = local_date
 
 
 def install_surface_globals(
-    manifests: Sequence[FeatureManifest], disabled: set[str], web_enabled: bool
+    manifests: Sequence[AnyManifest], disabled: set[str], web_enabled: bool
 ) -> None:
     """Set the process-static `enabled_features`/`nav_items` Jinja globals
     from the loaded manifests — the ONE place templates learn which

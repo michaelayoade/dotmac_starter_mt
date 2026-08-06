@@ -3,26 +3,50 @@
 Sub (S2) allows: assembly, capabilities, features, money, profiles, providers,
 providers.provisioning. ERP (E2) adds: licensing, testing. This probe covers
 that union — anything a product may import must work here, or the floor is a
-claim about a surface nobody actually checked.
+claim about a surface nobody actually checked. `modules` is covered too: it is
+the same category (a pure, FastAPI-light contract both products will consume
+next), and adding it to the probe when it ships is cheaper than discovering at
+adoption that the floor claim never included it.
 
 Importing is a weak check: a pydantic model only fails when it is BUILT, and a
 crypto backend only fails when it SIGNS. So each contract is constructed and,
 where it has behaviour, exercised.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import dotmac_kernel
 from dotmac_kernel import (
+    HOST_SCHEMA,
+    MIGRATION_OWNER_LEDGER,
+    UNVERSIONED,
+    AuditActionRegistry,
     CapabilityCatalogue,
     DeploymentProfileRegistry,
     DeploymentProfileSpec,
     ExchangeRate,
     FeatureManifest,
+    HostSchemaClaimError,
+    InvalidRevisionIdError,
+    MigrationOwner,
+    MissingModuleDependencyError,
+    ModuleManifest,
+    ModuleRegistry,
     Money,
+    NamespaceRegistry,
+    PermissionCatalogue,
+    PermissionSpec,
     ProductAssemblySpec,
+    UnallocatedNamespaceError,
+    UndeclaredAuditActionError,
+    UndeclaredPermissionError,
     currency,
+    module_schema,
+    qualified,
+    revision_id,
+    schema_table_args,
 )
 from dotmac_kernel.licensing import (
     UNKNOWN_DIGEST,
@@ -79,8 +103,86 @@ registry = DeploymentProfileRegistry([profile])
 assert registry.is_valid_code("p")
 assert profile.provider_selections()["identity"] == "local"
 
-# Assembly composition
-spec = ProductAssemblySpec(name="floor-probe", modules=(manifest,))
+# Module manifest + registry: build a real dependency graph, prove the order is
+# dependency-first, and serialize the inventory (a dataclass only fails when it
+# is BUILT, and the payload only fails when it is walked).
+module = ModuleManifest(code="m2", version="1.4.0", dependencies=("m",))
+module_registry = ModuleRegistry([manifest, module])
+assert [m.code for m in module_registry.startup_order()] == ["m", "m2"]
+assert module_registry.get("m").version == UNVERSIONED
+payload = module_registry.inventory_payload()
+assert payload["startup_order"] == ["m", "m2"], payload
+json.dumps(payload)
+try:
+    ModuleRegistry([module])  # dependency 'm' absent → must fail closed
+except MissingModuleDependencyError:
+    pass
+else:  # pragma: no cover - the probe fails loudly instead
+    raise AssertionError("ModuleRegistry accepted a missing dependency")
+
+# D1 (ADR-0006): database namespaces + migration lineage identity. Same
+# category as `modules` — a pure contract both products consume the moment they
+# extract a STATEFUL module — so the floor claim must cover it. Build a real
+# allocation, prove the schema derives, prove the 32-char revision-id budget
+# bites, and prove an UNALLOCATED module fails closed.
+assert module_schema("bill") == "mod_bill"
+assert qualified("mod_bill", "invoices") == "mod_bill.invoices"
+assert schema_table_args("mod_bill") == {"schema": "mod_bill"}
+assert revision_id("bl", 1, "invoices") == "bl_0001_invoices"
+allocated = MigrationOwner(
+    owner="m4", prefix="bl", branch_label="m4", db_schema=module_schema("bill")
+)
+stateful = ModuleManifest(
+    code="m4",
+    version="1.0.0",
+    short_code="bill",
+    migration_prefix="bl",
+    tables=("invoices",),
+)
+assert stateful.db_schema == "mod_bill"
+namespaces = NamespaceRegistry.from_manifests(
+    [stateful], ledger=(*MIGRATION_OWNER_LEDGER, allocated)
+)
+assert namespaces.module_schemas() == ("mod_bill",)
+for call, namespace_error in (
+    (lambda: revision_id("bl", 1, "x" * 40), InvalidRevisionIdError),
+    (lambda: schema_table_args(HOST_SCHEMA), HostSchemaClaimError),
+    (lambda: NamespaceRegistry.from_manifests([stateful]), UnallocatedNamespaceError),
+):
+    try:
+        call()
+    except namespace_error:
+        pass
+    else:  # pragma: no cover - the probe fails loudly instead
+        raise AssertionError(
+            f"namespaces accepted what {namespace_error.__name__} forbids"
+        )
+
+# Manifest declaration catalogues (module control-plane step 3): a spec only
+# fails when it is BUILT and a catalogue only fails when it is QUERIED, so build
+# both, resolve a declared code, and prove an undeclared one fails closed.
+declaring = FeatureManifest(
+    name="m3",
+    permissions=(PermissionSpec(code="m3.read", default_roles=("admin",)),),
+    audit_actions=("m3.happened",),
+)
+permissions = PermissionCatalogue.from_manifests([declaring])
+assert permissions.require("m3.read").default_roles == ("admin",)
+audit_actions = AuditActionRegistry.from_manifests([declaring])
+audit_actions.require("m3.happened")
+for catalogue, code, error in (
+    (permissions, "m3.write", UndeclaredPermissionError),
+    (audit_actions, "m3.never", UndeclaredAuditActionError),
+):
+    try:
+        catalogue.require(code)
+    except error:
+        pass
+    else:  # pragma: no cover - the probe fails loudly instead
+        raise AssertionError(f"{catalogue!r} accepted the undeclared {code!r}")
+
+# Assembly composition — a FeatureManifest and a ModuleManifest, mixed.
+spec = ProductAssemblySpec(name="floor-probe", modules=(manifest, module))
 assert spec.name == "floor-probe"
 
 # WS4: exact money AND FX

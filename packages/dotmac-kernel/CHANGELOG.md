@@ -8,6 +8,278 @@ here.
 
 ## Unreleased
 
+## 0.1.0a12 — 2026-08-06
+
+Twelfth alpha. Adds **per-module Postgres schema namespaces and registered
+Alembic migration prefixes** — D1 of the white-label foundation programme
+(ADR-0006 § "Decision amendment — 2026-08-02"), the last blocker for stateful
+module composition. No migration; the kernel head stays `0012` and every
+existing revision id is unchanged.
+
+### Added
+- **`dotmac_kernel.namespaces`** — the D1 authority. One immutable
+  `mod_<short_code>` Postgres schema per STATEFUL module, plus an immutable,
+  globally unique short migration prefix and branch label per migration owner.
+  `NamespaceRegistry` is construction-is-validation, like `PermissionCatalogue`
+  before it: it refuses a composition with a duplicate schema claim
+  (`DuplicateSchemaError`), duplicate migration prefix
+  (`DuplicateMigrationPrefixError`), duplicate branch label
+  (`DuplicateBranchLabelError`) or contested table (`DuplicateTableOwnerError`).
+
+  This answers verified evidence, not a hypothetical:
+  `docs/inventories/migration-collisions.md` found `starter ∩ ERP` colliding on
+  `audit_events`, `domain_settings`, `people`, `person_roles`, `roles`,
+  `user_credentials` and `starter ∩ Sub` on `parties`, `party_roles` — sixteen
+  of seventeen duplicate names same-name/**different-shape**, the failure mode
+  that corrupts quietly rather than erroring loudly.
+
+- **`MIGRATION_OWNER_LEDGER`** — the checked-in, kernel-shipped allocation
+  record, and the reason "globally unique" can be true across Dotmac repos: the
+  kernel is the shared dependency, so allocations are registered once. A
+  stateful module absent from it (`UnallocatedNamespaceError`) or contradicting
+  it (`NamespaceAllocationError`) cannot be registered. Ships with the two host
+  owners only — `kernel` and `assembly`, both writing to `public`.
+
+- **`ModuleManifest` D1 declaration fields** — `short_code`,
+  `migration_prefix`, `migration_branch`, `tables`. `db_schema` is a *derived,
+  read-only* property built only through `module_schema()`, so a namespace can
+  never be inferred from a display name and there is no settable attribute to
+  re-point at runtime. A manifest is either fully stateful or fully stateless;
+  a half-declaration (tables with no schema) is rejected, because its tables
+  would land in `public`.
+
+- **`ModuleRegistry` now assigns namespaces.** It builds the `NamespaceRegistry`
+  during construction and exposes it via `namespaces()`; `inventory_payload()`
+  gained a `migration_owners` block and each inventory row a `db_schema` /
+  `migration_branch`, so any `alembic_version` row is explainable from the
+  inventory alone.
+
+- **`dotmac_kernel.migrations.gate`** — the composed CI gate. Statically (AST,
+  no imports, no database) loads every selected version location and rejects
+  duplicate revisions, unregistered/duplicate prefixes, duplicate branch
+  labels, duplicate schema claims and duplicate table ownership; it also
+  enforces one lineage root per owner, `down_revision` never crossing owners
+  (cross-lineage ordering is `depends_on`), revision ids inside
+  `alembic_version.version_num`'s **VARCHAR(32)**, and module DDL that names
+  its schema instead of relying on `search_path`. Locations are attributed to
+  owners through their lineage root's branch label, so there is no second
+  location→owner map to drift from `alembic.ini`.
+
+- **`dotmac_kernel.migrations.catalog`** — the post-migration live-catalog
+  contract, applying the kernel RLS/grant rules across every registered module
+  schema: RLS ENABLEd + FORCEd, a policy present, `tenant_id NOT NULL` (or the
+  EXISTS-join subtype pattern), unique constraints that include `tenant_id`,
+  composite tenant FKs, manifest-vs-live table ownership, and no module table
+  squatting in `public`. Split into parameterised SQL builders plus a pure
+  `audit_snapshot` decision function, so the contract is fully unit-testable
+  without Postgres.
+
+- **`revision_id(prefix, sequence, slug)`**, `qualified()`,
+  `schema_table_args()` — the helpers that make the `<prefix>_<sequence>_<slug>`
+  format and full schema qualification the path of least resistance.
+  `revision_id` raises rather than truncating past 32 characters, a limit that
+  otherwise surfaces only mid-deploy against a real database.
+
+### Enforcement hardening
+- The allocation ledger is validated as a whole even when an allocated module
+  is not installed, so fleet-wide schema/prefix/branch uniqueness cannot hide
+  a collision in two dormant rows.
+- The static migration scanner follows local `upgrade()` helpers, understands
+  typed Alembic metadata and `module_schema()` constants, checks imperative and
+  inline foreign keys, treats an empty `tables` declaration as owning nothing,
+  and rejects a qualified DDL write aimed at another module's schema.
+- The host `public`-schema audit now consumes the kernel catalog's canonical
+  UNIQUE-constraint query and enforces the composite-unique rule it already
+  claimed under hard rule 11; its sensitivity canary covers the failure path.
+
+### Compatibility
+- **`public` is a compatibility namespace, not a shared one.** It remains the
+  kernel's and the one host assembly's, and is explicitly unavailable to
+  installable modules (`HostSchemaClaimError`).
+- **The `kernel` and `assembly` lineages are grandfathered.** Their revision
+  ids (`0001_initial_tenant_schema`, `a001_adopt_cfd`, …) are already recorded
+  in live `alembic_version` rows, so they keep their original format via
+  `MigrationOwner.legacy_revision_pattern` and are exempt from the strict
+  `<prefix>_<sequence>_<slug>` and `schema=` rules. Every installable module
+  gets the strict rules.
+- Purely additive: no existing public name changed, and every existing manifest
+  (including a plain `FeatureManifest`) is stateless under D1 and validates
+  unchanged.
+
+## 0.1.0a11 — 2026-08-06
+
+> **Amended 2026-08-03.** `active_audit_actions()` no longer defaults to an
+> empty registry. NOT INSTALLED and INSTALLED-AND-EMPTY are now different
+> states: the former raises `AuditActionsNotInstalledError` (a configuration
+> error), the latter still rejects each write as undeclared. The original
+> default told a process that builds no app — a worker, a Celery task, a CLI, a
+> migration helper — that its perfectly well-declared action "is not declared by
+> any installed module", pointing the reader at the manifests when the actual
+> fault was that the vocabulary was never loaded. `dotmac_kernel.permissions`
+> deliberately keeps its empty default: an uninstalled permission catalogue
+> DENIES, which is the safe answer for an authorization check, whereas an
+> uninstalled audit registry would reject every write inside the caller's
+> transaction and turn a wiring mistake into a failed business operation.
+
+Eleventh alpha. Adds the **manifest permission and audit-action declarations**
+together with the catalogues that consume them — step 3 of the module
+control-plane program
+(`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`; F2 of
+the white-label foundation programme, ADR-0006). No migration; the kernel head
+stays `0012`.
+
+### Added
+- **`dotmac_kernel.permissions`** — `PermissionSpec` (a permission a module
+  declares it OWNS: `code`, `description`, and `default_roles`, the role slugs
+  whose holders satisfy it) and `PermissionCatalogue`, the one authority on "is
+  this permission real, and who may hold it?". Sibling of `CapabilityCatalogue`
+  by design — same shape, same fail-closed posture, same invariant: a code has
+  exactly one owning module (`DuplicatePermissionError`) and may never be
+  invented at a reference site (`UndeclaredPermissionError`).
+
+  The two catalogues gate different things and must not be conflated:
+  capability answers "is this TENANT entitled?", permission answers "does this
+  ACTOR hold it?". `default_roles` is the code-declared default binding — the
+  same relationship `SettingSpec.default` has to a `domain_settings` row, not a
+  second authority; tenant-configurable role→permission grants are a later step
+  that layers over it.
+
+- **`dotmac_kernel.deps.require_permission(code)`** — the guard that consumes the
+  catalogue, and the reason the field is not inert. It resolves the declared spec
+  at request time and requires the actor to hold one of its `default_roles` (403
+  otherwise): a strict generalisation of `require_role`, which remains supported
+  as the raw role check underneath. Both now share one `_holds_any_role` query,
+  so a fix to the tenant scoping or the join lands once for both.
+
+- **`create_app` fails the BOOT on an undeclared permission reference.** The
+  dependency `require_permission` returns carries its code; after mounting,
+  `create_app` walks every mounted route and raises `UndeclaredPermissionError`
+  naming the route and the code. A typo therefore stops the boot instead of
+  surfacing as a mystery 403 on the first request that reaches that route. Scoped
+  to MOUNTED routes: importing a module's routers without mounting them cannot
+  fail an assembly for a code it never exposes.
+
+- **`dotmac_kernel.audit_actions`** — `AuditActionRegistry`, the same catalogue
+  shape for the audit trail's vocabulary (`DuplicateAuditActionError`,
+  `UndeclaredAuditActionError`). An action is a bare code, not a spec: unlike a
+  permission it carries no binding, because the trail records and decides nothing.
+
+- **`write_audit_event` validates its `action`** against the active registry
+  BEFORE adding anything to the session, so a rejected write leaves no partial
+  state. `audit_events.action` was free text, so any typo (`"role.grant"` vs
+  `"role.granted"`) silently produced a second, near-identical action nobody would
+  ever query for — and an audit trail missing events you believe you are reading
+  is worse than one that is obviously empty. `write_platform_audit_event` is
+  deliberately NOT validated the same way: platform actions are written by the
+  kernel's own control plane, which has no module manifest to declare them on.
+
+- **`install_permissions` / `install_audit_actions`** (+ `active_permissions` /
+  `active_audit_actions`) — the process-active install, the same pattern
+  `install_surface_globals` already uses, because a request-time guard and a
+  service-time writer cannot be handed a catalogue as an argument without
+  threading it through every call site. `create_app` installs both from the
+  INSTALLED module set (not the enabled subset: disabling a module must not turn
+  a real code into an undeclared one). Permissions default to an EMPTY catalogue
+  so an uninstalled authorization catalogue denies safely. Audit actions require
+  an explicit installation; a missing installer raises
+  `AuditActionsNotInstalledError`, while an installed-empty registry rejects
+  every action as undeclared.
+
+### Changed
+- **`FeatureManifest` and `ModuleManifest` gained `permissions` and
+  `audit_actions`.** Both default to `()`, and `ModuleManifest.from_feature`
+  carries them across unchanged — a feature manifest declares them exactly like a
+  module manifest, so a package does not have to migrate in order to declare.
+
+### Compatibility
+- **No breaking change to a public signature.** Every existing name keeps
+  working; `require_role` is untouched and remains supported.
+- **One behavior change to be aware of when adopting:** `write_audit_event` now
+  REJECTS an action no installed module declares. An assembly upgrading to this
+  version must add each action it writes to the writing module's manifest
+  (`audit_actions=(...)`), and a consumer that builds an app WITHOUT `create_app`
+  must call `install_audit_actions` itself — a missing installer is a distinct
+  configuration error and an explicitly empty registry rejects everything.
+- The directive's remaining manifest fields (`settings`, `feature_flags`,
+  `entity_types`, `health_checks`) are still deliberately NOT added. Same reason
+  as in `0.1.0a10`: each lands with the registry code that derives behavior from
+  it.
+
+## 0.1.0a10 — 2026-08-06
+
+Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
+control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
+authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
+head stays `0012`.
+
+### Added
+- **`dotmac_kernel.modules`** — `ModuleManifest`, the versioned expansion of
+  `FeatureManifest` (`code`, `version`, `contract_version`, `dependencies` on
+  top of the existing router/nav/capability/seed surface), and `ModuleRegistry`,
+  the one authority on whether an installed module set is coherent.
+
+  Construction IS validation, fail-closed on four independent checks, each with
+  its own named error under a shared `ModuleRegistryError` base: a duplicate
+  `code` (`DuplicateModuleError`), a `contract_version` outside
+  `SUPPORTED_MODULE_CONTRACT_VERSIONS` (`ModuleContractVersionError`), a
+  dependency on a code that is not installed (`MissingModuleDependencyError`),
+  and a dependency cycle (`ModuleDependencyCycleError`, whose message names the
+  actual path rather than merely asserting one exists).
+
+  `startup_order()` is a pure function of (declaration order, dependency edges):
+  dependencies first, **declaration order as the tiebreak**. Declaration order,
+  not alphabetical, is load-bearing — an assembly's module list is a deliberate
+  mount order and route matching is first-match-wins, so adopting the registry
+  must not silently reorder an assembly whose modules declare no dependencies.
+  For every `FeatureManifest` shipping today that means the order is provably
+  identical to before.
+
+  `enabled_codes`/`enabled_order` make "deployment-enabled" one definition
+  instead of three, and `enabled_order` fails closed when an enabled module
+  depends on one that is NOT enabled: installed is not sufficient, and disabling
+  a module something else needs is a misconfiguration that belongs at startup,
+  not in a mystery 500.
+
+  `inventory()` / `inventory_payload()` expose the installed-module/version
+  inventory (`ModuleInventoryEntry`: code, version, contract version,
+  dependencies, core, enabled) for health and diagnostics — sorted by code so
+  two deployments' inventories are diffable.
+
+- **`create_app` validates modules before mounting anything.** `spec.modules` is
+  built into a `ModuleRegistry` first, so an incoherent set stops the boot
+  rather than producing a half-mounted app, and surface globals, mounting, and
+  seeds all walk that single deterministic order. The validated registry and its
+  inventory are published on `app.state.module_registry` /
+  `app.state.module_inventory`.
+
+  Public `/health` is deliberately unchanged: it stays DB-free liveness and
+  discloses nothing about what is installed. The kernel ships the inventory
+  CONTRACT; the authenticated platform diagnostics surface is the control
+  plane's own program step and composes `inventory_payload()`.
+
+### Changed
+- **`ProductAssemblySpec.modules` accepts `ModuleManifest` and `FeatureManifest`,
+  freely mixed** (`AnyManifest`), which is what makes migrating an assembly's
+  feature packages incremental. Same widening for `mount_features`,
+  `install_surface_globals`, and `CapabilityCatalogue.from_manifests`.
+
+### Compatibility
+- **No breaking change.** `FeatureManifest` and every existing consumer keep
+  working untouched, two ways: the registry adapts a feature automatically
+  (`ModuleManifest.from_feature`, which carries every field across and invents
+  neither a version nor a dependency — an unversioned module records the
+  `UNVERSIONED` sentinel `"0.0.0"`), and `ModuleManifest` exposes read-only
+  `name`/`routers` aliases for `code`/`api_routers` so manifest-walking code
+  needs no call-site change.
+- The directive's `permissions`, `settings`, `feature_flags`, `audit_actions`,
+  `entity_types`, and `health_checks` manifest fields are deliberately NOT added
+  yet. They belong to later program steps, and the same directive requires CI to
+  fail when "a declaration has no consumer" — each lands with the registry code
+  that derives behavior from it.
+- The `kernel-floors` job now constructs a module graph, asserts its order,
+  serializes the inventory, and proves a missing dependency fails closed at the
+  floor.
+
 ## 0.1.0a9 — 2026-08-03
 
 Ninth alpha. Adds the **applied-state envelope** — the structure a deployment

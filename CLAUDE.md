@@ -3,6 +3,9 @@
 **Hard rules live in `AGENTS.md`** (tool-neutral, canonical — this file
 indexes them and adds repo-map/portal specifics). Docs hierarchy:
 `docs/ARCHITECTURE.md` = as-built truth; `docs/adr/` = decisions + status;
+`docs/inventories/` = dated cross-repo as-built characterization (starter,
+Sub, ERP, vendor control plane) — facts, not mandates, and explicitly not a
+licence to extract shared code (see ADR-0006 § "The extraction rule");
 `docs/superpowers/plans|specs/` = non-authoritative intent; `README.md` =
 onboarding; `CONTRIBUTING.md` = human dev rules; `docs/SECURITY.md` =
 security posture.
@@ -28,8 +31,12 @@ path dependency — the assembly imports `dotmac_kernel.*`, never a copied modul
 
 - `dotmac_kernel` (the kernel package) — config, db, models base, security,
   platform auth, deps (route guards), middleware, logging, errors, crud,
-  features registry, audit write-side, templating, settings resolver,
-  branding, identity. The kernel never imports `app` (import-linter contract
+  features registry, module registry (`modules`: the versioned
+  `ModuleManifest` + the `ModuleRegistry` that validates unique codes,
+  contract compatibility, dependencies and cycles, and derives the
+  deterministic startup order `create_app` mounts in), audit write-side,
+  templating, settings resolver, branding, identity. The kernel never
+  imports `app` (import-linter contract
   "Kernel must not import the assembly", `make lint-imports`).
 - `app/features/<name>/` — self-contained: `models.py`, `schemas.py`,
   `service.py`, `router.py` (JSON API), `web.py` (HTML/HTMX admin-portal
@@ -332,10 +339,24 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     the same migration (`domain_settings` is the documented exception;
     platform catalog tables get grants-not-RLS) — enforced on Postgres by
     `tests/test_rls_catalog.py` + the per-feature isolation canaries.
-12. Migrations run as `app_admin`, never on container boot;
+12. Manifest declarations (`permissions`, `audit_actions`) have ONE owning
+    module, are only referenced when declared (`require_permission` fails
+    the boot, `write_audit_event` fails the write), and every declared code
+    has a real consumer (`test_manifest_declarations.py`).
+13. Migrations run as `app_admin`, never on container boot;
     `scripts/deploy.sh` is the only production migration path.
-13. New feature: package + manifest + registry + import-linter contract +
-    cross-tenant isolation test FIRST.
+14. Each stateful module has one immutable `mod_<short_code>` schema and one
+    registered migration lineage; `public` is reserved for the kernel and host
+    assembly. Module SQL is fully schema-qualified, and the composed static and
+    live-catalog gates enforce revision, namespace, and table ownership
+    (`test_namespaces.py`, `test_migration_gate.py`,
+    `test_live_catalog_contract.py`, `test_module_schema_catalog.py`).
+15. Cross-repository engineering governance is pinned by exact commit and the
+    product workflow must execute that same accepted revision
+    (`.dotmac/standards-profile.json`, `engineering-standards.yml`).
+
+Process: a new feature starts with its package, manifest, registry entry,
+import-linter contract, and cross-tenant isolation test.
 
 ## SOT-complete criteria
 

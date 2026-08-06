@@ -4,16 +4,25 @@ This expands the `CLAUDE.md` summary. See `docs/adr/0001-multi-tenant-architectu
 for the founding tenancy design and `docs/adr/0002-starter-consolidation.md`
 for how this repo came to be the org's one starter. ADR-0003 defines the
 accepted, not-yet-implemented profile-driven direction for SaaS, dedicated,
-self-hosted/on-premise, OEM, and single-tenant deployments.
+self-hosted/on-premise, OEM, and single-tenant deployments. ADR-0006 fixes the
+package/module/theme/brand/facet ownership boundaries and extraction rule for
+that target.
 
-## Target deployment profiles and commercial authorities (accepted; not implemented)
+## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
 The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
-`WEB_ENABLED`; it does **not** yet implement `DeploymentProfile`, a provider
-registry, tenant entitlements, subscriptions, billing, metering, or signed
-licensing. The target architecture is authoritative in
-[`ADR-0003`](adr/0003-unified-deployment-profiles.md), with delivery gates in
-the
+`WEB_ENABLED`; the kernel also ships a validating
+`ModuleManifest`/`ModuleRegistry`, manifest-owned permission and audit-action
+catalogues with request/write-time enforcement, the capability catalogue, a
+pure typed deployment-profile registry, tenant-local WS2 entitlement
+grants/evaluation, and WS8 licence verification, revocation, and authenticated
+applied-state contracts. The reference assembly owns the durable
+licence/revocation receiver state and thin apply/import adapters. It does
+**not** yet implement runtime profile/provider selection, the complete
+effective-capability availability lifecycle, subscriptions, billing, or
+metering. The target architecture is authoritative in
+[`ADR-0003`](adr/0003-unified-deployment-profiles.md); ADR-0006 owns its package
+and presentation boundaries, with delivery gates in the
 [`deployment profiles and commercial platform plan`](superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md).
 
 New deployment types compose modules and providers across independent axes
@@ -171,13 +180,16 @@ post-incident corrective work.
 
 ### Target cross-project reuse and frontend surfaces
 
-Cloning this repository currently creates an independent source snapshot; later
-fixes do not propagate automatically. The target separates a versioned platform
-kernel, versioned optional modules, thin product assemblies, and deployment
-profiles. Maintained products pin signed releases; automated update PRs rebuild
-and run each product's profile/lifecycle/migration tests before rollout. A fix is
-implemented once but deployed deliberately—never injected silently into running
-systems.
+Cloning this repository still creates an independent source snapshot; later
+fixes do not propagate automatically. The repository now separates a versioned,
+publishable `dotmac-kernel` from this thin reference assembly and proves the
+built wheel in a clean consumer environment. The remaining target adds
+versioned optional modules and `dotmac-ui`, resolved deployment profiles, and
+product adoption through exact released pins. Maintained products use automated
+update PRs to rebuild and run profile/lifecycle/migration tests before rollout.
+A fix is implemented once but deployed deliberately—never injected silently
+into running systems. ADR-0006 owns the package direction and forbids extraction
+based on similarity alone.
 
 ERP and ISP subscriber management remain separate product assemblies/data planes
 even when they consume the same kernel. ERP `Organization` is the natural tenant
@@ -257,7 +269,9 @@ packages/dotmac-kernel/          the kernel package (distribution dotmac-kernel,
                  UserCredential), models_platform (PlatformAdmin/PlatformSession),
                  platform_auth (platform guard + auth routes), security,
                  deps (route guards), middleware/, logging, errors, crud,
-                 features (manifest registry), audit,
+                 features (manifest registry), modules (versioned ModuleManifest
+                 + validating ModuleRegistry), permissions (PermissionSpec +
+                 PermissionCatalogue), audit_actions (AuditActionRegistry), audit,
                  settings_models (DomainSetting), settings_resolver (spec
                  registry + tenant->platform->default resolver), templating
                  (Jinja env + render()), branding (static + per-tenant DB
@@ -972,7 +986,7 @@ write:
 | Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and `app.features.tenants.service.provision_tenant` (creates the new tenant's `admin` role during provisioning) |
 | Auth credentials | `app.features.auth.service.register` (policy-gated self-registration, `auth.registration_policy` default `closed`) **and** `app.features.tenants.service.provision_tenant` (the owner credential, inside the provisioning transaction) — no credential-update/password-reset path yet, phase 2c. `Party.email` is a SEPARATE resource with its own row above (Parties) — `UserCredential` carries no email of its own as of 2b.1-T3 (F2): `login()` resolves `Party` by email first, then `UserCredential` by `party_id` only. |
 | Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `POST /admin/logout`, CSRF-protected as of 2b.1-T5/F7; the JSON API has no logout/revoke route of its own yet) |
-| Audit events | `dotmac_kernel.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes), `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor), and `tenants/service.py::provision_tenant` (`platform.tenant.create` + `platform.tenant.owner_provision`, the platform actor named in `details.platform_actor` since platform admins are not tenant parties) |
+| Audit events | `dotmac_kernel.audit.write_audit_event` — the only function that constructs an `AuditEvent`, and (since kernel `0.1.0a11`) the one place the trail's ACTION VOCABULARY is enforced: `action` must be declared by an installed module's manifest `audit_actions`, validated against `dotmac_kernel.audit_actions.AuditActionRegistry` before anything reaches the session; called from `rbac/router.py` + `rbac/web.py` (role/grant writes), `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor), and `tenants/service.py::provision_tenant` (`platform.tenant.create` + `platform.tenant.owner_provision`, the platform actor named in `details.platform_actor` since platform admins are not tenant parties) |
 | Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
 | `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
@@ -1141,18 +1155,166 @@ tenants(id)`, a composite unique for anything unique-per-tenant, and
 `USING/WITH CHECK` policy on `tenant_id = app_current_tenant_id()`, applied
 in the same migration that creates the table.
 
+## Module registry (module control-plane step 2)
+
+`dotmac_kernel.modules` holds `ModuleManifest` — the **versioned** expansion of
+`FeatureManifest`, adding `code`, `version`, `contract_version`, and
+`dependencies` — and `ModuleRegistry`, the single authority on whether the
+installed module set is coherent. Both are pure and in-memory (same posture as
+`capabilities` and `profiles`): they DESCRIBE installed code. They never grant
+entitlement (WS2 owns that) and never deploy anything (the vendor control plane
+owns that).
+
+**Construction is validation.** `ModuleRegistry(manifests)` fails closed on four
+independent checks, each with its own named error under a shared
+`ModuleRegistryError` (all `ValueError`s):
+
+| Check | Error | Why it must be fatal |
+|---|---|---|
+| Duplicate `code` | `DuplicateModuleError` | A code with two owners has no single authority — every downstream reference (dependency edge, profile set, capability owner) becomes ambiguous. |
+| `contract_version` outside `SUPPORTED_MODULE_CONTRACT_VERSIONS` | `ModuleContractVersionError` | A module built for a different manifest generation would load half-understood. The supported set is a constructor keyword, so supporting two generations is a rollout, not a flag day. |
+| Dependency on a code that is not installed | `MissingModuleDependencyError` | The dependent's routes would 500 at the first request that crosses the edge. |
+| Dependency cycle | `ModuleDependencyCycleError` | No startup order exists. The message names the actual path (`a -> b -> a`), not merely "a cycle exists". |
+
+**Deterministic startup order.** `startup_order()` is a pure function of
+(declaration order, dependency edges): dependencies first, **declaration order
+as the tiebreak**. Declaration order — not alphabetical — is load-bearing:
+`FEATURE_MODULES` is a deliberate mount order and FastAPI route matching is
+first-match-wins, so adopting the registry must not silently reorder an assembly
+whose modules declare no dependencies. Every manifest shipping today declares
+none, so the order is provably identical to before the registry existed
+(`tests/unit/test_create_app.py::test_reference_assembly_route_order_is_unchanged_by_the_registry`).
+
+**Installed vs. enabled are different facts.** `enabled_codes(disabled)` is the
+one definition of enabled (not in `DISABLED_FEATURES`, and not
+`enabled_by_default=False`). `enabled_order(disabled)` filters the startup order
+to those and **fails closed when an enabled module depends on one that is not
+enabled** — "dependencies satisfied" means the dependency is actually running,
+not merely present on disk.
+
+**Inventory for health/diagnostics.** `inventory(disabled)` returns
+`ModuleInventoryEntry` rows (code, version, contract version, dependencies,
+core, enabled) sorted by CODE, so two deployments' inventories are diffable;
+`inventory_payload(disabled)` is the JSON-safe document
+(`kernel_contract_version`, `modules`, `startup_order`). `create_app` publishes
+both on `app.state.module_registry` / `app.state.module_inventory`. Public
+`/health` deliberately does NOT report any of it — it is liveness only (see
+"Health bypass"), and exposing the installed-module set there would hand an
+unauthenticated caller a deployment fingerprint. The authenticated platform
+diagnostics surface is a later program step and composes this payload.
+
+**`FeatureManifest` still works, unchanged.** The registry accepts either shape,
+freely mixed in one assembly, so feature packages migrate one at a time (or not
+at all):
+
+- forward — `ModuleManifest.from_feature(manifest, *, version, contract_version,
+  dependencies)` carries every field across and invents nothing; an unversioned
+  module records the `UNVERSIONED` sentinel `"0.0.0"`. The keyword arguments let
+  the assembly pin a version or declare edges for a package it has not migrated.
+- backward — `ModuleManifest` exposes read-only `name`/`routers` properties
+  aliasing `code`/`api_routers`, so `mount_features`,
+  `install_surface_globals`, and `CapabilityCatalogue.from_manifests` accept a
+  module manifest with no call-site change. `AnyManifest` is the union used in
+  those signatures.
+
+The directive's `settings`, `feature_flags`, `entity_types`, and `health_checks`
+manifest fields are deliberately absent until the registry code that consumes
+them lands — the same directive requires CI to fail when "a declaration has no
+consumer", and shipping inert fields would be exactly that.
+
+## Manifest declaration catalogues (module control-plane step 3)
+
+`permissions` and `audit_actions` landed under that same rule: each arrived WITH
+its consumer, in kernel `0.1.0a11`.
+
+| Declaration | Catalogue (owner) | Real consumer | When an undeclared reference fails |
+|---|---|---|---|
+| `FeatureManifest`/`ModuleManifest.permissions` (`PermissionSpec`: `code`, `description`, `default_roles`) | `dotmac_kernel.permissions.PermissionCatalogue` | `dotmac_kernel.deps.require_permission(code)` — resolves the spec and requires the actor to hold one of its `default_roles`, 403 otherwise | at BOOT: `create_app` walks every mounted route's stamped code and raises `UndeclaredPermissionError` |
+| `...audit_actions` (bare codes) | `dotmac_kernel.audit_actions.AuditActionRegistry` | `dotmac_kernel.audit.write_audit_event` | at the WRITE, before anything is added to the session (`UndeclaredAuditActionError`) |
+
+Both are siblings of `CapabilityCatalogue` (WS1) in shape and posture, and gate
+different questions — capability: "is this TENANT entitled?"; permission: "does
+this ACTOR hold it?". A code has exactly one owning module; two declarations of
+the same code raise on catalogue construction. Both catalogues are installed
+process-wide by `create_app` from the INSTALLED module set (not the enabled
+subset — disabling a module must not turn a real code into an undeclared one),
+the same pattern `install_surface_globals` uses. Permissions default to an EMPTY
+catalogue so a missing authorization installer denies safely. Audit actions
+distinguish NOT INSTALLED from INSTALLED-EMPTY: the former raises
+`AuditActionsNotInstalledError`, while the latter rejects every action as
+undeclared.
+
+`PermissionSpec.default_roles` is the code-declared DEFAULT binding, standing in
+the same relation to a future tenant-configurable role→permission grant that a
+`SettingSpec.default` does to a `domain_settings` row — not a second authority.
+`require_permission` is a strict generalisation of `require_role`, which remains
+supported as the raw role check; both share one `_holds_any_role` query. The
+`rbac` feature's JSON routes are migrated to `require_permission`; every other
+feature still uses `require_role` and migrates one at a time.
+
+## Module database namespaces and migration lineage (ADR-0006 D1)
+
+As-built in kernel `0.1.0a12`. The authority is `dotmac_kernel.namespaces`; the
+build-time enforcement is `dotmac_kernel.migrations.gate`; the post-migration
+enforcement is `dotmac_kernel.migrations.catalog`.
+
+| Concern | Owner | Enforced by |
+|---|---|---|
+| Which schema a module owns | `ModuleManifest.short_code` → derived read-only `db_schema` = `mod_<short_code>` | frozen dataclass + `module_schema()` as the only builder |
+| That the allocation never moves | `namespaces.MIGRATION_OWNER_LEDGER` (checked-in, kernel-shipped) | unconditional whole-ledger validation, then `NamespaceRegistry.from_manifests` → `UnallocatedNamespaceError` / `NamespaceAllocationError` |
+| No two owners share a schema / prefix / branch label / table | `NamespaceRegistry` | construction raises `DuplicateSchemaError` / `DuplicateMigrationPrefixError` / `DuplicateBranchLabelError` / `DuplicateTableOwnerError` |
+| Coherent composed migration graph | `migrations.gate.run_gate` | `make migration-gate` (in `make check`; the CI `quality` matrix, which `docker-build` now `needs`) |
+| Live RLS/grant contract per module schema | `migrations.catalog.audit_live_schemas` | `tests/test_module_schema_catalog.py` (Postgres) |
+
+**`public` is a compatibility namespace, not a shared one.** It belongs to the
+kernel and to this one host assembly — every feature in `app/features/` is a
+host feature whose tables live there, owned by the `assembly` migration owner,
+and none declares a `short_code`. An installable module may not claim it
+(`HostSchemaClaimError`), and that closure is what makes the verified cross-repo
+collisions in `docs/inventories/migration-collisions.md` (`parties`,
+`audit_events`, `roles`, `user_credentials`, …) structurally impossible rather
+than merely unlikely.
+
+**Attribution, not a second map.** Each version location is attributed to an
+owner through its lineage root's branch label. `alembic_version` remains the
+migration truth, and `ModuleRegistry.inventory_payload()["migration_owners"]`
+plus `GateReport.attribution` are what make an individual row in it explainable.
+
+**Static enforcement follows the real upgrade path.** The composed gate walks
+local helpers reachable from `upgrade()`, resolves typed Alembic metadata and
+module-level `module_schema()` constants, checks both imperative and inline
+foreign keys, and rejects a fully qualified DDL operation when its target is
+another owner's schema. An empty manifest `tables` declaration means “owns no
+tables”; it is never an allow-all escape hatch. The live gate then checks the
+manifest against the migrated catalog in both directions. The host `public`
+audit remains a separate policy adapter because it owns explicit platform and
+split-policy exceptions, but it reuses the kernel catalog's UNIQUE-constraint
+query and enforces the same composite-unique rule for tenant-scoped tables.
+
+**Two grandfathered lineages.** `kernel` (`0001_initial_tenant_schema` …
+`0012_platform_outbox`) and `assembly` (`a001_adopt_cfd` …
+`a003_revocation_lists`) predate D1. Their ids are already recorded in live
+`alembic_version` rows, so `MigrationOwner.legacy_revision_pattern` preserves
+their original format and exempts them from the strict
+`<prefix>_<sequence>_<slug>` and `schema=` rules. Every installable module gets
+the strict rules; no existing revision was renamed.
+
 ## Feature-mount sequence
 
+0. `dotmac_kernel.create_app` builds a `ModuleRegistry` from `spec.modules`
+   FIRST and derives the startup order from it (see "Module registry" above).
+   An incoherent module set raises here, before a single route is mounted.
+   Steps 2–3 and 6 below all walk that one order.
 1. `app/main.py` imports `FEATURE_MODULES` from `app/features/__init__.py`
    — a plain list of dotted module paths (currently `tenants`, `auth`,
-   `parties`, `rbac`, `settings`, `custom_fields`, `web`).
+   `parties`, `rbac`, `settings`, `custom_fields`, `licensing`, `web`).
 2. `dotmac_kernel.features.load_manifests(FEATURE_MODULES)` imports each
    `<module>.feature` submodule via `importlib` (so core never statically
    imports `app.features`) and collects its `feature: FeatureManifest`
    (`name`, `routers`, `web_routers`, `nav`, `core: bool`,
    `enabled_by_default: bool` — see "Capability model" above for the
    `web_routers`/`nav` fields).
-3. `dotmac_kernel.features.mount_features(app, manifests=..., disabled=settings.disabled_feature_set, web_enabled=settings.web_enabled)`
+3. `dotmac_kernel.features.mount_features(app, manifests=registry.enabled_order(disabled), disabled=settings.disabled_feature_set, web_enabled=settings.web_enabled)`
    mounts each enabled manifest's `routers` via `app.include_router(...)`
    unconditionally, then its `web_routers` ONLY `if web_enabled`, skipping
    the whole manifest if its name is in `DISABLED_FEATURES` or its
