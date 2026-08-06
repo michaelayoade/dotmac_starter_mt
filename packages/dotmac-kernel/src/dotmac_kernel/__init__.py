@@ -41,6 +41,14 @@ from dotmac_kernel.audit import (
     write_audit_event,
     write_platform_audit_event,
 )
+from dotmac_kernel.audit_actions import (
+    AuditActionRegistry,
+    AuditActionsNotInstalledError,
+    DuplicateAuditActionError,
+    UndeclaredAuditActionError,
+    active_audit_actions,
+    install_audit_actions,
+)
 from dotmac_kernel.capabilities import (
     CapabilityCatalogue,
     DuplicateCapabilityError,
@@ -107,6 +115,14 @@ from dotmac_kernel.money import (
     MoneyError,
     currency,
 )
+from dotmac_kernel.permissions import (
+    DuplicatePermissionError,
+    PermissionCatalogue,
+    PermissionSpec,
+    UndeclaredPermissionError,
+    active_permissions,
+    install_permissions,
+)
 from dotmac_kernel.profiles import (
     DeploymentProfileRegistry,
     DeploymentProfileSpec,
@@ -129,7 +145,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a10"
+__version__ = "0.1.0a11"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -139,6 +155,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.app_factory",
         "dotmac_kernel.assembly",
         "dotmac_kernel.audit",
+        "dotmac_kernel.audit_actions",
         "dotmac_kernel.branding",
         "dotmac_kernel.capabilities",
         "dotmac_kernel.config",
@@ -172,6 +189,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.models_platform",
         "dotmac_kernel.modules",
         "dotmac_kernel.money",
+        "dotmac_kernel.permissions",
         "dotmac_kernel.platform_auth",
         "dotmac_kernel.profiles",
         "dotmac_kernel.providers",
@@ -261,6 +279,20 @@ __all__ = [
     "CapabilityCatalogue",
     "DuplicateCapabilityError",
     "UndeclaredCapabilityError",
+    # permission catalogue (module control-plane step 3)
+    "PermissionSpec",
+    "PermissionCatalogue",
+    "DuplicatePermissionError",
+    "UndeclaredPermissionError",
+    "install_permissions",
+    "active_permissions",
+    # audit-action registry (module control-plane step 3)
+    "AuditActionRegistry",
+    "AuditActionsNotInstalledError",
+    "DuplicateAuditActionError",
+    "UndeclaredAuditActionError",
+    "install_audit_actions",
+    "active_audit_actions",
     # deployment-profile registry (WS1)
     "DeploymentProfileSpec",
     "DeploymentProfileRegistry",

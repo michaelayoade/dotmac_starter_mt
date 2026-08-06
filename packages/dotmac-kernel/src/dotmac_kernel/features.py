@@ -58,6 +58,8 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, FastAPI
 
+from dotmac_kernel.permissions import PermissionSpec
+
 if TYPE_CHECKING:  # avoids a runtime cycle: `modules` imports this module
     from dotmac_kernel.modules import ModuleManifest
 
@@ -105,6 +107,18 @@ class FeatureManifest:
     # `dotmac_kernel.capabilities.CapabilityCatalogue`. Carried through
     # unchanged by `ModuleManifest.from_feature`.
     capabilities: Sequence[str] = field(default_factory=tuple)
+    # Permissions this module DECLARES and OWNS (module control-plane directive
+    # step 3). A `PermissionSpec` is the code-authoritative statement that an
+    # authorization decision exists; `dotmac_kernel.deps.require_permission`
+    # may only REFERENCE a declared code, and `create_app` refuses to boot when
+    # a mounted route references one nothing declares. See
+    # `dotmac_kernel.permissions.PermissionCatalogue`.
+    permissions: Sequence[PermissionSpec] = field(default_factory=tuple)
+    # Audit actions this module DECLARES and OWNS (same step). An action is a
+    # bare code — the trail records, it decides nothing — and
+    # `dotmac_kernel.audit.write_audit_event` rejects one no module declares.
+    # See `dotmac_kernel.audit_actions.AuditActionRegistry`.
+    audit_actions: Sequence[str] = field(default_factory=tuple)
 
 
 def load_manifests(module_names: Sequence[str]) -> list[FeatureManifest]:

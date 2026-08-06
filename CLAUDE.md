@@ -339,10 +339,18 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     the same migration (`domain_settings` is the documented exception;
     platform catalog tables get grants-not-RLS) — enforced on Postgres by
     `tests/test_rls_catalog.py` + the per-feature isolation canaries.
-12. Migrations run as `app_admin`, never on container boot;
+12. Manifest declarations (`permissions`, `audit_actions`) have ONE owning
+    module, are only referenced when declared (`require_permission` fails
+    the boot, `write_audit_event` fails the write), and every declared code
+    has a real consumer (`test_manifest_declarations.py`).
+13. Migrations run as `app_admin`, never on container boot;
     `scripts/deploy.sh` is the only production migration path.
-13. New feature: package + manifest + registry + import-linter contract +
-    cross-tenant isolation test FIRST.
+14. Cross-repository engineering governance is pinned by exact commit and the
+    product workflow must execute that same accepted revision
+    (`.dotmac/standards-profile.json`, `engineering-standards.yml`).
+
+Process: a new feature starts with its package, manifest, registry entry,
+import-linter contract, and cross-tenant isolation test.
 
 ## SOT-complete criteria
 

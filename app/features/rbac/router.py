@@ -1,9 +1,20 @@
-"""Tenant-scoped RBAC and audit endpoints."""
+"""Tenant-scoped RBAC and audit endpoints.
+
+Guarded by `require_permission`, not `require_role` (module control-plane
+directive step 3): each route names the authorization DECISION it needs, as a
+permission code its own manifest declares and owns
+(`app/features/rbac/feature.py`). Which roles satisfy a code is the
+declaration's business, not the route's — today every rbac permission's
+`default_roles` is `("admin",)`, so behavior is identical to the
+`require_role("admin")` guards these replaced. Other features still use
+`require_role` and migrate one at a time, exactly as `FeatureManifest` ->
+`ModuleManifest` does.
+"""
 
 from __future__ import annotations
 
 from dotmac_kernel.audit import AuditEvent, write_audit_event
-from dotmac_kernel.deps import get_db, require_role, require_tenant
+from dotmac_kernel.deps import get_db, require_permission, require_tenant
 from dotmac_kernel.models import Party, Role, Tenant
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -35,7 +46,7 @@ def create_role(
     payload: RoleCreate,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    actor: Party = Depends(require_role("admin")),
+    actor: Party = Depends(require_permission("rbac.roles.manage")),
 ) -> Role:
     role = rbac_service.create_role(db, tenant, payload)
     write_audit_event(
@@ -56,7 +67,7 @@ def list_roles(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    _: Party = Depends(require_role("admin")),
+    _: Party = Depends(require_permission("rbac.roles.read")),
 ) -> list[Role]:
     return rbac_service.list_roles(db, tenant, limit=limit, offset=offset)
 
@@ -68,7 +79,7 @@ def grant_role(
     payload: RoleGrantRequest,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    actor: Party = Depends(require_role("admin")),
+    actor: Party = Depends(require_permission("rbac.grants.manage")),
 ) -> None:
     party_role = rbac_service.assign_role(db, tenant, payload)
     write_audit_event(
@@ -88,7 +99,7 @@ def list_audit_events(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
-    _: Party = Depends(require_role("admin")),
+    _: Party = Depends(require_permission("rbac.audit.read")),
 ) -> list[AuditEvent]:
     # Task 6: audit-events was the last unpaginated list in the app — this
     # route and `app.features.rbac.web`'s `/admin/audit` screen both call

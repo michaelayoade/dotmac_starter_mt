@@ -12,14 +12,15 @@ that target.
 
 The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
 `WEB_ENABLED`; the kernel also ships a validating
-`ModuleManifest`/`ModuleRegistry`, the capability catalogue, a pure typed
-deployment-profile registry, tenant-local WS2 entitlement grants/evaluation,
-and WS8 licence verification, revocation, and authenticated applied-state
-contracts. The reference assembly owns the durable licence/revocation receiver
-state and thin apply/import adapters. It does **not** yet implement runtime
-profile/provider selection, the complete effective-capability availability
-lifecycle, subscriptions, billing, or metering. The target architecture is
-authoritative in
+`ModuleManifest`/`ModuleRegistry`, manifest-owned permission and audit-action
+catalogues with request/write-time enforcement, the capability catalogue, a
+pure typed deployment-profile registry, tenant-local WS2 entitlement
+grants/evaluation, and WS8 licence verification, revocation, and authenticated
+applied-state contracts. The reference assembly owns the durable
+licence/revocation receiver state and thin apply/import adapters. It does
+**not** yet implement runtime profile/provider selection, the complete
+effective-capability availability lifecycle, subscriptions, billing, or
+metering. The target architecture is authoritative in
 [`ADR-0003`](adr/0003-unified-deployment-profiles.md); ADR-0006 owns its package
 and presentation boundaries, with delivery gates in the
 [`deployment profiles and commercial platform plan`](superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md).
@@ -269,7 +270,8 @@ packages/dotmac-kernel/          the kernel package (distribution dotmac-kernel,
                  platform_auth (platform guard + auth routes), security,
                  deps (route guards), middleware/, logging, errors, crud,
                  features (manifest registry), modules (versioned ModuleManifest
-                 + validating ModuleRegistry), audit,
+                 + validating ModuleRegistry), permissions (PermissionSpec +
+                 PermissionCatalogue), audit_actions (AuditActionRegistry), audit,
                  settings_models (DomainSetting), settings_resolver (spec
                  registry + tenant->platform->default resolver), templating
                  (Jinja env + render()), branding (static + per-tenant DB
@@ -984,7 +986,7 @@ write:
 | Roles | `app.features.rbac.service.create_role` (`POST /rbac/roles` API **and** `POST /admin/roles` web form), and `app.features.tenants.service.provision_tenant` (creates the new tenant's `admin` role during provisioning) |
 | Auth credentials | `app.features.auth.service.register` (policy-gated self-registration, `auth.registration_policy` default `closed`) **and** `app.features.tenants.service.provision_tenant` (the owner credential, inside the provisioning transaction) — no credential-update/password-reset path yet, phase 2c. `Party.email` is a SEPARATE resource with its own row above (Parties) — `UserCredential` carries no email of its own as of 2b.1-T3 (F2): `login()` resolves `Party` by email first, then `UserCredential` by `party_id` only. |
 | Auth sessions | `app.features.auth.service.login` (issues, via `POST /auth/login` and `POST /admin/login`'s `web_login`) **and** `web_logout` (revokes — sets `revoked_at`, via `POST /admin/logout`, CSRF-protected as of 2b.1-T5/F7; the JSON API has no logout/revoke route of its own yet) |
-| Audit events | `dotmac_kernel.audit.write_audit_event` — the only function that constructs an `AuditEvent`; called from `rbac/router.py` + `rbac/web.py` (role/grant writes), `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor), and `tenants/service.py::provision_tenant` (`platform.tenant.create` + `platform.tenant.owner_provision`, the platform actor named in `details.platform_actor` since platform admins are not tenant parties) |
+| Audit events | `dotmac_kernel.audit.write_audit_event` — the only function that constructs an `AuditEvent`, and (since kernel `0.1.0a11`) the one place the trail's ACTION VOCABULARY is enforced: `action` must be declared by an installed module's manifest `audit_actions`, validated against `dotmac_kernel.audit_actions.AuditActionRegistry` before anything reaches the session; called from `rbac/router.py` + `rbac/web.py` (role/grant writes), `settings/router.py` + `settings/web.py` (setting writes, including the `ui_branding` branding editor), and `tenants/service.py::provision_tenant` (`platform.tenant.create` + `platform.tenant.owner_provision`, the platform actor named in `details.platform_actor` since platform admins are not tenant parties) |
 | Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
 | `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
@@ -1215,11 +1217,40 @@ at all):
   module manifest with no call-site change. `AnyManifest` is the union used in
   those signatures.
 
-The directive's `permissions`, `settings`, `feature_flags`, `audit_actions`,
-`entity_types`, and `health_checks` manifest fields are deliberately absent
-until the registry code that consumes them lands — the same directive requires
-CI to fail when "a declaration has no consumer", and shipping six inert fields
-would be exactly that.
+The directive's `settings`, `feature_flags`, `entity_types`, and `health_checks`
+manifest fields are deliberately absent until the registry code that consumes
+them lands — the same directive requires CI to fail when "a declaration has no
+consumer", and shipping inert fields would be exactly that.
+
+## Manifest declaration catalogues (module control-plane step 3)
+
+`permissions` and `audit_actions` landed under that same rule: each arrived WITH
+its consumer, in kernel `0.1.0a11`.
+
+| Declaration | Catalogue (owner) | Real consumer | When an undeclared reference fails |
+|---|---|---|---|
+| `FeatureManifest`/`ModuleManifest.permissions` (`PermissionSpec`: `code`, `description`, `default_roles`) | `dotmac_kernel.permissions.PermissionCatalogue` | `dotmac_kernel.deps.require_permission(code)` — resolves the spec and requires the actor to hold one of its `default_roles`, 403 otherwise | at BOOT: `create_app` walks every mounted route's stamped code and raises `UndeclaredPermissionError` |
+| `...audit_actions` (bare codes) | `dotmac_kernel.audit_actions.AuditActionRegistry` | `dotmac_kernel.audit.write_audit_event` | at the WRITE, before anything is added to the session (`UndeclaredAuditActionError`) |
+
+Both are siblings of `CapabilityCatalogue` (WS1) in shape and posture, and gate
+different questions — capability: "is this TENANT entitled?"; permission: "does
+this ACTOR hold it?". A code has exactly one owning module; two declarations of
+the same code raise on catalogue construction. Both catalogues are installed
+process-wide by `create_app` from the INSTALLED module set (not the enabled
+subset — disabling a module must not turn a real code into an undeclared one),
+the same pattern `install_surface_globals` uses. Permissions default to an EMPTY
+catalogue so a missing authorization installer denies safely. Audit actions
+distinguish NOT INSTALLED from INSTALLED-EMPTY: the former raises
+`AuditActionsNotInstalledError`, while the latter rejects every action as
+undeclared.
+
+`PermissionSpec.default_roles` is the code-declared DEFAULT binding, standing in
+the same relation to a future tenant-configurable role→permission grant that a
+`SettingSpec.default` does to a `domain_settings` row — not a second authority.
+`require_permission` is a strict generalisation of `require_role`, which remains
+supported as the raw role check; both share one `_holds_any_role` query. The
+`rbac` feature's JSON routes are migrated to `require_permission`; every other
+feature still uses `require_role` and migrates one at a time.
 
 ## Feature-mount sequence
 

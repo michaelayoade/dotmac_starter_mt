@@ -20,6 +20,7 @@ from decimal import Decimal
 import dotmac_kernel
 from dotmac_kernel import (
     UNVERSIONED,
+    AuditActionRegistry,
     CapabilityCatalogue,
     DeploymentProfileRegistry,
     DeploymentProfileSpec,
@@ -29,7 +30,11 @@ from dotmac_kernel import (
     ModuleManifest,
     ModuleRegistry,
     Money,
+    PermissionCatalogue,
+    PermissionSpec,
     ProductAssemblySpec,
+    UndeclaredAuditActionError,
+    UndeclaredPermissionError,
     currency,
 )
 from dotmac_kernel.licensing import (
@@ -103,6 +108,29 @@ except MissingModuleDependencyError:
     pass
 else:  # pragma: no cover - the probe fails loudly instead
     raise AssertionError("ModuleRegistry accepted a missing dependency")
+
+# Manifest declaration catalogues (module control-plane step 3): a spec only
+# fails when it is BUILT and a catalogue only fails when it is QUERIED, so build
+# both, resolve a declared code, and prove an undeclared one fails closed.
+declaring = FeatureManifest(
+    name="m3",
+    permissions=(PermissionSpec(code="m3.read", default_roles=("admin",)),),
+    audit_actions=("m3.happened",),
+)
+permissions = PermissionCatalogue.from_manifests([declaring])
+assert permissions.require("m3.read").default_roles == ("admin",)
+audit_actions = AuditActionRegistry.from_manifests([declaring])
+audit_actions.require("m3.happened")
+for catalogue, code, error in (
+    (permissions, "m3.write", UndeclaredPermissionError),
+    (audit_actions, "m3.never", UndeclaredAuditActionError),
+):
+    try:
+        catalogue.require(code)
+    except error:
+        pass
+    else:  # pragma: no cover - the probe fails loudly instead
+        raise AssertionError(f"{catalogue!r} accepted the undeclared {code!r}")
 
 # Assembly composition — a FeatureManifest and a ModuleManifest, mixed.
 spec = ProductAssemblySpec(name="floor-probe", modules=(manifest, module))

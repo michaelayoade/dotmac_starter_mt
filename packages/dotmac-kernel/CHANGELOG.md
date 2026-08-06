@@ -8,6 +8,105 @@ here.
 
 ## Unreleased
 
+## 0.1.0a11 — 2026-08-06
+
+> **Amended 2026-08-03.** `active_audit_actions()` no longer defaults to an
+> empty registry. NOT INSTALLED and INSTALLED-AND-EMPTY are now different
+> states: the former raises `AuditActionsNotInstalledError` (a configuration
+> error), the latter still rejects each write as undeclared. The original
+> default told a process that builds no app — a worker, a Celery task, a CLI, a
+> migration helper — that its perfectly well-declared action "is not declared by
+> any installed module", pointing the reader at the manifests when the actual
+> fault was that the vocabulary was never loaded. `dotmac_kernel.permissions`
+> deliberately keeps its empty default: an uninstalled permission catalogue
+> DENIES, which is the safe answer for an authorization check, whereas an
+> uninstalled audit registry would reject every write inside the caller's
+> transaction and turn a wiring mistake into a failed business operation.
+
+Eleventh alpha. Adds the **manifest permission and audit-action declarations**
+together with the catalogues that consume them — step 3 of the module
+control-plane program
+(`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`; F2 of
+the white-label foundation programme, ADR-0006). No migration; the kernel head
+stays `0012`.
+
+### Added
+- **`dotmac_kernel.permissions`** — `PermissionSpec` (a permission a module
+  declares it OWNS: `code`, `description`, and `default_roles`, the role slugs
+  whose holders satisfy it) and `PermissionCatalogue`, the one authority on "is
+  this permission real, and who may hold it?". Sibling of `CapabilityCatalogue`
+  by design — same shape, same fail-closed posture, same invariant: a code has
+  exactly one owning module (`DuplicatePermissionError`) and may never be
+  invented at a reference site (`UndeclaredPermissionError`).
+
+  The two catalogues gate different things and must not be conflated:
+  capability answers "is this TENANT entitled?", permission answers "does this
+  ACTOR hold it?". `default_roles` is the code-declared default binding — the
+  same relationship `SettingSpec.default` has to a `domain_settings` row, not a
+  second authority; tenant-configurable role→permission grants are a later step
+  that layers over it.
+
+- **`dotmac_kernel.deps.require_permission(code)`** — the guard that consumes the
+  catalogue, and the reason the field is not inert. It resolves the declared spec
+  at request time and requires the actor to hold one of its `default_roles` (403
+  otherwise): a strict generalisation of `require_role`, which remains supported
+  as the raw role check underneath. Both now share one `_holds_any_role` query,
+  so a fix to the tenant scoping or the join lands once for both.
+
+- **`create_app` fails the BOOT on an undeclared permission reference.** The
+  dependency `require_permission` returns carries its code; after mounting,
+  `create_app` walks every mounted route and raises `UndeclaredPermissionError`
+  naming the route and the code. A typo therefore stops the boot instead of
+  surfacing as a mystery 403 on the first request that reaches that route. Scoped
+  to MOUNTED routes: importing a module's routers without mounting them cannot
+  fail an assembly for a code it never exposes.
+
+- **`dotmac_kernel.audit_actions`** — `AuditActionRegistry`, the same catalogue
+  shape for the audit trail's vocabulary (`DuplicateAuditActionError`,
+  `UndeclaredAuditActionError`). An action is a bare code, not a spec: unlike a
+  permission it carries no binding, because the trail records and decides nothing.
+
+- **`write_audit_event` validates its `action`** against the active registry
+  BEFORE adding anything to the session, so a rejected write leaves no partial
+  state. `audit_events.action` was free text, so any typo (`"role.grant"` vs
+  `"role.granted"`) silently produced a second, near-identical action nobody would
+  ever query for — and an audit trail missing events you believe you are reading
+  is worse than one that is obviously empty. `write_platform_audit_event` is
+  deliberately NOT validated the same way: platform actions are written by the
+  kernel's own control plane, which has no module manifest to declare them on.
+
+- **`install_permissions` / `install_audit_actions`** (+ `active_permissions` /
+  `active_audit_actions`) — the process-active install, the same pattern
+  `install_surface_globals` already uses, because a request-time guard and a
+  service-time writer cannot be handed a catalogue as an argument without
+  threading it through every call site. `create_app` installs both from the
+  INSTALLED module set (not the enabled subset: disabling a module must not turn
+  a real code into an undeclared one). Permissions default to an EMPTY catalogue
+  so an uninstalled authorization catalogue denies safely. Audit actions require
+  an explicit installation; a missing installer raises
+  `AuditActionsNotInstalledError`, while an installed-empty registry rejects
+  every action as undeclared.
+
+### Changed
+- **`FeatureManifest` and `ModuleManifest` gained `permissions` and
+  `audit_actions`.** Both default to `()`, and `ModuleManifest.from_feature`
+  carries them across unchanged — a feature manifest declares them exactly like a
+  module manifest, so a package does not have to migrate in order to declare.
+
+### Compatibility
+- **No breaking change to a public signature.** Every existing name keeps
+  working; `require_role` is untouched and remains supported.
+- **One behavior change to be aware of when adopting:** `write_audit_event` now
+  REJECTS an action no installed module declares. An assembly upgrading to this
+  version must add each action it writes to the writing module's manifest
+  (`audit_actions=(...)`), and a consumer that builds an app WITHOUT `create_app`
+  must call `install_audit_actions` itself — a missing installer is a distinct
+  configuration error and an explicitly empty registry rejects everything.
+- The directive's remaining manifest fields (`settings`, `feature_flags`,
+  `entity_types`, `health_checks`) are still deliberately NOT added. Same reason
+  as in `0.1.0a10`: each lands with the registry code that derives behavior from
+  it.
+
 ## 0.1.0a10 — 2026-08-06
 
 Tenth alpha. Adds the **module manifest and registry** — step 2 of the module

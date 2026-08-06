@@ -30,6 +30,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from dotmac_kernel.assembly import ProductAssemblySpec
+from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.config import settings, validate_settings
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.features import mount_features
@@ -40,6 +41,12 @@ from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
 from dotmac_kernel.modules import AnyManifest, ModuleRegistry
+from dotmac_kernel.permissions import (
+    PERMISSION_CODE_ATTR,
+    PermissionCatalogue,
+    UndeclaredPermissionError,
+    install_permissions,
+)
 from dotmac_kernel.platform_auth import platform_auth_router
 from dotmac_kernel.templating import (
     install_surface_globals,
@@ -76,6 +83,56 @@ async def _run_enabled_seeds(
                 logger.warning("Feature %s seed skipped: %s", manifest.name, exc)
 
 
+def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
+    """(route label, permission code) for every code a MOUNTED route references.
+
+    Scoped to this app's routes, not a process-wide tally of every
+    `require_permission` call ever imported: an assembly that imports a module's
+    routers without mounting them must not be failed for a code it never
+    exposes. `require_permission` stamps the code on the dependency callable it
+    returns (`PERMISSION_CODE_ATTR`); this walks each route's dependency tree
+    and reads it back.
+    """
+    found: list[tuple[str, str]] = []
+    for route in app.routes:
+        dependant = getattr(route, "dependant", None)
+        if dependant is None:
+            continue
+        codes: set[str] = set()
+        stack = list(dependant.dependencies)
+        while stack:
+            dep = stack.pop()
+            code = getattr(dep.call, PERMISSION_CODE_ATTR, None)
+            if isinstance(code, str):
+                codes.add(code)
+            stack.extend(dep.dependencies)
+        methods = sorted(getattr(route, "methods", None) or {"?"})
+        label = f"{'/'.join(methods)} {getattr(route, 'path', '?')}"
+        found.extend((label, code) for code in sorted(codes))
+    return found
+
+
+def _validate_referenced_permissions(
+    app: FastAPI, catalogue: PermissionCatalogue
+) -> None:
+    """Fail the BOOT when a mounted route requires a permission no installed
+    module declares. Without this a typo'd code is invisible until the first
+    request reaches that route — and then denies it, which reads as a
+    permissions bug rather than a declaration bug."""
+    undeclared = [
+        (label, code)
+        for label, code in _referenced_permissions(app)
+        if not catalogue.is_declared(code)
+    ]
+    if undeclared:
+        listed = ", ".join(f"{label} -> {code!r}" for label, code in undeclared)
+        raise UndeclaredPermissionError(
+            f"route(s) require a permission code no installed module declares: "
+            f"{listed} — declare it on the owning module's manifest "
+            "(`permissions=(PermissionSpec(...),)`)"
+        )
+
+
 def create_app(spec: ProductAssemblySpec) -> FastAPI:
     """Compose a FastAPI application for `spec`. Behavior is identical to the
     pre-Task-3 `app/main.py` when given the reference spec; the spec's
@@ -110,6 +167,15 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         len(manifests),
         ", ".join(f"{m.code}@{m.version}" for m in enabled_manifests) or "(none)",
     )
+
+    # Process-active declaration catalogues (module control-plane step 3), built
+    # from the INSTALLED set — not the enabled subset: disabling a module must
+    # not turn a real permission code or audit action into an undeclared one for
+    # whatever is still running. Installed BEFORE anything is mounted, because
+    # both are read at request/write time by code the mount produces.
+    permission_catalogue = PermissionCatalogue.from_manifests(manifests)
+    install_permissions(permission_catalogue)
+    install_audit_actions(AuditActionRegistry.from_manifests(manifests))
 
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
     # before any template renders. Fed the FULL installed set in startup order
@@ -198,6 +264,10 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
         disabled=disabled,
         web_enabled=web_enabled,
     )
+
+    # AFTER mounting: every route that now exists must reference only declared
+    # permission codes. Fails the boot, before the app is ever returned.
+    _validate_referenced_permissions(app, permission_catalogue)
     return app
 
 

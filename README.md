@@ -19,11 +19,11 @@ For new development, the accepted direction is to use this same foundation
 for vendor SaaS, dedicated hosted, self-hosted/on-premise, OEM, and
 single-tenant deployments. The foundation is partially implemented rather
 than merely planned: the versioned kernel and reference assembly now ship
-a validating `ModuleManifest`/`ModuleRegistry`, capability/profile contracts,
+a validating `ModuleManifest`/`ModuleRegistry`, manifest-owned permission and
+audit-action catalogues with enforced consumers, capability/profile contracts,
 tenant-local entitlements, and a WS8 licence receiver alongside the legacy
 `FeatureManifest`, `DISABLED_FEATURES`, and `WEB_ENABLED`. Runtime provider
-selection and the complete effective-capability lifecycle remain follow-on
-work.
+selection and the complete effective-capability lifecycle remain follow-on work.
 
 See [`docs/adr/0001-multi-tenant-architecture.md`](docs/adr/0001-multi-tenant-architecture.md)
 for the founding tenancy design, [`docs/adr/0002-starter-consolidation.md`](docs/adr/0002-starter-consolidation.md)
@@ -232,12 +232,12 @@ productionize further, port what your project needs:
   (phase 2c on this repo's own roadmap; fleet-specific rationale lives in
   `docs/adr/`, not here)
 - File uploads, notifications, scheduler
-- Manifest-owned declaration catalogues for permissions, audit actions,
-  settings, typed feature flags, entity types, and jobs, plus migration/health
-  validation and the effective-capability admin UI described by the module
-  control-plane directive. The validating module registry, tenant-local
-  entitlement grants, and their explainable evaluator already exist in the
-  kernel.
+- Manifest-owned declaration catalogues for settings, typed feature flags,
+  entity types, and jobs, plus migration/health validation and the
+  effective-capability admin UI described by the module control-plane
+  directive. The validating module, permission, and audit-action registries,
+  tenant-local entitlement grants, and their explainable evaluator already
+  exist in the kernel.
 - Runtime selection/wiring of the typed deployment-profile contracts, plus a
   provider registry for SaaS, dedicated, on-premise/air-gapped, OEM, and
   API-only packaging

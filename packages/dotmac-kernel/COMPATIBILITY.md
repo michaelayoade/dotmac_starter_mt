@@ -43,13 +43,14 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.app_factory` | `create_app`, `LayeredStaticFiles` |
 | `dotmac_kernel.assembly` | `ProductAssemblySpec` |
 | `dotmac_kernel.audit` | `AuditEvent`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
+| `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
 | `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
 | `dotmac_kernel.crud` | `CRUDManager` |
 | `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `conflict_savepoint`, `engine`, `platform_engine` |
-| `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
+| `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
 | `dotmac_kernel.errors` | `register_error_handlers` |
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
@@ -77,6 +78,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
+| `dotmac_kernel.permissions` | `PermissionSpec`, `PermissionCatalogue`, `DuplicatePermissionError`, `UndeclaredPermissionError`, `install_permissions`, `active_permissions` (permission catalogue; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
 | `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
 | `dotmac_kernel.providers.provisioning` | `ProvisioningProvider`, `ProvisioningRequest`, `ProvisioningStep`, `PlanResult`, `ApplyResult`, `ObserveResult`, `ProvisioningStatus`, `StepStatus`, `ProvisioningError`, `ProvisioningRetryableError`, `ProvisioningTerminalError`, `ProvisioningPlanError`, `ProvisioningApplyError`, `ProvisioningCancelled` |
@@ -101,10 +103,10 @@ in-memory, like `capabilities` and `profiles`: it **describes installed code**;
 it never grants entitlement and it never deploys anything.
 
 - **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
-  `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`, `core`,
-  `enabled_by_default`, `seed`. `code` is the stable identifier every other
-  authority references (a dependency edge, a profile's required/forbidden set, a
-  capability owner). `version` is the module's own release version;
+  `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
+  `permissions`, `audit_actions`, `core`, `enabled_by_default`, `seed`. `code`
+  is the stable identifier every other authority references (a dependency edge,
+  a profile's required/forbidden set, a capability owner). `version` is the module's own release version;
   `contract_version` is the kernel manifest generation it was built against —
   independent facts, and only the latter gates loading.
 - **`ModuleRegistry(manifests)`** — construction IS validation, fail-closed on
@@ -157,10 +159,55 @@ module manifest without a call-site change. `AnyManifest` is the union type used
 in those signatures.
 
 **Deliberately not declared yet.** The directive's manifest sketch also lists
-`permissions`, `settings`, `feature_flags`, `audit_actions`, `entity_types`, and
-`health_checks`. Those belong to later program steps, and the same directive
-requires CI to fail when "a declaration has no consumer" — each field lands with
-the registry code that derives behavior from it.
+`settings`, `feature_flags`, `entity_types`, and `health_checks`. Those belong to
+later program steps, and the same directive requires CI to fail when "a
+declaration has no consumer" — each field lands with the registry code that
+derives behavior from it, as `permissions` and `audit_actions` did in step 3
+(below).
+
+### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`)
+
+Module control-plane directive step 3. Both are sibling catalogues of
+`dotmac_kernel.capabilities.CapabilityCatalogue` — same shape, same fail-closed
+posture, same invariant: **a code is declared by exactly one module's manifest
+and may never be invented anywhere else.** Pure and in-memory; no engine, no I/O.
+
+- **`PermissionSpec(code, description="", default_roles=("admin",))`** — one
+  permission a module owns. `default_roles` is the code-declared default binding
+  (the role slugs whose holders satisfy it), the same relationship a
+  `SettingSpec.default` has to a `domain_settings` row; it must be non-empty.
+- **`PermissionCatalogue.from_manifests(manifests)`** — construction IS
+  validation: a code declared by two modules raises `DuplicatePermissionError`.
+  `require(code)` returns the declared spec or raises
+  `UndeclaredPermissionError`; `is_declared`/`spec`/`owner`/`codes` read it.
+- **`AuditActionRegistry.from_manifests(manifests)`** — the same, for the
+  free-text-no-longer `audit_events.action` vocabulary:
+  `DuplicateAuditActionError` on two owners, `require(action)` raising
+  `UndeclaredAuditActionError`, plus `is_declared`/`owner`/`actions`.
+- **Process-active install.** `install_permissions` / `install_audit_actions`
+  set the process-active catalogue and registry; `active_permissions` /
+  `active_audit_actions` read them. `create_app` installs both from the INSTALLED
+  module set before mounting anything. Permissions default to EMPTY so an
+  uninstalled authorization catalogue denies safely. Audit actions distinguish
+  NOT INSTALLED (`AuditActionsNotInstalledError`) from INSTALLED-EMPTY (every
+  write is undeclared). A consumer that builds an app by hand (a test mounting a
+  router on a bare `FastAPI()`) must install them itself, exactly as it must call
+  `install_surface_globals`.
+
+**The consumers, which is why the fields exist at all:**
+
+- `dotmac_kernel.deps.require_permission(code)` is the route guard. It resolves
+  the declared spec at request time and requires the actor to hold one of its
+  `default_roles`, 403 otherwise — a strict generalisation of `require_role`,
+  which remains supported and is the raw role check underneath. The returned
+  dependency carries the code, and `create_app` walks every MOUNTED route and
+  raises `UndeclaredPermissionError` at boot if any references a code the
+  catalogue does not declare.
+- `dotmac_kernel.audit.write_audit_event` validates `action` against the active
+  registry **before** it adds anything to the session, so a rejected write leaves
+  no partial state. `write_platform_audit_event` is deliberately NOT validated
+  this way: platform actions are written by the kernel's own control plane, which
+  has no module manifest to declare them on.
 
 ### Composing an app: `ProductAssemblySpec` + `create_app`
 

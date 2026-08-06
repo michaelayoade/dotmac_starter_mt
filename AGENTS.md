@@ -27,8 +27,9 @@ specifics) points here and must never fork these rules.
 3. **Every mounted route carries a `require_*` guard** (route- or
    router-level), or sits in the commented `ALLOWLIST`. Mutating routes
    need a guard from the explicit `AUTH_GUARD_NAMES` set
-   (`require_user_auth`, `require_role`, `require_web_auth`,
-   `require_platform_admin` — `require_tenant` alone does NOT count) or a
+   (`require_user_auth`, `require_role`, `require_permission`,
+   `require_web_auth`, `require_platform_admin` — `require_tenant` alone does
+   NOT count) or a
    commented `MUTATING_ALLOWLIST` entry.
    (`tests/architecture/test_route_guards.py`; non-admin sweep in
    `tests/unit/test_admin_route_sweep.py`)
@@ -67,12 +68,21 @@ specifics) points here and must never fork these rules.
     dynamically by `tests/test_rls_catalog.py` plus the per-feature
     isolation canaries — Postgres only (`make test-db-up &&
     make test-integration`); SQLite cannot enforce RLS.
-12. **Migration discipline.** Migrations run as `app_admin`
+12. **Manifest declarations are unique, referenced, and consumed.** A
+    permission code / audit action is declared by exactly ONE module's
+    manifest (`permissions=(PermissionSpec(...),)` / `audit_actions=(...)`);
+    a route may only `require_permission` a DECLARED code (`create_app`
+    refuses to boot otherwise) and `write_audit_event` may only write a
+    DECLARED action; and every declared code needs a real consumer outside
+    its own `feature.py` — the orphan allowlists are EMPTY and may only
+    shrink. (`tests/architecture/test_manifest_declarations.py`;
+    `tests/unit/test_permissions.py`, `tests/unit/test_audit_actions.py`)
+13. **Migration discipline.** Migrations run as `app_admin`
     (`MIGRATION_DATABASE_URL`), never on container boot — the Dockerfile
     `CMD` only runs `uvicorn`; `scripts/deploy.sh` is the only place
     migrations run in production. The same migration that creates a table
     creates its RLS and grants.
-13. **Cross-repository engineering governance is pinned and required.**
+14. **Cross-repository engineering governance is pinned and required.**
     `.dotmac/standards-profile.json` names this repository's declared authority
     and fully typed contract surfaces, and pins the accepted Governance source
     by exact commit. The `Dotmac engineering standards` CI job must execute the

@@ -13,13 +13,16 @@ owns that) and it never deploys anything (the vendor control plane owns that).
 
 ## What this step deliberately does NOT declare
 
-The directive's `ModuleManifest` sketch also lists `permissions`, `settings`,
-`feature_flags`, `audit_actions`, `entity_types`, and `health_checks`. Those
-belong to later program steps (3 = permissions/audit actions, 5 = typed flags),
-and the same directive's governance list says CI must fail when "a declaration
-has no consumer". Adding those fields now would ship exactly that: six
+The directive's `ModuleManifest` sketch also lists `settings`, `feature_flags`,
+`entity_types`, and `health_checks`. Those belong to later program steps (5 =
+typed flags), and the same directive's governance list says CI must fail when "a
+declaration has no consumer". Adding those fields now would ship exactly that:
 declarations nothing derives behavior from. Each lands with the registry code
-that consumes it.
+that consumes it — as `permissions` and `audit_actions` did in step 3, which
+landed together with `dotmac_kernel.permissions` (consumed by
+`dotmac_kernel.deps.require_permission` and validated at boot by `create_app`)
+and `dotmac_kernel.audit_actions` (consumed by
+`dotmac_kernel.audit.write_audit_event`).
 
 ## Compatibility with `FeatureManifest`
 
@@ -53,6 +56,7 @@ from typing import Final
 from fastapi import APIRouter
 
 from dotmac_kernel.features import FeatureManifest, NavItem
+from dotmac_kernel.permissions import PermissionSpec
 
 # The module-contract generation this kernel implements. A module declares the
 # generation it was BUILT against (`ModuleManifest.contract_version`); the
@@ -123,6 +127,13 @@ class ModuleManifest:
     nav: Sequence[NavItem] = field(default_factory=tuple)
     # Capability codes this module declares (see `dotmac_kernel.capabilities`).
     capabilities: Sequence[str] = field(default_factory=tuple)
+    # Permissions this module declares and owns — the actor-authorization
+    # counterpart of `capabilities` (tenant entitlement). Referenced by
+    # `dotmac_kernel.deps.require_permission`; see `dotmac_kernel.permissions`.
+    permissions: Sequence[PermissionSpec] = field(default_factory=tuple)
+    # Audit actions this module declares and owns. Enforced at the write by
+    # `dotmac_kernel.audit.write_audit_event`; see `dotmac_kernel.audit_actions`.
+    audit_actions: Sequence[str] = field(default_factory=tuple)
     core: bool = True
     enabled_by_default: bool = True
     seed: Callable[[], None] | None = None
@@ -140,6 +151,8 @@ class ModuleManifest:
             "web_routers",
             "nav",
             "capabilities",
+            "permissions",
+            "audit_actions",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
 
@@ -184,6 +197,8 @@ class ModuleManifest:
             web_routers=manifest.web_routers,
             nav=manifest.nav,
             capabilities=manifest.capabilities,
+            permissions=manifest.permissions,
+            audit_actions=manifest.audit_actions,
             core=manifest.core,
             enabled_by_default=manifest.enabled_by_default,
             seed=manifest.seed,
