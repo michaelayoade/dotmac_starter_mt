@@ -73,13 +73,21 @@ class WebAuthRedirect(HTTPException):
 
     Carries 302 semantics — `dotmac_kernel.errors.register_error_handlers`
     registers a dedicated handler for this exception that issues a real
-    `RedirectResponse` to `/admin/login?next=<safe next_url>` (the bare
+    `RedirectResponse` to `<login_path>?next=<safe next_url>` (the bare
     `HTTPException(302, ...)` FastAPI would otherwise render as a JSON/HTML
     error envelope, not an actual redirect).
+
+    `login_path` is where the handler sends the visitor. It defaults to the
+    tenant portal's login, and the PLATFORM surface passes its own — one
+    redirect concept with two front doors, rather than a second exception and a
+    second handler that would drift apart the first time one of them is fixed.
     """
 
-    def __init__(self, next_url: str = "/admin") -> None:
+    def __init__(
+        self, next_url: str = "/admin", *, login_path: str = "/admin/login"
+    ) -> None:
         self.next_url = next_url
+        self.login_path = login_path
         super().__init__(status_code=302, detail="Not authenticated")
 
 

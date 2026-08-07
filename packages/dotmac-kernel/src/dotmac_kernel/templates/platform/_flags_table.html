@@ -1,0 +1,83 @@
+{#
+  Deployment-scope flag overrides. Context: `flags` — a list of
+  {spec, override}. Swapped in place by every control below, so a change
+  re-renders at 200 with the new state rather than redirecting.
+
+  Each row shows the DECLARED spec (owner, default, expiry) beside the
+  override, because "on" is not an answer without "on against what default,
+  owned by whom".
+#}
+<div id="flags-table"
+     style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+            background:var(--dmui-surface-elevated); overflow-x:auto;">
+  <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
+    <thead>
+      <tr style="background:var(--dmui-surface-secondary); text-align:left;">
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Flag</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Owner</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Default</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Deployment override</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Set</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in flags %}
+      <tr style="border-top:1px solid var(--dmui-border-subtle);">
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
+          <strong style="color:var(--dmui-text-primary);">{{ row.spec.code }}</strong>
+          <div style="color:var(--dmui-text-muted); font-size:var(--dmui-font-size-xs);">
+            {{ row.spec.description }}
+            {% if row.spec.expires_on %} · expires {{ row.spec.expires_on }}{% endif %}
+          </div>
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary);">{{ row.spec.owner }}</td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary);">{{ row.spec.default }}</td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
+          {% if row.override is none %}
+          <span style="color:var(--dmui-text-muted);">none — default applies</span>
+          {% elif row.override.kill_switch %}
+          <span style="padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                       border-radius:var(--dmui-radius-full);
+                       background:var(--dmui-status-negative-surface);
+                       color:var(--dmui-status-negative-foreground);
+                       font-size:var(--dmui-font-size-xs);">KILLED</span>
+          {% elif row.override.rollout_percentage is not none %}
+          <span style="color:var(--dmui-text-secondary);">rollout {{ row.override.rollout_percentage }}%</span>
+          {% else %}
+          <span style="color:var(--dmui-text-secondary);">{{ row.override.value }}</span>
+          {% endif %}
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); white-space:nowrap;">
+          {# Every control is hx-post so `static/js/csrf.js` attaches the
+             X-CSRF-Token header — a bare form has no hook for it. #}
+          <button hx-post="/platform/flags/{{ row.spec.code }}" hx-vals='{"action":"set","value":"on"}'
+                  hx-target="#flags-table" hx-swap="outerHTML"
+                  style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-sm);
+                         background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);
+                         padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                         font-size:var(--dmui-font-size-xs); cursor:pointer;">on</button>
+          <button hx-post="/platform/flags/{{ row.spec.code }}" hx-vals='{"action":"set","value":"off"}'
+                  hx-target="#flags-table" hx-swap="outerHTML"
+                  style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-sm);
+                         background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);
+                         padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                         font-size:var(--dmui-font-size-xs); cursor:pointer;">off</button>
+          <button hx-post="/platform/flags/{{ row.spec.code }}" hx-vals='{"action":"kill"}'
+                  hx-target="#flags-table" hx-swap="outerHTML"
+                  style="border:1px solid var(--dmui-status-negative-border); border-radius:var(--dmui-radius-sm);
+                         background:var(--dmui-status-negative-surface);
+                         color:var(--dmui-status-negative-foreground);
+                         padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                         font-size:var(--dmui-font-size-xs); cursor:pointer;">kill</button>
+          <button hx-post="/platform/flags/{{ row.spec.code }}" hx-vals='{"action":"clear"}'
+                  hx-target="#flags-table" hx-swap="outerHTML"
+                  style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-sm);
+                         background:transparent; color:var(--dmui-text-muted);
+                         padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                         font-size:var(--dmui-font-size-xs); cursor:pointer;">clear</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

@@ -32,7 +32,8 @@ behavior (nothing here talks to the DB or the app):
    a test that runs in the fast unit/architecture suite by itself; this
    gives immediate, in-repo feedback without invoking `make lint-imports`.
 
-SCOPE LIMITATION: The template checks cover `admin/**` and `auth/*` only
+SCOPE LIMITATION: The template checks cover `admin/**`, `auth/*` and
+`platform/**` only
 (errors/layouts/components unscanned; currently verified clean by the T8
 review). The import scan skips relative imports (import-linter is the
 authoritative parallel contract). A future non-admin portal surface must extend
@@ -83,7 +84,29 @@ def _glob_all(pattern: str) -> list[Path]:
 
 
 def _admin_and_auth_templates() -> list[Path]:
-    return _glob_all("admin/**/*.html") + _glob_all("auth/*.html")
+    # `platform/**` joined admin/auth when the platform administration
+    # surface landed (step 6) — CLAUDE.md's scope-disclosure rule requires
+    # extending these globs in the SAME task that adds a new portal surface,
+    # or it silently escapes every convention check below.
+    return (
+        _glob_all("admin/**/*.html")
+        + _glob_all("auth/*.html")
+        + _glob_all("platform/**/*.html")
+    )
+
+
+def test_the_platform_surface_is_in_scope() -> None:
+    """The scope-disclosure rule, asserted rather than trusted.
+
+    A new portal surface escapes every check in this file until its templates
+    are added to the scan. Naming `platform` explicitly means a future surface
+    that forgets to do so fails here rather than shipping unchecked.
+    """
+    scanned = {p.name for p in _admin_and_auth_templates()}
+    assert "login.html" in scanned
+    assert any(
+        "platform" in str(p) for p in _admin_and_auth_templates()
+    ), "the platform administration templates are not being scanned"
 
 
 def test_template_scan_is_not_vacuous() -> None:

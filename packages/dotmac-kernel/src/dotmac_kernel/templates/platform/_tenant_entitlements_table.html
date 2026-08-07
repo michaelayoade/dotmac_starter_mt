@@ -1,0 +1,65 @@
+{#
+  One tenant's capability grants. Context: `tenant`, `capabilities` (every
+  declared code), `granted` (code -> bool for the rows that exist).
+
+  Three states, not two, and the distinction is the point: GRANTED, REVOKED
+  (a row exists saying false — "we took it away"), and NOT GRANTED (no row at
+  all — "they never had it"). Collapsing the last two would lose the answer an
+  operator needs months later.
+#}
+<div id="entitlements-table"
+     style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+            background:var(--dmui-surface-elevated); overflow-x:auto;">
+  <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
+    <thead>
+      <tr style="background:var(--dmui-surface-secondary); text-align:left;">
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Capability</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">State</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md);">Set</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for code in capabilities %}
+      <tr style="border-top:1px solid var(--dmui-border-subtle);">
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-primary);">
+          {{ code }}
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
+          {% if code not in granted %}
+          <span style="color:var(--dmui-text-muted);">not granted</span>
+          {% elif granted[code] %}
+          <span style="padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                       border-radius:var(--dmui-radius-full);
+                       background:var(--dmui-status-positive-surface);
+                       color:var(--dmui-status-positive-foreground);
+                       font-size:var(--dmui-font-size-xs);">granted</span>
+          {% else %}
+          <span style="padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                       border-radius:var(--dmui-radius-full);
+                       background:var(--dmui-status-negative-surface);
+                       color:var(--dmui-status-negative-foreground);
+                       font-size:var(--dmui-font-size-xs);">revoked</span>
+          {% endif %}
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); white-space:nowrap;">
+          <button hx-post="/platform/entitlements/{{ tenant.id }}/{{ code }}"
+                  hx-vals='{"granted":"on"}'
+                  hx-target="#entitlements-table" hx-swap="outerHTML"
+                  style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-sm);
+                         background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);
+                         padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                         font-size:var(--dmui-font-size-xs); cursor:pointer;">grant</button>
+          <button hx-post="/platform/entitlements/{{ tenant.id }}/{{ code }}"
+                  hx-vals='{"granted":"off"}'
+                  hx-target="#entitlements-table" hx-swap="outerHTML"
+                  style="border:1px solid var(--dmui-status-negative-border); border-radius:var(--dmui-radius-sm);
+                         background:var(--dmui-status-negative-surface);
+                         color:var(--dmui-status-negative-foreground);
+                         padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                         font-size:var(--dmui-font-size-xs); cursor:pointer;">revoke</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

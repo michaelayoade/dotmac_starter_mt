@@ -1,0 +1,17 @@
+{# One tenant's entitlements. Context: `tenant`, `capabilities`, `granted`. #}
+{% extends "layouts/platform.html" %}
+
+{% block platform_content %}
+<p style="margin-bottom:var(--dmui-space-md);">
+  <a href="/platform/entitlements"
+     style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-muted); text-decoration:none;">
+    &larr; All tenants
+  </a>
+</p>
+<p style="color:var(--dmui-text-secondary); font-size:var(--dmui-font-size-sm);
+          margin-bottom:var(--dmui-space-md);">
+  Revoking keeps a row saying so, rather than deleting it — "we took it away"
+  and "they never had it" are different answers.
+</p>
+{% include "platform/_tenant_entitlements_table.html" %}
+{% endblock %}

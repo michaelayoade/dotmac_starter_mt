@@ -10,6 +10,42 @@ here.
 
 ## 0.1.0a13 — 2026-08-07
 
+Seventeenth alpha. **Module control-plane directive step 6: the platform
+administration surface** — the operable half of steps 4 and 5. No migration.
+
+### Added
+- **`/platform/*` HTML surface** (`dotmac_kernel.platform_web`): module
+  inventory, deployment-scope feature-flag overrides, and per-tenant
+  entitlements. It lives in the kernel because everything it administers is
+  kernel-owned — the module registry, the flag catalogue and its overrides, the
+  capability catalogue and the grant store. The tenant portal is the opposite
+  case (its screens are the assembly's features), which is why that one composes
+  from feature `web_routers` and this one does not.
+- **`require_platform_web_auth`** — the platform plane's cookie guard, reading
+  its own cookie and handing the token to `authenticate_platform_request`, the
+  SAME seam the bearer guard uses. Any tightening of platform token validation
+  lands once and both surfaces get it.
+- `WebAuthRedirect` gained `login_path`, so one redirect concept serves two
+  front doors rather than a second exception and handler drifting apart.
+
+### Notes
+- The two planes never share a guard, a cookie, or a layout, and the surface
+  404s off the platform host — it does not appear to exist on a tenant's domain.
+- The entitlement screens are PER-TENANT rather than one fleet-wide matrix, and
+  that is forced by the data model rather than chosen for looks:
+  `tenant_entitlement_grants` carries only a `tenant_id = app_current_tenant_id()`
+  policy, and `platform_api` never sets a tenant context — so it reads nothing
+  without one. The screens use the `provision_tenant` idiom (set the context for
+  the transaction), which makes per-tenant the only coherent shape.
+- Module enable/disable is deliberately absent. A module's tables and migrations
+  are part of the image; ADR-0003 restricts the admin UI to enabling
+  already-installed, migrated, dependency-complete code, and a toggle here would
+  imply data can be switched off.
+- Routes read `await request.form()` rather than declaring `Form(...)` params:
+  FastAPI's `Form()` requires `python-multipart` at route-definition time, and
+  the kernel deliberately does not depend on it. Declaring one would break
+  `import dotmac_kernel` for every clean consumer.
+
 Sixteenth alpha. **Module control-plane directive step 5: typed feature flags**,
 plus the cache-key convention they are the first consumer of. Migration `0013`
 (kernel head advances from `0012`).
@@ -181,6 +217,7 @@ URL.
 
 
 
+
 Twelfth alpha. Adds **per-module Postgres schema namespaces and registered
 Alembic migration prefixes** — D1 of the white-label foundation programme
 (ADR-0006 § "Decision amendment — 2026-08-02"), the last blocker for stateful
@@ -278,6 +315,7 @@ existing revision id is unchanged.
   unchanged.
 
 ## 0.1.0a11 — 2026-08-06
+
 
 
 
@@ -386,6 +424,7 @@ stays `0012`.
 
 
 
+
 Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
 control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
 authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
@@ -460,6 +499,7 @@ head stays `0012`.
   floor.
 
 ## 0.1.0a9 — 2026-08-03
+
 
 
 
@@ -559,6 +599,7 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
 
 
 
+
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
 value object a deployment uses to report what it is actually running. No
 migration; the kernel head stays `0012`.
@@ -647,6 +688,7 @@ migration; the kernel head stays `0012`.
 
 
 
+
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
 signed/versioned licence delivery (design brief:
 `docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
@@ -693,6 +735,7 @@ receiver owns its durable applied/revocation state).
 
 
 
+
 Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
 of the tenant outbox/relay, so a platform-scoped owner (e.g. a vendor
 ContractService) can emit a durable control-plane event ATOMICALLY with its state
@@ -728,6 +771,7 @@ combined with the tenant table. Advances the kernel migration head to `0012`.
   with one active claim per lease; consumers dedupe via `process_once_platform`.
 
 ## 0.1.0a5 — 2026-07-31
+
 
 
 
@@ -791,6 +835,7 @@ explainable evaluator). Advances the kernel migration head to `0010`.
 
 
 
+
 Third alpha. Adds the WS1 capability catalogue + deployment-profile registry
 (pure in-memory contracts). Additive over `0.1.0a2` — no breaking changes, no new
 migrations (the kernel head stays `0009`).
@@ -816,6 +861,7 @@ migrations (the kernel head stays `0009`).
     `ModuleManifest` expansion.
 
 ## 0.1.0a2 — 2026-07-30
+
 
 
 
@@ -870,6 +916,7 @@ to the `0.1.0a1` public surface.
   `assembly@base` (branch-aware) rather than `kernel@head`.
 
 ## 0.1.0a1 — 2026-07-30
+
 
 
 

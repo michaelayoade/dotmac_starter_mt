@@ -122,8 +122,13 @@ AUTH_GUARD_NAMES = {
     "require_user_auth",
     "require_role",
     "require_permission",
+    "require_capability",
     "require_web_auth",
     "require_platform_admin",
+    # The PLATFORM portal's cookie guard (step 6), the platform-plane analogue
+    # of `require_web_auth`. It proves an authenticated `PlatformAdmin` through
+    # the same `authenticate_platform_request` seam the bearer guard uses.
+    "require_platform_web_auth",
 }
 
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -156,6 +161,12 @@ MUTATING_ALLOWLIST = {
     # what `test_csrf_*` in `tests/test_security_middleware.py` proves, and
     # what makes this route safe to allowlist here.
     ("POST", "/admin/logout"),
+    # Platform portal login (`dotmac_kernel.platform_web`) — the platform-plane
+    # equivalent of `POST /admin/login`, and pre-auth for the same reason: it is
+    # the route that CREATES the session everything else requires. It is not
+    # unguarded — `require_platform_host` still 404s it off the platform host,
+    # so the surface does not exist on a tenant's domain.
+    ("POST", "/platform/login"),
     # Platform login (`dotmac_kernel.platform_auth.platform_auth_router`): the
     # platform counterpart of `/auth/login` — this route IS how a platform
     # admin becomes authenticated, so it cannot require authentication. It

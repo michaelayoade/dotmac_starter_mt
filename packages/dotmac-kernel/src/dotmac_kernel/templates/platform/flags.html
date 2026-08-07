@@ -1,0 +1,12 @@
+{# Feature flags page shell. Context: `flags`. #}
+{% extends "layouts/platform.html" %}
+
+{% block platform_content %}
+<p style="color:var(--dmui-text-secondary); font-size:var(--dmui-font-size-sm);
+          margin-bottom:var(--dmui-space-md);">
+  Deployment-scope overrides. A kill switch outranks every other override,
+  including a rollout. Per-tenant overrides are set from the tenant's own
+  record, not here.
+</p>
+{% include "platform/_flags_table.html" %}
+{% endblock %}

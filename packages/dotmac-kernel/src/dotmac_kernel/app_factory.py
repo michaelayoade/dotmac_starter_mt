@@ -55,6 +55,7 @@ from dotmac_kernel.permissions import (
     install_permissions,
 )
 from dotmac_kernel.platform_auth import platform_auth_router
+from dotmac_kernel.platform_web import router as platform_web_router
 from dotmac_kernel.templating import (
     compose_templates,
     install_stylesheets,
@@ -332,6 +333,11 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # Platform auth mounts DIRECTLY (not a feature manifest) — the platform
     # control plane must exist even with every feature disabled.
     app.include_router(platform_auth_router)
+    # The platform ADMINISTRATION surface (step 6). Gated on `web_enabled` like
+    # every other HTML surface — an API-only deployment serves no portal of
+    # either plane — while the platform JSON API above stays mounted regardless.
+    if web_enabled:
+        app.include_router(platform_web_router)
 
     mount_features(
         app,
