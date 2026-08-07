@@ -83,6 +83,35 @@ def admin_session(admin_engine) -> Generator[Session, None, None]:
         db.close()
 
 
+def _entitle(admin_session, tenant) -> None:
+    """Grant every declared capability to a freshly created test tenant.
+
+    `require_capability` is deny-by-default and migration `a004` backfills only
+    the tenants that existed when it ran — so a tenant created by a test is
+    born un-entitled and would 403 on every gated route. Granting here makes the
+    DEFAULT test subject an ordinary, fully-entitled tenant; a test that cares
+    about the un-entitled case asserts it explicitly (see
+    `tests/unit/test_require_capability.py`).
+
+    Written as `app_admin` (RLS bypassed), like the tenant row itself.
+    """
+    from dotmac_kernel.capabilities import CapabilityCatalogue
+    from dotmac_kernel.entitlements import grant_entitlement
+
+    from app.assembly import assembly
+
+    catalogue = CapabilityCatalogue.from_manifests(assembly.modules)
+    for code in sorted(catalogue.codes()):
+        grant_entitlement(
+            admin_session,
+            tenant_id=tenant.id,
+            capability_code=code,
+            catalogue=catalogue,
+            source="test-fixture",
+        )
+    admin_session.commit()
+
+
 @pytest.fixture
 def tenant_a(admin_session: Session):
     from dotmac_kernel.models import Tenant
@@ -91,6 +120,7 @@ def tenant_a(admin_session: Session):
     admin_session.add(t)
     admin_session.commit()
     admin_session.refresh(t)
+    _entitle(admin_session, t)
     yield t
     admin_session.execute(text("DELETE FROM tenants WHERE id = :id"), {"id": str(t.id)})
     admin_session.commit()
@@ -104,6 +134,7 @@ def tenant_b(admin_session: Session):
     admin_session.add(t)
     admin_session.commit()
     admin_session.refresh(t)
+    _entitle(admin_session, t)
     yield t
     admin_session.execute(text("DELETE FROM tenants WHERE id = :id"), {"id": str(t.id)})
     admin_session.commit()

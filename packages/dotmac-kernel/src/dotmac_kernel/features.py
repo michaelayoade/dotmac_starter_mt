@@ -61,6 +61,7 @@ from fastapi import APIRouter, FastAPI
 from dotmac_kernel.permissions import PermissionSpec
 
 if TYPE_CHECKING:  # avoids a runtime cycle: `modules` imports this module
+    from dotmac_kernel.capabilities import CapabilitySpec
     from dotmac_kernel.modules import ModuleManifest
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,11 @@ class FeatureManifest:
     # never invent one. The manifest is the single declaration point; see
     # `dotmac_kernel.capabilities.CapabilityCatalogue`. Carried through
     # unchanged by `ModuleManifest.from_feature`.
-    capabilities: Sequence[str] = field(default_factory=tuple)
+    # Accepts a bare code or a `CapabilitySpec` (which additionally declares
+    # whether a NEWLY PROVISIONED tenant gets it). A bare string means
+    # `default_granted=True` — what these declarations meant before
+    # enforcement existed.
+    capabilities: Sequence[str | CapabilitySpec] = field(default_factory=tuple)
     # Permissions this module DECLARES and OWNS (module control-plane directive
     # step 3). A `PermissionSpec` is the code-authoritative statement that an
     # authorization decision exists; `dotmac_kernel.deps.require_permission`

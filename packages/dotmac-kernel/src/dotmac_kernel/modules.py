@@ -51,7 +51,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass, field
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter
 
@@ -66,6 +66,13 @@ from dotmac_kernel.namespaces import (
     validate_short_code,
 )
 from dotmac_kernel.permissions import PermissionSpec
+
+if TYPE_CHECKING:
+    # Type-only: `capabilities` imports THIS module for `AnyManifest`, so a
+    # runtime import here would close the cycle. Annotations are lazy
+    # (`from __future__ import annotations`), so the name is only ever
+    # needed by a type-checker.
+    from dotmac_kernel.capabilities import CapabilitySpec
 
 # The module-contract generation this kernel implements. A module declares the
 # generation it was BUILT against (`ModuleManifest.contract_version`); the
@@ -135,7 +142,8 @@ class ModuleManifest:
     web_routers: Sequence[APIRouter] = field(default_factory=tuple)
     nav: Sequence[NavItem] = field(default_factory=tuple)
     # Capability codes this module declares (see `dotmac_kernel.capabilities`).
-    capabilities: Sequence[str] = field(default_factory=tuple)
+    # A bare code or a `CapabilitySpec` — see `dotmac_kernel.capabilities`.
+    capabilities: Sequence[str | CapabilitySpec] = field(default_factory=tuple)
     # Permissions this module declares and owns — the actor-authorization
     # counterpart of `capabilities` (tenant entitlement). Referenced by
     # `dotmac_kernel.deps.require_permission`; see `dotmac_kernel.permissions`.

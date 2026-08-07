@@ -324,6 +324,17 @@ package (import-linter contract "Kernel must not import the UI package"), and
 `stylesheets` takes URLs rather than paths because the assembly owns the mapping
 from a package's static directory to a URL.
 
+**Capability enforcement (0.1.0a13).** `require_capability(code)` is the
+tenant-entitlement guard; `require_permission(code)` remains the actor guard.
+They are different questions and compose on the same route. A capability is
+declared as a `CapabilitySpec` on the owning module's manifest — a bare string
+is still accepted and means `default_granted=True`. `install_capabilities` /
+`active_capabilities` mirror the permission seam, `create_app` installs the
+catalogue from the INSTALLED module set, and a mounted route referencing an
+undeclared code fails the boot. `provision_tenant` applies
+`default_granted_codes()` in the transaction that creates the tenant, so a new
+tenant is usable without an operator granting each capability by hand.
+
 **Packaged templates (0.1.0a13).** `packaged_template_dirs` is the template
 counterpart, and the reason an installable MODULE can ship an `/admin/...`
 screen: its Jinja files are package data outside any assembly's template root.

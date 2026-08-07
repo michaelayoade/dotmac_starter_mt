@@ -25,6 +25,7 @@ code declared and never used fails the build rather than rotting.
 
 from __future__ import annotations
 
+from dotmac_kernel.capabilities import CapabilitySpec
 from dotmac_kernel.features import NavItem
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.permissions import PermissionSpec
@@ -43,6 +44,24 @@ module = ModuleManifest(
     migration_prefix="ts",
     migration_branch="template_studio",
     tables=("templates", "template_versions"),
+    # ── Entitlement ─────────────────────────────────────────────────────────
+    # The licensable capability code this module owns. A capability code may
+    # never be invented outside its owning module's manifest, so an entitlement
+    # grant, a deployment profile or a signed licence may only REFERENCE this.
+    # Enforced at request time by `require_capability` on both routers: the
+    # module is `core=False`, so "is this tenant entitled to it at all?" is a
+    # real question with a real answer, not a formality.
+    capabilities=(
+        CapabilitySpec(
+            code="template_studio.use",
+            description="Author, publish and render tenant templates.",
+            # Bundled in the reference assembly, like custom fields. A product
+            # that sells Template Studio as an add-on sets this False and the
+            # module's routes 403 until an operator grants the capability —
+            # no code change, no branch in a route.
+            default_granted=True,
+        ),
+    ),
     # ── Authorization ───────────────────────────────────────────────────────
     permissions=[
         PermissionSpec(

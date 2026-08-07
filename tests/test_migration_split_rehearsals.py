@@ -211,7 +211,10 @@ def test_rehearsal_2_fresh_reference_assembly(scratch_db: str) -> None:
     # does NOT depend on — so both lineage heads now appear, exactly the case the
     # split design anticipated ("if the kernel advances past what a001 depends
     # on, both heads would appear"). The assembly head is a002 (applied licences).
-    assert _versions(scratch_db) == {"0012_platform_outbox", "a003_revocation_lists"}
+    assert _versions(scratch_db) == {
+        "0012_platform_outbox",
+        "a004_backfill_capability_grants",
+    }
     # RLS + grants correct: FORCE RLS on, the isolation policy present, and
     # app_user holds DML (a proxy for the full contract the migration verifies).
     assert _q(
@@ -274,7 +277,10 @@ def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
     # to 0011, so both lineage heads appear (see rehearsal 2). The assembly
     # lineage continues to a002 (applied licences) on the same upgrade.
     _upgrade(scratch_db, "heads")
-    assert _versions(scratch_db) == {"0012_platform_outbox", "a003_revocation_lists"}
+    assert _versions(scratch_db) == {
+        "0012_platform_outbox",
+        "a004_backfill_capability_grants",
+    }
     # Data survived untouched.
     assert _q(scratch_db, "SELECT count(*) FROM custom_field_definitions") == 1
     assert (
@@ -354,7 +360,7 @@ def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -
     assert _table_exists(scratch_db, "custom_field_definitions")
     assert _table_exists(scratch_db, "tenant_applied_licences")
     assert _table_exists(scratch_db, "tenant_revocation_lists")
-    assert "a003_revocation_lists" in _versions(scratch_db)
+    assert "a004_backfill_capability_grants" in _versions(scratch_db)
 
     # Licence drops authorized alone: a001 still refuses; the CF table survives.
     monkeypatch.setenv("DOTMAC_ALLOW_DESTRUCTIVE_LICENCE_DOWNGRADE", "1")
@@ -380,7 +386,7 @@ def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -
 def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
     # New code deployed: the assembly head (a002, subsuming a001) recorded.
     _upgrade(scratch_db, "heads")
-    assert "a003_revocation_lists" in _versions(scratch_db)
+    assert "a004_backfill_capability_grants" in _versions(scratch_db)
 
     # NEGATIVE CONTROL: the old v0.8 migrator (kernel-only version_locations,
     # no assembly scripts) run against this database — reproduces the real
@@ -426,7 +432,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     # invariant — a second head inside ONE lineage would be the real defect.
     assert heads == {
         "0012_platform_outbox",
-        "a003_revocation_lists",
+        "a004_backfill_capability_grants",
         "ts_0001_templates",
     }, f"unexpected head set: {heads}"
 
@@ -435,5 +441,5 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     assembly_head = script.get_revision("assembly@head")
     module_head = script.get_revision("template_studio@head")
     assert kernel_head.revision == "0012_platform_outbox"
-    assert assembly_head.revision == "a003_revocation_lists"
+    assert assembly_head.revision == "a004_backfill_capability_grants"
     assert module_head.revision == "ts_0001_templates"

@@ -72,7 +72,18 @@ def test_revocation_is_explicit_and_explainable(
         catalogue=_CATALOGUE,
         granted=False,
     )
-    assert db.scalar(select(func.count()).select_from(TenantEntitlementGrant)) == 1
+    # Scoped to the code under test: the shared `tenant_row` fixture arrives
+    # already entitled to every capability the assembly declares (mirroring
+    # migration a004), so a global count would measure the fixture, not the
+    # upsert this test is about.
+    assert (
+        db.scalar(
+            select(func.count())
+            .select_from(TenantEntitlementGrant)
+            .where(TenantEntitlementGrant.capability_code == "billing.use")
+        )
+        == 1
+    )
     decision = is_entitled(db, tenant_id=tenant_row.id, capability_code="billing.use")
     assert not decision.allowed
     assert decision.reason == "revoked"

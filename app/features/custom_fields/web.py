@@ -50,7 +50,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from dotmac_kernel.deps import get_db, require_tenant
+from dotmac_kernel.deps import get_db, require_capability, require_tenant
 from dotmac_kernel.exceptions import BadRequestError, ConflictError
 from dotmac_kernel.models import Tenant
 from dotmac_kernel.templating import render
@@ -65,7 +65,18 @@ from app.features.custom_fields import service as custom_fields_service
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
 from app.features.custom_fields.schemas import CustomFieldCreate, CustomFieldUpdate
 
-router = APIRouter(prefix="/admin/custom-fields", tags=["web"])
+router = APIRouter(
+    prefix="/admin/custom-fields",
+    tags=["web"],
+    # Same capability gate as the JSON API — one feature, one entitlement
+    # decision, both surfaces. NOTE: this also gates the values-panel
+    # FRAGMENT that `templates/admin/parties/detail.html` htmx-loads, so an
+    # un-entitled tenant gets a 403 where the panel would render. Harmless
+    # today (every existing tenant is backfilled), but the fragment needs
+    # the same optional-slot treatment `enabled_features` already gives a
+    # disabled feature before any tenant is genuinely un-entitled.
+    dependencies=[Depends(require_capability("custom_fields.use"))],
+)
 
 _PARTY_ENTITY_TYPE = "party"
 

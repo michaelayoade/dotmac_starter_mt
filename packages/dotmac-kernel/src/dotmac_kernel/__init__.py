@@ -53,6 +53,8 @@ from dotmac_kernel.capabilities import (
     CapabilityCatalogue,
     DuplicateCapabilityError,
     UndeclaredCapabilityError,
+    active_capabilities,
+    install_capabilities,
 )
 from dotmac_kernel.config import Settings, settings, validate_settings
 from dotmac_kernel.entitlements import (
@@ -323,6 +325,8 @@ __all__ = [
     "HostSchemaClaimError",
     # capability catalogue (WS1)
     "CapabilityCatalogue",
+    "active_capabilities",
+    "install_capabilities",
     "DuplicateCapabilityError",
     "UndeclaredCapabilityError",
     # permission catalogue (module control-plane step 3)

@@ -91,6 +91,37 @@ def test_provisioning_creates_a_working_tenant_atomically(
     )
     assert parties.status_code == 200, parties.text
 
+    # ... and the tenant is USABLE, not just created: provisioning applied the
+    # declared default entitlements in the same transaction, so a gated module
+    # answers 200 rather than the 403 a deny-by-default guard would otherwise
+    # give every brand-new tenant.
+    gated = app_client.get(
+        "/custom-fields/definitions",
+        params={"entity_type": "party"},
+        headers={
+            "Host": "prov-atomic.localhost",
+            "Authorization": f"Bearer {owner_token}",
+        },
+    )
+    # 200, and specifically NOT 403 — the distinction this assertion exists for.
+    assert gated.status_code == 200, gated.text
+
+    grants = admin_session.execute(
+        text(
+            "SELECT capability_code, granted, source FROM tenant_entitlement_grants "
+            "WHERE tenant_id = :tid ORDER BY capability_code"
+        ),
+        {"tid": tenant_id},
+    ).all()
+    assert [g.capability_code for g in grants] == [
+        "custom_fields.use",
+        "template_studio.use",
+    ]
+    assert all(g.granted for g in grants)
+    # Provenance: an operator reading the grant table can tell a default from a
+    # deliberate decision.
+    assert {g.source for g in grants} == {"provisioning-default"}
+
     # Two audit events under the NEW tenant, naming the platform actor.
     rows = admin_session.execute(
         text(

@@ -27,7 +27,9 @@ from __future__ import annotations
 from uuid import UUID
 
 from dotmac_kernel.audit import write_audit_event
+from dotmac_kernel.capabilities import active_capabilities
 from dotmac_kernel.db import conflict_savepoint
+from dotmac_kernel.entitlements import grant_entitlement
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
 from dotmac_kernel.identity import normalize_email, person_display_name
 from dotmac_kernel.models import (
@@ -131,6 +133,27 @@ def provision_tenant(
     db.flush()
     db.add(PartyRole(tenant_id=tenant.id, party_id=owner.id, role_id=role.id))
     db.flush()
+
+    # Default entitlements, in the SAME transaction that creates the tenant
+    # (module control-plane directive step 4). `require_capability` is
+    # deny-by-default, so without this a freshly provisioned tenant would be
+    # locked out of every gated module until an operator granted it one by one
+    # — and the platform UI to do that is a later step.
+    #
+    # WHICH codes is a per-capability DECLARATION, not a policy decided here:
+    # `CapabilitySpec.default_granted` on the owning module's manifest. A SaaS
+    # deployment flips a capability default-off and sells it; a self-hosted one
+    # leaves it on and works on day one. This service applies the declaration
+    # and does not interpret it — no plan name, no payment state, no branch.
+    catalogue = active_capabilities()
+    for code in catalogue.default_granted_codes():
+        grant_entitlement(
+            db,
+            tenant_id=tenant.id,
+            capability_code=code,
+            catalogue=catalogue,
+            source="provisioning-default",
+        )
 
     write_audit_event(
         db,

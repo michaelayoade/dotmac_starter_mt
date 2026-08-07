@@ -31,6 +31,12 @@ from fastapi.staticfiles import StaticFiles
 
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+from dotmac_kernel.capabilities import (
+    CAPABILITY_CODE_ATTR,
+    CapabilityCatalogue,
+    UndeclaredCapabilityError,
+    install_capabilities,
+)
 from dotmac_kernel.config import settings, validate_settings
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.features import mount_features
@@ -84,15 +90,18 @@ async def _run_enabled_seeds(
                 logger.warning("Feature %s seed skipped: %s", manifest.name, exc)
 
 
-def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
-    """(route label, permission code) for every code a MOUNTED route references.
+def _referenced_codes(app: FastAPI, attr: str) -> list[tuple[str, str]]:
+    """(route label, declared code) for every code a MOUNTED route references
+    through a guard that stamps `attr` on its dependency callable.
 
-    Scoped to this app's routes, not a process-wide tally of every
-    `require_permission` call ever imported: an assembly that imports a module's
-    routers without mounting them must not be failed for a code it never
-    exposes. `require_permission` stamps the code on the dependency callable it
-    returns (`PERMISSION_CODE_ATTR`); this walks each route's dependency tree
-    and reads it back.
+    ONE walker for both declaration kinds — `PERMISSION_CODE_ATTR` (who may act)
+    and `CAPABILITY_CODE_ATTR` (whether the tenant has the feature). The two are
+    different decisions but the same discovery problem, and a second copy of
+    this traversal would be one more place for the dependency-tree walk to drift.
+
+    Scoped to this app's routes, not a process-wide tally of every guard ever
+    imported: an assembly that imports a module's routers without mounting them
+    must not be failed for a code it never exposes.
     """
     found: list[tuple[str, str]] = []
     for route in app.routes:
@@ -103,7 +112,7 @@ def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
         stack = list(dependant.dependencies)
         while stack:
             dep = stack.pop()
-            code = getattr(dep.call, PERMISSION_CODE_ATTR, None)
+            code = getattr(dep.call, attr, None)
             if isinstance(code, str):
                 codes.add(code)
             stack.extend(dep.dependencies)
@@ -111,6 +120,16 @@ def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
         label = f"{'/'.join(methods)} {getattr(route, 'path', '?')}"
         found.extend((label, code) for code in sorted(codes))
     return found
+
+
+def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
+    """Permission codes referenced by this app's mounted routes."""
+    return _referenced_codes(app, PERMISSION_CODE_ATTR)
+
+
+def _referenced_capabilities(app: FastAPI) -> list[tuple[str, str]]:
+    """Capability codes referenced by this app's mounted routes."""
+    return _referenced_codes(app, CAPABILITY_CODE_ATTR)
 
 
 def _validate_referenced_permissions(
@@ -131,6 +150,32 @@ def _validate_referenced_permissions(
             f"route(s) require a permission code no installed module declares: "
             f"{listed} — declare it on the owning module's manifest "
             "(`permissions=(PermissionSpec(...),)`)"
+        )
+
+
+def _validate_referenced_capabilities(
+    app: FastAPI, catalogue: CapabilityCatalogue
+) -> None:
+    """Fail the BOOT when a mounted route requires a capability no installed
+    module declares (module control-plane directive step 4).
+
+    Worse than the permission case if it were left to request time: an
+    undeclared capability code makes `require_capability` raise for EVERY
+    tenant, forever, on a route that looks correctly wired. That reads as "no
+    one is entitled" — an operations problem someone would go looking for in the
+    grant table — when it is really a typo in a declaration.
+    """
+    undeclared = [
+        (label, code)
+        for label, code in _referenced_capabilities(app)
+        if not catalogue.is_declared(code)
+    ]
+    if undeclared:
+        listed = ", ".join(f"{label} -> {code!r}" for label, code in undeclared)
+        raise UndeclaredCapabilityError(
+            f"route(s) require a capability code no installed module declares: "
+            f"{listed} — declare it on the owning module's manifest "
+            "(`capabilities=(...,)`)"
         )
 
 
@@ -177,6 +222,12 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     permission_catalogue = PermissionCatalogue.from_manifests(manifests)
     install_permissions(permission_catalogue)
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    # Capabilities join them (step 4). Same installed-not-enabled rule, and the
+    # same reason it matters more here: a tenant's entitlement GRANT references a
+    # capability code and outlives any deployment's enabled set, so a disabled
+    # module must not make an existing grant unexplainable.
+    capability_catalogue = CapabilityCatalogue.from_manifests(manifests)
+    install_capabilities(capability_catalogue)
 
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
     # before any template renders. Fed the FULL installed set in startup order
@@ -288,6 +339,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # AFTER mounting: every route that now exists must reference only declared
     # permission codes. Fails the boot, before the app is ever returned.
     _validate_referenced_permissions(app, permission_catalogue)
+    _validate_referenced_capabilities(app, capability_catalogue)
     return app
 
 

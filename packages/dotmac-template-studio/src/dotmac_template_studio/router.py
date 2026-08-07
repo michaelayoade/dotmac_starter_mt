@@ -11,7 +11,12 @@ from __future__ import annotations
 from uuid import UUID
 
 from dotmac_kernel.audit import write_audit_event
-from dotmac_kernel.deps import get_db, require_permission, require_tenant
+from dotmac_kernel.deps import (
+    get_db,
+    require_capability,
+    require_permission,
+    require_tenant,
+)
 from dotmac_kernel.models import Party, Tenant
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -32,7 +37,15 @@ from dotmac_template_studio.schemas import (
 router = APIRouter(
     prefix="/template-studio",
     tags=["template-studio"],
-    dependencies=[Depends(require_tenant)],
+    # Two independent decisions, both required. The capability gates the
+    # FEATURE for the tenant (router level, once); the per-route
+    # `require_permission` gates the ACTION for the actor. An entitled tenant's
+    # viewer still cannot publish, and a permitted admin in an un-entitled
+    # tenant still gets nothing.
+    dependencies=[
+        Depends(require_tenant),
+        Depends(require_capability("template_studio.use")),
+    ],
 )
 
 

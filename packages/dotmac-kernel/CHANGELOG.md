@@ -10,6 +10,52 @@ here.
 
 ## 0.1.0a13 — 2026-08-07
 
+Fifteenth alpha. Closes **module control-plane directive step 4**: tenant
+entitlements become an ENFORCED request-time decision instead of a store with no
+consumer. No migration in the kernel; the reference assembly ships `a004` to
+backfill grants for the capabilities it begins gating.
+
+### Added
+- **`dotmac_kernel.deps.require_capability(code)`** — the tenant-entitlement
+  guard, and the counterpart to `require_permission`. A permission asks "may
+  this ACTOR do it?"; a capability asks "does this TENANT have the feature at
+  all?". Both compose on a route and neither substitutes for the other.
+
+  The decision is local and explainable — a pure read of the grant store. A
+  request-time check never calls a payment provider and never validates a
+  licence over the network (ADR-0003), which is why the signed-licence receiver
+  PROJECTS into grants rather than being consulted per request. Denials carry
+  the stable reason code (`not_granted` / `revoked`) so an operator can tell
+  "never had it" from "had it and lost it" without reading the database. The
+  admitting decision is RETURNED, so a route needing the grant's `limits` reads
+  them from the same decision that let it in.
+- **`install_capabilities` / `active_capabilities`** — the process-active
+  capability catalogue, the same shape as the permission and audit-action
+  seams, installed by `create_app` from the INSTALLED module set. Empty means
+  deny: an uninstalled catalogue must not silently entitle every tenant.
+- **Boot-time validation of referenced capability codes.** A mounted route
+  referencing an undeclared code fails the BOOT. Left to request time it would
+  deny every tenant forever on a route that looks correctly wired — which reads
+  as an operations problem in the grant table rather than a typo in a
+  declaration.
+- **`CapabilitySpec`** — a capability is now a typed declaration
+  (`code`, `description`, `default_granted`) rather than a bare string.
+  `default_granted` answers the question enforcement forces: what does a newly
+  provisioned tenant get? It is per-capability and per-product — a self-hosted
+  deployment bundles a feature and expects it to work on day one, a SaaS
+  deployment sells the same one default-off — and it is a DECLARATION the
+  provisioning service applies, never a plan-name or payment branch in a route.
+
+### Changed
+- **`ModuleManifest.capabilities` / `FeatureManifest.capabilities` accept
+  `str | CapabilitySpec`.** A bare string still works and means
+  `default_granted=True` — exactly what those declarations meant before
+  enforcement existed — so no existing manifest changes behaviour. Consumers
+  that iterate the field now receive whatever was declared; use
+  `CapabilitySpec.coerce` (or the catalogue) to normalise.
+- `create_app`'s route walker is one function over both declaration kinds
+  rather than a permission-specific copy.
+
 Fourteenth alpha. Opens the two seams the FIRST STATEFUL MODULE needs, and makes
 its namespace allocation (ADR-0006 D1 / M1). Additive only; no migration, kernel
 head stays `0012`.
@@ -78,6 +124,7 @@ assembly, not the kernel, owns the mapping from a package's static directory to 
 URL.
 
 ## 0.1.0a12 — 2026-08-06
+
 
 
 
@@ -178,6 +225,7 @@ existing revision id is unchanged.
   unchanged.
 
 ## 0.1.0a11 — 2026-08-06
+
 
 
 
@@ -282,6 +330,7 @@ stays `0012`.
 
 
 
+
 Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
 control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
 authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
@@ -356,6 +405,7 @@ head stays `0012`.
   floor.
 
 ## 0.1.0a9 — 2026-08-03
+
 
 
 
@@ -451,6 +501,7 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
 
 
 
+
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
 value object a deployment uses to report what it is actually running. No
 migration; the kernel head stays `0012`.
@@ -537,6 +588,7 @@ migration; the kernel head stays `0012`.
 
 
 
+
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
 signed/versioned licence delivery (design brief:
 `docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
@@ -581,6 +633,7 @@ receiver owns its durable applied/revocation state).
 
 
 
+
 Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
 of the tenant outbox/relay, so a platform-scoped owner (e.g. a vendor
 ContractService) can emit a durable control-plane event ATOMICALLY with its state
@@ -616,6 +669,7 @@ combined with the tenant table. Advances the kernel migration head to `0012`.
   with one active claim per lease; consumers dedupe via `process_once_platform`.
 
 ## 0.1.0a5 — 2026-07-31
+
 
 
 
@@ -675,6 +729,7 @@ explainable evaluator). Advances the kernel migration head to `0010`.
 
 
 
+
 Third alpha. Adds the WS1 capability catalogue + deployment-profile registry
 (pure in-memory contracts). Additive over `0.1.0a2` — no breaking changes, no new
 migrations (the kernel head stays `0009`).
@@ -700,6 +755,7 @@ migrations (the kernel head stays `0009`).
     `ModuleManifest` expansion.
 
 ## 0.1.0a2 — 2026-07-30
+
 
 
 
@@ -752,6 +808,7 @@ to the `0.1.0a1` public surface.
   `assembly@base` (branch-aware) rather than `kernel@head`.
 
 ## 0.1.0a1 — 2026-07-30
+
 
 
 

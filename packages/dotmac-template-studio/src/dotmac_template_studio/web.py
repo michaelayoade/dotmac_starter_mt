@@ -21,7 +21,7 @@ from pathlib import Path
 from uuid import UUID
 
 from dotmac_kernel.audit import write_audit_event
-from dotmac_kernel.deps import get_db, require_tenant
+from dotmac_kernel.deps import get_db, require_capability, require_tenant
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.models import Tenant
 from dotmac_kernel.templating import render
@@ -33,7 +33,13 @@ from sqlalchemy.orm import Session
 from dotmac_template_studio import service
 from dotmac_template_studio.models import TEMPLATE_KINDS
 
-router = APIRouter(prefix="/admin", tags=["web"])
+router = APIRouter(
+    prefix="/admin",
+    tags=["web"],
+    # Same capability as the JSON API — one feature, one entitlement
+    # decision, both surfaces.
+    dependencies=[Depends(require_capability("template_studio.use"))],
+)
 
 _PKG_DIR = Path(__file__).resolve().parent
 

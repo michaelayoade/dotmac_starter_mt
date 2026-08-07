@@ -25,6 +25,8 @@ from dotmac_kernel import (
     settings_models,  # noqa: F401
 )
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+from dotmac_kernel.capabilities import CapabilityCatalogue, install_capabilities
+from dotmac_kernel.entitlements import grant_entitlement
 from dotmac_kernel.features import load_manifests
 from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
@@ -74,6 +76,10 @@ def _default_declaration_catalogues():
     manifests = _all_manifests()
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    # Capabilities too (step 4). Re-installed per test for the same reason:
+    # a test that installs a narrower probe catalogue must not leave it
+    # behind for the next one.
+    install_capabilities(CapabilityCatalogue.from_manifests(manifests))
 
 
 @pytest.fixture(autouse=True)
@@ -113,9 +119,27 @@ def db(unit_engine) -> Generator[Session, None, None]:
 
 @pytest.fixture()
 def tenant_row(db: Session) -> Tenant:
+    """The shared unit-test tenant — entitled to every declared capability.
+
+    `require_capability` is deny-by-default, so a bare tenant would 403 on every
+    gated route and each feature's tests would have to re-grant the same codes.
+    Granting them here mirrors what migration `a004` does for every tenant that
+    existed when enforcement landed: the DEFAULT test subject is an ordinary,
+    fully-entitled tenant, and a test that cares about the un-entitled case
+    builds its own (see `tests/unit/test_require_capability.py`).
+    """
     row = Tenant(slug="acme", name="Acme")
     db.add(row)
     db.flush()
+    catalogue = CapabilityCatalogue.from_manifests(_all_manifests())
+    for code in sorted(catalogue.codes()):
+        grant_entitlement(
+            db,
+            tenant_id=row.id,
+            capability_code=code,
+            catalogue=catalogue,
+            source="test-fixture",
+        )
     return row
 
 
