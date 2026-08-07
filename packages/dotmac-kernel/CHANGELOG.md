@@ -10,6 +10,58 @@ here.
 
 ## 0.1.0a13 — 2026-08-07
 
+Sixteenth alpha. **Module control-plane directive step 5: typed feature flags**,
+plus the cache-key convention they are the first consumer of. Migration `0013`
+(kernel head advances from `0012`).
+
+### Added
+- **`dotmac_kernel.cache`** — the ONE place a cache key is built. Scope is a
+  TYPE (`TenantScope` / `PlatformScope`), not a `tenant_id: UUID | None`
+  parameter: with a nullable parameter, "I forgot the tenant" and "this is
+  deliberately deployment-wide" produce the SAME key, and the platform entry
+  silently becomes the bucket every unscoped read lands in. Omitting `scope=` is
+  a `TypeError`; `t=<uuid>` and the literal `platform` are structurally
+  different, so no tenant identifier can occupy the platform entry. `version=`
+  retires a whole generation of entries without a delete sweep.
+
+  Landed before the first tenant-keyed cache deliberately — the entitlement
+  guard added in `0.1.0a13` was the first request-time consumer of tenant-scoped
+  state, which closed the window in which this could be added for free.
+- **`dotmac_kernel.flags`** — `FeatureFlagSpec` (code, value_type, default,
+  owner, description, allowed_scopes, expires_on, operational) and `evaluate`,
+  which returns a `FlagEvaluation`, never a bare bool: "it was on" is useless in
+  an incident, "it was on because tenant override <rule> set it against a
+  default of off" is not.
+
+  Precedence, highest first: **kill switch** (outranks everything, including a
+  rollout — the person turning a feature off at 3am must not have to unwind
+  every override first, and it forces OFF rather than back-to-default, or a
+  default of True would make it a no-op), tenant override, tenant rollout,
+  platform override, platform rollout, declared default.
+
+  Rollouts hash `(flag code, subject)`: deterministic, so a tenant does not flip
+  between requests, and salted by code so two flags at 50% do not select the
+  same half of the fleet.
+- **`feature_flag_overrides`** (migration `0013`) — deployment- and tenant-scope
+  overrides. Nullable `tenant_id` following `domain_settings`, the documented
+  exception to hard rule 11, with the same asymmetric RLS: read own-or-platform,
+  write own-only, plus a `platform_api`-only policy for the NULL-tenant rows.
+  Two PARTIAL unique indexes, because Postgres treats NULL as distinct from
+  every other NULL.
+- **`resolve_flag(db, code, tenant_id=...)`** — the one entry point a service
+  calls. It loads the overrides in scope, derives the invalidation version from
+  them, and evaluates through the scoped cache, so a caller cannot evaluate
+  against another tenant's overrides or skip the version.
+- **`ModuleManifest.feature_flags` / `FeatureManifest.feature_flags`** — flags
+  are declared by their owning module, like permissions and capabilities.
+
+### Governance
+Flag codes and permission/capability codes are DISJOINT namespaces — the
+executable form of "flags cannot grant permissions". Every declared flag has a
+real consumer, every flag has an owner, and an expired flag fails the BUILD
+rather than production: an expiry must never take a feature down for users, it
+must force a decision in CI.
+
 Fifteenth alpha. Closes **module control-plane directive step 4**: tenant
 entitlements become an ENFORCED request-time decision instead of a store with no
 consumer. No migration in the kernel; the reference assembly ships `a004` to
@@ -128,6 +180,7 @@ URL.
 
 
 
+
 Twelfth alpha. Adds **per-module Postgres schema namespaces and registered
 Alembic migration prefixes** — D1 of the white-label foundation programme
 (ADR-0006 § "Decision amendment — 2026-08-02"), the last blocker for stateful
@@ -225,6 +278,7 @@ existing revision id is unchanged.
   unchanged.
 
 ## 0.1.0a11 — 2026-08-06
+
 
 
 
@@ -331,6 +385,7 @@ stays `0012`.
 
 
 
+
 Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
 control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
 authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
@@ -405,6 +460,7 @@ head stays `0012`.
   floor.
 
 ## 0.1.0a9 — 2026-08-03
+
 
 
 
@@ -502,6 +558,7 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
 
 
 
+
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
 value object a deployment uses to report what it is actually running. No
 migration; the kernel head stays `0012`.
@@ -589,6 +646,7 @@ migration; the kernel head stays `0012`.
 
 
 
+
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
 signed/versioned licence delivery (design brief:
 `docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
@@ -634,6 +692,7 @@ receiver owns its durable applied/revocation state).
 
 
 
+
 Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
 of the tenant outbox/relay, so a platform-scoped owner (e.g. a vendor
 ContractService) can emit a durable control-plane event ATOMICALLY with its state
@@ -669,6 +728,7 @@ combined with the tenant table. Advances the kernel migration head to `0012`.
   with one active claim per lease; consumers dedupe via `process_once_platform`.
 
 ## 0.1.0a5 — 2026-07-31
+
 
 
 
@@ -730,6 +790,7 @@ explainable evaluator). Advances the kernel migration head to `0010`.
 
 
 
+
 Third alpha. Adds the WS1 capability catalogue + deployment-profile registry
 (pure in-memory contracts). Additive over `0.1.0a2` — no breaking changes, no new
 migrations (the kernel head stays `0009`).
@@ -755,6 +816,7 @@ migrations (the kernel head stays `0009`).
     `ModuleManifest` expansion.
 
 ## 0.1.0a2 — 2026-07-30
+
 
 
 
@@ -808,6 +870,7 @@ to the `0.1.0a1` public surface.
   `assembly@base` (branch-aware) rather than `kernel@head`.
 
 ## 0.1.0a1 — 2026-07-30
+
 
 
 

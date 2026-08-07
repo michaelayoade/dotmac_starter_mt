@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from dotmac_kernel.capabilities import CapabilitySpec
 from dotmac_kernel.features import NavItem
+from dotmac_kernel.flags import FeatureFlagSpec
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.permissions import PermissionSpec
 
@@ -60,6 +61,30 @@ module = ModuleManifest(
             # module's routes 403 until an operator grants the capability —
             # no code change, no branch in a route.
             default_granted=True,
+        ),
+    ),
+    # ── Feature flags ───────────────────────────────────────────────────────
+    # A real operational switch, not a demo. Rendering is STRICT by default: a
+    # missing variable raises rather than sending a half-substituted message.
+    # During an incident — a caller stopped supplying a variable a published
+    # template still references — an operator flips this off and messages go
+    # out with the placeholder intact instead of failing outright. That is a
+    # deliberate, temporary degradation someone chooses; the default stays
+    # strict.
+    #
+    # `operational=True`, so evaluating it emits no exposure event: this is
+    # read on every render, and one audit row per outbound message would bury
+    # the decisions in traffic.
+    feature_flags=(
+        FeatureFlagSpec(
+            code="template_studio.strict_render",
+            value_type=bool,
+            default=True,
+            description=(
+                "Raise on a missing template variable instead of leaving the "
+                "placeholder in the rendered output."
+            ),
+            operational=True,
         ),
     ),
     # ── Authorization ───────────────────────────────────────────────────────

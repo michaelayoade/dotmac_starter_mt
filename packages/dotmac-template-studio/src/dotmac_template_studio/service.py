@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
+from dotmac_kernel.flag_models import resolve_flag
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -311,6 +312,10 @@ def publish_version(
     return revision
 
 
+# The flag this module declares and reads — see `manifest.py` for why it exists.
+STRICT_RENDER_FLAG = "template_studio.strict_render"
+
+
 def render_published(
     db: Session,
     tenant_id: UUID,
@@ -318,7 +323,7 @@ def render_published(
     slug: str,
     values: dict[str, str],
     *,
-    strict: bool = True,
+    strict: bool | None = None,
 ) -> tuple[str | None, str]:
     """Render a template's PUBLISHED revision — the caller-facing entry point.
 
@@ -326,6 +331,11 @@ def render_published(
     `(kind, slug)` and never by a version number: which revision is live is this
     module's decision, not theirs.
     """
+    if strict is None:
+        # The FLAG decides, unless a caller was explicit. A preview screen
+        # passes `strict=False` because it knows it has no values yet; everyone
+        # else gets the operator's current answer.
+        strict = bool(resolve_flag(db, STRICT_RENDER_FLAG, tenant_id=tenant_id).value)
     template = get_by_slug(db, tenant_id, kind, slug)
     if not template.is_active:
         raise ConflictError(f"template {kind}/{slug} is not active")

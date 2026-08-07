@@ -17,7 +17,8 @@ Table classes audited:
   policy — OR a subtype table whose policy is an EXISTS-join back to a
   tenant-scoped parent (`party_persons`/`party_organizations` pattern,
   detected from `pg_policies.qual`, not from a name list).
-- `domain_settings`: the ONE documented exception — nullable tenant_id
+- `domain_settings` and `feature_flag_overrides`: the documented exceptions —
+  nullable tenant_id
   (platform-default rows) with a split read/write policy pair.
 
 Requires real Postgres (`make test-db-up` / `make test-integration`).
@@ -59,10 +60,21 @@ _INFRA_TABLES = {"alembic_version"}
 
 _PLATFORM_TABLES = _PLATFORM_READABLE | _PLATFORM_PRIVATE | _INFRA_TABLES
 
-# The one nullable-tenant_id split-policy exception (see module docstring
-# and docs/ARCHITECTURE.md "Settings resolution order + platform-row RLS
-# design").
-_SPLIT_POLICY_EXCEPTION = "domain_settings"
+# The nullable-tenant_id split-policy exceptions (see module docstring and
+# docs/ARCHITECTURE.md "Settings resolution order + platform-row RLS design").
+#
+# Both tables model a value that genuinely has TWO scopes — a deployment-wide
+# default row and a tenant's own — so `tenant_id IS NULL` is the discriminator
+# rather than missing data. They carry the same asymmetric policy set: read
+# own-or-platform, write own-only, plus a `platform_api`-only policy for the
+# NULL-tenant rows. Modelling the platform scope as a second table would
+# duplicate every column and every query to express one nullable column.
+#
+# This set only grows for a table with that exact shape, and each entry owes the
+# behavioural proof its isolation canary provides — for flags,
+# `tests/test_flag_override_isolation.py`, which specifically pins the half a
+# naive policy breaks (every tenant must still READ the platform row).
+_SPLIT_POLICY_EXCEPTIONS = frozenset({"domain_settings", "feature_flag_overrides"})
 
 # Tenant-scoped FKs that may reference a tenant-scoped table WITHOUT
 # carrying tenant_id, each justified inline. Currently empty — keep it so.
@@ -152,7 +164,7 @@ def audit_live_catalog(conn) -> list[str]:
         if not table_policies:
             violations.append(f"{table}: no RLS policy in pg_policies")
             continue
-        if table == _SPLIT_POLICY_EXCEPTION:
+        if table in _SPLIT_POLICY_EXCEPTIONS:
             if len(table_policies) < 2:
                 violations.append(
                     f"{table}: documented split-policy exception must keep "

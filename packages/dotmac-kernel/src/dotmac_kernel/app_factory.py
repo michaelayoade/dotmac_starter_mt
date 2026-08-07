@@ -40,6 +40,7 @@ from dotmac_kernel.capabilities import (
 from dotmac_kernel.config import settings, validate_settings
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.features import mount_features
+from dotmac_kernel.flags import FlagCatalogue, install_flags
 from dotmac_kernel.logging import setup_logging
 from dotmac_kernel.middleware.csrf import CSRFMiddleware
 from dotmac_kernel.middleware.observability import ObservabilityMiddleware
@@ -228,6 +229,9 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # module must not make an existing grant unexplainable.
     capability_catalogue = CapabilityCatalogue.from_manifests(manifests)
     install_capabilities(capability_catalogue)
+    # Feature flags (step 5). Same installed-not-enabled rule: an override row
+    # references a flag code and outlives any deployment's enabled set.
+    install_flags(FlagCatalogue.from_manifests(manifests))
 
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
     # before any template renders. Fed the FULL installed set in startup order

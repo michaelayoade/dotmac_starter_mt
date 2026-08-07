@@ -21,13 +21,17 @@ import pytest
 # there about import-time engine creation in dotmac_kernel.db.
 from dotmac_kernel import (
     audit,  # noqa: F401
+    flag_models,  # noqa: F401
     models_platform,  # noqa: F401
     settings_models,  # noqa: F401
 )
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+from dotmac_kernel.cache import MemoryCache
 from dotmac_kernel.capabilities import CapabilityCatalogue, install_capabilities
 from dotmac_kernel.entitlements import grant_entitlement
 from dotmac_kernel.features import load_manifests
+from dotmac_kernel.flag_models import install_flag_cache
+from dotmac_kernel.flags import FlagCatalogue, install_flags
 from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
 from dotmac_kernel.permissions import PermissionCatalogue, install_permissions
@@ -80,6 +84,10 @@ def _default_declaration_catalogues():
     # a test that installs a narrower probe catalogue must not leave it
     # behind for the next one.
     install_capabilities(CapabilityCatalogue.from_manifests(manifests))
+    install_flags(FlagCatalogue.from_manifests(manifests))
+    # A fresh evaluation cache per test: the store is process-global, and a
+    # leaked entry would make one test's overrides decide another's answer.
+    install_flag_cache(MemoryCache())
 
 
 @pytest.fixture(autouse=True)

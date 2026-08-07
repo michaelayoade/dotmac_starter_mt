@@ -49,6 +49,13 @@ from dotmac_kernel.audit_actions import (
     active_audit_actions,
     install_audit_actions,
 )
+from dotmac_kernel.cache import (
+    CacheStore,
+    MemoryCache,
+    PlatformScope,
+    TenantScope,
+    cache_key,
+)
 from dotmac_kernel.capabilities import (
     CapabilityCatalogue,
     DuplicateCapabilityError,
@@ -76,6 +83,15 @@ from dotmac_kernel.features import (
     NavItem,
     load_manifests,
     mount_features,
+)
+from dotmac_kernel.flags import (
+    FeatureFlagSpec,
+    FlagCatalogue,
+    FlagEvaluation,
+    UndeclaredFlagError,
+    active_flags,
+    evaluate,
+    install_flags,
 )
 from dotmac_kernel.identity import normalize_email, person_display_name
 from dotmac_kernel.models import (
@@ -324,6 +340,18 @@ __all__ = [
     "NamespaceAllocationError",
     "HostSchemaClaimError",
     # capability catalogue (WS1)
+    "CacheStore",
+    "MemoryCache",
+    "PlatformScope",
+    "TenantScope",
+    "cache_key",
+    "FeatureFlagSpec",
+    "FlagCatalogue",
+    "FlagEvaluation",
+    "UndeclaredFlagError",
+    "active_flags",
+    "evaluate",
+    "install_flags",
     "CapabilityCatalogue",
     "active_capabilities",
     "install_capabilities",

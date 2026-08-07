@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     # (`from __future__ import annotations`), so the name is only ever
     # needed by a type-checker.
     from dotmac_kernel.capabilities import CapabilitySpec
+    from dotmac_kernel.flags import FeatureFlagSpec
 
 # The module-contract generation this kernel implements. A module declares the
 # generation it was BUILT against (`ModuleManifest.contract_version`); the
@@ -144,6 +145,8 @@ class ModuleManifest:
     # Capability codes this module declares (see `dotmac_kernel.capabilities`).
     # A bare code or a `CapabilitySpec` — see `dotmac_kernel.capabilities`.
     capabilities: Sequence[str | CapabilitySpec] = field(default_factory=tuple)
+    # Feature flags this module declares and owns — see `dotmac_kernel.flags`.
+    feature_flags: Sequence[FeatureFlagSpec] = field(default_factory=tuple)
     # Permissions this module declares and owns — the actor-authorization
     # counterpart of `capabilities` (tenant entitlement). Referenced by
     # `dotmac_kernel.deps.require_permission`; see `dotmac_kernel.permissions`.
@@ -192,6 +195,7 @@ class ModuleManifest:
             "permissions",
             "audit_actions",
             "tables",
+            "feature_flags",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
         self._validate_namespace()
@@ -324,6 +328,7 @@ class ModuleManifest:
             web_routers=manifest.web_routers,
             nav=manifest.nav,
             capabilities=manifest.capabilities,
+            feature_flags=manifest.feature_flags,
             permissions=manifest.permissions,
             audit_actions=manifest.audit_actions,
             core=manifest.core,

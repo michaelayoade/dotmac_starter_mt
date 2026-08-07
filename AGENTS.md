@@ -123,7 +123,19 @@ specifics) points here and must never fork these rules.
     alike). (`tests/architecture/test_ui_public_surface.py`; `pyproject.toml`
     contracts "Kernel must not import the UI package" and "UI package must
     not import the kernel or the assembly")
-17. **`dotmac-ui`'s compiled assets are COMMITTED and match their token
+17. **Every cache key carries its scope, built by `dotmac_kernel.cache`.**
+    Scope is a type (`TenantScope`/`PlatformScope`), never a nullable
+    `tenant_id`: a `None` tenant is indistinguishable from a forgotten one, and
+    the platform entry becomes the bucket every unscoped read lands in. No
+    module builds a key by interpolation, and no `@lru_cache` decorates a
+    function taking tenant-bearing input — a process-wide memo over tenant data
+    serves one tenant's value to every other.
+    (`tests/architecture/test_cache_scope.py`)
+18. **A feature flag is not a permission and not an entitlement.** Flag codes
+    are disjoint from permission and capability codes; every declared flag has
+    an owning module and a real consumer; an expired flag fails the build, never
+    production. (`tests/architecture/test_feature_flags.py`)
+19. **`dotmac-ui`'s compiled assets are COMMITTED and match their token
     source.** `packages/dotmac-ui/src/dotmac_ui/static/**` is the published
     contract, not a build artifact — never gitignore it, never hand-edit it;
     regenerate with `make ui-build` and commit the diff. The stylesheet stays

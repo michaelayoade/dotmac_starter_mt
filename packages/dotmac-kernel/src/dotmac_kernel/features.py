@@ -62,6 +62,7 @@ from dotmac_kernel.permissions import PermissionSpec
 
 if TYPE_CHECKING:  # avoids a runtime cycle: `modules` imports this module
     from dotmac_kernel.capabilities import CapabilitySpec
+    from dotmac_kernel.flags import FeatureFlagSpec
     from dotmac_kernel.modules import ModuleManifest
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,11 @@ class FeatureManifest:
     # `default_granted=True` — what these declarations meant before
     # enforcement existed.
     capabilities: Sequence[str | CapabilitySpec] = field(default_factory=tuple)
+    # Feature flags this module DECLARES and owns (module control-plane
+    # directive step 5). A flag answers "which code path runs", never "who may
+    # run it" — the two are kept disjoint by `test_feature_flags.py`. Carried
+    # through unchanged by `ModuleManifest.from_feature`.
+    feature_flags: Sequence[FeatureFlagSpec] = field(default_factory=tuple)
     # Permissions this module DECLARES and OWNS (module control-plane directive
     # step 3). A `PermissionSpec` is the code-authoritative statement that an
     # authorization decision exists; `dotmac_kernel.deps.require_permission`
