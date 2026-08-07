@@ -122,7 +122,10 @@ for API-only deployments, or build separate SPA/mobile/partner frontends
 against versioned OpenAPI contracts and the same authorization/capability APIs.
 
 Existing `dotmac_erp` and `dotmac_sub` are adoption candidates, not rewrite
-targets. ERP and ISP subscriber management remain separate product assemblies
+targets; `dotmac_academy_app` joined the same plan on 2026-08-07 as a
+discovery target only. Adopting products stay in their own repositories — the
+starter does not absorb a product's vertical domain.
+ERP and ISP subscriber management remain separate product assemblies
 and normally separate deployments/databases. Other ISP operators should first
 receive dedicated one-tenant ISP deployments; shared multi-ISP SaaS follows only
 after an explicit cross-ISP isolation program. See the

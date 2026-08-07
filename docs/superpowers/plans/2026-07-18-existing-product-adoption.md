@@ -1,4 +1,4 @@
-# Existing Product Adoption Plan — dotmac_erp and dotmac_sub
+# Existing Product Adoption Plan — dotmac_erp, dotmac_sub, and dotmac_academy_app
 
 > **Status:** Accepted migration direction; discovery and implementation not started.
 > ADR-0003 owns the platform/reuse decisions. This plan applies them to existing products
@@ -12,6 +12,12 @@
 > based on the live product SOT maps and released kernel `0.1.0a7`. Where an older discovery
 > statement here conflicts with those products' checked-in as-built documentation, the
 > product documentation is authoritative.
+>
+> **2026-08-07 scope addition:** `dotmac_academy_app` joins this plan as a **discovery
+> target only** — see "dotmac_academy_app — discovery target" below. It has no executable
+> sequencing document, no phase commitments beyond Phase 0/1, and no authorized schema
+> work. The shared decisions, migration principles, and prohibited approaches here apply
+> to it in full.
 
 ## Recon basis
 
@@ -25,6 +31,20 @@ Reviewed fetched `origin/main` snapshots on 2026-07-18:
   RADIUS/OLT/ACS/network operations, customer/admin/reseller web surfaces, and mobile/API
   consumers. Its subscribers are ISP customers, not platform tenants.
 
+Added on 2026-08-07, from the local `origin/main` snapshot:
+
+- `dotmac_academy_app` at `9b124a0` — admissions and learning application: roughly 146
+  Python modules under `app/` (28 domain model modules, ~60 services, 30 web route
+  modules, 4 JSON API modules) over 51 Alembic revisions. Covers public applications,
+  entrance assessment, audited admissions review, onboarding, courses, grading, labs,
+  completion, certificates, and instructor reporting. Its own ADR-0002 declares a
+  single-Academy deployment while retaining the inherited `tenant_id` columns and
+  PostgreSQL RLS as defence in depth; production host resolution is pinned by
+  `ACADEMY_TENANT_SLUG` and there is no public tenant provisioning or `/auth/register`.
+  It carries its own auth, RBAC, settings store, templating, audit ledger, email outbox,
+  and a `tailwind.config.js` + `src/input.css` CSS build. It already integrates outward
+  to ERP over an API boundary (`app/services/erp_sync.py`).
+
 These products contain battle-tested behavior that may inform or implement optional
 platform contracts. They are not code donors to copy wholesale into the kernel.
 
@@ -33,9 +53,10 @@ platform contracts. They are not code donors to copy wholesale into the kernel.
 Both products can adopt the platform, incrementally:
 
 ```text
-dotmac_erp = platform kernel + ERP product assembly + ERP domain modules
-dotmac_sub = platform kernel + dedicated-one-tenant assembly + ISP domain modules
+dotmac_erp         = platform kernel + ERP product assembly + ERP domain modules
+dotmac_sub         = platform kernel + dedicated-one-tenant assembly + ISP domain modules
 vendor control plane = platform kernel + commercial/fleet product assembly
+dotmac_academy_app = platform kernel + single-Academy assembly + learning domain modules
 ```
 
 No big-bang rewrite, schema replacement, repository merge, or simultaneous UI/API cutover
@@ -62,6 +83,76 @@ Run two coordinated delivery tracks:
 The tracks can proceed concurrently at those seams; product code must not import an
 unreleased starter branch or copy provisional kernel files. Each integration advances by a
 versioned dependency update PR with product tests and an independently reversible cutover.
+
+## dotmac_academy_app — discovery target
+
+Added 2026-08-07. Academy is a **discovery target**, not a delivery track: it is admitted
+to Phase 0 and Phase 1 only. It gets no executable sequencing document, no schema or
+identity work, and no `dotmac-lms` module, until its Phase 0 ledger exists and Michael
+promotes it explicitly.
+
+### It adopts the platform; it is not absorbed into it
+
+Academy is a product assembly in its own repository, on the same footing as ERP and Sub.
+It is **not** a module of `dotmac_starter_mt`, and the starter does not acquire a bundled
+LMS. Three independent reasons, any one of which is sufficient:
+
+1. **Composition direction.** ADR-0003 composes `product = kernel + product assembly +
+   domain modules`, each in its own repository. Vendoring Academy into the starter would
+   force `dotmac_erp`, `dotmac_sub`, and the vendor control plane — all of which pin the
+   starter — to carry a vertical learning domain in the repository that defines their
+   foundation.
+2. **Module class.** `dotmac-template-studio` is a horizontal white-label capability every
+   assembly plausibly wants. Admissions, lab grading, and certificate issuance are vertical
+   domain behaviour with exactly one consumer.
+3. **The extraction rule (ADR-0006 § 5).** A shared `dotmac-lms` module requires two
+   independent consumers of the same *contract*, a named owner, and a migration/cutover
+   path. Academy is one consumer, so the rule is unmet. Per that rule the duplication is
+   recorded — here — and left in place.
+
+Note also that "the Academy repo" is ambiguous locally. Only `dotmac_academy_app` is an
+application. `dotmac-academy` is a technical-manual/content pipeline and
+`academy-management-courses` is course content; both are data, not modules, and neither is
+in scope for this plan under any reading.
+
+### Sequencing
+
+- **A1 — adopt `dotmac-ui` (recommended first, independently valuable).** `dotmac-ui` is
+  dependency-free (no kernel, no ORM, no web framework, no Jinja) and integrates through
+  two anonymous spec slots in the product assembly, so this is reachable without any kernel
+  adoption. Academy's own `tailwind.config.js` + `src/input.css` build is precisely the
+  per-product presentation duplication ADR-0006 exists to end. Gate: token parity review
+  and the UI contract version pinned in Academy's assembly.
+- **A2 — Phase 0 ownership ledger.** Run the Phase 0 inventory below against Academy's
+  checked-in `docs/SOT_RELATIONSHIP_MAP.md`, naming the current authority for identity,
+  credentials, roles/permissions, settings, audit codes, the email outbox, transaction
+  ownership, and the ERP integration boundary. Produce the `reuse`/`adapt`/`product-owned`/
+  `migrate later`/`retire` collision ledger. **This is the promotion gate**: Academy does
+  not advance past A2 without it.
+- **A3 — Phase 1 characterization and assembly declaration.** Pin OpenAPI and golden
+  admissions/assessment/completion lifecycle scenarios, then declare an `academy`
+  `ProductAssemblySpec`. No production behaviour or schema change.
+- **A4 — pin `dotmac-kernel`, adopt low-coupling contracts (Phase 2).** Errors/request
+  IDs/logging, settings and flag declarations, manifest-declared permission/audit codes,
+  outbox/idempotency shapes, provider interfaces. Behind adapters, parity-tested.
+- **A5 — conditional, not scheduled: extract `dotmac-lms`.** Only when a genuine second
+  consumer of the same learning-delivery contract appears — for example Sub selling
+  technician certification, or ERP onboarding/HR training. At that point the module's owner
+  is Academy, both assemblies consume it as a versioned dependency, and the extraction
+  carries the named owner and cutover path ADR-0006 § 5 requires. No second consumer is
+  known as of 2026-08-07, so the trigger is unmet and A5 must not be started speculatively.
+
+### Tenancy note
+
+Academy retains `tenant_id` and RLS from its multi-tenant ancestry and constrains itself to
+one configured tenant at the product level. Under ADR-0003 that is a topology, not a second
+schema — which makes its tenancy invariants a closer fit to the kernel than ERP's
+application-enforced `organization_id`. This does **not** authorize Phase 4 database
+convergence work; it only means Phase 4 is expected to be cheaper here than for ERP.
+
+Academy's single-Academy posture is a *product* decision recorded in its own ADR-0002.
+Adopting the kernel must not be read as reopening it, and nothing in this plan authorizes
+public tenant provisioning or public registration in Academy.
 
 ## Deployment topology and onboarding other ISPs
 
@@ -122,6 +213,11 @@ joins or shared ORM models.
 `Organization`/`Subscriber`/`Party` convergence requires an explicit identity and data
 mapping ADR per product. Similar names are not sufficient evidence that records have the
 same lifecycle or authority.
+
+This table is deliberately scoped to `dotmac_erp` and `dotmac_sub`. The equivalent
+`dotmac_academy_app` row is **deferred to A2**: its applicant/learner/instructor identity
+and its relationship to platform `Party` are Phase 0 conclusions, and filling them in
+before the ownership ledger exists would violate "characterize before changing".
 
 ## Migration principles
 
@@ -275,8 +371,13 @@ explicitly deferred the update with owner, reason, risk, and expiry.
 
 ## Prohibited approaches
 
-- Rebuilding ERP or subscriber management from the starter in one branch.
-- Copying the starter's core directory into either product and calling it shared.
+- Rebuilding ERP, subscriber management, or Academy from the starter in one branch.
+- Copying the starter's core directory into any product and calling it shared.
+- Vendoring `dotmac_academy_app` into `dotmac_starter_mt` as a bundled LMS module, or
+  otherwise moving a vertical product domain into the repository every other assembly
+  pins.
+- Extracting a `dotmac-lms` module (or any shared learning contract) while Academy is its
+  only consumer.
 - Making all ISP subscribers separate platform tenants.
 - Combining ERP and ISP product databases or migrations merely because they share a
   kernel/customer account.
@@ -290,7 +391,13 @@ explicitly deferred the update with owner, reason, risk, and expiry.
 
 ## Completion criteria
 
-- Both products are declared assemblies consuming pinned platform releases.
+The criteria below are the bar for the two delivery-track products, `dotmac_erp` and
+`dotmac_sub`. `dotmac_academy_app` is a discovery target and is complete for now at A2:
+a Phase 0 ownership ledger exists, no `dotmac-lms` module has been extracted, and the
+starter carries no learning domain. It inherits the full list only if and when Michael
+promotes it to a delivery track.
+
+- Both delivery-track products are declared assemblies consuming pinned platform releases.
 - A kernel security/tenancy bug is fixed once and reaches both through automated tested
   update PRs and controlled deployment.
 - Product domain logic remains product-owned and import boundaries prevent leakage into
