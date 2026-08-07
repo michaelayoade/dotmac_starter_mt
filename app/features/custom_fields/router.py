@@ -33,7 +33,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from dotmac_kernel.deps import get_db, require_role, require_tenant
+from dotmac_kernel.deps import (
+    get_db,
+    require_capability,
+    require_role,
+    require_tenant,
+)
 from dotmac_kernel.exceptions import BadRequestError
 from dotmac_kernel.models import Party, Tenant
 from fastapi import APIRouter, Depends, Query, status
@@ -76,7 +81,13 @@ NOT_NULLABLE_FIELDS = frozenset(
 router = APIRouter(
     prefix="/custom-fields",
     tags=["custom-fields"],
-    dependencies=[Depends(require_tenant)],
+    # Router-level, not per-route: a capability gates the FEATURE, not an
+    # individual action. Which actor may do what inside it is the separate
+    # per-route `require_role`/`require_permission` decision below.
+    dependencies=[
+        Depends(require_tenant),
+        Depends(require_capability("custom_fields.use")),
+    ],
 )
 
 

@@ -1,0 +1,49 @@
+[tool.poetry]
+name = "dotmac-template-studio"
+version = "0.1.0a1"
+description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_template_studio", from = "src" }]
+include = [
+    # PEP 561 marker — the module's contracts are annotated, and a consuming
+    # assembly's type-checker cannot see them without this.
+    { path = "src/dotmac_template_studio/py.typed", format = ["sdist", "wheel"] },
+    # The admin screens. Package data, NOT assembly files: a module is
+    # pip-installed, so its Jinja lives outside any assembly's template root and
+    # is composed through `ProductAssemblySpec.packaged_template_dirs`
+    # (kernel 0.1.0a13).
+    { path = "src/dotmac_template_studio/templates/**/*", format = ["sdist", "wheel"] },
+    # The module's OWN Alembic lineage (prefix `ts`, branch label
+    # `template_studio`), composed by a consuming assembly through
+    # `version_locations`. No `__init__` in versions/ (Alembic convention), so
+    # it is declared explicitly as package data.
+    { path = "src/dotmac_template_studio/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# Floor 3.11 to match the kernel and the products that consume it.
+python = ">=3.11,<3.14"
+# The one runtime dependency, and the direction ADR-0006 § 2 fixes:
+# `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
+# kernel; it never depends on an assembly, and never on another module.
+#
+# Floors, not preferences — matched to the kernel's own declared floors so
+# installing this module cannot force a consumer's FastAPI/SQLAlchemy upgrade.
+# `>=0.1.0a13` because `packaged_template_dirs` (the slot this module's admin
+# screens are mounted through) and the `mod_tstudio` ledger allocation both land
+# in that release: an earlier kernel cannot register this module at all.
+dotmac-kernel = ">=0.1.0a13"
+fastapi = ">=0.111,<0.116"
+sqlalchemy = "^2.0"
+pydantic = ">=2.7.4,<3.0"
+
+# Note the absence of `dotmac-ui`. The admin screens author against
+# `var(--dmui-*)` tokens, but they consume them as CSS custom properties the
+# ASSEMBLY has already loaded (ADR-0006 D3's compiled-asset boundary) — a
+# stylesheet link, not a Python import. Declaring the dependency would buy
+# nothing and would couple a data-plane module to a presentation release.
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

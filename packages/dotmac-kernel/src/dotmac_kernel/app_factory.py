@@ -31,9 +31,16 @@ from fastapi.staticfiles import StaticFiles
 
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+from dotmac_kernel.capabilities import (
+    CAPABILITY_CODE_ATTR,
+    CapabilityCatalogue,
+    UndeclaredCapabilityError,
+    install_capabilities,
+)
 from dotmac_kernel.config import settings, validate_settings
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.features import mount_features
+from dotmac_kernel.flags import FlagCatalogue, install_flags
 from dotmac_kernel.logging import setup_logging
 from dotmac_kernel.middleware.csrf import CSRFMiddleware
 from dotmac_kernel.middleware.observability import ObservabilityMiddleware
@@ -48,10 +55,12 @@ from dotmac_kernel.permissions import (
     install_permissions,
 )
 from dotmac_kernel.platform_auth import platform_auth_router
+from dotmac_kernel.platform_web import router as platform_web_router
 from dotmac_kernel.templating import (
+    compose_templates,
+    install_stylesheets,
     install_surface_globals,
     static_dir,
-    use_assembly_templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,15 +92,18 @@ async def _run_enabled_seeds(
                 logger.warning("Feature %s seed skipped: %s", manifest.name, exc)
 
 
-def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
-    """(route label, permission code) for every code a MOUNTED route references.
+def _referenced_codes(app: FastAPI, attr: str) -> list[tuple[str, str]]:
+    """(route label, declared code) for every code a MOUNTED route references
+    through a guard that stamps `attr` on its dependency callable.
 
-    Scoped to this app's routes, not a process-wide tally of every
-    `require_permission` call ever imported: an assembly that imports a module's
-    routers without mounting them must not be failed for a code it never
-    exposes. `require_permission` stamps the code on the dependency callable it
-    returns (`PERMISSION_CODE_ATTR`); this walks each route's dependency tree
-    and reads it back.
+    ONE walker for both declaration kinds — `PERMISSION_CODE_ATTR` (who may act)
+    and `CAPABILITY_CODE_ATTR` (whether the tenant has the feature). The two are
+    different decisions but the same discovery problem, and a second copy of
+    this traversal would be one more place for the dependency-tree walk to drift.
+
+    Scoped to this app's routes, not a process-wide tally of every guard ever
+    imported: an assembly that imports a module's routers without mounting them
+    must not be failed for a code it never exposes.
     """
     found: list[tuple[str, str]] = []
     for route in app.routes:
@@ -102,7 +114,7 @@ def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
         stack = list(dependant.dependencies)
         while stack:
             dep = stack.pop()
-            code = getattr(dep.call, PERMISSION_CODE_ATTR, None)
+            code = getattr(dep.call, attr, None)
             if isinstance(code, str):
                 codes.add(code)
             stack.extend(dep.dependencies)
@@ -110,6 +122,16 @@ def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
         label = f"{'/'.join(methods)} {getattr(route, 'path', '?')}"
         found.extend((label, code) for code in sorted(codes))
     return found
+
+
+def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
+    """Permission codes referenced by this app's mounted routes."""
+    return _referenced_codes(app, PERMISSION_CODE_ATTR)
+
+
+def _referenced_capabilities(app: FastAPI) -> list[tuple[str, str]]:
+    """Capability codes referenced by this app's mounted routes."""
+    return _referenced_codes(app, CAPABILITY_CODE_ATTR)
 
 
 def _validate_referenced_permissions(
@@ -130,6 +152,32 @@ def _validate_referenced_permissions(
             f"route(s) require a permission code no installed module declares: "
             f"{listed} — declare it on the owning module's manifest "
             "(`permissions=(PermissionSpec(...),)`)"
+        )
+
+
+def _validate_referenced_capabilities(
+    app: FastAPI, catalogue: CapabilityCatalogue
+) -> None:
+    """Fail the BOOT when a mounted route requires a capability no installed
+    module declares (module control-plane directive step 4).
+
+    Worse than the permission case if it were left to request time: an
+    undeclared capability code makes `require_capability` raise for EVERY
+    tenant, forever, on a route that looks correctly wired. That reads as "no
+    one is entitled" — an operations problem someone would go looking for in the
+    grant table — when it is really a typo in a declaration.
+    """
+    undeclared = [
+        (label, code)
+        for label, code in _referenced_capabilities(app)
+        if not catalogue.is_declared(code)
+    ]
+    if undeclared:
+        listed = ", ".join(f"{label} -> {code!r}" for label, code in undeclared)
+        raise UndeclaredCapabilityError(
+            f"route(s) require a capability code no installed module declares: "
+            f"{listed} — declare it on the owning module's manifest "
+            "(`capabilities=(...,)`)"
         )
 
 
@@ -176,6 +224,15 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     permission_catalogue = PermissionCatalogue.from_manifests(manifests)
     install_permissions(permission_catalogue)
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    # Capabilities join them (step 4). Same installed-not-enabled rule, and the
+    # same reason it matters more here: a tenant's entitlement GRANT references a
+    # capability code and outlives any deployment's enabled set, so a disabled
+    # module must not make an existing grant unexplainable.
+    capability_catalogue = CapabilityCatalogue.from_manifests(manifests)
+    install_capabilities(capability_catalogue)
+    # Feature flags (step 5). Same installed-not-enabled rule: an override row
+    # references a flag code and outlives any deployment's enabled set.
+    install_flags(FlagCatalogue.from_manifests(manifests))
 
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
     # before any template renders. Fed the FULL installed set in startup order
@@ -183,10 +240,20 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # the mount order instead of being derived separately.
     install_surface_globals(manifests, disabled, web_enabled)
 
-    # Assembly-over-kernel template precedence (ChoiceLoader), if the assembly
-    # ships its own templates.
-    if spec.assembly_template_dir is not None:
-        use_assembly_templates(spec.assembly_template_dir)
+    # Extra stylesheet links for every page's <head> (installed presentation
+    # packages' compiled CSS — see `install_stylesheets`). Empty in API-only
+    # mode: there is no <head> to add them to.
+    install_stylesheets(spec.stylesheets if web_enabled else ())
+
+    # Template precedence, most specific first: the assembly's own directory,
+    # then installed packages' (an installable module's admin screens, a
+    # packaged theme), then the kernel's. Called UNCONDITIONALLY — passing an
+    # empty composition resets to kernel-only, so a second `create_app` in one
+    # process cannot inherit a previous spec's override.
+    compose_templates(
+        assembly_dir=spec.assembly_template_dir,
+        packaged_dirs=spec.packaged_template_dirs,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -236,15 +303,24 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     register_error_handlers(app)
 
-    # Static mount — the kernel's packaged static, with the assembly's own dir
-    # layered on top when provided (Task 3A static override). Absent in API-only
-    # mode (web_enabled=False), exactly like the reference app.
+    # Static mount — first match wins, most specific authority first: the
+    # assembly's own dir (Task 3A static override), then any installed
+    # presentation package's packaged static (U1), then the kernel's. A product
+    # can therefore shadow one file from a shipped design system without
+    # vendoring the rest of it. Absent in API-only mode (web_enabled=False),
+    # exactly like the reference app.
     if web_enabled:
         static: StaticFiles
-        if spec.assembly_static_dir is not None:
-            static = LayeredStaticFiles(
-                [str(spec.assembly_static_dir), str(static_dir())]
+        layers = [
+            str(directory)
+            for directory in (
+                spec.assembly_static_dir,
+                *spec.packaged_static_dirs,
             )
+            if directory is not None
+        ]
+        if layers:
+            static = LayeredStaticFiles([*layers, str(static_dir())])
         else:
             static = StaticFiles(directory=str(static_dir()))
         app.mount("/static", static, name="static")
@@ -257,6 +333,11 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # Platform auth mounts DIRECTLY (not a feature manifest) — the platform
     # control plane must exist even with every feature disabled.
     app.include_router(platform_auth_router)
+    # The platform ADMINISTRATION surface (step 6). Gated on `web_enabled` like
+    # every other HTML surface — an API-only deployment serves no portal of
+    # either plane — while the platform JSON API above stays mounted regardless.
+    if web_enabled:
+        app.include_router(platform_web_router)
 
     mount_features(
         app,
@@ -268,6 +349,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # AFTER mounting: every route that now exists must reference only declared
     # permission codes. Fails the boot, before the app is ever returned.
     _validate_referenced_permissions(app, permission_catalogue)
+    _validate_referenced_capabilities(app, capability_catalogue)
     return app
 
 

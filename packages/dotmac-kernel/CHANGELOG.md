@@ -8,7 +8,215 @@ here.
 
 ## Unreleased
 
+## 0.1.0a13 — 2026-08-07
+
+Seventeenth alpha. **Module control-plane directive step 6: the platform
+administration surface** — the operable half of steps 4 and 5. No migration.
+
+### Added
+- **`/platform/*` HTML surface** (`dotmac_kernel.platform_web`): module
+  inventory, deployment-scope feature-flag overrides, and per-tenant
+  entitlements. It lives in the kernel because everything it administers is
+  kernel-owned — the module registry, the flag catalogue and its overrides, the
+  capability catalogue and the grant store. The tenant portal is the opposite
+  case (its screens are the assembly's features), which is why that one composes
+  from feature `web_routers` and this one does not.
+- **`require_platform_web_auth`** — the platform plane's cookie guard, reading
+  its own cookie and handing the token to `authenticate_platform_request`, the
+  SAME seam the bearer guard uses. Any tightening of platform token validation
+  lands once and both surfaces get it.
+- `WebAuthRedirect` gained `login_path`, so one redirect concept serves two
+  front doors rather than a second exception and handler drifting apart.
+
+### Notes
+- The two planes never share a guard, a cookie, or a layout, and the surface
+  404s off the platform host — it does not appear to exist on a tenant's domain.
+- The entitlement screens are PER-TENANT rather than one fleet-wide matrix, and
+  that is forced by the data model rather than chosen for looks:
+  `tenant_entitlement_grants` carries only a `tenant_id = app_current_tenant_id()`
+  policy, and `platform_api` never sets a tenant context — so it reads nothing
+  without one. The screens use the `provision_tenant` idiom (set the context for
+  the transaction), which makes per-tenant the only coherent shape.
+- Module enable/disable is deliberately absent. A module's tables and migrations
+  are part of the image; ADR-0003 restricts the admin UI to enabling
+  already-installed, migrated, dependency-complete code, and a toggle here would
+  imply data can be switched off.
+- Routes read `await request.form()` rather than declaring `Form(...)` params:
+  FastAPI's `Form()` requires `python-multipart` at route-definition time, and
+  the kernel deliberately does not depend on it. Declaring one would break
+  `import dotmac_kernel` for every clean consumer.
+
+Sixteenth alpha. **Module control-plane directive step 5: typed feature flags**,
+plus the cache-key convention they are the first consumer of. Migration `0013`
+(kernel head advances from `0012`).
+
+### Added
+- **`dotmac_kernel.cache`** — the ONE place a cache key is built. Scope is a
+  TYPE (`TenantScope` / `PlatformScope`), not a `tenant_id: UUID | None`
+  parameter: with a nullable parameter, "I forgot the tenant" and "this is
+  deliberately deployment-wide" produce the SAME key, and the platform entry
+  silently becomes the bucket every unscoped read lands in. Omitting `scope=` is
+  a `TypeError`; `t=<uuid>` and the literal `platform` are structurally
+  different, so no tenant identifier can occupy the platform entry. `version=`
+  retires a whole generation of entries without a delete sweep.
+
+  Landed before the first tenant-keyed cache deliberately — the entitlement
+  guard added in `0.1.0a13` was the first request-time consumer of tenant-scoped
+  state, which closed the window in which this could be added for free.
+- **`dotmac_kernel.flags`** — `FeatureFlagSpec` (code, value_type, default,
+  owner, description, allowed_scopes, expires_on, operational) and `evaluate`,
+  which returns a `FlagEvaluation`, never a bare bool: "it was on" is useless in
+  an incident, "it was on because tenant override <rule> set it against a
+  default of off" is not.
+
+  Precedence, highest first: **kill switch** (outranks everything, including a
+  rollout — the person turning a feature off at 3am must not have to unwind
+  every override first, and it forces OFF rather than back-to-default, or a
+  default of True would make it a no-op), tenant override, tenant rollout,
+  platform override, platform rollout, declared default.
+
+  Rollouts hash `(flag code, subject)`: deterministic, so a tenant does not flip
+  between requests, and salted by code so two flags at 50% do not select the
+  same half of the fleet.
+- **`feature_flag_overrides`** (migration `0013`) — deployment- and tenant-scope
+  overrides. Nullable `tenant_id` following `domain_settings`, the documented
+  exception to hard rule 11, with the same asymmetric RLS: read own-or-platform,
+  write own-only, plus a `platform_api`-only policy for the NULL-tenant rows.
+  Two PARTIAL unique indexes, because Postgres treats NULL as distinct from
+  every other NULL.
+- **`resolve_flag(db, code, tenant_id=...)`** — the one entry point a service
+  calls. It loads the overrides in scope, derives the invalidation version from
+  them, and evaluates through the scoped cache, so a caller cannot evaluate
+  against another tenant's overrides or skip the version.
+- **`ModuleManifest.feature_flags` / `FeatureManifest.feature_flags`** — flags
+  are declared by their owning module, like permissions and capabilities.
+
+### Governance
+Flag codes and permission/capability codes are DISJOINT namespaces — the
+executable form of "flags cannot grant permissions". Every declared flag has a
+real consumer, every flag has an owner, and an expired flag fails the BUILD
+rather than production: an expiry must never take a feature down for users, it
+must force a decision in CI.
+
+Fifteenth alpha. Closes **module control-plane directive step 4**: tenant
+entitlements become an ENFORCED request-time decision instead of a store with no
+consumer. No migration in the kernel; the reference assembly ships `a004` to
+backfill grants for the capabilities it begins gating.
+
+### Added
+- **`dotmac_kernel.deps.require_capability(code)`** — the tenant-entitlement
+  guard, and the counterpart to `require_permission`. A permission asks "may
+  this ACTOR do it?"; a capability asks "does this TENANT have the feature at
+  all?". Both compose on a route and neither substitutes for the other.
+
+  The decision is local and explainable — a pure read of the grant store. A
+  request-time check never calls a payment provider and never validates a
+  licence over the network (ADR-0003), which is why the signed-licence receiver
+  PROJECTS into grants rather than being consulted per request. Denials carry
+  the stable reason code (`not_granted` / `revoked`) so an operator can tell
+  "never had it" from "had it and lost it" without reading the database. The
+  admitting decision is RETURNED, so a route needing the grant's `limits` reads
+  them from the same decision that let it in.
+- **`install_capabilities` / `active_capabilities`** — the process-active
+  capability catalogue, the same shape as the permission and audit-action
+  seams, installed by `create_app` from the INSTALLED module set. Empty means
+  deny: an uninstalled catalogue must not silently entitle every tenant.
+- **Boot-time validation of referenced capability codes.** A mounted route
+  referencing an undeclared code fails the BOOT. Left to request time it would
+  deny every tenant forever on a route that looks correctly wired — which reads
+  as an operations problem in the grant table rather than a typo in a
+  declaration.
+- **`CapabilitySpec`** — a capability is now a typed declaration
+  (`code`, `description`, `default_granted`) rather than a bare string.
+  `default_granted` answers the question enforcement forces: what does a newly
+  provisioned tenant get? It is per-capability and per-product — a self-hosted
+  deployment bundles a feature and expects it to work on day one, a SaaS
+  deployment sells the same one default-off — and it is a DECLARATION the
+  provisioning service applies, never a plan-name or payment branch in a route.
+
+### Changed
+- **`ModuleManifest.capabilities` / `FeatureManifest.capabilities` accept
+  `str | CapabilitySpec`.** A bare string still works and means
+  `default_granted=True` — exactly what those declarations meant before
+  enforcement existed — so no existing manifest changes behaviour. Consumers
+  that iterate the field now receive whatever was declared; use
+  `CapabilitySpec.coerce` (or the catalogue) to normalise.
+- `create_app`'s route walker is one function over both declaration kinds
+  rather than a permission-specific copy.
+
+Fourteenth alpha. Opens the two seams the FIRST STATEFUL MODULE needs, and makes
+its namespace allocation (ADR-0006 D1 / M1). Additive only; no migration, kernel
+head stays `0012`.
+
+### Added
+- **`ProductAssemblySpec.packaged_template_dirs`** + **`dotmac_kernel.templating
+  .compose_templates`** — template directories belonging to installed packages
+  (an installable module's admin screens, a packaged theme), layered UNDER the
+  assembly's own directory and OVER the kernel's, in declaration order. This is
+  what lets a stateful module ship a `/admin/...` surface at all: a module is a
+  pip-installed package, so its Jinja files are package data outside any
+  assembly's template root, and the single ChoiceLoader could previously hold
+  exactly one assembly directory.
+
+  `compose_templates` is now the ONE loader authority and `create_app` calls it
+  unconditionally; `use_assembly_templates` is retained as the published
+  single-layer spelling and delegates to it. Two independent setters would each
+  have had to guess what the other installed, and the last caller would silently
+  drop the other's layer. A consequence worth knowing: an empty composition
+  RESETS to kernel-only, so a second `create_app` in one process no longer
+  inherits a previous spec's override.
+- **`mod_tstudio` ledger allocation** — `TEMPLATE_STUDIO_MIGRATION_OWNER` in
+  `dotmac_kernel.namespaces`, the first installable module in
+  `MIGRATION_OWNER_LEDGER` (owner `template_studio`, prefix `ts`, schema
+  `mod_tstudio`). Per D1's own rule, the row lands in the same change as the
+  module's manifest.
+
+### Changed
+- **`dotmac_kernel.testing.create_test_engine` attaches module schemas.** A
+  stateful module's models are bound to `mod_<short_code>`, so the ORM emits
+  fully qualified `mod_x.thing` — which plain SQLite rejects. Each distinct
+  schema in `Base.metadata` is now ATTACHed as its own in-memory database before
+  `create_all`. Deliberately ATTACH and not a `schema_translate_map`: translating
+  the schema away would make the unit lane exercise unqualified SQL no deployment
+  runs, hiding precisely the qualification defects D1's gate exists to catch.
+
+Thirteenth alpha. Adds the **presentation-package composition slots** an assembly
+needs to adopt a shared design system (ADR-0006 U1). Additive only; no migration,
+kernel head stays `0012`.
+
+### Added
+- **`ProductAssemblySpec.packaged_static_dirs`** — static directories belonging
+  to installed presentation packages (a `dotmac-ui` release, a `dotmac-theme-*`),
+  layered UNDER the assembly's own `assembly_static_dir` and OVER the kernel's,
+  in declaration order. Kept separate from `assembly_static_dir` because they are
+  different authorities: that one is the product's own source, these are
+  versioned package data the product composes and must not edit. First match
+  still wins, so a product can shadow one file from a shipped design system
+  without vendoring the rest of it.
+- **`ProductAssemblySpec.stylesheets`** + **`dotmac_kernel.templating
+  .install_stylesheets`** — extra stylesheet URLs rendered into every page's
+  `<head>` after the kernel's own, exposed to templates as the process-static
+  `extra_stylesheets` Jinja global (default `()`, so a render that never called
+  the installer degrades rather than raising). `create_app` installs them, and
+  installs `()` when `web_enabled` is False: an API-only deployment has no
+  `<head>` to advertise a stylesheet for.
+
+**The kernel deliberately does not know what those URLs and directories are
+for.** ADR-0006 § 2 fixes the dependency direction as `assembly → module →
+dotmac-ui → dotmac-kernel`; a kernel that reached forward into the presentation
+system would make the UI package un-releasable independently. So these are
+anonymous slots an assembly fills — the kernel never imports, names, or resolves
+a presentation package, and a new import-linter contract ("Kernel must not import
+the UI package") holds that. URLs rather than paths for `stylesheets` because the
+assembly, not the kernel, owns the mapping from a package's static directory to a
+URL.
+
 ## 0.1.0a12 — 2026-08-06
+
+
+
+
+
 
 Twelfth alpha. Adds **per-module Postgres schema namespaces and registered
 Alembic migration prefixes** — D1 of the white-label foundation programme
@@ -107,6 +315,11 @@ existing revision id is unchanged.
   unchanged.
 
 ## 0.1.0a11 — 2026-08-06
+
+
+
+
+
 
 > **Amended 2026-08-03.** `active_audit_actions()` no longer defaults to an
 > empty registry. NOT INSTALLED and INSTALLED-AND-EMPTY are now different
@@ -207,6 +420,11 @@ stays `0012`.
 
 ## 0.1.0a10 — 2026-08-06
 
+
+
+
+
+
 Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
 control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
 authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
@@ -281,6 +499,11 @@ head stays `0012`.
   floor.
 
 ## 0.1.0a9 — 2026-08-03
+
+
+
+
+
 
 Ninth alpha. Adds the **applied-state envelope** — the structure a deployment
 signs to prove WHO is reporting what it has applied, unblocking the WS8
@@ -372,6 +595,11 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
 
 ## 0.1.0a8 — 2026-08-02
 
+
+
+
+
+
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
 value object a deployment uses to report what it is actually running. No
 migration; the kernel head stays `0012`.
@@ -456,6 +684,11 @@ migration; the kernel head stays `0012`.
 
 ## 0.1.0a7 — 2026-08-01
 
+
+
+
+
+
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
 signed/versioned licence delivery (design brief:
 `docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
@@ -498,6 +731,11 @@ receiver owns its durable applied/revocation state).
 
 ## 0.1.0a6 — 2026-07-31
 
+
+
+
+
+
 Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
 of the tenant outbox/relay, so a platform-scoped owner (e.g. a vendor
 ContractService) can emit a durable control-plane event ATOMICALLY with its state
@@ -533,6 +771,11 @@ combined with the tenant table. Advances the kernel migration head to `0012`.
   with one active claim per lease; consumers dedupe via `process_once_platform`.
 
 ## 0.1.0a5 — 2026-07-31
+
+
+
+
+
 
 Fifth alpha. Completes **WS3 slice 2 — the outbox relay**: the leasing
 schema + `outbox_dispatcher` security boundary (SECURITY DEFINER claim/settle,
@@ -588,6 +831,11 @@ explainable evaluator). Advances the kernel migration head to `0010`.
 
 ## 0.1.0a3 — 2026-07-31
 
+
+
+
+
+
 Third alpha. Adds the WS1 capability catalogue + deployment-profile registry
 (pure in-memory contracts). Additive over `0.1.0a2` — no breaking changes, no new
 migrations (the kernel head stays `0009`).
@@ -613,6 +861,11 @@ migrations (the kernel head stays `0009`).
     `ModuleManifest` expansion.
 
 ## 0.1.0a2 — 2026-07-30
+
+
+
+
+
 
 Second alpha. Adds exact money/FX value objects and platform-scoped audit +
 idempotency primitives, corrects the vendored font weights, and advances the
@@ -663,6 +916,11 @@ to the `0.1.0a1` public surface.
   `assembly@base` (branch-aware) rather than `kernel@head`.
 
 ## 0.1.0a1 — 2026-07-30
+
+
+
+
+
 
 First published release — the **alpha** of the DotMac platform kernel extracted
 from the reference assembly (`dotmac_starter_mt`). `pip install --pre

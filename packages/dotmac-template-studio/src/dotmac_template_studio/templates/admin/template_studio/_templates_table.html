@@ -1,0 +1,56 @@
+{#
+  Templates table fragment. Context: `templates` (list[Template]).
+  Token-styled for the reason index.html's header comment explains.
+#}
+<div style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+            background:var(--dmui-surface-elevated); overflow:hidden;">
+  {% if templates %}
+  <table style="width:100%; border-collapse:collapse; font-size:var(--dmui-font-size-sm);">
+    <thead>
+      <tr style="background:var(--dmui-surface-secondary); text-align:left;">
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Name</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Kind</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Slug</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Published</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for template in templates %}
+      <tr style="border-top:1px solid var(--dmui-border-subtle);">
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
+          <a href="/admin/templates/{{ template.id }}"
+             style="color:var(--dmui-action-primary-default); text-decoration:none; font-weight:var(--dmui-font-weight-medium);">
+            {{ template.name }}
+          </a>
+          {% if not template.is_active %}
+          <span style="margin-left:var(--dmui-space-xs); font-size:var(--dmui-font-size-xs);
+                       color:var(--dmui-status-neutral-foreground);">inactive</span>
+          {% endif %}
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary);">{{ template.kind }}</td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-muted);">{{ template.slug }}</td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
+          {% if template.published_version %}
+          <span style="display:inline-block; padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                       border-radius:var(--dmui-radius-full);
+                       background:var(--dmui-status-positive-surface);
+                       color:var(--dmui-status-positive-foreground);
+                       font-size:var(--dmui-font-size-xs);">v{{ template.published_version }}</span>
+          {% else %}
+          <span style="color:var(--dmui-text-muted); font-size:var(--dmui-font-size-xs);">draft only</span>
+          {% endif %}
+        </td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-muted);">
+          {{ template.updated_at | local_datetime }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="padding:var(--dmui-space-lg); color:var(--dmui-text-muted); font-size:var(--dmui-font-size-sm);">
+    No templates yet. Create one to get started.
+  </p>
+  {% endif %}
+</div>

@@ -16,10 +16,31 @@ DISALLOWED = [
 ]
 
 
+# Installed MODULE packages are held to the same rule as the assembly's own
+# features: an adapter never queries. A module that escaped this check would be
+# held to a WEAKER standard than the assembly installing it, which is backwards
+# — it is the less-reviewed code.
+MODULE_PACKAGE_ROOTS: tuple[Path, ...] = (
+    PROJECT_ROOT / "packages/dotmac-template-studio/src/dotmac_template_studio",
+)
+
+
 def _router_files() -> list[Path]:
-    features = PROJECT_ROOT / "app" / "features"
+    roots = (PROJECT_ROOT / "app" / "features", *MODULE_PACKAGE_ROOTS)
     return sorted(
-        p for p in features.rglob("*.py") if p.name in {"router.py", "web.py"}
+        p
+        for root in roots
+        for p in root.rglob("*.py")
+        if p.name in {"router.py", "web.py"}
+    )
+
+
+def test_router_scan_is_not_vacuous() -> None:
+    """Assert on the set walked, not just on the violations found."""
+    found = {p.parent.name for p in _router_files()}
+    assert "dotmac_template_studio" in found, (
+        "the installed module's adapters are not being scanned — "
+        f"walked: {sorted(found)}"
     )
 
 

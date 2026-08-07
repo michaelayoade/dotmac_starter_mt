@@ -63,6 +63,33 @@ class ProductAssemblySpec:
     # The assembly's own static directory — layered OVER the kernel static when
     # set. None = the kernel's packaged static only.
     assembly_static_dir: Path | None = None
+    # Static directories belonging to INSTALLED PRESENTATION PACKAGES (a
+    # `dotmac-ui` release, a `dotmac-theme-*`), layered UNDER the assembly's own
+    # dir and OVER the kernel's, in declaration order. Kept separate from
+    # `assembly_static_dir` because they are different authorities: the assembly
+    # dir is this product's own source, these are versioned package data the
+    # product composes and must not edit. The kernel never learns which package
+    # supplied one — it is handed a path (ADR-0006 § 2: the kernel never imports
+    # `dotmac-ui`).
+    packaged_static_dirs: Sequence[Path] = ()
+    # Template directories belonging to INSTALLED PACKAGES — an installable
+    # MODULE's own admin screens, a packaged theme's overrides — layered UNDER
+    # the assembly's own dir and OVER the kernel's, in declaration order. The
+    # template counterpart of `packaged_static_dirs`, and the reason a stateful
+    # module can ship a `/admin/...` surface at all: a module is a pip-installed
+    # package, so its Jinja files are package data outside any assembly's
+    # template root, and until this slot existed the one ChoiceLoader could hold
+    # exactly one assembly directory. Same anonymity rule as the static slot —
+    # the kernel is handed paths and never learns which package supplied one.
+    packaged_template_dirs: Sequence[Path] = ()
+    # Extra stylesheet URLs rendered into every page's <head>, after the
+    # kernel's own, in declaration order. The companion to
+    # `packaged_static_dirs`: that field makes a presentation package's assets
+    # reachable, this one makes them LOADED. URLs, not paths — the assembly owns
+    # the mapping from a package's static dir to a URL, and a consumer that
+    # serves assets from a CDN-less external mount can point here instead.
+    # Ignored entirely when `web_enabled` is False (no HTML surface, no <head>).
+    stylesheets: Sequence[str] = ()
     # The assembly's own Alembic version directory (composed with the kernel
     # base migrations via `version_locations`). Consumed by the assembly's
     # Alembic config, not by `create_app`; carried here for a complete spec.
@@ -75,6 +102,13 @@ class ProductAssemblySpec:
         )
         object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
         object.__setattr__(self, "disabled_modules", frozenset(self.disabled_modules))
+        object.__setattr__(
+            self, "packaged_static_dirs", tuple(self.packaged_static_dirs)
+        )
+        object.__setattr__(
+            self, "packaged_template_dirs", tuple(self.packaged_template_dirs)
+        )
+        object.__setattr__(self, "stylesheets", tuple(self.stylesheets))
 
 
 __all__ = ["ProductAssemblySpec"]

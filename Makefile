@@ -27,14 +27,16 @@ lint-imports: ## Import boundary contracts
 format: ## Ruff format
 	poetry run ruff format .
 KERNEL_SRC ?= packages/dotmac-kernel/src/dotmac_kernel
-type-check: ## mypy (assembly + kernel package)
-	poetry run mypy app $(KERNEL_SRC)
-security: ## Bandit security scan (assembly + kernel package)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC)
+UI_SRC ?= packages/dotmac-ui/src/dotmac_ui
+MODULE_SRC ?= packages/dotmac-template-studio/src/dotmac_template_studio
+type-check: ## mypy (assembly + kernel + UI + module packages)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC)
+security: ## Bandit security scan (assembly + kernel + UI + module packages)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
-check: lint lint-imports type-check security migration-gate ## Lint + types + security + migration composition
+check: lint lint-imports type-check security migration-gate ui-check ## Lint + types + security + migration composition + design-system asset freshness
 	poetry run ruff format --check .
 
 ##@ Testing
@@ -74,6 +76,18 @@ css-watch: ## Rebuild Tailwind CSS on file change (dev loop)
 	npm install
 	npm run css:watch
 
+##@ Design system (dotmac-ui)
+# NOTE: no npm. The design system's published CSS is generated from its own
+# token source by a pure-Python, deterministic build (ADR-0006 D3 — the
+# package's toolchain is its business, not a consumer's). Its output is
+# COMMITTED, so a checkout has working assets with no build step at all; the
+# `ui-check` gate (wired into `make check`) fails if the committed copy drifts
+# from its source.
+ui-build: ## Regenerate the dotmac-ui compiled assets from the token source (commit the result)
+	poetry run python -m dotmac_ui.build
+ui-check: ## Fail if the committed dotmac-ui assets are stale
+	poetry run python -m dotmac_ui.build --check
+
 ##@ Docker
 docker-build: ## Build local dev image (IMAGE_NAME, IMAGE_TAG, APP_PORT overridable)
 	docker build --build-arg APP_PORT=$(APP_PORT) -t $(IMAGE_NAME):$(IMAGE_TAG) .
@@ -89,4 +103,5 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 
 .PHONY: help lint lint-imports format type-check security migration-gate check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	css-build css-watch docker-build docker-dev bump-version deploy
+	css-build css-watch ui-build ui-check docker-build docker-dev bump-version \
+	deploy

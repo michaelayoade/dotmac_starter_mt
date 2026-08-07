@@ -171,9 +171,18 @@ def test_undeclared_code_rejects_with_no_partial_grants(
     assert result.applied is False
     assert result.acknowledgement.reason == "UndeclaredCapabilityError"
     # Fail-closed BEFORE the first write: not even the declared code landed.
+    # Scoped to the codes this envelope carried — the shared `tenant_row`
+    # fixture is pre-entitled to the assembly's own declared capabilities, so a
+    # global count would never be 0 regardless of what the receiver did.
     assert (
         db.execute(
-            sa.select(sa.func.count()).select_from(TenantEntitlementGrant)
+            sa.select(sa.func.count())
+            .select_from(TenantEntitlementGrant)
+            .where(
+                TenantEntitlementGrant.capability_code.in_(
+                    ("billing.use", "not.a.module")
+                )
+            )
         ).scalar_one()
         == 0
     )

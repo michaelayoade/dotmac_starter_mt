@@ -1,0 +1,49 @@
+{#
+  Template Studio index — the tenant's templates (ADR-0006 M1).
+
+  Context contract: `templates` (list[Template]) — see
+  dotmac_template_studio.web.templates_index.
+
+  ## Why this file styles itself with `var(--dmui-*)` and not Tailwind classes
+
+  This template ships inside a pip-INSTALLED package. The assembly's Tailwind
+  build scans `@source "../../templates"` — the kernel's packaged templates —
+  and cannot see this file, so any utility class used only here would be PURGED
+  from the compiled CSS. The screen would then render unstyled in production
+  while looking correct in any dev build that happened to scan more.
+
+  So a module's screens depend on the one thing contractually guaranteed to be
+  present: the `dotmac-ui` design tokens, loaded by the assembly as a compiled,
+  self-hosted stylesheet (ADR-0006 D3). Tokens are a published contract; the
+  host's utility classes are its private build output. This is the
+  compiled-asset boundary doing exactly the job it exists for.
+
+  Fragment vs full page: an `HX-Request` GET gets `_templates_table.html`
+  instead of this shell — the same convention as the assembly's own screens.
+#}
+{% extends "layouts/admin.html" %}
+
+{% block admin_content %}
+<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--dmui-space-lg);">
+  <div>
+    <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold); color:var(--dmui-text-primary);">Templates</h1>
+    <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+      Tenant-authored notification and document templates.
+    </p>
+  </div>
+  <a href="/admin/templates/create"
+     style="display:inline-flex; align-items:center; gap:var(--dmui-space-xs);
+            border-radius:var(--dmui-radius-lg);
+            background:var(--dmui-action-primary-default);
+            color:var(--dmui-action-primary-on);
+            padding:var(--dmui-space-xs) var(--dmui-space-md);
+            font-size:var(--dmui-font-size-sm); font-weight:var(--dmui-font-weight-medium);
+            text-decoration:none;">
+    New Template
+  </a>
+</div>
+
+<div id="templates-table">
+  {% include "admin/template_studio/_templates_table.html" %}
+</div>
+{% endblock %}

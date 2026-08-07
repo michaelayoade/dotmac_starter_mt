@@ -20,7 +20,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from dotmac_kernel.features import load_manifests
 from dotmac_kernel.migrations.gate import (
     run_gate,
     scan_revision_file,
@@ -36,7 +35,7 @@ from dotmac_kernel.namespaces import (
     module_schema,
 )
 
-from app.features import FEATURE_MODULES
+from app.assembly import assembly
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -114,25 +113,31 @@ def _messages(report) -> str:
 
 
 def test_the_real_repo_composes() -> None:
-    """The repo's OWN composition — kernel (`0001`…`0012`) + assembly
-    (`a001`…`a003`) — must pass unchanged. Both lineages are grandfathered
-    (legacy revision-id format, tables in `public`); D1 must not have broken
-    them."""
+    """The repo's OWN composition — kernel (`0001`…`0012`), assembly
+    (`a001`…`a003`), and the first installed MODULE lineage (`ts_0001`) — must
+    pass. The two host lineages are grandfathered (legacy revision-id format,
+    tables in `public`); `template_studio` gets the strict rules.
+
+    Gated from `assembly.modules`, the composition the app actually boots, NOT
+    from `load_manifests(FEATURE_MODULES)`: that narrower set omits installed
+    modules, so a module's branch label would be unattributable and the gate
+    would be checking something other than what ships."""
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
-    report = run_gate(load_manifests(FEATURE_MODULES), locations)
+    report = run_gate(assembly.modules, locations)
     assert report.ok, report.render()
-    assert len(report.revisions) == 15
+    assert len(report.revisions) == 18
     owners = {a["owner"] for a in report.attribution.values()}
-    assert owners == {"kernel", "assembly"}
+    assert owners == {"kernel", "assembly", "template_studio"}
 
 
 def test_every_real_revision_is_attributed_to_exactly_one_owner() -> None:
     """D1 item 5: `alembic_version` stays the truth, and every row in it is
     explainable through manifest-to-branch attribution."""
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
-    report = run_gate(load_manifests(FEATURE_MODULES), locations)
+    report = run_gate(assembly.modules, locations)
     assert report.attribution["0001_initial_tenant_schema"]["owner"] == "kernel"
     assert report.attribution["a001_adopt_cfd"]["owner"] == "assembly"
+    assert report.attribution["ts_0001_templates"]["owner"] == "template_studio"
     assert all(a["owner"] is not None for a in report.attribution.values())
 
 
@@ -601,7 +606,7 @@ def test_version_locations_are_read_from_the_alembic_config() -> None:
     """The gate reads the config the deployment actually uses — a location
     added to `alembic.ini` is automatically one the gate must attribute."""
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
-    assert len(locations) == 2
+    assert len(locations) == 3
     assert all(location.is_dir() for location in locations)
 
 

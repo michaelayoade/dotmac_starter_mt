@@ -1,0 +1,54 @@
+{#
+  Platform operator login. Context: `error` (a single generic message).
+
+  Extends `base.html` directly, not the platform layout: the layout's header
+  carries a sign-out control and navigation, which are meaningless before
+  authentication.
+#}
+{% extends "base.html" %}
+
+{% block title %}Platform sign in{% endblock %}
+
+{% block content %}
+<div style="min-height:100vh; display:flex; align-items:center; justify-content:center;
+            background:var(--dmui-color-semantic-neutral-900);">
+  <div style="width:22rem; background:var(--dmui-surface-elevated);
+              border-radius:var(--dmui-radius-lg); padding:var(--dmui-space-lg);">
+    <h1 style="font-size:var(--dmui-font-size-lg); font-weight:var(--dmui-font-weight-semibold);
+               color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-md);">
+      Platform administration
+    </h1>
+
+    {% if error %}
+    <div style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                border:1px solid var(--dmui-status-negative-border);
+                background:var(--dmui-status-negative-surface);
+                color:var(--dmui-status-negative-foreground);
+                border-radius:var(--dmui-radius-md); font-size:var(--dmui-font-size-sm);">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    {# hx-post so `static/js/csrf.js` can attach the X-CSRF-Token header. #}
+    <form hx-post="/platform/login" hx-swap="none"
+          style="display:flex; flex-direction:column; gap:var(--dmui-space-sm);">
+      <input type="email" name="email" placeholder="Email" autocomplete="username"
+             style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                    border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                    background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+      <input type="password" name="password" placeholder="Password" autocomplete="current-password"
+             style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                    border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                    background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+      <button type="submit"
+              style="border:none; border-radius:var(--dmui-radius-md);
+                     background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on);
+                     padding:var(--dmui-space-xs) var(--dmui-space-md);
+                     font-size:var(--dmui-font-size-sm); font-weight:var(--dmui-font-weight-medium);
+                     cursor:pointer;">
+        Sign in
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -5,12 +5,12 @@ contract.py` covers the decision logic exhaustively from synthetic snapshots;
 this file drives the same contract against a REAL, migrated Postgres —
 `fetch_snapshot`'s catalog queries plus `audit_live_schemas`' loop.
 
-**No module schema is registered yet** (`MIGRATION_OWNER_LEDGER` ships the two
-host owners only), so `test_registered_module_schemas_are_compliant` walks an
-empty set today — deliberately, and visibly: it asserts on the set it walked
-rather than passing silently. It bites the moment the first stateful module is
-allocated, which is the point of landing the seam with D1 rather than with the
-module that needs it.
+`dotmac-template-studio` (ADR-0006 M1) is the first allocated module, so
+`test_registered_module_schemas_are_compliant` now audits a REAL `mod_tstudio`
+schema instead of walking the empty set it was landed with. It asserts on what
+it FOUND — the schema is audited, and it holds exactly the tables the manifest
+declares — because an audit over a schema whose tables were never created
+reports no violations and no coverage, and the two look identical in a green run.
 
 The sensitivity self-test below is what proves the seam is real NOW: it builds
 a `mod_` schema with a deliberately broken table inside a rolled-back
@@ -22,7 +22,6 @@ Requires real Postgres (`make test-db-up` / `make test-integration`).
 
 from __future__ import annotations
 
-from dotmac_kernel.features import load_manifests
 from dotmac_kernel.migrations.catalog import audit_live_schemas, audited_schemas
 from dotmac_kernel.namespaces import (
     HOST_MIGRATION_OWNERS,
@@ -32,7 +31,7 @@ from dotmac_kernel.namespaces import (
 )
 from sqlalchemy import text
 
-from app.features import FEATURE_MODULES
+from app.assembly import assembly
 
 # A synthetic allocation used ONLY by the sensitivity self-test below. It is
 # not in the shipped ledger and no migration creates it; the probe builds and
@@ -43,13 +42,33 @@ _PROBE_OWNER = MigrationOwner(
 
 
 def test_registered_module_schemas_are_compliant(admin_engine) -> None:
-    registry = NamespaceRegistry.from_manifests(load_manifests(FEATURE_MODULES))
+    """The gate D1 landed, now driven by a REAL module schema.
+
+    Built from `assembly.modules` — the composition the app boots — rather than
+    `load_manifests(FEATURE_MODULES)`, which covers the assembly's own features
+    only. With the narrower set this test walked an empty tuple and passed over
+    nothing, which is exactly the vacuity the file's docstring warned about.
+    """
+    registry = NamespaceRegistry.from_manifests(assembly.modules)
     schemas = audited_schemas(registry)
-    # Visibly empty, not silently skipped: every feature this assembly ships is
-    # a host feature whose tables live in the `public` compatibility namespace.
-    assert schemas == (), f"unexpected registered module schemas: {schemas}"
+    assert (
+        "mod_tstudio" in schemas
+    ), f"the first stateful module's schema is not being audited: {schemas}"
     with admin_engine.connect() as conn:
         violations = audit_live_schemas(conn, registry)
+        # Assert on what was FOUND, not only on what was flagged: an audit over
+        # a schema whose tables were never created reports no violations and no
+        # coverage, and the two look identical in a green run.
+        live = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = 'mod_tstudio'")
+            )
+        }
+    assert live == {
+        "templates",
+        "template_versions",
+    }, f"mod_tstudio does not hold the tables its manifest declares: {live}"
     assert not violations, "module schema violations:\n" + "\n".join(violations)
 
 

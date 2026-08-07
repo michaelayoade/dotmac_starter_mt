@@ -10,6 +10,7 @@ page lazy-loads (cross-feature UI composition via a browser-side `hx-get`,
 not a Python import — see `web.py`'s module docstring).
 """
 
+from dotmac_kernel.capabilities import CapabilitySpec
 from dotmac_kernel.features import FeatureManifest, NavItem
 
 from app.features.custom_fields.router import router
@@ -23,7 +24,18 @@ feature = FeatureManifest(
     # WS1: this module's licensable capability code (referenced by entitlement
     # grants / licences, e.g. the WS8 receiver in app/features/licensing —
     # declared here because a capability code may never be invented outside
-    # its owning module's manifest). Declaration describes; it does not gate:
-    # request-time enforcement via `is_entitled` is future, contract-gated work.
-    capabilities=("custom_fields.use",),
+    # its owning module's manifest). ENFORCED since step 4: both routers carry
+    # `require_capability("custom_fields.use")`.
+    #
+    # `default_granted=True` — the reference assembly ships custom fields as a
+    # bundled feature, so a newly provisioned tenant has it, matching what
+    # migration a004 gave every tenant that predates enforcement. A deployment
+    # that SELLS custom fields flips this to False; nothing else changes.
+    capabilities=(
+        CapabilitySpec(
+            code="custom_fields.use",
+            description="Define and use custom fields on registered entities.",
+            default_granted=True,
+        ),
+    ),
 )

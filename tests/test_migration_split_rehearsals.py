@@ -193,7 +193,7 @@ def test_rehearsal_1_fresh_empty_assembly(scratch_db: str) -> None:
     assert _table_exists(scratch_db, "platform_audit_events")
     assert _table_exists(scratch_db, "platform_inbox_records")
     assert _table_exists(scratch_db, "tenant_entitlement_grants")
-    assert _versions(scratch_db) == {"0012_platform_outbox"}
+    assert _versions(scratch_db) == {"0013_feature_flag_overrides"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,7 +211,10 @@ def test_rehearsal_2_fresh_reference_assembly(scratch_db: str) -> None:
     # does NOT depend on — so both lineage heads now appear, exactly the case the
     # split design anticipated ("if the kernel advances past what a001 depends
     # on, both heads would appear"). The assembly head is a002 (applied licences).
-    assert _versions(scratch_db) == {"0012_platform_outbox", "a003_revocation_lists"}
+    assert _versions(scratch_db) == {
+        "0013_feature_flag_overrides",
+        "a004_backfill_capability_grants",
+    }
     # RLS + grants correct: FORCE RLS on, the isolation policy present, and
     # app_user holds DML (a proxy for the full contract the migration verifies).
     assert _q(
@@ -244,7 +247,7 @@ def _simulate_v08(url: str) -> None:
     # kernel@head is now 0011 (relay leasing added atop 0010 entitlements),
     # but a001 is un-recorded — the "table present, a001 not recorded" state adoption
     # repairs.
-    assert _versions(url) == {"0012_platform_outbox"}
+    assert _versions(url) == {"0013_feature_flag_overrides"}
 
 
 def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
@@ -274,7 +277,10 @@ def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
     # to 0011, so both lineage heads appear (see rehearsal 2). The assembly
     # lineage continues to a002 (applied licences) on the same upgrade.
     _upgrade(scratch_db, "heads")
-    assert _versions(scratch_db) == {"0012_platform_outbox", "a003_revocation_lists"}
+    assert _versions(scratch_db) == {
+        "0013_feature_flag_overrides",
+        "a004_backfill_capability_grants",
+    }
     # Data survived untouched.
     assert _q(scratch_db, "SELECT count(*) FROM custom_field_definitions") == 1
     assert (
@@ -354,7 +360,7 @@ def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -
     assert _table_exists(scratch_db, "custom_field_definitions")
     assert _table_exists(scratch_db, "tenant_applied_licences")
     assert _table_exists(scratch_db, "tenant_revocation_lists")
-    assert "a003_revocation_lists" in _versions(scratch_db)
+    assert "a004_backfill_capability_grants" in _versions(scratch_db)
 
     # Licence drops authorized alone: a001 still refuses; the CF table survives.
     monkeypatch.setenv("DOTMAC_ALLOW_DESTRUCTIVE_LICENCE_DOWNGRADE", "1")
@@ -380,7 +386,7 @@ def test_rehearsal_5_destructive_downgrade_guard(scratch_db: str, monkeypatch) -
 def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
     # New code deployed: the assembly head (a002, subsuming a001) recorded.
     _upgrade(scratch_db, "heads")
-    assert "a003_revocation_lists" in _versions(scratch_db)
+    assert "a004_backfill_capability_grants" in _versions(scratch_db)
 
     # NEGATIVE CONTROL: the old v0.8 migrator (kernel-only version_locations,
     # no assembly scripts) run against this database — reproduces the real
@@ -398,13 +404,13 @@ def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
     # a002) and leaves the kernel head; `kernel@head` no longer collapses the
     # branch now the kernel lineage has advanced past a001's `depends_on` pin.
     _stamp(scratch_db, "assembly@base")
-    assert _versions(scratch_db) == {"0012_platform_outbox"}
+    assert _versions(scratch_db) == {"0013_feature_flag_overrides"}
     assert _table_exists(scratch_db, "custom_field_definitions")
 
     # Now the kernel-only migrator succeeds: it sees only the kernel head (0008),
     # which it knows — a001 is no longer recorded.
     _upgrade(scratch_db, "heads", version_locations=_kernel_only_locations())
-    assert _versions(scratch_db) == {"0012_platform_outbox"}
+    assert _versions(scratch_db) == {"0013_feature_flag_overrides"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -421,13 +427,19 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     script = ScriptDirectory.from_config(cfg)
 
     heads = set(script.get_heads())
+    # Three lineages now: the two grandfathered host owners plus the first
+    # installed stateful MODULE (ADR-0006 M1). One head per owner is the
+    # invariant — a second head inside ONE lineage would be the real defect.
     assert heads == {
-        "0012_platform_outbox",
-        "a003_revocation_lists",
+        "0013_feature_flag_overrides",
+        "a004_backfill_capability_grants",
+        "ts_0001_templates",
     }, f"unexpected head set: {heads}"
 
     # Each head carries the expected branch label.
     kernel_head = script.get_revision("kernel@head")
     assembly_head = script.get_revision("assembly@head")
-    assert kernel_head.revision == "0012_platform_outbox"
-    assert assembly_head.revision == "a003_revocation_lists"
+    module_head = script.get_revision("template_studio@head")
+    assert kernel_head.revision == "0013_feature_flag_overrides"
+    assert assembly_head.revision == "a004_backfill_capability_grants"
+    assert module_head.revision == "ts_0001_templates"

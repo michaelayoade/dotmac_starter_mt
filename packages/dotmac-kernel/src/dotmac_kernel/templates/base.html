@@ -16,6 +16,20 @@
     <!-- Tailwind CSS (built from static/css/src/main.css via `npm run css:build`) -->
     <link rel="stylesheet" href="{{ static_asset_url('/static/css/main.css') }}">
 
+    <!-- Installed presentation packages' compiled stylesheets (a `dotmac-ui`
+         release, a packaged theme), declared by the assembly as
+         `ProductAssemblySpec.stylesheets` and installed as this global by
+         `dotmac_kernel.templating.install_stylesheets`. The kernel does not
+         know what they are — ADR-0006 § 2's dependency direction runs
+         assembly → dotmac-ui → dotmac-kernel, never the other way, so this is
+         a slot, not a reference. LAST, so a design system's tokens and its
+         focus-indicator contract win over the compiled utility CSS above on
+         equal specificity. Each URL already carries its own cache-busting
+         query; they are package-resolved, self-hosted paths, never a CDN. -->
+    {% for href in extra_stylesheets %}
+    <link rel="stylesheet" href="{{ href }}">
+    {% endfor %}
+
     {% block head %}{% endblock %}
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 antialiased">

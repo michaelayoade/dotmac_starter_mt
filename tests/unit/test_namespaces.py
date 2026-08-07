@@ -151,13 +151,30 @@ def test_revision_id_pattern_matches_only_its_own_lineage() -> None:
 # ── Ledger allocation = where immutability is enforced ──────────────────────
 
 
-def test_the_shipped_ledger_is_the_two_host_owners() -> None:
-    assert MIGRATION_OWNER_LEDGER == (
+def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
+    """The two grandfathered host owners, then every allocated module.
+
+    Was "the two host owners" until `template_studio` became the first
+    installable allocation (ADR-0006 M1). The host owners keep their properties
+    — legacy revision ids, tables in `public`, no module schema — and a module
+    row is the inverse of all three, which is the distinction the ledger exists
+    to make.
+    """
+    assert MIGRATION_OWNER_LEDGER[:2] == (
         KERNEL_MIGRATION_OWNER,
         ASSEMBLY_MIGRATION_OWNER,
     )
     assert KERNEL_MIGRATION_OWNER.is_legacy and ASSEMBLY_MIGRATION_OWNER.is_legacy
-    assert all(owner.db_schema is None for owner in MIGRATION_OWNER_LEDGER)
+    host, modules = MIGRATION_OWNER_LEDGER[:2], MIGRATION_OWNER_LEDGER[2:]
+    assert all(owner.db_schema is None for owner in host)
+    # Every allocated module owns a real `mod_` namespace and gets the strict
+    # (non-legacy) revision-id rules.
+    assert modules, "no installable module is allocated — expected template_studio"
+    for owner in modules:
+        assert owner.db_schema is not None
+        assert owner.db_schema.startswith("mod_")
+        assert not owner.is_legacy
+    assert {owner.owner for owner in modules} == {"template_studio"}
 
 
 def test_an_unallocated_module_cannot_own_a_namespace() -> None:

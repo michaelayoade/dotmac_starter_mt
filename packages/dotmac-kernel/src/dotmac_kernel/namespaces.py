@@ -389,9 +389,23 @@ HOST_MIGRATION_OWNERS: Final[tuple[MigrationOwner, ...]] = (
 #   * `prefix`       ≤ 6 chars, unique fleet-wide, never reused after retirement
 #   * `branch_label` unique fleet-wide
 #
-# No installable module is allocated yet: the first stateful module extracted
-# under F4 adds its row in the same change that adds its manifest.
-MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = HOST_MIGRATION_OWNERS
+# `dotmac-template-studio` — the FIRST allocated installable module (ADR-0006
+# names it the first stateful one). Its row lands in the same change as its
+# manifest, exactly as the rule above requires. `tstudio` (not `template_studio`)
+# because the short code is the permanent physical identity and shorter is
+# cheaper to read in every qualified name; `ts` leaves the whole revision-id
+# budget for a readable slug.
+TEMPLATE_STUDIO_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="template_studio",
+    prefix="ts",
+    branch_label="template_studio",
+    db_schema=module_schema("tstudio"),
+)
+
+MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
+    *HOST_MIGRATION_OWNERS,
+    TEMPLATE_STUDIO_MIGRATION_OWNER,
+)
 
 
 # ── The composed registry ───────────────────────────────────────────────────

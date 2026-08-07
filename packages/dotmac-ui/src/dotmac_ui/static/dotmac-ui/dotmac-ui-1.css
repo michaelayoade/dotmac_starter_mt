@@ -1,0 +1,322 @@
+/*!
+ * dotmac-ui — the DotMac shared UI design system.
+ * UI contract version: 1
+ * Package version:     0.1.0a1
+ * Accessibility:       WCAG 2.2 Level AA
+ *
+ * GENERATED FILE — do not edit by hand. The source of truth is
+ * dotmac_ui/tokens.py; rebuild with `make ui-build`.
+ *
+ * This file is self-contained: no @import, no remote origin, no
+ * web font, no CDN. It needs no preprocessor and no particular
+ * Tailwind major — see dotmac_ui/assets.py.
+ */
+
+:root {
+  /* color */
+  --dmui-color-brand-50: #eff6ff;
+  --dmui-color-brand-100: #dbeafe;
+  --dmui-color-brand-200: #bfdbfe;
+  --dmui-color-brand-300: #93c5fd;
+  --dmui-color-brand-400: #60a5fa;
+  --dmui-color-brand-500: #3b82f6;
+  --dmui-color-brand-600: #2563eb;
+  --dmui-color-brand-700: #1d4ed8;
+  --dmui-color-brand-800: #1e40af;
+  --dmui-color-brand-900: #1e3a8a;
+  --dmui-color-brand-950: #172554;
+  --dmui-color-accent-50: #ecfeff;
+  --dmui-color-accent-100: #cffafe;
+  --dmui-color-accent-200: #a5f3fc;
+  --dmui-color-accent-300: #67e8f9;
+  --dmui-color-accent-400: #22d3ee;
+  --dmui-color-accent-500: #06b6d4;
+  --dmui-color-accent-600: #0891b2;
+  --dmui-color-accent-700: #0e7490;
+  --dmui-color-accent-800: #155e75;
+  --dmui-color-accent-900: #164e63;
+  --dmui-color-accent-950: #083344;
+  --dmui-color-semantic-positive-50: #f0fdf4;
+  --dmui-color-semantic-positive-100: #dcfce7;
+  --dmui-color-semantic-positive-200: #bbf7d0;
+  --dmui-color-semantic-positive-300: #86efac;
+  --dmui-color-semantic-positive-400: #4ade80;
+  --dmui-color-semantic-positive-500: #22c55e;
+  --dmui-color-semantic-positive-600: #16a34a;
+  --dmui-color-semantic-positive-700: #15803d;
+  --dmui-color-semantic-positive-800: #166534;
+  --dmui-color-semantic-positive-900: #14532d;
+  --dmui-color-semantic-positive-950: #052e16;
+  --dmui-color-semantic-info-50: #f0f9ff;
+  --dmui-color-semantic-info-100: #e0f2fe;
+  --dmui-color-semantic-info-200: #bae6fd;
+  --dmui-color-semantic-info-300: #7dd3fc;
+  --dmui-color-semantic-info-400: #38bdf8;
+  --dmui-color-semantic-info-500: #0ea5e9;
+  --dmui-color-semantic-info-600: #0284c7;
+  --dmui-color-semantic-info-700: #0369a1;
+  --dmui-color-semantic-info-800: #075985;
+  --dmui-color-semantic-info-900: #0c4a6e;
+  --dmui-color-semantic-info-950: #082f49;
+  --dmui-color-semantic-warning-50: #fffbeb;
+  --dmui-color-semantic-warning-100: #fef3c7;
+  --dmui-color-semantic-warning-200: #fde68a;
+  --dmui-color-semantic-warning-300: #fcd34d;
+  --dmui-color-semantic-warning-400: #fbbf24;
+  --dmui-color-semantic-warning-500: #f59e0b;
+  --dmui-color-semantic-warning-600: #d97706;
+  --dmui-color-semantic-warning-700: #b45309;
+  --dmui-color-semantic-warning-800: #92400e;
+  --dmui-color-semantic-warning-900: #78350f;
+  --dmui-color-semantic-warning-950: #451a03;
+  --dmui-color-semantic-negative-50: #fef2f2;
+  --dmui-color-semantic-negative-100: #fee2e2;
+  --dmui-color-semantic-negative-200: #fecaca;
+  --dmui-color-semantic-negative-300: #fca5a5;
+  --dmui-color-semantic-negative-400: #f87171;
+  --dmui-color-semantic-negative-500: #ef4444;
+  --dmui-color-semantic-negative-600: #dc2626;
+  --dmui-color-semantic-negative-700: #b91c1c;
+  --dmui-color-semantic-negative-800: #991b1b;
+  --dmui-color-semantic-negative-900: #7f1d1d;
+  --dmui-color-semantic-negative-950: #450a0a;
+  --dmui-color-semantic-neutral-50: #f8fafc;
+  --dmui-color-semantic-neutral-100: #f1f5f9;
+  --dmui-color-semantic-neutral-200: #e2e8f0;
+  --dmui-color-semantic-neutral-300: #cbd5e1;
+  --dmui-color-semantic-neutral-400: #94a3b8;
+  --dmui-color-semantic-neutral-500: #64748b;
+  --dmui-color-semantic-neutral-600: #475569;
+  --dmui-color-semantic-neutral-700: #334155;
+  --dmui-color-semantic-neutral-800: #1e293b;
+  --dmui-color-semantic-neutral-900: #0f172a;
+  --dmui-color-semantic-neutral-950: #020617;
+
+  /* surface */
+  --dmui-surface-background: var(--dmui-color-semantic-neutral-50);
+  --dmui-surface-primary: #ffffff;
+  --dmui-surface-secondary: var(--dmui-color-semantic-neutral-100);
+  --dmui-surface-tertiary: var(--dmui-color-semantic-neutral-200);
+  --dmui-surface-elevated: #ffffff;
+
+  /* text */
+  --dmui-text-primary: var(--dmui-color-semantic-neutral-900);
+  --dmui-text-secondary: var(--dmui-color-semantic-neutral-700);
+  --dmui-text-tertiary: var(--dmui-color-semantic-neutral-600);
+  --dmui-text-muted: var(--dmui-color-semantic-neutral-500);
+  --dmui-text-inverted: #ffffff;
+
+  /* border */
+  --dmui-border-subtle: var(--dmui-color-semantic-neutral-100);
+  --dmui-border-default: var(--dmui-color-semantic-neutral-200);
+  --dmui-border-strong: var(--dmui-color-semantic-neutral-500);
+  --dmui-border-focus: var(--dmui-focus-ring-color);
+
+  /* action */
+  --dmui-action-primary-default: var(--dmui-color-brand-600);
+  --dmui-action-primary-hover: var(--dmui-color-brand-700);
+  --dmui-action-primary-pressed: var(--dmui-color-brand-800);
+  --dmui-action-primary-disabled: var(--dmui-color-brand-200);
+  --dmui-action-primary-on: #ffffff;
+  --dmui-action-accent-default: var(--dmui-color-accent-700);
+  --dmui-action-accent-hover: var(--dmui-color-accent-800);
+  --dmui-action-accent-pressed: var(--dmui-color-accent-900);
+  --dmui-action-accent-disabled: var(--dmui-color-accent-200);
+  --dmui-action-accent-on: #ffffff;
+  --dmui-action-destructive-default: var(--dmui-color-semantic-negative-700);
+  --dmui-action-destructive-hover: var(--dmui-color-semantic-negative-800);
+  --dmui-action-destructive-pressed: var(--dmui-color-semantic-negative-900);
+  --dmui-action-destructive-disabled: var(--dmui-color-semantic-negative-200);
+  --dmui-action-destructive-on: #ffffff;
+  --dmui-action-neutral-default: var(--dmui-color-semantic-neutral-700);
+  --dmui-action-neutral-hover: var(--dmui-color-semantic-neutral-800);
+  --dmui-action-neutral-pressed: var(--dmui-color-semantic-neutral-900);
+  --dmui-action-neutral-disabled: var(--dmui-color-semantic-neutral-200);
+  --dmui-action-neutral-on: #ffffff;
+
+  /* status */
+  --dmui-status-positive-surface: var(--dmui-color-semantic-positive-50);
+  --dmui-status-positive-border: var(--dmui-color-semantic-positive-200);
+  --dmui-status-positive-foreground: var(--dmui-color-semantic-positive-700);
+  --dmui-status-positive-indicator: var(--dmui-color-semantic-positive-600);
+  --dmui-status-info-surface: var(--dmui-color-semantic-info-50);
+  --dmui-status-info-border: var(--dmui-color-semantic-info-200);
+  --dmui-status-info-foreground: var(--dmui-color-semantic-info-700);
+  --dmui-status-info-indicator: var(--dmui-color-semantic-info-600);
+  --dmui-status-warning-surface: var(--dmui-color-semantic-warning-50);
+  --dmui-status-warning-border: var(--dmui-color-semantic-warning-200);
+  --dmui-status-warning-foreground: var(--dmui-color-semantic-warning-700);
+  --dmui-status-warning-indicator: var(--dmui-color-semantic-warning-600);
+  --dmui-status-negative-surface: var(--dmui-color-semantic-negative-50);
+  --dmui-status-negative-border: var(--dmui-color-semantic-negative-200);
+  --dmui-status-negative-foreground: var(--dmui-color-semantic-negative-700);
+  --dmui-status-negative-indicator: var(--dmui-color-semantic-negative-600);
+  --dmui-status-neutral-surface: var(--dmui-color-semantic-neutral-50);
+  --dmui-status-neutral-border: var(--dmui-color-semantic-neutral-200);
+  --dmui-status-neutral-foreground: var(--dmui-color-semantic-neutral-700);
+  --dmui-status-neutral-indicator: var(--dmui-color-semantic-neutral-600);
+
+  /* typography */
+  --dmui-font-display: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --dmui-font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --dmui-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --dmui-font-size-xs: 0.75rem;
+  --dmui-font-size-sm: 0.875rem;
+  --dmui-font-size-base: 1rem;
+  --dmui-font-size-lg: 1.125rem;
+  --dmui-font-size-xl: 1.25rem;
+  --dmui-font-size-2xl: 1.5rem;
+  --dmui-font-size-3xl: 1.875rem;
+  --dmui-font-size-4xl: 2.25rem;
+  --dmui-font-weight-regular: 400;
+  --dmui-font-weight-medium: 500;
+  --dmui-font-weight-semibold: 600;
+  --dmui-font-weight-bold: 700;
+  --dmui-line-height-tight: 1.2;
+  --dmui-line-height-snug: 1.35;
+  --dmui-line-height-normal: 1.5;
+  --dmui-line-height-relaxed: 1.65;
+  --dmui-letter-spacing-tight: -0.02em;
+  --dmui-letter-spacing-normal: 0em;
+  --dmui-letter-spacing-wide: 0.02em;
+
+  /* space */
+  --dmui-space-3xs: 0.125rem;
+  --dmui-space-2xs: 0.25rem;
+  --dmui-space-xs: 0.5rem;
+  --dmui-space-sm: 0.75rem;
+  --dmui-space-md: 1rem;
+  --dmui-space-lg: 1.5rem;
+  --dmui-space-xl: 2rem;
+  --dmui-space-2xl: 3rem;
+  --dmui-space-3xl: 4rem;
+
+  /* radius */
+  --dmui-radius-none: 0;
+  --dmui-radius-sm: 0.25rem;
+  --dmui-radius-md: 0.375rem;
+  --dmui-radius-lg: 0.5rem;
+  --dmui-radius-xl: 0.75rem;
+  --dmui-radius-2xl: 1rem;
+  --dmui-radius-full: 9999px;
+
+  /* shadow */
+  --dmui-shadow-none: none;
+  --dmui-shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.06);
+  --dmui-shadow-md: 0 2px 4px -1px rgb(15 23 42 / 0.08), 0 4px 8px -2px rgb(15 23 42 / 0.06);
+  --dmui-shadow-lg: 0 4px 8px -2px rgb(15 23 42 / 0.10), 0 12px 24px -4px rgb(15 23 42 / 0.08);
+  --dmui-shadow-xl: 0 8px 16px -4px rgb(15 23 42 / 0.12), 0 24px 48px -8px rgb(15 23 42 / 0.10);
+
+  /* focus */
+  --dmui-focus-ring-color: var(--dmui-color-brand-600);
+  --dmui-focus-ring-width: 2px;
+  --dmui-focus-ring-offset: 2px;
+
+  /* breakpoint */
+  --dmui-breakpoint-xs: 480px;
+  --dmui-breakpoint-sm: 640px;
+  --dmui-breakpoint-md: 768px;
+  --dmui-breakpoint-lg: 1024px;
+  --dmui-breakpoint-xl: 1280px;
+  --dmui-breakpoint-2xl: 1536px;
+
+  /* motion */
+  --dmui-duration-instant: 0ms;
+  --dmui-duration-fast: 120ms;
+  --dmui-duration-normal: 200ms;
+  --dmui-duration-slow: 320ms;
+  --dmui-easing-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --dmui-easing-entrance: cubic-bezier(0, 0, 0.2, 1);
+  --dmui-easing-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Dark mode. Only the mode-DEPENDENT roles are restated: the ramps are
+ * identical in both modes, so a runtime brand override re-declares them
+ * once and every role that points at them follows. `.dark` is honoured
+ * alongside the package's own attribute so a host already using
+ * Tailwind's class strategy needs no template change. */
+.dark,
+[data-dmui-theme="dark"] {
+  --dmui-surface-background: var(--dmui-color-semantic-neutral-950);
+  --dmui-surface-primary: var(--dmui-color-semantic-neutral-900);
+  --dmui-surface-secondary: var(--dmui-color-semantic-neutral-800);
+  --dmui-surface-tertiary: var(--dmui-color-semantic-neutral-700);
+  --dmui-surface-elevated: var(--dmui-color-semantic-neutral-800);
+  --dmui-text-primary: var(--dmui-color-semantic-neutral-50);
+  --dmui-text-secondary: var(--dmui-color-semantic-neutral-200);
+  --dmui-text-tertiary: var(--dmui-color-semantic-neutral-300);
+  --dmui-text-muted: var(--dmui-color-semantic-neutral-400);
+  --dmui-text-inverted: var(--dmui-color-semantic-neutral-900);
+  --dmui-border-subtle: var(--dmui-color-semantic-neutral-800);
+  --dmui-border-default: var(--dmui-color-semantic-neutral-700);
+  --dmui-border-strong: var(--dmui-color-semantic-neutral-500);
+  --dmui-action-primary-default: var(--dmui-color-brand-400);
+  --dmui-action-primary-hover: var(--dmui-color-brand-300);
+  --dmui-action-primary-pressed: var(--dmui-color-brand-200);
+  --dmui-action-primary-disabled: var(--dmui-color-brand-800);
+  --dmui-action-primary-on: var(--dmui-color-brand-950);
+  --dmui-action-accent-default: var(--dmui-color-accent-400);
+  --dmui-action-accent-hover: var(--dmui-color-accent-300);
+  --dmui-action-accent-pressed: var(--dmui-color-accent-200);
+  --dmui-action-accent-disabled: var(--dmui-color-accent-800);
+  --dmui-action-accent-on: var(--dmui-color-accent-950);
+  --dmui-action-destructive-default: var(--dmui-color-semantic-negative-400);
+  --dmui-action-destructive-hover: var(--dmui-color-semantic-negative-300);
+  --dmui-action-destructive-pressed: var(--dmui-color-semantic-negative-200);
+  --dmui-action-destructive-disabled: var(--dmui-color-semantic-negative-800);
+  --dmui-action-destructive-on: var(--dmui-color-semantic-negative-950);
+  --dmui-action-neutral-default: var(--dmui-color-semantic-neutral-300);
+  --dmui-action-neutral-hover: var(--dmui-color-semantic-neutral-200);
+  --dmui-action-neutral-pressed: var(--dmui-color-semantic-neutral-100);
+  --dmui-action-neutral-disabled: var(--dmui-color-semantic-neutral-800);
+  --dmui-action-neutral-on: var(--dmui-color-semantic-neutral-950);
+  --dmui-status-positive-surface: var(--dmui-color-semantic-positive-900);
+  --dmui-status-positive-border: var(--dmui-color-semantic-positive-800);
+  --dmui-status-positive-foreground: var(--dmui-color-semantic-positive-200);
+  --dmui-status-positive-indicator: var(--dmui-color-semantic-positive-400);
+  --dmui-status-info-surface: var(--dmui-color-semantic-info-900);
+  --dmui-status-info-border: var(--dmui-color-semantic-info-800);
+  --dmui-status-info-foreground: var(--dmui-color-semantic-info-200);
+  --dmui-status-info-indicator: var(--dmui-color-semantic-info-400);
+  --dmui-status-warning-surface: var(--dmui-color-semantic-warning-900);
+  --dmui-status-warning-border: var(--dmui-color-semantic-warning-800);
+  --dmui-status-warning-foreground: var(--dmui-color-semantic-warning-200);
+  --dmui-status-warning-indicator: var(--dmui-color-semantic-warning-400);
+  --dmui-status-negative-surface: var(--dmui-color-semantic-negative-900);
+  --dmui-status-negative-border: var(--dmui-color-semantic-negative-800);
+  --dmui-status-negative-foreground: var(--dmui-color-semantic-negative-200);
+  --dmui-status-negative-indicator: var(--dmui-color-semantic-negative-400);
+  --dmui-status-neutral-surface: var(--dmui-color-semantic-neutral-900);
+  --dmui-status-neutral-border: var(--dmui-color-semantic-neutral-800);
+  --dmui-status-neutral-foreground: var(--dmui-color-semantic-neutral-200);
+  --dmui-status-neutral-indicator: var(--dmui-color-semantic-neutral-400);
+  --dmui-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.40);
+  --dmui-shadow-md: 0 2px 4px -1px rgb(0 0 0 / 0.45), 0 4px 8px -2px rgb(0 0 0 / 0.35);
+  --dmui-shadow-lg: 0 4px 8px -2px rgb(0 0 0 / 0.50), 0 12px 24px -4px rgb(0 0 0 / 0.40);
+  --dmui-shadow-xl: 0 8px 16px -4px rgb(0 0 0 / 0.55), 0 24px 48px -8px rgb(0 0 0 / 0.45);
+  --dmui-focus-ring-color: var(--dmui-color-brand-300);
+}
+
+/* WCAG 2.2 SC 2.3.3 — a user who asks for reduced motion gets it from
+ * the token layer, not from each component. 1ms rather than 0s so
+ * transitionend/animationend handlers still fire and no interaction
+ * that waits on one can hang. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dmui-duration-instant: 1ms;
+    --dmui-duration-fast: 1ms;
+    --dmui-duration-normal: 1ms;
+    --dmui-duration-slow: 1ms;
+  }
+}
+
+/* The one base rule this contract ships. WCAG 2.2 SC 2.4.11 (focus
+ * appearance) is a token-layer promise, so the indicator itself is
+ * defined here rather than left to each consumer to re-derive.
+ * Deliberately unlayered and at (0,1,0) specificity: an @layer would
+ * lose to every unlayered rule in the host stylesheet, which would
+ * silently give the promise away. */
+:focus-visible {
+  outline: var(--dmui-focus-ring-width) solid var(--dmui-focus-ring-color);
+  outline-offset: var(--dmui-focus-ring-offset);
+}

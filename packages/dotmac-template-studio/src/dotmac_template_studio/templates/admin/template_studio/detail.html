@@ -1,0 +1,65 @@
+{#
+  Template detail — metadata plus the version history and authoring form.
+  Context: `template`, `versions` — see dotmac_template_studio.web.template_detail.
+  Token-styled; see index.html's header comment for why.
+#}
+{% extends "layouts/admin.html" %}
+
+{% block admin_content %}
+<div style="margin-bottom:var(--dmui-space-lg);">
+  <a href="/admin/templates"
+     style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-muted); text-decoration:none;">
+    &larr; Templates
+  </a>
+  <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold);
+             color:var(--dmui-text-primary); margin-top:var(--dmui-space-2xs);">{{ template.name }}</h1>
+  <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+    {{ template.kind }} &middot; <code>{{ template.slug }}</code>
+    {% if template.channel %} &middot; {{ template.channel }}{% endif %}
+    &middot; created {{ template.created_at | local_date }}
+  </p>
+</div>
+
+<div style="display:flex; flex-direction:column; gap:var(--dmui-space-lg);">
+  <section style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+                  background:var(--dmui-surface-elevated); padding:var(--dmui-space-lg);">
+    <h2 style="font-size:var(--dmui-font-size-lg); font-weight:var(--dmui-font-weight-semibold);
+               color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-md);">New version</h2>
+    {#
+      Posts to this module's own route and swaps the versions panel below.
+      hx-post, not a bare form — the CSRF header-bridge has no hook otherwise.
+    #}
+    <form hx-post="/admin/templates/{{ template.id }}/versions"
+          hx-target="#versions-panel" hx-swap="outerHTML"
+          style="display:flex; flex-direction:column; gap:var(--dmui-space-sm);">
+      {% if template.kind == 'notification' %}
+      <input type="text" name="subject" placeholder="Subject"
+             style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                    border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                    background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+      {% endif %}
+      <textarea name="body" rows="8" placeholder="Hello {{ '{{ customer_name }}' }}, …"
+                style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                       border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                       background:var(--dmui-surface-primary); color:var(--dmui-text-primary);
+                       font-family:var(--dmui-font-family-mono);"></textarea>
+      <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
+        Use {{ '{{ variable_name }}' }} placeholders. The declared variable list is derived
+        from the body, so it can never drift from what the text actually uses.
+      </span>
+      <div>
+        <button type="submit"
+                style="border-radius:var(--dmui-radius-lg);
+                       background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on);
+                       padding:var(--dmui-space-xs) var(--dmui-space-md); border:none;
+                       font-size:var(--dmui-font-size-sm); font-weight:var(--dmui-font-weight-medium);
+                       cursor:pointer;">
+          Save version
+        </button>
+      </div>
+    </form>
+  </section>
+
+  {% include "admin/template_studio/_versions_panel.html" %}
+</div>
+{% endblock %}

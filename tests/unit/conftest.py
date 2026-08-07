@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
+# Installed MODULE models, for the same reason — and with one extra consequence:
+# these are bound to `mod_tstudio`, and `create_test_engine` ATTACHes every
+# schema it finds in `Base.metadata`, so the import must happen before the
+# engine fixture runs or the qualified CREATE TABLE has nowhere to land.
+import dotmac_template_studio as template_studio
 import pytest
 
 # DATABASE_URL is pinned to a hermetic placeholder in tests/conftest.py (the
@@ -16,11 +21,17 @@ import pytest
 # there about import-time engine creation in dotmac_kernel.db.
 from dotmac_kernel import (
     audit,  # noqa: F401
+    flag_models,  # noqa: F401
     models_platform,  # noqa: F401
     settings_models,  # noqa: F401
 )
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+from dotmac_kernel.cache import MemoryCache
+from dotmac_kernel.capabilities import CapabilityCatalogue, install_capabilities
+from dotmac_kernel.entitlements import grant_entitlement
 from dotmac_kernel.features import load_manifests
+from dotmac_kernel.flag_models import install_flag_cache
+from dotmac_kernel.flags import FlagCatalogue, install_flags
 from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
 from dotmac_kernel.permissions import PermissionCatalogue, install_permissions
@@ -30,6 +41,7 @@ from dotmac_kernel.templating import install_surface_globals
 # test kit (`dotmac_kernel.testing`, kernel-boundary Task 5) — this assembly
 # consumes it instead of hand-rolling the harness it used to define here.
 from dotmac_kernel.testing import create_test_engine, isolated_session
+from dotmac_template_studio import models as template_studio_models  # noqa: F401
 from sqlalchemy.orm import Session
 
 from app.features import FEATURE_MODULES
@@ -39,6 +51,17 @@ from app.features import FEATURE_MODULES
 # dotmac_kernel.models in control-plane security Task 2).
 from app.features.custom_fields import models as custom_fields  # noqa: F401
 from app.features.licensing import models as licensing_models  # noqa: F401
+
+
+def _all_manifests():
+    """Every manifest the reference assembly composes — its own features plus
+    each installed module. The two declaration catalogues below are built from
+    this, not from `FEATURE_MODULES` alone: a module's permissions and audit
+    actions are as real as a feature's, and omitting them would make every
+    `require_permission` guard 500 and every `write_audit_event` raise inside
+    the unit lane while working perfectly in the real app.
+    """
+    return [*load_manifests(FEATURE_MODULES), template_studio.module]
 
 
 @pytest.fixture(autouse=True)
@@ -54,9 +77,17 @@ def _default_declaration_catalogues():
     from a narrower module set (e.g. `tests/unit/test_create_app.py`) cannot
     leave a truncated catalogue behind.
     """
-    manifests = load_manifests(FEATURE_MODULES)
+    manifests = _all_manifests()
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    # Capabilities too (step 4). Re-installed per test for the same reason:
+    # a test that installs a narrower probe catalogue must not leave it
+    # behind for the next one.
+    install_capabilities(CapabilityCatalogue.from_manifests(manifests))
+    install_flags(FlagCatalogue.from_manifests(manifests))
+    # A fresh evaluation cache per test: the store is process-global, and a
+    # leaked entry would make one test's overrides decide another's answer.
+    install_flag_cache(MemoryCache())
 
 
 @pytest.fixture(autouse=True)
@@ -72,9 +103,7 @@ def _default_surface_globals():
     inside the test body, to set a different (disabled) state — this
     autouse fixture only establishes the baseline before each test runs.
     """
-    install_surface_globals(
-        load_manifests(FEATURE_MODULES), disabled=set(), web_enabled=True
-    )
+    install_surface_globals(_all_manifests(), disabled=set(), web_enabled=True)
 
 
 @pytest.fixture(scope="session")
@@ -98,9 +127,27 @@ def db(unit_engine) -> Generator[Session, None, None]:
 
 @pytest.fixture()
 def tenant_row(db: Session) -> Tenant:
+    """The shared unit-test tenant — entitled to every declared capability.
+
+    `require_capability` is deny-by-default, so a bare tenant would 403 on every
+    gated route and each feature's tests would have to re-grant the same codes.
+    Granting them here mirrors what migration `a004` does for every tenant that
+    existed when enforcement landed: the DEFAULT test subject is an ordinary,
+    fully-entitled tenant, and a test that cares about the un-entitled case
+    builds its own (see `tests/unit/test_require_capability.py`).
+    """
     row = Tenant(slug="acme", name="Acme")
     db.add(row)
     db.flush()
+    catalogue = CapabilityCatalogue.from_manifests(_all_manifests())
+    for code in sorted(catalogue.codes()):
+        grant_entitlement(
+            db,
+            tenant_id=row.id,
+            capability_code=code,
+            catalogue=catalogue,
+            source="test-fixture",
+        )
     return row
 
 

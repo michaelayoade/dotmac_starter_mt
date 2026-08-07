@@ -195,7 +195,7 @@ def register_error_handlers(app: FastAPI) -> None:
         # `next` query param, but this handler quotes unconditionally since
         # `request.url.path` (the other caller) also needs safe encoding.
         return RedirectResponse(
-            url=f"/admin/login?next={quote(exc.next_url, safe='')}",
+            url=f"{exc.login_path}?next={quote(exc.next_url, safe='')}",
             status_code=302,
         )
 

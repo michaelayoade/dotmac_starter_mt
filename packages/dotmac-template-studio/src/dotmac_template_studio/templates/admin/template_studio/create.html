@@ -1,0 +1,95 @@
+{#
+  New-template form. Context: `kinds`, `error`, `form` — see
+  dotmac_template_studio.web.template_create_form.
+
+  `hx-post`, never `<form method="post">`: CSRFMiddleware validates the
+  `X-CSRF-Token` HEADER against the `csrf_token` cookie, and a plain form has no
+  hook to attach a header. `static/js/csrf.js` bridges the two for every htmx
+  request. Token-styled — see index.html's header comment.
+#}
+{% extends "layouts/admin.html" %}
+
+{% block admin_content %}
+<div style="max-width:40rem;">
+  <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold);
+             color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-lg);">New Template</h1>
+
+  {% if error %}
+  <div style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md);
+              border:1px solid var(--dmui-status-negative-border);
+              background:var(--dmui-status-negative-surface);
+              color:var(--dmui-status-negative-foreground);
+              border-radius:var(--dmui-radius-md); font-size:var(--dmui-font-size-sm);">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  <form hx-post="/admin/templates" hx-swap="none"
+        style="display:flex; flex-direction:column; gap:var(--dmui-space-md);
+               border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+               background:var(--dmui-surface-elevated); padding:var(--dmui-space-lg);">
+    <label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
+                  font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+      Kind
+      <select name="kind"
+              style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                     border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                     background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+        {% for kind in kinds %}
+        <option value="{{ kind }}" {% if form.get('kind') == kind %}selected{% endif %}>{{ kind }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
+                  font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+      Slug
+      <input type="text" name="slug" value="{{ form.get('slug', '') }}"
+             placeholder="welcome-email"
+             style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                    border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                    background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+      <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
+        The stable identifier callers render this template by. It does not change.
+      </span>
+    </label>
+
+    <label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
+                  font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+      Name
+      <input type="text" name="name" value="{{ form.get('name', '') }}"
+             style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                    border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                    background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+    </label>
+
+    <label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
+                  font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+      Channel <span style="color:var(--dmui-text-muted);">(notifications only)</span>
+      <input type="text" name="channel" value="{{ form.get('channel', '') }}"
+             placeholder="email"
+             style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
+                    border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
+                    background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+    </label>
+
+    <div style="display:flex; gap:var(--dmui-space-xs);">
+      <button type="submit"
+              style="border-radius:var(--dmui-radius-lg);
+                     background:var(--dmui-action-primary-default); color:var(--dmui-action-primary-on);
+                     padding:var(--dmui-space-xs) var(--dmui-space-md); border:none;
+                     font-size:var(--dmui-font-size-sm); font-weight:var(--dmui-font-weight-medium);
+                     cursor:pointer;">
+        Create
+      </button>
+      <a href="/admin/templates"
+         style="border-radius:var(--dmui-radius-lg); border:1px solid var(--dmui-border-default);
+                padding:var(--dmui-space-xs) var(--dmui-space-md);
+                font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);
+                text-decoration:none;">
+        Cancel
+      </a>
+    </div>
+  </form>
+</div>
+{% endblock %}

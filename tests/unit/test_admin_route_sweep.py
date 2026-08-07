@@ -44,6 +44,11 @@ from dotmac_kernel.deps import get_db
 from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.models import AuthSession, Party, PartyPerson, PartyType, Tenant
 from dotmac_kernel.security import hash_token, issue_access_token
+
+# Installed MODULE web routers are swept too — the sweep enumerates from the
+# production app, so a module route omitted here would 404 on this minimal
+# app and read as a failure rather than as a missing mount.
+from dotmac_template_studio.web import router as template_studio_web_router
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -76,6 +81,8 @@ _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _SKIP = {("POST", "/admin/login"), ("POST", "/admin/logout")}
 
 _DUMMY_UUID = "00000000-0000-0000-0000-000000000000"
+# Path params typed `int` on some route — see `_concrete_path`.
+_NUMERIC_PARAMS = frozenset({"version"})
 _PARAM_RE = re.compile(r"\{(\w+)\}")
 
 
@@ -107,7 +114,15 @@ def _concrete_path(path_template: str) -> str:
 
     def _replace(match: re.Match[str]) -> str:
         name = match.group(1)
-        return _DUMMY_UUID if name.endswith("_id") else "dummy"
+        if name.endswith("_id"):
+            return _DUMMY_UUID
+        # An int-typed param (e.g. a template `version`) must be filled with
+        # something that parses as one. A non-numeric placeholder makes the
+        # route 404 before any guard runs, which would read as "the route is
+        # unguarded" when it is really "the sweep addressed nothing".
+        if name in _NUMERIC_PARAMS:
+            return "1"
+        return "dummy"
 
     return _PARAM_RE.sub(_replace, path_template)
 
@@ -163,6 +178,7 @@ def sweep_client(db: Session, tenant_row: Tenant) -> TestClient:
     app.include_router(rbac_web_router)
     app.include_router(settings_web_router)
     app.include_router(custom_fields_web_router)
+    app.include_router(template_studio_web_router)
 
     @app.middleware("http")
     async def _inject_tenant(request: Request, call_next):

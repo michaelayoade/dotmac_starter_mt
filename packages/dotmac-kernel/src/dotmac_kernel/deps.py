@@ -10,7 +10,9 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dotmac_kernel.capabilities import CAPABILITY_CODE_ATTR, active_capabilities
 from dotmac_kernel.db import get_db, get_platform_db
+from dotmac_kernel.entitlements import EntitlementDecision, is_entitled
 from dotmac_kernel.models import AuthSession, Party, PartyRole, PartyType, Role, Tenant
 from dotmac_kernel.permissions import PERMISSION_CODE_ATTR, active_permissions
 from dotmac_kernel.security import decode_access_token, hash_token
@@ -194,6 +196,69 @@ def require_permission(code: str):
     return _dependency
 
 
+def require_capability(code: str):
+    """Return a dependency that requires the TENANT to be entitled to `code`
+    (module control-plane directive step 4).
+
+    **A different question from `require_permission`, and the two compose.**
+    A permission asks "may this ACTOR do it?"; a capability asks "does this
+    TENANT have the feature at all?". An admin of a tenant that never bought
+    custom fields holds every relevant permission and is still not entitled, and
+    a viewer in a tenant that did buy them is entitled and still not permitted.
+    Collapsing them would make one decision answer for both, which is how a
+    plan-name check ends up hardcoded inside a route.
+
+    The decision is LOCAL and explainable: `is_entitled` is a pure read of the
+    tenant's grant store (`dotmac_kernel.entitlements`). A request-time check
+    never calls a payment provider and never validates a licence over the
+    network — ADR-0003 is explicit about that, and it is why the signed-licence
+    receiver PROJECTS into grants rather than being consulted per request.
+
+    Two failure modes, deliberately at different times, mirroring
+    `require_permission`:
+
+    - **Undeclared code → boot failure.** The returned dependency is stamped
+      with `code` (`CAPABILITY_CODE_ATTR`) and `create_app` validates every
+      mounted route's stamped codes against the installed catalogue. A typo
+      stops the boot rather than silently denying every request to that route
+      forever — which would read as an entitlement bug, not a declaration one.
+    - **Tenant not entitled → 403** at request time, carrying the decision's
+      stable `reason` code (`not_granted` / `revoked`) so an operator can tell
+      "never had it" from "had it and lost it" without reading the database.
+
+    Deny-by-default: no grant row means not entitled. A capability whose
+    catalogue was never installed raises `UndeclaredCapabilityError` rather than
+    allowing the request — fail closed, never fail open.
+    """
+
+    def _dependency(
+        request: Request,
+        db: Session = Depends(get_db),
+    ) -> EntitlementDecision:
+        tenant = require_tenant(request)
+        active_capabilities().require(code)
+        decision = is_entitled(db, tenant_id=tenant.id, capability_code=code)
+        if not decision.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                # The reason is a stable, language-neutral code — never a
+                # payment or licence status, which a request-time check does
+                # not know and must not imply.
+                detail={
+                    "error": "not_entitled",
+                    "capability": code,
+                    "reason": decision.reason,
+                },
+            )
+        # Returned, not discarded: a route that needs the grant's `limits` (a
+        # seat count, a quota) reads them from the same decision that admitted
+        # it, rather than issuing a second, possibly-disagreeing read.
+        return decision
+
+    setattr(_dependency, CAPABILITY_CODE_ATTR, code)
+    return _dependency
+
+
 def _bearer_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
@@ -208,6 +273,7 @@ __all__ = [
     "authenticate_request",
     "get_db",
     "get_platform_db",
+    "require_capability",
     "require_permission",
     "require_role",
     "require_tenant",
