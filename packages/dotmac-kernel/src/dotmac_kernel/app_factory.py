@@ -49,6 +49,7 @@ from dotmac_kernel.permissions import (
 )
 from dotmac_kernel.platform_auth import platform_auth_router
 from dotmac_kernel.templating import (
+    install_stylesheets,
     install_surface_globals,
     static_dir,
     use_assembly_templates,
@@ -183,6 +184,11 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # the mount order instead of being derived separately.
     install_surface_globals(manifests, disabled, web_enabled)
 
+    # Extra stylesheet links for every page's <head> (installed presentation
+    # packages' compiled CSS — see `install_stylesheets`). Empty in API-only
+    # mode: there is no <head> to add them to.
+    install_stylesheets(spec.stylesheets if web_enabled else ())
+
     # Assembly-over-kernel template precedence (ChoiceLoader), if the assembly
     # ships its own templates.
     if spec.assembly_template_dir is not None:
@@ -236,15 +242,24 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     register_error_handlers(app)
 
-    # Static mount — the kernel's packaged static, with the assembly's own dir
-    # layered on top when provided (Task 3A static override). Absent in API-only
-    # mode (web_enabled=False), exactly like the reference app.
+    # Static mount — first match wins, most specific authority first: the
+    # assembly's own dir (Task 3A static override), then any installed
+    # presentation package's packaged static (U1), then the kernel's. A product
+    # can therefore shadow one file from a shipped design system without
+    # vendoring the rest of it. Absent in API-only mode (web_enabled=False),
+    # exactly like the reference app.
     if web_enabled:
         static: StaticFiles
-        if spec.assembly_static_dir is not None:
-            static = LayeredStaticFiles(
-                [str(spec.assembly_static_dir), str(static_dir())]
+        layers = [
+            str(directory)
+            for directory in (
+                spec.assembly_static_dir,
+                *spec.packaged_static_dirs,
             )
+            if directory is not None
+        ]
+        if layers:
+            static = LayeredStaticFiles([*layers, str(static_dir())])
         else:
             static = StaticFiles(directory=str(static_dir()))
         app.mount("/static", static, name="static")

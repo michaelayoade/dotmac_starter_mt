@@ -166,13 +166,33 @@ def install_surface_globals(
     templates.env.globals["nav_items"] = nav_items
 
 
-# Safe defaults so any template render before `install_surface_globals` has
-# run (e.g. a test that builds its own throwaway app and never calls it)
-# degrades to "no optional features, no nav" rather than a Jinja
-# UndefinedError — `app.main` overwrites these at import time with the real,
-# manifest-derived values.
+def install_stylesheets(hrefs: Sequence[str]) -> None:
+    """Set the process-static `extra_stylesheets` Jinja global — the ONE place
+    a deployment adds a stylesheet to every page's `<head>`.
+
+    Called once from `create_app` with `ProductAssemblySpec.stylesheets`. The
+    kernel deliberately does not know what those URLs are for: this is the seam
+    an assembly uses to load an installed presentation package's compiled CSS
+    (a `dotmac-ui` release, a packaged theme) WITHOUT the kernel importing,
+    naming, or depending on that package — ADR-0006 § 2's one-way dependency
+    (`assembly → module → dotmac-ui → dotmac-kernel`) forbids the kernel
+    reaching the other way.
+
+    Order is the caller's: these render AFTER the kernel's own stylesheet
+    links, so a later sheet wins on equal specificity. That is the whole
+    cascade contract; there is no per-sheet priority knob.
+    """
+    templates.env.globals["extra_stylesheets"] = tuple(hrefs)
+
+
+# Safe defaults so any template render before `install_surface_globals` /
+# `install_stylesheets` has run (e.g. a test that builds its own throwaway app
+# and never calls them) degrades to "no optional features, no nav, no extra
+# stylesheets" rather than a Jinja UndefinedError — `create_app` overwrites
+# these at app-build time with the real, spec-derived values.
 templates.env.globals.setdefault("enabled_features", frozenset())
 templates.env.globals.setdefault("nav_items", ())
+templates.env.globals.setdefault("extra_stylesheets", ())
 
 
 @lru_cache(maxsize=256)
@@ -245,6 +265,7 @@ def render(
 
 __all__ = [
     "render",
+    "install_stylesheets",
     "install_surface_globals",
     "static_dir",
     "use_assembly_templates",

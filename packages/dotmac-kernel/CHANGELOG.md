@@ -8,7 +8,41 @@ here.
 
 ## Unreleased
 
+## 0.1.0a13 — 2026-08-07
+
+Thirteenth alpha. Adds the **presentation-package composition slots** an assembly
+needs to adopt a shared design system (ADR-0006 U1). Additive only; no migration,
+kernel head stays `0012`.
+
+### Added
+- **`ProductAssemblySpec.packaged_static_dirs`** — static directories belonging
+  to installed presentation packages (a `dotmac-ui` release, a `dotmac-theme-*`),
+  layered UNDER the assembly's own `assembly_static_dir` and OVER the kernel's,
+  in declaration order. Kept separate from `assembly_static_dir` because they are
+  different authorities: that one is the product's own source, these are
+  versioned package data the product composes and must not edit. First match
+  still wins, so a product can shadow one file from a shipped design system
+  without vendoring the rest of it.
+- **`ProductAssemblySpec.stylesheets`** + **`dotmac_kernel.templating
+  .install_stylesheets`** — extra stylesheet URLs rendered into every page's
+  `<head>` after the kernel's own, exposed to templates as the process-static
+  `extra_stylesheets` Jinja global (default `()`, so a render that never called
+  the installer degrades rather than raising). `create_app` installs them, and
+  installs `()` when `web_enabled` is False: an API-only deployment has no
+  `<head>` to advertise a stylesheet for.
+
+**The kernel deliberately does not know what those URLs and directories are
+for.** ADR-0006 § 2 fixes the dependency direction as `assembly → module →
+dotmac-ui → dotmac-kernel`; a kernel that reached forward into the presentation
+system would make the UI package un-releasable independently. So these are
+anonymous slots an assembly fills — the kernel never imports, names, or resolves
+a presentation package, and a new import-linter contract ("Kernel must not import
+the UI package") holds that. URLs rather than paths for `stylesheets` because the
+assembly, not the kernel, owns the mapping from a package's static directory to a
+URL.
+
 ## 0.1.0a12 — 2026-08-06
+
 
 Twelfth alpha. Adds **per-module Postgres schema namespaces and registered
 Alembic migration prefixes** — D1 of the white-label foundation programme
@@ -107,6 +141,7 @@ existing revision id is unchanged.
   unchanged.
 
 ## 0.1.0a11 — 2026-08-06
+
 
 > **Amended 2026-08-03.** `active_audit_actions()` no longer defaults to an
 > empty registry. NOT INSTALLED and INSTALLED-AND-EMPTY are now different
@@ -207,6 +242,7 @@ stays `0012`.
 
 ## 0.1.0a10 — 2026-08-06
 
+
 Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
 control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
 authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
@@ -281,6 +317,7 @@ head stays `0012`.
   floor.
 
 ## 0.1.0a9 — 2026-08-03
+
 
 Ninth alpha. Adds the **applied-state envelope** — the structure a deployment
 signs to prove WHO is reporting what it has applied, unblocking the WS8
@@ -372,6 +409,7 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
 
 ## 0.1.0a8 — 2026-08-02
 
+
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
 value object a deployment uses to report what it is actually running. No
 migration; the kernel head stays `0012`.
@@ -456,6 +494,7 @@ migration; the kernel head stays `0012`.
 
 ## 0.1.0a7 — 2026-08-01
 
+
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
 signed/versioned licence delivery (design brief:
 `docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
@@ -498,6 +537,7 @@ receiver owns its durable applied/revocation state).
 
 ## 0.1.0a6 — 2026-07-31
 
+
 Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
 of the tenant outbox/relay, so a platform-scoped owner (e.g. a vendor
 ContractService) can emit a durable control-plane event ATOMICALLY with its state
@@ -533,6 +573,7 @@ combined with the tenant table. Advances the kernel migration head to `0012`.
   with one active claim per lease; consumers dedupe via `process_once_platform`.
 
 ## 0.1.0a5 — 2026-07-31
+
 
 Fifth alpha. Completes **WS3 slice 2 — the outbox relay**: the leasing
 schema + `outbox_dispatcher` security boundary (SECURITY DEFINER claim/settle,
@@ -588,6 +629,7 @@ explainable evaluator). Advances the kernel migration head to `0010`.
 
 ## 0.1.0a3 — 2026-07-31
 
+
 Third alpha. Adds the WS1 capability catalogue + deployment-profile registry
 (pure in-memory contracts). Additive over `0.1.0a2` — no breaking changes, no new
 migrations (the kernel head stays `0009`).
@@ -613,6 +655,7 @@ migrations (the kernel head stays `0009`).
     `ModuleManifest` expansion.
 
 ## 0.1.0a2 — 2026-07-30
+
 
 Second alpha. Adds exact money/FX value objects and platform-scoped audit +
 idempotency primitives, corrects the vendored font weights, and advances the
@@ -663,6 +706,7 @@ to the `0.1.0a1` public surface.
   `assembly@base` (branch-aware) rather than `kernel@head`.
 
 ## 0.1.0a1 — 2026-07-30
+
 
 First published release — the **alpha** of the DotMac platform kernel extracted
 from the reference assembly (`dotmac_starter_mt`). `pip install --pre

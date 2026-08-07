@@ -14,6 +14,13 @@ python = ">=3.12,<3.14"
 # the ones it uses directly below (uvicorn/gunicorn/psycopg/alembic/
 # python-multipart/email-validator).
 dotmac-kernel = { path = "packages/dotmac-kernel", develop = true }
+# The shared UI design system (ADR-0006 U1), consumed as a package boundary on
+# the same terms as the kernel: editable path dependency, no copied files, no
+# import shims. It is dependency-free by design — adding it pulls in nothing —
+# and the assembly's ONLY use of it is `app/assembly.py` composing its packaged
+# static dir and its one stylesheet URL. Governed by
+# `tests/architecture/test_ui_public_surface.py` (ADR-0006 D5).
+dotmac-ui = { path = "packages/dotmac-ui", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -85,13 +92,38 @@ addopts = "-q"
 pythonpath = ["."]
 
 [tool.importlinter]
-root_packages = ["app", "dotmac_kernel"]
+root_packages = ["app", "dotmac_kernel", "dotmac_ui"]
 
 [[tool.importlinter.contracts]]
 name = "Kernel must not import the assembly"
 type = "forbidden"
 source_modules = ["dotmac_kernel"]
 forbidden_modules = ["app"]
+
+# ADR-0006 § 2: the dependency direction is one-way,
+# `assembly → module → dotmac-ui → dotmac-kernel`. Two contracts pin the two
+# ends of it. The kernel end is absolute — a kernel that reached forward into
+# the presentation system would make the UI package un-releasable
+# independently.
+[[tool.importlinter.contracts]]
+name = "Kernel must not import the UI package"
+type = "forbidden"
+source_modules = ["dotmac_kernel"]
+forbidden_modules = ["dotmac_ui"]
+
+# The UI end is pinned STRONGER than ADR-0006 § 2 requires. The ADR permits
+# `dotmac-ui → dotmac-kernel`; at 0.1.0a1 the package takes no such dependency,
+# and that is load-bearing rather than incidental: it is what lets `dotmac_erp`
+# — which has adopted no kernel at all — consume the design system without
+# adopting anything else first. Relaxing this contract is therefore a decision
+# about ERP's adoption path, which is exactly why it should require editing
+# this file. (The companion pytest guard additionally forbids a web framework,
+# an ORM, and a templating engine, which import-linter cannot express here.)
+[[tool.importlinter.contracts]]
+name = "UI package must not import the kernel or the assembly"
+type = "forbidden"
+source_modules = ["dotmac_ui"]
+forbidden_modules = ["dotmac_kernel", "app"]
 
 [[tool.importlinter.contracts]]
 name = "Features are independent of each other"

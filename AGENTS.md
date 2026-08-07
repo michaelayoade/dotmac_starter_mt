@@ -110,6 +110,28 @@ specifics) points here and must never fork these rules.
     admissible substitute. Product CI is evidence only for the product revision
     it evaluated. (`.github/workflows/engineering-standards.yml`; Governance
     ADR 0006 in `michaelayoade/dotmac_governance`)
+16. **The design system is consumed through its published surface only.**
+    The assembly imports only names in `dotmac_ui.__all__` or in a
+    `SUPPORTED_MODULES` module's `__all__`; `dotmac_ui` itself imports no
+    kernel, no assembly, no web framework, no ORM, and no templating engine,
+    and declares no runtime dependency beyond `python`. Design tokens are
+    named by ROLE, never by value (`--dmui-action-destructive-hover`, never
+    `--teal`), and no `.dmui-*` component class ships without being declared
+    in `PUBLISHED_COMPONENT_CLASSES` + the package's `COMPATIBILITY.md`
+    (ADR-0006 § 5 — a component is extracted only with the same contract, a
+    named owner, and a migration path, never because two templates look
+    alike). (`tests/architecture/test_ui_public_surface.py`; `pyproject.toml`
+    contracts "Kernel must not import the UI package" and "UI package must
+    not import the kernel or the assembly")
+17. **`dotmac-ui`'s compiled assets are COMMITTED and match their token
+    source.** `packages/dotmac-ui/src/dotmac_ui/static/**` is the published
+    contract, not a build artifact — never gitignore it, never hand-edit it;
+    regenerate with `make ui-build` and commit the diff. The stylesheet stays
+    self-contained (no `@import`, CDN, remote origin, or `@font-face`) and
+    preprocessor-free (no `@tailwind`/`@apply`/`@theme`/`@layer`), so a
+    consumer on any Tailwind major — or none — links it as-is (ADR-0006 D3).
+    (`make ui-check`, wired into `make check`;
+    `tests/unit/test_dotmac_ui_tokens.py`)
 
 ## Everything by config — no hardcoding
 

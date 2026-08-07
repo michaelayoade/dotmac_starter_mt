@@ -277,6 +277,15 @@ packages/dotmac-kernel/          the kernel package (distribution dotmac-kernel,
                  (Jinja env + render()), branding (static + per-tenant DB
                  override), identity (Party invariant helpers), web_deps
                  (cookie auth guard, shared with the bearer seam in deps.py)
+packages/dotmac-ui/              the design-system package (distribution
+  pyproject.toml                 dotmac-ui, import dotmac_ui, editable path dep,
+  src/dotmac_ui/                 ZERO runtime dependencies)
+                 contract (UI_CONTRACT_VERSION + namespaces + theme selectors),
+                 tokens (190 role-named semantic design tokens),
+                 assets (packaged static dir, stylesheet path/URL, digests),
+                 a11y (WCAG 2.2 AA contrast contract + checker),
+                 build (INTERNAL — the deterministic asset generator),
+                 static/dotmac-ui/  the COMMITTED compiled stylesheet + manifest
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -302,6 +311,15 @@ Core never imports `app/features` (import-linter contract). Features never
 import each other (import-linter contract). Cross-feature references are
 FK/UUID columns, never a Python import — e.g. `rbac`'s `PartyRole` refers
 to `parties` via a composite FK, not by importing `app.features.parties`.
+
+The package dependency direction is one-way and enforced (ADR-0006 § 2):
+`assembly → module → dotmac-ui → dotmac-kernel`. The kernel imports neither
+`app` nor `dotmac_ui`; `dotmac_ui` imports neither of those, and at 0.1.0a1
+imports no kernel either — deliberately stronger than the ADR requires, because
+that is what lets `dotmac_erp` (which has adopted no kernel at all) consume the
+design system without adopting anything else. Three import-linter contracts hold
+it, and `tests/architecture/test_ui_public_surface.py` additionally forbids
+`dotmac_ui` importing a web framework, an ORM, or a templating engine.
 
 ### Model placement: core vs. feature
 
@@ -617,7 +635,8 @@ routes mount independently.
 
 ```
 templates/
-  base.html                 <html> shell: brand-aware <title>, static asset links
+  base.html                 <html> shell: brand-aware <title>, static asset links,
+                            and the `extra_stylesheets` slot (see "Design system")
   layouts/admin.html         {% extends "base.html" %} + sidebar/topbar chrome
   components/                sidebar, topbar, form_macros, table_macros (Jinja macros)
   auth/login.html             standalone (does not extend layouts/admin.html — pre-auth)
@@ -632,6 +651,10 @@ static/
   js/{htmx,alpine}.min.js     vendored (no CDN, no node_modules at runtime)
   js/csrf.js                  CSRF header bridge (see below)
   js/components.js            small Alpine component glue
+
+(served under the same /static mount, from the dotmac-ui package:)
+  dotmac-ui/dotmac-ui-1.css   design-system tokens — COMMITTED, npm-free
+  dotmac-ui/manifest.json     asset digests for non-Python consumers
 ```
 
 Every `templates/admin/**/*.html` and `templates/auth/*.html` file either
@@ -651,6 +674,51 @@ scannable source the default content-detection understands) replace the old
 `tailwind.config.js` entirely. `npm run css:build` (`make css-build`, or the
 Dockerfile's `css-builder` stage) compiles it; `static/css/main.css` is
 gitignored — never commit it, always rebuild.
+
+### Design system: `dotmac-ui` (ADR-0006 U1)
+
+The portal loads a **second** stylesheet, from the `dotmac-ui` package. The two
+are not variants of each other and must not be conflated:
+
+| | `static/css/main.css` | `dotmac-ui/dotmac-ui-1.css` |
+|---|---|---|
+| Owner | this assembly (kernel package data) | the `dotmac-ui` package |
+| Built by | Tailwind v4 CLI, via npm | pure Python, `make ui-build` |
+| In git | **no** — gitignored, rebuilt | **yes** — it IS the published contract |
+| Contains | compiled utility classes | 190 role-named CSS custom properties + one `:focus-visible` rule |
+| Consumer needs | the v4 toolchain | nothing at all |
+
+It loads **after** `main.css`, so its tokens and its focus-indicator rule win on
+equal specificity. The whole wiring is two fields in `app/assembly.py`:
+`packaged_static_dirs=(dotmac_ui.static_dir(),)` layers the package's assets into
+the existing `/static` mount (under any assembly file, over the kernel's), and
+`stylesheets=(dotmac_ui.stylesheet_url(),)` puts the `<link>` in `base.html` via
+the `extra_stylesheets` Jinja global. Both are ignored when `WEB_ENABLED=false`.
+
+**The kernel does not know what fills those slots.** They are anonymous
+`ProductAssemblySpec` fields (kernel 0.1.0a13) — the dependency direction
+forbids the kernel reaching forward to a presentation package, so the assembly
+owns the composition and the kernel owns only the slot. `stylesheets` takes URLs
+rather than paths for the same reason: the URL mapping is the assembly's.
+
+**Why the artifact is committed and npm-free** (ADR-0006 D3): the published
+contract is *compiled, versioned, self-hosted CSS*, so a consumer never runs the
+package through its own compiler and never has to match a Tailwind major — ERP
+is on v3.4, this repo and Sub are on v4, and all three link the identical file.
+Committing it means a token change shows up as a CSS diff in review and an
+air-gapped consumer gets working assets from a checkout. `make ui-check` (in
+`make check`) and `test_committed_stylesheet_matches_a_fresh_build` fail if the
+committed copy drifts from `packages/dotmac-ui/src/dotmac_ui/tokens.py`.
+
+Tokens are named by ROLE (`--dmui-surface-primary`,
+`--dmui-action-destructive-hover`), never by value; the `--dmui-` prefix exists
+because Tailwind v4's `@theme` emits unprefixed `--color-*`/`--font-*` into the
+same `:root`. Dark values are emitted under both `.dark` (what this portal's
+Alpine store already toggles) and `[data-dmui-theme="dark"]`. **No component
+classes are published yet** — ADR-0006 § 5 forbids extracting markup on the
+grounds that it looks similar, and a guard fails the build if a `.dmui-*`
+selector appears without being declared. Full contract:
+`packages/dotmac-ui/COMPATIBILITY.md`.
 
 ### Auth flow: cookie + bearer share one seam
 

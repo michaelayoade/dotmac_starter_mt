@@ -90,7 +90,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.settings_models` | `SettingDomain`, `SettingValueType` |
 | `dotmac_kernel.settings_resolver` | `SettingSpec`, `register_specs`, `resolve_value` |
 | `dotmac_kernel.settings_admin` | `all_specs`, `get_spec`, `resolve_with_source`, `upsert_by_key`, `ensure_by_key`, `validate_spec_value` |
-| `dotmac_kernel.templating` | `render`, `install_surface_globals`, `static_dir` |
+| `dotmac_kernel.templating` | `render`, `install_surface_globals`, `install_stylesheets`, `static_dir`, `use_assembly_templates` |
 | `dotmac_kernel.testing` | `create_test_engine`, `isolated_session`, `assembly_test_client`, `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding`, `FakeProvisioningProvider`, `check_provisioning_provider_contract`, `FakeLicenceSigner` (see "Testing kit" below) |
 | `dotmac_kernel.testing.harness` | `create_test_engine`, `isolated_session`, `assembly_test_client` |
 | `dotmac_kernel.testing.fakes` | `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding` |
@@ -296,7 +296,8 @@ and may never be invented anywhere else.** Pure and in-memory; no engine, no I/O
 
 A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAssemblySpec`
 (`name`, `modules`, `settings_overrides`, `branding`, `providers`, `web_enabled`,
-`disabled_modules`, `assembly_template_dir`, `assembly_static_dir`, `assembly_migrations`)
+`disabled_modules`, `assembly_template_dir`, `assembly_static_dir`,
+`packaged_static_dirs`, `stylesheets`, `assembly_migrations`)
 and calls `dotmac_kernel.create_app(spec) -> FastAPI` (also reachable as
 `from dotmac_kernel import create_app`; it is lazily loaded so `import dotmac_kernel`
 stays DB-free). `create_app` wires logging, module-registry validation, the lifespan
@@ -305,6 +306,23 @@ platform-auth surface, the static mount, and module mounting.
 `assembly_template_dir`/`assembly_static_dir` layer the
 assembly's own templates/static OVER the kernel's (first-match-wins, via `use_assembly_templates`
 and `LayeredStaticFiles`).
+
+**Presentation-package composition (0.1.0a13).** `packaged_static_dirs` and
+`stylesheets` are the two slots an assembly fills to adopt an installed
+presentation package — a `dotmac-ui` release, a packaged theme.
+`packaged_static_dirs` layers those packages' static directories *under* the
+assembly's own and *over* the kernel's, so their assets are reachable;
+`stylesheets` adds their compiled CSS URLs to every page's `<head>` (after the
+kernel's own links, in declaration order — later wins on equal specificity),
+installed as the `extra_stylesheets` Jinja global by `install_stylesheets`. Both
+are ignored in API-only mode (`web_enabled=False`).
+
+The kernel deliberately does not know what fills them. ADR-0006 § 2 fixes the
+dependency direction as `assembly → module → dotmac-ui → dotmac-kernel`, so these
+are anonymous slots: the kernel never imports, names, or resolves a presentation
+package (import-linter contract "Kernel must not import the UI package"), and
+`stylesheets` takes URLs rather than paths because the assembly owns the mapping
+from a package's static directory to a URL.
 
 `spec.modules` accepts `ModuleManifest`s and/or `FeatureManifest`s. `create_app`
 validates them into a `ModuleRegistry` **before mounting anything** — an

@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "dotmac-ui"
+version = "0.1.0a1"
+description = "DotMac shared UI design system — semantic design tokens and compiled, self-hosted, CSP-compatible assets (ADR-0006 U1)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_ui", from = "src" }]
+include = [
+    # PEP 561 marker — the package's contracts are annotated; ship the hints so
+    # a consumer's type-checker sees dotmac_ui as a TYPED package.
+    { path = "src/dotmac_ui/py.typed", format = ["sdist", "wheel"] },
+    # THE PUBLISHED ARTIFACT (ADR-0006 D3). The compiled stylesheet and its
+    # manifest are the package's consumer contract: a consumer references the
+    # built CSS, it does NOT run this package through its own Tailwind (or any
+    # other) compiler. Shipped as package data and resolved by package path.
+    { path = "src/dotmac_ui/static/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# DELIBERATELY DEPENDENCY-FREE. ADR-0006 § 2 permits `dotmac-ui → dotmac-kernel`,
+# but this package takes no such dependency: at 0.1.0a1 it is pure token data,
+# pure asset-path resolution, and pure contrast arithmetic — no database, no web
+# framework, no templating engine, no kernel. Keeping the dependency set empty
+# is what lets ERP (which has adopted no kernel at all) consume the design
+# system without adopting anything else, and it is enforced by
+# `tests/architecture/test_ui_public_surface.py`.
+# Floor 3.11 to match the kernel and both adopting products.
+python = ">=3.11,<3.14"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
