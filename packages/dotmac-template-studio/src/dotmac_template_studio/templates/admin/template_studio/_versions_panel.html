@@ -1,0 +1,81 @@
+{#
+  Version history + publish controls. Context: `template`, `versions`, `error`.
+
+  Swapped in place by the authoring form and by each publish button, so it
+  carries its own id and renders at 200 with an inline `error` rather than
+  redirecting — the repo's "re-render, don't redirect" convention for a failed
+  mutation.
+
+  NOTE ON ESCAPING: `version.body` is TENANT-AUTHORED text and is rendered
+  through Jinja's default autoescaping. It must never be marked `| safe` — an
+  operator would then be able to inject script into an admin page, which is
+  precisely the stored-XSS shape the escaping rule exists to prevent.
+#}
+<section id="versions-panel"
+         style="border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-lg);
+                background:var(--dmui-surface-elevated); padding:var(--dmui-space-lg);">
+  <h2 style="font-size:var(--dmui-font-size-lg); font-weight:var(--dmui-font-weight-semibold);
+             color:var(--dmui-text-primary); margin-bottom:var(--dmui-space-md);">Versions</h2>
+
+  {% if error %}
+  <div style="margin-bottom:var(--dmui-space-md); padding:var(--dmui-space-sm) var(--dmui-space-md);
+              border:1px solid var(--dmui-status-negative-border);
+              background:var(--dmui-status-negative-surface);
+              color:var(--dmui-status-negative-foreground);
+              border-radius:var(--dmui-radius-md); font-size:var(--dmui-font-size-sm);">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if versions %}
+  <ul style="list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:var(--dmui-space-sm);">
+    {% for version in versions %}
+    <li style="border:1px solid var(--dmui-border-subtle); border-radius:var(--dmui-radius-md);
+               padding:var(--dmui-space-sm) var(--dmui-space-md);">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--dmui-space-md);">
+        <div>
+          <strong style="color:var(--dmui-text-primary); font-size:var(--dmui-font-size-sm);">v{{ version.version }}</strong>
+          {% if template.published_version == version.version %}
+          <span style="margin-left:var(--dmui-space-xs); padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                       border-radius:var(--dmui-radius-full);
+                       background:var(--dmui-status-positive-surface);
+                       color:var(--dmui-status-positive-foreground);
+                       font-size:var(--dmui-font-size-xs);">published</span>
+          {% endif %}
+          <span style="margin-left:var(--dmui-space-xs); color:var(--dmui-text-muted); font-size:var(--dmui-font-size-xs);">
+            {{ version.created_at | local_datetime }}
+          </span>
+        </div>
+        {% if template.published_version != version.version %}
+        <button hx-post="/admin/templates/{{ template.id }}/versions/{{ version.version }}/publish"
+                hx-target="#versions-panel" hx-swap="outerHTML"
+                style="border-radius:var(--dmui-radius-md); border:1px solid var(--dmui-border-default);
+                       background:var(--dmui-surface-primary); color:var(--dmui-text-secondary);
+                       padding:var(--dmui-space-3xs) var(--dmui-space-xs);
+                       font-size:var(--dmui-font-size-xs); cursor:pointer;">
+          Publish
+        </button>
+        {% endif %}
+      </div>
+      {% if version.subject %}
+      <p style="margin:var(--dmui-space-xs) 0 0; font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
+        {{ version.subject }}
+      </p>
+      {% endif %}
+      <pre style="margin:var(--dmui-space-xs) 0 0; white-space:pre-wrap; word-break:break-word;
+                  font-family:var(--dmui-font-family-mono); font-size:var(--dmui-font-size-xs);
+                  color:var(--dmui-text-tertiary);">{{ version.body }}</pre>
+      {% if version.variables %}
+      <p style="margin:var(--dmui-space-xs) 0 0; font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
+        Variables: {{ version.variables | join(', ') }}
+      </p>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p style="color:var(--dmui-text-muted); font-size:var(--dmui-font-size-sm);">
+    No versions yet. Author one above, then publish it to make it live.
+  </p>
+  {% endif %}
+</section>

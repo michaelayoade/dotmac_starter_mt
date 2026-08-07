@@ -21,6 +21,12 @@ dotmac-kernel = { path = "packages/dotmac-kernel", develop = true }
 # static dir and its one stylesheet URL. Governed by
 # `tests/architecture/test_ui_public_surface.py` (ADR-0006 D5).
 dotmac-ui = { path = "packages/dotmac-ui", develop = true }
+# The first INSTALLED STATEFUL MODULE (ADR-0006 M1) — composed on the same terms
+# as the kernel and the UI package: editable path dependency, no copied files,
+# no import shims. The assembly's only uses of it are the three lines in
+# `app/assembly.py` (its manifest, its packaged template dir) and its version
+# location in `alembic.ini`.
+dotmac-template-studio = { path = "packages/dotmac-template-studio", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -92,7 +98,7 @@ addopts = "-q"
 pythonpath = ["."]
 
 [tool.importlinter]
-root_packages = ["app", "dotmac_kernel", "dotmac_ui"]
+root_packages = ["app", "dotmac_kernel", "dotmac_ui", "dotmac_template_studio"]
 
 [[tool.importlinter.contracts]]
 name = "Kernel must not import the assembly"
@@ -124,6 +130,23 @@ name = "UI package must not import the kernel or the assembly"
 type = "forbidden"
 source_modules = ["dotmac_ui"]
 forbidden_modules = ["dotmac_kernel", "app"]
+
+# The MODULE end of the same one-way direction. A module may import the kernel
+# (and, if it needed to, `dotmac-ui`); it may never import the ASSEMBLY that
+# installs it, or another module. The assembly rule is what keeps a module
+# releasable on its own — a module that reached into `app` would only run inside
+# this one repository. The module-to-module rule is the same independence rule
+# features already have, for the same reason: cross-module composition is an
+# htmx-fetched fragment or a service call, never an import (ADR-0006 § 2).
+#
+# Only one module exists today, so "modules do not import each other" has
+# nothing to bite on yet; the contract is written now so the SECOND module
+# inherits the rule instead of discovering it.
+[[tool.importlinter.contracts]]
+name = "Modules must not import the assembly"
+type = "forbidden"
+source_modules = ["dotmac_template_studio"]
+forbidden_modules = ["app"]
 
 [[tool.importlinter.contracts]]
 name = "Features are independent of each other"

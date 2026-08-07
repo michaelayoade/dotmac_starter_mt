@@ -49,10 +49,10 @@ from dotmac_kernel.permissions import (
 )
 from dotmac_kernel.platform_auth import platform_auth_router
 from dotmac_kernel.templating import (
+    compose_templates,
     install_stylesheets,
     install_surface_globals,
     static_dir,
-    use_assembly_templates,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,10 +189,15 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # mode: there is no <head> to add them to.
     install_stylesheets(spec.stylesheets if web_enabled else ())
 
-    # Assembly-over-kernel template precedence (ChoiceLoader), if the assembly
-    # ships its own templates.
-    if spec.assembly_template_dir is not None:
-        use_assembly_templates(spec.assembly_template_dir)
+    # Template precedence, most specific first: the assembly's own directory,
+    # then installed packages' (an installable module's admin screens, a
+    # packaged theme), then the kernel's. Called UNCONDITIONALLY — passing an
+    # empty composition resets to kernel-only, so a second `create_app` in one
+    # process cannot inherit a previous spec's override.
+    compose_templates(
+        assembly_dir=spec.assembly_template_dir,
+        packaged_dirs=spec.packaged_template_dirs,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

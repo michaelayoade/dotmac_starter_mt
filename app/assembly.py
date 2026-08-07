@@ -32,6 +32,7 @@ those to layer its own look over the kernel's.
 
 from __future__ import annotations
 
+import dotmac_template_studio
 import dotmac_ui
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.config import settings
@@ -41,9 +42,21 @@ from app.features import FEATURE_MODULES
 
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
-    modules=load_manifests(FEATURE_MODULES),
+    # The assembly's own features, plus every INSTALLED MODULE it composes.
+    #
+    # `dotmac_template_studio.module` is a `ModuleManifest`, not a
+    # `FeatureManifest`, so it cannot go through `load_manifests` (which
+    # isinstance-checks the latter) and must NOT go in `FEATURE_MODULES` —
+    # that list is the assembly's own packages, and an architecture test holds
+    # it byte-for-byte equal to the features independence contract. The
+    # assembly importing a module directly is the legal direction: `assembly →
+    # module → dotmac-ui → dotmac-kernel`.
+    modules=[*load_manifests(FEATURE_MODULES), dotmac_template_studio.module],
     web_enabled=settings.web_enabled,
     disabled_modules=frozenset(settings.disabled_feature_set),
     packaged_static_dirs=(dotmac_ui.static_dir(),),
+    # An installed module's admin screens are package data outside this
+    # assembly's template root — see `ProductAssemblySpec.packaged_template_dirs`.
+    packaged_template_dirs=(dotmac_template_studio.template_dir(),),
     stylesheets=(dotmac_ui.stylesheet_url(),),
 )

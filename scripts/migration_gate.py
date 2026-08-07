@@ -41,13 +41,18 @@ _PLACEHOLDER_DB_URL = os.getenv(
 os.environ.setdefault("DATABASE_URL", _PLACEHOLDER_DB_URL)
 os.environ.setdefault("PLATFORM_DATABASE_URL", _PLACEHOLDER_DB_URL)
 
-from dotmac_kernel.features import load_manifests  # noqa: E402
 from dotmac_kernel.migrations.gate import (  # noqa: E402
     run_gate,
     version_locations_from_ini,
 )
 
-from app.features import FEATURE_MODULES  # noqa: E402
+# Gate the SAME composition the app boots — `app.assembly`'s spec, not
+# `load_manifests(FEATURE_MODULES)`. That earlier spelling covered the
+# assembly's own features only, so the first INSTALLED MODULE's lineage was
+# unattributable: its branch label was "not registered" because the module
+# declaring it was never in the set the gate built its registry from. A gate
+# that checks a different composition than the one that ships is not a gate.
+from app.assembly import assembly  # noqa: E402
 
 
 def main() -> int:
@@ -59,7 +64,7 @@ def main() -> int:
     if not locations:
         print(f"{ini_path} selects no version_locations", file=sys.stderr)
         return 2
-    report = run_gate(load_manifests(FEATURE_MODULES), locations)
+    report = run_gate(assembly.modules, locations)
     print(report.render())
     return 0 if report.ok else 1
 

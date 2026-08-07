@@ -281,7 +281,14 @@ def test_metadata_matches_live_tables(admin_engine) -> None:
 
     with admin_engine.connect() as conn:
         live = set(_live_tables(conn)) - _INFRA_TABLES
-    declared = set(Base.metadata.tables)
+    # `_live_tables` queries the `public` namespace only, so compare against the
+    # models that live there. A stateful MODULE's models are keyed
+    # `mod_<short>.<table>` in `Base.metadata` and are covered — in both
+    # directions, and against their own declaration — by
+    # `tests/test_module_schema_catalog.py`, the live-catalog gate D1 added for
+    # exactly this. Including them here would report every module table as
+    # "missing a migration" purely because this query never looked in its schema.
+    declared = {name for name in Base.metadata.tables if "." not in name}
     missing_migrations = declared - live
     unmodelled = live - declared
     assert (

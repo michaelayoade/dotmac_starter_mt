@@ -10,6 +10,42 @@ here.
 
 ## 0.1.0a13 — 2026-08-07
 
+Fourteenth alpha. Opens the two seams the FIRST STATEFUL MODULE needs, and makes
+its namespace allocation (ADR-0006 D1 / M1). Additive only; no migration, kernel
+head stays `0012`.
+
+### Added
+- **`ProductAssemblySpec.packaged_template_dirs`** + **`dotmac_kernel.templating
+  .compose_templates`** — template directories belonging to installed packages
+  (an installable module's admin screens, a packaged theme), layered UNDER the
+  assembly's own directory and OVER the kernel's, in declaration order. This is
+  what lets a stateful module ship a `/admin/...` surface at all: a module is a
+  pip-installed package, so its Jinja files are package data outside any
+  assembly's template root, and the single ChoiceLoader could previously hold
+  exactly one assembly directory.
+
+  `compose_templates` is now the ONE loader authority and `create_app` calls it
+  unconditionally; `use_assembly_templates` is retained as the published
+  single-layer spelling and delegates to it. Two independent setters would each
+  have had to guess what the other installed, and the last caller would silently
+  drop the other's layer. A consequence worth knowing: an empty composition
+  RESETS to kernel-only, so a second `create_app` in one process no longer
+  inherits a previous spec's override.
+- **`mod_tstudio` ledger allocation** — `TEMPLATE_STUDIO_MIGRATION_OWNER` in
+  `dotmac_kernel.namespaces`, the first installable module in
+  `MIGRATION_OWNER_LEDGER` (owner `template_studio`, prefix `ts`, schema
+  `mod_tstudio`). Per D1's own rule, the row lands in the same change as the
+  module's manifest.
+
+### Changed
+- **`dotmac_kernel.testing.create_test_engine` attaches module schemas.** A
+  stateful module's models are bound to `mod_<short_code>`, so the ORM emits
+  fully qualified `mod_x.thing` — which plain SQLite rejects. Each distinct
+  schema in `Base.metadata` is now ATTACHed as its own in-memory database before
+  `create_all`. Deliberately ATTACH and not a `schema_translate_map`: translating
+  the schema away would make the unit lane exercise unqualified SQL no deployment
+  runs, hiding precisely the qualification defects D1's gate exists to catch.
+
 Thirteenth alpha. Adds the **presentation-package composition slots** an assembly
 needs to adopt a shared design system (ADR-0006 U1). Additive only; no migration,
 kernel head stays `0012`.
@@ -42,6 +78,7 @@ assembly, not the kernel, owns the mapping from a package's static directory to 
 URL.
 
 ## 0.1.0a12 — 2026-08-06
+
 
 
 Twelfth alpha. Adds **per-module Postgres schema namespaces and registered
@@ -141,6 +178,7 @@ existing revision id is unchanged.
   unchanged.
 
 ## 0.1.0a11 — 2026-08-06
+
 
 
 > **Amended 2026-08-03.** `active_audit_actions()` no longer defaults to an
@@ -243,6 +281,7 @@ stays `0012`.
 ## 0.1.0a10 — 2026-08-06
 
 
+
 Tenth alpha. Adds the **module manifest and registry** — step 2 of the module
 control-plane program (`docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`,
 authorized by ADR-0003 and constrained by ADR-0006). No migration; the kernel
@@ -317,6 +356,7 @@ head stays `0012`.
   floor.
 
 ## 0.1.0a9 — 2026-08-03
+
 
 
 Ninth alpha. Adds the **applied-state envelope** — the structure a deployment
@@ -410,6 +450,7 @@ production-readiness gate (ADR-0007). No migration; the kernel head stays
 ## 0.1.0a8 — 2026-08-02
 
 
+
 Eighth alpha. Adds the **receiver-applied-state contract** — the cross-plane
 value object a deployment uses to report what it is actually running. No
 migration; the kernel head stays `0012`.
@@ -495,6 +536,7 @@ migration; the kernel head stays `0012`.
 ## 0.1.0a7 — 2026-08-01
 
 
+
 Seventh alpha. Adds **WS8 signed-licence verification** — the kernel slice of
 signed/versioned licence delivery (design brief:
 `docs/superpowers/reviews/2026-08-01-ws8-signed-licence-design.md`). The kernel
@@ -538,6 +580,7 @@ receiver owns its durable applied/revocation state).
 ## 0.1.0a6 — 2026-07-31
 
 
+
 Sixth alpha. Adds the **platform outbox + platform relay** — the tenant-free peer
 of the tenant outbox/relay, so a platform-scoped owner (e.g. a vendor
 ContractService) can emit a durable control-plane event ATOMICALLY with its state
@@ -573,6 +616,7 @@ combined with the tenant table. Advances the kernel migration head to `0012`.
   with one active claim per lease; consumers dedupe via `process_once_platform`.
 
 ## 0.1.0a5 — 2026-07-31
+
 
 
 Fifth alpha. Completes **WS3 slice 2 — the outbox relay**: the leasing
@@ -630,6 +674,7 @@ explainable evaluator). Advances the kernel migration head to `0010`.
 ## 0.1.0a3 — 2026-07-31
 
 
+
 Third alpha. Adds the WS1 capability catalogue + deployment-profile registry
 (pure in-memory contracts). Additive over `0.1.0a2` — no breaking changes, no new
 migrations (the kernel head stays `0009`).
@@ -655,6 +700,7 @@ migrations (the kernel head stays `0009`).
     `ModuleManifest` expansion.
 
 ## 0.1.0a2 — 2026-07-30
+
 
 
 Second alpha. Adds exact money/FX value objects and platform-scoped audit +
@@ -706,6 +752,7 @@ to the `0.1.0a1` public surface.
   `assembly@base` (branch-aware) rather than `kernel@head`.
 
 ## 0.1.0a1 — 2026-07-30
+
 
 
 First published release — the **alpha** of the DotMac platform kernel extracted

@@ -72,6 +72,16 @@ class ProductAssemblySpec:
     # supplied one — it is handed a path (ADR-0006 § 2: the kernel never imports
     # `dotmac-ui`).
     packaged_static_dirs: Sequence[Path] = ()
+    # Template directories belonging to INSTALLED PACKAGES — an installable
+    # MODULE's own admin screens, a packaged theme's overrides — layered UNDER
+    # the assembly's own dir and OVER the kernel's, in declaration order. The
+    # template counterpart of `packaged_static_dirs`, and the reason a stateful
+    # module can ship a `/admin/...` surface at all: a module is a pip-installed
+    # package, so its Jinja files are package data outside any assembly's
+    # template root, and until this slot existed the one ChoiceLoader could hold
+    # exactly one assembly directory. Same anonymity rule as the static slot —
+    # the kernel is handed paths and never learns which package supplied one.
+    packaged_template_dirs: Sequence[Path] = ()
     # Extra stylesheet URLs rendered into every page's <head>, after the
     # kernel's own, in declaration order. The companion to
     # `packaged_static_dirs`: that field makes a presentation package's assets
@@ -94,6 +104,9 @@ class ProductAssemblySpec:
         object.__setattr__(self, "disabled_modules", frozenset(self.disabled_modules))
         object.__setattr__(
             self, "packaged_static_dirs", tuple(self.packaged_static_dirs)
+        )
+        object.__setattr__(
+            self, "packaged_template_dirs", tuple(self.packaged_template_dirs)
         )
         object.__setattr__(self, "stylesheets", tuple(self.stylesheets))
 

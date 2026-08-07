@@ -32,12 +32,23 @@ behavior (nothing here talks to the DB or the app):
    a test that runs in the fast unit/architecture suite by itself; this
    gives immediate, in-repo feedback without invoking `make lint-imports`.
 
-SCOPE LIMITATION: The template checks cover `templates/admin/**` and
-`templates/auth/*` only (errors/layouts/components unscanned; currently
-verified clean by the T8 review). The import scan skips relative imports
-(import-linter is the authoritative parallel contract). A future non-admin
-portal surface must extend `_admin_and_auth_templates()` and the sweep
-prefix accordingly.
+SCOPE LIMITATION: The template checks cover `admin/**` and `auth/*` only
+(errors/layouts/components unscanned; currently verified clean by the T8
+review). The import scan skips relative imports (import-linter is the
+authoritative parallel contract). A future non-admin portal surface must extend
+`_admin_and_auth_templates()` and the sweep prefix accordingly.
+
+WHERE THE TEMPLATES LIVE. Not in one directory, and no longer in the assembly at
+all. They are PACKAGE DATA in every package that ships a portal surface: the
+kernel's own screens, and each installed module's (ADR-0006 M1 —
+`dotmac-template-studio` is the first). `TEMPLATE_ROOTS` below enumerates them,
+and `test_template_scan_is_not_vacuous` asserts the scan actually found files.
+
+That last test exists because this suite HAD silently gone vacuous: the root
+constant was `PROJECT_ROOT / "templates"`, which stopped existing when the
+templates moved into the kernel package, and four checks went on passing while
+walking an empty set. A guard that reports success over nothing is worse than no
+guard, because it also reports coverage.
 """
 
 from __future__ import annotations
@@ -50,7 +61,20 @@ from dotmac_kernel.templating import templates
 from jinja2 import nodes
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TEMPLATES_ROOT = PROJECT_ROOT / "templates"
+
+# Every packaged template root a portal surface can ship from. An assembly that
+# adds its own `templates/` directory, or a second installed module, appends its
+# root here — the same edit shape as adding a feature to `FEATURE_MODULES`.
+TEMPLATE_ROOTS: tuple[Path, ...] = (
+    PROJECT_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/templates",
+    PROJECT_ROOT
+    / "packages/dotmac-template-studio/src/dotmac_template_studio/templates",
+)
+
+
+def _glob_all(pattern: str) -> list[Path]:
+    return sorted(p for root in TEMPLATE_ROOTS for p in root.glob(pattern))
+
 
 # ---------------------------------------------------------------------------
 # 1. Every admin/auth template extends a layout or is an `_`-prefixed
@@ -59,9 +83,25 @@ TEMPLATES_ROOT = PROJECT_ROOT / "templates"
 
 
 def _admin_and_auth_templates() -> list[Path]:
-    return sorted(TEMPLATES_ROOT.glob("admin/**/*.html")) + sorted(
-        TEMPLATES_ROOT.glob("auth/*.html")
+    return _glob_all("admin/**/*.html") + _glob_all("auth/*.html")
+
+
+def test_template_scan_is_not_vacuous() -> None:
+    """Every check below is only as good as the set it walks.
+
+    Asserting on the set — rather than trusting a glob — is what keeps a moved
+    template directory from turning this whole file into a green no-op, which is
+    exactly what happened once already (see the module docstring).
+    """
+    missing = [str(root) for root in TEMPLATE_ROOTS if not root.is_dir()]
+    assert (
+        not missing
+    ), f"TEMPLATE_ROOTS names a directory that does not exist: {missing}"
+    assert _admin_and_auth_templates(), (
+        "no admin/auth templates found under any TEMPLATE_ROOT — the scan is "
+        "vacuous and every convention check below is passing over nothing"
     )
+    assert _template_files(), "no templates found under any TEMPLATE_ROOT"
 
 
 def test_every_admin_or_auth_template_extends_a_layout_or_is_a_fragment() -> None:
@@ -168,12 +208,23 @@ def test_safe_filter_only_used_with_a_sanitize_comment_nearby() -> None:
 # ---------------------------------------------------------------------------
 
 
+# Installed MODULE packages that ship a `web.py`. A module is held to the same
+# import rule as a feature, one level up: it may import `dotmac_kernel.*` and its
+# OWN package, never the assembly and never another module.
+MODULE_PACKAGE_ROOTS: tuple[Path, ...] = (
+    PROJECT_ROOT / "packages/dotmac-template-studio/src/dotmac_template_studio",
+)
+
+
 def _web_py_files() -> list[Path]:
-    return sorted((PROJECT_ROOT / "app" / "features").glob("*/web.py"))
+    return sorted((PROJECT_ROOT / "app" / "features").glob("*/web.py")) + sorted(
+        root / "web.py" for root in MODULE_PACKAGE_ROOTS if (root / "web.py").is_file()
+    )
 
 
 def _own_feature_name(path: Path) -> str:
     # app/features/<name>/web.py -> <name>
+    # <module package>/web.py     -> the package name (e.g. dotmac_template_studio)
     return path.parent.name
 
 
@@ -190,6 +241,10 @@ def _imported_module_names(path: Path) -> list[str]:
 
 def _is_allowed_app_import(module: str, own_feature: str) -> bool:
     if module == "dotmac_kernel" or module.startswith("dotmac_kernel."):
+        return True
+    # An installed module's own package — `own_feature` is the package name for
+    # a module `web.py`, and importing itself is exactly what is allowed.
+    if module == own_feature or module.startswith(f"{own_feature}."):
         return True
     own_prefix = f"app.features.{own_feature}"
     return module == own_prefix or module.startswith(f"{own_prefix}.")
@@ -243,12 +298,12 @@ _LOCAL_FILTER_NAMES = frozenset({"local_date", "local_datetime"})
 
 
 def _template_files() -> list[Path]:
-    """Every template under `templates/**` — wider than
+    """Every template under every `TEMPLATE_ROOT` — wider than
     `_admin_and_auth_templates()` above (which is scoped to admin/auth full
     pages) because fragments (`_*.html`, e.g. `_audit_table.html`) render
     `*_at` timestamps too and must be covered here.
     """
-    return sorted(TEMPLATES_ROOT.glob("**/*.html"))
+    return _glob_all("**/*.html")
 
 
 def _timestamp_attr_name(expr: nodes.Node) -> str | None:

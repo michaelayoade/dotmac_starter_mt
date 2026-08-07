@@ -33,16 +33,55 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 
+def _module_schemas() -> tuple[str, ...]:
+    """Every distinct non-default schema bound to a table in `Base.metadata`.
+
+    Read off the metadata rather than off `MIGRATION_OWNER_LEDGER` on purpose:
+    the harness must attach exactly what the caller actually imported, and it
+    must not care whether a schema belongs to an installed module, so it never
+    needs to import one.
+    """
+    return tuple(sorted({t.schema for t in Base.metadata.tables.values() if t.schema}))
+
+
 def create_test_engine() -> Engine:
     """A fresh in-memory SQLite engine with the full `Base.metadata` schema
     created. `check_same_thread=False` because a TestClient runs sync route
     dependencies on a worker thread while the test holds one connection —
-    sequential use only, never concurrent."""
+    sequential use only, never concurrent.
+
+    **Module schemas (ADR-0006 D1).** A stateful module binds its models to
+    `mod_<short_code>` via `namespaces.schema_table_args`, so the ORM emits
+    fully qualified `mod_x.thing` — which is the entire point of D1, and which
+    plain SQLite rejects because it has no schemas. Each such schema is
+    therefore ATTACHed as its own in-memory database before `create_all`, on
+    every connection.
+
+    ATTACH rather than a `schema_translate_map`: translating the schema away
+    would make the unit lane exercise UNQUALIFIED SQL that no deployment ever
+    runs, quietly hiding exactly the qualification defects D1's gate exists to
+    catch. Attaching keeps the emitted SQL identical to production's.
+    """
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         future=True,
         connect_args={"check_same_thread": False},
     )
+    schemas = _module_schemas()
+    if schemas:
+
+        @event.listens_for(engine, "connect")
+        def _attach_module_schemas(dbapi_connection: object, _record: object) -> None:
+            cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+            try:
+                for schema in schemas:
+                    # Identifier-quoted, and the names are `mod_<short_code>`
+                    # already validated by `namespaces.validate_schema` — this
+                    # is defence in depth, not the only check.
+                    cursor.execute(f"ATTACH DATABASE ':memory:' AS \"{schema}\"")
+            finally:
+                cursor.close()
+
     Base.metadata.create_all(engine)
     return engine
 

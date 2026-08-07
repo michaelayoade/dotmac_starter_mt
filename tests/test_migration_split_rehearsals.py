@@ -421,13 +421,19 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     script = ScriptDirectory.from_config(cfg)
 
     heads = set(script.get_heads())
+    # Three lineages now: the two grandfathered host owners plus the first
+    # installed stateful MODULE (ADR-0006 M1). One head per owner is the
+    # invariant — a second head inside ONE lineage would be the real defect.
     assert heads == {
         "0012_platform_outbox",
         "a003_revocation_lists",
+        "ts_0001_templates",
     }, f"unexpected head set: {heads}"
 
     # Each head carries the expected branch label.
     kernel_head = script.get_revision("kernel@head")
     assembly_head = script.get_revision("assembly@head")
+    module_head = script.get_revision("template_studio@head")
     assert kernel_head.revision == "0012_platform_outbox"
     assert assembly_head.revision == "a003_revocation_lists"
+    assert module_head.revision == "ts_0001_templates"

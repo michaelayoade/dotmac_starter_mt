@@ -78,18 +78,48 @@ def static_dir() -> Path:
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
+def compose_templates(
+    *,
+    assembly_dir: Path | None = None,
+    packaged_dirs: Sequence[Path] = (),
+) -> None:
+    """Rebuild the ONE template loader from a composition, most specific first:
+    the assembly's own directory, then any installed packages' directories in
+    declaration order, then the kernel's packaged templates.
+
+    Called once by ``create_app`` with ``assembly_template_dir`` and
+    ``packaged_template_dirs``. A template the assembly ships (e.g.
+    ``admin/dashboard.html``) shadows a packaged module's same-named one, which
+    in turn shadows the kernel's; anything nobody overrides still resolves from
+    the kernel. That ordering is the same authority rule the static mount uses
+    (`create_app`): the product's own source wins over versioned package data it
+    composes but must not edit.
+
+    ONE function rather than a setter per layer, and it always rebuilds from the
+    ORIGINAL kernel loader: two independent setters would each have to guess
+    what the other had installed, and the last caller would silently drop the
+    other's layer. Passing nothing therefore RESETS to kernel-only, which is
+    what a second ``create_app`` in the same process (a test building a
+    throwaway app) should get — a leaked override from a previous app is the
+    same class of bug as a leaked process-static Jinja global.
+    """
+    layers = [FileSystemLoader(str(d)) for d in (assembly_dir,) if d is not None]
+    layers += [FileSystemLoader(str(d)) for d in packaged_dirs]
+    kernel_loader = FileSystemLoader(str(TEMPLATES_DIR))
+    templates.env.loader = (
+        ChoiceLoader([*layers, kernel_loader]) if layers else kernel_loader
+    )
+
+
 def use_assembly_templates(directory: Path) -> None:
     """Give an assembly's own template directory PRECEDENCE over the kernel's
-    (kernel-boundary Task 3A — the assembly-over-kernel ChoiceLoader). Called by
-    ``create_app`` when the spec carries an ``assembly_template_dir``: a template
-    the assembly ships (e.g. ``admin/dashboard.html``) then shadows the kernel's
-    same-named one, while any template the assembly does NOT override still
-    resolves from the packaged kernel templates. Idempotent-safe: it always
-    layers over the ORIGINAL kernel loader, never stacking assembly loaders."""
-    kernel_loader = FileSystemLoader(str(TEMPLATES_DIR))
-    templates.env.loader = ChoiceLoader(
-        [FileSystemLoader(str(directory)), kernel_loader]
-    )
+    (kernel-boundary Task 3A — the assembly-over-kernel ChoiceLoader).
+
+    Retained as the published single-layer spelling; `compose_templates` is the
+    general form and the one `create_app` calls. Delegating rather than
+    duplicating the loader construction is what keeps the two from drifting.
+    """
+    compose_templates(assembly_dir=directory)
 
 
 def _context_display(context: Any) -> DisplaySettings:
@@ -265,6 +295,7 @@ def render(
 
 __all__ = [
     "render",
+    "compose_templates",
     "install_stylesheets",
     "install_surface_globals",
     "static_dir",

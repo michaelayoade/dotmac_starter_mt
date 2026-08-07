@@ -324,6 +324,16 @@ package (import-linter contract "Kernel must not import the UI package"), and
 `stylesheets` takes URLs rather than paths because the assembly owns the mapping
 from a package's static directory to a URL.
 
+**Packaged templates (0.1.0a13).** `packaged_template_dirs` is the template
+counterpart, and the reason an installable MODULE can ship an `/admin/...`
+screen: its Jinja files are package data outside any assembly's template root.
+`dotmac_kernel.templating.compose_templates` is the one loader authority —
+assembly directory, then packaged directories in declaration order, then the
+kernel's — and `create_app` calls it unconditionally. `use_assembly_templates`
+remains published and delegates to it. Note the consequence of "unconditional":
+an empty composition resets to kernel-only, so a second `create_app` in one
+process does not inherit a previous spec's override.
+
 `spec.modules` accepts `ModuleManifest`s and/or `FeatureManifest`s. `create_app`
 validates them into a `ModuleRegistry` **before mounting anything** — an
 incoherent set raises a `ModuleRegistryError` at boot rather than surfacing as a
