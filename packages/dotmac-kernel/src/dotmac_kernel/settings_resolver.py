@@ -30,7 +30,7 @@ import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -39,6 +39,11 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel.exceptions import BadRequestError
 from dotmac_kernel.setting_domains import active_setting_domains
+from dotmac_kernel.setting_scopes import (
+    SettingScope,
+    active_scope_kinds,
+    resolution_chain,
+)
 from dotmac_kernel.setting_value_types import (
     SettingValueType,
     UndeclaredValueTypeError,
@@ -61,7 +66,11 @@ from dotmac_kernel.settings_models import (
 _UNSET = object()
 
 # What determined a resolved value — see `resolve_with_source`.
-SettingSource = Literal["tenant", "platform", "env", "default"]
+# What determined a resolved value: the SCOPE KIND of the row that won, or
+# `env`/`default` when no row did. A plain `str` rather than a closed Literal,
+# because the set of scope kinds is itself declared — the kernel's two still
+# render as "tenant" and "platform", so nothing visible changes today.
+SettingSource = str
 
 
 @dataclass(frozen=True)
@@ -127,8 +136,32 @@ def get_spec(domain: SettingDomain, key: str) -> SettingSpec:
         raise KeyError(f"No registered setting spec for {domain.value}/{key}") from None
 
 
+def _scope_for(
+    tenant_id: UUID | None | object, scope: SettingScope | None
+) -> SettingScope:
+    """Normalise the two ways a caller can name a scope into one.
+
+    `scope=` is the real parameter. `tenant_id=` is the shorthand that predates
+    scope depth and still covers the common case; it is kept because it reads
+    well at a call site that genuinely means "this tenant", not for
+    compatibility alone. Passing both is a caller error rather than a merge,
+    because there is no sensible answer to which one wins.
+    """
+    if scope is not None:
+        if tenant_id is not _UNSET:
+            raise TypeError(
+                "pass either tenant_id= or scope=, not both — they name the "
+                "same thing and there is no rule for which would win"
+            )
+        return scope
+    resolved = None if tenant_id is _UNSET else tenant_id
+    if resolved is None:
+        return SettingScope.platform()
+    return SettingScope.tenant(cast("UUID", resolved))
+
+
 def _select_row(
-    db: Session, domain: SettingDomain, key: str, tenant_id: UUID | None
+    db: Session, domain: SettingDomain, key: str, scope: SettingScope
 ) -> DomainSetting | None:
     """The active row for this (domain, key, scope), or None.
 
@@ -136,13 +169,26 @@ def _select_row(
     an inactive tenant row yields to the platform row, an inactive platform
     row yields to the spec default.
     """
-    return db.scalars(
+    statement = (
         select(DomainSetting)
         .where(DomainSetting.domain == domain)
         .where(DomainSetting.key == key)
-        .where(DomainSetting.tenant_id == tenant_id)
+        .where(DomainSetting.scope_kind == scope.kind)
         .where(DomainSetting.is_active == True)  # noqa: E712
-    ).first()
+    )
+    # `IS NULL` rather than `== None`: SQL equality against NULL is never true,
+    # so a platform row would be invisible to its own lookup.
+    statement = statement.where(
+        DomainSetting.tenant_id.is_(None)
+        if scope.tenant_id is None
+        else DomainSetting.tenant_id == scope.tenant_id
+    )
+    statement = statement.where(
+        DomainSetting.scope_id.is_(None)
+        if scope.scope_id is None
+        else DomainSetting.scope_id == scope.scope_id
+    )
+    return db.scalars(statement).first()
 
 
 def _extract_raw(setting: DomainSetting | None) -> object | None:
@@ -187,7 +233,8 @@ def resolve_with_source(
     domain: SettingDomain,
     key: str,
     *,
-    tenant_id: UUID | None,
+    tenant_id: UUID | None | object = _UNSET,
+    scope: SettingScope | None = None,
     default: Any = _UNSET,
 ) -> tuple[Any, SettingSource]:
     """Resolve a setting value AND where it came from: tenant, platform, or default.
@@ -206,6 +253,7 @@ def resolve_with_source(
     the spec's built-in default (e.g. to mask secrets only when a real row
     value is shown, not when displaying the default).
     """
+    target = _scope_for(tenant_id, scope)
     try:
         spec = get_spec(domain, key)
     except KeyError:
@@ -215,20 +263,20 @@ def resolve_with_source(
             return default, "default"
         raise
 
-    hit = _cached(domain, key, tenant_id=tenant_id)
+    hit = _cached(domain, key, scope=target)
     if hit is not _CACHE_MISS:
         return cast("tuple[Any, SettingSource]", hit)
 
     row = None
     source: SettingSource = "default"
-    if tenant_id is not None:
-        row = _select_row(db, domain, key, tenant_id)
+    # Most specific first, ending at platform. The chain comes from the DECLARED
+    # ranks, so a product that inserts a level (site, region, user) gets it in
+    # the right position without editing this function.
+    for candidate in resolution_chain(target, active_scope_kinds()):
+        row = _select_row(db, domain, key, candidate)
         if row is not None:
-            source = "tenant"
-    if row is None:
-        row = _select_row(db, domain, key, None)
-        if row is not None:
-            source = "platform"
+            source = candidate.kind
+            break
 
     raw = _extract_raw(row)
     if raw is None and spec.env_var is not None:
@@ -286,7 +334,7 @@ def resolve_with_source(
     _store_resolved(
         domain,
         key,
-        tenant_id=tenant_id,
+        scope=target,
         value=value,
         source=source,
         is_secret=spec.is_secret,
@@ -299,7 +347,8 @@ def resolve_value(
     domain: SettingDomain,
     key: str,
     *,
-    tenant_id: UUID | None,
+    tenant_id: UUID | None | object = _UNSET,
+    scope: SettingScope | None = None,
     default: Any = _UNSET,
 ) -> Any:
     """Resolve a setting value: tenant row -> platform row -> spec default.
@@ -326,7 +375,7 @@ def resolve_value(
     `source` ("tenant"/"platform"/"default") the settings admin API needs.
     """
     value, _source = resolve_with_source(
-        db, domain, key, tenant_id=tenant_id, default=default
+        db, domain, key, tenant_id=tenant_id, scope=scope, default=default
     )
     return value
 
@@ -491,7 +540,8 @@ def upsert_by_key(
     key: str,
     value: object,
     *,
-    tenant_id: UUID | None,
+    tenant_id: UUID | None | object = _UNSET,
+    scope: SettingScope | None = None,
 ) -> DomainSetting:
     """Create or overwrite the (domain, key, tenant_id) row with `value`.
 
@@ -503,12 +553,14 @@ def upsert_by_key(
     at the DB layer, not here.
     """
     domain = active_setting_domains().require(domain)
+    target = _scope_for(tenant_id, scope)
+    active_scope_kinds().require(target.kind)
     spec = get_spec(domain, key)
     value_text, value_json = _normalize_for_db(
         spec.value_type, value, is_secret=spec.is_secret
     )
 
-    row = _select_row(db, domain, key, tenant_id)
+    row = _select_row(db, domain, key, target)
     if row is not None:
         # Captured BEFORE the assignment: once the attribute is set, the prior
         # value is only recoverable from the session's history, which a later
@@ -525,11 +577,13 @@ def upsert_by_key(
             action=SettingChangeAction.update,
             before=before,
         )
-        _invalidate_cache(domain, key, tenant_id=tenant_id)
+        _invalidate_cache(domain, key, scope=target)
         return row
 
     row = DomainSetting(
-        tenant_id=tenant_id,
+        tenant_id=target.tenant_id,
+        scope_kind=target.kind,
+        scope_id=target.scope_id,
         domain=domain,
         key=key,
         value_type=spec.value_type,
@@ -542,7 +596,7 @@ def upsert_by_key(
     _record_history(
         db, row=row, spec=spec, action=SettingChangeAction.create, before=None
     )
-    _invalidate_cache(domain, key, tenant_id=tenant_id)
+    _invalidate_cache(domain, key, scope=target)
     return row
 
 
@@ -552,7 +606,8 @@ def ensure_by_key(
     key: str,
     value: object,
     *,
-    tenant_id: UUID | None,
+    tenant_id: UUID | None | object = _UNSET,
+    scope: SettingScope | None = None,
 ) -> DomainSetting:
     """Insert the (domain, key, tenant_id) row with `value` if missing; else no-op.
 
@@ -586,7 +641,9 @@ def ensure_by_key(
     should pass `None` (see `upsert_by_key`'s docstring).
     """
     domain = active_setting_domains().require(domain)
-    existing = _select_row(db, domain, key, tenant_id)
+    target = _scope_for(tenant_id, scope)
+    active_scope_kinds().require(target.kind)
+    existing = _select_row(db, domain, key, target)
     if existing is not None:
         return existing
 
@@ -595,7 +652,9 @@ def ensure_by_key(
         spec.value_type, value, is_secret=spec.is_secret
     )
     row = DomainSetting(
-        tenant_id=tenant_id,
+        tenant_id=target.tenant_id,
+        scope_kind=target.kind,
+        scope_id=target.scope_id,
         domain=domain,
         key=key,
         value_type=spec.value_type,
@@ -608,7 +667,7 @@ def ensure_by_key(
         db.flush()
     except IntegrityError:
         db.rollback()
-        raced = _select_row(db, domain, key, tenant_id)
+        raced = _select_row(db, domain, key, target)
         if raced is not None:
             # The race LOSER wrote nothing, so it records nothing: the winner
             # already recorded the one creation that happened.
@@ -617,7 +676,7 @@ def ensure_by_key(
     _record_history(
         db, row=row, spec=spec, action=SettingChangeAction.create, before=None
     )
-    _invalidate_cache(domain, key, tenant_id=tenant_id)
+    _invalidate_cache(domain, key, scope=target)
     return row
 
 

@@ -499,6 +499,7 @@ def test_cached_reads_do_not_cross_tenants(
     from dotmac_kernel import settings_cache as settings_cache_module
     from dotmac_kernel import settings_resolver
     from dotmac_kernel.cache import MemoryCache
+    from dotmac_kernel.setting_scopes import SettingScope
     from dotmac_kernel.settings_models import SettingDomain
 
     def write(tenant, value: int) -> None:
@@ -545,7 +546,7 @@ def test_cached_reads_do_not_cross_tenants(
         # A's write evicts A's entry and leaves B's intact.
         write(tenant_a, 33)
         assert settings_cache_module.cached(
-            "audit", "retention_days", tenant_id=tenant_b.id
+            "audit", "retention_days", scope=SettingScope.tenant(tenant_b.id)
         ) == (22, "tenant")
         assert read(tenant_a) == 33
         assert read(tenant_b) == 22

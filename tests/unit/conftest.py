@@ -39,6 +39,7 @@ from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
     install_setting_domains,
 )
+from dotmac_kernel.setting_scopes import ScopeKindRegistry, install_scope_kinds
 from dotmac_kernel.setting_value_types import (
     SettingValueTypeRegistry,
     install_setting_value_types,
@@ -95,6 +96,7 @@ def _default_declaration_catalogues():
     install_flags(FlagCatalogue.from_manifests(manifests))
     install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
     install_setting_value_types(SettingValueTypeRegistry.from_manifests(manifests))
+    install_scope_kinds(ScopeKindRegistry.from_manifests(manifests))
     # A fresh evaluation cache per test: the store is process-global, and a
     # leaked entry would make one test's overrides decide another's answer.
     install_flag_cache(MemoryCache())

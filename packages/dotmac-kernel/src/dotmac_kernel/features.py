@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from dotmac_kernel.capabilities import CapabilitySpec
     from dotmac_kernel.flags import FeatureFlagSpec
     from dotmac_kernel.modules import ModuleManifest
+    from dotmac_kernel.setting_scopes import ScopeKindSpec
     from dotmac_kernel.setting_value_types import (
         ValueTypeSpec,  # avoids a runtime cycle: `modules` imports this module
     )
@@ -142,6 +143,9 @@ class FeatureManifest:
     # how its values are stored and read back. See
     # `dotmac_kernel.setting_value_types`.
     setting_value_types: Sequence[ValueTypeSpec] = field(default_factory=tuple)
+    # Scope kinds this module introduces — levels in the settings hierarchy,
+    # each naming where it sits. See `dotmac_kernel.setting_scopes`.
+    scope_kinds: Sequence[ScopeKindSpec] = field(default_factory=tuple)
 
 
 def load_manifests(module_names: Sequence[str]) -> list[FeatureManifest]:

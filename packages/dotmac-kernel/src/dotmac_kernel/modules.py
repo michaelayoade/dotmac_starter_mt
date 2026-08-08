@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     # needed by a type-checker.
     from dotmac_kernel.capabilities import CapabilitySpec
     from dotmac_kernel.flags import FeatureFlagSpec
+    from dotmac_kernel.setting_scopes import ScopeKindSpec
     from dotmac_kernel.setting_value_types import ValueTypeSpec
 
 # The module-contract generation this kernel implements. A module declares the
@@ -160,6 +161,9 @@ class ModuleManifest:
     # how its values are stored and read back. See
     # `dotmac_kernel.setting_value_types`.
     setting_value_types: Sequence[ValueTypeSpec] = field(default_factory=tuple)
+    # Scope kinds this module introduces — levels in the settings hierarchy,
+    # each naming where it sits. See `dotmac_kernel.setting_scopes`.
+    scope_kinds: Sequence[ScopeKindSpec] = field(default_factory=tuple)
     # ── D1: database namespace + migration lineage identity (ADR-0006) ──────
     # `short_code` is the registry-ALLOCATED database identity of a STATEFUL
     # module (see `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER`). Its schema
@@ -202,6 +206,7 @@ class ModuleManifest:
             "audit_actions",
             "setting_domains",
             "setting_value_types",
+            "scope_kinds",
             "tables",
             "feature_flags",
         ):
@@ -341,6 +346,7 @@ class ModuleManifest:
             audit_actions=manifest.audit_actions,
             setting_domains=manifest.setting_domains,
             setting_value_types=manifest.setting_value_types,
+            scope_kinds=manifest.scope_kinds,
             core=manifest.core,
             enabled_by_default=manifest.enabled_by_default,
             seed=manifest.seed,

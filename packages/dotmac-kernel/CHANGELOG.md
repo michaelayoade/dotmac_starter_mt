@@ -6,6 +6,37 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a16 — 2026-08-08
+
+Settings hierarchies gain arbitrary depth, and `tenant_id` stops carrying two
+meanings. Migration `0016`. **No RLS policy is touched.**
+
+### Changed — BREAKING (database, API)
+- **`tenant_id` now carries isolation and only isolation.** It used to mean both
+  "which tenant owns this row" (what RLS keys on) and "how specific this value
+  is" (what resolution walks), which capped the hierarchy at platform-or-tenant
+  because there was nowhere to put a third level.
+- **`scope_kind` (NOT NULL) and `scope_id` carry precedence**, always within the
+  tenant above. `NULL` never means "some level": meaning-by-absence is the
+  convention that let `dotmac_erp` hold duplicate global settings.
+- **The two partial unique indexes become ONE** over `COALESCE`d columns.
+  Postgres treats every NULL as distinct inside a unique index, so a nullable
+  column in one admits duplicates; coalescing removes the NULL and closes the
+  bug class.
+- `SettingSource` widens from a closed `Literal` to `str` — it now reports the
+  scope kind that won. The kernel's own two still render as `"tenant"` and
+  `"platform"`, so nothing visible changes today.
+- Cache, resolver and writer signatures accept `scope=`; `tenant_id=` remains
+  the shorthand for the common case. Passing both raises.
+
+### Added
+- **`dotmac_kernel.setting_scopes`** — `SettingScope` (which refuses to
+  construct a non-platform scope without a tenant, so isolation stays a stored
+  fact), `ScopeKindSpec`/`ScopeKindRegistry` (the seventh declaration registry,
+  ranked), and `resolution_chain`. A product declares `site` and `user` with
+  ranks and the resolver walks user → site → tenant → platform → env → default
+  with no edit to the resolver.
+
 ## 0.1.0a15 — 2026-08-08
 
 Setting value types become open and registered, and each type owns its own

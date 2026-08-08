@@ -34,10 +34,22 @@ from sqlalchemy import (
     Uuid,
 )
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine.default import DefaultExecutionContext
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
+from dotmac_kernel.setting_scopes import PLATFORM, TENANT
 from dotmac_kernel.setting_value_types import SettingValueType
+
+# The sentinel standing in for NULL in the uniqueness index below. A real UUID
+# so the COALESCE is type-correct, and one no generator will produce.
+_NIL_UUID = "00000000-0000-0000-0000-000000000000"
+
+
+def _default_scope_kind(context: DefaultExecutionContext) -> str:
+    """`platform` for a row with no tenant, `tenant` otherwise."""
+    parameters = context.get_current_parameters()
+    return PLATFORM if parameters.get("tenant_id") is None else TENANT
 
 
 class SettingDomain(str):
@@ -110,30 +122,48 @@ class DomainSetting(Base, TimestampMixin):
             "OR (value_text IS NULL AND value_json IS NOT NULL)",
             name="ck_domain_settings_value_alignment",
         ),
+        # ONE index, not a partial pair. Postgres treats every NULL as distinct
+        # inside a unique constraint, so a nullable column in one admits
+        # duplicates — that is how `dotmac_erp` came to hold duplicate global
+        # settings. `COALESCE` to a sentinel removes the NULL entirely, so the
+        # whole bug class is closed rather than this instance patched.
         Index(
-            "uq_domain_settings_platform",
+            "uq_domain_settings_scope",
+            sa.text(f"COALESCE(tenant_id, '{_NIL_UUID}')"),
+            "scope_kind",
+            sa.text(f"COALESCE(scope_id, '{_NIL_UUID}')"),
             "domain",
             "key",
             unique=True,
-            postgresql_where=sa.text("tenant_id IS NULL"),
-        ),
-        Index(
-            "uq_domain_settings_tenant",
-            "tenant_id",
-            "domain",
-            "key",
-            unique=True,
-            postgresql_where=sa.text("tenant_id IS NOT NULL"),
         ),
     )
 
     id: Mapped[UUID] = uuid_pk()
+    # ISOLATION, and only isolation. RLS keys on this column and nothing else,
+    # which is what keeps tenant ownership a stored fact rather than something
+    # derived per row. NULL = the platform scope.
     tenant_id: Mapped[UUID | None] = mapped_column(
         Uuid(),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )
+    # PRECEDENCE, always within the tenant above. NOT NULL on purpose: a level
+    # meant by the absence of a value is the convention that produced the
+    # duplicate-globals bug. `scope_id` names the instance for kinds that have
+    # one — a site, a branch, a user — and is NULL for `platform` and `tenant`,
+    # which have no instance. See `dotmac_kernel.setting_scopes`.
+    scope_kind: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        # Derived from `tenant_id` when the caller does not say, because a row
+        # with no tenant IS the platform scope — that is the same invariant
+        # `SettingScope.__post_init__` enforces, not an inference. Callers that
+        # mean a finer level always name it; there is no level this can guess.
+        default=_default_scope_kind,
+        server_default=TENANT,
+    )
+    scope_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
     # String, not a database enum: a CHECK constraint over a fixed member list
     # would need a kernel migration per consuming product. The domain is
     # validated at the write boundary against `SettingDomainRegistry`.

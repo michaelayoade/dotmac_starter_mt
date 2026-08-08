@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -15,7 +15,10 @@ class SettingOut(BaseModel):
     label: str | None
     description: str | None
     is_secret: bool
-    source: Literal["tenant", "platform", "env", "default"]
+    # The scope KIND that supplied the value, or "env"/"default". Not a closed
+    # Literal any more: a deployment may declare its own levels (site, region),
+    # and the API should report the one that actually won.
+    source: str
 
 
 class SettingUpdate(BaseModel):
