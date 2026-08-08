@@ -31,7 +31,7 @@ from a network store while handling a request.**
 
 A value that cannot be held is not a setting. If it must live in a store, the
 product reads it and installs it — via
-`dotmac_kernel.secrets.SecretSource` for named material, or
+`dotmac_kernel.secret_sources.SecretSource` for named material, or
 `dotmac_kernel.settings_crypto.KeyProvider` for settings encryption keys — or
 seeds it as a real setting. It never enters `domain_settings` as a reference the
 kernel dereferences.
@@ -84,7 +84,7 @@ designed with no product attached is how the kernel's original settings module
 got weak enough to need replacing.
 
 The cost is real: store integration lives in products, and without a shared
-shape each would reinvent it. `dotmac_kernel.secrets` and `KeyProvider` are that
+shape each would reinvent it. `dotmac_kernel.secret_sources` and `KeyProvider` are that
 shape — the pattern without the dependency.
 
 ## Consequences
@@ -111,12 +111,12 @@ shape — the pattern without the dependency.
 
 ## Enforcement
 
-- `tests/unit/test_secrets_no_network.py` — resolution of a real encrypted
+- `tests/unit/test_secret_sources_no_network.py` — resolution of a real encrypted
   secret, and of a bulk read, completes with `socket.socket` and
   `socket.create_connection` patched to raise. Includes a sensitivity proof
   that the patch fires, so the suite cannot pass vacuously.
 - `tests/architecture/test_secrets_are_held.py` — no module on the resolution
-  path imports anything that could open a socket (`secrets.py` included: the
+  path imports anything that could open a socket (`secret_sources.py` included: the
   module that holds secrets must not also be able to fetch them). Includes a
   sensitivity proof that the detector catches a planted import.
 - Neither check alone is sufficient: the runtime proof catches a dereference

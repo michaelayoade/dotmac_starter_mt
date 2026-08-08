@@ -155,7 +155,7 @@ without touching core:
 - **Install secret material a product resolved itself.** The kernel never
   fetches a secret while handling a request (ADR-0009), so anything living in
   a secret store is read by the PRODUCT and installed at startup:
-  `dotmac_kernel.secrets.install_secret_source(...)` for named material
+  `dotmac_kernel.secret_sources.install_secret_source(...)` for named material
   (`get_secret`/`require_secret` are dict lookups afterwards), or
   `install_key_provider(...)` above for settings encryption keys. Same
   semantics for both: loaded once, explicit `refresh_secrets()`/`refresh_keys()`
@@ -419,7 +419,7 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     preprocessor-free (`make ui-check`; `test_dotmac_ui_tokens.py`).
 18. A secret is HELD, never dereferenced — nothing on the settings resolution
     path reaches a network, and a value that cannot be held is not a setting
-    (ADR-0009; `test_secrets_no_network.py`, `test_secrets_are_held.py`).
+    (ADR-0009; `test_secret_sources_no_network.py`, `test_secrets_are_held.py`).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.

@@ -105,8 +105,15 @@ if tops:
     sys.exit("Unexpected top-level entries: " + ", ".join(sorted(tops)))
 print("    wheel: no app/ , no secrets, only dotmac_kernel top-level")
 PY
-if tar tzf "$SDIST" | grep -Eq '(^|/)app/|\.env|secret|\.pem$|\.key$'; then
-  echo "FORBIDDEN in sdist" >&2
+# Same rule as the wheel check above, deliberately: this used to match a bare
+# `secret` anywhere in a path, so any legitimately named module — say
+# `secret_sources.py`, the seam products install secret material through —
+# failed the release. A guard with false positives gets weakened by whoever
+# hits one at a bad moment; matching the wheel's precision keeps it sharp.
+# What is forbidden is a file that IS a secret, not one that discusses them.
+if tar tzf "$SDIST" | grep -Eq '(^|/)app/|(^|/)\.env|\.env$|(^|/)secrets?\.py$|id_rsa|\.pem$|\.key$'; then
+  echo "FORBIDDEN in sdist:" >&2
+  tar tzf "$SDIST" | grep -E '(^|/)app/|(^|/)\.env|\.env$|(^|/)secrets?\.py$|id_rsa|\.pem$|\.key$' >&2
   exit 1
 fi
 echo "    sdist: clean"

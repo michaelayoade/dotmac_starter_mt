@@ -3,7 +3,7 @@
 The kernel's position on secret stores is meant to be a property it has rather
 than a policy it argues for, so it is tested. This half catches a dereference on
 a path no test happens to drive; the runtime half —
-`tests/unit/test_secrets_no_network.py` — proves resolution completes with
+`tests/unit/test_secret_sources_no_network.py` — proves resolution completes with
 sockets unavailable.
 """
 
@@ -28,7 +28,7 @@ RESOLUTION_MODULES = (
     "setting_scopes.py",
     "setting_value_types.py",
     "setting_domains.py",
-    "secrets.py",
+    "secret_sources.py",
 )
 
 # Not an exhaustive list of the internet — an exhaustive list of the ways a
@@ -67,7 +67,7 @@ def _imported_roots(path: Path) -> set[str]:
 
 @pytest.mark.parametrize("module", RESOLUTION_MODULES)
 def test_no_resolution_module_imports_a_network_client(module: str) -> None:
-    """Note `secrets.py` is in scope: the module that HOLDS secrets must not
+    """Note `secret_sources.py` is in scope: the module that HOLDS secrets must not
     also be able to fetch them, or the distinction it exists to draw
     disappears."""
     path = KERNEL / module
@@ -92,11 +92,11 @@ def test_the_check_would_notice_a_network_import(tmp_path: Path) -> None:
 def test_secrets_module_has_no_accessor_that_dumps_every_value() -> None:
     """`secret_names()` exists and returns names. A mapping accessor must not:
     that is how held secrets end up rendered on a debug page."""
-    from dotmac_kernel import secrets
+    from dotmac_kernel import secret_sources
 
-    assert all(isinstance(name, str) for name in secrets.secret_names())
+    assert all(isinstance(name, str) for name in secret_sources.secret_names())
     for forbidden in ("secret_values", "all_secrets", "held_secrets", "as_dict"):
-        assert not hasattr(secrets, forbidden), (
-            f"`secrets.{forbidden}` would expose every held value at once — "
+        assert not hasattr(secret_sources, forbidden), (
+            f"`secret_sources.{forbidden}` would expose every held value at once — "
             "callers ask for one secret by name"
         )

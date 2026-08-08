@@ -11,7 +11,7 @@ here.
 ADR-0009: a secret is held, never dereferenced. No migration.
 
 ### Added
-- **`dotmac_kernel.secrets`** — a place to PUT secret material a product
+- **`dotmac_kernel.secret_sources`** — a place to PUT secret material a product
   resolved from somewhere the kernel knows nothing about. `SecretSource` is a
   one-method protocol; `install_secret_source` loads it once at startup and
   `get_secret`/`require_secret` are dict lookups afterwards. Same semantics as
@@ -36,7 +36,7 @@ ADR-0009: a secret is held, never dereferenced. No migration.
   per-secret product question, answerable either way with no kernel change.
 
 ### Enforcement
-- `tests/unit/test_secrets_no_network.py` — resolving a real encrypted secret,
+- `tests/unit/test_secret_sources_no_network.py` — resolving a real encrypted secret,
   and a bulk read, with `socket.socket`/`socket.create_connection` patched to
   raise. Includes a sensitivity proof that the patch fires.
 - `tests/architecture/test_secrets_are_held.py` — no module on the resolution
