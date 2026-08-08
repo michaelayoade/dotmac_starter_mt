@@ -113,7 +113,7 @@ def _messages(report) -> str:
 
 
 def test_the_real_repo_composes() -> None:
-    """The repo's OWN composition — kernel (`0001`…`0016`), assembly
+    """The repo's OWN composition — kernel (`0001`…`0017`), assembly
     (`a001`…`a003`), and the first installed MODULE lineage (`ts_0001`) — must
     pass. The two host lineages are grandfathered (legacy revision-id format,
     tables in `public`); `template_studio` gets the strict rules.
@@ -125,7 +125,7 @@ def test_the_real_repo_composes() -> None:
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
     report = run_gate(assembly.modules, locations)
     assert report.ok, report.render()
-    assert len(report.revisions) == 21
+    assert len(report.revisions) == 22
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio"}
 

@@ -116,10 +116,19 @@ def _required_setting_errors() -> list[str]:
     missing `DATABASE_URL` itself, and `/health` stays DB-free by design.
     """
     from dotmac_kernel.db import platform_session
-    from dotmac_kernel.settings_resolver import validate_required_settings
+    from dotmac_kernel.settings_resolver import (
+        seed_settings_from_env,
+        validate_required_settings,
+    )
 
     try:
         with platform_session() as db:
+            # Bootstrap first: a setting configured by environment variable is
+            # turned into a real row here, so the check below sees it as
+            # configured — and so it behaves like every other value from then
+            # on. Env is never consulted at read time.
+            seed_settings_from_env(db)
+            db.commit()
             return validate_required_settings(db)
     except Exception as exc:  # unreachable store: see docstring
         logger.warning("Required-setting validation skipped: %s", exc)

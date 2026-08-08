@@ -29,7 +29,8 @@ from dotmac_kernel.models import (
     UserCredential,
 )
 from dotmac_kernel.security import hash_password
-from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.setting_value_types import SettingValueType
+from dotmac_kernel.settings_models import DomainSetting, SettingDomain
 from dotmac_kernel.settings_resolver import (
     get_spec,
     resolve_value,
@@ -124,14 +125,21 @@ class TestDisplaySpecs:
     def test_read_path_degrades_bad_stored_timezone_to_default(
         self, db, tenant_row
     ) -> None:
-        # Bypass write validation (legacy/hand-edited row) via direct upsert.
-        upsert_by_key(
-            db,
-            SettingDomain.display,
-            "timezone",
-            "Not/AZone",
-            tenant_id=tenant_row.id,
+        # A legacy or hand-edited row: planted directly, because the WRITE path
+        # now refuses a value the spec rejects. That refusal is the point — the
+        # writer used to accept it and the read silently degraded it, so an
+        # operator saw success and got the default. This test still covers the
+        # read half: whatever is already in the table must degrade safely.
+        db.add(
+            DomainSetting(
+                tenant_id=tenant_row.id,
+                domain=SettingDomain.display,
+                key="timezone",
+                value_type=SettingValueType("string"),
+                value_text="Not/AZone",
+            )
         )
+        db.flush()
         assert (
             resolve_value(
                 db, SettingDomain.display, "timezone", tenant_id=tenant_row.id

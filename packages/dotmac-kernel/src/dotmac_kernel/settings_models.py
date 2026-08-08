@@ -214,12 +214,25 @@ class DomainSettingHistory(Base):
     audit trail cannot answer, because `AuditEvent` records that a change
     happened, not what the value was.
 
-    **The two are deliberately split, and this table does NOT record the actor.**
-    `dotmac_kernel.audit.write_audit_event` is the one writer of who-did-what;
-    duplicating actor, IP and user-agent here would make a second authority for
-    the same fact, and the two would drift. The pair correlates on
-    `(tenant_id, domain, key)` and adjacent timestamps: the audit event says who
-    changed a setting, this row says what it became.
+    **The row carries WHO changed it, not just what changed.** An earlier version
+    of this model deliberately omitted the actor, on the reasoning that
+    `write_audit_event` owns who-did-what and a copy here would be a second
+    authority. That was wrong on both counts.
+
+    It is not a second authority: who changed a setting is INTRINSIC to the
+    settings-change record, and this table is that record. The audit trail is a
+    cross-cutting index over activity — it may carry a copy for querying, which
+    is a projection, not a competing owner.
+
+    And splitting them was not even workable. Without the actor on the row, an
+    operator answering "who turned this off" joins two tables on timestamp
+    PROXIMITY, which is fragile by construction. Worse, it cost adopting
+    products a capability they already had — a kernel that forces a product to
+    give something up is a tax, not a foundation.
+
+    The value is still never recorded for a secret (see `secret_changed`): a
+    history table must not become the place a rotated credential outlives its
+    rotation.
 
     **A secret's value is never recorded.** `value_before`/`value_after` are
     NULL when the spec is secret, and `secret_changed` carries the fact that it
@@ -238,6 +251,7 @@ class DomainSettingHistory(Base):
     __table_args__ = (
         Index("ix_domain_setting_history_lookup", "tenant_id", "domain", "key"),
         Index("ix_domain_setting_history_changed_at", "changed_at"),
+        Index("ix_domain_setting_history_actor", "changed_by_party_id"),
     )
 
     id: Mapped[UUID] = uuid_pk()
@@ -271,6 +285,19 @@ class DomainSettingHistory(Base):
     changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+    # WHO, and the request it arrived on. All nullable: a seed, a migration or a
+    # CLI genuinely has no actor, and recording "unknown" honestly beats
+    # inventing one. A caller with request context passes a
+    # `SettingChangeContext`; one without simply does not.
+    changed_by_party_id: Mapped[UUID | None] = mapped_column(
+        Uuid(), ForeignKey("parties.id", ondelete="SET NULL"), nullable=True
+    )
+    change_reason: Mapped[str | None] = mapped_column(Text)
+    # 45 characters holds an IPv6 address with an embedded IPv4 suffix.
+    ip_address: Mapped[str | None] = mapped_column(String(45))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    # Ties the change to one request across logs, audit and outbox.
+    request_id: Mapped[str | None] = mapped_column(String(128))
 
 
 __all__ = [
