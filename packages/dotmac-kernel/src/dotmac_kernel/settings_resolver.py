@@ -31,10 +31,12 @@ import logging
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -92,10 +94,17 @@ class SettingSpec:
     # Environment variable consulted BELOW the platform row and ABOVE `default`
     # — see `resolve_with_source` for why that position and no other.
     env_var: str | None = None
-    # A setting the deployment cannot run correctly without. Checked at startup
-    # by `validate_required_settings`, which `create_app` treats as fatal in
-    # production and a warning elsewhere.
-    required: bool = False
+    # The SCOPE KIND at which this setting must be configured, or None if it is
+    # optional. `"platform"` means the deployment cannot run without it, and is
+    # checked at startup. A finer kind — `"tenant"`, `"site"` — means each
+    # instance of that level must have its own value, which startup cannot check
+    # because instances come and go long after boot; callers ask
+    # `missing_required_settings` for one scope when it matters (provisioning a
+    # tenant, opening a site).
+    #
+    # A bool could only ever express the deployment case, which is why "every
+    # tenant must set a billing contact" had no way to be stated.
+    required_at: str | None = None
     allowed: set[str] | None = None
     min_value: int | None = None
     max_value: int | None = None
@@ -208,7 +217,7 @@ def _extract_raw(setting: DomainSetting | None) -> object | None:
     if setting.value_json is not None:
         return setting.value_json
     if setting.is_secret:
-        return decrypt_value(setting.value_text)
+        return decrypt_value(setting.value_text, tenant_id=setting.tenant_id)
     return setting.value_text
 
 
@@ -457,34 +466,93 @@ def _select_rows(
     return db.scalars(statement).all()
 
 
-def validate_required_settings(db: Session) -> list[str]:
-    """Every `required` spec that resolves to nothing, as operator-readable text.
+def prune_setting_history(
+    db: Session,
+    *,
+    older_than_days: int,
+    scope: SettingScope | None = None,
+) -> int:
+    """Delete history rows older than `older_than_days`. Returns the count.
 
-    Called once at startup by `create_app`, AFTER seeds run — a seeded platform
-    default is a real configured value, and checking before seeding would report
-    settings that are about to exist. Resolution is platform-scoped
-    (`tenant_id=None`): a required setting is a deployment prerequisite, and a
-    per-tenant override cannot satisfy it for the tenants that lack one.
+    `DomainSettingHistory` is append-only and had no retention, so it grows for
+    the life of the deployment. Append-only is about who may rewrite it, not
+    about keeping it forever.
 
-    Returns a list rather than raising so the caller decides severity — fatal in
-    production, a warning elsewhere, the same split `validate_settings` already
-    applies to `Settings`. Reporting ALL failures at once matters here: an
-    operator bringing up a deployment should see every missing value in one
-    pass, not rediscover them one restart at a time.
+    Deliberately a FUNCTION a caller schedules rather than something the write
+    path does: pruning inside a write would make an ordinary setting change
+    occasionally do unbounded work, and the operator — not the kernel — decides
+    how long a change record is worth keeping.
+
+    `scope=None` prunes every scope. Callers hold the transaction; this flushes
+    but never commits, like every other writer here.
     """
+    if older_than_days < 1:
+        raise ValueError("older_than_days must be at least 1")
+    cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
+    statement = delete(DomainSettingHistory).where(
+        DomainSettingHistory.changed_at < cutoff
+    )
+    if scope is not None:
+        statement = statement.where(
+            DomainSettingHistory.tenant_id.is_(None)
+            if scope.tenant_id is None
+            else DomainSettingHistory.tenant_id == scope.tenant_id
+        )
+    # `CursorResult` carries `rowcount`; the base `Result` protocol does not,
+    # and a DELETE always yields the former.
+    result = cast("CursorResult[Any]", db.execute(statement))
+    removed = result.rowcount or 0
+    db.flush()
+    logger.info("Pruned %d setting-history row(s) older than %s", removed, cutoff)
+    return removed
+
+
+def missing_required_settings(
+    db: Session,
+    *,
+    tenant_id: UUID | None | object = _UNSET,
+    scope: SettingScope | None = None,
+) -> list[str]:
+    """Required settings that resolve to nothing AT THIS SCOPE, as readable text.
+
+    A spec is checked when its `required_at` names this scope's kind, so one
+    call answers "is this tenant configured" without dragging in the
+    deployment's own prerequisites or another tenant's.
+
+    Returns a list rather than raising so the caller decides severity — fatal at
+    boot for the deployment, a blocked provisioning step for a tenant, a warning
+    on a settings screen. Reporting ALL of them at once matters: an operator
+    bringing something up should see every missing value in one pass rather than
+    rediscover them one restart at a time.
+    """
+    target = _scope_for(tenant_id, scope)
     errors: list[str] = []
     for spec in all_specs():
-        if not spec.required:
+        if spec.required_at != target.kind:
             continue
-        value, source = resolve_with_source(db, spec.domain, spec.key, tenant_id=None)
+        value, source = resolve_with_source(db, spec.domain, spec.key, scope=target)
         if value is None or (source == "default" and spec.default is None):
             errors.append(
                 f"required setting {spec.domain.value}/{spec.key} is not "
-                "configured: no platform row"
+                f"configured at scope {target.kind!r}: no row"
                 + (f", no {spec.env_var}" if spec.env_var else "")
                 + ", and no default"
             )
     return errors
+
+
+def validate_required_settings(db: Session) -> list[str]:
+    """The DEPLOYMENT's own prerequisites — every spec with
+    `required_at="platform"`.
+
+    Called once at startup by `create_app`, AFTER seeds run, because a seeded
+    platform default is a real configured value. Finer scopes are deliberately
+    not checked here: a tenant that does not exist yet cannot be missing
+    anything, and enumerating every tenant at boot would make startup cost grow
+    with the customer count. Use `missing_required_settings` at the moment a
+    given scope matters.
+    """
+    return missing_required_settings(db, scope=SettingScope.platform())
 
 
 def validate_spec_value(spec: SettingSpec, value: object) -> object:
@@ -546,7 +614,11 @@ def validate_spec_value(spec: SettingSpec, value: object) -> object:
 
 
 def _normalize_for_db(
-    value_type: SettingValueType, value: object, *, is_secret: bool = False
+    value_type: SettingValueType,
+    value: object,
+    *,
+    is_secret: bool = False,
+    tenant_id: UUID | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Split a Python value into the model's (value_text, value_json) pair.
 
@@ -570,7 +642,7 @@ def _normalize_for_db(
             )
         return None, cast("dict[str, Any]", stored)
     text = str(stored)
-    return (encrypt_value(text) if is_secret else text), None
+    return (encrypt_value(text, tenant_id=tenant_id) if is_secret else text), None
 
 
 def _stored_text(row: DomainSetting) -> str | None:
@@ -687,7 +759,7 @@ def upsert_by_key(
     active_scope_kinds().require(target.kind)
     spec = get_spec(domain, key)
     value_text, value_json = _normalize_for_db(
-        spec.value_type, value, is_secret=spec.is_secret
+        spec.value_type, value, is_secret=spec.is_secret, tenant_id=target.tenant_id
     )
 
     row = _select_row(db, domain, key, target)
@@ -781,7 +853,7 @@ def ensure_by_key(
 
     spec = get_spec(domain, key)
     value_text, value_json = _normalize_for_db(
-        spec.value_type, value, is_secret=spec.is_secret
+        spec.value_type, value, is_secret=spec.is_secret, tenant_id=target.tenant_id
     )
     row = DomainSetting(
         tenant_id=target.tenant_id,
@@ -817,6 +889,8 @@ __all__ = [
     "SettingSpec",
     "register_specs",
     "SETTING_CHANGED_EVENT",
+    "missing_required_settings",
+    "prune_setting_history",
     "resolve_many",
     "resolve_value",
     "validate_required_settings",

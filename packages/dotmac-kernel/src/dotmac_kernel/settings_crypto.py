@@ -75,6 +75,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 if TYPE_CHECKING:  # the runtime import is lazy — see the module docstring
     from cryptography.fernet import Fernet
@@ -120,6 +121,15 @@ class EncryptionKey:
     key_id: str
     material: str
     status: KeyStatus = KeyStatus.ACTIVE
+    # The tenant this key belongs to, or None for the deployment's own key.
+    # A customer that requires its own key material (BYOK) gets an entry with
+    # its tenant id; everything else keeps using the deployment key, so the
+    # common case is unchanged.
+    #
+    # This works without a format change because `enc:<key_id>:<token>` already
+    # names the key that wrote a value — which is the same property that made
+    # rotation possible.
+    tenant_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -144,18 +154,36 @@ class Keyring:
             if key.key_id in seen:
                 raise KeyringError(f"duplicate key_id in keyring: {key.key_id!r}")
             seen.add(key.key_id)
-        active = [key for key in self.keys if key.status is KeyStatus.ACTIVE]
-        if len(active) > 1:
-            raise KeyringError(
-                "keyring has more than one active key "
-                f"({sorted(key.key_id for key in active)}) — exactly one key "
-                "encrypts new values; mark the others `retired`"
-            )
-
-    @property
-    def active(self) -> EncryptionKey | None:
+        # At most one active key PER OWNER: one for the deployment, and one for
+        # each tenant that brings its own. More than one for an owner leaves no
+        # rule for which encrypts a new value.
+        by_owner: dict[UUID | None, list[str]] = {}
         for key in self.keys:
             if key.status is KeyStatus.ACTIVE:
+                by_owner.setdefault(key.tenant_id, []).append(key.key_id)
+        for owner, ids in by_owner.items():
+            if len(ids) > 1:
+                whose = "the deployment" if owner is None else f"tenant {owner}"
+                raise KeyringError(
+                    f"keyring has more than one active key for {whose} "
+                    f"({sorted(ids)}) — exactly one key encrypts new values; "
+                    "mark the others `retired`"
+                )
+
+    def active(self, tenant_id: UUID | None = None) -> EncryptionKey | None:
+        """The key that ENCRYPTS for this tenant.
+
+        A tenant's own active key wins; otherwise the deployment's. Falling back
+        is deliberate — a tenant without its own key is the normal case, not an
+        error — but the fallback is one way only: a tenant key never encrypts
+        another tenant's value, because it is only ever selected by exact match.
+        """
+        if tenant_id is not None:
+            for key in self.keys:
+                if key.status is KeyStatus.ACTIVE and key.tenant_id == tenant_id:
+                    return key
+        for key in self.keys:
+            if key.status is KeyStatus.ACTIVE and key.tenant_id is None:
                 return key
         return None
 
@@ -200,11 +228,19 @@ def _keyring_from_env() -> Keyring:
                     f"{KEYRING_ENV_VAR}[{index}].status must be one of "
                     f"{[member.value for member in KeyStatus]}"
                 ) from exc
+            owner = entry.get("tenant_id")
+            try:
+                tenant = UUID(str(owner)) if owner else None
+            except ValueError as exc:
+                raise KeyringError(
+                    f"{KEYRING_ENV_VAR}[{index}].tenant_id is not a UUID"
+                ) from exc
             keys.append(
                 EncryptionKey(
                     key_id=str(entry["key_id"]),
                     material=str(entry["key"]),
                     status=status,
+                    tenant_id=tenant,
                 )
             )
         return Keyring(tuple(keys))
@@ -265,7 +301,7 @@ def keyring() -> Keyring:
 def encryption_configured() -> bool:
     """True when a key exists that can encrypt a new value."""
     try:
-        active = keyring().active
+        active = keyring().active()
     except KeyringError:
         return False
     return active is not None and _fernet(active) is not None
@@ -294,7 +330,7 @@ def encrypted_key_id(value: str | None) -> str | None:
     return _split(str(value))[0]
 
 
-def encrypt_value(value: str) -> str:
+def encrypt_value(value: str, *, tenant_id: UUID | None = None) -> str:
     """Encrypt a secret setting's value for storage under the active key.
 
     Idempotent only for a value ALREADY under the active key: a value under a
@@ -305,7 +341,7 @@ def encrypt_value(value: str) -> str:
     see the module docstring for why this fails rather than storing plaintext.
     """
     try:
-        active = keyring().active
+        active = keyring().active(tenant_id)
     except KeyringError as exc:
         raise SettingsEncryptionError(f"cannot store a secret setting: {exc}") from exc
     if active is None:
@@ -338,13 +374,20 @@ def encrypt_value(value: str) -> str:
     return f"{ENCRYPTED_PREFIX}{active.key_id}:{token}"
 
 
-def decrypt_value(value: str | None) -> str | None:
+def decrypt_value(value: str | None, *, tenant_id: UUID | None = None) -> str | None:
     """Decrypt a stored value. Plaintext passes through; undecryptable is None.
 
     `None` rather than an exception, because the caller is the read path:
     `resolve_with_source` degrades a value it cannot read to the spec default,
     the same safe behaviour a corrupted plaintext value already gets. A rotated
     or missing key must not take down every request that touches settings.
+
+    `tenant_id` is the tenant that OWNS the row. When given, a ciphertext naming
+    a key belonging to a DIFFERENT tenant is refused rather than decrypted. RLS
+    already stops one tenant reading another's row, so this should be
+    unreachable — which is exactly why it is worth asserting: if it ever fires,
+    something upstream has handed us the wrong row, and returning plaintext
+    would turn that into a disclosure.
     """
     if not value or not is_encrypted(value):
         # Written before a key existed, or on a deployment with none. Readable
@@ -364,6 +407,19 @@ def decrypt_value(value: str | None) -> str | None:
                 "A settings value is encrypted under key %r, which is not in "
                 "the configured keyring — add it, or the value is unreadable",
                 key_id,
+            )
+            return None
+        if (
+            key.tenant_id is not None
+            and tenant_id is not None
+            and key.tenant_id != tenant_id
+        ):
+            logger.error(
+                "A settings value for tenant %s names key %r, which belongs to "
+                "tenant %s — refusing to decrypt",
+                tenant_id,
+                key_id,
+                key.tenant_id,
             )
             return None
         if key.status is KeyStatus.REVOKED:
@@ -421,8 +477,8 @@ def reencrypt_secrets(db: Session) -> tuple[int, int]:
 
     from dotmac_kernel.settings_models import DomainSetting
 
-    active = keyring().active
-    if active is None:
+    ring = keyring()
+    if ring.active() is None:
         raise SettingsEncryptionError(
             "cannot re-encrypt: no active settings encryption key configured"
         )
@@ -434,10 +490,13 @@ def reencrypt_secrets(db: Session) -> tuple[int, int]:
     ).all()
     for row in rows:
         stored = row.value_text
-        if not stored or encrypted_key_id(stored) == active.key_id:
+        # The target key depends on WHOSE row this is: a tenant that brought its
+        # own key must be re-encrypted onto that key, not the deployment's.
+        target = ring.active(row.tenant_id)
+        if not stored or target is None or encrypted_key_id(stored) == target.key_id:
             continue
         try:
-            row.value_text = encrypt_value(stored)
+            row.value_text = encrypt_value(stored, tenant_id=row.tenant_id)
         except SettingsEncryptionError as exc:
             failed += 1
             logger.error("Could not re-encrypt %s/%s: %s", row.domain, row.key, exc)
@@ -445,9 +504,9 @@ def reencrypt_secrets(db: Session) -> tuple[int, int]:
         rewritten += 1
     db.flush()
     logger.info(
-        "Re-encrypted %d secret setting(s) onto key %r; %d failed",
+        "Re-encrypted %d secret setting(s) onto their owners' active keys; "
+        "%d failed",
         rewritten,
-        active.key_id,
         failed,
     )
     return rewritten, failed
