@@ -368,8 +368,9 @@ its enforcing test/contract). This section is only an index — adapters
 point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 `AGENTS.md` wins; fix the drift.
 
-1. Routers (`router.py`/`web.py`) never issue direct DB queries — logic in
-   `service.py` (`test_thin_wrappers.py`).
+1. Adapters (`router.py`/`web.py`) never issue direct DB queries — logic in
+   `service.py`. The filename convention is what makes this enforceable
+   (`test_thin_wrappers.py`; ADR-0010, fleet-wide).
 2. Templates render `*_at` timestamps only via `local_datetime`/`local_date`
    filters (`test_web_conventions.py`).
 3. Every route carries a `require_*` guard or a commented `ALLOWLIST` entry;
@@ -420,6 +421,10 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 18. A secret is HELD, never dereferenced — nothing on the settings resolution
     path reaches a network, and a value that cannot be held is not a setting
     (ADR-0009; `test_secret_sources_no_network.py`, `test_secrets_are_held.py`).
+19. Settings resolution reads rows and defaults, never the environment;
+    `env_var` seeds a row at startup and nothing more (ADR-0011;
+    `test_settings_resolution_ignores_env.py`,
+    `test_settings_env_is_bootstrap_only.py`).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.

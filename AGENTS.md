@@ -18,9 +18,16 @@ specifics) points here and must never fork these rules.
 
 ## Hard rules (enforced — test/contract named per rule)
 
-1. **Routers are thin.** `router.py`/`web.py` never issue direct DB queries
+1. **Adapters are thin.** `router.py`/`web.py` never issue direct DB queries
    (no `db.query(`, `db.execute(`, `select(`) — logic lives in `service.py`.
-   (`tests/architecture/test_thin_wrappers.py`)
+   Adapters validate, authorize, delegate and render; a DECISION belongs to one
+   service. This repo identifies an adapter by FILENAME, which is why the check
+   is a three-line `rglob` — that naming convention is load-bearing, not
+   cosmetic. ADR-0010 makes the rule fleet-wide and says why a repository
+   without such a convention cannot enforce it: `dotmac_erp` has 1223 direct
+   queries in 83 web modules living inside `app/services/`, where a
+   directory-scoped check passes while missing 96% of them.
+   (`tests/architecture/test_thin_wrappers.py`; ADR-0010)
 2. **Timestamps render only through the `local_datetime`/`local_date` Jinja
    filters** — never a raw `*_at` attribute in a template.
    (`tests/architecture/test_web_conventions.py::test_timestamp_renders_go_through_local_filters`)
@@ -164,6 +171,16 @@ specifics) points here and must never fork these rules.
     degraded, and never log, repr or quote a value — only names (ADR-0009).
     (`tests/unit/test_secret_sources_no_network.py`,
     `tests/architecture/test_secrets_are_held.py`)
+
+21. **Settings resolution reads rows and defaults — never the environment.**
+    `env_var` is a declaration whose only consumer is `seed_settings_from_env`,
+    which runs once at startup and never overwrites an existing row. Precedence
+    is `scope chain -> spec default`; the environment does not appear, because
+    it is a loader that produces a row rather than a source that competes with
+    one. A value in effect is therefore always one an operator can see and
+    change (ADR-0011).
+    (`tests/unit/test_settings_resolution_ignores_env.py`,
+    `tests/architecture/test_settings_env_is_bootstrap_only.py`)
 
 ## Everything by config — no hardcoding
 
