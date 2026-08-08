@@ -60,6 +60,10 @@ from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
     install_setting_domains,
 )
+from dotmac_kernel.setting_value_types import (
+    SettingValueTypeRegistry,
+    install_setting_value_types,
+)
 from dotmac_kernel.templating import (
     compose_templates,
     install_stylesheets,
@@ -265,6 +269,8 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # Setting domains. Same installed-not-enabled rule: a stored setting row
     # references a domain and outlives any deployment's enabled set.
     install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
+    # Setting value types: the kernel's built-ins plus any a module declares.
+    install_setting_value_types(SettingValueTypeRegistry.from_manifests(manifests))
 
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
     # before any template renders. Fed the FULL installed set in startup order

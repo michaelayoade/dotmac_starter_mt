@@ -6,6 +6,42 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a15 — 2026-08-08
+
+Setting value types become open and registered, and each type owns its own
+encoding. Migration `0015`.
+
+### Changed — BREAKING (database)
+- **`SettingValueType` is an open registered string, not a four-member enum**;
+  `ck_domain_settings_value_type` is dropped. The same closed-list defect `0014`
+  removed from `domain`, one column across.
+- **The value-alignment CHECK no longer names types.** It permitted `value_json`
+  only when `value_type = 'json'`, so a new JSON-stored type could not be
+  written at all. It now states the invariant that actually holds: exactly one
+  value column is populated.
+- **`value_json` stores SQL NULL, not the JSON text `null`.** SQLAlchemy's JSON
+  type serialises Python `None` as JSON null unless `none_as_null=True`, so "no
+  JSON value" was indistinguishable from "a JSON null value" and every
+  `value_json IS NULL` predicate silently never matched. Migration `0015`
+  backfills rows already written that way.
+
+### Added
+- **`dotmac_kernel.setting_value_types`** — `ValueTypeSpec` owns BOTH directions
+  of a type's encoding (`from_storage`/`to_storage`) as a matched pair, replacing
+  three separate if-ladders in the resolver that each knew part of what a type
+  meant. Adding a type is one declaration; a single round-trip test covers every
+  type at once. The sixth declaration registry (ADR-0008), declared on manifests
+  as `setting_value_types`.
+- **`money` as a first-class value type**, stored as
+  `{"amount": "<decimal string>", "currency": "<ISO-4217>"}` over
+  `dotmac_kernel.money`. The amount is a STRING because JSON numbers are IEEE
+  doubles in most parsers, and exactness is the point; a bare number is rejected
+  because it cannot name its currency. This is ADR-0003's exact-Money rule
+  finally expressible as a setting.
+- Read stays tolerant and write strict: `from_storage` returns `None` for
+  anything unreadable (the resolver degrades to the spec default), while
+  `to_storage` raises so a caller can still be told it is wrong.
+
 ## 0.1.0a14 — 2026-08-08
 
 Settings subsystem re-based on the products' proven implementation: open setting

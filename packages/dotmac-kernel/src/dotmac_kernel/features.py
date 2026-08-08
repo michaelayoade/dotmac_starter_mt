@@ -60,10 +60,13 @@ from fastapi import APIRouter, FastAPI
 
 from dotmac_kernel.permissions import PermissionSpec
 
-if TYPE_CHECKING:  # avoids a runtime cycle: `modules` imports this module
+if TYPE_CHECKING:
     from dotmac_kernel.capabilities import CapabilitySpec
     from dotmac_kernel.flags import FeatureFlagSpec
     from dotmac_kernel.modules import ModuleManifest
+    from dotmac_kernel.setting_value_types import (
+        ValueTypeSpec,  # avoids a runtime cycle: `modules` imports this module
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +138,10 @@ class FeatureManifest:
     # write naming one no module declares. See
     # `dotmac_kernel.setting_domains.SettingDomainRegistry`.
     setting_domains: Sequence[str] = field(default_factory=tuple)
+    # Setting VALUE types this module declares — each a `ValueTypeSpec` owning
+    # how its values are stored and read back. See
+    # `dotmac_kernel.setting_value_types`.
+    setting_value_types: Sequence[ValueTypeSpec] = field(default_factory=tuple)
 
 
 def load_manifests(module_names: Sequence[str]) -> list[FeatureManifest]:

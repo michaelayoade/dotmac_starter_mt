@@ -37,6 +37,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
+from dotmac_kernel.setting_value_types import SettingValueType
 
 
 class SettingDomain(str):
@@ -84,17 +85,6 @@ for _domain in KERNEL_SETTING_DOMAINS:
 del _domain
 
 
-class SettingValueType(str, enum.Enum):
-    string = "string"
-    integer = "integer"
-    boolean = "boolean"
-    json = "json"
-
-
-def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
-    return [member.value for member in enum_cls]
-
-
 class DomainSetting(Base, TimestampMixin):
     """A single setting row, either tenant-owned or a platform default.
 
@@ -109,9 +99,15 @@ class DomainSetting(Base, TimestampMixin):
 
     __tablename__ = "domain_settings"
     __table_args__ = (
+        # A value lands in exactly one column. The old form named the types
+        # (`value_type = 'json'`), which is the same closed list this release
+        # removed from the column itself — a new JSON-stored type such as
+        # `money` could not satisfy it. Which column a type uses is its
+        # `ValueTypeSpec.storage`; the database only needs to know that exactly
+        # one is populated.
         CheckConstraint(
-            "(value_type = 'json' AND value_json IS NOT NULL AND value_text IS NULL) "
-            "OR (value_type != 'json' AND value_text IS NOT NULL)",
+            "(value_text IS NOT NULL AND value_json IS NULL) "
+            "OR (value_text IS NULL AND value_json IS NOT NULL)",
             name="ck_domain_settings_value_alignment",
         ),
         Index(
@@ -143,25 +139,39 @@ class DomainSetting(Base, TimestampMixin):
     # validated at the write boundary against `SettingDomainRegistry`.
     domain: Mapped[SettingDomain] = mapped_column(String(120), nullable=False)
     key: Mapped[str] = mapped_column(String(120), nullable=False)
+    # String, not a database enum — the same reason the domain column is one.
+    # Which value types exist is a declaration validated by
+    # `dotmac_kernel.setting_value_types`, so a product adding one (money,
+    # duration, a cron expression) needs no kernel migration.
     value_type: Mapped[SettingValueType] = mapped_column(
-        sa.Enum(
-            SettingValueType,
-            name="ck_domain_settings_value_type",
-            native_enum=False,
-            values_callable=_enum_values,
-        ),
-        nullable=False,
-        default=SettingValueType.string,
+        String(40), nullable=False, default="string"
     )
     value_text: Mapped[str | None] = mapped_column(Text)
+    # `none_as_null=True` because the default stores Python `None` as the JSON
+    # text `null`, which is NOT SQL NULL. That made "this setting has no JSON
+    # value" indistinguishable from "its value is JSON null", and it defeats any
+    # `value_json IS NULL` predicate — including the alignment CHECK below.
     value_json: Mapped[dict | None] = mapped_column(
-        sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
+        sa.JSON(none_as_null=True).with_variant(
+            postgresql.JSONB(none_as_null=True), "postgresql"
+        )
     )
     is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
+def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
+    return [member.value for member in enum_cls]
+
+
 class SettingChangeAction(str, enum.Enum):
+    """Genuinely closed, and deliberately still an enum.
+
+    A row was created, updated or deleted; no module declares a fourth. The
+    open-vocabulary rule (ADR-0008) constrains vocabularies whose members belong
+    to somebody else — not every enum.
+    """
+
     create = "create"
     update = "update"
     delete = "delete"
@@ -239,5 +249,8 @@ __all__ = [
     "DomainSettingHistory",
     "SettingChangeAction",
     "SettingDomain",
+    # Re-exported so the many `from settings_models import SettingValueType`
+    # call sites keep working; it is DEFINED in `setting_value_types`, which
+    # owns the type and its encodings.
     "SettingValueType",
 ]

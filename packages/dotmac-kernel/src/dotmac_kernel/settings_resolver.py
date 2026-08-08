@@ -39,6 +39,11 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel.exceptions import BadRequestError
 from dotmac_kernel.setting_domains import active_setting_domains
+from dotmac_kernel.setting_value_types import (
+    SettingValueType,
+    UndeclaredValueTypeError,
+    active_setting_value_types,
+)
 from dotmac_kernel.settings_cache import MISS as _CACHE_MISS
 from dotmac_kernel.settings_cache import cached as _cached
 from dotmac_kernel.settings_cache import invalidate as _invalidate_cache
@@ -49,7 +54,6 @@ from dotmac_kernel.settings_models import (
     DomainSettingHistory,
     SettingChangeAction,
     SettingDomain,
-    SettingValueType,
 )
 
 # Sentinel distinguishing "no default kwarg passed" from "default=None was
@@ -159,36 +163,23 @@ def _extract_raw(setting: DomainSetting | None) -> object | None:
 
 
 def _coerce(value_type: SettingValueType, raw: object) -> object | None:
-    """Coerce a raw stored value to `value_type`. Returns None on failure."""
+    """Read a stored value through its type's own spec.
+
+    One line, because the type owns its encoding — `dotmac_kernel
+    .setting_value_types.ValueTypeSpec.from_storage`. This used to be an
+    if-ladder that knew every type, one of three such ladders.
+
+    An UNDECLARED type reads as `None` rather than raising: the caller is the
+    read path, which degrades to the spec default, and a row whose type a
+    deployment no longer declares must not take down every request.
+    """
     if raw is None:
         return None
-    if value_type == SettingValueType.boolean:
-        if isinstance(raw, bool):
-            return raw
-        if isinstance(raw, str):
-            normalized = raw.strip().lower()
-            if normalized in {"1", "true", "yes", "on"}:
-                return True
-            if normalized in {"0", "false", "no", "off"}:
-                return False
+    try:
+        spec = active_setting_value_types().require(value_type)
+    except UndeclaredValueTypeError:
         return None
-    if value_type == SettingValueType.integer:
-        if isinstance(raw, bool):
-            return None
-        if isinstance(raw, int):
-            return raw
-        if isinstance(raw, str):
-            try:
-                return int(raw.strip())
-            except ValueError:
-                return None
-        return None
-    if value_type == SettingValueType.string:
-        if isinstance(raw, str):
-            return raw
-        return str(raw)
-    # json: stored value is already a Python object (dict/list/bool/...).
-    return raw
+    return spec.from_storage(raw)
 
 
 def resolve_with_source(
@@ -266,7 +257,7 @@ def resolve_with_source(
         value = spec.default
         source = "default"
 
-    if spec.value_type == SettingValueType.integer and isinstance(value, int):
+    if isinstance(value, int) and not isinstance(value, bool):
         if spec.min_value is not None and value < spec.min_value:
             value = spec.default
             source = "default"
@@ -281,8 +272,10 @@ def resolve_with_source(
             value = spec.default
             source = "default"
 
-    if spec.value_type == SettingValueType.json and value is not None:
-        # json-type values are mutable (dicts). `value` may be the shared
+    if isinstance(value, dict | list):
+        # A MUTABLE resolved value — keyed on the value, not on the type's name,
+        # so an immutable JSON-stored type such as `money` is not copied and a
+        # future list type is. `value` may be the shared
         # `spec.default` object (assigned by reference above whenever
         # resolution falls back to the default) — every caller must get an
         # independent copy so mutating one caller's result can't corrupt the
@@ -399,18 +392,13 @@ def validate_spec_value(spec: SettingSpec, value: object) -> object:
             f"{spec.value_type.value}"
         )
 
-    if spec.value_type == SettingValueType.json and not isinstance(coerced, dict):
-        raise BadRequestError(
-            f"{spec.domain.value}/{spec.key}: value must be an object"
-        )
-
     if spec.allowed is not None and coerced not in spec.allowed:
         raise BadRequestError(
             f"{spec.domain.value}/{spec.key}: value must be one of "
             f"{sorted(spec.allowed)}"
         )
 
-    if spec.value_type == SettingValueType.integer and isinstance(coerced, int):
+    if isinstance(coerced, int) and not isinstance(coerced, bool):
         if spec.min_value is not None and coerced < spec.min_value:
             raise BadRequestError(
                 f"{spec.domain.value}/{spec.key}: value must be >= {spec.min_value}"
@@ -434,20 +422,28 @@ def validate_spec_value(spec: SettingSpec, value: object) -> object:
 def _normalize_for_db(
     value_type: SettingValueType, value: object, *, is_secret: bool = False
 ) -> tuple[str | None, dict[str, Any] | None]:
-    """Split a Python value into the model's (value_text, value_json) pair,
-    respecting the `ck_domain_settings_value_alignment` CHECK constraint.
+    """Split a Python value into the model's (value_text, value_json) pair.
 
-    A secret is encrypted here, at the last point before the value reaches the
-    column, so both writers get it from one place. `encrypt_value` RAISES when
-    no key is configured: a secret that cannot be encrypted must not be stored.
+    Which column a type uses, and how it renders, both come from its
+    `ValueTypeSpec` — so a new type needs no edit here. `to_storage` raises
+    `ValueError` on an invalid value, which the write path surfaces as a clean
+    400 rather than an `IntegrityError` at flush time.
+
+    A secret is encrypted at this last point before the value reaches the
+    column, so both writers get it from one place. Only `text`-stored types can
+    be secret: encrypting a JSON structure would need per-field handling that
+    does not exist, and silently storing it in the clear would be worse.
     """
-    if value_type == SettingValueType.json:
-        if value is not None and not isinstance(value, dict):
-            raise TypeError(f"json setting value must be a dict, got {type(value)!r}")
-        return None, value
-    if value_type == SettingValueType.boolean:
-        return ("true" if value else "false"), None
-    text = str(value)
+    spec = active_setting_value_types().require(value_type)
+    stored = spec.to_storage(value)
+    if spec.storage == "json":
+        if is_secret:
+            raise ValueError(
+                f"value type {str(value_type)!r} stores JSON and cannot be a "
+                "secret — a secret must be a scalar this can encrypt whole"
+            )
+        return None, cast("dict[str, Any]", stored)
+    text = str(stored)
     return (encrypt_value(text) if is_secret else text), None
 
 
