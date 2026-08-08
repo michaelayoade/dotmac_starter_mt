@@ -4,7 +4,7 @@ Sockets are made to fail, then real settings — including an encrypted secret �
 are resolved. Any attempt to dereference a value against a store turns into a
 failure here rather than into an outage when that store is down.
 
-Also covers `dotmac_kernel.secrets`, the place a product PUTS material it
+Also covers `dotmac_kernel.secret_sources`, the place a product PUTS material it
 resolved itself: loaded once, rotated explicitly, never logged.
 """
 
@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import pytest
 from cryptography.fernet import Fernet
-from dotmac_kernel import secrets as ks
+from dotmac_kernel import secret_sources as ks
 from dotmac_kernel import settings_crypto as sc
 from dotmac_kernel import settings_resolver as sr
 from dotmac_kernel.setting_scopes import SettingScope
@@ -117,7 +117,7 @@ def test_a_stored_uri_is_a_value_not_a_reference(db, no_network, secret_spec):
     assert value == pointer
 
 
-# ── dotmac_kernel.secrets ────────────────────────────────────────────────────
+# ── dotmac_kernel.secret_sources ────────────────────────────────────────────────────
 
 
 class _Source:

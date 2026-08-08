@@ -1,5 +1,12 @@
 """Secret material a deployment holds in memory, loaded once at startup.
 
+Named `secret_sources` and not `secrets` for two reasons, neither cosmetic:
+`dotmac_kernel.security`, `platform_auth` and `middleware.csrf` all
+`import secrets` from the standard library for token generation, and a sibling
+module by that name makes every one of those imports ambiguous to a reader; and
+the release inspection forbids packaging any file named `secrets.py`, which is
+a guard worth keeping sharp rather than carving an exception into.
+
 ## The rule this module exists to serve
 
 **A secret is held, never dereferenced.** Nothing in the kernel resolves a
