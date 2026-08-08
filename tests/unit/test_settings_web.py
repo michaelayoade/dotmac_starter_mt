@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
+from cryptography.fernet import Fernet
+from dotmac_kernel import settings_crypto as sc
 from dotmac_kernel import settings_resolver as sr
 from dotmac_kernel.audit import AuditEvent
 from dotmac_kernel.deps import get_db
@@ -290,7 +292,10 @@ def test_edit_submit_writes_audit_event(
 
 
 @pytest.fixture()
-def secret_spec():
+def secret_spec(monkeypatch):
+    """A secret spec plus the key its writes now require — see the same
+    fixture in `test_settings_api.py`."""
+    monkeypatch.setenv(sc.KEY_ENV_VAR, Fernet.generate_key().decode())
     spec = sr.SettingSpec(
         domain=SettingDomain.auth,
         key="test_secret_token",

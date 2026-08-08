@@ -304,3 +304,257 @@ def test_tenant_a_put_max_per_entity_does_not_affect_tenant_b(
     a_entry = next(item for item in a_list.json() if item["key"] == "max_per_entity")
     assert a_entry["value"] == 5
     assert a_entry["source"] == "tenant"
+
+
+# ---------------------------------------------------------------------------
+# domain_setting_history — the same split-policy exception, plus append-only
+#
+# `_SPLIT_POLICY_EXCEPTIONS` in `tests/test_rls_catalog.py` only accepts a
+# nullable-tenant table that pays for the exception with a behavioural canary.
+# This is that canary. It pins the half a naive policy breaks (a tenant must
+# still READ platform-scope history) AND the half unique to this table: history
+# is append-only, so no tenant may rewrite or delete the record of a change.
+# ---------------------------------------------------------------------------
+
+
+def _insert_history(
+    session: Session,
+    *,
+    tenant_id: uuid.UUID | None,
+    key: str,
+    domain: str = "branding",
+) -> None:
+    session.execute(
+        text(
+            "INSERT INTO domain_setting_history "
+            "(id, tenant_id, domain, key, action, value_after) "
+            "VALUES (:id, :tenant_id, :domain, :key, 'create', 'v')"
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "tenant_id": str(tenant_id) if tenant_id else None,
+            "domain": domain,
+            "key": key,
+        },
+    )
+
+
+def test_history_of_tenant_a_is_invisible_to_tenant_b(
+    admin_session: Session,
+    tenant_a,
+    tenant_b,
+    tenant_sessionmaker: sessionmaker[Session],
+) -> None:
+    key = f"hist-a-{uuid.uuid4().hex[:8]}"
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        _insert_history(a, tenant_id=tenant_a.id, key=key)
+        a.commit()
+    finally:
+        a.close()
+
+    b = _as_tenant(tenant_sessionmaker, tenant_b.id)
+    try:
+        rows = b.execute(
+            text("SELECT key FROM domain_setting_history WHERE key = :key"),
+            {"key": key},
+        ).fetchall()
+        assert rows == []
+    finally:
+        b.rollback()
+        b.close()
+
+    admin_session.execute(
+        text("DELETE FROM domain_setting_history WHERE key = :key"), {"key": key}
+    )
+    admin_session.commit()
+
+
+def test_platform_history_is_visible_to_every_tenant(
+    admin_session: Session,
+    tenant_a,
+    tenant_b,
+    tenant_sessionmaker: sessionmaker[Session],
+) -> None:
+    """The half a naive `tenant_id = current_tenant` policy breaks."""
+    key = f"hist-platform-{uuid.uuid4().hex[:8]}"
+    admin_session.execute(
+        text(
+            "INSERT INTO domain_setting_history "
+            "(id, tenant_id, domain, key, action, value_after) "
+            "VALUES (:id, NULL, 'branding', :key, 'create', 'v')"
+        ),
+        {"id": str(uuid.uuid4()), "key": key},
+    )
+    admin_session.commit()
+
+    for tenant in (tenant_a, tenant_b):
+        session = _as_tenant(tenant_sessionmaker, tenant.id)
+        try:
+            rows = session.execute(
+                text("SELECT key FROM domain_setting_history WHERE key = :key"),
+                {"key": key},
+            ).fetchall()
+            assert len(rows) == 1
+        finally:
+            session.rollback()
+            session.close()
+
+    admin_session.execute(
+        text("DELETE FROM domain_setting_history WHERE key = :key"), {"key": key}
+    )
+    admin_session.commit()
+
+
+def test_tenant_cannot_write_history_for_another_tenant(
+    tenant_a, tenant_b, tenant_sessionmaker: sessionmaker[Session]
+) -> None:
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        with pytest.raises(DBAPIError):
+            _insert_history(a, tenant_id=tenant_b.id, key="hist-forged")
+            a.flush()
+    finally:
+        a.rollback()
+        a.close()
+
+
+def test_tenant_cannot_write_platform_scope_history(
+    tenant_a, tenant_sessionmaker: sessionmaker[Session]
+) -> None:
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        with pytest.raises(DBAPIError):
+            _insert_history(a, tenant_id=None, key="hist-platform-forged")
+            a.flush()
+    finally:
+        a.rollback()
+        a.close()
+
+
+def test_history_is_append_only_for_a_tenant(
+    admin_session: Session, tenant_a, tenant_sessionmaker: sessionmaker[Session]
+) -> None:
+    """A tenant that could rewrite or delete a history row could erase the
+    record of the change the row exists to explain. Enforced twice: no
+    UPDATE/DELETE policy, and no UPDATE/DELETE grant."""
+    key = f"hist-append-{uuid.uuid4().hex[:8]}"
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        _insert_history(a, tenant_id=tenant_a.id, key=key)
+        a.commit()
+    finally:
+        a.close()
+
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        with pytest.raises(DBAPIError):
+            a.execute(
+                text(
+                    "UPDATE domain_setting_history SET value_after = 'tampered' "
+                    "WHERE key = :key"
+                ),
+                {"key": key},
+            )
+    finally:
+        a.rollback()
+        a.close()
+
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        with pytest.raises(DBAPIError):
+            a.execute(
+                text("DELETE FROM domain_setting_history WHERE key = :key"),
+                {"key": key},
+            )
+    finally:
+        a.rollback()
+        a.close()
+
+    admin_session.execute(
+        text("DELETE FROM domain_setting_history WHERE key = :key"), {"key": key}
+    )
+    admin_session.commit()
+
+
+# ---------------------------------------------------------------------------
+# The settings read cache, against two real tenants
+#
+# `tests/unit/test_settings_cache.py` proves the key shape and the invalidation
+# arithmetic. This proves the property those imply but cannot demonstrate: with
+# a cache installed and TWO tenants whose rows really exist under RLS, tenant B
+# reads its own value and not A's, and A's write does not evict B's entry.
+#
+# A static check cannot see this. `dotmac_erp`'s unscoped key passed every one
+# of its own tests.
+# ---------------------------------------------------------------------------
+
+
+def test_cached_reads_do_not_cross_tenants(
+    admin_session: Session,
+    tenant_a,
+    tenant_b,
+    tenant_sessionmaker: sessionmaker[Session],
+) -> None:
+    from dotmac_kernel import settings_cache as settings_cache_module
+    from dotmac_kernel import settings_resolver
+    from dotmac_kernel.cache import MemoryCache
+    from dotmac_kernel.settings_models import SettingDomain
+
+    def write(tenant, value: int) -> None:
+        """One write in its own transaction.
+
+        A fresh session per commit is not ceremony: `_as_tenant` issues
+        `SET LOCAL app.current_tenant`, which is scoped to the transaction, so
+        reusing a session after `commit()` leaves it with no tenant context and
+        RLS correctly hides the row it just wrote.
+        """
+        session = _as_tenant(tenant_sessionmaker, tenant.id)
+        try:
+            settings_resolver.upsert_by_key(
+                session,
+                SettingDomain.audit,
+                "retention_days",
+                value,
+                tenant_id=tenant.id,
+            )
+            session.commit()
+        finally:
+            session.close()
+
+    def read(tenant) -> object:
+        session = _as_tenant(tenant_sessionmaker, tenant.id)
+        try:
+            return settings_resolver.resolve_value(
+                session, SettingDomain.audit, "retention_days", tenant_id=tenant.id
+            )
+        finally:
+            session.rollback()
+            session.close()
+
+    store = MemoryCache()
+    settings_cache_module.install_settings_cache(store)
+    try:
+        write(tenant_a, 11)
+        write(tenant_b, 22)
+
+        # A reads first and populates the cache; B must not be served A's entry.
+        assert read(tenant_a) == 11
+        assert read(tenant_b) == 22
+
+        # A's write evicts A's entry and leaves B's intact.
+        write(tenant_a, 33)
+        assert settings_cache_module.cached(
+            "audit", "retention_days", tenant_id=tenant_b.id
+        ) == (22, "tenant")
+        assert read(tenant_a) == 33
+        assert read(tenant_b) == 22
+    finally:
+        settings_cache_module.install_settings_cache(None)
+        admin_session.execute(
+            text(
+                "DELETE FROM domain_settings WHERE domain = 'audit' "
+                "AND key = 'retention_days'"
+            )
+        )
+        admin_session.commit()

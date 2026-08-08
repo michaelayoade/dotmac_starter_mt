@@ -130,6 +130,11 @@ class FeatureManifest:
     # `dotmac_kernel.audit.write_audit_event` rejects one no module declares.
     # See `dotmac_kernel.audit_actions.AuditActionRegistry`.
     audit_actions: Sequence[str] = field(default_factory=tuple)
+    # Setting domains this module DECLARES and OWNS. A domain groups settings
+    # under one owner; `dotmac_kernel.settings_resolver` rejects a spec or a
+    # write naming one no module declares. See
+    # `dotmac_kernel.setting_domains.SettingDomainRegistry`.
+    setting_domains: Sequence[str] = field(default_factory=tuple)
 
 
 def load_manifests(module_names: Sequence[str]) -> list[FeatureManifest]:

@@ -24,6 +24,8 @@ from __future__ import annotations
 from collections.abc import Generator
 
 import pytest
+from cryptography.fernet import Fernet
+from dotmac_kernel import settings_crypto as sc
 from dotmac_kernel import settings_resolver as sr
 from dotmac_kernel.audit import AuditEvent
 from dotmac_kernel.deps import get_db, require_user_auth
@@ -100,6 +102,10 @@ def test_list_settings_shows_spec_default_when_no_row(app_client: TestClient) ->
         "value": 20,
         "value_type": "integer",
         "label": "Maximum custom fields per entity",
+        "description": (
+            "Ceiling on custom-field definitions for one entity type. Raising "
+            "it widens every row's JSONB payload, so raise it deliberately."
+        ),
         "is_secret": False,
         "source": "default",
     }
@@ -133,12 +139,17 @@ def test_list_settings_returns_every_spec_in_domain(app_client: TestClient) -> N
 
 
 @pytest.fixture()
-def secret_spec():
+def secret_spec(monkeypatch):
     """Registers a throwaway `is_secret=True` spec, deregistered on teardown.
 
-    None of this app's three real specs are secrets — this proves the
-    masking behavior contractually rather than incidentally.
+    None of this app's real specs are secrets — this proves the masking
+    behavior contractually rather than incidentally.
+
+    An encryption key comes with it: since `dotmac_kernel.settings_crypto`, a
+    secret WRITE fails closed without one, so a fixture that registers a secret
+    spec and does not configure a key is testing an unreachable state.
     """
+    monkeypatch.setenv(sc.KEY_ENV_VAR, Fernet.generate_key().decode())
     spec = sr.SettingSpec(
         domain=SettingDomain.auth,
         key="test_secret_token",

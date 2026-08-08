@@ -1,49 +1,36 @@
 """Settings spec registry + tenant -> platform -> default resolver.
 
-Lives in `dotmac_kernel` (not `app.features.settings`) even though the spec
-*declarations* and seed data live in the feature: a later task wires the
-`custom_fields` feature to consume `resolve_value` directly, and features may
-never import each other, so the resolver mechanics have to sit somewhere both
-`custom_fields` and `settings` can import — that's core. `app/features/
-settings/spec.py` DECLARES the initial `SettingSpec` instances and calls
-`register_specs` at import time; this module only owns the registry
-*mechanism* (register/get/all) plus resolution and the upsert/ensure helpers
-that operate on `dotmac_kernel.settings_models.DomainSetting`.
+Lives in `dotmac_kernel`, not in a feature package: features may never import
+each other, and both the `settings` and `custom_fields` features consume
+`resolve_value`. A feature's own spec module DECLARES its `SettingSpec`
+instances and calls `register_specs` at import time; this module owns the
+registry *mechanism* (register/get/all), resolution, and the upsert/ensure
+helpers over `dotmac_kernel.settings_models.DomainSetting`.
 
-No caching here: phase 1 has no Redis. A Redis-backed settings cache is
-backlogged for phase 3.
+Which domains a spec may name is declared on module manifests and enforced on
+the write path — see `dotmac_kernel.setting_domains`.
 
-**DO NOT port `dotmac_sub:app/services/settings_cache.py`'s key shape.** This
-docstring used to name it as "the shape to port", which would have introduced a
-cross-tenant leak into the kernel. Its key is `f"{PREFIX}{domain}:{key}"` — no
-scope segment — which is correct THERE (a single-scope settings table) and
-catastrophic here, where `domain_settings` rows are tenant-scoped. The identical
-omission in `dotmac_erp`'s copy served one organization's stored values to every
-other organization, deployment-wide, because Redis is shared across all workers.
-
-Whatever lands must: take a REQUIRED tenant argument (never an optional one
-defaulting to unscoped); carry the scope in the key in a form a tenant cannot
-occupy (`…:tenant=<uuid>` vs a literal `…:platform`); expose the platform read
-as a SEPARATELY NAMED function rather than `tenant_id=None` through this same
-one; and invalidate scope-correctly. Note that `resolve_value(..., tenant_id=
-None)` is the platform path through the shared function today — the moment a
-cache exists, that `None` becomes a legitimate-looking key value, so the split
-has to happen with the cache, not after it.
-
-Race-safety and precedence mechanics are ported from
-`dotmac_sub:app/services/domain_settings.py::ensure_by_key` and
-`dotmac_sub:app/services/settings_spec.py::resolve_value`, adapted to this
-app's partial-unique-index pair (`uq_domain_settings_platform` /
-`uq_domain_settings_tenant`) and explicit `tenant_id: UUID | None` parameter
-instead of sub's single-tenant assumption.
+**Any cache added over these reads must be tenant-scoped in the key.** A key of
+the shape `settings:{domain}:{key}` is correct for a single-scope settings
+table and a cross-tenant leak here, where `domain_settings` rows are
+tenant-scoped and Redis is shared across every worker. A cache must therefore
+take a REQUIRED tenant argument (never an optional one defaulting to
+unscoped), carry the scope in a form a tenant cannot occupy
+(`…:tenant=<uuid>` vs a literal `…:platform`), expose the platform read as a
+SEPARATELY NAMED function rather than `tenant_id=None` through the shared one,
+and invalidate scope-correctly. `resolve_value(..., tenant_id=None)` is the
+platform path through the shared function today, so that split has to land
+WITH the cache, not after it.
 """
 
 from __future__ import annotations
 
 import copy
+import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -51,30 +38,47 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.exceptions import BadRequestError
-from dotmac_kernel.settings_models import DomainSetting, SettingDomain, SettingValueType
+from dotmac_kernel.setting_domains import active_setting_domains
+from dotmac_kernel.settings_cache import MISS as _CACHE_MISS
+from dotmac_kernel.settings_cache import cached as _cached
+from dotmac_kernel.settings_cache import invalidate as _invalidate_cache
+from dotmac_kernel.settings_cache import store_resolved as _store_resolved
+from dotmac_kernel.settings_crypto import decrypt_value, encrypt_value
+from dotmac_kernel.settings_models import (
+    DomainSetting,
+    DomainSettingHistory,
+    SettingChangeAction,
+    SettingDomain,
+    SettingValueType,
+)
 
 # Sentinel distinguishing "no default kwarg passed" from "default=None was
 # passed explicitly" in resolve_value.
 _UNSET = object()
 
-# Which row (if any) determined a resolved value — see `resolve_with_source`.
-SettingSource = Literal["tenant", "platform", "default"]
+# What determined a resolved value — see `resolve_with_source`.
+SettingSource = Literal["tenant", "platform", "env", "default"]
 
 
 @dataclass(frozen=True)
 class SettingSpec:
-    """Declares one (domain, key) setting: its type, default, and constraints.
-
-    Shape matches `dotmac_sub:app/services/settings_spec.py::SettingSpec`
-    minus `env_var` — this app seeds explicitly via `seed.py` rather than
-    reading env vars into settings rows at spec-declaration time.
-    """
+    """Declares one (domain, key) setting: its type, default, and constraints."""
 
     domain: SettingDomain
     key: str
     value_type: SettingValueType
     default: object | None
     label: str | None = None
+    # Prose shown beside `label` on the settings screen. A setting an operator
+    # cannot interpret is a setting they will not touch.
+    description: str | None = None
+    # Environment variable consulted BELOW the platform row and ABOVE `default`
+    # — see `resolve_with_source` for why that position and no other.
+    env_var: str | None = None
+    # A setting the deployment cannot run correctly without. Checked at startup
+    # by `validate_required_settings`, which `create_app` treats as fatal in
+    # production and a warning elsewhere.
+    required: bool = False
     allowed: set[str] | None = None
     min_value: int | None = None
     max_value: int | None = None
@@ -88,9 +92,17 @@ _REGISTRY: dict[tuple[SettingDomain, str], SettingSpec] = {}
 def register_specs(specs: list[SettingSpec]) -> None:
     """Add/overwrite specs in the module-level registry, keyed by (domain, key).
 
-    Called by `app/features/settings/spec.py` at import time. Idempotent —
+    Called by a feature's spec module at import time. Idempotent —
     re-registering the same (domain, key) overwrites the prior spec, so
     re-importing a spec module (e.g. under test reload) is harmless.
+
+    Domains are NOT validated here. Registration happens at import time, before
+    any registry is installed, and the registry is a property of ONE assembly
+    while `_REGISTRY` is process-global — a spec module imported by the test
+    suite would otherwise break an unrelated assembly's boot. The write path
+    (`upsert_by_key`/`ensure_by_key`) is the enforcement point, exactly as it
+    is for audit actions; `tests/architecture/test_manifest_declarations.py`
+    checks the real assembly's specs against its declarations.
     """
     for spec in specs:
         _REGISTRY[(spec.domain, spec.key)] = spec
@@ -103,7 +115,7 @@ def all_specs() -> list[SettingSpec]:
 def get_spec(domain: SettingDomain, key: str) -> SettingSpec:
     """Look up a registered spec. Raises `KeyError` if unregistered.
 
-    The API layer (a later task) catches this and maps it to `NotFoundError`.
+    The settings admin API catches this and maps it to `NotFoundError`.
     """
     try:
         return _REGISTRY[(domain, key)]
@@ -114,11 +126,11 @@ def get_spec(domain: SettingDomain, key: str) -> SettingSpec:
 def _select_row(
     db: Session, domain: SettingDomain, key: str, tenant_id: UUID | None
 ) -> DomainSetting | None:
-    """Final-review Group 4(c): `is_active` was a dead column — declared on
-    the model (`settings_models.py`), never read here. A deactivated row now
-    falls through resolution exactly like a missing one (tenant row inactive
-    -> platform row; platform row inactive -> spec default), instead of
-    resolving as if it were still active.
+    """The active row for this (domain, key, scope), or None.
+
+    `is_active=False` falls through resolution exactly like a missing row:
+    an inactive tenant row yields to the platform row, an inactive platform
+    row yields to the spec default.
     """
     return db.scalars(
         select(DomainSetting)
@@ -130,10 +142,19 @@ def _select_row(
 
 
 def _extract_raw(setting: DomainSetting | None) -> object | None:
+    """The stored value, decrypted when the row holds a secret.
+
+    `value_json` is never encrypted: only `value_text` carries a secret, since
+    a secret is a scalar credential and a JSON blob of them would need per-field
+    handling this deliberately does not have. `decrypt_value` passes plaintext
+    through, so a row written before a key existed still resolves.
+    """
     if setting is None:
         return None
     if setting.value_json is not None:
         return setting.value_json
+    if setting.is_secret:
+        return decrypt_value(setting.value_text)
     return setting.value_text
 
 
@@ -198,8 +219,14 @@ def resolve_with_source(
         spec = get_spec(domain, key)
     except KeyError:
         if default is not _UNSET:
+            # Nothing is cached here: this path never touches the database, so
+            # there is no read to save.
             return default, "default"
         raise
+
+    hit = _cached(domain, key, tenant_id=tenant_id)
+    if hit is not _CACHE_MISS:
+        return cast("tuple[Any, SettingSource]", hit)
 
     row = None
     source: SettingSource = "default"
@@ -213,6 +240,17 @@ def resolve_with_source(
             source = "platform"
 
     raw = _extract_raw(row)
+    if raw is None and spec.env_var is not None:
+        # BELOW both rows and ABOVE the spec default, deliberately. An env var
+        # is DEPLOYMENT-scoped: it cannot express a per-tenant value, so it must
+        # never beat a stored row an operator set — but it is a real operator
+        # decision, so it must beat a default the code shipped. Reading it here,
+        # in the one resolver, is also what keeps every consumer agreeing on the
+        # answer.
+        environment = os.environ.get(spec.env_var)
+        if environment is not None and environment != "":
+            raw = environment
+            source = "env"
     if raw is None:
         raw = spec.default
         source = "default"
@@ -252,6 +290,14 @@ def resolve_with_source(
         # the process. Scalars (bool/int/str) are immutable, no copy needed.
         value = copy.deepcopy(value)
 
+    _store_resolved(
+        domain,
+        key,
+        tenant_id=tenant_id,
+        value=value,
+        source=source,
+        is_secret=spec.is_secret,
+    )
     return value, source
 
 
@@ -290,6 +336,36 @@ def resolve_value(
         db, domain, key, tenant_id=tenant_id, default=default
     )
     return value
+
+
+def validate_required_settings(db: Session) -> list[str]:
+    """Every `required` spec that resolves to nothing, as operator-readable text.
+
+    Called once at startup by `create_app`, AFTER seeds run — a seeded platform
+    default is a real configured value, and checking before seeding would report
+    settings that are about to exist. Resolution is platform-scoped
+    (`tenant_id=None`): a required setting is a deployment prerequisite, and a
+    per-tenant override cannot satisfy it for the tenants that lack one.
+
+    Returns a list rather than raising so the caller decides severity — fatal in
+    production, a warning elsewhere, the same split `validate_settings` already
+    applies to `Settings`. Reporting ALL failures at once matters here: an
+    operator bringing up a deployment should see every missing value in one
+    pass, not rediscover them one restart at a time.
+    """
+    errors: list[str] = []
+    for spec in all_specs():
+        if not spec.required:
+            continue
+        value, source = resolve_with_source(db, spec.domain, spec.key, tenant_id=None)
+        if value is None or (source == "default" and spec.default is None):
+            errors.append(
+                f"required setting {spec.domain.value}/{spec.key} is not "
+                "configured: no platform row"
+                + (f", no {spec.env_var}" if spec.env_var else "")
+                + ", and no default"
+            )
+    return errors
 
 
 def validate_spec_value(spec: SettingSpec, value: object) -> object:
@@ -356,17 +432,61 @@ def validate_spec_value(spec: SettingSpec, value: object) -> object:
 
 
 def _normalize_for_db(
-    value_type: SettingValueType, value: object
+    value_type: SettingValueType, value: object, *, is_secret: bool = False
 ) -> tuple[str | None, dict[str, Any] | None]:
     """Split a Python value into the model's (value_text, value_json) pair,
-    respecting the `ck_domain_settings_value_alignment` CHECK constraint."""
+    respecting the `ck_domain_settings_value_alignment` CHECK constraint.
+
+    A secret is encrypted here, at the last point before the value reaches the
+    column, so both writers get it from one place. `encrypt_value` RAISES when
+    no key is configured: a secret that cannot be encrypted must not be stored.
+    """
     if value_type == SettingValueType.json:
         if value is not None and not isinstance(value, dict):
             raise TypeError(f"json setting value must be a dict, got {type(value)!r}")
         return None, value
     if value_type == SettingValueType.boolean:
         return ("true" if value else "false"), None
-    return str(value), None
+    text = str(value)
+    return (encrypt_value(text) if is_secret else text), None
+
+
+def _stored_text(row: DomainSetting) -> str | None:
+    """The row's current value as history records it — text or dumped JSON."""
+    if row.value_json is not None:
+        return json.dumps(row.value_json)
+    return row.value_text
+
+
+def _record_history(
+    db: Session,
+    *,
+    row: DomainSetting,
+    spec: SettingSpec,
+    action: SettingChangeAction,
+    before: str | None,
+) -> DomainSettingHistory:
+    """Record one value transition. Called by both writers, never by a caller.
+
+    A secret's value is redacted rather than stored — see
+    `DomainSettingHistory`'s docstring for why a history table must not become
+    the place a rotated credential outlives its rotation. The actor is NOT
+    recorded here: `write_audit_event` owns who-did-what, and the two records
+    correlate on `(tenant_id, domain, key)` and adjacent timestamps.
+    """
+    entry = DomainSettingHistory(
+        tenant_id=row.tenant_id,
+        domain=row.domain,
+        key=row.key,
+        setting_id=row.id,
+        action=action,
+        value_before=None if spec.is_secret else before,
+        value_after=None if spec.is_secret else _stored_text(row),
+        secret_changed=spec.is_secret,
+    )
+    db.add(entry)
+    db.flush()
+    return entry
 
 
 def upsert_by_key(
@@ -386,15 +506,30 @@ def upsert_by_key(
     migration's RLS policy), so a tenant-scoped session attempting this fails
     at the DB layer, not here.
     """
+    domain = active_setting_domains().require(domain)
     spec = get_spec(domain, key)
-    value_text, value_json = _normalize_for_db(spec.value_type, value)
+    value_text, value_json = _normalize_for_db(
+        spec.value_type, value, is_secret=spec.is_secret
+    )
 
     row = _select_row(db, domain, key, tenant_id)
     if row is not None:
+        # Captured BEFORE the assignment: once the attribute is set, the prior
+        # value is only recoverable from the session's history, which a later
+        # flush discards.
+        before = _stored_text(row)
         row.value_type = spec.value_type
         row.value_text = value_text
         row.value_json = value_json
         db.flush()
+        _record_history(
+            db,
+            row=row,
+            spec=spec,
+            action=SettingChangeAction.update,
+            before=before,
+        )
+        _invalidate_cache(domain, key, tenant_id=tenant_id)
         return row
 
     row = DomainSetting(
@@ -408,6 +543,10 @@ def upsert_by_key(
     )
     db.add(row)
     db.flush()
+    _record_history(
+        db, row=row, spec=spec, action=SettingChangeAction.create, before=None
+    )
+    _invalidate_cache(domain, key, tenant_id=tenant_id)
     return row
 
 
@@ -450,12 +589,15 @@ def ensure_by_key(
     `tenant_id=None` targets the PLATFORM row — only a platform-role session
     should pass `None` (see `upsert_by_key`'s docstring).
     """
+    domain = active_setting_domains().require(domain)
     existing = _select_row(db, domain, key, tenant_id)
     if existing is not None:
         return existing
 
     spec = get_spec(domain, key)
-    value_text, value_json = _normalize_for_db(spec.value_type, value)
+    value_text, value_json = _normalize_for_db(
+        spec.value_type, value, is_secret=spec.is_secret
+    )
     row = DomainSetting(
         tenant_id=tenant_id,
         domain=domain,
@@ -472,8 +614,14 @@ def ensure_by_key(
         db.rollback()
         raced = _select_row(db, domain, key, tenant_id)
         if raced is not None:
+            # The race LOSER wrote nothing, so it records nothing: the winner
+            # already recorded the one creation that happened.
             return raced
         raise
+    _record_history(
+        db, row=row, spec=spec, action=SettingChangeAction.create, before=None
+    )
+    _invalidate_cache(domain, key, tenant_id=tenant_id)
     return row
 
 
@@ -481,4 +629,5 @@ __all__ = [
     "SettingSpec",
     "register_specs",
     "resolve_value",
+    "validate_required_settings",
 ]

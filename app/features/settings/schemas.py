@@ -13,8 +13,9 @@ class SettingOut(BaseModel):
     value: Any
     value_type: str
     label: str | None
+    description: str | None
     is_secret: bool
-    source: Literal["tenant", "platform", "default"]
+    source: Literal["tenant", "platform", "env", "default"]
 
 
 class SettingUpdate(BaseModel):

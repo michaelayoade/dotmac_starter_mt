@@ -11,18 +11,16 @@ Pure and in-memory, like `capabilities` and `profiles`: no database, no I/O, no
 FastAPI app. It **describes installed code**; it never grants entitlement (WS2
 owns that) and it never deploys anything (the vendor control plane owns that).
 
-## What this step deliberately does NOT declare
+## What this manifest deliberately does NOT declare
 
-The directive's `ModuleManifest` sketch also lists `settings`, `feature_flags`,
-`entity_types`, and `health_checks`. Those belong to later program steps (5 =
-typed flags), and the same directive's governance list says CI must fail when "a
-declaration has no consumer". Adding those fields now would ship exactly that:
-declarations nothing derives behavior from. Each lands with the registry code
-that consumes it — as `permissions` and `audit_actions` did in step 3, which
-landed together with `dotmac_kernel.permissions` (consumed by
-`dotmac_kernel.deps.require_permission` and validated at boot by `create_app`)
-and `dotmac_kernel.audit_actions` (consumed by
-`dotmac_kernel.audit.write_audit_event`).
+The directive's `ModuleManifest` sketch also lists `entity_types` and
+`health_checks`, and its `settings` field in the sense of declaring individual
+setting SPECS (a spec is declared in its feature's own spec module and
+registered with `dotmac_kernel.settings_resolver`; the manifest declares only
+the DOMAINS a module owns). Those are absent because the directive's governance
+list says CI must fail when "a declaration has no consumer" — adding the field
+before the registry that reads it would ship exactly that. Each lands with the
+code that consumes it; ADR-0008 describes the shape every one of them takes.
 
 ## Compatibility with `FeatureManifest`
 
@@ -154,6 +152,9 @@ class ModuleManifest:
     # Audit actions this module declares and owns. Enforced at the write by
     # `dotmac_kernel.audit.write_audit_event`; see `dotmac_kernel.audit_actions`.
     audit_actions: Sequence[str] = field(default_factory=tuple)
+    # Setting domains this module declares and owns. Enforced when a spec is
+    # registered and at the write; see `dotmac_kernel.setting_domains`.
+    setting_domains: Sequence[str] = field(default_factory=tuple)
     # ── D1: database namespace + migration lineage identity (ADR-0006) ──────
     # `short_code` is the registry-ALLOCATED database identity of a STATEFUL
     # module (see `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER`). Its schema
@@ -194,6 +195,7 @@ class ModuleManifest:
             "capabilities",
             "permissions",
             "audit_actions",
+            "setting_domains",
             "tables",
             "feature_flags",
         ):
@@ -331,6 +333,7 @@ class ModuleManifest:
             feature_flags=manifest.feature_flags,
             permissions=manifest.permissions,
             audit_actions=manifest.audit_actions,
+            setting_domains=manifest.setting_domains,
             core=manifest.core,
             enabled_by_default=manifest.enabled_by_default,
             seed=manifest.seed,

@@ -490,3 +490,213 @@ def test_upsert_by_key_overwrites_existing_row(db):
     assert row1.id == row2.id
     assert row2.value_json == {"a": 2}
     assert _row_count(db, SettingDomain.branding, "ui_branding") == 1
+
+
+# ---------------------------------------------------------------------------
+# Environment fallback + required settings (spec richness)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _env_spec():
+    """A spec with an `env_var`, registered for one test and then removed."""
+    before = set(sr._REGISTRY.keys())
+    sr.register_specs(
+        [
+            sr.SettingSpec(
+                domain=SettingDomain.auth,
+                key="test_env",
+                value_type=SettingValueType.string,
+                default="from-default",
+                env_var="DOTMAC_TEST_ENV_SETTING",
+            )
+        ]
+    )
+    yield
+    for key in set(sr._REGISTRY.keys()) - before:
+        del sr._REGISTRY[key]
+
+
+def test_env_var_beats_the_spec_default(db, monkeypatch, _env_spec):
+    monkeypatch.setenv("DOTMAC_TEST_ENV_SETTING", "from-env")
+    value, source = sr.resolve_with_source(
+        db, SettingDomain.auth, "test_env", tenant_id=None
+    )
+    assert (value, source) == ("from-env", "env")
+
+
+def test_a_stored_row_beats_the_env_var(db, monkeypatch, _env_spec):
+    """An env var is deployment-scoped, so it must never override a value an
+    operator stored — the inverse would make the admin screen a liar."""
+    monkeypatch.setenv("DOTMAC_TEST_ENV_SETTING", "from-env")
+    db.add(
+        DomainSetting(
+            tenant_id=None,
+            domain=SettingDomain.auth,
+            key="test_env",
+            value_type=SettingValueType.string,
+            value_text="from-row",
+        )
+    )
+    db.flush()
+    value, source = sr.resolve_with_source(
+        db, SettingDomain.auth, "test_env", tenant_id=None
+    )
+    assert (value, source) == ("from-row", "platform")
+
+
+def test_an_unset_env_var_falls_through_to_the_default(db, monkeypatch, _env_spec):
+    monkeypatch.delenv("DOTMAC_TEST_ENV_SETTING", raising=False)
+    value, source = sr.resolve_with_source(
+        db, SettingDomain.auth, "test_env", tenant_id=None
+    )
+    assert (value, source) == ("from-default", "default")
+
+
+def test_an_empty_env_var_is_not_a_value(db, monkeypatch, _env_spec):
+    """An exported-but-empty variable is how a shell says "unset", not how an
+    operator says "the empty string"."""
+    monkeypatch.setenv("DOTMAC_TEST_ENV_SETTING", "")
+    value, source = sr.resolve_with_source(
+        db, SettingDomain.auth, "test_env", tenant_id=None
+    )
+    assert (value, source) == ("from-default", "default")
+
+
+@pytest.fixture
+def _required_spec():
+    before = set(sr._REGISTRY.keys())
+    sr.register_specs(
+        [
+            sr.SettingSpec(
+                domain=SettingDomain.auth,
+                key="test_required",
+                value_type=SettingValueType.string,
+                default=None,
+                required=True,
+                env_var="DOTMAC_TEST_REQUIRED_SETTING",
+            )
+        ]
+    )
+    yield
+    for key in set(sr._REGISTRY.keys()) - before:
+        del sr._REGISTRY[key]
+
+
+def test_required_setting_with_nothing_configured_is_reported(
+    db, monkeypatch, _required_spec
+):
+    monkeypatch.delenv("DOTMAC_TEST_REQUIRED_SETTING", raising=False)
+    errors = sr.validate_required_settings(db)
+    assert any("auth/test_required" in error for error in errors)
+    # The message names every place the operator could have set it.
+    assert any("DOTMAC_TEST_REQUIRED_SETTING" in error for error in errors)
+
+
+def test_required_setting_satisfied_by_env_is_not_reported(
+    db, monkeypatch, _required_spec
+):
+    monkeypatch.setenv("DOTMAC_TEST_REQUIRED_SETTING", "configured")
+    assert sr.validate_required_settings(db) == []
+
+
+def test_required_setting_satisfied_by_a_row_is_not_reported(
+    db, monkeypatch, _required_spec
+):
+    monkeypatch.delenv("DOTMAC_TEST_REQUIRED_SETTING", raising=False)
+    db.add(
+        DomainSetting(
+            tenant_id=None,
+            domain=SettingDomain.auth,
+            key="test_required",
+            value_type=SettingValueType.string,
+            value_text="configured",
+        )
+    )
+    db.flush()
+    assert sr.validate_required_settings(db) == []
+
+
+def test_this_assembly_declares_no_required_setting_it_cannot_satisfy(db):
+    """Every shipped spec has a working default, so a fresh deployment starts
+    with no operator configuration. A spec added with `required=True` and no
+    default fails here until it is genuinely satisfiable."""
+    assert sr.validate_required_settings(db) == []
+
+
+def test_every_shipped_spec_explains_itself(db):
+    """`description` is what the settings screen renders under the label."""
+    missing = [
+        f"{spec.domain.value}/{spec.key}"
+        for spec in sr.all_specs()
+        if spec.key.startswith("test_") is False and not spec.description
+    ]
+    assert not missing, f"spec(s) with no description: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Change history
+# ---------------------------------------------------------------------------
+
+
+def _history_rows(db, key: str):
+    from dotmac_kernel.settings_models import DomainSettingHistory
+
+    return (
+        db.scalars(
+            select(DomainSettingHistory)
+            .where(DomainSettingHistory.key == key)
+            .order_by(DomainSettingHistory.changed_at)
+        )
+        .unique()
+        .all()
+    )
+
+
+def test_a_create_then_update_is_two_history_rows(db):
+    sr.upsert_by_key(db, SettingDomain.audit, "retention_days", 30, tenant_id=None)
+    sr.upsert_by_key(db, SettingDomain.audit, "retention_days", 90, tenant_id=None)
+
+    rows = _history_rows(db, "retention_days")
+    assert [(r.action.value, r.value_before, r.value_after) for r in rows] == [
+        ("create", None, "30"),
+        ("update", "30", "90"),
+    ]
+
+
+def test_history_records_the_scope_it_happened_in(db, tenant_row):
+    sr.upsert_by_key(
+        db, SettingDomain.audit, "retention_days", 30, tenant_id=tenant_row.id
+    )
+    (row,) = _history_rows(db, "retention_days")
+    assert row.tenant_id == tenant_row.id
+    assert row.domain == "audit"
+
+
+def test_a_json_setting_records_both_states(db):
+    sr.upsert_by_key(
+        db, SettingDomain.branding, "ui_branding", {"logo": "a"}, tenant_id=None
+    )
+    sr.upsert_by_key(
+        db, SettingDomain.branding, "ui_branding", {"logo": "b"}, tenant_id=None
+    )
+    rows = _history_rows(db, "ui_branding")
+    assert rows[1].value_before == '{"logo": "a"}'
+    assert rows[1].value_after == '{"logo": "b"}'
+
+
+def test_history_points_at_the_row_it_describes(db):
+    setting = sr.upsert_by_key(
+        db, SettingDomain.audit, "retention_days", 30, tenant_id=None
+    )
+    (row,) = _history_rows(db, "retention_days")
+    assert row.setting_id == setting.id
+
+
+def test_ensure_by_key_records_only_the_real_insert(db):
+    """Seeding runs on every boot; only the boot that actually inserts is a
+    transition."""
+    sr.ensure_by_key(db, SettingDomain.audit, "retention_days", 30, tenant_id=None)
+    sr.ensure_by_key(db, SettingDomain.audit, "retention_days", 99, tenant_id=None)
+    rows = _history_rows(db, "retention_days")
+    assert [(r.action.value, r.value_after) for r in rows] == [("create", "30")]

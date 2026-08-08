@@ -87,8 +87,11 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.providers.provisioning` | `ProvisioningProvider`, `ProvisioningRequest`, `ProvisioningStep`, `PlanResult`, `ApplyResult`, `ObserveResult`, `ProvisioningStatus`, `StepStatus`, `ProvisioningError`, `ProvisioningRetryableError`, `ProvisioningTerminalError`, `ProvisioningPlanError`, `ProvisioningApplyError`, `ProvisioningCancelled` |
 | `dotmac_kernel.query` | `apply_pagination`, `escape_like` |
 | `dotmac_kernel.security` | `hash_password`, `verify_password`, `password_needs_rehash`, `hash_token`, `issue_access_token`, `decode_access_token` |
-| `dotmac_kernel.settings_models` | `SettingDomain`, `SettingValueType` |
+| `dotmac_kernel.setting_domains` | `SettingDomainRegistry`, `SettingDomainsNotInstalledError`, `DuplicateSettingDomainError`, `UndeclaredSettingDomainError`, `install_setting_domains`, `active_setting_domains` |
+| `dotmac_kernel.settings_models` | `SettingDomain`, `SettingValueType`, `DomainSetting`, `KERNEL_SETTING_DOMAINS` |
 | `dotmac_kernel.settings_resolver` | `SettingSpec`, `register_specs`, `resolve_value` |
+| `dotmac_kernel.settings_cache` | `MISS`, `install_settings_cache`, `active_settings_cache`, `cached`, `store_resolved`, `invalidate`, `setting_cache_key`, `setting_key_prefix` (scoped read cache for resolved settings; OFF until a store is installed) |
+| `dotmac_kernel.settings_crypto` | `ENCRYPTED_PREFIX`, `DEFAULT_KEY_ID`, `KEYRING_ENV_VAR`, `KEY_ENV_VAR`, `KEY_FILE_ENV_VAR`, `EncryptionKey`, `KeyStatus`, `Keyring`, `KeyringError`, `SettingsEncryptionError`, `encrypt_value`, `decrypt_value`, `encrypted_key_id`, `encryption_configured`, `is_encrypted`, `keyring`, `reencrypt_secrets` (at-rest encryption of secret settings, with a rotatable keyring; needs the `settings-crypto` extra) |
 | `dotmac_kernel.settings_admin` | `all_specs`, `get_spec`, `resolve_with_source`, `upsert_by_key`, `ensure_by_key`, `validate_spec_value` |
 | `dotmac_kernel.templating` | `render`, `install_surface_globals`, `install_stylesheets`, `static_dir`, `use_assembly_templates` |
 | `dotmac_kernel.testing` | `create_test_engine`, `isolated_session`, `assembly_test_client`, `FakeClock`, `FakeSeeder`, `InMemoryRateLimitStore`, `fake_branding`, `FakeProvisioningProvider`, `check_provisioning_provider_contract`, `FakeLicenceSigner` (see "Testing kit" below) |
@@ -107,7 +110,8 @@ it never grants entitlement and it never deploys anything.
 
 - **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
   `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
-  `permissions`, `audit_actions`, `short_code`, `migration_prefix`,
+  `permissions`, `audit_actions`, `feature_flags`, `setting_domains`,
+  `short_code`, `migration_prefix`,
   `migration_branch`, `tables`, `core`, `enabled_by_default`, `seed`. `code`
   is the stable identifier every other authority references (a dependency edge,
   a profile's required/forbidden set, a capability owner). `version` is the module's own release version;
@@ -248,12 +252,18 @@ revision ids are already recorded in live `alembic_version` rows, so
 exempts them from the strict id and `schema=` rules. Their tables legitimately
 live in `public`. Every installable module gets the strict rules.
 
-### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`)
+### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`, `dotmac_kernel.setting_domains`)
 
-Module control-plane directive step 3. Both are sibling catalogues of
-`dotmac_kernel.capabilities.CapabilityCatalogue` — same shape, same fail-closed
-posture, same invariant: **a code is declared by exactly one module's manifest
-and may never be invented anywhere else.** Pure and in-memory; no engine, no I/O.
+Siblings of `dotmac_kernel.capabilities.CapabilityCatalogue` and
+`dotmac_kernel.flags.FlagCatalogue` — same shape, same fail-closed posture, same
+invariant: **a code is declared by exactly one module's manifest and may never be
+invented anywhere else.** Pure and in-memory; no engine, no I/O.
+
+**ADR-0008 makes this the standard.** A kernel-level vocabulary whose members
+belong to modules is declared on manifests and validated by a registry — never
+enumerated by the kernel as an enum or a fixed list, and never pinned by a CHECK
+constraint on the backing column. If you are adding a sixth, copy
+`dotmac_kernel.audit_actions` and change the nouns.
 
 - **`PermissionSpec(code, description="", default_roles=("admin",))`** — one
   permission a module owns. `default_roles` is the code-declared default binding
@@ -267,13 +277,26 @@ and may never be invented anywhere else.** Pure and in-memory; no engine, no I/O
   free-text-no-longer `audit_events.action` vocabulary:
   `DuplicateAuditActionError` on two owners, `require(action)` raising
   `UndeclaredAuditActionError`, plus `is_declared`/`owner`/`actions`.
-- **Process-active install.** `install_permissions` / `install_audit_actions`
-  set the process-active catalogue and registry; `active_permissions` /
-  `active_audit_actions` read them. `create_app` installs both from the INSTALLED
-  module set before mounting anything. Permissions default to EMPTY so an
-  uninstalled authorization catalogue denies safely. Audit actions distinguish
-  NOT INSTALLED (`AuditActionsNotInstalledError`) from INSTALLED-EMPTY (every
-  write is undeclared). A consumer that builds an app by hand (a test mounting a
+- **`SettingDomainRegistry.from_manifests(manifests)`** — the same again, for
+  `domain_settings.domain`: `DuplicateSettingDomainError`, `require(domain)`
+  returning a `SettingDomain` or raising `UndeclaredSettingDomainError`, plus
+  `is_declared`/`owner`/`domains`. **`SettingDomain` is an open `str` subclass,
+  not an enum** — a kernel cannot enumerate its consumers' domains (this repo
+  declares five; `dotmac_erp` runs twenty-one), so the column is a plain
+  `String(120)` and correctness comes from the write boundary. Kernel-owned
+  domains are bound as class attributes (`SettingDomain.branding`); a product
+  constructs its own (`SettingDomain("payroll")`).
+- **Process-active install.** `install_permissions` / `install_audit_actions` /
+  `install_setting_domains` set the process-active catalogue and registries;
+  `active_permissions` / `active_audit_actions` / `active_setting_domains` read
+  them. `create_app` installs all of them from the INSTALLED module set before
+  mounting anything. Permissions default to EMPTY so an uninstalled
+  authorization catalogue denies safely. Audit actions and setting domains
+  distinguish NOT INSTALLED (`AuditActionsNotInstalledError` /
+  `SettingDomainsNotInstalledError`) from INSTALLED-EMPTY (every write is
+  undeclared) — an uninstalled write-path registry would otherwise reject writes
+  inside the caller's transaction and turn a wiring mistake into a failed
+  business operation. A consumer that builds an app by hand (a test mounting a
   router on a bare `FastAPI()`) must install them itself, exactly as it must call
   `install_surface_globals`.
 

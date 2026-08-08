@@ -3,7 +3,7 @@
 The model + resolver live in `dotmac_kernel` (`dotmac_kernel.settings_models`,
 `dotmac_kernel.settings_resolver`) because the `custom_fields` feature must
 consume them and features may never import each other. This package owns the
-spec declarations, seed data, and the tenant admin API (Task 5): `GET
+spec declarations, seed data, and the tenant admin API: `GET
 /settings/{domain}` (list every registered spec merged with the tenant's
 effective values) and `PUT /settings/{domain}/{key}` (write the tenant
 override), both guarded by `require_tenant` + `require_role("admin")` — see
@@ -11,6 +11,7 @@ override), both guarded by `require_tenant` + `require_role("admin")` — see
 """
 
 from dotmac_kernel.features import FeatureManifest, NavItem
+from dotmac_kernel.settings_models import KERNEL_SETTING_DOMAINS
 
 from app.features.settings.router import router
 from app.features.settings.seed import seed_platform_defaults
@@ -27,4 +28,9 @@ feature = FeatureManifest(
     # the trail reads identically however the change arrived (module
     # control-plane directive step 3).
     audit_actions=["settings.update"],
+    # This module declares every spec in `spec.py`, so it owns every domain
+    # those specs name — declaration and ownership stay in one place, which is
+    # the property `SettingDomainRegistry` checks. A feature that declares its
+    # own specs declares its own domains alongside them.
+    setting_domains=[str(domain) for domain in KERNEL_SETTING_DOMAINS],
 )
