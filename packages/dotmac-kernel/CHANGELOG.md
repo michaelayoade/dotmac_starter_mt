@@ -6,6 +6,38 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a18 — 2026-08-08
+
+Per-scope requirements, per-tenant encryption keys, and history retention. No
+migration.
+
+### Changed — BREAKING (API)
+- **`SettingSpec.required` becomes `required_at`**, naming the SCOPE KIND at
+  which a setting must be configured. A bool could only ever express the
+  deployment case, so "every tenant must set a billing contact" had no way to be
+  stated. `required_at="platform"` is the old behaviour.
+- **`Keyring.active` is a method taking an optional tenant**, not a property.
+
+### Added
+- **`missing_required_settings(db, scope=...)`** — what is unconfigured AT ONE
+  SCOPE. Startup still checks only the deployment's own prerequisites: a tenant
+  that does not exist yet cannot be missing anything, and enumerating every
+  tenant at boot would make startup cost grow with the customer count. Callers
+  ask for a scope when it matters — provisioning a tenant, opening a site.
+- **Per-tenant encryption keys (BYOK)** — a keyring entry may name a
+  `tenant_id`. That tenant's writes use its own key; everything else uses the
+  deployment key, so the common case is unchanged. Possible without a format
+  change because `enc:<key_id>:<token>` already names the key that wrote a
+  value — the same property that made rotation possible. At most one active key
+  PER OWNER. `reencrypt_secrets` rewrites each row onto ITS owner's key.
+  Decryption refuses a ciphertext naming another tenant's key: RLS should make
+  that unreachable, which is why it is worth asserting.
+- **`prune_setting_history`** — `DomainSettingHistory` had no retention and grew
+  for the life of the deployment. Append-only is about who may rewrite history,
+  not about keeping it forever. A function a caller schedules, not something the
+  write path does: pruning inside a write would make an ordinary change
+  occasionally do unbounded work.
+
 ## 0.1.0a17 — 2026-08-08
 
 Bulk settings reads, and a setting change that announces itself. No migration.

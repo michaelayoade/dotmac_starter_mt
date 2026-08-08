@@ -7,6 +7,8 @@ told so at the write rather than discovering it in a database dump.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from cryptography.fernet import Fernet
 from dotmac_kernel import settings_crypto as sc
@@ -446,3 +448,115 @@ def test_a_secret_change_is_recorded_without_the_secret(db, monkeypatch, _secret
     blob = " ".join(str(v) for e in entries for v in vars(e).values())
     assert "first" not in blob
     assert "second" not in blob
+
+
+# ---------------------------------------------------------------------------
+# Per-tenant keys (BYOK)
+#
+# The ciphertext already names its key, which is what made rotation possible;
+# the same property is what makes per-tenant keys a lookup change rather than a
+# format change.
+# ---------------------------------------------------------------------------
+
+TENANT_KEY = Fernet.generate_key().decode()
+TENANT_ONE = UUID("11111111-1111-1111-1111-111111111111")
+TENANT_TWO = UUID("22222222-2222-2222-2222-222222222222")
+
+
+def test_a_tenant_with_its_own_key_uses_it(monkeypatch) -> None:
+    monkeypatch.setenv(
+        sc.KEYRING_ENV_VAR,
+        _keyring(
+            {"key_id": "deployment", "key": KEY, "status": "active"},
+            {
+                "key_id": "acme",
+                "key": TENANT_KEY,
+                "status": "active",
+                "tenant_id": str(TENANT_ONE),
+            },
+        ),
+    )
+    stored = sc.encrypt_value("hunter2", tenant_id=TENANT_ONE)
+    assert sc.encrypted_key_id(stored) == "acme"
+    assert sc.decrypt_value(stored, tenant_id=TENANT_ONE) == "hunter2"
+
+
+def test_a_tenant_without_its_own_key_uses_the_deployments(monkeypatch) -> None:
+    """The common case stays unchanged — BYOK is opt-in per tenant."""
+    monkeypatch.setenv(
+        sc.KEYRING_ENV_VAR,
+        _keyring(
+            {"key_id": "deployment", "key": KEY, "status": "active"},
+            {
+                "key_id": "acme",
+                "key": TENANT_KEY,
+                "status": "active",
+                "tenant_id": str(TENANT_ONE),
+            },
+        ),
+    )
+    assert sc.encrypted_key_id(sc.encrypt_value("x", tenant_id=TENANT_TWO)) == (
+        "deployment"
+    )
+    assert sc.encrypted_key_id(sc.encrypt_value("x")) == "deployment"
+
+
+def test_one_tenants_key_never_decrypts_anothers_row(monkeypatch) -> None:
+    """RLS should make this unreachable, which is why it is worth asserting: if
+    it fires, something upstream handed us the wrong row, and returning the
+    plaintext would turn that into a disclosure."""
+    monkeypatch.setenv(
+        sc.KEYRING_ENV_VAR,
+        _keyring(
+            {"key_id": "deployment", "key": KEY, "status": "active"},
+            {
+                "key_id": "acme",
+                "key": TENANT_KEY,
+                "status": "active",
+                "tenant_id": str(TENANT_ONE),
+            },
+        ),
+    )
+    stored = sc.encrypt_value("hunter2", tenant_id=TENANT_ONE)
+    assert sc.decrypt_value(stored, tenant_id=TENANT_TWO) is None
+
+
+def test_two_active_keys_for_one_owner_is_still_an_error(monkeypatch) -> None:
+    monkeypatch.setenv(
+        sc.KEYRING_ENV_VAR,
+        _keyring(
+            {
+                "key_id": "a",
+                "key": KEY,
+                "status": "active",
+                "tenant_id": str(TENANT_ONE),
+            },
+            {
+                "key_id": "b",
+                "key": OLD_KEY,
+                "status": "active",
+                "tenant_id": str(TENANT_ONE),
+            },
+        ),
+    )
+    with pytest.raises(sc.KeyringError, match="more than one active key"):
+        sc.keyring()
+
+
+def test_one_active_key_per_owner_is_fine(monkeypatch) -> None:
+    """Two active keys are legitimate when they belong to different owners."""
+    monkeypatch.setenv(
+        sc.KEYRING_ENV_VAR,
+        _keyring(
+            {"key_id": "deployment", "key": KEY, "status": "active"},
+            {
+                "key_id": "acme",
+                "key": OLD_KEY,
+                "status": "active",
+                "tenant_id": str(TENANT_ONE),
+            },
+        ),
+    )
+    ring = sc.keyring()
+    assert ring.active().key_id == "deployment"
+    assert ring.active(TENANT_ONE).key_id == "acme"

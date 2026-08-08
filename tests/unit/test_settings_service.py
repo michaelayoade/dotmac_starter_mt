@@ -578,7 +578,7 @@ def _required_spec():
                 key="test_required",
                 value_type=SettingValueType.string,
                 default=None,
-                required=True,
+                required_at="platform",
                 env_var="DOTMAC_TEST_REQUIRED_SETTING",
             )
         ]
@@ -624,7 +624,7 @@ def test_required_setting_satisfied_by_a_row_is_not_reported(
 
 def test_this_assembly_declares_no_required_setting_it_cannot_satisfy(db):
     """Every shipped spec has a working default, so a fresh deployment starts
-    with no operator configuration. A spec added with `required=True` and no
+    with no operator configuration. A spec added with `required_at="platform"` and no
     default fails here until it is genuinely satisfiable."""
     assert sr.validate_required_settings(db) == []
 
@@ -705,3 +705,91 @@ def test_ensure_by_key_records_only_the_real_insert(db):
     sr.ensure_by_key(db, SettingDomain.audit, "retention_days", 99, tenant_id=None)
     rows = _history_rows(db, "retention_days")
     assert [(r.action.value, r.value_after) for r in rows] == [("create", "30")]
+
+
+# ---------------------------------------------------------------------------
+# Per-scope required, and history retention
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _tenant_required_spec():
+    before = set(sr._REGISTRY)
+    sr.register_specs(
+        [
+            sr.SettingSpec(
+                domain=SettingDomain.audit,
+                key="test_billing_contact",
+                value_type=SettingValueType("string"),
+                default=None,
+                required_at="tenant",
+            )
+        ]
+    )
+    yield
+    for key in set(sr._REGISTRY) - before:
+        del sr._REGISTRY[key]
+
+
+def test_a_tenant_scoped_requirement_is_not_a_startup_failure(
+    db, _tenant_required_spec
+):
+    """A tenant that does not exist yet cannot be missing anything, and
+    enumerating every tenant at boot would make startup cost grow with the
+    customer count."""
+    assert sr.validate_required_settings(db) == []
+
+
+def test_a_tenant_missing_its_required_setting_is_reported(
+    db, tenant_row, _tenant_required_spec
+):
+    """The thing a bool could never express: 'every tenant must set this'."""
+    errors = sr.missing_required_settings(db, tenant_id=tenant_row.id)
+    assert any("test_billing_contact" in error for error in errors)
+
+
+def test_a_tenant_that_has_set_it_is_not_reported(
+    db, tenant_row, _tenant_required_spec
+):
+    sr.upsert_by_key(
+        db,
+        SettingDomain.audit,
+        "test_billing_contact",
+        "ops@acme",
+        tenant_id=tenant_row.id,
+    )
+    assert sr.missing_required_settings(db, tenant_id=tenant_row.id) == []
+
+
+def test_history_older_than_the_window_is_pruned(db, tenant_row):
+    from dotmac_kernel.settings_models import DomainSettingHistory
+
+    """Append-only is about who may rewrite history, not about keeping it
+    forever."""
+    from datetime import UTC, datetime, timedelta
+
+    sr.upsert_by_key(
+        db, SettingDomain.audit, "retention_days", 30, tenant_id=tenant_row.id
+    )
+    old = db.query(DomainSettingHistory).one()
+    old.changed_at = datetime.now(UTC) - timedelta(days=400)
+    db.flush()
+
+    assert sr.prune_setting_history(db, older_than_days=365) == 1
+    assert db.query(DomainSettingHistory).count() == 0
+
+
+def test_recent_history_survives_pruning(db, tenant_row):
+    from dotmac_kernel.settings_models import DomainSettingHistory
+
+    sr.upsert_by_key(
+        db, SettingDomain.audit, "retention_days", 30, tenant_id=tenant_row.id
+    )
+    assert sr.prune_setting_history(db, older_than_days=365) == 0
+    assert db.query(DomainSettingHistory).count() == 1
+
+
+def test_pruning_needs_a_real_window(db):
+    """`older_than_days=0` would delete the change someone just made."""
+    with pytest.raises(ValueError):
+        sr.prune_setting_history(db, older_than_days=0)
