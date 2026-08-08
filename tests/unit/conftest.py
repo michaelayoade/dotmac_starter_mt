@@ -39,6 +39,10 @@ from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
     install_setting_domains,
 )
+from dotmac_kernel.setting_value_types import (
+    SettingValueTypeRegistry,
+    install_setting_value_types,
+)
 from dotmac_kernel.templating import install_surface_globals
 
 # The in-memory engine + savepoint-isolated session are the kernel's supported
@@ -90,6 +94,7 @@ def _default_declaration_catalogues():
     install_capabilities(CapabilityCatalogue.from_manifests(manifests))
     install_flags(FlagCatalogue.from_manifests(manifests))
     install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
+    install_setting_value_types(SettingValueTypeRegistry.from_manifests(manifests))
     # A fresh evaluation cache per test: the store is process-global, and a
     # leaked entry would make one test's overrides decide another's answer.
     install_flag_cache(MemoryCache())
