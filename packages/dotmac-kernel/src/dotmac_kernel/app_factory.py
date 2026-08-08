@@ -60,6 +60,7 @@ from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
     install_setting_domains,
 )
+from dotmac_kernel.setting_scopes import ScopeKindRegistry, install_scope_kinds
 from dotmac_kernel.setting_value_types import (
     SettingValueTypeRegistry,
     install_setting_value_types,
@@ -271,6 +272,8 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
     # Setting value types: the kernel's built-ins plus any a module declares.
     install_setting_value_types(SettingValueTypeRegistry.from_manifests(manifests))
+    # Scope kinds: the kernel's platform/tenant plus any level a module adds.
+    install_scope_kinds(ScopeKindRegistry.from_manifests(manifests))
 
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
     # before any template renders. Fed the FULL installed set in startup order

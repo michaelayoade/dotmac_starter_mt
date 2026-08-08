@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import pytest
 from dotmac_kernel import settings_resolver as sr
+from dotmac_kernel.setting_scopes import SettingScope
 from dotmac_kernel.settings_models import DomainSetting, SettingDomain, SettingValueType
 from sqlalchemy import func, select
 
@@ -188,8 +189,8 @@ def test_resolve_value_tenant_row_wins_over_platform_row(db, tenant_row, monkeyp
         value_text="45",
     )
 
-    def fake_select_row(db_, domain_, key_, tenant_id_):
-        return tenant_setting if tenant_id_ == tenant_row.id else platform_setting
+    def fake_select_row(db_, domain_, key_, scope_):
+        return tenant_setting if scope_.kind == "tenant" else platform_setting
 
     monkeypatch.setattr(sr, "_select_row", fake_select_row)
     value = sr.resolve_value(
@@ -425,14 +426,18 @@ def test_ensure_by_key_does_not_overwrite_operator_value(db):
         db, SettingDomain.custom_fields, "max_per_entity", 20, tenant_id=None
     )
     # Simulate an operator override.
-    row = sr._select_row(db, SettingDomain.custom_fields, "max_per_entity", None)
+    row = sr._select_row(
+        db, SettingDomain.custom_fields, "max_per_entity", SettingScope.platform()
+    )
     row.value_text = "77"
     db.flush()
 
     sr.ensure_by_key(
         db, SettingDomain.custom_fields, "max_per_entity", 20, tenant_id=None
     )
-    row = sr._select_row(db, SettingDomain.custom_fields, "max_per_entity", None)
+    row = sr._select_row(
+        db, SettingDomain.custom_fields, "max_per_entity", SettingScope.platform()
+    )
     assert row.value_text == "77"
 
 
@@ -455,11 +460,11 @@ def test_ensure_by_key_race_safe_reselects_winner(db, monkeypatch):
     real_select_row = sr._select_row
     calls = {"n": 0}
 
-    def fake_select_row(db_, domain_, key_, tenant_id_):
+    def fake_select_row(db_, domain_, key_, scope_):
         calls["n"] += 1
         if calls["n"] == 1:
             return None
-        return real_select_row(db_, domain_, key_, tenant_id_)
+        return real_select_row(db_, domain_, key_, scope_)
 
     monkeypatch.setattr(sr, "_select_row", fake_select_row)
 

@@ -64,7 +64,6 @@ from __future__ import annotations
 
 import copy
 from typing import TYPE_CHECKING
-from uuid import UUID
 
 from dotmac_kernel.cache import (
     CacheStore,
@@ -73,6 +72,7 @@ from dotmac_kernel.cache import (
     TenantScope,
     cache_key,
 )
+from dotmac_kernel.setting_scopes import SettingScope
 
 if TYPE_CHECKING:
     from dotmac_kernel.settings_models import SettingDomain
@@ -92,20 +92,37 @@ class _Miss:
 MISS = _Miss()
 
 
-def _scope(tenant_id: UUID | None) -> Scope:
-    return TenantScope(tenant_id) if tenant_id is not None else PlatformScope()
+def _cache_scope(scope: SettingScope) -> Scope:
+    """The CACHE scope for a setting scope.
+
+    Deliberately keyed on `tenant_id`, not on the finer level: the cache scope
+    exists to make a cross-TENANT leak unrepresentable, and every scope inside a
+    tenant belongs to that tenant. The finer level is part of the key's identity
+    segment instead — see `setting_cache_key` — so a site's entry and its
+    tenant's entry are distinct without weakening the isolation segment.
+    """
+    return PlatformScope() if scope.tenant_id is None else TenantScope(scope.tenant_id)
 
 
 def setting_cache_key(
-    domain: SettingDomain | str, key: str, *, tenant_id: UUID | None
+    domain: SettingDomain | str, key: str, *, scope: SettingScope
 ) -> str:
-    """The cache key for one resolved setting.
+    """The cache key for one resolved setting at one scope.
 
     `k=` prefixes the setting key so no setting can collide with a future
-    aggregate entry (`all`, say) in the same namespace, and so the two are
-    distinguishable in a cache dump.
+    aggregate entry (`all`, say) in the same namespace. The scope LEVEL is part
+    of the identity segments, while the tenant remains the cache scope — so two
+    levels of one tenant never share an entry, and no level of one tenant can
+    ever occupy another tenant's.
     """
-    return cache_key(_NAMESPACE, str(domain), f"k={key}", scope=_scope(tenant_id))
+    return cache_key(
+        _NAMESPACE,
+        str(domain),
+        f"k={key}",
+        f"s={scope.kind}",
+        f"i={scope.scope_id or '-'}",
+        scope=_cache_scope(scope),
+    )
 
 
 def setting_key_prefix(domain: SettingDomain | str, key: str) -> str:
@@ -115,8 +132,10 @@ def setting_key_prefix(domain: SettingDomain | str, key: str) -> str:
     rather than re-assembled here: two independent renderings of one key shape
     is exactly how a prefix comes to miss the keys it is meant to drop.
     """
-    built = setting_cache_key(domain, key, tenant_id=None)
-    return built[: built.rindex(":") + 1]
+    built = setting_cache_key(domain, key, scope=SettingScope.platform())
+    # Everything from the setting's identity up to (not including) the level
+    # segments, so the prefix covers every level and every tenant for this key.
+    return built[: built.index(":s=") + 1]
 
 
 # ── The process-active store ────────────────────────────────────────────────
@@ -135,7 +154,7 @@ def active_settings_cache() -> CacheStore | None:
     return _active_store
 
 
-def cached(domain: SettingDomain | str, key: str, *, tenant_id: UUID | None) -> object:
+def cached(domain: SettingDomain | str, key: str, *, scope: SettingScope) -> object:
     """A cached `(value, source)` pair, or `MISS`.
 
     Returns a sentinel rather than None, because `None` is a legitimate resolved
@@ -145,7 +164,7 @@ def cached(domain: SettingDomain | str, key: str, *, tenant_id: UUID | None) -> 
     store = _active_store
     if store is None:
         return MISS
-    hit = store.get(setting_cache_key(domain, key, tenant_id=tenant_id))
+    hit = store.get(setting_cache_key(domain, key, scope=scope))
     if hit is None:
         return MISS
     # Defensive copy on the way OUT as well as in: a json setting resolves to a
@@ -158,7 +177,7 @@ def store_resolved(
     domain: SettingDomain | str,
     key: str,
     *,
-    tenant_id: UUID | None,
+    scope: SettingScope,
     value: object,
     source: str,
     is_secret: bool,
@@ -168,12 +187,12 @@ def store_resolved(
     if store is None or is_secret:
         return
     store.set(
-        setting_cache_key(domain, key, tenant_id=tenant_id),
+        setting_cache_key(domain, key, scope=scope),
         copy.deepcopy((value, source)),
     )
 
 
-def invalidate(domain: SettingDomain | str, key: str, *, tenant_id: UUID | None) -> int:
+def invalidate(domain: SettingDomain | str, key: str, *, scope: SettingScope) -> int:
     """Drop what a write to (domain, key, scope) invalidated. Returns the count.
 
     A platform write drops every scope's entry — see the module docstring for
@@ -182,9 +201,11 @@ def invalidate(domain: SettingDomain | str, key: str, *, tenant_id: UUID | None)
     store = _active_store
     if store is None:
         return 0
-    if tenant_id is None:
+    if scope.tenant_id is None:
+        # A platform write changes what every tenant at every level resolves,
+        # because they all fall through to it.
         return store.delete_prefix(setting_key_prefix(domain, key))
-    return store.delete_prefix(setting_cache_key(domain, key, tenant_id=tenant_id))
+    return store.delete_prefix(setting_cache_key(domain, key, scope=scope))
 
 
 __all__ = [

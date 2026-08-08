@@ -193,7 +193,7 @@ def test_rehearsal_1_fresh_empty_assembly(scratch_db: str) -> None:
     assert _table_exists(scratch_db, "platform_audit_events")
     assert _table_exists(scratch_db, "platform_inbox_records")
     assert _table_exists(scratch_db, "tenant_entitlement_grants")
-    assert _versions(scratch_db) == {"0015_open_value_types"}
+    assert _versions(scratch_db) == {"0016_setting_scope_depth"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -212,7 +212,7 @@ def test_rehearsal_2_fresh_reference_assembly(scratch_db: str) -> None:
     # design anticipated ("if the kernel advances past what a001 depends on,
     # both heads would appear").
     assert _versions(scratch_db) == {
-        "0015_open_value_types",
+        "0016_setting_scope_depth",
         "a004_backfill_capability_grants",
     }
     # RLS + grants correct: FORCE RLS on, the isolation policy present, and
@@ -247,7 +247,7 @@ def _simulate_v08(url: str) -> None:
     # kernel@head is now 0011 (relay leasing added atop 0010 entitlements),
     # but a001 is un-recorded — the "table present, a001 not recorded" state adoption
     # repairs.
-    assert _versions(url) == {"0015_open_value_types"}
+    assert _versions(url) == {"0016_setting_scope_depth"}
 
 
 def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
@@ -278,7 +278,7 @@ def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
     # lineage continues on the same upgrade.
     _upgrade(scratch_db, "heads")
     assert _versions(scratch_db) == {
-        "0015_open_value_types",
+        "0016_setting_scope_depth",
         "a004_backfill_capability_grants",
     }
     # Data survived untouched.
@@ -404,13 +404,13 @@ def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
     # a002) and leaves the kernel head; `kernel@head` no longer collapses the
     # branch now the kernel lineage has advanced past a001's `depends_on` pin.
     _stamp(scratch_db, "assembly@base")
-    assert _versions(scratch_db) == {"0015_open_value_types"}
+    assert _versions(scratch_db) == {"0016_setting_scope_depth"}
     assert _table_exists(scratch_db, "custom_field_definitions")
 
     # Now the kernel-only migrator succeeds: it sees only the kernel head (0008),
     # which it knows — a001 is no longer recorded.
     _upgrade(scratch_db, "heads", version_locations=_kernel_only_locations())
-    assert _versions(scratch_db) == {"0015_open_value_types"}
+    assert _versions(scratch_db) == {"0016_setting_scope_depth"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -431,7 +431,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     # installed stateful MODULE (ADR-0006 M1). One head per owner is the
     # invariant — a second head inside ONE lineage would be the real defect.
     assert heads == {
-        "0015_open_value_types",
+        "0016_setting_scope_depth",
         "a004_backfill_capability_grants",
         "ts_0001_templates",
     }, f"unexpected head set: {heads}"
@@ -440,6 +440,6 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     kernel_head = script.get_revision("kernel@head")
     assembly_head = script.get_revision("assembly@head")
     module_head = script.get_revision("template_studio@head")
-    assert kernel_head.revision == "0015_open_value_types"
+    assert kernel_head.revision == "0016_setting_scope_depth"
     assert assembly_head.revision == "a004_backfill_capability_grants"
     assert module_head.revision == "ts_0001_templates"
