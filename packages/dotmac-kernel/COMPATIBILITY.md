@@ -12,6 +12,60 @@ The current kernel version is the `[tool.poetry] version` in this package's
 `pyproject.toml` (pre-release `0.x` alphas; per-release notes in
 `CHANGELOG.md`) — it is deliberately not repeated here, where it would drift.
 
+## Settings: the minimal core, and everything else
+
+Nine modules carry settings — `settings_resolver`, `settings_models`,
+`settings_admin`, `settings_cache`, `settings_crypto`, `setting_domains`,
+`setting_scopes`, `setting_value_types`, `secret_sources` — plus history,
+retention, BYOK, change events and bulk reads inside them. **A new application
+needs three things from all of that.** The rest exists because a product asked
+for it, and adopting a piece because it exists is how a configuration system
+becomes a subsystem.
+
+Everything below is public and supported. This section is about what to REACH
+FOR, not what is allowed.
+
+### The core three
+
+1. **Declare your domains** on the owning module's manifest
+   (`setting_domains=(...)`). A domain is an open registered string, so naming
+   one costs no kernel change (ADR-0008).
+2. **Register your specs** — `register_specs([SettingSpec(...)])` at import
+   time, in the module that owns them.
+3. **Read them** — `resolve_value(db, domain, key, tenant_id=...)`.
+
+That is a complete, multi-tenant, RLS-isolated, admin-editable settings system.
+Single-tenant is the same code path with one tenant row, not a second one.
+
+### Everything else, and the condition for reaching for it
+
+Take these ONE AT A TIME, when the stated condition is true of your
+application. None is a prerequisite for another unless noted.
+
+| Capability | Reach for it when |
+|---|---|
+| `resolve_with_source` | A screen must show WHERE a value came from. |
+| `resolve_many` | One screen resolves many keys and the per-key queries show up. |
+| `settings_cache` | Profiling says resolution is hot. Inert until you `install_settings_cache(store)`; secrets are never cached. |
+| `setting_scopes` (beyond platform/tenant) | You genuinely have a level between or below them — per-site, per-reseller, per-user. Most products never do. |
+| `setting_value_types` (beyond the built-ins) | A value has a shape the built-in types cannot store correctly. `money` already exists; do not model currency as a string. |
+| `settings_crypto` | You store a secret AS a setting. Needs the `settings-crypto` extra. |
+| `KeyProvider` | Encryption keys live in a secret store rather than the environment. |
+| `secret_sources` | Secret material lives in a store and is NOT a setting (ADR-0009). |
+| BYOK (per-tenant keys) | A specific customer contractually requires its own key material. |
+| `DomainSettingHistory` + `SettingChangeContext` | You must answer "who changed this, and when". |
+| `prune_setting_history` | History growth is measured and a retention period is decided. |
+| Change events | Another system must react to a setting changing. `settings_change_events` defaults to `False`: an event with no relay accumulates. |
+| `required_at` + `validate_required_settings` | A deployment is invalid without a value, and you want it to fail at boot rather than at first use. |
+| `seed_settings_from_env` | Automatic. Env is a bootstrap input, never a read-time fallback. |
+
+### What adopting the core does NOT commit you to
+
+Nothing in the second table. There is no initialisation order that forces the
+cache on, no migration that presumes history is wanted, and no scope kind you
+must declare. A deployment that registers specs and calls `resolve_value` and
+does nothing else is a supported, complete configuration.
+
 ## What is public
 
 A name is public **only** if it is either:
