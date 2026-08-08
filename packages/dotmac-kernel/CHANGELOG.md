@@ -6,6 +6,32 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a23 — 2026-08-08
+
+An adoption path for products that already have settings. No migration.
+
+### Added
+- **`dotmac_kernel.settings_shadow`** — run a product's own resolver and the
+  kernel's side by side and record where they disagree, so a cutover is gated
+  on evidence rather than confidence. ADR-0003 requires adapters, shadow tests
+  and one-writer cutovers; for settings the kernel supplied none of it.
+
+  `ShadowPhase` moves one way only — legacy served, then kernel served with the
+  legacy still compared, then legacy no longer called. There is deliberately no
+  "serve whichever is non-null" mode: that is a third answer belonging to
+  neither system.
+
+  `compare_one` / `sweep` / `sweep_scopes` never raise (a shadow phase that can
+  crash a request is worse than the drift it looks for) and **never report a
+  value** — only domain, key, scope and type names, because a settings table
+  holds credentials and a divergence report is exactly what gets pasted into a
+  ticket.
+
+- **`ADOPTION.md`** — the five-phase recipe, the ADR-0009 decision that must
+  come first, and the traps: platform-only sweeps prove nothing about tenant
+  overrides, and representation differences (`Decimal("5")` vs `5`) are not
+  drift and are not reported, because a report that cries wolf gets ignored.
+
 ## 0.1.0a22 — 2026-08-08
 
 The settings read API is typed. No migration.
