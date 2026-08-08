@@ -368,8 +368,9 @@ its enforcing test/contract). This section is only an index — adapters
 point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 `AGENTS.md` wins; fix the drift.
 
-1. Routers (`router.py`/`web.py`) never issue direct DB queries — logic in
-   `service.py` (`test_thin_wrappers.py`).
+1. Adapters (`router.py`/`web.py`) never issue direct DB queries — logic in
+   `service.py`. The filename convention is what makes this enforceable
+   (`test_thin_wrappers.py`; ADR-0010, fleet-wide).
 2. Templates render `*_at` timestamps only via `local_datetime`/`local_date`
    filters (`test_web_conventions.py`).
 3. Every route carries a `require_*` guard or a commented `ALLOWLIST` entry;

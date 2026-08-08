@@ -18,9 +18,16 @@ specifics) points here and must never fork these rules.
 
 ## Hard rules (enforced — test/contract named per rule)
 
-1. **Routers are thin.** `router.py`/`web.py` never issue direct DB queries
+1. **Adapters are thin.** `router.py`/`web.py` never issue direct DB queries
    (no `db.query(`, `db.execute(`, `select(`) — logic lives in `service.py`.
-   (`tests/architecture/test_thin_wrappers.py`)
+   Adapters validate, authorize, delegate and render; a DECISION belongs to one
+   service. This repo identifies an adapter by FILENAME, which is why the check
+   is a three-line `rglob` — that naming convention is load-bearing, not
+   cosmetic. ADR-0010 makes the rule fleet-wide and says why a repository
+   without such a convention cannot enforce it: `dotmac_erp` has 1223 direct
+   queries in 83 web modules living inside `app/services/`, where a
+   directory-scoped check passes while missing 96% of them.
+   (`tests/architecture/test_thin_wrappers.py`; ADR-0010)
 2. **Timestamps render only through the `local_datetime`/`local_date` Jinja
    filters** — never a raw `*_at` attribute in a template.
    (`tests/architecture/test_web_conventions.py::test_timestamp_renders_go_through_local_filters`)
