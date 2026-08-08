@@ -111,7 +111,7 @@ don't duplicate it here.
 
 ## Extension points
 
-Four points let a project built from this template add its own surface
+These points let a project built from this template add its own surface
 without touching core:
 
 - **Register a feature package.** Add `app/features/<name>/` (with
@@ -138,6 +138,20 @@ without touching core:
   anywhere under `app/` (outside the settings feature and the resolver
   module itself) fails the no-orphan-settings test — wire a real
   `resolve_value(...)` call before shipping it, or don't register it yet.
+- **Supply encryption keys from a secret store.** By default settings
+  encryption keys come from the environment
+  (`SETTINGS_ENCRYPTION_KEY`/`_FILE`/`SETTINGS_ENCRYPTION_KEYS`). A deployment
+  that keeps keys in a secret store instead implements
+  `dotmac_kernel.settings_crypto.KeyProvider` (one method, `load_keys`) and
+  calls `install_key_provider(...)` at startup. The kernel ships no provider
+  and no store client — the dependency stays in the product. The provider is
+  read ONCE, at install, and held in memory: a key is fetched at boot, so the
+  store being unreachable an hour later cannot touch the per-request read
+  path. Rotation is an explicit `refresh_keys()`, never a TTL. A provider that
+  fails raises at install rather than letting the process start with no keys
+  and silently degrade every secret to its spec default; there is deliberately
+  no degraded-start knob. Key material is never stored in `domain_settings` —
+  a key that protects data at rest must not live in the database it protects.
 - **Add an admin-portal surface (the capability model — THE surface
   extension point).** A feature's `FeatureManifest` (`dotmac_kernel.features`)
   declares `web_routers` (its `web.py` router, HTML/HTMX) and `nav` (a

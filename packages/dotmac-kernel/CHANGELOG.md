@@ -6,6 +6,42 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a20 — 2026-08-08
+
+A seam for supplying settings encryption keys from a secret store, and a fix
+for key material appearing in reprs. No migration.
+
+### Added
+- **`KeyProvider`** — a structural protocol (one method, `load_keys`) for
+  deployments whose encryption keys live in a secret store rather than the
+  environment. `install_key_provider(provider)` loads it ONCE and holds the
+  result; `refresh_keys()` re-reads it; `clear_key_provider()` falls back to
+  the environment.
+
+  Reading KEYS from a store is safe where reading VALUES from one is not:
+  settings resolution is a per-request read path, so putting a store on it
+  turns that store's outage into a total outage — but a key fetched at startup
+  is already in the process, and the same outage an hour later is invisible.
+  Rotation is therefore explicit rather than a TTL, and a provider that fails
+  raises at install rather than letting a process start with no keys and
+  silently degrade every secret to its spec default. There is no
+  degraded-start option, deliberately.
+
+  The kernel ships no provider and no secret-store client; the implementation
+  and its dependency stay in the product.
+
+### Fixed
+- **Key material no longer appears in `EncryptionKey` / `Keyring` reprs.** The
+  default dataclass repr printed `material=<the key>`, and a repr is reached
+  from places nobody audits — an exception traceback, a debug log, a failed
+  assertion. Key ids and statuses are still shown, so a keyring stays
+  debuggable. A `KeyProvider` failure likewise reports only the exception TYPE,
+  because a store client's error can quote the payload it choked on.
+
+### Unchanged
+- With no provider installed, keys come from the environment exactly as before,
+  re-read on each use so a rotated variable still takes effect.
+
 ## 0.1.0a19 — 2026-08-08
 
 Settings change actor, write-time spec enforcement, and environment variables as

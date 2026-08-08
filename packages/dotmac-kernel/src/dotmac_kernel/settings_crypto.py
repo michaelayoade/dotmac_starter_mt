@@ -48,14 +48,35 @@ rows its own code wrote, and the next write moves them onto the keyring.
 
 ## Where key material comes from
 
-The environment (`SETTINGS_ENCRYPTION_KEYS`, or `SETTINGS_ENCRYPTION_KEY` /
-`SETTINGS_ENCRYPTION_KEY_FILE` for the single-key case) — never a network fetch.
-Settings resolution is a per-request read path, and making it depend on a secret
-store being reachable would turn that store's outage into a total outage. Every
-secret manager (OpenBao Agent templates, Kubernetes mounted secrets, cloud
-secret CSI drivers, Docker secrets) can render to an environment variable or a
-file, so env-or-file is the one contract that excludes no deployment profile.
-Choosing the store is a deployment decision; the kernel does not know which.
+An encryption key protects other data, so it must never live in the database it
+protects — storing it beside the ciphertext defeats encryption at rest entirely.
+That rules out `domain_settings` for key material and leaves two sources.
+
+**By default, the environment** (`SETTINGS_ENCRYPTION_KEYS`, or
+`SETTINGS_ENCRYPTION_KEY` / `SETTINGS_ENCRYPTION_KEY_FILE` for the single-key
+case). Every secret manager (OpenBao Agent templates, Kubernetes mounted
+secrets, cloud secret CSI drivers, Docker secrets) can render to an environment
+variable or a file, so env-or-file is the one contract that excludes no
+deployment profile. Read fresh on each call, so a rotated variable takes effect.
+
+**Or a `KeyProvider` the product installs** — for a deployment whose keys live
+in a secret store it wants to read directly. The kernel ships no such provider
+and no client library for one: `KeyProvider` is a structural protocol, the
+product supplies the implementation, and the dependency stays in the product.
+
+The provider is loaded ONCE, by `install_key_provider`, and the result is held
+in memory. This is what makes reading keys from a network store safe when
+reading *values* from one would not be: settings resolution is a per-request
+read path, and putting a store on it turns that store's outage into a total
+outage — but a key fetched at startup is already in the process, so the same
+outage an hour later is invisible. Rotation is therefore an explicit
+`refresh_keys()`, never a side effect of a read.
+
+A provider that fails to load raises, and a caller that installs one has said
+keys are expected — so the failure is loud rather than a process that starts
+with no keys and silently degrades every secret to its spec default. There is
+deliberately no "start anyway" knob: that is the flag that gets switched on
+during an incident and never switched back.
 
 Dependency: Fernet needs the `cryptography` package, installed by the
 `settings-crypto` extra. The import is LAZY, exactly as
@@ -72,9 +93,10 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
 if TYPE_CHECKING:  # the runtime import is lazy — see the module docstring
@@ -116,10 +138,18 @@ class KeyringError(ValueError):
     """The configured keyring is not usable as configured."""
 
 
+class KeyProviderError(KeyringError):
+    """An installed `KeyProvider` could not supply keys."""
+
+
 @dataclass(frozen=True)
 class EncryptionKey:
     key_id: str
-    material: str
+    # `repr=False` because a dataclass repr is reached from places nobody
+    # audits: an exception traceback, a debug log, a test failure diff. The key
+    # id identifies a key well enough for every one of those; the material
+    # would be the whole secret, printed.
+    material: str = field(repr=False)
     status: KeyStatus = KeyStatus.ACTIVE
     # The tenant this key belongs to, or None for the deployment's own key.
     # A customer that requires its own key material (BYOK) gets an entry with
@@ -142,6 +172,15 @@ class Keyring:
     """
 
     keys: tuple[EncryptionKey, ...]
+
+    def __repr__(self) -> str:
+        """Key ids and statuses only — never material. See `EncryptionKey`."""
+        described = ", ".join(
+            f"{key.key_id}:{key.status.value}"
+            + (f"@{key.tenant_id}" if key.tenant_id else "")
+            for key in self.keys
+        )
+        return f"Keyring({described})"
 
     def __post_init__(self) -> None:
         seen: set[str] = set()
@@ -196,6 +235,100 @@ class Keyring:
     def decrypting(self) -> tuple[EncryptionKey, ...]:
         """Keys permitted to decrypt: everything not revoked."""
         return tuple(key for key in self.keys if key.status is not KeyStatus.REVOKED)
+
+
+@runtime_checkable
+class KeyProvider(Protocol):
+    """Where a deployment's encryption keys come from, when not the environment.
+
+    One method, because a provider has one job. The kernel builds the `Keyring`
+    from what is returned, so a provider cannot skip the duplicate-id, malformed
+    -id and one-active-key-per-owner checks by constructing its own.
+
+    Implementations live in the PRODUCT, not here — that is what keeps the
+    kernel free of any secret-store client library. A typical one reads a path
+    in OpenBao and maps each field to an `EncryptionKey`.
+
+    It is called once by `install_key_provider` and again only on an explicit
+    `refresh_keys()`, so it may be slow and may do I/O.
+    """
+
+    def load_keys(self) -> Iterable[EncryptionKey]:
+        """Every key this deployment should decrypt with, including retired
+        ones. Raise to signal the store could not be reached — do not return an
+        empty sequence for that, which is indistinguishable from "no keys are
+        configured" and would silently degrade every secret to its default."""
+        ...
+
+
+# The installed provider and the snapshot it produced. Held together so that
+# "a provider is installed" and "we have its keys" cannot disagree.
+_provider: KeyProvider | None = None
+_provided: Keyring | None = None
+
+
+def _load_from(provider: KeyProvider) -> Keyring:
+    try:
+        keys = tuple(provider.load_keys())
+    except KeyringError:
+        raise
+    except Exception as exc:
+        # Deliberately not `exc` in the message: a store client's error can
+        # quote the payload it failed on, and that payload is key material.
+        raise KeyProviderError(
+            f"{type(provider).__name__} could not load encryption keys: "
+            f"{type(exc).__name__}"
+        ) from exc
+    return Keyring(keys)
+
+
+def install_key_provider(provider: KeyProvider) -> Keyring:
+    """Install `provider` as the source of key material and load it NOW.
+
+    Loading eagerly is the point: the keys are in memory from this moment, so a
+    later outage of whatever the provider reads cannot affect request handling.
+    It also puts any failure at a place with a stack trace naming the product's
+    provider, rather than at some unrelated write hours later.
+
+    Raises `KeyProviderError` if the provider fails, or `KeyringError` if what
+    it returns is not a usable keyring. Both are loud on purpose — see the
+    module docstring on why there is no degraded-start option.
+
+    Returns the loaded keyring so a caller can log what it got (ids and
+    statuses; the repr carries no material).
+    """
+    global _provider, _provided
+    loaded = _load_from(provider)
+    _provider, _provided = provider, loaded
+    logger.info("Installed settings key provider %s", loaded)
+    return loaded
+
+
+def refresh_keys() -> Keyring:
+    """Re-read the installed provider — the rotation operation.
+
+    Explicit rather than a TTL, because a key rotation should take effect when
+    an operator says so, not when a timer happens to fire. Nothing else re-reads
+    a provider.
+
+    The previous keyring is kept if the reload fails, so a store that is briefly
+    unreachable during a rotation attempt leaves a working process working.
+    """
+    global _provided
+    if _provider is None:
+        raise KeyProviderError(
+            "no key provider is installed — nothing to refresh. Keys are read "
+            "from the environment, which is re-read on every use already"
+        )
+    _provided = _load_from(_provider)
+    logger.info("Refreshed settings encryption keys: %s", _provided)
+    return _provided
+
+
+def clear_key_provider() -> None:
+    """Uninstall the provider and fall back to the environment."""
+    global _provider, _provided
+    _provider, _provided = None, None
 
 
 def _keyring_from_env() -> Keyring:
@@ -294,7 +427,14 @@ def _fernet(key: EncryptionKey) -> Fernet | None:
 def keyring() -> Keyring:
     """The configured keyring, or an empty one. Raises `KeyringError` on a
     keyring that is configured but malformed — a typo must not read as
-    "encryption is off"."""
+    "encryption is off".
+
+    An installed provider's snapshot wins and is NOT re-read here; that is what
+    keeps this a pure in-memory call on the per-request read path. Without one,
+    the environment is read fresh each time so a rotated variable takes effect.
+    """
+    if _provided is not None:
+        return _provided
     return _keyring_from_env()
 
 
@@ -519,15 +659,20 @@ __all__ = [
     "KEY_ENV_VAR",
     "KEY_FILE_ENV_VAR",
     "EncryptionKey",
+    "KeyProvider",
+    "KeyProviderError",
     "KeyStatus",
     "Keyring",
     "KeyringError",
     "SettingsEncryptionError",
+    "clear_key_provider",
     "decrypt_value",
     "encrypt_value",
     "encrypted_key_id",
     "encryption_configured",
+    "install_key_provider",
     "is_encrypted",
     "keyring",
     "reencrypt_secrets",
+    "refresh_keys",
 ]
