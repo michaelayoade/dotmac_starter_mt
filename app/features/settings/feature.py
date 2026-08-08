@@ -17,6 +17,10 @@ from app.features.settings.router import router
 from app.features.settings.seed import seed_platform_defaults
 from app.features.settings.web import router as web_router
 
+# Declared by the feature that reads them, not here. Kept as a named set so the
+# reason a domain is absent is visible at the place it would otherwise appear.
+_DOMAINS_OWNED_BY_OTHER_FEATURES = {"auth", "audit", "custom_fields"}
+
 feature = FeatureManifest(
     name="settings",
     routers=[router],
@@ -32,5 +36,13 @@ feature = FeatureManifest(
     # those specs name — declaration and ownership stay in one place, which is
     # the property `SettingDomainRegistry` checks. A feature that declares its
     # own specs declares its own domains alongside them.
-    setting_domains=[str(domain) for domain in KERNEL_SETTING_DOMAINS],
+    # Every kernel domain EXCEPT those a feature has taken ownership of by
+    # declaring their specs itself. This list shrinks as specs move to their
+    # readers; a domain declared here with no spec fails CI, and so does a spec
+    # in a domain nobody declares.
+    setting_domains=[
+        str(domain)
+        for domain in KERNEL_SETTING_DOMAINS
+        if str(domain) not in _DOMAINS_OWNED_BY_OTHER_FEATURES
+    ],
 )

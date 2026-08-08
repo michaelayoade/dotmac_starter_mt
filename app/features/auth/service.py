@@ -44,13 +44,13 @@ from dotmac_kernel.security import (
     password_needs_rehash,
     verify_password,
 )
-from dotmac_kernel.settings_models import SettingDomain
-from dotmac_kernel.settings_resolver import resolve_value
+from dotmac_kernel.settings_resolver import resolve
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.features.auth.schemas import LoginRequest, RegisterRequest
+from app.features.auth.spec import REGISTRATION_POLICY
 
 # Constant-work login (Task 5): the no-such-party / org-party / no-credential
 # miss paths verify against this pre-computed dummy hash so every failure
@@ -89,13 +89,7 @@ def register(db: Session, tenant: Tenant, payload: RegisterRequest) -> PersonVie
     # owner-creation path; the race-prone first-registrant-becomes-admin
     # bootstrap is deleted outright. A registered user under an `open`
     # policy is a PLAIN user — roles are granted explicitly via rbac.
-    policy = resolve_value(
-        db,
-        SettingDomain.auth,
-        "registration_policy",
-        tenant_id=tenant.id,
-        default="closed",
-    )
+    policy = resolve(db, REGISTRATION_POLICY, tenant_id=tenant.id)
     if policy != "open":
         raise ForbiddenError("registration_closed")
     # Normalize to lowercase at this boundary so a later login lookup

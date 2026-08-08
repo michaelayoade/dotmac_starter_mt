@@ -72,8 +72,7 @@ from uuid import UUID
 
 from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
-from dotmac_kernel.settings_models import SettingDomain
-from dotmac_kernel.settings_resolver import resolve_value
+from dotmac_kernel.settings_resolver import resolve
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -82,8 +81,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.features.custom_fields.models import CustomFieldDefinition, CustomFieldType
 from app.features.custom_fields.registry import ENTITY_MODELS, resolve_entity
 from app.features.custom_fields.schemas import CustomFieldCreate
-
-_DEFAULT_MAX_PER_ENTITY = 20
+from app.features.custom_fields.spec import MAX_PER_ENTITY
 
 _NUMERIC_FIELD_TYPES = (CustomFieldType.NUMBER, CustomFieldType.DECIMAL)
 _MIN_MAX_CONSISTENCY_KEYS = {"min_value", "max_value", "field_type"}
@@ -183,13 +181,9 @@ def create_field(
     _validate_regex_compiles(payload.validation_regex)
     _validate_select_options(payload.field_type, payload.field_options)
 
-    limit = resolve_value(
-        db,
-        SettingDomain.custom_fields,
-        "max_per_entity",
-        tenant_id=tenant_id,
-        default=_DEFAULT_MAX_PER_ENTITY,
-    )
+    # Typed: `resolve` returns the spec's declared `int`, so `count >= limit`
+    # below is a checked comparison rather than one against `Any`.
+    limit = resolve(db, MAX_PER_ENTITY, tenant_id=tenant_id)
     count = _active_field_count(db, tenant_id, payload.entity_type)
     if count >= limit:
         raise BadRequestError(

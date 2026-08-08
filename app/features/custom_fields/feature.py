@@ -31,6 +31,10 @@ feature = FeatureManifest(
     # bundled feature, so a newly provisioned tenant has it, matching what
     # migration a004 gave every tenant that predates enforcement. A deployment
     # that SELLS custom fields flips this to False; nothing else changes.
+    # This feature declares the `custom_fields` setting DOMAIN because it now
+    # owns the spec in that domain (`spec.py`). A declaration follows its
+    # declarations' owner — ADR-0008.
+    setting_domains=("custom_fields",),
     capabilities=(
         CapabilitySpec(
             code="custom_fields.use",
