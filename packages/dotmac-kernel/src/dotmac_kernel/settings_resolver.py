@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
@@ -37,7 +38,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_kernel.config import settings
 from dotmac_kernel.exceptions import BadRequestError
+from dotmac_kernel.messaging.outbox import enqueue_event, enqueue_platform_event
 from dotmac_kernel.setting_domains import active_setting_domains
 from dotmac_kernel.setting_scopes import (
     SettingScope,
@@ -63,6 +66,8 @@ from dotmac_kernel.settings_models import (
 
 # Sentinel distinguishing "no default kwarg passed" from "default=None was
 # passed explicitly" in resolve_value.
+logger = logging.getLogger(__name__)
+
 _UNSET = object()
 
 # What determined a resolved value — see `resolve_with_source`.
@@ -228,6 +233,51 @@ def _coerce(value_type: SettingValueType, raw: object) -> object | None:
     return spec.from_storage(raw)
 
 
+def _finish(
+    spec: SettingSpec, raw: object | None, source: SettingSource
+) -> tuple[Any, SettingSource]:
+    """Turn a raw stored value into the resolved one: env fallback, coercion,
+    constraint checks, and the degrade-to-default rule.
+
+    Shared by the single-key and bulk paths deliberately. Two copies of these
+    rules would drift, and the drift would be invisible — a page reading twenty
+    settings in bulk would quietly answer differently from the same settings
+    read one at a time.
+    """
+    if raw is None and spec.env_var is not None:
+        # BELOW both rows and ABOVE the spec default: an env var is
+        # deployment-scoped so it must not beat a stored row, but it is a real
+        # operator decision so it must beat a default the code shipped.
+        environment = os.environ.get(spec.env_var)
+        if environment is not None and environment != "":
+            raw, source = environment, "env"
+    if raw is None:
+        raw, source = spec.default, "default"
+
+    value = _coerce(spec.value_type, raw)
+    if value is None and raw is not None:
+        # Unreadable stored value — degrade to the default rather than surface
+        # something the spec says is impossible.
+        value, source = spec.default, "default"
+    if spec.allowed is not None and value is not None and value not in spec.allowed:
+        value, source = spec.default, "default"
+    if isinstance(value, int) and not isinstance(value, bool):
+        if spec.min_value is not None and value < spec.min_value:
+            value, source = spec.default, "default"
+        elif spec.max_value is not None and value > spec.max_value:
+            value, source = spec.default, "default"
+    if spec.validator is not None and value is not None:
+        try:
+            spec.validator(value)
+        except ValueError:
+            value, source = spec.default, "default"
+    if isinstance(value, dict | list):
+        # A MUTABLE resolved value may be the shared `spec.default` object, so
+        # every caller must get an independent copy.
+        value = copy.deepcopy(value)
+    return value, source
+
+
 def resolve_with_source(
     db: Session,
     domain: SettingDomain,
@@ -278,58 +328,7 @@ def resolve_with_source(
             source = candidate.kind
             break
 
-    raw = _extract_raw(row)
-    if raw is None and spec.env_var is not None:
-        # BELOW both rows and ABOVE the spec default, deliberately. An env var
-        # is DEPLOYMENT-scoped: it cannot express a per-tenant value, so it must
-        # never beat a stored row an operator set — but it is a real operator
-        # decision, so it must beat a default the code shipped. Reading it here,
-        # in the one resolver, is also what keeps every consumer agreeing on the
-        # answer.
-        environment = os.environ.get(spec.env_var)
-        if environment is not None and environment != "":
-            raw = environment
-            source = "env"
-    if raw is None:
-        raw = spec.default
-        source = "default"
-
-    value = _coerce(spec.value_type, raw)
-    if value is None and raw is not None:
-        # Coercion failed (e.g. a corrupted/unparseable stored value) —
-        # degrade to the spec default rather than surface a bad value.
-        value = spec.default
-        source = "default"
-
-    if spec.allowed is not None and value is not None and value not in spec.allowed:
-        value = spec.default
-        source = "default"
-
-    if isinstance(value, int) and not isinstance(value, bool):
-        if spec.min_value is not None and value < spec.min_value:
-            value = spec.default
-            source = "default"
-        elif spec.max_value is not None and value > spec.max_value:
-            value = spec.default
-            source = "default"
-
-    if spec.validator is not None and value is not None:
-        try:
-            spec.validator(value)
-        except ValueError:
-            value = spec.default
-            source = "default"
-
-    if isinstance(value, dict | list):
-        # A MUTABLE resolved value — keyed on the value, not on the type's name,
-        # so an immutable JSON-stored type such as `money` is not copied and a
-        # future list type is. `value` may be the shared
-        # `spec.default` object (assigned by reference above whenever
-        # resolution falls back to the default) — every caller must get an
-        # independent copy so mutating one caller's result can't corrupt the
-        # spec default (and thus every future resolution) for the rest of
-        # the process. Scalars (bool/int/str) are immutable, no copy needed.
-        value = copy.deepcopy(value)
+    value, source = _finish(spec, _extract_raw(row), source)
 
     _store_resolved(
         domain,
@@ -378,6 +377,85 @@ def resolve_value(
         db, domain, key, tenant_id=tenant_id, scope=scope, default=default
     )
     return value
+
+
+def resolve_many(
+    db: Session,
+    domain: SettingDomain,
+    keys: Sequence[str] | None = None,
+    *,
+    tenant_id: UUID | None | object = _UNSET,
+    scope: SettingScope | None = None,
+) -> dict[str, Any]:
+    """Resolve many settings of one domain at one scope, in one pass.
+
+    `resolve_value` costs up to one query per level of the chain, so a screen
+    reading twenty settings costs forty queries and the cache only helps once
+    it is warm. This costs one query PER LEVEL regardless of how many keys are
+    asked for — three or four, not eighty — by fetching each level's rows with
+    `key IN (...)` and applying precedence in memory.
+
+    `keys=None` means every registered key of the domain, which is what the
+    settings screen actually wants.
+
+    Precedence, coercion and the degrade-to-default rule come from `_finish`,
+    the same function the single-key path uses. That sharing is deliberate: two
+    implementations of these rules would drift, and a page reading in bulk would
+    quietly disagree with the same settings read one at a time.
+    """
+    target = _scope_for(tenant_id, scope)
+    wanted = (
+        list(keys)
+        if keys is not None
+        else [spec.key for spec in all_specs() if spec.domain == domain]
+    )
+    specs = {}
+    for key in wanted:
+        try:
+            specs[key] = get_spec(domain, key)
+        except KeyError:
+            continue
+    if not specs:
+        return {}
+
+    # Most specific first; the first level to supply a key wins it.
+    winner: dict[str, tuple[object | None, SettingSource]] = {}
+    for candidate in resolution_chain(target, active_scope_kinds()):
+        outstanding = [key for key in specs if key not in winner]
+        if not outstanding:
+            break
+        for row in _select_rows(db, domain, outstanding, candidate):
+            winner[row.key] = (_extract_raw(row), candidate.kind)
+
+    resolved: dict[str, Any] = {}
+    for key, spec in specs.items():
+        raw, source = winner.get(key, (None, "default"))
+        resolved[key], _ = _finish(spec, raw, source)
+    return resolved
+
+
+def _select_rows(
+    db: Session, domain: SettingDomain, keys: Sequence[str], scope: SettingScope
+) -> Sequence[DomainSetting]:
+    """Every active row for these keys at exactly this scope — one query."""
+    statement = (
+        select(DomainSetting)
+        .where(DomainSetting.domain == domain)
+        .where(DomainSetting.key.in_(list(keys)))
+        .where(DomainSetting.scope_kind == scope.kind)
+        .where(DomainSetting.is_active == True)  # noqa: E712
+    )
+    statement = statement.where(
+        DomainSetting.tenant_id.is_(None)
+        if scope.tenant_id is None
+        else DomainSetting.tenant_id == scope.tenant_id
+    )
+    statement = statement.where(
+        DomainSetting.scope_id.is_(None)
+        if scope.scope_id is None
+        else DomainSetting.scope_id == scope.scope_id
+    )
+    return db.scalars(statement).all()
 
 
 def validate_required_settings(db: Session) -> list[str]:
@@ -503,6 +581,54 @@ def _stored_text(row: DomainSetting) -> str | None:
     return row.value_text
 
 
+SETTING_CHANGED_EVENT = "settings.changed"
+
+
+def _emit_change(
+    db: Session, *, spec: SettingSpec, key: str, scope: SettingScope, action: str
+) -> None:
+    """Announce a setting change on the outbox, in the caller's transaction.
+
+    A setting change is invisible to anything holding derived state — another
+    worker's cache, a projection, a process that read the value at boot. The
+    kernel already has an outbox for exactly this, and settings simply were not
+    using it.
+
+    **The value is never in the payload.** A subscriber that needs it resolves
+    it, which keeps one reader of the value and means a secret does not travel
+    through a delivery pipeline with its own retention and logging.
+
+    Off unless `SETTINGS_CHANGE_EVENTS` is set: an event with no relay running
+    is a row that accumulates forever. Failure to enqueue is swallowed and
+    logged — a notification that could not be sent must not roll back the write
+    it was describing.
+    """
+    if not settings.settings_change_events:
+        return
+    payload: dict[str, object] = {
+        "domain": str(spec.domain),
+        "key": key,
+        "action": action,
+        "scope_kind": scope.kind,
+        "scope_id": str(scope.scope_id) if scope.scope_id else None,
+        "is_secret": spec.is_secret,
+    }
+    try:
+        if scope.tenant_id is None:
+            enqueue_platform_event(
+                db, event_type=SETTING_CHANGED_EVENT, payload=payload
+            )
+        else:
+            enqueue_event(
+                db,
+                tenant_id=scope.tenant_id,
+                event_type=SETTING_CHANGED_EVENT,
+                payload=payload,
+            )
+    except Exception as exc:  # never fail the write for a notification
+        logger.warning("Settings change event not enqueued for %s: %s", key, exc)
+
+
 def _record_history(
     db: Session,
     *,
@@ -578,6 +704,7 @@ def upsert_by_key(
             before=before,
         )
         _invalidate_cache(domain, key, scope=target)
+        _emit_change(db, spec=spec, key=key, scope=target, action="update")
         return row
 
     row = DomainSetting(
@@ -597,6 +724,7 @@ def upsert_by_key(
         db, row=row, spec=spec, action=SettingChangeAction.create, before=None
     )
     _invalidate_cache(domain, key, scope=target)
+    _emit_change(db, spec=spec, key=key, scope=target, action="create")
     return row
 
 
@@ -677,12 +805,15 @@ def ensure_by_key(
         db, row=row, spec=spec, action=SettingChangeAction.create, before=None
     )
     _invalidate_cache(domain, key, scope=target)
+    _emit_change(db, spec=spec, key=key, scope=target, action="create")
     return row
 
 
 __all__ = [
     "SettingSpec",
     "register_specs",
+    "SETTING_CHANGED_EVENT",
+    "resolve_many",
     "resolve_value",
     "validate_required_settings",
 ]

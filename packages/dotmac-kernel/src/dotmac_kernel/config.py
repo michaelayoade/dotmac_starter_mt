@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     session_hash_secret: str = "dev-insecure-change-me"
     jwt_ttl_seconds: int = 3600
     csrf_enabled: bool = True
+    # Emit an outbox event when a setting changes, so a process holding derived
+    # state learns of it. OFF by default: an event with no relay running is a
+    # row that accumulates forever, and a deployment that runs no relay is
+    # better off with no events than with a growing table. Turn it on where the
+    # relay runs.
+    settings_change_events: bool = False
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60
