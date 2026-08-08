@@ -147,7 +147,9 @@ def test_a_failed_enqueue_does_not_roll_back_the_write(
     def boom(*_args, **_kwargs):
         raise RuntimeError("outbox unavailable")
 
-    monkeypatch.setattr(sr, "enqueue_event", boom)
+    # Patch the SOURCE module: the resolver imports it lazily inside the
+    # emit, so patching the resolver's own namespace would miss.
+    monkeypatch.setattr("dotmac_kernel.messaging.outbox.enqueue_event", boom)
     sr.upsert_by_key(
         db, SettingDomain.audit, "retention_days", 30, tenant_id=tenant_row.id
     )

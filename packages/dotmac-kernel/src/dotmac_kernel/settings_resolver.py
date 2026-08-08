@@ -40,7 +40,6 @@ from sqlalchemy.orm import Session
 
 from dotmac_kernel.config import settings
 from dotmac_kernel.exceptions import BadRequestError
-from dotmac_kernel.messaging.outbox import enqueue_event, enqueue_platform_event
 from dotmac_kernel.setting_domains import active_setting_domains
 from dotmac_kernel.setting_scopes import (
     SettingScope,
@@ -605,6 +604,11 @@ def _emit_change(
     """
     if not settings.settings_change_events:
         return
+    # Imported HERE, not at module scope: the outbox reaches the database layer,
+    # and `import dotmac_kernel.settings_resolver` must keep working without a
+    # DATABASE_URL — that is a documented property of the supported surface and
+    # the `kernel-floors` job proves it by importing with the variable unset.
+    from dotmac_kernel.messaging.outbox import enqueue_event, enqueue_platform_event
     payload: dict[str, object] = {
         "domain": str(spec.domain),
         "key": key,
