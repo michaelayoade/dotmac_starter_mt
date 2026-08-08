@@ -6,6 +6,28 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a17 — 2026-08-08
+
+Bulk settings reads, and a setting change that announces itself. No migration.
+
+### Added
+- **`resolve_many`** — resolves many keys of one domain at one scope in ONE
+  QUERY PER LEVEL of the chain, rather than up to one per key per level. A
+  settings screen goes from ~40 queries to 2. `keys=None` means the whole
+  domain, which is what such a screen actually wants. Precedence, coercion and
+  the degrade-to-default rule are shared with the single-key path (`_finish`)
+  deliberately: two implementations would drift, and a page reading in bulk
+  would quietly disagree with the same settings read one at a time.
+- **`settings.changed` outbox events** — a setting change was invisible to
+  anything holding derived state, and the kernel already had an outbox it was
+  not using. Tenant-scoped writes use `enqueue_event`, platform writes
+  `enqueue_platform_event`. **The value is never in the payload**: a subscriber
+  resolves it, so there is one reader of the value and no secret travels through
+  a delivery pipeline with its own retention. A failed enqueue is logged and
+  swallowed — a notification that cannot be sent must not roll back the change
+  it describes. OFF unless `SETTINGS_CHANGE_EVENTS` is set, because an event
+  with no relay running is a row that accumulates forever.
+
 ## 0.1.0a16 — 2026-08-08
 
 Settings hierarchies gain arbitrary depth, and `tenant_id` stops carrying two
