@@ -45,6 +45,14 @@ from dotmac_kernel import (
 )
 from dotmac_kernel.deps import require_permission, require_tenant
 from dotmac_kernel.models import Party
+from dotmac_kernel.setting_domains import (
+    DuplicateSettingDomainError,
+    SettingDomainRegistry,
+    UndeclaredSettingDomainError,
+    install_setting_domains,
+)
+from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_resolver import all_specs, upsert_by_key
 from dotmac_kernel.templating import install_surface_globals
 from dotmac_kernel.testing import create_test_engine, isolated_session
 from fastapi import APIRouter, Depends
@@ -62,6 +70,7 @@ _EXCLUDED_SUFFIX = "/feature.py"
 _EXCLUDED_FILES = {
     "dotmac_kernel/permissions.py",
     "dotmac_kernel/audit_actions.py",
+    "dotmac_kernel/setting_domains.py",
 }
 
 # Burn-down allowlists — do NOT add without a task/plan reference in the
@@ -114,6 +123,7 @@ def _restore_process_declarations() -> None:
     manifests = _assembly_manifests()
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
     install_surface_globals(manifests, disabled=set(), web_enabled=True)
 
 
@@ -130,6 +140,10 @@ def test_assembly_declarations_build_and_are_owned() -> None:
         assert catalogue.owner(code), code
     for action in registry.actions():
         assert registry.owner(action), action
+    domains = SettingDomainRegistry.from_manifests(manifests)
+    assert domains.domains(), "the assembly declares no setting domains at all"
+    for domain in domains.domains():
+        assert domains.owner(domain), domain
 
 
 # ── Two owners is a conflict, not a merge ───────────────────────────────────
@@ -151,6 +165,16 @@ def test_two_modules_declaring_the_same_audit_action_fails() -> None:
             [
                 FeatureManifest(name="a", audit_actions=["x.happened"]),
                 FeatureManifest(name="b", audit_actions=["x.happened"]),
+            ]
+        )
+
+
+def test_two_modules_declaring_the_same_setting_domain_fails() -> None:
+    with pytest.raises(DuplicateSettingDomainError):
+        SettingDomainRegistry.from_manifests(
+            [
+                FeatureManifest(name="a", setting_domains=["shared"]),
+                FeatureManifest(name="b", setting_domains=["shared"]),
             ]
         )
 
@@ -219,6 +243,25 @@ def test_an_audit_event_with_an_undeclared_action_fails() -> None:
         _restore_process_declarations()
 
 
+def test_a_setting_write_to_an_undeclared_domain_fails() -> None:
+    install_setting_domains(
+        SettingDomainRegistry.from_manifests(
+            [FeatureManifest(name="probe", setting_domains=["probe"])]
+        )
+    )
+    try:
+        engine = create_test_engine()
+        with isolated_session(engine) as db:
+            with pytest.raises(UndeclaredSettingDomainError) as exc:
+                upsert_by_key(
+                    db, SettingDomain("ghost"), "anything", "x", tenant_id=uuid4()
+                )
+            assert "ghost" in str(exc.value)
+        engine.dispose()
+    finally:
+        _restore_process_declarations()
+
+
 # ── An unconsumed DECLARATION fails ─────────────────────────────────────────
 
 
@@ -247,6 +290,36 @@ def test_no_orphan_audit_action_declarations() -> None:
         '`write_audit_event(..., action="<action>")` call outside the '
         "declaring feature.py, or drop it from the manifest. Do not add to "
         "_ALLOWED_ORPHAN_AUDIT_ACTIONS."
+    )
+
+
+def test_every_registered_spec_names_a_declared_domain() -> None:
+    """The counterpart of the orphan scan, and the reason `create_app` does not
+    perform this check itself: the spec registry is process-global while a
+    domain registry belongs to ONE assembly, so this belongs in CI over the
+    real assembly rather than at every boot."""
+    declared = {str(d) for m in _assembly_manifests() for d in m.setting_domains}
+    undeclared = sorted({str(spec.domain) for spec in all_specs()} - declared)
+    assert not undeclared, (
+        f"Registered setting spec(s) name undeclared domain(s): {undeclared}. "
+        "Declare each on the owning module's manifest (`setting_domains=(...)`)."
+    )
+
+
+def test_no_orphan_setting_domain_declarations() -> None:
+    """A declared domain with no registered spec naming it.
+
+    Checked structurally against `all_specs()` rather than by text scan: a
+    domain name like "auth" or "display" appears all over the corpus as an
+    unrelated string, so a grep would pass for a domain nothing declares a
+    setting in.
+    """
+    declared = {str(d) for m in _assembly_manifests() for d in m.setting_domains}
+    used = {str(spec.domain) for spec in all_specs()}
+    orphans = sorted(declared - used)
+    assert not orphans, (
+        f"Declared setting domain(s) with no registered spec: {orphans}. "
+        "Register a `SettingSpec` naming each, or drop it from the manifest."
     )
 
 

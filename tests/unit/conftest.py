@@ -35,6 +35,10 @@ from dotmac_kernel.flags import FlagCatalogue, install_flags
 from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
 from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
 from dotmac_kernel.permissions import PermissionCatalogue, install_permissions
+from dotmac_kernel.setting_domains import (
+    SettingDomainRegistry,
+    install_setting_domains,
+)
 from dotmac_kernel.templating import install_surface_globals
 
 # The in-memory engine + savepoint-isolated session are the kernel's supported
@@ -85,6 +89,7 @@ def _default_declaration_catalogues():
     # behind for the next one.
     install_capabilities(CapabilityCatalogue.from_manifests(manifests))
     install_flags(FlagCatalogue.from_manifests(manifests))
+    install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
     # A fresh evaluation cache per test: the store is process-global, and a
     # leaked entry would make one test's overrides decide another's answer.
     install_flag_cache(MemoryCache())

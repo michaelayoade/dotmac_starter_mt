@@ -129,9 +129,14 @@ without touching core:
   and write it generically via `db.get(model, entity_id)`.
 - **Declare a setting spec.** Add a `SettingSpec` to a feature's own spec
   module and call `dotmac_kernel.settings_resolver.register_specs([...])` at
-  import time (see `app/features/settings/spec.py`). A registered spec with
-  no reader anywhere under `app/` (outside the settings feature and the
-  resolver module itself) fails the no-orphan-settings test — wire a real
+  import time (see `app/features/settings/spec.py`), and declare the spec's
+  DOMAIN on the owning module's manifest (`setting_domains=(...)`) — a write
+  to an undeclared domain is rejected, and CI checks both directions
+  (declared-with-no-spec, spec-with-no-declaration). `SettingDomain` is an
+  open registered string, not an enum, so a product names its own domains
+  without a kernel change — ADR-0008. A registered spec with no reader
+  anywhere under `app/` (outside the settings feature and the resolver
+  module itself) fails the no-orphan-settings test — wire a real
   `resolve_value(...)` call before shipping it, or don't register it yet.
 - **Add an admin-portal surface (the capability model — THE surface
   extension point).** A feature's `FeatureManifest` (`dotmac_kernel.features`)
@@ -363,10 +368,12 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     the same migration (`domain_settings` is the documented exception;
     platform catalog tables get grants-not-RLS) — enforced on Postgres by
     `tests/test_rls_catalog.py` + the per-feature isolation canaries.
-12. Manifest declarations (`permissions`, `audit_actions`) have ONE owning
-    module, are only referenced when declared (`require_permission` fails
-    the boot, `write_audit_event` fails the write), and every declared code
-    has a real consumer (`test_manifest_declarations.py`).
+12. Manifest declarations (`permissions`, `capabilities`, `audit_actions`,
+    `feature_flags`, `setting_domains`) have ONE owning module, are only
+    referenced when declared (`require_permission` fails the boot,
+    `write_audit_event` fails the write), and every declared code has a real
+    consumer (`test_manifest_declarations.py`). A new vocabulary is a
+    declaration registry, never an enum — ADR-0008, a FLEET-WIDE standard.
 13. Migrations run as `app_admin`, never on container boot;
     `scripts/deploy.sh` is the only production migration path.
 14. Each stateful module has one immutable `mod_<short_code>` schema and one

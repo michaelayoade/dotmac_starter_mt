@@ -17,9 +17,9 @@ Table classes audited:
   policy — OR a subtype table whose policy is an EXISTS-join back to a
   tenant-scoped parent (`party_persons`/`party_organizations` pattern,
   detected from `pg_policies.qual`, not from a name list).
-- `domain_settings` and `feature_flag_overrides`: the documented exceptions —
-  nullable tenant_id
-  (platform-default rows) with a split read/write policy pair.
+- `domain_settings`, `feature_flag_overrides` and `domain_setting_history`:
+  the documented exceptions — nullable tenant_id (platform-scope rows) with a
+  split read/write policy pair.
 
 Requires real Postgres (`make test-db-up` / `make test-integration`).
 """
@@ -72,9 +72,13 @@ _PLATFORM_TABLES = _PLATFORM_READABLE | _PLATFORM_PRIVATE | _INFRA_TABLES
 #
 # This set only grows for a table with that exact shape, and each entry owes the
 # behavioural proof its isolation canary provides — for flags,
-# `tests/test_flag_override_isolation.py`, which specifically pins the half a
-# naive policy breaks (every tenant must still READ the platform row).
-_SPLIT_POLICY_EXCEPTIONS = frozenset({"domain_settings", "feature_flag_overrides"})
+# `tests/test_flag_override_isolation.py`; for settings and their history,
+# `tests/test_settings_isolation.py`. Each pins the half a naive policy breaks
+# (every tenant must still READ the platform row), and history additionally
+# pins that it is append-only.
+_SPLIT_POLICY_EXCEPTIONS = frozenset(
+    {"domain_settings", "feature_flag_overrides", "domain_setting_history"}
+)
 
 # Tenant-scoped FKs that may reference a tenant-scoped table WITHOUT
 # carrying tenant_id, each justified inline. Currently empty — keep it so.

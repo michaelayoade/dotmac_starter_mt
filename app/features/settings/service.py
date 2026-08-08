@@ -11,6 +11,10 @@ from __future__ import annotations
 
 from dotmac_kernel.exceptions import NotFoundError
 from dotmac_kernel.models import Tenant
+from dotmac_kernel.setting_domains import (
+    UndeclaredSettingDomainError,
+    active_setting_domains,
+)
 from dotmac_kernel.settings_admin import (
     all_specs,
     get_spec,
@@ -31,9 +35,14 @@ MASKED_SECRET_VALUE = "********"  # noqa: S105 # nosec B105
 
 
 def _domain_from_str(domain: str) -> SettingDomain:
+    """A path-supplied domain string, or 404.
+
+    The registry is what makes an arbitrary string a real domain — the type
+    itself is an open `str` subclass and accepts anything.
+    """
     try:
-        return SettingDomain(domain)
-    except ValueError:
+        return active_setting_domains().require(domain)
+    except UndeclaredSettingDomainError:
         raise NotFoundError(f"Unknown settings domain: {domain}") from None
 
 
@@ -47,6 +56,7 @@ def _to_setting_out(db: Session, tenant: Tenant, spec: SettingSpec) -> SettingOu
         value=value,
         value_type=spec.value_type.value,
         label=spec.label,
+        description=spec.description,
         is_secret=spec.is_secret,
         source=source,
     )

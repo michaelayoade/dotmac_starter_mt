@@ -7,9 +7,10 @@ loads the `settings` feature package (e.g. `dotmac_kernel.features.load_manifest
 importing `app.features.settings.feature`, which first imports the parent
 package) registers these as a byproduct.
 
-`custom_fields/max_per_entity` is ported from ERP's orphan spec (declared but
-never consumed there); it's actually consumed by this app's `custom_fields`
-feature in a later task.
+Every spec carries a `description`: the settings screen renders it, and a
+setting an operator cannot interpret is a setting they will not touch. None of
+these is `required` — each ships a working default, so the deployment starts
+without operator configuration.
 """
 
 from __future__ import annotations
@@ -85,6 +86,10 @@ SPECS: list[SettingSpec] = [
         default="closed",
         allowed={"open", "closed"},
         label="Self-registration policy (open | closed)",
+        description=(
+            "Whether anyone may create an account through POST /auth/register. "
+            "Closed is the default: a tenant admin invites instead."
+        ),
     ),
     SettingSpec(
         domain=SettingDomain.custom_fields,
@@ -94,6 +99,10 @@ SPECS: list[SettingSpec] = [
         min_value=1,
         max_value=100,
         label="Maximum custom fields per entity",
+        description=(
+            "Ceiling on custom-field definitions for one entity type. Raising "
+            "it widens every row's JSONB payload, so raise it deliberately."
+        ),
     ),
     SettingSpec(
         domain=SettingDomain.branding,
@@ -101,6 +110,10 @@ SPECS: list[SettingSpec] = [
         value_type=SettingValueType.json,
         default={},
         label="UI branding overrides (logo, colors, etc.)",
+        description=(
+            "Per-tenant overrides applied over the deployment brand. Edit these "
+            "on the Branding screen, which previews and sanitizes them."
+        ),
     ),
     SettingSpec(
         domain=SettingDomain.audit,
@@ -109,6 +122,10 @@ SPECS: list[SettingSpec] = [
         default=365,
         min_value=1,
         label="Audit event retention period (days)",
+        description=(
+            "How long audit events are kept before a retention job may remove "
+            "them. Shortening it does not delete anything retroactively."
+        ),
     ),
     SettingSpec(
         domain=SettingDomain.display,
@@ -116,6 +133,10 @@ SPECS: list[SettingSpec] = [
         value_type=SettingValueType.string,
         default="UTC",
         label="Display timezone (IANA name, e.g. Europe/London)",
+        description=(
+            "Timezone the admin portal renders timestamps in. The JSON API is "
+            "unaffected: it always returns ISO-8601 UTC."
+        ),
         validator=_validate_timezone,
     ),
     SettingSpec(
@@ -124,6 +145,7 @@ SPECS: list[SettingSpec] = [
         value_type=SettingValueType.string,
         default="%Y-%m-%d",
         label="Date display format (strftime)",
+        description="strftime format for dates without a time, e.g. %Y-%m-%d.",
         validator=_validate_strftime,
     ),
     SettingSpec(
@@ -132,6 +154,7 @@ SPECS: list[SettingSpec] = [
         value_type=SettingValueType.string,
         default="%Y-%m-%d %H:%M",
         label="Date+time display format (strftime)",
+        description="strftime format for dates with a time, e.g. %Y-%m-%d %H:%M.",
         validator=_validate_strftime,
     ),
 ]

@@ -56,6 +56,10 @@ from dotmac_kernel.permissions import (
 )
 from dotmac_kernel.platform_auth import platform_auth_router
 from dotmac_kernel.platform_web import router as platform_web_router
+from dotmac_kernel.setting_domains import (
+    SettingDomainRegistry,
+    install_setting_domains,
+)
 from dotmac_kernel.templating import (
     compose_templates,
     install_stylesheets,
@@ -90,6 +94,31 @@ async def _run_enabled_seeds(
                 await asyncio.to_thread(manifest.seed)
             except Exception as exc:  # swallow: seed failure never downs startup
                 logger.warning("Feature %s seed skipped: %s", manifest.name, exc)
+
+
+def _required_setting_errors() -> list[str]:
+    """Required-setting failures, or an empty list when the store is unreachable.
+
+    Imports `dotmac_kernel.db` HERE, not at module scope: importing it builds
+    the SQLAlchemy engine from `DATABASE_URL`, and `create_app` must stay
+    importable without a database (the same reason those APIs are submodule-only
+    in the public surface).
+
+    A store this cannot reach yields NO errors rather than a false one. Reading
+    an unreachable database says nothing about whether a setting is configured,
+    and reporting "not configured" for a connection failure would be fatal in
+    production for the wrong reason — `validate_settings` already covers a
+    missing `DATABASE_URL` itself, and `/health` stays DB-free by design.
+    """
+    from dotmac_kernel.db import platform_session
+    from dotmac_kernel.settings_resolver import validate_required_settings
+
+    try:
+        with platform_session() as db:
+            return validate_required_settings(db)
+    except Exception as exc:  # unreachable store: see docstring
+        logger.warning("Required-setting validation skipped: %s", exc)
+        return []
 
 
 def _referenced_codes(app: FastAPI, attr: str) -> list[tuple[str, str]]:
@@ -233,6 +262,9 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     # Feature flags (step 5). Same installed-not-enabled rule: an override row
     # references a flag code and outlives any deployment's enabled set.
     install_flags(FlagCatalogue.from_manifests(manifests))
+    # Setting domains. Same installed-not-enabled rule: a stored setting row
+    # references a domain and outlives any deployment's enabled set.
+    install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
 
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
     # before any template renders. Fed the FULL installed set in startup order
@@ -263,6 +295,10 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             logger.warning("Config: %s", err)
         if settings.seed_on_startup:
             await _run_enabled_seeds(enabled_manifests, disabled)
+        for err in await asyncio.to_thread(_required_setting_errors):
+            if settings.is_production:
+                raise RuntimeError(f"Configuration error: {err}")
+            logger.warning("Config: %s", err)
         yield
 
     app = FastAPI(title=spec.name, lifespan=lifespan)

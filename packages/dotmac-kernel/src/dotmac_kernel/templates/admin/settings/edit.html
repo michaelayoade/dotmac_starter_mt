@@ -24,6 +24,9 @@
     </p>
 
     <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6">
+        {% if setting.description %}
+        <p class="mb-4 text-sm text-slate-600 dark:text-slate-300">{{ setting.description }}</p>
+        {% endif %}
         <form hx-post="/admin/settings/{{ setting.domain }}/{{ setting.key }}/edit" class="space-y-4">
             {% if setting.is_secret %}
             {{ text_input("value", setting.label or setting.key, value="", type="password", help_text="Leave blank to keep the current value.") }}

@@ -68,14 +68,21 @@ specifics) points here and must never fork these rules.
     dynamically by `tests/test_rls_catalog.py` plus the per-feature
     isolation canaries — Postgres only (`make test-db-up &&
     make test-integration`); SQLite cannot enforce RLS.
-12. **Manifest declarations are unique, referenced, and consumed.** A
-    permission code / audit action is declared by exactly ONE module's
-    manifest (`permissions=(PermissionSpec(...),)` / `audit_actions=(...)`);
-    a route may only `require_permission` a DECLARED code (`create_app`
-    refuses to boot otherwise) and `write_audit_event` may only write a
-    DECLARED action; and every declared code needs a real consumer outside
-    its own `feature.py` — the orphan allowlists are EMPTY and may only
-    shrink. (`tests/architecture/test_manifest_declarations.py`;
+12. **Manifest declarations are unique, referenced, and consumed.** FIVE
+    vocabularies work this way — permissions, capabilities, audit actions,
+    feature flags, setting domains — and a vocabulary whose members belong to
+    modules must be a SIXTH declaration registry, never an enum or a fixed
+    list. ADR-0008 is a FLEET-WIDE standard: it binds every Dotmac
+    repository, not only this one, and applies wherever one layer holds a
+    vocabulary another layer owns members of. Each member is declared by
+    exactly ONE module's manifest; a consumer may only reference a DECLARED
+    member (`require_permission` refuses the boot, `require_capability`,
+    `write_audit_event`, `resolve_flag` and the settings write path refuse
+    the operation); every declared member needs a real consumer outside its
+    own `feature.py`; and the backing DB column stays a plain string, since
+    a CHECK constraint would re-close the list and cost a kernel migration
+    per consuming product. Orphan allowlists are EMPTY and may only shrink.
+    (`tests/architecture/test_manifest_declarations.py`;
     `tests/unit/test_permissions.py`, `tests/unit/test_audit_actions.py`)
 13. **Migration discipline.** Migrations run as `app_admin`
     (`MIGRATION_DATABASE_URL`), never on container boot — the Dockerfile

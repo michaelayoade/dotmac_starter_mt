@@ -1285,20 +1285,29 @@ at all):
   module manifest with no call-site change. `AnyManifest` is the union used in
   those signatures.
 
-The directive's `settings`, `feature_flags`, `entity_types`, and `health_checks`
-manifest fields are deliberately absent until the registry code that consumes
-them lands — the same directive requires CI to fail when "a declaration has no
-consumer", and shipping inert fields would be exactly that.
+The directive's `entity_types` and `health_checks` manifest fields are
+deliberately absent until the registry code that consumes them lands — the same
+directive requires CI to fail when "a declaration has no consumer", and shipping
+inert fields would be exactly that. Its `settings` field is present only as
+`setting_domains`: a module declares the DOMAINS it owns, while individual
+`SettingSpec`s stay in the owning feature's spec module.
 
-## Manifest declaration catalogues (module control-plane step 3)
+## Manifest declaration catalogues
 
-`permissions` and `audit_actions` landed under that same rule: each arrived WITH
-its consumer, in kernel `0.1.0a11`.
+Five vocabularies now work this way, and **ADR-0008 makes the shape the standard**:
+a kernel-level vocabulary whose members belong to modules is DECLARED on module
+manifests and validated by a registry — never enumerated by the kernel as an enum
+or a fixed list, and never pinned by a CHECK constraint on the backing column.
+Each one arrived WITH its consumer, under the directive's "a declaration has no
+consumer" rule.
 
 | Declaration | Catalogue (owner) | Real consumer | When an undeclared reference fails |
 |---|---|---|---|
 | `FeatureManifest`/`ModuleManifest.permissions` (`PermissionSpec`: `code`, `description`, `default_roles`) | `dotmac_kernel.permissions.PermissionCatalogue` | `dotmac_kernel.deps.require_permission(code)` — resolves the spec and requires the actor to hold one of its `default_roles`, 403 otherwise | at BOOT: `create_app` walks every mounted route's stamped code and raises `UndeclaredPermissionError` |
+| `...capabilities` (`CapabilitySpec`) | `dotmac_kernel.capabilities.CapabilityCatalogue` | `dotmac_kernel.deps.require_capability` | at the request (`UndeclaredCapabilityError`) |
 | `...audit_actions` (bare codes) | `dotmac_kernel.audit_actions.AuditActionRegistry` | `dotmac_kernel.audit.write_audit_event` | at the WRITE, before anything is added to the session (`UndeclaredAuditActionError`) |
+| `...feature_flags` (`FeatureFlagSpec`) | `dotmac_kernel.flags.FlagCatalogue` | `dotmac_kernel.flags.resolve_flag` | at resolution (`UndeclaredFlagError`) |
+| `...setting_domains` (bare codes) | `dotmac_kernel.setting_domains.SettingDomainRegistry` | `dotmac_kernel.settings_resolver.upsert_by_key`/`ensure_by_key`, and the settings admin API's path-to-domain lookup | at the WRITE (`UndeclaredSettingDomainError`); an unknown domain in a URL is a 404 |
 
 Both are siblings of `CapabilityCatalogue` (WS1) in shape and posture, and gate
 different questions — capability: "is this TENANT entitled?"; permission: "does
@@ -1307,10 +1316,32 @@ the same code raise on catalogue construction. Both catalogues are installed
 process-wide by `create_app` from the INSTALLED module set (not the enabled
 subset — disabling a module must not turn a real code into an undeclared one),
 the same pattern `install_surface_globals` uses. Permissions default to an EMPTY
-catalogue so a missing authorization installer denies safely. Audit actions
-distinguish NOT INSTALLED from INSTALLED-EMPTY: the former raises
-`AuditActionsNotInstalledError`, while the latter rejects every action as
-undeclared.
+catalogue so a missing authorization installer denies safely. Audit actions and setting
+domains distinguish NOT INSTALLED from INSTALLED-EMPTY: the former raises
+`AuditActionsNotInstalledError` / `SettingDomainsNotInstalledError`, while the
+latter rejects every action or domain as undeclared. The asymmetry is about what
+each default DOES — an uninstalled permission catalogue denies, the safe answer
+for an authorization check; an uninstalled write-path registry would reject
+writes inside the caller's transaction and turn a wiring mistake into a failed
+business operation.
+
+`setting_domains` is the reason `domain_settings.domain` is a plain
+`String(120)` rather than the five-member `sa.Enum` it was through kernel
+`0.1.0a13` (migration `0014` drops `ck_domain_settings_domain`). This repo
+declares five domains; `dotmac_erp` runs twenty-one, and a kernel that
+enumerates its consumers' domains needs a migration every time a product invents
+one. `SettingDomain` is correspondingly an open `str` subclass — kernel-owned
+domains are bound as class attributes (`SettingDomain.branding`), a product
+constructs its own (`SettingDomain("payroll")`).
+
+Validation lives at the boundary that USES a member, not at declaration time:
+declarations are import-time and process-global while a registry belongs to one
+assembly, so `create_app` deliberately does NOT check registered `SettingSpec`s
+against the installed registry — importing the settings feature anywhere would
+otherwise break every synthetic assembly's boot. That assembly-wide invariant is
+checked in CI instead, in both directions
+(`test_every_registered_spec_names_a_declared_domain`,
+`test_no_orphan_setting_domain_declarations`).
 
 `PermissionSpec.default_roles` is the code-declared DEFAULT binding, standing in
 the same relation to a future tenant-configurable role→permission grant that a

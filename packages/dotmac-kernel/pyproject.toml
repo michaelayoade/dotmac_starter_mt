@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-kernel"
-version = "0.1.0a13"
+version = "0.1.0a14"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -66,6 +66,13 @@ httpx = { version = "^0.27", optional = true }
 # licence and a revocation list on 42.0.8 (dotmac_sub's exact pin — a >=43
 # floor would force a product upgrade for no behavioural reason). The kernel's
 # own full licensing suite runs on current cryptography, not at the floor.
+#
+# `dotmac_kernel.settings_crypto` (Fernet, at-rest encryption of secret
+# settings) shares it and imports it the same lazy way, so it stays OPTIONAL
+# for the same reason: a deployment that declares no `is_secret` spec — the
+# reference assembly declares none — must not inherit a compiled crypto stack
+# to satisfy a code path it never reaches. Absence is not silent: writing a
+# secret without it raises `SettingsEncryptionError` naming the extra.
 cryptography = { version = ">=42", optional = true }
 
 [tool.poetry.extras]
@@ -79,6 +86,11 @@ testing = ["httpx"]
 # `pip install dotmac-kernel[licensing]` — WS8 signed-licence verification
 # (and the testing kit's FakeLicenceSigner).
 licensing = ["cryptography"]
+# `pip install dotmac-kernel[settings-crypto]` — at-rest encryption of secret
+# domain settings. Same distribution as `licensing`, named separately because
+# they are independent reasons to need it and a consumer should install the one
+# it means.
+settings-crypto = ["cryptography"]
 
 [build-system]
 requires = ["poetry-core"]

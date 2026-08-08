@@ -6,7 +6,89 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## Unreleased
+## 0.1.0a14 — 2026-08-08
+
+Settings subsystem re-based on the products' proven implementation: open setting
+domains, richer specs, at-rest encryption with a rotatable keyring, change
+history, and a scope-safe read cache. Migration `0014`.
+
+### Changed — BREAKING (database)
+- **`SettingDomain` is an open registered string, not a five-member enum**, and
+  `domain_settings.domain` is a plain `String(120)` — migration `0014` drops the
+  `ck_domain_settings_domain` CHECK. A kernel that enumerates its consumers'
+  setting domains needs a migration every time a product invents one: this repo
+  declares five, `dotmac_erp` runs twenty-one. Kernel-owned domains stay bound
+  as class attributes (`SettingDomain.branding`), so existing call sites are
+  unchanged; a product constructs its own (`SettingDomain("payroll")`).
+  Downgrade is lossy — rows outside the original five cannot satisfy a restored
+  constraint.
+
+### Added
+- **`dotmac_kernel.settings_cache`** — a read cache for resolved settings whose
+  keys carry their scope by construction (`dotmac_kernel.cache.cache_key`, whose
+  `scope` is keyword-only with no default). Invalidation happens at the write,
+  not on a TTL: a tenant write drops that tenant's entry, a platform write drops
+  EVERY scope's entry for that setting, because a tenant without a row of its
+  own inherits the platform value. Secrets are never cached — encrypting at rest
+  and then putting the plaintext in a shared store gives most of that back.
+  **OFF unless a store is installed**, and `create_app` installs none: a delete
+  only reaches the process that performs it, so a per-process cache under
+  multiple workers would make a setting change appear not to take effect on some
+  requests. A single-process deployment installs `MemoryCache()`; a multi-worker
+  one installs a shared store.
+- **`DomainSettingHistory`** (migration `0014`) — one row per value transition,
+  answering "what was this before" which `AuditEvent` cannot: the audit trail
+  records that a change happened, not what the value was. The two are split
+  deliberately — this table does NOT record the actor, because
+  `write_audit_event` is the one writer of who-did-what and duplicating it here
+  would create a second authority that drifts. **A secret's value is never
+  recorded**: `value_before`/`value_after` stay NULL and `secret_changed` marks
+  the transition, so rotating a compromised credential does not leave it
+  readable in the table that explains the rotation. Append-only, enforced twice
+  (no UPDATE/DELETE policy and no UPDATE/DELETE grant); tenancy and the RLS
+  split mirror `domain_settings`, with the isolation canary the
+  nullable-tenant exception requires.
+- **`dotmac_kernel.settings_crypto`** — at-rest Fernet encryption of any setting
+  whose spec sets `is_secret`. `is_secret` previously only masked the value in
+  the admin API, which protects the screen and nothing else: a dump, a replica
+  or a backup still carried the plaintext. Applied at the three call sites in
+  `settings_resolver` (one reader, two writers). **Fail closed on write, tolerant
+  on read** — writing a secret with no usable key raises
+  `SettingsEncryptionError` rather than storing plaintext, while reads pass
+  legacy plaintext through and degrade an undecryptable value to the spec
+  default. Key from `SETTINGS_ENCRYPTION_KEY` or a file named by
+  `SETTINGS_ENCRYPTION_KEY_FILE`, or a rotatable keyring in
+  `SETTINGS_ENCRYPTION_KEYS`; the kernel never fetches a secret over the
+  network, because settings resolution is a per-request read path, and every
+  secret manager can render to an env var or a file. The stored form is
+  `enc:<key_id>:<token>` — **the key id is in the ciphertext because a Fernet
+  token does not carry one**, and without it rotation would silently substitute
+  spec defaults for credentials the new key cannot read. Keyring statuses match
+  `licensing`'s (`active` encrypts and decrypts, exactly one; `retired`
+  decrypts only; `revoked` decrypts nothing), and `reencrypt_secrets` is the
+  idempotent, resumable second half of a rotation. `enc:` prefix
+  and scheme match `dotmac_erp`'s. Needs the new `settings-crypto` extra —
+  `cryptography` stays optional and is imported lazily, as `licensing` does.
+- **`SettingSpec.env_var`, `.required`, `.description`**, each with a real
+  consumer. `env_var` is read in the ONE resolver, BELOW both rows and ABOVE the
+  spec default: an env var is deployment-scoped so it must not beat a stored
+  row, but it is a real operator decision so it must beat a shipped default —
+  new `SettingSource` value `"env"`. `required` is checked at startup by
+  `validate_required_settings`, which `create_app` runs after seeds, fatal in
+  production and a warning elsewhere. `description` renders on the settings list
+  and editor.
+- **`dotmac_kernel.setting_domains.SettingDomainRegistry`** — the fifth manifest
+  declaration registry, alongside permissions, capabilities, audit actions and
+  feature flags. A module declares `setting_domains` on its manifest;
+  `create_app` installs the registry from the INSTALLED module set; the settings
+  write path rejects an undeclared domain (`UndeclaredSettingDomainError`), and
+  the settings admin API 404s an unknown domain in a URL. Not-installed raises
+  `SettingDomainsNotInstalledError`, distinct from installed-and-empty.
+- `setting_domains` on `FeatureManifest` and `ModuleManifest`, carried through by
+  `ModuleManifest.from_feature`.
+- **ADR-0008** makes the registry shape the standard: a kernel-level vocabulary
+  whose members belong to modules is declared on manifests and validated by a
+  registry — never a kernel enum, a fixed list, or a CHECK constraint.
 
 ## 0.1.0a13 — 2026-08-07
 

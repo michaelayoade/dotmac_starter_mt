@@ -8,7 +8,8 @@
 
   Context: `grouped` (dict[str domain -> list[SettingOut]], domains sorted
   alphabetically) — see app.features.settings.web.index. `SettingOut` fields:
-  `domain`, `key`, `value`, `value_type`, `label`, `is_secret`, `source`.
+  `domain`, `key`, `value`, `value_type`, `label`, `description`,
+  `is_secret`, `source`.
 
   No htmx fragment here (unlike parties/rbac) — see app.features.settings.web
   module docstring for why a single full-page render is enough for this
@@ -20,6 +21,7 @@
 {% set source_classes = {
     "tenant": "bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400",
     "platform": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+    "env": "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400",
     "default": "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400",
 } %}
 
@@ -47,6 +49,9 @@
                     <td class="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">
                         {{ item.label or item.key }}
                         <p class="text-xs font-normal text-slate-400 dark:text-slate-500">{{ item.key }}</p>
+                        {% if item.description %}
+                        <p class="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">{{ item.description }}</p>
+                        {% endif %}
                     </td>
                     <td class="px-4 py-3 text-sm text-slate-500 dark:text-slate-400">
                         {% if item.is_secret %}
