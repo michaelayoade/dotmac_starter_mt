@@ -80,31 +80,6 @@ def _validate_strftime(value: object) -> None:
 
 SPECS: list[SettingSpec] = [
     SettingSpec(
-        domain=SettingDomain.auth,
-        key="registration_policy",
-        value_type=SettingValueType.string,
-        default="closed",
-        allowed={"open", "closed"},
-        label="Self-registration policy (open | closed)",
-        description=(
-            "Whether anyone may create an account through POST /auth/register. "
-            "Closed is the default: a tenant admin invites instead."
-        ),
-    ),
-    SettingSpec(
-        domain=SettingDomain.custom_fields,
-        key="max_per_entity",
-        value_type=SettingValueType.integer,
-        default=20,
-        min_value=1,
-        max_value=100,
-        label="Maximum custom fields per entity",
-        description=(
-            "Ceiling on custom-field definitions for one entity type. Raising "
-            "it widens every row's JSONB payload, so raise it deliberately."
-        ),
-    ),
-    SettingSpec(
         domain=SettingDomain.branding,
         key="ui_branding",
         value_type=SettingValueType.json,
@@ -113,18 +88,6 @@ SPECS: list[SettingSpec] = [
         description=(
             "Per-tenant overrides applied over the deployment brand. Edit these "
             "on the Branding screen, which previews and sanitizes them."
-        ),
-    ),
-    SettingSpec(
-        domain=SettingDomain.audit,
-        key="retention_days",
-        value_type=SettingValueType.integer,
-        default=365,
-        min_value=1,
-        label="Audit event retention period (days)",
-        description=(
-            "How long audit events are kept before a retention job may remove "
-            "them. Shortening it does not delete anything retroactively."
         ),
     ),
     SettingSpec(

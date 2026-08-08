@@ -18,17 +18,16 @@ from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
 from dotmac_kernel.models import Party, PartyRole, Role, Tenant
 from dotmac_kernel.query import apply_pagination, escape_like
-from dotmac_kernel.settings_models import SettingDomain
-from dotmac_kernel.settings_resolver import resolve_value
+from dotmac_kernel.settings_resolver import resolve
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.features.rbac.schemas import RoleCreate, RoleGrantRequest
+from app.features.rbac.spec import AUDIT_RETENTION_DAYS
 
 # Fallback if the settings feature is disabled in this deployment — matches
-# the `audit/retention_days` spec's own default (app/features/settings/spec.py).
-_DEFAULT_AUDIT_RETENTION_DAYS = 365
+# the `audit/retention_days` spec's own default (app/features/rbac/spec.py).
 
 
 def list_roles(db: Session, tenant: Tenant, *, limit: int, offset: int) -> list[Role]:
@@ -183,13 +182,8 @@ def _audit_retention_cutoff(db: Session, tenant: Tenant) -> datetime:
     `parties.service._search_filter` powering both `search_parties` and
     `count_parties`).
     """
-    retention_days = resolve_value(
-        db,
-        SettingDomain.audit,
-        "retention_days",
-        tenant_id=tenant.id,
-        default=_DEFAULT_AUDIT_RETENTION_DAYS,
-    )
+    # `int` from the spec, so the `timedelta` below is a checked call.
+    retention_days = resolve(db, AUDIT_RETENTION_DAYS, tenant_id=tenant.id)
     return datetime.now(UTC) - timedelta(days=retention_days)
 
 

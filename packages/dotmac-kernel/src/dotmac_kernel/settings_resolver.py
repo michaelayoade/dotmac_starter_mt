@@ -32,7 +32,7 @@ import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Generic, TypeVar, cast
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -69,6 +69,9 @@ from dotmac_kernel.settings_models import (
 # passed explicitly" in resolve_value.
 logger = logging.getLogger(__name__)
 
+# The Python type a setting's values resolve to. See `SettingSpec`.
+T = TypeVar("T")
+
 _UNSET = object()
 
 # What determined a resolved value: the SCOPE KIND of the row that won, or
@@ -99,13 +102,34 @@ class SettingChangeContext:
 
 
 @dataclass(frozen=True)
-class SettingSpec:
-    """Declares one (domain, key) setting: its type, default, and constraints."""
+class SettingSpec(Generic[T]):
+    """Declares one (domain, key) setting: its type, default, and constraints.
+
+    Generic in the PYTHON type its values resolve to, so a caller gets that type
+    rather than `Any`:
+
+        REGISTRATION_POLICY: SettingSpec[str] = SettingSpec(
+            domain=SettingDomain.auth, key="registration_policy",
+            value_type=SettingValueType("string"), default="closed",
+        )
+        policy = resolve(db, REGISTRATION_POLICY, tenant_id=tenant.id)  # -> str
+
+    `value_type` stays the RUNTIME declaration — it decides storage and
+    coercion, and the registries validate it. `T` is the static shadow of the
+    same fact. They are two views of one decision, which is why `default: T`
+    ties them together: a spec whose default does not fit its parameter is a
+    type error at the declaration, where it is cheap.
+
+    If a setting can genuinely be absent, say so — `SettingSpec[str | None]`
+    with `default=None`. That is a real property of the setting, and making the
+    author write it is the point: the old `default: object | None` let every
+    spec be silently optional.
+    """
 
     domain: SettingDomain
     key: str
     value_type: SettingValueType
-    default: object | None
+    default: T
     label: str | None = None
     # Prose shown beside `label` on the settings screen. A setting an operator
     # cannot interpret is a setting they will not touch.
@@ -139,7 +163,7 @@ class SettingSpec:
     validator: Callable[[object], None] | None = None
 
 
-_REGISTRY: dict[tuple[SettingDomain, str], SettingSpec] = {}
+_REGISTRY: dict[tuple[SettingDomain, str], SettingSpec[Any]] = {}
 
 
 class DuplicateSettingSpecError(ValueError):
@@ -150,7 +174,7 @@ class InvalidSpecDefaultError(ValueError):
     """A spec's own default violates the spec's own constraints."""
 
 
-def _fingerprint(spec: SettingSpec) -> tuple[object, ...]:
+def _fingerprint(spec: SettingSpec[Any]) -> tuple[object, ...]:
     """What makes two declarations of one setting the SAME declaration.
 
     Re-importing a spec module (a test reload, a module imported twice through
@@ -176,7 +200,7 @@ def _fingerprint(spec: SettingSpec) -> tuple[object, ...]:
     )
 
 
-def _validate_default(spec: SettingSpec) -> None:
+def _validate_default(spec: SettingSpec[Any]) -> None:
     """A spec's default must satisfy the spec's own constraints.
 
     Otherwise resolution's degrade-to-default path returns a value the spec
@@ -227,7 +251,7 @@ def register_specs(specs: list[SettingSpec]) -> None:
         _REGISTRY[(spec.domain, spec.key)] = spec
 
 
-def all_specs() -> list[SettingSpec]:
+def all_specs() -> list[SettingSpec[Any]]:
     return list(_REGISTRY.values())
 
 
@@ -335,8 +359,8 @@ def _coerce(value_type: SettingValueType, raw: object) -> object | None:
 
 
 def _finish(
-    spec: SettingSpec, raw: object | None, source: SettingSource
-) -> tuple[Any, SettingSource]:
+    spec: SettingSpec[Any], raw: object | None, source: SettingSource
+) -> tuple[object, SettingSource]:
     """Turn a raw stored value into the resolved one: env fallback, coercion,
     constraint checks, and the degrade-to-default rule.
 
@@ -379,8 +403,8 @@ def resolve_with_source(
     *,
     tenant_id: UUID | None | object = _UNSET,
     scope: SettingScope | None = None,
-    default: Any = _UNSET,
-) -> tuple[Any, SettingSource]:
+    default: object = _UNSET,
+) -> tuple[object, SettingSource]:
     """Resolve a setting value AND where it came from: tenant, platform, or default.
 
     Same precedence/coercion/fallback semantics as `resolve_value` (which now
@@ -409,7 +433,7 @@ def resolve_with_source(
 
     hit = _cached(domain, key, scope=target)
     if hit is not _CACHE_MISS:
-        return cast("tuple[Any, SettingSource]", hit)
+        return cast("tuple[object, SettingSource]", hit)
 
     row = None
     source: SettingSource = "default"
@@ -435,6 +459,40 @@ def resolve_with_source(
     return value, source
 
 
+def resolve(
+    db: Session,
+    spec: SettingSpec[T],
+    *,
+    tenant_id: UUID | None | object = _UNSET,
+    scope: SettingScope | None = None,
+) -> T:
+    """Resolve `spec` and return its DECLARED type, not `Any`.
+
+    This is the read a product should write. The spec is the key, so the type
+    travels with it and every call site is checked:
+
+        limit = resolve(db, CUSTOM_FIELD_LIMIT, tenant_id=tenant.id)  # -> int
+
+    Prefer this over `resolve_value` wherever the setting is known at the call
+    site — which is everywhere except the settings screen, whose whole job is
+    resolving keys chosen at runtime.
+
+    `Any` propagates: a value typed `Any` silently disables checking in the
+    expression it flows into, so one untyped read costs the type-safety of
+    everything downstream of it. That is why this exists and why
+    `resolve_value` now returns `object`.
+
+    The cast is the one honest place for it. Coercion is driven by the runtime
+    `value_type` registry, which cannot be proven to the type checker to agree
+    with `T` — so the guarantee is anchored where the two are tied together:
+    `default: T` on the spec, checked at declaration.
+    """
+    value, _source = resolve_with_source(
+        db, spec.domain, spec.key, tenant_id=tenant_id, scope=scope
+    )
+    return cast("T", value)
+
+
 def resolve_value(
     db: Session,
     domain: SettingDomain,
@@ -442,9 +500,17 @@ def resolve_value(
     *,
     tenant_id: UUID | None | object = _UNSET,
     scope: SettingScope | None = None,
-    default: Any = _UNSET,
-) -> Any:
-    """Resolve a setting value: tenant row -> platform row -> spec default.
+    default: object = _UNSET,
+) -> object:
+    """Resolve a setting value by (domain, key) — the DYNAMIC path.
+
+    Returns `object`, so a caller must narrow before use. That is deliberate:
+    this function cannot know the type, and returning `Any` would have every
+    call site silently unchecked rather than visibly needing a decision. When
+    the setting IS known at the call site, use `resolve(db, spec)` and get its
+    declared type instead.
+
+    Resolution: tenant row -> platform row -> spec default.
 
     Precedence: a tenant-owned row (`tenant_id = tenant_id`) wins over the
     platform-default row (`tenant_id IS NULL`) wins over the spec's own
@@ -480,8 +546,11 @@ def resolve_many(
     *,
     tenant_id: UUID | None | object = _UNSET,
     scope: SettingScope | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Resolve many settings of one domain at one scope, in one pass.
+
+    Values are `object` for the same reason as `resolve_value`: the keys are
+    chosen at runtime, so no single type describes them.
 
     `resolve_value` costs up to one query per level of the chain, so a screen
     reading twenty settings costs forty queries and the cache only helps once
@@ -520,7 +589,7 @@ def resolve_many(
     for key, spec in specs.items():
         hit = _cached(domain, key, scope=target)
         if hit is not _CACHE_MISS:
-            resolved[key] = cast("tuple[Any, SettingSource]", hit)[0]
+            resolved[key] = cast("tuple[object, SettingSource]", hit)[0]
         else:
             outstanding_specs[key] = spec
     if not outstanding_specs:
@@ -710,7 +779,7 @@ def validate_required_settings(db: Session) -> list[str]:
     return missing_required_settings(db, scope=SettingScope.platform())
 
 
-def validate_spec_value(spec: SettingSpec, value: object) -> object:
+def validate_spec_value(spec: SettingSpec[Any], value: object) -> object:
     """Validate `value` against `spec`'s type/allowed/range constraints for a WRITE.
 
     Unlike `resolve_value`'s coercion (which silently degrades an unreadable
@@ -835,7 +904,7 @@ SETTING_CHANGED_EVENT = "settings.changed"
 
 
 def _emit_change(
-    db: Session, *, spec: SettingSpec, key: str, scope: SettingScope, action: str
+    db: Session, *, spec: SettingSpec[Any], key: str, scope: SettingScope, action: str
 ) -> None:
     """Announce a setting change on the outbox, in the caller's transaction.
 
@@ -889,7 +958,7 @@ def _record_history(
     db: Session,
     *,
     row: DomainSetting,
-    spec: SettingSpec,
+    spec: SettingSpec[Any],
     action: SettingChangeAction,
     before: str | None,
     changed_by: SettingChangeContext | None = None,
@@ -1152,6 +1221,7 @@ __all__ = [
     "clear_by_key",
     "missing_required_settings",
     "prune_setting_history",
+    "resolve",
     "resolve_many",
     "seed_settings_from_env",
     "resolve_value",

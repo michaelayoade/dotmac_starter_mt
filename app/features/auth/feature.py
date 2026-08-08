@@ -15,4 +15,11 @@ from dotmac_kernel.features import FeatureManifest
 from app.features.auth.router import router
 from app.features.auth.web import router as web_router
 
-feature = FeatureManifest(name="auth", routers=[router], web_routers=[web_router])
+feature = FeatureManifest(
+    name="auth",
+    routers=[router],
+    web_routers=[web_router],
+    # Owns the `auth` setting domain: `registration_policy`'s spec lives in
+    # this feature (`spec.py`), and a declaration follows its owner — ADR-0008.
+    setting_domains=("auth",),
+)

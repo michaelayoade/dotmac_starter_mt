@@ -6,6 +6,35 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a22 — 2026-08-08
+
+The settings read API is typed. No migration.
+
+### Changed — BREAKING (typing)
+- **`SettingSpec` is generic in the Python type its values resolve to** —
+  `SettingSpec[int]`, with `default: T`. A spec whose default does not fit its
+  parameter is now a type error at the declaration.
+- **`resolve_value` returns `object`, not `Any`**; `resolve_many` returns
+  `dict[str, object]`; `resolve_with_source` returns
+  `tuple[object, SettingSource]`. These are the DYNAMIC path — keys chosen at
+  runtime — so a caller must narrow. Nothing about resolution changed; only
+  what the type checker will now insist you acknowledge.
+
+  `Any` is not a weaker annotation, it is the absence of one, and it is
+  contagious: a value typed `Any` silences checking in every expression it
+  reaches. Removing it immediately surfaced a real unchecked call site in the
+  reference assembly, where a resolved value went straight into
+  `timedelta(days=...)`.
+
+### Added
+- **`resolve(db, spec, *, tenant_id=..., scope=...) -> T`** — the read a
+  product should write. The spec is the key, so the declared type travels with
+  it and every call site is checked.
+
+### Why this had to land before any product cuts over
+Fixing it afterwards would have meant migrating call sites twice — roughly 109
+in `dotmac_sub` and ~331 in `dotmac_erp`.
+
 ## 0.1.0a21 — 2026-08-08
 
 ADR-0009: a secret is held, never dereferenced. No migration.

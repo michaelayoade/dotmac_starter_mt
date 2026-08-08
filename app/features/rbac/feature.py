@@ -20,6 +20,9 @@ from app.features.rbac.router import router
 from app.features.rbac.web import router as web_router
 
 feature = FeatureManifest(
+    # Owns the `audit` setting domain: its spec lives in this feature
+    # (`spec.py`), and a declaration follows its owner — ADR-0008.
+    setting_domains=("audit",),
     name="rbac",
     routers=[router],
     web_routers=[web_router],
