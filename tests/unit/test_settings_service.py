@@ -522,17 +522,30 @@ def _env_spec():
         del sr._REGISTRY[key]
 
 
-def test_env_var_beats_the_spec_default(db, monkeypatch, _env_spec):
+def test_env_seeds_a_real_row_rather_than_answering_at_read_time(
+    db, monkeypatch, _env_spec
+):
+    """`env` is a bootstrap input. Before seeding it changes nothing; after
+    seeding the value is a normal platform row, so every process agrees and the
+    change has an owner and a history."""
     monkeypatch.setenv("DOTMAC_TEST_ENV_SETTING", "from-env")
+
+    # Nothing yet: the resolver does not read the environment.
+    assert sr.resolve_with_source(
+        db, SettingDomain.auth, "test_env", tenant_id=None
+    ) == ("from-default", "default")
+
+    assert sr.seed_settings_from_env(db) == 1
     value, source = sr.resolve_with_source(
         db, SettingDomain.auth, "test_env", tenant_id=None
     )
-    assert (value, source) == ("from-env", "env")
+    assert (value, source) == ("from-env", "platform")
 
 
-def test_a_stored_row_beats_the_env_var(db, monkeypatch, _env_spec):
-    """An env var is deployment-scoped, so it must never override a value an
-    operator stored — the inverse would make the admin screen a liar."""
+def test_seeding_never_overwrites_a_value_an_operator_set(db, monkeypatch, _env_spec):
+    """Seeding runs on every boot, so it must be one-way: an operator who has
+    since changed the value must not have it reverted by a stale variable left
+    in a unit file."""
     monkeypatch.setenv("DOTMAC_TEST_ENV_SETTING", "from-env")
     db.add(
         DomainSetting(
@@ -544,14 +557,16 @@ def test_a_stored_row_beats_the_env_var(db, monkeypatch, _env_spec):
         )
     )
     db.flush()
+    assert sr.seed_settings_from_env(db) == 0
     value, source = sr.resolve_with_source(
         db, SettingDomain.auth, "test_env", tenant_id=None
     )
     assert (value, source) == ("from-row", "platform")
 
 
-def test_an_unset_env_var_falls_through_to_the_default(db, monkeypatch, _env_spec):
+def test_an_unset_env_var_seeds_nothing(db, monkeypatch, _env_spec):
     monkeypatch.delenv("DOTMAC_TEST_ENV_SETTING", raising=False)
+    assert sr.seed_settings_from_env(db) == 0
     value, source = sr.resolve_with_source(
         db, SettingDomain.auth, "test_env", tenant_id=None
     )
@@ -562,6 +577,7 @@ def test_an_empty_env_var_is_not_a_value(db, monkeypatch, _env_spec):
     """An exported-but-empty variable is how a shell says "unset", not how an
     operator says "the empty string"."""
     monkeypatch.setenv("DOTMAC_TEST_ENV_SETTING", "")
+    assert sr.seed_settings_from_env(db) == 0
     value, source = sr.resolve_with_source(
         db, SettingDomain.auth, "test_env", tenant_id=None
     )
@@ -602,6 +618,8 @@ def test_required_setting_satisfied_by_env_is_not_reported(
     db, monkeypatch, _required_spec
 ):
     monkeypatch.setenv("DOTMAC_TEST_REQUIRED_SETTING", "configured")
+    # Satisfied by the bootstrap, which `create_app` runs before this check.
+    sr.seed_settings_from_env(db)
     assert sr.validate_required_settings(db) == []
 
 

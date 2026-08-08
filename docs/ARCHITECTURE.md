@@ -387,6 +387,23 @@ row can never break every caller. `source` (`"tenant" | "platform" |
 (masked whenever a real row exists; never for the built-in default — there's
 nothing to hide there).
 
+Finer levels than `tenant` are possible — a spec resolves through the
+declared scope chain (`dotmac_kernel.setting_scopes`), most specific first,
+always ending at the platform row. `tenant_id` carries isolation and only
+isolation; `scope_kind`/`scope_id` carry precedence.
+
+**Environment variables are a bootstrap, never a fallback.** A spec's
+`env_var` is read once, at startup, by `seed_settings_from_env` (called from
+the `create_app` lifespan just before `validate_required_settings`, so a
+required setting configured by environment counts as configured). It creates
+the platform row when none exists and never touches one that does — so an
+operator who later edits the value in the admin screen does not have it
+reverted on the next restart by a stale variable in a unit file. Nothing
+reads the environment at resolution time: a live env fallback would make the
+answer depend on which process asked, leave the value with no history and no
+owner, and make a database restore fail to reproduce it. (`dotmac_sub`
+reached this rule first; the kernel has been brought to it.)
+
 **Spec registration**: `SettingSpec` instances are declared in a feature's
 own module (today only `app/features/settings/spec.py`) and registered into
 the core registry via `register_specs([...])` as an import-time side

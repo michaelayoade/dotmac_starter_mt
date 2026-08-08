@@ -32,7 +32,7 @@ Scope kinds are the seventh declaration registry (ADR-0008). A module declares
 the kinds it introduces and where they sit, and `resolve_value` walks the chain
 most-specific first:
 
-    user → site → tenant → platform → env var → spec default
+    user → site → tenant → platform → spec default
 
 `platform` and `tenant` are the kernel's own and are always present. `NULL`
 never means "some level" — `scope_kind` is NOT NULL, because meaning-by-absence

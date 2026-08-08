@@ -71,12 +71,31 @@ logger = logging.getLogger(__name__)
 
 _UNSET = object()
 
-# What determined a resolved value — see `resolve_with_source`.
 # What determined a resolved value: the SCOPE KIND of the row that won, or
-# `env`/`default` when no row did. A plain `str` rather than a closed Literal,
-# because the set of scope kinds is itself declared — the kernel's two still
-# render as "tenant" and "platform", so nothing visible changes today.
+# `default` when no row did. Never `env` — see `seed_settings_from_env`.
+#
+# A plain `str` rather than a closed Literal, because the set of scope kinds is
+# itself declared; the kernel's two still render as "tenant" and "platform".
 SettingSource = str
+
+
+@dataclass(frozen=True, slots=True)
+class SettingChangeContext:
+    """Who is making a settings change, and on what request.
+
+    Passed to the writers so the history row records it. Every field is
+    optional because a seed, a migration or a CLI genuinely has no actor, and
+    recording "unknown" honestly is better than inventing one.
+
+    Frozen, and every field a scalar — no mutable container to be shared
+    between two changes and then edited.
+    """
+
+    actor_party_id: UUID | None = None
+    reason: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    request_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,8 +110,16 @@ class SettingSpec:
     # Prose shown beside `label` on the settings screen. A setting an operator
     # cannot interpret is a setting they will not touch.
     description: str | None = None
-    # Environment variable consulted BELOW the platform row and ABOVE `default`
-    # — see `resolve_with_source` for why that position and no other.
+    # Environment variable that BOOTSTRAPS this setting's platform row on first
+    # start — see `seed_settings_from_env`. It is NOT consulted at read time.
+    #
+    # A live env fallback makes resolution depend on process environment rather
+    # than on data: two workers with different environments answer the same
+    # question differently and silently, the value has no history and no owner,
+    # and restoring the database does not reproduce it. Seeding a real row
+    # instead keeps one authority, gives the value an audit trail, and makes
+    # every process agree. (`dotmac_sub` reached this rule first; the kernel
+    # had the weaker behaviour.)
     env_var: str | None = None
     # The SCOPE KIND at which this setting must be configured, or None if it is
     # optional. `"platform"` means the deployment cannot run without it, and is
@@ -115,6 +142,62 @@ class SettingSpec:
 _REGISTRY: dict[tuple[SettingDomain, str], SettingSpec] = {}
 
 
+class DuplicateSettingSpecError(ValueError):
+    """Two modules declared the same setting with different definitions."""
+
+
+class InvalidSpecDefaultError(ValueError):
+    """A spec's own default violates the spec's own constraints."""
+
+
+def _fingerprint(spec: SettingSpec) -> tuple[object, ...]:
+    """What makes two declarations of one setting the SAME declaration.
+
+    Re-importing a spec module (a test reload, a module imported twice through
+    different paths) builds an equal-but-not-identical `SettingSpec`, and its
+    `validator` is a fresh function object every time — so plain equality would
+    reject legitimate re-registration. Validators are compared by qualified name
+    instead: same function, same declaration.
+    """
+    return (
+        str(spec.domain),
+        spec.key,
+        str(spec.value_type),
+        repr(spec.default),
+        spec.label,
+        spec.description,
+        spec.env_var,
+        spec.required_at,
+        tuple(sorted(spec.allowed)) if spec.allowed else None,
+        spec.min_value,
+        spec.max_value,
+        spec.is_secret,
+        getattr(spec.validator, "__qualname__", None),
+    )
+
+
+def _validate_default(spec: SettingSpec) -> None:
+    """A spec's default must satisfy the spec's own constraints.
+
+    Otherwise resolution's degrade-to-default path returns a value the spec
+    forbids — silently, and for every reader. Checked at registration because it
+    is a property of the DECLARATION, knowable without a database or a request.
+
+    `default=None` is legitimate and skipped: a setting that must be configured
+    (`required_at`) has no sensible built-in default.
+    """
+    if spec.default is None:
+        return
+    try:
+        validate_spec_value(spec, spec.default)
+    except BadRequestError as exc:
+        raise InvalidSpecDefaultError(
+            f"setting {spec.domain.value}/{spec.key} declares a default its own "
+            f"spec rejects: {exc}. Resolution degrades to this default, so every "
+            "reader would silently receive a forbidden value."
+        ) from None
+
+
 def register_specs(specs: list[SettingSpec]) -> None:
     """Add/overwrite specs in the module-level registry, keyed by (domain, key).
 
@@ -131,6 +214,16 @@ def register_specs(specs: list[SettingSpec]) -> None:
     checks the real assembly's specs against its declarations.
     """
     for spec in specs:
+        existing = _REGISTRY.get((spec.domain, spec.key))
+        if existing is not None and _fingerprint(existing) != _fingerprint(spec):
+            raise DuplicateSettingSpecError(
+                f"setting {spec.domain.value}/{spec.key} is declared twice with "
+                "different definitions — whichever module imported last would "
+                "silently win, so the effective spec would depend on import "
+                "order. Every other registry in the kernel fails here; this one "
+                "used to overwrite quietly."
+            )
+        _validate_default(spec)
         _REGISTRY[(spec.domain, spec.key)] = spec
 
 
@@ -252,13 +345,6 @@ def _finish(
     settings in bulk would quietly answer differently from the same settings
     read one at a time.
     """
-    if raw is None and spec.env_var is not None:
-        # BELOW both rows and ABOVE the spec default: an env var is
-        # deployment-scoped so it must not beat a stored row, but it is a real
-        # operator decision so it must beat a default the code shipped.
-        environment = os.environ.get(spec.env_var)
-        if environment is not None and environment != "":
-            raw, source = environment, "env"
     if raw is None:
         raw, source = spec.default, "default"
 
@@ -426,6 +512,21 @@ def resolve_many(
     if not specs:
         return {}
 
+    # Serve whatever is already cached, and only query for the rest. Without
+    # this the bulk path neither read nor warmed the cache, so the screen that
+    # most needs it got no benefit AND left single-key reads still missing.
+    resolved: dict[str, Any] = {}
+    outstanding_specs: dict[str, SettingSpec] = {}
+    for key, spec in specs.items():
+        hit = _cached(domain, key, scope=target)
+        if hit is not _CACHE_MISS:
+            resolved[key] = cast("tuple[Any, SettingSource]", hit)[0]
+        else:
+            outstanding_specs[key] = spec
+    if not outstanding_specs:
+        return resolved
+    specs = outstanding_specs
+
     # Most specific first; the first level to supply a key wins it.
     winner: dict[str, tuple[object | None, SettingSource]] = {}
     for candidate in resolution_chain(target, active_scope_kinds()):
@@ -435,10 +536,20 @@ def resolve_many(
         for row in _select_rows(db, domain, outstanding, candidate):
             winner[row.key] = (_extract_raw(row), candidate.kind)
 
-    resolved: dict[str, Any] = {}
     for key, spec in specs.items():
         raw, source = winner.get(key, (None, "default"))
-        resolved[key], _ = _finish(spec, raw, source)
+        value, resolved_source = _finish(spec, raw, source)
+        resolved[key] = value
+        # Warm the cache from the bulk read too, so a later single-key read of
+        # the same setting hits rather than repeating the work.
+        _store_resolved(
+            domain,
+            key,
+            scope=target,
+            value=value,
+            source=resolved_source,
+            is_secret=spec.is_secret,
+        )
     return resolved
 
 
@@ -507,6 +618,50 @@ def prune_setting_history(
     return removed
 
 
+def seed_settings_from_env(db: Session) -> int:
+    """Create the platform row for any spec whose `env_var` is set and which has
+    no row yet. Returns how many were created.
+
+    This is what `env_var` means: a BOOTSTRAP input, read once, turned into a
+    real row that then behaves like every other value — visible on the settings
+    screen, editable, historied, and identical in every process.
+
+    Idempotent and non-destructive: a setting that already has a platform row is
+    left alone, so an operator who has since changed the value does not have it
+    reverted on the next restart by a stale variable in the unit file. That
+    one-way property is the reason this is safe to run on every boot.
+
+    An empty variable is treated as unset — an exported-but-empty value is how a
+    shell says "not configured", not how an operator says "the empty string".
+    """
+    created = 0
+    for spec in all_specs():
+        if not spec.env_var:
+            continue
+        raw = os.environ.get(spec.env_var)
+        if raw is None or raw == "":
+            continue
+        platform = SettingScope.platform()
+        if _select_row(db, spec.domain, spec.key, platform) is not None:
+            continue
+        try:
+            ensure_by_key(db, spec.domain, spec.key, raw, scope=platform)
+        except (BadRequestError, ValueError) as exc:
+            # A bad variable must not stop the boot, and must not be silent.
+            logger.error(
+                "Could not seed %s/%s from %s: %s",
+                spec.domain.value,
+                spec.key,
+                spec.env_var,
+                exc,
+            )
+            continue
+        created += 1
+    if created:
+        logger.info("Seeded %d setting(s) from the environment", created)
+    return created
+
+
 def missing_required_settings(
     db: Session,
     *,
@@ -535,7 +690,7 @@ def missing_required_settings(
             errors.append(
                 f"required setting {spec.domain.value}/{spec.key} is not "
                 f"configured at scope {target.kind!r}: no row"
-                + (f", no {spec.env_var}" if spec.env_var else "")
+                + (f" (and {spec.env_var} was unset at boot)" if spec.env_var else "")
                 + ", and no default"
             )
     return errors
@@ -579,7 +734,31 @@ def validate_spec_value(spec: SettingSpec, value: object) -> object:
     if value is None:
         raise BadRequestError(f"{spec.domain.value}/{spec.key}: value must not be null")
 
-    coerced = _coerce(spec.value_type, value)
+    # Validated through the WRITE direction (`to_storage`), not the read one.
+    # `_coerce` answers "can this STORED form be read back", which is a
+    # different question: a `money` value arrives here as a `Money` object and
+    # is stored as a dict, so read-direction coercion rejected every valid write.
+    # The two directions are a matched pair on one spec precisely so each is
+    # used for its own half.
+    # Round-tripped through the type's OWN matched pair: `to_storage` rejects an
+    # invalid value, and `from_storage` of the result is the canonical Python
+    # form — so a form's "30" becomes 30 and a `Money` stays a `Money`.
+    #
+    # Validating with `from_storage` alone (as this did) asks the wrong
+    # question — "can this STORED form be read back" — and rejected every valid
+    # `money` write, since one arrives as a `Money` and is stored as a dict.
+    # Validating with `to_storage` alone skips the coercion the form boundary
+    # depends on, so "abc" for an integer sailed through.
+    try:
+        type_spec = active_setting_value_types().require(spec.value_type)
+        coerced = type_spec.from_storage(type_spec.to_storage(value))
+    except UndeclaredValueTypeError as exc:
+        raise BadRequestError(f"{spec.domain.value}/{spec.key}: {exc}") from None
+    except ValueError as exc:
+        raise BadRequestError(
+            f"{spec.domain.value}/{spec.key}: invalid value for type "
+            f"{spec.value_type.value} ({exc})"
+        ) from None
     if coerced is None:
         raise BadRequestError(
             f"{spec.domain.value}/{spec.key}: invalid value for type "
@@ -681,6 +860,7 @@ def _emit_change(
     # DATABASE_URL — that is a documented property of the supported surface and
     # the `kernel-floors` job proves it by importing with the variable unset.
     from dotmac_kernel.messaging.outbox import enqueue_event, enqueue_platform_event
+
     payload: dict[str, object] = {
         "domain": str(spec.domain),
         "key": key,
@@ -712,14 +892,16 @@ def _record_history(
     spec: SettingSpec,
     action: SettingChangeAction,
     before: str | None,
+    changed_by: SettingChangeContext | None = None,
 ) -> DomainSettingHistory:
     """Record one value transition. Called by both writers, never by a caller.
 
     A secret's value is redacted rather than stored — see
     `DomainSettingHistory`'s docstring for why a history table must not become
-    the place a rotated credential outlives its rotation. The actor is NOT
-    recorded here: `write_audit_event` owns who-did-what, and the two records
-    correlate on `(tenant_id, domain, key)` and adjacent timestamps.
+    the place a rotated credential outlives its rotation. WHO made the change is
+    recorded, because it is intrinsic to the change record; without it an
+    operator answering "who turned this off" would be joining tables on
+    timestamp proximity.
     """
     entry = DomainSettingHistory(
         tenant_id=row.tenant_id,
@@ -730,6 +912,11 @@ def _record_history(
         value_before=None if spec.is_secret else before,
         value_after=None if spec.is_secret else _stored_text(row),
         secret_changed=spec.is_secret,
+        changed_by_party_id=changed_by.actor_party_id if changed_by else None,
+        change_reason=changed_by.reason if changed_by else None,
+        ip_address=changed_by.ip_address if changed_by else None,
+        user_agent=changed_by.user_agent if changed_by else None,
+        request_id=changed_by.request_id if changed_by else None,
     )
     db.add(entry)
     db.flush()
@@ -744,6 +931,7 @@ def upsert_by_key(
     *,
     tenant_id: UUID | None | object = _UNSET,
     scope: SettingScope | None = None,
+    changed_by: SettingChangeContext | None = None,
 ) -> DomainSetting:
     """Create or overwrite the (domain, key, tenant_id) row with `value`.
 
@@ -758,6 +946,13 @@ def upsert_by_key(
     target = _scope_for(tenant_id, scope)
     active_scope_kinds().require(target.kind)
     spec = get_spec(domain, key)
+    # Enforced HERE, not only in whichever service remembered to call it. The
+    # writer already refuses an undeclared domain, an undeclared scope kind and
+    # an uncoercible value; leaving `allowed`/min/max/`validator` to the caller
+    # meant an out-of-range write succeeded and the READ then degraded it to the
+    # default — so the operator saw no error and the setting silently did not
+    # take effect. Returns the coerced value, which is what gets stored.
+    value = validate_spec_value(spec, value)
     value_text, value_json = _normalize_for_db(
         spec.value_type, value, is_secret=spec.is_secret, tenant_id=target.tenant_id
     )
@@ -778,6 +973,7 @@ def upsert_by_key(
             spec=spec,
             action=SettingChangeAction.update,
             before=before,
+            changed_by=changed_by,
         )
         _invalidate_cache(domain, key, scope=target)
         _emit_change(db, spec=spec, key=key, scope=target, action="update")
@@ -797,11 +993,65 @@ def upsert_by_key(
     db.add(row)
     db.flush()
     _record_history(
-        db, row=row, spec=spec, action=SettingChangeAction.create, before=None
+        db,
+        row=row,
+        spec=spec,
+        action=SettingChangeAction.create,
+        before=None,
+        changed_by=changed_by,
     )
     _invalidate_cache(domain, key, scope=target)
     _emit_change(db, spec=spec, key=key, scope=target, action="create")
     return row
+
+
+def clear_by_key(
+    db: Session,
+    domain: SettingDomain,
+    key: str,
+    *,
+    tenant_id: UUID | None | object = _UNSET,
+    scope: SettingScope | None = None,
+    changed_by: SettingChangeContext | None = None,
+) -> bool:
+    """Remove the override at exactly this scope. Returns whether one existed.
+
+    Setting a value had no inverse: a tenant could override a platform default
+    but never go back to inheriting it, which is the kind of hole that ends with
+    someone running DELETE by hand in production.
+
+    DELETES the row rather than deactivating it. `is_active=False` would leave a
+    tombstone that the uniqueness index still counts, so the scope could never
+    be set again — and "inherit from above" is precisely the absence of a row,
+    not a row that says nothing.
+
+    Only this scope's own row goes. A tenant clearing its override does not
+    touch the platform value it falls back to, and clearing something that was
+    never set is a no-op rather than an error.
+    """
+    domain = active_setting_domains().require(domain)
+    target = _scope_for(tenant_id, scope)
+    active_scope_kinds().require(target.kind)
+    spec = get_spec(domain, key)
+
+    row = _select_row(db, domain, key, target)
+    if row is None:
+        return False
+
+    before = _stored_text(row)
+    _record_history(
+        db,
+        row=row,
+        spec=spec,
+        action=SettingChangeAction.delete,
+        before=before,
+        changed_by=changed_by,
+    )
+    db.delete(row)
+    db.flush()
+    _invalidate_cache(domain, key, scope=target)
+    _emit_change(db, spec=spec, key=key, scope=target, action="delete")
+    return True
 
 
 def ensure_by_key(
@@ -812,6 +1062,7 @@ def ensure_by_key(
     *,
     tenant_id: UUID | None | object = _UNSET,
     scope: SettingScope | None = None,
+    changed_by: SettingChangeContext | None = None,
 ) -> DomainSetting:
     """Insert the (domain, key, tenant_id) row with `value` if missing; else no-op.
 
@@ -852,6 +1103,9 @@ def ensure_by_key(
         return existing
 
     spec = get_spec(domain, key)
+    # Same enforcement as `upsert_by_key`: a seed that plants a value the spec
+    # forbids should fail at boot, not resolve to the default forever after.
+    value = validate_spec_value(spec, value)
     value_text, value_json = _normalize_for_db(
         spec.value_type, value, is_secret=spec.is_secret, tenant_id=target.tenant_id
     )
@@ -878,7 +1132,12 @@ def ensure_by_key(
             return raced
         raise
     _record_history(
-        db, row=row, spec=spec, action=SettingChangeAction.create, before=None
+        db,
+        row=row,
+        spec=spec,
+        action=SettingChangeAction.create,
+        before=None,
+        changed_by=changed_by,
     )
     _invalidate_cache(domain, key, scope=target)
     _emit_change(db, spec=spec, key=key, scope=target, action="create")
@@ -889,9 +1148,12 @@ __all__ = [
     "SettingSpec",
     "register_specs",
     "SETTING_CHANGED_EVENT",
+    "SettingChangeContext",
+    "clear_by_key",
     "missing_required_settings",
     "prune_setting_history",
     "resolve_many",
+    "seed_settings_from_env",
     "resolve_value",
     "validate_required_settings",
 ]
