@@ -151,6 +151,19 @@ specifics) points here and must never fork these rules.
     consumer on any Tailwind major — or none — links it as-is (ADR-0006 D3).
     (`make ui-check`, wired into `make check`;
     `tests/unit/test_dotmac_ui_tokens.py`)
+20. **A secret is HELD, never dereferenced.** Nothing on the settings
+    resolution path reaches a network — not for a value, not for a key. A
+    value that cannot be held is not a setting: if it must live in a secret
+    store, the product reads it and installs it via
+    `dotmac_kernel.secrets.SecretSource` (named material) or
+    `dotmac_kernel.settings_crypto.KeyProvider` (encryption keys), or seeds it
+    as a real setting. A row whose value merely LOOKS like a reference
+    (`bao://...`) resolves to that string; the kernel does not recognise the
+    scheme. Both seams load once at install, rotate on an explicit refresh,
+    keep the working set when a refresh fails, raise rather than start
+    degraded, and never log, repr or quote a value — only names (ADR-0009).
+    (`tests/unit/test_secrets_no_network.py`,
+    `tests/architecture/test_secrets_are_held.py`)
 
 ## Everything by config — no hardcoding
 

@@ -152,6 +152,17 @@ without touching core:
   and silently degrade every secret to its spec default; there is deliberately
   no degraded-start knob. Key material is never stored in `domain_settings` —
   a key that protects data at rest must not live in the database it protects.
+- **Install secret material a product resolved itself.** The kernel never
+  fetches a secret while handling a request (ADR-0009), so anything living in
+  a secret store is read by the PRODUCT and installed at startup:
+  `dotmac_kernel.secrets.install_secret_source(...)` for named material
+  (`get_secret`/`require_secret` are dict lookups afterwards), or
+  `install_key_provider(...)` above for settings encryption keys. Same
+  semantics for both: loaded once, explicit `refresh_secrets()`/`refresh_keys()`
+  for rotation, a failed refresh keeps the working set, a failing source raises
+  rather than starting degraded, and names are logged but never values. A
+  setting whose value merely looks like a reference (`bao://...`) is just that
+  string — the kernel does not dereference it.
 - **Add an admin-portal surface (the capability model — THE surface
   extension point).** A feature's `FeatureManifest` (`dotmac_kernel.features`)
   declares `web_routers` (its `web.py` router, HTML/HTMX) and `nav` (a
@@ -406,6 +417,9 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 17. `dotmac-ui`'s compiled assets are committed, never hand-edited, and match
     their token source; the stylesheet stays self-contained and
     preprocessor-free (`make ui-check`; `test_dotmac_ui_tokens.py`).
+18. A secret is HELD, never dereferenced — nothing on the settings resolution
+    path reaches a network, and a value that cannot be held is not a setting
+    (ADR-0009; `test_secrets_no_network.py`, `test_secrets_are_held.py`).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.

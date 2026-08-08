@@ -6,6 +6,43 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a21 — 2026-08-08
+
+ADR-0009: a secret is held, never dereferenced. No migration.
+
+### Added
+- **`dotmac_kernel.secrets`** — a place to PUT secret material a product
+  resolved from somewhere the kernel knows nothing about. `SecretSource` is a
+  one-method protocol; `install_secret_source` loads it once at startup and
+  `get_secret`/`require_secret` are dict lookups afterwards. Same semantics as
+  `KeyProvider`: explicit `refresh_secrets()` for rotation, a failed refresh
+  keeps the working set, a failing source raises rather than starting degraded,
+  and names are logged but never values.
+
+  The module performs no I/O and imports nothing that could — enforced, since
+  the module that holds secrets must not also be able to fetch them.
+
+### Decided (ADR-0009)
+- **Nothing on the settings resolution path reaches a network**, for a value or
+  a key. A value that cannot be held is not a setting. A row whose value merely
+  looks like a store reference (`bao://...`) resolves to that string; the kernel
+  does not recognise the scheme, does not fetch it, and does not fail.
+
+  The rejected alternative — resolution *timing* as a kernel contract, with
+  product-declared secret classes — would have baked one organisation's policy
+  vocabulary into the kernel (the mistake ADR-0008 exists to prevent) and made
+  an operational property negotiable per product. It also means a compliance
+  ruling about where secrets may live is no longer a kernel input: it becomes a
+  per-secret product question, answerable either way with no kernel change.
+
+### Enforcement
+- `tests/unit/test_secrets_no_network.py` — resolving a real encrypted secret,
+  and a bulk read, with `socket.socket`/`socket.create_connection` patched to
+  raise. Includes a sensitivity proof that the patch fires.
+- `tests/architecture/test_secrets_are_held.py` — no module on the resolution
+  path imports anything that could open a socket, with a sensitivity proof that
+  the detector catches a planted import.
+
 ## 0.1.0a20 — 2026-08-08
 
 A seam for supplying settings encryption keys from a secret store, and a fix
