@@ -172,6 +172,16 @@ specifics) points here and must never fork these rules.
     (`tests/unit/test_secret_sources_no_network.py`,
     `tests/architecture/test_secrets_are_held.py`)
 
+21. **Settings resolution reads rows and defaults — never the environment.**
+    `env_var` is a declaration whose only consumer is `seed_settings_from_env`,
+    which runs once at startup and never overwrites an existing row. Precedence
+    is `scope chain -> spec default`; the environment does not appear, because
+    it is a loader that produces a row rather than a source that competes with
+    one. A value in effect is therefore always one an operator can see and
+    change (ADR-0011).
+    (`tests/unit/test_settings_resolution_ignores_env.py`,
+    `tests/architecture/test_settings_env_is_bootstrap_only.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
