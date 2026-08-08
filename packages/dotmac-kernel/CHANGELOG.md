@@ -6,6 +6,50 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a19 — 2026-08-08
+
+Settings change actor, write-time spec enforcement, and environment variables as
+a bootstrap rather than a resolution-time fallback. Migration `0017`.
+
+### Changed — BREAKING (behaviour)
+- **`SettingSpec.env_var` no longer participates in resolution.** It is read
+  once at startup by the new `seed_settings_from_env`, which creates the
+  platform row when none exists and never overwrites one that does. Nothing
+  consults the environment at read time, and `SettingSource` no longer has an
+  `"env"` member.
+
+  A live env fallback makes the resolved value depend on which process asked,
+  leaves it with no history and no owner, and makes a database restore fail to
+  reproduce it. `create_app` calls the seed in its lifespan just before
+  `validate_required_settings`, so a required setting configured by environment
+  still counts as configured — but a deployment that relied on an environment
+  variable silently overriding a *missing* row now gets a real, visible,
+  editable row instead.
+- **A write to a spec'd key is validated against its spec** and rejected with
+  `BadRequestError` if the spec would reject it. A value that only the old,
+  unvalidated write path could store now fails at the write. Values are also
+  canonicalised on the way in (a form's `"30"` stores as `30`).
+- **`register_specs` raises on a duplicate key** (`DuplicateSettingSpecError`)
+  when two modules declare the same `(domain, key)` with different definitions,
+  and on a spec whose own `default` its own constraints reject
+  (`InvalidSpecDefaultError`). Both previously registered silently.
+
+### Added
+- **`SettingChangeContext`** — a frozen actor record (`actor_party_id`,
+  `actor_kind`, `reason`) accepted by the write functions and stored on the
+  history row. Migration `0017` adds the three columns. A history row that
+  records what changed but not who changed it cannot answer the question it
+  exists to answer, and requiring a join to audit to name the actor costs an
+  adopting product a capability it already has.
+- **`seed_settings_from_env(db)`** — the bootstrap described above. Idempotent
+  and one-way; an empty variable is treated as unset.
+- **`clear_by_key`** — removes a row so resolution falls through to the next
+  scope. `upsert_by_key(None)` stored a null; it did not un-set.
+
+### Changed
+- `resolve_many` consults the read cache, so a screen resolving many keys no
+  longer issues one query per key.
+
 ## 0.1.0a18 — 2026-08-08
 
 Per-scope requirements, per-tenant encryption keys, and history retention. No
