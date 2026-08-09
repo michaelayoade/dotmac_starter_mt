@@ -6,6 +6,43 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a26 — 2026-08-09
+
+ADR-0013: a module declares the question, the deployment declares the answer.
+No migration.
+
+### Changed — BREAKING (API)
+- **`ProductAssemblySpec.settings_overrides` becomes `setting_defaults`**, and
+  its semantics are corrected with its name. It was documented as "applied on
+  top of env/defaults" — i.e. winning over stored values, which is the defect
+  ADR-0011 removed from `env_var`. Nothing read it, so both are fixed together.
+  A profile default now LOSES to every stored row and WINS over the module's
+  fallback:
+
+      scope chain  ->  profile default  ->  spec fallback
+
+### Added
+- **Per-deployment setting defaults.** A module declares what a setting IS —
+  type, constraints, `inherits`, `is_secret`, all properties of its reader. A
+  deployment declares what its value should be when nothing else supplies one,
+  because that varies by region, regime and topology and was otherwise
+  hardcoded in module source where a deployment could not reach it.
+
+  `dotmac_erp` shows the cost of having nowhere to put it: eight caller
+  fallbacks in `auth_flow`, four disagreeing with their spec, three of those
+  security properties (`refresh_cookie_secure`, `samesite`, `path`).
+
+  Validated at startup — a default for a key no module declares is rejected (a
+  profile supplies answers, it cannot invent questions), as is one its own spec
+  rejects. Provenance reports `"profile"`.
+
+- **`ProductAssemblySpec.tenancy`** — single- or multi-tenant, declared rather
+  than inferred. **Nothing branches on it**; ADR-0003 forbids that. It makes the
+  intent checkable (a `single` deployment growing a second tenant is a
+  misconfiguration nothing currently notices) and answerable (ERP has six
+  identifier settings that cannot be marked non-inheriting because nobody knows
+  whether its rows are global or per-organisation).
+
 ## 0.1.0a25 — 2026-08-09
 
 `stored_at` — what is persisted at one scope, for editors. No migration.
