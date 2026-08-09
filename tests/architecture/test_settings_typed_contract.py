@@ -78,10 +78,11 @@ def test_no_public_read_returns_any() -> None:
 def test_the_scan_is_not_vacuous() -> None:
     """A parse that finds nothing must fail loudly rather than pass silently."""
     returns = _returns(RESOLVER)
-    assert (
-        len(returns) > 10
-    ), f"only parsed {len(returns)} functions — check the AST walk"
-    assert "resolve_value" in returns
+    assert returns, "the AST walk parsed no annotated functions at all"
+    # Named rather than counted: a threshold encodes today's function count as
+    # a rule and fails the day the module is legitimately refactored.
+    for required in ("resolve", "resolve_value", "resolve_many"):
+        assert required in returns, f"{required} was not parsed — check the walk"
 
 
 def test_setting_spec_is_generic() -> None:
