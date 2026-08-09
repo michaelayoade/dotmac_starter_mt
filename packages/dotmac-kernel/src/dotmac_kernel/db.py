@@ -3,6 +3,14 @@
 `get_db` sets the `app.current_tenant` Postgres setting per request so RLS policies
 can scope rows to the resolved tenant. `SET LOCAL` is transaction-scoped — the next
 request from the connection pool starts with no setting and must set its own.
+
+Code that runs OUTSIDE a request needs the same scope and has no `request.state`
+to take it from. `tenant_session` is that boundary, the tenant-scoped sibling of
+`platform_session`. Reaching for `SessionLocal` directly instead is the one
+mistake this module cannot catch for you: RLS fails **closed**, so an unscoped
+session returns zero rows rather than raising, and the caller cannot tell an
+empty tenant from an invisible one. A `dotmac_academy_app` audit command did
+exactly this and reported a clean estate against a database holding 333 banks.
 """
 
 from __future__ import annotations
@@ -23,6 +31,8 @@ __all__ = [
     "get_platform_db",
     "platform_engine",
     "platform_session",
+    "set_tenant",
+    "tenant_session",
 ]
 
 engine = create_engine(
@@ -44,6 +54,23 @@ PlatformSessionLocal = sessionmaker(
 )
 
 
+def set_tenant(db: Session, tenant_id: object) -> None:
+    """Apply the RLS tenant scope to `db`. The one writer of the setting.
+
+    Split out of `get_db` so the scope has a name. While it was inline there,
+    it was reachable only from the request cycle, and every other caller had to
+    know to reproduce the SQL — which is a thing you can only remember to do if
+    you already know RLS fails closed.
+
+    `SET LOCAL` is transaction-scoped, so this applies to the current
+    transaction only and must be re-applied on a new session.
+    """
+    db.execute(
+        text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
+        {"tenant_id": str(tenant_id)},
+    )
+
+
 def get_db(request: Request) -> Generator[Session, None, None]:
     """Per-request DB session with tenant context applied for RLS.
 
@@ -56,10 +83,7 @@ def get_db(request: Request) -> Generator[Session, None, None]:
     try:
         tenant = getattr(request.state, "tenant", None)
         if tenant is not None:
-            db.execute(
-                text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
-                {"tenant_id": str(tenant.id)},
-            )
+            set_tenant(db, tenant.id)
         yield db
         db.commit()
     except Exception:
@@ -100,6 +124,36 @@ def platform_session() -> Generator[Session, None, None]:
     """
     db = PlatformSessionLocal()
     try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@contextmanager
+def tenant_session(tenant_id: object) -> Generator[Session, None, None]:
+    """Non-request TENANT-scoped session boundary — CLI commands, jobs, workers.
+
+    The sibling of `platform_session`, for the other half of the non-request
+    world: work that acts as one tenant rather than as the platform. Commit on
+    success, rollback on error, and the RLS scope applied before the caller gets
+    the session, so there is no window in which a query can run unscoped.
+
+    Takes a tenant id, not a slug: resolving a slug needs a query, and that
+    query would itself have to decide which scope to run under. Callers resolve
+    the tenant first — usually against `tenants`, which is not tenant-scoped —
+    and pass the id in.
+
+    Prefer this over `SessionLocal` in any non-request caller. An unscoped
+    session does not raise; it returns nothing, which reads exactly like a
+    tenant that has no data (see the module docstring).
+    """
+    db = SessionLocal()
+    try:
+        set_tenant(db, tenant_id)
         yield db
         db.commit()
     except Exception:

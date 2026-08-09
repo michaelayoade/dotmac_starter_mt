@@ -6,6 +6,36 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a27 — 2026-08-09
+
+A tenant-scoped session boundary for code outside the request cycle. No
+migration, no breaking change.
+
+### Added
+- **`tenant_session(tenant_id)`** — the tenant-scoped sibling of
+  `platform_session`, for CLI commands, jobs and workers that act as one tenant
+  rather than as the platform. Applies the RLS scope before yielding, so there
+  is no window in which a query can run unscoped, and commits or rolls back on
+  the same owned-boundary contract as the other session helpers.
+- **`set_tenant(db, tenant_id)`** — the one writer of `app.current_tenant`,
+  split out of `get_db` so the scope has a name. `get_db` now calls it.
+
+### Why
+
+`platform_session` already existed for non-request platform work; there was no
+equivalent for non-request *tenant* work, so callers reached for `SessionLocal`
+directly — which the public-surface test forbids precisely because it skips the
+scope. The failure is silent by construction: RLS fails **closed**, so an
+unscoped session returns zero rows instead of raising, and a caller cannot
+distinguish an empty tenant from an invisible one.
+
+Found in `dotmac_academy_app`, which carries a fork of this module. Its
+`audit-banks` command printed `TOTAL 0 0` — a clean estate — against a
+production database holding 333 question banks and 3,210 questions for the
+tenant it had been asked about. Its `load-banks` command was blind the same way
+and had silently deployed nothing for 37 commits. Every assembly running CLI or
+batch work through a bare `SessionLocal` has the same exposure.
+
 ## 0.1.0a26 — 2026-08-09
 
 ADR-0013: a module declares the question, the deployment declares the answer.
