@@ -67,6 +67,7 @@ class SettingValueType(str):
     integer: SettingValueType
     boolean: SettingValueType
     json: SettingValueType
+    list: SettingValueType
     money: SettingValueType
 
     @property
@@ -166,6 +167,19 @@ def _integer_to(value: object) -> object:
     return str(coerced)
 
 
+def _require_serialisable(value: object, kind: str) -> None:
+    """Refuse a value the JSON column cannot hold.
+
+    Without this the write succeeds here and fails at flush, as a driver error
+    naming a column rather than the setting — far from the caller who can still
+    be told what is wrong. `to_storage` is that caller's last chance.
+    """
+    try:
+        _json.dumps(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"a {kind} setting must be JSON-serialisable: {exc}") from exc
+
+
 def _json_from(raw: object) -> object | None:
     # Already a Python object when it comes from the JSON column.
     return raw
@@ -174,7 +188,40 @@ def _json_from(raw: object) -> object | None:
 def _json_to(value: object) -> object:
     if not isinstance(value, dict):
         raise ValueError(f"a json setting must be an object, got {type(value)!r}")
+    _require_serialisable(value, "json")
     return value
+
+
+def _list_from(raw: object) -> object | None:
+    """A JSON array -> `list`.
+
+    Distinct from `json` on purpose: `json` is an OBJECT type, so a spec whose
+    values are a sequence had nowhere correct to live and a list-defaulted json
+    spec is rejected outright. A `str` is parsed for the same reason `money`
+    parses one — a value written before this type existed, or through a form,
+    arrives as text and must still be readable rather than degrading every
+    reader to the default.
+    """
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except ValueError:
+            return None
+    return raw if isinstance(raw, list) else None
+
+
+def _list_to(value: object) -> object:
+    # A `tuple` is accepted and stored as an array because the declaration side
+    # of this codebase is frozen dataclasses holding tuples — a spec default of
+    # `("POST", "PUT")` means the same list. `str` and `bytes` are refused
+    # explicitly: both are sequences, so a coercing implementation would store
+    # "abc" as ["a", "b", "c"]. A `set` is refused because order is part of the
+    # value (an audited-methods list is not a set).
+    if isinstance(value, str | bytes) or not isinstance(value, list | tuple):
+        raise ValueError(f"a list setting must be a list, got {type(value)!r}")
+    coerced = list(value)
+    _require_serialisable(coerced, "list")
+    return coerced
 
 
 def _money_from(raw: object) -> object | None:
@@ -237,7 +284,14 @@ KERNEL_VALUE_TYPES: tuple[ValueTypeSpec, ...] = (
         storage="json",
         from_storage=_json_from,
         to_storage=_json_to,
-        description="An arbitrary JSON object.",
+        description="An arbitrary JSON object. For a sequence, use `list`.",
+    ),
+    ValueTypeSpec(
+        code=SettingValueType("list"),
+        storage="json",
+        from_storage=_list_from,
+        to_storage=_list_to,
+        description="An ordered JSON array. Order is part of the value.",
     ),
     ValueTypeSpec(
         code=SettingValueType("money"),
