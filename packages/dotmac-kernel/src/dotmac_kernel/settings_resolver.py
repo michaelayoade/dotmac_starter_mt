@@ -156,6 +156,22 @@ class SettingSpec(Generic[T]):
     # A bool could only ever express the deployment case, which is why "every
     # tenant must set a billing contact" had no way to be stated.
     required_at: str | None = None
+    # Whether a less-specific scope's value is a valid answer for this
+    # setting. True for nearly everything — a preference, threshold, format or
+    # toggle set for the deployment is a real answer for a tenant that has not
+    # overridden it.
+    #
+    # False for a value that IDENTIFIES something belonging to one scope: a
+    # ledger account, a bank account, a warehouse, an external system's id. A
+    # fallback is the claim that a less-specific value answers the question,
+    # and for those it does not — there is no "default GL account", and
+    # inheriting one means posting to another tenant's books. `dotmac_erp` has
+    # eight such settings and guards exactly one of them, by hand, in the one
+    # caller whose author thought of it.
+    #
+    # Pair with `required_at` to get "must be set here, no fallback, fail
+    # loudly", which is what an identifier almost always wants.
+    inherits: bool = True
     allowed: set[str] | None = None
     min_value: int | None = None
     max_value: int | None = None
@@ -192,6 +208,7 @@ def _fingerprint(spec: SettingSpec[Any]) -> tuple[object, ...]:
         spec.description,
         spec.env_var,
         spec.required_at,
+        spec.inherits,
         tuple(sorted(spec.allowed)) if spec.allowed else None,
         spec.min_value,
         spec.max_value,
@@ -440,7 +457,13 @@ def resolve_with_source(
     # Most specific first, ending at platform. The chain comes from the DECLARED
     # ranks, so a product that inserts a level (site, region, user) gets it in
     # the right position without editing this function.
-    for candidate in resolution_chain(target, active_scope_kinds()):
+    # A non-inheriting spec is asked at its OWN scope and nowhere else: the
+    # chain is truncated rather than walked, so a less-specific row cannot
+    # answer for it.
+    chain = (
+        resolution_chain(target, active_scope_kinds()) if spec.inherits else (target,)
+    )
+    for candidate in chain:
         row = _select_row(db, domain, key, candidate)
         if row is not None:
             source = candidate.kind
@@ -597,9 +620,18 @@ def resolve_many(
     specs = outstanding_specs
 
     # Most specific first; the first level to supply a key wins it.
+    #
+    # A non-inheriting spec drops out of the walk after its own scope, so bulk
+    # and single-key reads answer identically. Getting this wrong would be the
+    # exact drift `_finish` is shared to prevent — a settings screen showing an
+    # inherited GL account that no individual read would ever return.
     winner: dict[str, tuple[object | None, SettingSource]] = {}
-    for candidate in resolution_chain(target, active_scope_kinds()):
-        outstanding = [key for key in specs if key not in winner]
+    for depth, candidate in enumerate(resolution_chain(target, active_scope_kinds())):
+        outstanding = [
+            key
+            for key, spec in specs.items()
+            if key not in winner and (depth == 0 or spec.inherits)
+        ]
         if not outstanding:
             break
         for row in _select_rows(db, domain, outstanding, candidate):

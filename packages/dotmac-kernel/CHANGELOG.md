@@ -6,6 +6,32 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a24 — 2026-08-09
+
+A setting declares whether it inherits (ADR-0012). No migration.
+
+### Added
+- **`SettingSpec.inherits`** (default `True`). `False` reads the setting at the
+  asked-for scope and nowhere else, so a less-specific row cannot answer for it.
+
+  A fallback is the claim that a less-specific value is a valid answer. For a
+  timezone or a threshold it is; for a value that IDENTIFIES something owned by
+  one scope it is not — there is no "default GL account", and inheriting one
+  means posting to another tenant's books.
+
+  Found in `dotmac_erp`, which reads general-ledger account ids two ways:
+  `fx_revaluation` hand-writes an organisation-only query to avoid exactly this,
+  while `payment_service` reads a structurally identical account id through the
+  resolver and inherits the fallback. Same data, opposite safety, decided by
+  which author thought of it. ERP has eight such settings and guards one.
+
+  Pairs with `required_at` to state "must be set here, no fallback, fail
+  loudly". Honoured by both the single-key and bulk paths, and part of a spec's
+  fingerprint, so two declarations differing only in this are a conflict.
+
+### Unchanged
+- The default preserves existing behaviour exactly; every current spec inherits.
+
 ## 0.1.0a23 — 2026-08-08
 
 An adoption path for products that already have settings. No migration.

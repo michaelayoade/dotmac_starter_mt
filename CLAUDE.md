@@ -425,6 +425,9 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     `env_var` seeds a row at startup and nothing more (ADR-0011;
     `test_settings_resolution_ignores_env.py`,
     `test_settings_env_is_bootstrap_only.py`).
+20. A setting declares whether it inherits; `inherits=False` for values that
+    identify something owned by one scope, so no less-specific row can answer
+    (ADR-0012; `test_setting_inherits.py`).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.

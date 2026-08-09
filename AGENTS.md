@@ -182,6 +182,15 @@ specifics) points here and must never fork these rules.
     (`tests/unit/test_settings_resolution_ignores_env.py`,
     `tests/architecture/test_settings_env_is_bootstrap_only.py`)
 
+22. **A setting declares whether it inherits.** `SettingSpec.inherits`
+    defaults to `True` (walk the scope chain, then the spec default) and is set
+    `False` for a value that IDENTIFIES something owned by one scope — a ledger
+    or bank account, a warehouse, an external system's id. A fallback claims a
+    less-specific value answers the question; for an identifier it does not.
+    Pair with `required_at` for "must be set here, no fallback, fail loudly".
+    Honoured by single-key AND bulk reads (ADR-0012).
+    (`tests/unit/test_setting_inherits.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
