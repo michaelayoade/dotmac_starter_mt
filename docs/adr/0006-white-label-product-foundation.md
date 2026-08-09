@@ -486,6 +486,67 @@ questions:
   nothing records which module owns which head row. F4's orchestrator needs that
   attribution.
 
+### Decision amendment — 2026-08-09 (build once; an extension point is not a licence)
+
+Section 5 is a brake on sharing things that merely LOOK alike. It says nothing
+about the opposite failure, which has now happened: implementing a shape in a
+product that every product needs, because an extension point made it easy.
+
+The owner's ruling: **a capability a second Dotmac app would otherwise
+reimplement is built in the shared layer, not in the product.** This covers
+value types, adapters, and reusable functions — not only things that feel like
+"framework".
+
+1. **An open extension point is not a licence to use it.** The kernel's
+   registries — permissions, capabilities, audit actions, feature flags,
+   setting domains, setting value types, setting scopes, secret sources — exist
+   so a product can declare vocabulary that is genuinely ITS OWN. Declaring a
+   UNIVERSAL shape through one is the forking failure ADR-0008 exists to
+   prevent, arrived at from the other direction: nothing is duplicated, and the
+   fleet still ends up with two incompatible definitions of one thing.
+
+   The applied test, before declaring anything on a product manifest: *would a
+   second app need this?* If yes, it belongs to the shared layer, and the
+   product declares nothing.
+
+2. **This governs SAMENESS; Section 5 governs SIMILARITY. Neither relaxes the
+   other.** Two dashboards that resemble each other are not one component, and
+   Section 5 still refuses them. A JSON list, a held secret reference, an exact
+   money amount are one thing with one correct encoding, and a second
+   implementation of one is a defect rather than a candidate. When a concrete
+   case looks like it satisfies both readings, it is a Section 5 case — the
+   two-consumer, named-owner and cutover gate decides, and "build once" is not
+   an argument for skipping it.
+
+3. **Mechanism is shared; policy stays in the product.** Gapless sequence
+   allocation under concurrency is a mechanism; what an invoice number looks
+   like is policy the product declares. A shared unit that cannot be described
+   without naming a business rule is in the wrong place.
+
+4. **Adapters are shared as PORTS, not as vendor bindings.** The typed
+   protocol, the held-credential contract (ADR-0009), timeout/retry/
+   circuit-breaking, the error taxonomy and the test fake are one thing, built
+   once. A specific vendor binding ships as its own `dotmac-adapter-*`
+   distribution against that port — inside the kernel it would make every
+   assembly inherit that vendor's SDK and release cadence.
+
+**First application.** Sub's settings cutover needed a `list` setting value
+type. Sub could have declared one on its own manifest and nothing in this ADR
+forbade it; ERP would then have declared an incompatible one. `list` shipped as
+a kernel built-in instead (`0.1.0a27`), and `dotmac-kernel`'s `COMPATIBILITY.md`
+now states the test above at the point where a reader is choosing.
+`secret_ref` follows the same route once the per-secret classification lands.
+
+**Note for the product-first extraction amendment.** That amendment (dated
+2026-08-08, in flight on `docs/product-first-extraction` at the time of
+writing) decides HOW a shared unit is implemented once sharing is agreed —
+inventory the products, port the proven implementation, place it at the
+narrowest shared layer. This amendment decides WHERE NEW work goes when no
+product implementation is the reference. Its point 3 and this amendment's
+points 3–4 overlap on placement and should be read as one rule when both have
+landed; if they are ever in tension, the placement wording in the product-first
+amendment is the more specific and wins.
+
 ## Consequences
 
 - F1–P1 have fixed vocabulary. "Module", "theme", "brand", and "facet" mean one
