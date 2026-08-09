@@ -82,7 +82,9 @@ def test_tenant_session_applies_the_scope(admin_session: Session, tenant_a) -> N
         admin_session.commit()
 
 
-def test_tenant_session_does_not_widen_to_other_tenants(admin_session: Session, tenant_a, tenant_b) -> None:
+def test_tenant_session_does_not_widen_to_other_tenants(
+    admin_session: Session, tenant_a, tenant_b
+) -> None:
     """The obvious over-correction is a BYPASSRLS role, which would make every
     non-request caller cross-tenant. Pin that this is a scope, not a bypass."""
     role = _seed_role(admin_session, tenant_a, "widen-canary")
@@ -101,7 +103,8 @@ def test_the_scope_is_applied_before_the_caller_gets_the_session(tenant_a) -> No
     caller ran on its first line — so the boundary must do it, not the caller.
     """
     with tenant_session(tenant_a.id) as db:
-        current = db.execute(text("SELECT current_setting('app.current_tenant', true)")).scalar()
+        sql = text("SELECT current_setting('app.current_tenant', true)")
+        current = db.execute(sql).scalar()
         assert current == str(tenant_a.id)
 
 
