@@ -375,11 +375,43 @@ def _coerce(value_type: SettingValueType, raw: object) -> object | None:
     return spec.from_storage(raw)
 
 
+def _check_against_spec(
+    spec: SettingSpec[Any], raw: object
+) -> tuple[object | None, str | None]:
+    """Coerce `raw` and check it against the spec. Returns `(value, error)`.
+
+    `error` is None when the value is usable. This says WHY a stored value is
+    unusable rather than silently substituting the default, which is the
+    difference between what resolution needs and what an editor needs — see
+    `stored_at`.
+
+    One implementation, used by both. Two copies of these rules would drift,
+    and an admin screen disagreeing with the resolver about whether a value is
+    valid is worse than either answer alone.
+    """
+    value = _coerce(spec.value_type, raw)
+    if value is None:
+        return None, f"not readable as {spec.value_type}"
+    if spec.allowed is not None and value not in spec.allowed:
+        return None, f"not one of {sorted(spec.allowed)}"
+    if isinstance(value, int) and not isinstance(value, bool):
+        if spec.min_value is not None and value < spec.min_value:
+            return None, f"below the minimum of {spec.min_value}"
+        if spec.max_value is not None and value > spec.max_value:
+            return None, f"above the maximum of {spec.max_value}"
+    if spec.validator is not None:
+        try:
+            spec.validator(value)
+        except ValueError as exc:
+            return None, str(exc)
+    return value, None
+
+
 def _finish(
     spec: SettingSpec[Any], raw: object | None, source: SettingSource
 ) -> tuple[object, SettingSource]:
-    """Turn a raw stored value into the resolved one: env fallback, coercion,
-    constraint checks, and the degrade-to-default rule.
+    """Turn a raw stored value into the resolved one: coercion, constraint
+    checks, and the degrade-to-default rule.
 
     Shared by the single-key and bulk paths deliberately. Two copies of these
     rules would drift, and the drift would be invisible — a page reading twenty
@@ -389,28 +421,121 @@ def _finish(
     if raw is None:
         raw, source = spec.default, "default"
 
-    value = _coerce(spec.value_type, raw)
-    if value is None and raw is not None:
-        # Unreadable stored value — degrade to the default rather than surface
-        # something the spec says is impossible.
-        value, source = spec.default, "default"
-    if spec.allowed is not None and value is not None and value not in spec.allowed:
-        value, source = spec.default, "default"
-    if isinstance(value, int) and not isinstance(value, bool):
-        if spec.min_value is not None and value < spec.min_value:
+    if raw is None:
+        value = None
+    else:
+        value, error = _check_against_spec(spec, raw)
+        if error is not None:
+            # Unusable stored value — degrade to the default rather than
+            # surface something the spec says is impossible. `stored_at`
+            # exists because this makes the bad row invisible to an editor.
             value, source = spec.default, "default"
-        elif spec.max_value is not None and value > spec.max_value:
-            value, source = spec.default, "default"
-    if spec.validator is not None and value is not None:
-        try:
-            spec.validator(value)
-        except ValueError:
-            value, source = spec.default, "default"
+
     if isinstance(value, dict | list):
         # A MUTABLE resolved value may be the shared `spec.default` object, so
         # every caller must get an independent copy.
         value = copy.deepcopy(value)
     return value, source
+
+
+@dataclass(frozen=True, slots=True)
+class StoredSetting:
+    """What is PERSISTED at one scope — not what resolves.
+
+    An editor and a reader ask different questions, and conflating them
+    produces two specific bugs.
+
+    **An inherited value shown in an edit box becomes an accidental override.**
+    Populate the form from `resolve_value` and a tenant with no row of its own
+    sees the platform value; saving that form writes a tenant row nobody asked
+    for, and nothing on screen changed to warn them.
+
+    **An invalid stored value is invisible.** Resolution degrades a row that
+    fails its spec all the way to the default and reports `source="default"`,
+    so a screen built on resolution shows a healthy-looking default while the
+    bad row persists — unshowable and therefore unfixable. `valid`/`error`
+    exist for exactly that row.
+    """
+
+    domain: str
+    key: str
+    # The scope this row lives at. A row is returned only from the scope asked
+    # for: `stored_at` never walks the chain, because "does THIS tenant have an
+    # override" is the question an editor needs answered.
+    scope_kind: str
+    raw: object | None
+    valid: bool
+    error: str | None
+    is_secret: bool
+
+    @property
+    def redacted(self) -> bool:
+        """True when `raw` is withheld because the setting holds a secret."""
+        return self.is_secret
+
+
+def stored_at(
+    db: Session,
+    domain: SettingDomain,
+    key: str,
+    *,
+    scope: SettingScope,
+) -> StoredSetting | None:
+    """The row stored AT `scope`, or None when there is none.
+
+    Never walks the resolution chain. `None` means "no override here", which is
+    what an editor must distinguish from "the inherited value happens to equal
+    this" — and what `resolve_with_source` cannot tell you without inference.
+
+    `raw` is the value as stored, uncoerced, so an operator can see and repair
+    something the spec rejects. **For a secret it is always None**: a settings
+    screen must not echo a stored credential, and this returning a
+    `StoredSetting` at all already answers the only question the form needs —
+    whether a value is set.
+
+    Validity is judged by the same `_check_against_spec` resolution uses, so an
+    admin screen and the resolver cannot disagree about whether a value is
+    usable.
+    """
+    row = _select_row(db, domain, key, scope)
+    if row is None:
+        return None
+
+    try:
+        spec = get_spec(domain, key)
+    except KeyError:
+        # A row whose spec is gone — a retired setting, or one belonging to a
+        # module this deployment no longer installs. Worth showing, since it is
+        # exactly the row an operator may want to delete, but nothing can be
+        # said about its validity.
+        return StoredSetting(
+            domain=str(domain),
+            key=key,
+            scope_kind=scope.kind,
+            raw=None if row.is_secret else _extract_raw(row),
+            valid=False,
+            error="no registered spec declares this setting",
+            is_secret=bool(row.is_secret),
+        )
+
+    raw = _extract_raw(row)
+    # Annotated: the first branch would otherwise narrow `error` to `str`, and
+    # the second assigns `str | None`.
+    value: object | None
+    error: str | None
+    if raw is None:
+        value, error = None, "the row holds no value"
+    else:
+        value, error = _check_against_spec(spec, raw)
+    return StoredSetting(
+        domain=str(domain),
+        key=key,
+        scope_kind=scope.kind,
+        raw=None if spec.is_secret else raw,
+        valid=error is None and value is not None,
+        error=error,
+        is_secret=spec.is_secret,
+    )
 
 
 def resolve_with_source(
@@ -1253,8 +1378,10 @@ __all__ = [
     "clear_by_key",
     "missing_required_settings",
     "prune_setting_history",
+    "StoredSetting",
     "resolve",
     "resolve_many",
+    "stored_at",
     "seed_settings_from_env",
     "resolve_value",
     "validate_required_settings",

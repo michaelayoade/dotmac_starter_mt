@@ -6,6 +6,39 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a25 — 2026-08-09
+
+`stored_at` — what is persisted at one scope, for editors. No migration.
+
+### Added
+- **`stored_at(db, domain, key, *, scope)` returning `StoredSetting | None`.**
+  An editor and a reader ask different questions, and the settings admin
+  surface had only the reader's answer.
+
+  Resolution walks the chain and degrades, which produces two bugs in any
+  screen built on it. An inherited value shown in an edit box becomes an
+  **accidental override** on save, with nothing on screen to warn the operator.
+  And a stored value that fails its spec **degrades to the default** and
+  reports `source="default"`, so the screen shows something healthy while the
+  bad row persists — unshowable and therefore unfixable.
+
+  `stored_at` never walks the chain: `None` means "no override here", which is
+  what an editor must distinguish from "the inherited value happens to match".
+  `raw` is the value as stored, uncoerced, so an operator can see and repair
+  what the spec rejects — and `valid`/`error` say why it was rejected.
+
+  **A secret never returns its stored value.** Returning a `StoredSetting` at
+  all already answers the form's only question: whether a value is set.
+
+  A row whose spec is gone (a retired setting, or a module no longer installed)
+  is still returned, marked invalid — it is precisely the row an operator may
+  want to delete, so hiding it would strand it.
+
+### Changed
+- Spec validation is extracted to one function used by both resolution and
+  `stored_at`, so an admin screen and the resolver cannot disagree about
+  whether a value is usable. Resolution behaviour is unchanged.
+
 ## 0.1.0a24 — 2026-08-09
 
 A setting declares whether it inherits (ADR-0012). No migration.
