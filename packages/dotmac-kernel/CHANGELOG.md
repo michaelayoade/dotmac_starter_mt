@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a27 — 2026-08-09
+## 0.1.0a28 — 2026-08-09
 
 A tenant-scoped session boundary for code outside the request cycle. No
 migration, no breaking change.
@@ -36,6 +36,42 @@ tenant it had been asked about. Its `load-banks` command was blind the same way
 and had silently deployed nothing for 37 commits. Every assembly running CLI or
 batch work through a bare `SessionLocal` has the same exposure.
 
+## 0.1.0a27 — 2026-08-09
+
+A `list` setting value type. No migration — `0.1.0a15` already replaced the
+CHECK constraint that named types with one that names only the invariant, so a
+new JSON-stored type needs no schema change.
+
+### Added
+- **`list` — an ordered JSON array.** `json` is an OBJECT type and stays one:
+  its `to_storage` rejects anything that is not a `dict`, and a spec whose
+  default is a list is refused at registration rather than resolving to a value
+  its own type forbids. That left a sequence setting — audited HTTP methods,
+  excluded path prefixes, preset amounts — with nowhere correct to live, so
+  products encoded them as comma-separated strings each reader re-split.
+
+  Widening `json` to accept arrays would have been the cheaper fix and the
+  wrong one: a reader could no longer know whether to expect `.get(...)` or
+  `[0]`, which is the ambiguity a value type exists to remove.
+
+  A `tuple` is accepted and stored as an array, because declarations here are
+  frozen dataclasses holding tuples. `str`, `bytes` and `set` are refused
+  explicitly — the first two are sequences, so a coercing implementation would
+  store `"abc"` as `["a", "b", "c"]`; a `set` is refused because order is part
+  of the value. On read, a value stored as JSON text is still parsed, so a row
+  written before this type existed does not degrade every reader to the
+  default.
+
+  This is a kernel built-in rather than a product registration on purpose. The
+  value-type registry is open, so a product *could* declare its own `list` —
+  and then a second product declares an incompatible one and the fleet's
+  vocabulary forks, which is the failure ADR-0008 exists to prevent. A shape
+  every product needs belongs to the kernel.
+
+### Changed
+- `json`'s `to_storage` now rejects a value the column cannot serialise,
+  instead of letting the write fail at flush as a driver error naming a column.
+  A value that was previously accepted here always failed a moment later.
 ## 0.1.0a26 — 2026-08-09
 
 ADR-0013: a module declares the question, the deployment declares the answer.

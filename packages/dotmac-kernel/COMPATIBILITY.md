@@ -48,7 +48,7 @@ application. None is a prerequisite for another unless noted.
 | `resolve_many` | One screen resolves many keys and the per-key queries show up. |
 | `settings_cache` | Profiling says resolution is hot. Inert until you `install_settings_cache(store)`; secrets are never cached. |
 | `setting_scopes` (beyond platform/tenant) | You genuinely have a level between or below them — per-site, per-reseller, per-user. Most products never do. |
-| `setting_value_types` (beyond the built-ins) | A value has a shape the built-in types cannot store correctly. `money` already exists; do not model currency as a string. |
+| `setting_value_types` (beyond the built-ins) | A value has a shape the built-in types cannot store correctly, AND that shape is specific to your product. `money` and `list` already exist — do not model currency as a string or a sequence as comma-separated text. A shape a second product would also need belongs in the kernel, not here: two products declaring their own `list` fork the vocabulary, which is what ADR-0008 exists to prevent. |
 | `settings_crypto` | You store a secret AS a setting. Needs the `settings-crypto` extra. |
 | `KeyProvider` | Encryption keys live in a secret store rather than the environment. |
 | `secret_sources` | Secret material lives in a store and is NOT a setting (ADR-0009). |
