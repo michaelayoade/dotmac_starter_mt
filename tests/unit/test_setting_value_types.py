@@ -31,8 +31,15 @@ SAMPLES: dict[str, object] = {
     "integer": 42,
     "boolean": True,
     "json": {"a": 1},
+    "list": ["POST", "PUT", "PATCH", "DELETE"],
     "money": Money.of(Decimal("1234.56"), currency("NGN")),
 }
+
+
+def _spec(code: str) -> ValueTypeSpec:
+    """One built-in by code, through the registry rather than by import — so a
+    type that stops being registered fails these tests too."""
+    return active_setting_value_types().require(code)
 
 
 def test_every_kernel_type_has_a_sample() -> None:
@@ -54,6 +61,59 @@ def test_unreadable_storage_is_none_not_an_exception(spec: ValueTypeSpec) -> Non
     """The read path degrades to the spec default; a value written by an older
     version must not take down every request that touches settings."""
     assert spec.from_storage(object()) is None or True  # never raises
+
+
+# ── `list` is a type, not a shape of `json` ─────────────────────────────────
+
+
+def test_json_still_refuses_a_list_now_that_list_exists() -> None:
+    """`json` is an object type and stays one.
+
+    Widening it to accept arrays would have been the cheaper fix and the wrong
+    one: a reader of a `json` setting would no longer know whether to expect
+    `.get(...)` or `[0]`, which is the ambiguity the type is supposed to remove.
+    """
+    spec = _spec("json")
+    with pytest.raises(ValueError, match="must be an object"):
+        spec.to_storage(["a"])
+
+
+def test_a_tuple_default_stores_as_an_array() -> None:
+    """Declarations in this codebase are frozen dataclasses holding tuples, so
+    a spec default of `("POST", "PUT")` is the ordinary case, not an edge one."""
+    assert _spec("list").to_storage(("POST", "PUT")) == ["POST", "PUT"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["abc", b"abc", {"a": 1}, {"a", "b"}, 42],
+    ids=["str", "bytes", "dict", "set", "int"],
+)
+def test_list_refuses_the_things_that_would_coerce_wrongly(value: object) -> None:
+    """`str` is the dangerous one: it is a sequence, so a coercing
+    implementation stores "abc" as ["a", "b", "c"] and nobody notices until a
+    reader iterates. A `set` is refused because order is part of the value."""
+    with pytest.raises(ValueError, match="must be a list"):
+        _spec("list").to_storage(value)
+
+
+def test_list_refuses_a_value_the_column_cannot_hold() -> None:
+    """Caught here, where the caller can be told, rather than at flush as a
+    driver error naming a column."""
+    with pytest.raises(ValueError, match="JSON-serialisable"):
+        _spec("list").to_storage([Decimal("1.5")])
+
+
+def test_a_list_written_as_text_is_still_readable() -> None:
+    """Tolerant read: a row written before this type existed, or through a
+    form, must not degrade every reader to the default."""
+    assert _spec("list").from_storage('["a", "b"]') == ["a", "b"]
+
+
+def test_an_object_stored_under_a_list_type_reads_as_none() -> None:
+    """Degrades to the spec default rather than handing a reader a dict where
+    its type promised an array."""
+    assert _spec("list").from_storage({"a": 1}) is None
 
 
 # ── Money is the reason this slice exists ───────────────────────────────────
