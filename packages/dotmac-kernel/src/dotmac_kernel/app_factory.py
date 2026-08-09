@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence, Set
+from collections.abc import Mapping, Sequence, Set
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -65,6 +65,7 @@ from dotmac_kernel.setting_value_types import (
     SettingValueTypeRegistry,
     install_setting_value_types,
 )
+from dotmac_kernel.settings_models import SettingDomain
 from dotmac_kernel.templating import (
     compose_templates,
     install_stylesheets,
@@ -224,6 +225,43 @@ def _validate_referenced_capabilities(
         )
 
 
+def _install_profile_defaults(defaults: Mapping[str, object]) -> None:
+    """Validate and install the assembly's declared setting defaults.
+
+    Fails the boot rather than degrading. A deployment that declares a default
+    is stating intent, and silently ignoring an unusable one would leave the
+    settings screen showing a value nothing resolves to.
+    """
+    from dotmac_kernel.settings_resolver import (
+        _check_against_spec,
+        get_spec,
+        install_setting_defaults,
+    )
+
+    for composite, value in defaults.items():
+        domain, _, key = composite.partition("/")
+        if not domain or not key:
+            raise ValueError(
+                f"setting default {composite!r} must be keyed '<domain>/<key>'"
+            )
+        try:
+            spec = get_spec(SettingDomain(domain), key)
+        except KeyError:
+            raise ValueError(
+                f"the deployment declares a default for {composite!r}, which no "
+                "installed module declares as a setting. A profile supplies "
+                "ANSWERS; it cannot introduce a question."
+            ) from None
+        if value is not None:
+            _, error = _check_against_spec(spec, value)
+            if error is not None:
+                raise ValueError(
+                    f"the deployment's default for {composite!r} is rejected by "
+                    f"its own spec ({error})"
+                )
+    install_setting_defaults(defaults)
+
+
 def create_app(spec: ProductAssemblySpec) -> FastAPI:
     """Compose a FastAPI application for `spec`. Behavior is identical to the
     pre-Task-3 `app/main.py` when given the reference spec; the spec's
@@ -283,6 +321,11 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     install_setting_value_types(SettingValueTypeRegistry.from_manifests(manifests))
     # Scope kinds: the kernel's platform/tenant plus any level a module adds.
     install_scope_kinds(ScopeKindRegistry.from_manifests(manifests))
+    # The deployment's declared defaults. Validated against the specs BEFORE
+    # installation: a default for a key nothing declares is how settings with
+    # no reader appear, and a default its own spec rejects would resolve to the
+    # module fallback anyway while looking configured on the settings screen.
+    _install_profile_defaults(spec.setting_defaults)
 
     # Process-static Jinja globals (enabled_features / nav_items) — must be set
     # before any template renders. Fed the FULL installed set in startup order

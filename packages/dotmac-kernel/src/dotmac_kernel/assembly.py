@@ -13,7 +13,7 @@ not-yet-migrated `FeatureManifest`s, freely mixed. `create_app` validates them
 into a `ModuleRegistry` (`dotmac_kernel.modules`) before mounting anything, so
 an incoherent module set (duplicate code, unsupported contract version, missing
 dependency, cycle) fails at startup rather than at first request.
-`settings_overrides`, `branding`, and `providers` are declared here so a
+`setting_defaults`, `branding`, and `providers` are declared here so a
 downstream assembly can supply them even where the reference assembly leaves
 them empty.
 """
@@ -44,15 +44,52 @@ class ProductAssemblySpec:
     # adapts when it builds the `ModuleRegistry`. The two may be MIXED in one
     # assembly — that is what makes migrating feature packages incremental.
     modules: Sequence[AnyManifest] = ()
-    # Per-deployment setting overrides applied on top of env/defaults. Declared
-    # for downstream assemblies; the reference assembly leaves it empty.
-    settings_overrides: Mapping[str, object] = field(default_factory=dict)
+    # The deployment's DECLARED DEFAULTS, keyed "<domain>/<key>".
+    #
+    # Named `setting_defaults` and not `settings_overrides` because the
+    # direction matters and the old name stated the wrong one. These LOSE to
+    # every stored row and WIN over the module's own fallback:
+    #
+    #     scope chain  ->  profile default  ->  spec fallback
+    #
+    # A module declares the QUESTION — that a setting exists, its type, its
+    # constraints, whether it inherits. A deployment declares the ANSWER OF
+    # LAST RESORT, because that is what genuinely varies by region, regime and
+    # topology, and it is currently hardcoded in module code where a deployment
+    # cannot reach it.
+    #
+    # The inverse — a profile value beating an operator's stored row — is the
+    # defect ADR-0011 removed from `env_var`: it makes the settings screen lie
+    # about what is in effect. Nothing here overrides a row.
+    #
+    # A default for a key no spec declares is rejected at startup: that is how
+    # settings with no reader appear.
+    setting_defaults: Mapping[str, object] = field(default_factory=dict)
     # Deployment-static branding (a BrandSpec or None). None = the kernel's
     # env/`brand.json` resolution (see `dotmac_kernel.branding`).
     branding: object | None = None
     # Provider implementations keyed by interface (e.g. a ProvisioningProvider).
     # Empty for the reference assembly.
     providers: Mapping[str, object] = field(default_factory=dict)
+    # The deployment's tenancy TOPOLOGY, declared rather than inferred.
+    #
+    # This creates NO code path. ADR-0003 is explicit that a single-tenant
+    # deployment "keeps Tenant, request tenant context, composite tenant
+    # constraints, and RLS — it is a topology, not a second schema or code
+    # path", and scattering `if tenancy == ...` through features is exactly
+    # what that forbids. Nothing branches on this.
+    #
+    # What it buys is that the intent becomes checkable and answerable:
+    #
+    # * `create_app` asserts it — a deployment declaring `single` that grows a
+    #   second tenant row is a misconfiguration someone should hear about,
+    #   and today nothing would notice.
+    # * Provisioning knows whether a second tenant is expected or a mistake.
+    # * Settings scope stops being guesswork. `dotmac_erp` has six identifier
+    #   settings that cannot safely be marked non-inheriting because nobody
+    #   knows whether its rows are global or per-organisation — a question a
+    #   declared topology answers instead of leaving to inspection.
+    tenancy: str = "multi"
     # Whole-portal surface switch — mount the admin/HTML surface or run API-only.
     web_enabled: bool = True
     # Feature/module names to disable (JSON API + web together), per deployment.
@@ -98,7 +135,7 @@ class ProductAssemblySpec:
     def __post_init__(self) -> None:
         object.__setattr__(self, "modules", tuple(self.modules))
         object.__setattr__(
-            self, "settings_overrides", MappingProxyType(dict(self.settings_overrides))
+            self, "setting_defaults", MappingProxyType(dict(self.setting_defaults))
         )
         object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
         object.__setattr__(self, "disabled_modules", frozenset(self.disabled_modules))

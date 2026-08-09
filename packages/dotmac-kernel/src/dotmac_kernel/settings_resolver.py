@@ -29,9 +29,10 @@ import copy
 import json
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import MappingProxyType
 from typing import Any, Generic, TypeVar, cast
 from uuid import UUID
 
@@ -375,6 +376,42 @@ def _coerce(value_type: SettingValueType, raw: object) -> object | None:
     return spec.from_storage(raw)
 
 
+# Per-deployment default values, keyed "<domain>/<key>", installed from the
+# assembly spec by `create_app`. Empty until a product declares any.
+#
+# These LOSE to every stored row and WIN over the spec's own fallback. That
+# direction is the whole point: a deployment states its intent, an operator's
+# stored value still overrides it, and the settings screen never lies about
+# what is in effect. The inverse — a profile value beating a stored row — is
+# the defect ADR-0011 removed from `env_var`, and it would be no better here.
+_profile_defaults: dict[str, object] = {}
+
+
+def install_setting_defaults(defaults: Mapping[str, object]) -> None:
+    """Install the deployment profile's declared defaults (called by
+    `create_app`). Replaces any previously installed set."""
+    global _profile_defaults
+    _profile_defaults = dict(defaults)
+
+
+def active_setting_defaults() -> Mapping[str, object]:
+    """The installed profile defaults. Read-only view for callers and tests."""
+    return MappingProxyType(_profile_defaults)
+
+
+def _profile_default(spec: SettingSpec[Any]) -> tuple[object | None, bool]:
+    """The profile's default for `spec`, and whether one was declared.
+
+    Returns the flag separately because a declared default of `None`, `0`,
+    `False` or `""` is a real answer, and `is None` cannot distinguish it from
+    "not declared".
+    """
+    composite = f"{spec.domain}/{spec.key}"
+    if composite not in _profile_defaults:
+        return None, False
+    return _profile_defaults[composite], True
+
+
 def _check_against_spec(
     spec: SettingSpec[Any], raw: object
 ) -> tuple[object | None, str | None]:
@@ -419,7 +456,14 @@ def _finish(
     read one at a time.
     """
     if raw is None:
-        raw, source = spec.default, "default"
+        # The deployment's declared answer, before the module's fallback. Both
+        # the single-key and bulk paths reach this, so a settings screen and a
+        # business read cannot disagree about which level supplied a value.
+        profile_value, declared = _profile_default(spec)
+        if declared:
+            raw, source = profile_value, "profile"
+        else:
+            raw, source = spec.default, "default"
 
     if raw is None:
         value = None
@@ -1379,6 +1423,8 @@ __all__ = [
     "missing_required_settings",
     "prune_setting_history",
     "StoredSetting",
+    "active_setting_defaults",
+    "install_setting_defaults",
     "resolve",
     "resolve_many",
     "stored_at",
