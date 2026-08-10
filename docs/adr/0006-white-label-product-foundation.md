@@ -547,6 +547,56 @@ points 3–4 overlap on placement and should be read as one rule when both have
 landed; if they are ever in tension, the placement wording in the product-first
 amendment is the more specific and wins.
 
+### Decision amendment — 2026-08-10 (sweep for restatements before a cutover)
+
+The 2026-08-08 amendment governs EXTRACTION: inventory the products before
+writing shared behaviour. Adoption needs the mirror, and its absence has now
+cost a measurable amount.
+
+Sub's settings cutover produced seven CI failures across eight push cycles.
+They presented as unrelated — a duplicate spec, a type error, a schema
+validation error, two mocked-session failures, two query budgets — and were one
+root cause seven times: **a fact the kernel owns had been expressed a second
+time inside the product**, and the two copies had drifted.
+
+Restatement is not code duplication. The implementations differ, which is
+precisely why it survives review. What is duplicated is a DECISION — which
+column a value type uses, what a cache key contains, which duplicate spec wins
+— and it drifts in one direction only: the kernel changes and the product's
+copy silently stops agreeing.
+
+So, before a product cuts over to a kernel subsystem:
+
+1. **Sweep for restatements, not call sites.** For each fact the incoming
+   subsystem owns, find where the product already answers it: a vocabulary held
+   as an enum or CHECK; a decision taken by comparing against a literal name; a
+   key format, TTL or invalidation rule; a data-access shape baked into test
+   doubles. Call-site inventories do not find these — Sub's recon counted 560
+   call sites and 574 specs and found none of the seven.
+2. **Record the sweep before the first push.** `docs/inventories/
+   kernel-restatement-sweep.md` holds it, dated, per product, as facts rather
+   than mandates like every other inventory.
+3. **Each restatement becomes one expression or one recorded debt.** The
+   surviving expression is an ADAPTER that ASKS the kernel; it does not decide.
+   Anything not migrated in the cutover is a shrink-only baseline in an
+   architecture test, so it is bounded rather than forgotten.
+4. **Enforce with a test per fact, not with review.** Sub's
+   `tests/architecture/test_kernel_owned_facts_have_one_expression.py` is the
+   pattern: the permitted adapter is allowlisted, the adapter is itself checked
+   for delegating, and the remaining restatements are a list that may only
+   shrink.
+
+This does not gate adoption on a clean sweep — a product with restatements
+still adopts. It gates adoption on a KNOWN sweep, so the cutover's cost is
+visible before it is paid rather than discovered one CI run at a time.
+
+A worked consequence of doing it: the first sweep of `dotmac_erp` found eleven
+of its twenty-nine value-type branches in HR employee filtering, which is not a
+settings surface. `SettingValueType` had been borrowed as a general "what kind
+of value is this" vocabulary. That must NOT follow the settings cutover into the
+kernel registry; it needs its own type. Found by sweeping, it is a design
+question. Found mid-cutover, it would have looked like a blocker.
+
 ## Consequences
 
 - F1–P1 have fixed vocabulary. "Module", "theme", "brand", and "facet" mean one
