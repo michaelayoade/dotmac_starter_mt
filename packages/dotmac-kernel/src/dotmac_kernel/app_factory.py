@@ -102,6 +102,47 @@ async def _run_enabled_seeds(
                 logger.warning("Feature %s seed skipped: %s", manifest.name, exc)
 
 
+def _tenancy_errors() -> list[str]:
+    """Enforce `TENANCY=single`: exactly one tenant row, and bind to it.
+
+    Imported inside the function for the same reason `_required_setting_errors`
+    does it — importing `dotmac_kernel.db` builds the engine from DATABASE_URL,
+    and `create_app` must stay importable without a database.
+
+    An unreachable database returns no errors rather than a false one: it says
+    nothing about how many tenants exist, and `validate_settings` already covers
+    a missing DATABASE_URL.
+    """
+    from dotmac_kernel.config import settings as _settings
+
+    if _settings.tenancy != "single":
+        return []
+
+    from dotmac_kernel.db import resolver_session
+    from dotmac_kernel.models import Tenant
+    from dotmac_kernel.tenancy import bind_single_tenant
+
+    try:
+        with resolver_session() as db:
+            slugs = [t.slug for t in db.query(Tenant).order_by(Tenant.slug).all()]
+    except Exception as exc:  # unreachable store: not a tenancy verdict
+        logger.warning("Tenancy check skipped: %s", exc)
+        return []
+
+    if len(slugs) == 1:
+        bind_single_tenant(slugs[0])
+        return []
+    if not slugs:
+        return [
+            "TENANCY=single but no tenant exists; the deployment has nothing to serve"
+        ]
+    return [
+        "TENANCY=single but this database holds "
+        f"{len(slugs)} tenants ({', '.join(slugs)}); "
+        "a single-tenant deployment must not carry another tenant's rows"
+    ]
+
+
 def _required_setting_errors() -> list[str]:
     """Required-setting failures, or an empty list when the store is unreachable.
 
@@ -360,6 +401,12 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             if settings.is_production:
                 raise RuntimeError(f"Configuration error: {err}")
             logger.warning("Config: %s", err)
+        # After the seeds, so a deployment that seeds its first tenant on boot
+        # is counted once that has happened rather than before it.
+        for err in await asyncio.to_thread(_tenancy_errors):
+            if settings.is_production:
+                raise RuntimeError(f"Tenancy error: {err}")
+            logger.warning("Tenancy: %s", err)
         yield
 
     app = FastAPI(title=spec.name, lifespan=lifespan)
@@ -450,4 +497,4 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     return app
 
 
-__all__ = ["create_app", "LayeredStaticFiles"]
+__all__ = ["LayeredStaticFiles", "create_app"]

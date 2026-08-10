@@ -366,17 +366,17 @@ class AuthSession(Base, TimestampMixin):
 
 
 __all__ = [
+    "AuthSession",
     "Base",
-    "TimestampMixin",
-    "uuid_pk",
+    "Party",
+    "PartyOrganization",
+    "PartyPerson",
+    "PartyRole",
+    "PartyType",
+    "Role",
     "Tenant",
     "TenantDomain",
-    "Party",
-    "PartyType",
-    "PartyPerson",
-    "PartyOrganization",
-    "Role",
-    "PartyRole",
-    "AuthSession",
+    "TimestampMixin",
     "UserCredential",
+    "uuid_pk",
 ]

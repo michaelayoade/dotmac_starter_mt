@@ -148,10 +148,10 @@ def _b64decode(data: str) -> bytes:
 
 
 __all__ = [
+    "decode_access_token",
     "hash_password",
-    "verify_password",
-    "password_needs_rehash",
     "hash_token",
     "issue_access_token",
-    "decode_access_token",
+    "password_needs_rehash",
+    "verify_password",
 ]

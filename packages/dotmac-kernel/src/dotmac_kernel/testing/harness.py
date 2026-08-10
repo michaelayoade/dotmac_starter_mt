@@ -136,4 +136,4 @@ def assembly_test_client(app: FastAPI, *, session: Session) -> Iterator[TestClie
             app.dependency_overrides.pop(dep, None)
 
 
-__all__ = ["create_test_engine", "isolated_session", "assembly_test_client"]
+__all__ = ["assembly_test_client", "create_test_engine", "isolated_session"]

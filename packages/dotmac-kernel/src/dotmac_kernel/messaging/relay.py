@@ -159,10 +159,10 @@ def record_failure(
 
 
 __all__ = [
-    "RelayPolicy",
     "ClaimedEvent",
     "FailureOutcome",
+    "RelayPolicy",
     "claim_batch",
-    "record_success",
     "record_failure",
+    "record_success",
 ]

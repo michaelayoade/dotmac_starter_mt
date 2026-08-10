@@ -103,7 +103,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
 | `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
 | `dotmac_kernel.crud` | `CRUDManager` |
-| `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
+| `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `resolver_session`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
+| `dotmac_kernel.tenancy` | `bind_single_tenant`, `single_tenant_binding`, `clear_single_tenant_binding` (which tenant, if any, this deployment is bound to) |
 | `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
 | `dotmac_kernel.errors` | `register_error_handlers` |
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |

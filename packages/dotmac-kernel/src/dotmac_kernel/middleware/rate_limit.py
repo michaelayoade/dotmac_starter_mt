@@ -150,7 +150,7 @@ def _rate_limit_key(request: Request) -> str:
 
 
 __all__ = [
+    "MemoryStore",
     "RateLimitMiddleware",
     "RateLimitStore",
-    "MemoryStore",
 ]

@@ -1415,20 +1415,20 @@ def ensure_by_key(
 
 
 __all__ = [
-    "SettingSpec",
-    "register_specs",
     "SETTING_CHANGED_EVENT",
     "SettingChangeContext",
-    "clear_by_key",
-    "missing_required_settings",
-    "prune_setting_history",
+    "SettingSpec",
     "StoredSetting",
     "active_setting_defaults",
+    "clear_by_key",
     "install_setting_defaults",
+    "missing_required_settings",
+    "prune_setting_history",
+    "register_specs",
     "resolve",
     "resolve_many",
-    "stored_at",
-    "seed_settings_from_env",
     "resolve_value",
+    "seed_settings_from_env",
+    "stored_at",
     "validate_required_settings",
 ]

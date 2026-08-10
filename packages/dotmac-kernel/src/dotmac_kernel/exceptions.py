@@ -34,10 +34,10 @@ class ForbiddenError(DomainError):
 
 
 __all__ = [
-    "DomainError",
-    "NotFoundError",
     "BadRequestError",
     "ConflictError",
-    "UnauthorizedError",
+    "DomainError",
     "ForbiddenError",
+    "NotFoundError",
+    "UnauthorizedError",
 ]

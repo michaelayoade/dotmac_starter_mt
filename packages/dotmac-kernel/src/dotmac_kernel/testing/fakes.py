@@ -70,8 +70,8 @@ def fake_branding(**overrides: str) -> dict[str, str]:
 
 
 __all__ = [
-    "InMemoryRateLimitStore",
     "FakeClock",
     "FakeSeeder",
+    "InMemoryRateLimitStore",
     "fake_branding",
 ]

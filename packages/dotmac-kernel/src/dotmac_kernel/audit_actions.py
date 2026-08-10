@@ -163,6 +163,6 @@ __all__ = [
     "AuditActionsNotInstalledError",
     "DuplicateAuditActionError",
     "UndeclaredAuditActionError",
-    "install_audit_actions",
     "active_audit_actions",
+    "install_audit_actions",
 ]

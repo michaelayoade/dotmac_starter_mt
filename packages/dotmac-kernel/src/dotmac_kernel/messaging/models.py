@@ -195,10 +195,10 @@ class PlatformOutboxEvent(Base, TimestampMixin):
 
 
 __all__ = [
-    "OutboxStatus",
-    "InboxStatus",
     "InboxRecord",
-    "PlatformInboxRecord",
+    "InboxStatus",
     "OutboxEvent",
+    "OutboxStatus",
+    "PlatformInboxRecord",
     "PlatformOutboxEvent",
 ]

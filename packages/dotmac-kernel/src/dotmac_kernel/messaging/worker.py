@@ -157,6 +157,6 @@ __all__ = [
     "DeliveryTransport",
     "LoggingTransport",
     "SessionFactory",
-    "run_once",
     "run_forever",
+    "run_once",
 ]

@@ -139,8 +139,8 @@ def is_entitled(
 
 
 __all__ = [
-    "TenantEntitlementGrant",
     "EntitlementDecision",
+    "TenantEntitlementGrant",
     "grant_entitlement",
     "is_entitled",
 ]
