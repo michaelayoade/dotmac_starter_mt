@@ -44,6 +44,7 @@ from dotmac_kernel.db import (
 from dotmac_kernel.exceptions import NotFoundError
 from dotmac_kernel.models import Role, Tenant
 from sqlalchemy import select, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 
@@ -311,14 +312,20 @@ def test_resolver_session_clears_an_inherited_scope(
     assert tenant_b.slug in slugs
 
 
-def test_resolver_session_never_commits(admin_session: Session, tenant_a) -> None:
-    """Read-only by construction: it cannot become a back door for writes."""
-    slug = f"resolver-write-{uuid.uuid4().hex[:8]}"
-    with resolver_session() as db:
-        db.add(Tenant(slug=slug, name=slug))
-        db.flush()
+def test_resolver_session_cannot_write_the_tenancy_tables(tenant_a) -> None:
+    """Read-only is enforced by the ROLE, not merely by the rollback.
 
-    assert admin_session.query(Tenant).filter(Tenant.slug == slug).first() is None
+    `app_user` holds SELECT on `tenants`/`tenant_domains` and nothing else, so a
+    resolver cannot mutate the tables it reads even by mistake. That is a
+    stronger guarantee than "we roll back", and it is worth pinning: if these
+    grants ever widened, `resolver_session` would quietly become an unscoped
+    write path.
+    """
+    slug = f"resolver-write-{uuid.uuid4().hex[:8]}"
+    with pytest.raises(ProgrammingError):
+        with resolver_session() as db:
+            db.add(Tenant(slug=slug, name=slug))
+            db.flush()
 
 
 def test_resolver_result_is_usable_after_the_block(tenant_a) -> None:
