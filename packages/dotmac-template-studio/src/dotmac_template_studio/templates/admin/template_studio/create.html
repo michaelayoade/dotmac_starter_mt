@@ -1,5 +1,5 @@
 {#
-  New-template form. Context: `kinds`, `error`, `form` — see
+  New-template form. Context: `contexts`, `error`, `form` — see
   dotmac_template_studio.web.template_create_form.
 
   `hx-post`, never `<form method="post">`: CSRFMiddleware validates the
@@ -30,16 +30,29 @@
                background:var(--dmui-surface-elevated); padding:var(--dmui-space-lg);">
     <label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
                   font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
-      Kind
-      <select name="kind"
+      Send context
+      <select name="context"
               style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
                      border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
                      background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
-        {% for kind in kinds %}
-        <option value="{{ kind }}" {% if form.get('kind') == kind %}selected{% endif %}>{{ kind }}</option>
+        {% for context in contexts %}
+        <option value="{{ context.name }}" {% if form.get('context') == context.name %}selected{% endif %}>{{ context.name }}</option>
         {% endfor %}
       </select>
+      <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
+        Which send path renders this. It fixes the variables the body may use, and
+        cannot be changed afterwards.
+      </span>
     </label>
+
+    {% for context in contexts %}
+    <div style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);
+                border-left:2px solid var(--dmui-border-default); padding-left:var(--dmui-space-sm);">
+      <strong>{{ context.name }}</strong>{% if context.description %} — {{ context.description }}{% endif %}<br>
+      Variables:
+      {% for variable in context.sorted_variables() %}<code>{{ '{' }}{{ variable }}{{ '}' }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+    </div>
+    {% endfor %}
 
     <label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
                   font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
@@ -65,12 +78,16 @@
 
     <label style="display:flex; flex-direction:column; gap:var(--dmui-space-2xs);
                   font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
-      Channel <span style="color:var(--dmui-text-muted);">(notifications only)</span>
+      Channel
       <input type="text" name="channel" value="{{ form.get('channel', '') }}"
              placeholder="email"
              style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
                     border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
                     background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
+      <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
+        Part of the identity, with the slug — the same message can exist as
+        <code>email</code> and <code>sms</code> with different wording.
+      </span>
     </label>
 
     <div style="display:flex; gap:var(--dmui-space-xs);">

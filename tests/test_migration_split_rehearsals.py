@@ -433,7 +433,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     assert heads == {
         "0018_idempotency_one_owner",
         "a004_backfill_capability_grants",
-        "ts_0001_templates",
+        "ts_0002_notify_identity",
     }, f"unexpected head set: {heads}"
 
     # Each head carries the expected branch label.
@@ -442,4 +442,4 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     module_head = script.get_revision("template_studio@head")
     assert kernel_head.revision == "0018_idempotency_one_owner"
     assert assembly_head.revision == "a004_backfill_capability_grants"
-    assert module_head.revision == "ts_0001_templates"
+    assert module_head.revision == "ts_0002_notify_identity"

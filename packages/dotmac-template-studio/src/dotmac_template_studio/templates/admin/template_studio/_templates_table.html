@@ -9,7 +9,7 @@
     <thead>
       <tr style="background:var(--dmui-surface-secondary); text-align:left;">
         <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Name</th>
-        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Kind</th>
+        <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Channel</th>
         <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Slug</th>
         <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Published</th>
         <th style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary); font-weight:var(--dmui-font-weight-medium);">Updated</th>
@@ -28,7 +28,7 @@
                        color:var(--dmui-status-neutral-foreground);">inactive</span>
           {% endif %}
         </td>
-        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary);">{{ template.kind }}</td>
+        <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-secondary);">{{ template.channel }}</td>
         <td style="padding:var(--dmui-space-sm) var(--dmui-space-md); color:var(--dmui-text-muted);">{{ template.slug }}</td>
         <td style="padding:var(--dmui-space-sm) var(--dmui-space-md);">
           {% if template.published_version %}

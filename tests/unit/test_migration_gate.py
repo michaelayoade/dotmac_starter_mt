@@ -114,9 +114,10 @@ def _messages(report) -> str:
 
 def test_the_real_repo_composes() -> None:
     """The repo's OWN composition — kernel (`0001`…`0017`), assembly
-    (`a001`…`a003`), and the first installed MODULE lineage (`ts_0001`) — must
-    pass. The two host lineages are grandfathered (legacy revision-id format,
-    tables in `public`); `template_studio` gets the strict rules.
+    (`a001`…`a003`), and the first installed MODULE lineage (`ts_0001`,
+    `ts_0002`) — must pass. The two host lineages are grandfathered (legacy
+    revision-id format, tables in `public`); `template_studio` gets the strict
+    rules.
 
     Gated from `assembly.modules`, the composition the app actually boots, NOT
     from `load_manifests(FEATURE_MODULES)`: that narrower set omits installed
@@ -125,7 +126,9 @@ def test_the_real_repo_composes() -> None:
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
     report = run_gate(assembly.modules, locations)
     assert report.ok, report.render()
-    assert len(report.revisions) == 23
+    # Non-vacuity: a gate that walked an empty set would pass silently. Bump
+    # this deliberately when a lineage gains a revision.
+    assert len(report.revisions) == 24
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio"}
 

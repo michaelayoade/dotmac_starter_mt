@@ -30,6 +30,10 @@ preserved_tests = [
   "dotmac_sub:tests/test_email_services.py",
   "dotmac_sub:tests/test_settings_seed_services.py",
   "dotmac_starter_mt:tests/architecture/test_template_studio_module.py",
+  # Sub's 7 renderer tests, PORTED 2026-08-10 with the code they prove
+  # (ADR-0006 5b). The header of that file records what changed in the port and
+  # why each change is faithful rather than a weakening.
+  "dotmac_starter_mt:tests/unit/test_template_studio_renderer.py",
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_erp", "dotmac_sub"]
@@ -39,5 +43,5 @@ inventory_evidence = [
 ]
 first_cutover = "Sub, on the notification contract only, once the renderer is re-based per ADR-0006 5b. The package cannot receive Sub's rows as built: its double-brace substitution syntax is the syntax Sub rejects at save time after it leaked a literal placeholder to customers."
 shadow_and_drift = "Sub's 7 notification_template_renderer tests are the parity proof; shadow rendering against the live single-brace renderer is required before Sub retires its local writer."
-next_action = "Audit complete and ACCEPTED as ADR-0006 amendment 2026-08-10 (sections 5a-5c); evidence in docs/inventories/template-studio-source-audit.md. Next slice for THIS package (ADR-0006 5b): drop kind=document, re-base the renderer on Sub's single-brace allowlisted contract carrying its 7 renderer tests, and keep the starter's RLS, manage/publish split and versioning. Out of this package by ruling (5c): consent/suppression, channel policy, delivery/outbox and document generation are four separate foundation owners, each needing its own dossier, with consent sequenced before delivery. Do not absorb them here."
+next_action = "ADR-0006 5b IMPLEMENTED in 0.2.0a1 (2026-08-10): kind=document dropped, renderer re-based on Sub's single-brace allowlisted contract with its 7 tests ported, identity moved to (tenant, slug, channel), RenderContext registry added, migration ts_0002. Remaining before this dossier can reach `approved`: add the seeding mechanism (Sub's upsert-by-identity, never-clobber, derived-from-executable-spec), cut Sub over and retire its local renderer, then move a second consumer on an exact pin. Out of this package by ruling (5c): consent/suppression, channel policy, delivery/outbox and document generation are four separate foundation owners, each needing its own dossier, with consent sequenced before delivery. Do not absorb them here."
 local_copy_retirement = "The selected source product must consume the released module and retire or gate its local writer before a second product cutover."

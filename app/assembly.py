@@ -40,6 +40,31 @@ from dotmac_kernel.features import load_manifests
 
 from app.features import FEATURE_MODULES
 
+# Template Studio owns the CHECKING of a template's placeholders; the product
+# owns the VOCABULARY (ADR-0006 § 5b, ADR-0008 — a vocabulary is a declaration
+# registry, never an enum). Registered at import time, exactly like a
+# `SettingSpec`, and BEFORE the spec below so the module's admin screens can
+# offer it.
+#
+# This is the reference assembly, so the set is deliberately minimal and
+# product-neutral: the values any deployment can supply about the tenant and the
+# recipient it is writing to. A real product replaces this with one context per
+# send path it actually implements — a context must never declare a variable its
+# sender cannot produce, because the whole guarantee is that a saved template is
+# renderable.
+dotmac_template_studio.register_contexts(
+    dotmac_template_studio.RenderContext(
+        name="default",
+        variables=(
+            "recipient_name",
+            "recipient_email",
+            "tenant_name",
+            "portal_url",
+        ),
+        description="Values any send path in the reference assembly can supply.",
+    )
+)
+
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
     # The assembly's own features, plus every INSTALLED MODULE it composes.

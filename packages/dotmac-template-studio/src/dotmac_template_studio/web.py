@@ -31,7 +31,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from dotmac_template_studio import service
-from dotmac_template_studio.models import TEMPLATE_KINDS
+from dotmac_template_studio.contexts import registered_contexts
 
 router = APIRouter(
     prefix="/admin",
@@ -90,7 +90,10 @@ def _render_create_form(
         {
             "active_nav": "templates",
             "page_title": "New Template",
-            "kinds": TEMPLATE_KINDS,
+            # The product's registered vocabulary, not a constant of this
+            # module — the author picks a real send path and sees the exact
+            # variables it can supply.
+            "contexts": registered_contexts(),
             "error": error,
             "form": form or {},
         },
@@ -107,19 +110,19 @@ async def template_create_submit(
 ) -> HTMLResponse | RedirectResponse:
     form_data = await request.form()
     raw = {
-        "kind": str(form_data.get("kind", "")).strip(),
         "slug": str(form_data.get("slug", "")).strip(),
-        "name": str(form_data.get("name", "")).strip(),
         "channel": str(form_data.get("channel", "")).strip(),
+        "context": str(form_data.get("context", "")).strip(),
+        "name": str(form_data.get("name", "")).strip(),
     }
     try:
         template = service.create_template(
             db,
             tenant.id,
-            kind=raw["kind"],
             slug=raw["slug"],
+            channel=raw["channel"],
+            context=raw["context"],
             name=raw["name"],
-            channel=raw["channel"] or None,
         )
     except (BadRequestError, ConflictError) as exc:
         return _render_create_form(request, error=str(exc), form=raw)
@@ -130,11 +133,31 @@ async def template_create_submit(
         action="template_studio.template.create",
         entity_type="template",
         entity_id=str(template.id),
-        details={"kind": template.kind, "slug": template.slug},
+        details={
+            "slug": template.slug,
+            "channel": template.channel,
+            "context": template.context,
+        },
     )
     response = HTMLResponse("")
     response.headers["HX-Redirect"] = f"/admin/templates/{template.id}"
     return response
+
+
+def _context_variables(name: str) -> list[str]:
+    """The placeholders an author may use, for the editor's hint list.
+
+    Degrades to an empty list rather than raising: a template whose context was
+    un-registered by a later deployment must still be VIEWABLE, so an operator
+    can see what is there and delete it. Authoring a new version against it
+    still fails loudly in the service, which is where that decision belongs.
+    """
+    from dotmac_template_studio.contexts import UnknownRenderContextError, get_context
+
+    try:
+        return get_context(name).sorted_variables()
+    except UnknownRenderContextError:
+        return []
 
 
 @router.get("/templates/{template_id}")
@@ -155,6 +178,7 @@ def template_detail(
             "page_title": template.name,
             "template": template,
             "versions": versions,
+            "variables": _context_variables(template.context),
         },
     )
 
@@ -175,29 +199,37 @@ async def version_create_submit(
     if not body:
         error = "A version needs a body."
     else:
-        version = service.create_version(
-            db,
-            tenant.id,
-            template_id,
-            body=body,
-            subject=subject,
-            author_party_id=auth["party"].id,
-        )
-        write_audit_event(
-            db,
-            tenant_id=tenant.id,
-            actor_party_id=auth["party"].id,
-            action="template_studio.version.create",
-            entity_type="template_version",
-            entity_id=str(version.id),
-            details={"template_id": str(template_id), "version": version.version},
-        )
+        try:
+            version = service.create_version(
+                db,
+                tenant.id,
+                template_id,
+                body=body,
+                subject=subject,
+                author_party_id=auth["party"].id,
+            )
+        except BadRequestError as exc:
+            # Save-time placeholder validation. Re-render at 200 with the
+            # message rather than redirecting or 500ing — an author needs to see
+            # WHICH variable is wrong and what the context does supply.
+            error = str(exc)
+        else:
+            write_audit_event(
+                db,
+                tenant_id=tenant.id,
+                actor_party_id=auth["party"].id,
+                action="template_studio.version.create",
+                entity_type="template_version",
+                entity_id=str(version.id),
+                details={"template_id": str(template_id), "version": version.version},
+            )
     return render(
         request,
         "admin/template_studio/_versions_panel.html",
         {
             "template": template,
             "versions": service.list_versions(db, tenant.id, template_id),
+            "variables": _context_variables(template.context),
             "error": error,
         },
         status_code=200,
@@ -228,12 +260,14 @@ def version_publish(
             entity_id=str(revision.id),
             details={"template_id": str(template_id), "version": version},
         )
+    template = service.get_template(db, tenant.id, template_id)
     return render(
         request,
         "admin/template_studio/_versions_panel.html",
         {
-            "template": service.get_template(db, tenant.id, template_id),
+            "template": template,
             "versions": service.list_versions(db, tenant.id, template_id),
+            "variables": _context_variables(template.context),
             "error": error,
         },
         status_code=200,

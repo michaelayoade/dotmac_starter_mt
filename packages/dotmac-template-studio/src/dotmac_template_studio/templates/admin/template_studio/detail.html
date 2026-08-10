@@ -14,8 +14,8 @@
   <h1 style="font-size:var(--dmui-font-size-xl); font-weight:var(--dmui-font-weight-semibold);
              color:var(--dmui-text-primary); margin-top:var(--dmui-space-2xs);">{{ template.name }}</h1>
   <p style="font-size:var(--dmui-font-size-sm); color:var(--dmui-text-secondary);">
-    {{ template.kind }} &middot; <code>{{ template.slug }}</code>
-    {% if template.channel %} &middot; {{ template.channel }}{% endif %}
+    <code>{{ template.slug }}</code> &middot; {{ template.channel }}
+    &middot; context <code>{{ template.context }}</code>
     &middot; created {{ template.created_at | local_date }}
   </p>
 </div>
@@ -32,21 +32,32 @@
     <form hx-post="/admin/templates/{{ template.id }}/versions"
           hx-target="#versions-panel" hx-swap="outerHTML"
           style="display:flex; flex-direction:column; gap:var(--dmui-space-sm);">
-      {% if template.kind == 'notification' %}
       <input type="text" name="subject" placeholder="Subject"
              style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
                     border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
                     background:var(--dmui-surface-primary); color:var(--dmui-text-primary);">
-      {% endif %}
-      <textarea name="body" rows="8" placeholder="Hello {{ '{{ customer_name }}' }}, …"
+      <textarea name="body" rows="8" placeholder="Hello {{ '{' }}{{ variables[0] if variables else 'name' }}{{ '}' }}, …"
                 style="padding:var(--dmui-space-xs) var(--dmui-space-sm);
                        border:1px solid var(--dmui-border-default); border-radius:var(--dmui-radius-md);
                        background:var(--dmui-surface-primary); color:var(--dmui-text-primary);
                        font-family:var(--dmui-font-family-mono);"></textarea>
       <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
-        Use {{ '{{ variable_name }}' }} placeholders. The declared variable list is derived
-        from the body, so it can never drift from what the text actually uses.
+        Single-brace placeholders only. Double braces are rejected when you save —
+        they are not substituted at send time and would reach the recipient
+        literally. The declared variable list is derived from the body, so it can
+        never drift from what the text actually uses.
       </span>
+      {% if variables %}
+      <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-text-muted);">
+        Available in <code>{{ template.context }}</code>:
+        {% for variable in variables %}<code>{{ '{' }}{{ variable }}{{ '}' }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      </span>
+      {% else %}
+      <span style="font-size:var(--dmui-font-size-xs); color:var(--dmui-status-warning-foreground);">
+        The <code>{{ template.context }}</code> context is not registered in this
+        deployment — no new version can be saved against it.
+      </span>
+      {% endif %}
       <div>
         <button type="submit"
                 style="border-radius:var(--dmui-radius-lg);

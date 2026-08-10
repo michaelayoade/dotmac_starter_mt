@@ -12,20 +12,33 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 _SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{0,98}[a-z0-9]$"
+_CHANNEL_PATTERN = r"^[a-z][a-z0-9_]{0,19}$"
 
 
 class TemplateCreate(BaseModel):
-    kind: str = Field(description="`notification` or `document`")
     slug: str = Field(pattern=_SLUG_PATTERN)
+    channel: str = Field(
+        pattern=_CHANNEL_PATTERN,
+        description="Delivery channel — part of the identity, e.g. `email`, `sms`.",
+    )
+    context: str = Field(
+        min_length=1,
+        max_length=60,
+        description=(
+            "Name of a registered `RenderContext`. Its variables are the only "
+            "placeholders this template's versions may use."
+        ),
+    )
     name: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=500)
-    channel: str | None = Field(default=None, max_length=20)
 
 
 class TemplateUpdate(BaseModel):
+    """Metadata only. `slug`, `channel` and `context` are not editable — see
+    `service.update_template` for why."""
+
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=500)
-    channel: str | None = Field(default=None, max_length=20)
     is_active: bool | None = None
 
 
@@ -33,11 +46,11 @@ class TemplateRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    kind: str
     slug: str
+    channel: str
+    context: str
     name: str
     description: str | None
-    channel: str | None
     is_active: bool
     published_version: int | None
     created_at: datetime

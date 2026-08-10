@@ -20,6 +20,19 @@ dependent, which forces a migration to create one table, then the other, then
 circle back to add the constraint — a shape that is fragile to reorder and adds
 nothing here, because a version number is already unique within a template.
 
+## Identity is `(tenant_id, slug, channel)` — ADR-0006 § 5b
+
+Channel is part of the identity rather than an attribute of it. One message
+routinely exists as an email and an SMS with different wording, and both are the
+"same" template to the code that sends it — Sub's seeder relies on exactly this,
+seeding one referral-reward code for `push` and `email`. The pre-5b shape keyed on
+a `kind` discriminator with channel as a nullable attribute, which could not
+represent that at all.
+
+`kind` is gone. The audit disqualified `kind=document`: ERP's document templates
+need Jinja control flow, filters and page geometry, and this module renders by
+substitution as a deliberate security posture. Documents are a separate owner.
+
 ## Tenancy
 
 Both tables are tenant-scoped with a real `tenant_id NOT NULL` column (not an
@@ -42,7 +55,6 @@ from dotmac_kernel.models import Base, Tenant, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     Boolean,
-    CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -64,29 +76,18 @@ SCHEMA = module_schema("tstudio")
 # JSONB on Postgres, plain JSON on SQLite — the kernel's own variant pattern.
 _JSON_VARIANT = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
-# The `kind` discriminator's allowed values. One table typed by kind, rather than
-# a table per kind: the two share every structural column (ownership, slug,
-# versioning, publication) and differ only in which optional content fields they
-# use, so splitting them would duplicate the schema and the entire service layer
-# to express "documents have no channel".
-KIND_NOTIFICATION = "notification"
-KIND_DOCUMENT = "document"
-TEMPLATE_KINDS: tuple[str, ...] = (KIND_NOTIFICATION, KIND_DOCUMENT)
-
 
 class Template(Base, TimestampMixin):
-    """A tenant's addressable template: `(kind, slug)` within one tenant."""
+    """A tenant's addressable template: `(slug, channel)` within one tenant."""
 
     __tablename__ = "templates"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "kind", "slug", name="uq_templates_tenant_slug"),
+        UniqueConstraint(
+            "tenant_id", "slug", "channel", name="uq_templates_tenant_slug_channel"
+        ),
         # Referenced by `template_versions`' composite FK — see the module
         # docstring. Redundant on its own; load-bearing for tenant integrity.
         UniqueConstraint("tenant_id", "id", name="uq_templates_tenant_id_id"),
-        CheckConstraint(
-            "kind IN ('notification', 'document')",
-            name="ck_templates_kind",
-        ),
         Index("ix_templates_tenant_id", "tenant_id"),
         schema_table_args(SCHEMA),
     )
@@ -106,14 +107,18 @@ class Template(Base, TimestampMixin):
         ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
         nullable=False,
     )
-    kind: Mapped[str] = mapped_column(String(20), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Delivery channel (`email`, `sms`, …). NOT NULL and part of the identity —
+    # see the module docstring. An open registered string, never an enum: a
+    # product names the channels it actually delivers on (ADR-0008).
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    # The registered `RenderContext` whose variables this template's revisions
+    # are validated against. A plain string, resolved through
+    # `dotmac_template_studio.contexts` — the module owns the CHECKING, the
+    # product owns the vocabulary.
+    context: Mapped[str] = mapped_column(String(60), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    # Delivery channel for a notification (`email`, `sms`, …). NULL for a
-    # document, which is rendered rather than delivered — the one field where the
-    # two kinds genuinely diverge.
-    channel: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sa.true()
     )
@@ -170,10 +175,7 @@ class TemplateVersion(Base, TimestampMixin):
 
 
 __all__ = [
-    "KIND_DOCUMENT",
-    "KIND_NOTIFICATION",
     "SCHEMA",
-    "TEMPLATE_KINDS",
     "Template",
     "TemplateVersion",
 ]

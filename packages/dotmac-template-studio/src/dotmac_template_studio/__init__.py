@@ -1,9 +1,21 @@
-"""DotMac Template Studio — tenant-authored notification and document templates.
+"""DotMac Template Studio — tenant-authored NOTIFICATION templates.
 
 The FIRST stateful module (ADR-0006: "dotmac-template-studio a MODULE — the first
 stateful one, not a kernel facility"). It owns the `mod_tstudio` schema and its
 own `ts` migration lineage, and it is installed by an assembly rather than
 imported by the kernel.
+
+## Its one decision: what the message SAYS
+
+ADR-0006 § 5b narrowed this module to a single owned decision. It renders and
+returns `(subject, body)`. It does **not** decide whether a message may be sent
+(consent), over what (channel policy), how it is actually sent (delivery), or
+produce documents — those are four separate foundation owners. A module that
+absorbed them would be the merge the 2026-08-10 source audit disqualified.
+
+Documents in particular are NOT served here: ERP's document templates need Jinja
+control flow, filters and page geometry, and this module substitutes rather than
+evaluates, on purpose.
 
 ## The public surface
 
@@ -11,6 +23,10 @@ Everything below is what a consuming assembly may use. Anything else is internal
 and may change without a contract bump.
 
 - `module` — the `ModuleManifest` an assembly puts in `ProductAssemblySpec.modules`.
+- `RenderContext` / `register_contexts()` — the product declares which send paths
+  exist and exactly which variables each can supply. Template Studio owns the
+  CHECKING; the product owns the VOCABULARY (ADR-0008). A deployment that
+  registers no context can create no template.
 - `template_dir()` — the packaged Jinja directory for
   `ProductAssemblySpec.packaged_template_dirs`.
 - `migrations_dir()` — the packaged Alembic version location for the assembly's
@@ -31,12 +47,20 @@ from __future__ import annotations
 from pathlib import Path
 
 from dotmac_template_studio import service
+from dotmac_template_studio.contexts import (
+    RenderContext,
+    register_contexts,
+    registered_contexts,
+)
 from dotmac_template_studio.manifest import module
 from dotmac_template_studio.web import template_dir
 
 _PKG_DIR = Path(__file__).resolve().parent
 
-__version__ = "0.1.0a1"
+# 0.2.0a1, not 0.1.0a2: § 5b is a BREAKING change to every part of the surface —
+# `kind` is gone, `channel` and `context` are required, and the render route
+# moved. Pre-1.0 a `0.MINOR` bump is how this package signals that (CHANGELOG).
+__version__ = "0.2.0a1"
 
 
 def migrations_dir() -> Path:
@@ -50,9 +74,12 @@ def migrations_dir() -> Path:
 
 
 __all__ = [
+    "RenderContext",
     "__version__",
     "migrations_dir",
     "module",
+    "register_contexts",
+    "registered_contexts",
     "service",
     "template_dir",
 ]

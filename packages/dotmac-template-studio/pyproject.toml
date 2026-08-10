@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-template-studio"
-version = "0.1.0a1"
+version = "0.2.0a1"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
 authors = ["DotMac"]
 readme = "README.md"
