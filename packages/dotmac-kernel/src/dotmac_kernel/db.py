@@ -215,6 +215,12 @@ def resolver_session() -> Generator[Session, None, None]:
     Read-only by construction: it always rolls back and never commits, so it
     cannot become a back door for unscoped writes.
 
+    "Unscoped" does NOT mean "sees everything". RLS fails closed, so on a
+    tenant-scoped table this session sees NOTHING — which is correct, and is why
+    it is only useful for the tenancy tables. `tenants` and `tenant_domains` are
+    deliberately not RLS-protected precisely because they are read to DECIDE a
+    scope and so cannot depend on one.
+
     It also RESETs the tenant setting before yielding. That is correctness, not
     paranoia — a scope inherited from a pooled connection would filter the
     resolver's own lookup, and because RLS fails closed the symptom would be a
