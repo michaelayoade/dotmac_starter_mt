@@ -54,20 +54,31 @@ PlatformSessionLocal = sessionmaker(
 )
 
 
-def set_tenant(db: Session, tenant_id: object) -> None:
+def set_tenant(
+    db: Session, tenant_id: object, *, transaction_local: bool = True
+) -> None:
     """Apply the RLS tenant scope to `db`. The one writer of the setting.
+
+    `transaction_local` decides how long the scope lasts, and both values are
+    unsafe in the other's place:
+
+    * `True` (SET LOCAL) for `get_db`. Its session is pooled, so a scope that
+      outlived the transaction would be inherited by the next request to borrow
+      that connection — one tenant reading another's rows.
+    * `False` for a session that commits more than once. A commit ends the
+      transaction and takes `SET LOCAL` with it; `expire_on_commit` then
+      reloads attributes on the next statement, which runs unscoped, and RLS
+      fails closed — a row the session itself just wrote comes back as
+      `ObjectDeletedError`. `tenant_session` uses this, and resets on exit.
 
     Split out of `get_db` so the scope has a name. While it was inline there,
     it was reachable only from the request cycle, and every other caller had to
     know to reproduce the SQL — which is a thing you can only remember to do if
     you already know RLS fails closed.
-
-    `SET LOCAL` is transaction-scoped, so this applies to the current
-    transaction only and must be re-applied on a new session.
     """
     db.execute(
-        text("SELECT set_config('app.current_tenant', :tenant_id, true)"),
-        {"tenant_id": str(tenant_id)},
+        text("SELECT set_config('app.current_tenant', :tenant_id, :is_local)"),
+        {"tenant_id": str(tenant_id), "is_local": transaction_local},
     )
 
 
@@ -153,14 +164,29 @@ def tenant_session(tenant_id: object) -> Generator[Session, None, None]:
     """
     db = SessionLocal()
     try:
-        set_tenant(db, tenant_id)
+        # Session-level, not SET LOCAL: callers commit inside this block (a CLI
+        # loop, a worker draining a queue), and a transaction-local scope would
+        # be discarded by the first of those commits — leaving the rest of the
+        # block running unscoped against a fail-closed policy.
+        set_tenant(db, tenant_id, transaction_local=False)
         yield db
         db.commit()
     except Exception:
         db.rollback()
         raise
     finally:
-        db.close()
+        # The engine is shared, so this connection goes back to the pool. A
+        # session-level setting that survived would be inherited by whoever
+        # borrows it next — the exact cross-tenant leak `get_db` uses SET LOCAL
+        # to avoid. Reset before close, and never let a failed reset mask the
+        # caller's own exception.
+        try:
+            db.execute(text("RESET app.current_tenant"))
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
 
 
 @contextmanager

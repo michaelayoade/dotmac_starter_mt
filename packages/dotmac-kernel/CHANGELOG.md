@@ -6,6 +6,35 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a29 — 2026-08-10
+
+Fixes a defect in `tenant_session` as shipped in 0.1.0a28. No migration.
+
+### Fixed
+- **The tenant scope now survives a commit inside `tenant_session`.** It was
+  applied with `SET LOCAL`, which is transaction-scoped, so the first
+  `db.commit()` inside the block discarded it. `expire_on_commit` then reloads
+  attributes on the next statement, that statement runs unscoped, RLS fails
+  closed, and a row the session itself just wrote comes back as
+  `ObjectDeletedError`. Every intended caller — a CLI loop, a worker draining a
+  queue — commits more than once, so the boundary failed precisely for the
+  callers it was added for.
+
+  `set_tenant` takes `transaction_local` (default `True`). The two values are
+  not interchangeable: `get_db` needs `True`, because its session is pooled and
+  a scope outliving the transaction would be inherited by the next request to
+  borrow that connection. `tenant_session` needs `False`, and now issues
+  `RESET app.current_tenant` before returning the connection to the pool — a
+  session-level setting that survived would be the very cross-tenant leak
+  `SET LOCAL` exists to prevent. The reset never masks the caller's exception.
+
+### Why it was missed
+
+`dotmac_academy_app` found it within minutes of running `load-banks` against
+production against the equivalent fix in its own fork. The 0.1.0a28 tests
+asserted the scope was applied and did not widen; none of them committed. A
+boundary's contract includes how long it lasts, and that is now pinned.
+
 ## 0.1.0a28 — 2026-08-09
 
 A tenant-scoped session boundary for code outside the request cycle. No
