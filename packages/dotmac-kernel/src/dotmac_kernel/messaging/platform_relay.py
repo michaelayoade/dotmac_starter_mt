@@ -133,6 +133,6 @@ def record_failure(
 __all__ = [
     "ClaimedPlatformEvent",
     "claim_platform_batch",
-    "record_success",
     "record_failure",
+    "record_success",
 ]

@@ -437,14 +437,14 @@ def audited_schemas(registry: NamespaceRegistry) -> tuple[str, ...]:
 
 
 __all__ = [
-    "TENANT_COLUMN",
     "DEFAULT_APP_ROLE",
-    "PolicyFacts",
-    "TableFacts",
+    "TENANT_COLUMN",
     "ForeignKeyFacts",
+    "PolicyFacts",
     "SchemaSnapshot",
-    "audit_snapshot",
+    "TableFacts",
     "audit_live_schemas",
+    "audit_snapshot",
     "audited_schemas",
     "catalog_queries",
     "fetch_snapshot",

@@ -39,6 +39,7 @@ from dotmac_kernel.config import settings
 from dotmac_kernel.db import resolver_session
 from dotmac_kernel.errors import envelope
 from dotmac_kernel.models import Tenant, TenantDomain
+from dotmac_kernel.tenancy import single_tenant_binding
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +59,7 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
         self._root = settings.platform_root_domain.lower().lstrip(".")
-        # Empty => multi-tenant, the historical behaviour.
-        self._single_tenant = settings.single_tenant_slug.strip().lower()
+
 
     async def dispatch(self, request: Request, call_next):
         host = (request.headers.get("host") or "").split(":")[0].lower()
@@ -132,20 +132,35 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
             return None
 
     def _allow(self, tenant: Tenant | None) -> Tenant | None:
-        """Enforce the single-tenant deployment fact, if one is declared.
+        """Refuse a tenant this deployment is not bound to.
 
-        ADR-0003 makes a dedicated one-tenant deployment per ISP the safe
-        default, but nothing enforced it: a deployment carrying rows for a second
-        tenant would happily serve them to anyone who knew the host. This is the
-        enforcement, and it lives here so every assembly gets it rather than each
-        reinventing it — `dotmac_academy_app` had, privately, and that is the
-        only reason it was noticed.
+        The primary control for single-tenancy is the startup assertion in
+        `create_app`'s lifespan: under `TENANCY=single` the kernel refuses to
+        boot unless exactly one tenant row exists. That catches the real hazard
+        — a restored backup, a migration rehearsal, a shared database someone
+        meant to split — at deploy time, loudly, rather than waiting for someone
+        to guess a hostname.
 
-        Refuses rather than substitutes: a host that resolves to the wrong tenant
-        is a misconfiguration, and quietly serving the right one would hide it.
+        This is the second half: a tenant created *after* startup would satisfy
+        no assertion until the next restart, and would otherwise be served to
+        anyone who knew its host. The binding comes from that startup check, so
+        the identity is whatever the database actually held — it is never
+        configured, and so cannot drift from it.
+
+        Refuses rather than substitutes: a host resolving to the wrong tenant is
+        a misconfiguration, and quietly serving the right one would hide it.
         """
-        if tenant is None or not self._single_tenant:
+        bound = single_tenant_binding()
+        if tenant is None or bound is None:
             return tenant
+        if tenant.slug.lower() != bound:
+            logger.warning(
+                "rejected host for tenant slug=%s on a deployment bound to slug=%s",
+                tenant.slug,
+                bound,
+            )
+            return None
+        return tenant
         if tenant.slug.lower() != self._single_tenant:
             logger.warning(
                 "rejected host for tenant slug=%s on a deployment locked to slug=%s",

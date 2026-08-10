@@ -204,10 +204,10 @@ def active_permissions() -> PermissionCatalogue:
 
 
 __all__ = [
-    "PermissionSpec",
-    "PermissionCatalogue",
     "DuplicatePermissionError",
+    "PermissionCatalogue",
+    "PermissionSpec",
     "UndeclaredPermissionError",
-    "install_permissions",
     "active_permissions",
+    "install_permissions",
 ]

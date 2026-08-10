@@ -294,10 +294,10 @@ def render(
 
 
 __all__ = [
-    "render",
     "compose_templates",
     "install_stylesheets",
     "install_surface_globals",
+    "render",
     "static_dir",
     "use_assembly_templates",
 ]

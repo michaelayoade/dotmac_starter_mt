@@ -17,11 +17,19 @@ class Settings(BaseSettings):
     migration_database_url: str = ""
     platform_root_domain: str = "localhost"
     # A deployment fact, per ADR-0013: the module declares the question, the
-    # deployment declares the answer. Empty means multi-tenant, which is the
-    # existing behaviour and the default. Set it and the resolver refuses any
-    # host that resolves to a different tenant — the lockdown ADR-0003 Stage A
-    # ("dedicated one-tenant deployment per ISP") implies but nothing enforced.
-    single_tenant_slug: str = ""
+    # deployment declares the answer. ADR-0003 Stage A ("dedicated one-tenant
+    # deployment per ISP") is the safe default topology, and nothing enforced it.
+    #
+    # "single" or "multi". The deployment declares the MODE only — never WHICH
+    # tenant. The tenant already exists as a row; naming it here too would be a
+    # second source of truth that can drift or be mistyped, and a typo would
+    # take the deployment down for no reason. Under "single" the kernel asserts
+    # at startup that exactly one tenant row exists and binds to it.
+    #
+    # Defaults to "multi", which is the historical behaviour. Safe-by-default
+    # would mean "single", but flipping it would change every existing
+    # deployment at once; declare it explicitly everywhere first.
+    tenancy: str = "multi"
     trusted_hosts: str = ""
     jwt_secret: str = "dev-insecure-change-me"
     session_hash_secret: str = "dev-insecure-change-me"
@@ -79,6 +87,8 @@ def validate_settings(s: Settings) -> list[str]:
         errors.append("PLATFORM_DATABASE_URL is required in production")
     if s.is_production and not s.trusted_hosts:
         errors.append("TRUSTED_HOSTS is required in production")
+    if s.tenancy not in {"single", "multi"}:
+        errors.append(f"TENANCY must be 'single' or 'multi', not {s.tenancy!r}")
     if s.is_production and s.platform_root_domain in {"localhost", ""}:
         errors.append("PLATFORM_ROOT_DOMAIN must be a real domain in production")
     # Sentinel comparisons to fail closed in prod; not real secrets.
