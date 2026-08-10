@@ -6,6 +6,62 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a32 — 2026-08-10
+
+Two things an assembly could not get from the public surface. No migration; the
+new setting defaults to the existing behaviour.
+
+### Added
+- **`resolver_session()`** — an UNSCOPED session on the main engine, for
+  deciding which tenant to scope to. The one legitimate reason to run without a
+  scope, and the one thing the surface had no name for: this package's own
+  `TenantResolverMiddleware` reached for `SessionLocal` while the public-surface
+  test forbade consumers the same import. That is not a rule with an exception,
+  it is a missing primitive.
+
+  Read-only by construction (always rolls back, never commits). It RESETs the
+  tenant setting before yielding: a scope inherited from a pooled connection
+  would filter the resolver's own lookup, and because RLS fails closed the
+  symptom would be a valid host resolving to no tenant.
+
+- **`TENANCY=single`**, enforced at startup. ADR-0003 makes a dedicated
+  one-tenant deployment per ISP the safe default, and nothing enforced it: a
+  deployment that acquired rows for a second tenant — restored backup, migration
+  rehearsal, a shared database someone meant to split — would serve them to
+  anyone who knew the host, with no error state, because the host resolved fine.
+
+  Under `single` the lifespan asserts exactly one tenant row exists and binds to
+  it; two rows, or none, is a startup failure (fatal in production, a warning
+  elsewhere, matching the existing config checks). An unreachable database is
+  not a tenancy verdict and returns no error.
+
+- **`dotmac_kernel.tenancy`** — the binding that check produces, read by the
+  resolver to refuse a tenant created *after* startup.
+
+### Two decisions worth stating
+
+**The deployment declares the mode, not the identity.** `TENANCY=single` says
+one tenant lives here; it does not name which. The tenant is already a row, and
+naming it in configuration would be a second source of truth that can drift —
+with a typo taking the deployment down for no reason. The binding is discovered
+from the database, so it cannot disagree with it.
+
+**The assertion belongs at startup, not per request.** Refusing a wrong host is
+a symptom-level control that fires only if somebody tries. Refusing to boot with
+two tenant rows catches the hazard itself, at deploy time. The per-request gate
+is the second half only.
+
+`multi` remains the default: safe-by-default would be `single`, but flipping it
+would change every existing deployment at once. Declare it explicitly first.
+
+### Why now
+
+`dotmac_academy_app` had implemented the lockdown privately, which is the only
+reason it was noticed — and it was why adopting the kernel's middleware would
+have been a downgrade. That generalises: **a shared component must be a superset
+of what it replaces, or adoption silently removes a control.** The assembly's
+tests cannot catch it, because they do not know the kernel exists.
+
 ## 0.1.0a31 — 2026-08-10
 
 Widen the FastAPI ceiling so a consumer on a newer web stack can install the

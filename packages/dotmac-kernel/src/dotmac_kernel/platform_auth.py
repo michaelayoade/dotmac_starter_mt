@@ -247,7 +247,7 @@ def platform_logout(
 
 
 __all__ = [
-    "require_platform_admin",
-    "platform_auth_router",
     "PLATFORM_AUDIENCE",
+    "platform_auth_router",
+    "require_platform_admin",
 ]

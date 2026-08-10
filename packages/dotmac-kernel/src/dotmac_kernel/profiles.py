@@ -178,9 +178,9 @@ class DeploymentProfileRegistry:
 
 
 __all__ = [
-    "DeploymentProfileSpec",
     "DeploymentProfileRegistry",
-    "ProfileValidationReport",
+    "DeploymentProfileSpec",
     "DuplicateProfileError",
+    "ProfileValidationReport",
     "UnknownProfileError",
 ]

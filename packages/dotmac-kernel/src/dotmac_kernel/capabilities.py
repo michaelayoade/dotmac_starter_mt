@@ -192,11 +192,11 @@ def active_capabilities() -> CapabilityCatalogue:
 
 
 __all__ = [
-    "CapabilitySpec",
+    "CAPABILITY_CODE_ATTR",
     "CapabilityCatalogue",
+    "CapabilitySpec",
     "DuplicateCapabilityError",
     "UndeclaredCapabilityError",
-    "CAPABILITY_CODE_ATTR",
-    "install_capabilities",
     "active_capabilities",
+    "install_capabilities",
 ]

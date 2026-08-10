@@ -112,7 +112,7 @@ def write_platform_audit_event(
 
 __all__ = [
     "AuditEvent",
-    "write_audit_event",
     "PlatformAuditEvent",
+    "write_audit_event",
     "write_platform_audit_event",
 ]

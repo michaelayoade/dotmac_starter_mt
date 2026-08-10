@@ -36,13 +36,15 @@ import uuid
 import pytest
 from dotmac_kernel.db import (
     SessionLocal,
+    resolver_session,
     set_tenant,
     tenant_session,
     tenant_session_by_slug,
 )
 from dotmac_kernel.exceptions import NotFoundError
-from dotmac_kernel.models import Role
+from dotmac_kernel.models import Role, Tenant
 from sqlalchemy import select, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 
@@ -254,3 +256,91 @@ def test_by_slug_resets_the_scope_on_exit(admin_session: Session, tenant_a) -> N
     finally:
         admin_session.delete(role)
         admin_session.commit()
+
+
+def test_resolver_session_reads_the_tenancy_tables(
+    admin_session: Session, tenant_a, tenant_b
+) -> None:
+    """It must see tenants it has not scoped to — that is the whole job.
+
+    This works because `tenants` and `tenant_domains` are deliberately NOT
+    RLS-protected: they are read to DECIDE a scope, so they cannot themselves
+    depend on one.
+    """
+    with resolver_session() as db:
+        slugs = {t.slug for t in db.query(Tenant).all()}
+    assert {tenant_a.slug, tenant_b.slug} <= slugs
+
+
+def test_resolver_session_cannot_read_tenant_scoped_rows(
+    admin_session: Session, tenant_a
+) -> None:
+    """Unscoped means fails CLOSED, not "sees everything".
+
+    Worth pinning as a security property: `resolver_session` must not become a
+    way to read another tenant's data. On an RLS-protected table it sees
+    nothing at all, which is correct — and is why it is only useful for the
+    tenancy tables.
+    """
+    role = _seed_role(admin_session, tenant_a, "resolver-scope-canary")
+    try:
+        with resolver_session() as db:
+            assert role.slug not in _slugs(db)
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
+def test_resolver_session_clears_an_inherited_scope(
+    admin_session: Session, tenant_a, tenant_b
+) -> None:
+    """A scope left on a pooled connection must not filter the resolver.
+
+    Without the RESET, a connection still scoped to tenant A would hide tenant
+    B from `tenants` — and because RLS fails closed the symptom would be a valid
+    host resolving to nothing.
+    """
+    leaked = SessionLocal()
+    try:
+        set_tenant(leaked, tenant_a.id, transaction_local=False)
+    finally:
+        leaked.rollback()
+        leaked.close()
+
+    with resolver_session() as db:
+        slugs = {t.slug for t in db.query(Tenant).all()}
+    assert tenant_b.slug in slugs
+
+
+def test_resolver_session_cannot_write_the_tenancy_tables(tenant_a) -> None:
+    """Read-only is enforced by the ROLE, not merely by the rollback.
+
+    `app_user` holds SELECT on `tenants`/`tenant_domains` and nothing else, so a
+    resolver cannot mutate the tables it reads even by mistake. That is a
+    stronger guarantee than "we roll back", and it is worth pinning: if these
+    grants ever widened, `resolver_session` would quietly become an unscoped
+    write path.
+    """
+    slug = f"resolver-write-{uuid.uuid4().hex[:8]}"
+    with pytest.raises(ProgrammingError):
+        with resolver_session() as db:
+            db.add(Tenant(slug=slug, name=slug))
+            db.flush()
+
+
+def test_resolver_result_is_usable_after_the_block(tenant_a) -> None:
+    """A resolver hands something back, and its caller reads it later.
+
+    `TenantResolverMiddleware` puts the Tenant on `request.state`; the
+    rate-limit and observability middleware read `.id` well after the session
+    has closed. Rolling back without expunging first EXPIRES the instance, so it
+    comes back alive but hollow and the next attribute access raises
+    DetachedInstanceError — which is exactly how this shipped and how CI caught
+    it.
+    """
+    with resolver_session() as db:
+        found = db.query(Tenant).filter(Tenant.slug == tenant_a.slug).one()
+
+    # Outside the block, on a closed session: must not raise.
+    assert found.slug == tenant_a.slug
+    assert found.id == tenant_a.id

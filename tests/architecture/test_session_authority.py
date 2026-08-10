@@ -42,13 +42,15 @@ _AUTHORITY = "dotmac_kernel/db.py"
 # Explicit, justified exceptions to the CALL rule (module-path suffix →
 # reason). Additions require a matching justification in ARCHITECTURE.md's
 # "Transaction authority" section.
-_CALL_ALLOWLIST = {
-    # The tenant resolver runs BEFORE any route dependency exists, so no
-    # get_db-provided session can reach it; it opens a short read-only
-    # session via `with SessionLocal() as db:` and owns that boundary
-    # itself (same contract, different entry point). It never mutates.
-    "dotmac_kernel/middleware/tenant.py",
-}
+# Empty, and worth keeping that way. The one entry was
+# `dotmac_kernel/middleware/tenant.py`, which opened a bare `SessionLocal()`
+# because the resolver runs before any route dependency exists and nothing on
+# the public surface named that need. `resolver_session()` names it, so the
+# resolver uses a boundary like everything else and the exception disappeared
+# rather than being documented — which is the outcome an allowlist should be
+# aiming for. `test_allowlist_is_still_needed` fails on a stale entry, which is
+# how this one was found.
+_CALL_ALLOWLIST: set[str] = set()
 
 
 def _call_name(node: ast.Call) -> str | None:

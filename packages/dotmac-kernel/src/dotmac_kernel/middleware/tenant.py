@@ -36,9 +36,10 @@ from starlette.requests import Request
 from starlette.types import ASGIApp
 
 from dotmac_kernel.config import settings
-from dotmac_kernel.db import SessionLocal
+from dotmac_kernel.db import resolver_session
 from dotmac_kernel.errors import envelope
 from dotmac_kernel.models import Tenant, TenantDomain
+from dotmac_kernel.tenancy import single_tenant_binding
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._root = settings.platform_root_domain.lower().lstrip(".")
 
+
     async def dispatch(self, request: Request, call_next):
         host = (request.headers.get("host") or "").split(":")[0].lower()
 
@@ -78,7 +80,7 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
             request.state.tenant = None
             return await call_next(request)
 
-        request.state.tenant = self._resolve(host)
+        request.state.tenant = self._allow(self._resolve(host))
 
         # Platform paths are allowed without a tenant.
         if request.state.tenant is None and not _is_platform_path(
@@ -95,7 +97,7 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
     def _resolve(self, host: str) -> Tenant | None:
         if not host:
             return None
-        with SessionLocal() as db:
+        with resolver_session() as db:
             # 1. Custom domain
             tenant = db.scalars(
                 select(Tenant)
@@ -128,6 +130,45 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
 
             # 4. Unknown host → caller decides (will 404)
             return None
+
+    def _allow(self, tenant: Tenant | None) -> Tenant | None:
+        """Refuse a tenant this deployment is not bound to.
+
+        The primary control for single-tenancy is the startup assertion in
+        `create_app`'s lifespan: under `TENANCY=single` the kernel refuses to
+        boot unless exactly one tenant row exists. That catches the real hazard
+        — a restored backup, a migration rehearsal, a shared database someone
+        meant to split — at deploy time, loudly, rather than waiting for someone
+        to guess a hostname.
+
+        This is the second half: a tenant created *after* startup would satisfy
+        no assertion until the next restart, and would otherwise be served to
+        anyone who knew its host. The binding comes from that startup check, so
+        the identity is whatever the database actually held — it is never
+        configured, and so cannot drift from it.
+
+        Refuses rather than substitutes: a host resolving to the wrong tenant is
+        a misconfiguration, and quietly serving the right one would hide it.
+        """
+        bound = single_tenant_binding()
+        if tenant is None or bound is None:
+            return tenant
+        if tenant.slug.lower() != bound:
+            logger.warning(
+                "rejected host for tenant slug=%s on a deployment bound to slug=%s",
+                tenant.slug,
+                bound,
+            )
+            return None
+        return tenant
+        if tenant.slug.lower() != self._single_tenant:
+            logger.warning(
+                "rejected host for tenant slug=%s on a deployment locked to slug=%s",
+                tenant.slug,
+                self._single_tenant,
+            )
+            return None
+        return tenant
 
 
 def _is_platform_path(path: str, host: str, root: str) -> bool:

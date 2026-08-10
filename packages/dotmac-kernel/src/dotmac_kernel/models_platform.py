@@ -111,6 +111,6 @@ class PlatformAuditEvent(Base):
 
 __all__ = [
     "PlatformAdmin",
-    "PlatformSession",
     "PlatformAuditEvent",
+    "PlatformSession",
 ]

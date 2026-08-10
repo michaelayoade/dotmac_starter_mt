@@ -154,9 +154,9 @@ def run_forever(
 
 
 __all__ = [
-    "PlatformDeliveryTransport",
     "LoggingPlatformTransport",
+    "PlatformDeliveryTransport",
     "SessionFactory",
-    "run_once",
     "run_forever",
+    "run_once",
 ]
