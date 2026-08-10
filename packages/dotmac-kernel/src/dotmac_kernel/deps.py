@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from dotmac_kernel.capabilities import CAPABILITY_CODE_ATTR, active_capabilities
 from dotmac_kernel.db import get_db, get_platform_db
 from dotmac_kernel.entitlements import EntitlementDecision, is_entitled
+from dotmac_kernel.idempotency import MAX_KEY_LENGTH as MAX_IDEMPOTENCY_KEY_LENGTH
 from dotmac_kernel.models import AuthSession, Party, PartyRole, PartyType, Role, Tenant
 from dotmac_kernel.permissions import PERMISSION_CODE_ATTR, active_permissions
 from dotmac_kernel.security import decode_access_token, hash_token
@@ -259,6 +260,40 @@ def require_capability(code: str):
     return _dependency
 
 
+def idempotency_key(
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> str | None:
+    """The client-supplied `Idempotency-Key` header, or None when absent.
+
+    Optional by design: the kernel takes no position on which routes require a
+    key — that is the product's decision, expressed by raising when this returns
+    None. What the kernel DOES own is the header's spelling and its length
+    limit, so every Dotmac API answers the same way and a key too long for the
+    ledger is a 400 at the seam rather than a database error mid-flush.
+
+    Pass the result to a service that wraps its work in
+    `dotmac_kernel.idempotency.execute_once`. Routes stay thin (ADR-0010): the
+    dependency reads a header, it does not decide anything.
+    """
+    if idempotency_key is None:
+        return None
+    trimmed = idempotency_key.strip()
+    if not trimmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key must not be blank",
+        )
+    if len(trimmed) > MAX_IDEMPOTENCY_KEY_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Idempotency-Key must be at most "
+                f"{MAX_IDEMPOTENCY_KEY_LENGTH} characters"
+            ),
+        )
+    return trimmed
+
+
 def _bearer_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
@@ -273,6 +308,7 @@ __all__ = [
     "authenticate_request",
     "get_db",
     "get_platform_db",
+    "idempotency_key",
     "require_capability",
     "require_permission",
     "require_role",

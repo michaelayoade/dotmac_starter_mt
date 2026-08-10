@@ -14,8 +14,8 @@ Grant/RLS boundaries for these platform catalog tables are proven on Postgres
 from __future__ import annotations
 
 from dotmac_kernel.audit import write_platform_audit_event
+from dotmac_kernel.idempotency_models import PlatformIdempotencyRecord
 from dotmac_kernel.messaging import process_once_platform
-from dotmac_kernel.messaging.models import PlatformInboxRecord
 from dotmac_kernel.models_platform import PlatformAdmin, PlatformAuditEvent
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -49,10 +49,12 @@ def test_process_once_platform_runs_handler_and_records_result(db: Session) -> N
     assert calls == ["ran"]
 
     record = db.execute(
-        select(PlatformInboxRecord).where(PlatformInboxRecord.command_id == "pcmd-1")
+        select(PlatformIdempotencyRecord).where(
+            PlatformIdempotencyRecord.key == "pcmd-1"
+        )
     ).scalar_one()
     assert record.command_type == "account.provision"
-    assert record.status == "processed"
+    assert record.status == "executed"
     assert record.result == {"provisioned": True}
     assert record.correlation_id == "corr-1"
 
@@ -79,7 +81,9 @@ def test_process_once_platform_is_idempotent_and_replays_result(db: Session) -> 
     assert calls == ["ran"]  # exactly once
 
     rows = db.execute(
-        select(PlatformInboxRecord).where(PlatformInboxRecord.command_id == "pcmd-dup")
+        select(PlatformIdempotencyRecord).where(
+            PlatformIdempotencyRecord.key == "pcmd-dup"
+        )
     ).all()
     assert len(rows) == 1
 

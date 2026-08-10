@@ -1,13 +1,16 @@
-"""Persisted state for the outbox/inbox subsystem (kernel WS3).
+"""Persisted state for the outbox subsystem (kernel WS3).
 
-Two tenant-scoped, RLS-protected tables:
-
-- ``inbox_records`` — the idempotency ledger: one row per processed command
-  (`unique(tenant_id, command_id)`), storing the recorded outcome so a
-  re-delivered command replays its result instead of re-running.
 - ``outbox_events`` — the transactional outbox: an event row written IN THE SAME
   transaction as a state change, so the event exists iff that change commits. A
-  relay (WS3 slice 2) drains `pending` rows and delivers them.
+  relay (WS3 slice 2) drains `pending` rows and delivers them. Tenant-scoped and
+  RLS-protected.
+- ``platform_outbox_events`` — its platform-scoped peer (no tenant, no RLS).
+
+The idempotency ledger that used to live here as ``inbox_records`` moved to
+`dotmac_kernel.idempotency_models` when ADR-0014 made at-most-once execution a
+first-class kernel facility with one owner. It was never specific to inbound
+transport delivery, and keeping it filed under "inbox" is part of why five other
+idempotency stores grew beside it across the fleet.
 
 Import-safe: this module touches only `Base.metadata`, never the engine.
 """
@@ -25,7 +28,6 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    UniqueConstraint,
     Uuid,
     func,
 )
@@ -51,61 +53,6 @@ class OutboxStatus(str, Enum):
     SENT = "sent"
     FAILED = "failed"
     DEAD = "dead"
-
-
-class InboxStatus(str, Enum):
-    """Terminal status recorded for a processed command."""
-
-    PROCESSED = "processed"
-    FAILED = "failed"
-
-
-class InboxRecord(Base, TimestampMixin):
-    """One row per processed command — the idempotency ledger. A second delivery
-    of the same `(tenant_id, command_id)` finds this row and replays `result`."""
-
-    __tablename__ = "inbox_records"
-    __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "command_id", name="uq_inbox_records_tenant_command_id"
-        ),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    tenant_id: Mapped[UUID] = mapped_column(
-        Uuid(),
-        ForeignKey("tenants.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    command_id: Mapped[str] = mapped_column(String(200), nullable=False)
-    command_type: Mapped[str] = mapped_column(String(120), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False)
-    result: Mapped[dict] = mapped_column(
-        _JSON, nullable=False, default=dict, server_default=sa.text("'{}'")
-    )
-    correlation_id: Mapped[str | None] = mapped_column(String(200))
-
-
-class PlatformInboxRecord(Base, TimestampMixin):
-    """The PLATFORM-level idempotency ledger — the platform-scoped counterpart to
-    `InboxRecord`. A platform command has no tenant, so its idempotency key is
-    `command_id` alone (globally unique, not per-tenant). A PLATFORM catalog
-    table: no `tenant_id`, no RLS, GRANTed to `platform_api`/`app_admin`."""
-
-    __tablename__ = "platform_inbox_records"
-    __table_args__ = (
-        UniqueConstraint("command_id", name="uq_platform_inbox_command_id"),
-    )
-
-    id: Mapped[UUID] = uuid_pk()
-    command_id: Mapped[str] = mapped_column(String(200), nullable=False)
-    command_type: Mapped[str] = mapped_column(String(120), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False)
-    result: Mapped[dict] = mapped_column(
-        _JSON, nullable=False, default=dict, server_default=sa.text("'{}'")
-    )
-    correlation_id: Mapped[str | None] = mapped_column(String(200))
 
 
 class OutboxEvent(Base, TimestampMixin):
@@ -195,10 +142,7 @@ class PlatformOutboxEvent(Base, TimestampMixin):
 
 
 __all__ = [
-    "InboxRecord",
-    "InboxStatus",
     "OutboxEvent",
     "OutboxStatus",
-    "PlatformInboxRecord",
     "PlatformOutboxEvent",
 ]

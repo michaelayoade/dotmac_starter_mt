@@ -18,11 +18,12 @@ from logging.config import fileConfig
 from dotmac_kernel import (
     audit,  # noqa: F401  (register AuditEvent for autogenerate)
     entitlements,  # noqa: F401  (register TenantEntitlementGrant)
+    idempotency_models,  # noqa: F401  (register Idempotency/PlatformIdempotencyRecord)
     models_platform,  # noqa: F401  (register PlatformAdmin/PlatformSession)
     settings_models,  # noqa: F401  (register DomainSetting)
 )
 from dotmac_kernel.messaging import (
-    models as messaging_models,  # noqa: F401  (register InboxRecord/OutboxEvent)
+    models as messaging_models,  # noqa: F401  (register OutboxEvent/PlatformOutboxEvent)
 )
 from dotmac_kernel.models import (  # registers Tenant/Party/Role/PartyRole/AuthSession/UserCredential
     Base,

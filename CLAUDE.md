@@ -428,6 +428,10 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 20. A setting declares whether it inherits; `inherits=False` for values that
     identify something owned by one scope, so no less-specific row can answer
     (ADR-0012; `test_setting_inherits.py`).
+21. At-most-once execution has ONE owner (`dotmac_kernel.idempotency`);
+    `messaging.process_once` is an adapter over it. Nothing is reserved before
+    the effect, the fingerprint is its own column, and retention is the
+    product's policy (ADR-0014; `test_idempotency.py`).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.
