@@ -51,7 +51,7 @@ _PLATFORM_PRIVATE = {
     "platform_admins",
     "platform_sessions",
     "platform_audit_events",
-    "platform_inbox_records",
+    "platform_idempotency_records",
     "platform_outbox_events",
 }
 
@@ -288,8 +288,14 @@ def test_metadata_matches_live_tables(admin_engine) -> None:
     fail here."""
     # Import every model-bearing module so metadata is fully populated —
     # explicitly, not relying on another test module having imported them first
-    # (messaging registers outbox_events/inbox_records/platform_inbox_records).
-    from dotmac_kernel import audit, models_platform, settings_models  # noqa: F401
+    # (messaging registers outbox_events/platform_outbox_events; the
+    # idempotency ledgers moved to `idempotency_models` in ADR-0014).
+    from dotmac_kernel import (  # noqa: F401
+        audit,
+        idempotency_models,
+        models_platform,
+        settings_models,
+    )
     from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
     from dotmac_kernel.models import Base
 

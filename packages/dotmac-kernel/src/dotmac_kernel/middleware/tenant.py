@@ -60,7 +60,6 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._root = settings.platform_root_domain.lower().lstrip(".")
 
-
     async def dispatch(self, request: Request, call_next):
         host = (request.headers.get("host") or "").split(":")[0].lower()
 

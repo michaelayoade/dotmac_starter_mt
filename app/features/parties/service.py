@@ -22,11 +22,13 @@ uses via `Parties.get`).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import UUID
 
 from dotmac_kernel.crud import CRUDManager
 from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
+from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.identity import normalize_email, person_display_name
 from dotmac_kernel.models import (
     Party,
@@ -58,6 +60,28 @@ from app.features.parties.schemas import (
 _NOT_NULLABLE_PERSON_FIELDS = frozenset({"first_name", "last_name"})
 _NOT_NULLABLE_ORGANIZATION_FIELDS = frozenset({"legal_name"})
 
+# Idempotency scopes owned by this feature (ADR-0014). A scope names the
+# OPERATION, never the HTTP route: the same create reached through a second
+# surface must land in the same ledger, which is why the kernel's key is
+# (tenant_id, scope, key) and not ERP's (org, endpoint, key).
+PERSON_CREATE_SCOPE = "parties.create_person"
+ORGANIZATION_CREATE_SCOPE = "parties.create_organization"
+
+
+def _created_party(db: Session, result: Mapping[str, object]) -> Party:
+    """Load the party a recorded (or just-executed) create produced.
+
+    The ledger stores the id, not the row — so a replay returns the CURRENT
+    party, not a stale snapshot. If it has since been deleted the replay is a
+    404 rather than a fabricated object: the operation genuinely happened and
+    its result genuinely no longer exists, and saying so is more useful than
+    pretending either way.
+    """
+    party = db.get(Party, UUID(str(result["party_id"])))
+    if party is None:
+        raise NotFoundError("Party not found")
+    return party
+
 
 class Parties(CRUDManager[Party]):
     model = Party
@@ -65,6 +89,34 @@ class Parties(CRUDManager[Party]):
 
 
 def create_person_party(
+    db: Session, tenant: Tenant, payload: PersonPartyCreate, *, key: str | None = None
+) -> Party:
+    """Create a person party, at most once per `key` when one is supplied.
+
+    `key` is the client's `Idempotency-Key` (see
+    `dotmac_kernel.deps.idempotency_key`). With no key the behaviour is exactly
+    as before — the kernel takes no position on which routes require one
+    (ADR-0014). With a key, a retried request returns the SAME party instead of
+    creating a second one, and a key reused with a different payload is a
+    conflict rather than a silent replay of someone else's result.
+    """
+    if key is None:
+        return _create_person_party(db, tenant, payload)
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant.id,
+        scope=PERSON_CREATE_SCOPE,
+        key=key,
+        fingerprint=fingerprint_of(payload),
+        operation=lambda session: {
+            "party_id": str(_create_person_party(session, tenant, payload).id)
+        },
+    )
+    return _created_party(db, outcome.result)
+
+
+def _create_person_party(
     db: Session, tenant: Tenant, payload: PersonPartyCreate
 ) -> Party:
     email = normalize_email(payload.email)
@@ -102,6 +154,31 @@ def create_person_party(
 
 
 def create_organization_party(
+    db: Session,
+    tenant: Tenant,
+    payload: OrganizationPartyCreate,
+    *,
+    key: str | None = None,
+) -> Party:
+    """Create an organization party, at most once per `key` when one is
+    supplied. Same contract as `create_person_party` above."""
+    if key is None:
+        return _create_organization_party(db, tenant, payload)
+
+    outcome = execute_once(
+        db,
+        tenant_id=tenant.id,
+        scope=ORGANIZATION_CREATE_SCOPE,
+        key=key,
+        fingerprint=fingerprint_of(payload),
+        operation=lambda session: {
+            "party_id": str(_create_organization_party(session, tenant, payload).id)
+        },
+    )
+    return _created_party(db, outcome.result)
+
+
+def _create_organization_party(
     db: Session, tenant: Tenant, payload: OrganizationPartyCreate
 ) -> Party:
     email = normalize_email(payload.email) if payload.email else None

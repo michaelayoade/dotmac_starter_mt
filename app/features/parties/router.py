@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from dotmac_kernel.deps import get_db, require_role, require_tenant
+from dotmac_kernel.deps import get_db, idempotency_key, require_role, require_tenant
 from dotmac_kernel.models import Party, PartyType, Tenant
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -55,9 +55,10 @@ def create_person_party(
     payload: PersonPartyCreate,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
+    key: str | None = Depends(idempotency_key),
     _: Party = Depends(require_role("admin")),
 ) -> PartyRead:
-    party = parties_service.create_person_party(db, tenant, payload)
+    party = parties_service.create_person_party(db, tenant, payload, key=key)
     return _to_party_read(party)
 
 
@@ -68,9 +69,10 @@ def create_organization_party(
     payload: OrganizationPartyCreate,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
+    key: str | None = Depends(idempotency_key),
     _: Party = Depends(require_role("admin")),
 ) -> PartyRead:
-    party = parties_service.create_organization_party(db, tenant, payload)
+    party = parties_service.create_organization_party(db, tenant, payload, key=key)
     return _to_party_read(party)
 
 

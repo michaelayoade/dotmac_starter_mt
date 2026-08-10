@@ -112,7 +112,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.identity` | `normalize_email`, `person_display_name` |
 | `dotmac_kernel.licensing` | `ENVELOPE_SCHEMA`, `LICENCE_SCHEMA`, `REVOCATION_SCHEMA`, `KeyStatus`, `LicenceKey`, `LicenceKeyRing`, `LicenceSubject`, `CapabilityGrant`, `LicenceDocument`, `AppliedLicence`, `VerifiedLicence`, `RevocationList`, `LicenceAcknowledgement`, `ReceiverAppliedState`, `APPLIED_STATE_SCHEMA`, `UNKNOWN_DIGEST`, `applied_state_payload`, `parse_applied_state`, `payload_digest`, `verify_licence`, `verify_revocation_list`, `LicenceError` + its subclasses, and the ADR-0007 applied-state envelope: `APPLIED_STATE_ENVELOPE_SCHEMA`, `APPLIED_STATE_DOMAIN`, `DEPLOYMENT_CHALLENGE_DOMAIN`, `DEPLOYMENT_CHALLENGE_SCHEMA`, `DEPLOYMENT_RESPONSE_SCHEMA`, `AppliedStateEnvelope`, `DeploymentSigner`, `DeploymentVerificationKey`, `VerifiedAppliedState`, `DeploymentPossessionChallenge`, `DeploymentPossessionResponse`, `VerifiedDeploymentPossession`, `applied_state_signing_input`, `seal_applied_state`, `verify_applied_state`, `answer_possession_challenge`, `verify_possession` (WS8 signed-licence verification; submodule-only; see "Signed-licence verification" below) |
 | `dotmac_kernel.logging` | `setup_logging` |
-| `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `PlatformOutboxEvent`, `InboxStatus`, `OutboxStatus` (see "Outbox/inbox" below) |
+| `dotmac_kernel.messaging` | `CommandEnvelope`, `process_once`, `ProcessOutcome`, `CommandHandler`, `process_once_platform`, `PlatformCommandHandler`, `enqueue_event`, `enqueue_platform_event`, `ClaimedPlatformEvent`, `claim_platform_batch`, `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `OutboxEvent`, `PlatformOutboxEvent`, `OutboxStatus` (see "Outbox/inbox" below) |
 | `dotmac_kernel.messaging.envelope` | `CommandEnvelope` |
 | `dotmac_kernel.messaging.inbox` | `process_once`, `ProcessOutcome`, `CommandHandler` |
 | `dotmac_kernel.messaging.outbox` | `enqueue_event`, `enqueue_platform_event` |
@@ -121,7 +121,9 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.messaging.platform_relay` | `ClaimedPlatformEvent`, `claim_platform_batch`, `record_success`, `record_failure` (platform relay behavior; reuses `relay`'s `RelayPolicy`/`FailureOutcome`/backoff; `platform_outbox_dispatcher`-bound session) |
 | `dotmac_kernel.messaging.worker` | `DeliveryTransport`, `LoggingTransport`, `run_once`, `run_forever` (WS3 relay polling worker; receives session factories, never builds engines; run via `scripts/run_relay.py`) |
 | `dotmac_kernel.messaging.platform_worker` | `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `run_once`, `run_forever` (platform relay worker; dispatcher claims/settles, delivery on a separate `platform_api` session with no tenant context; run via `scripts/run_platform_relay.py`) |
-| `dotmac_kernel.messaging.models` | `InboxRecord`, `PlatformInboxRecord`, `OutboxEvent`, `PlatformOutboxEvent`, `InboxStatus`, `OutboxStatus` |
+| `dotmac_kernel.messaging.models` | `OutboxEvent`, `PlatformOutboxEvent`, `OutboxStatus` |
+| `dotmac_kernel.idempotency` | `execute_once`, `execute_once_platform`, `fingerprint_of`, `purge_expired`, `IdempotentOutcome`, `IdempotencyConflict`, `Operation`, `MAX_KEY_LENGTH`, `MAX_SCOPE_LENGTH` (see "At-most-once execution" below) |
+| `dotmac_kernel.idempotency_models` | `IdempotencyRecord`, `PlatformIdempotencyRecord`, `IdempotencyStatus`, `INBOX_SCOPE` |
 | `dotmac_kernel.middleware.csrf` | `CSRFMiddleware` |
 | `dotmac_kernel.middleware.observability` | `ObservabilityMiddleware` |
 | `dotmac_kernel.middleware.rate_limit` | `RateLimitMiddleware`, `RateLimitStore`, `MemoryStore` |
@@ -549,10 +551,11 @@ level — import it directly (`from dotmac_kernel.messaging import ...`).
   `process_once(db, envelope, handler) -> ProcessOutcome` runs `handler` (a
   `CommandHandler`, `Callable[[Session, CommandEnvelope], Mapping | None]`) AT
   MOST ONCE per `(tenant_id, command_id)`: the first delivery runs it and records
-  an `InboxRecord` with the result; a later delivery replays that result without
-  re-running. `ProcessOutcome(command_id, status, result)` exposes
-  `was_duplicate`. Concurrency-safe via the `uq_inbox_records_tenant_command_id`
-  constraint + a SAVEPOINT rollback of the losing racer.
+  the result in the shared idempotency ledger; a later delivery replays that
+  result without re-running. `ProcessOutcome(command_id, status, result)` exposes
+  `was_duplicate`. Since 0.1.0a33 this is a thin adapter over
+  `dotmac_kernel.idempotency` (`scope="inbox"`), not a separate mechanism —
+  same signature, same guarantees.
 - **Transactional outbox** — `enqueue_event(db, *, tenant_id, event_type,
   payload=None, correlation_id=None) -> OutboxEvent` inserts a `pending` event in
   the CALLER's transaction, so the event persists iff that transaction commits
@@ -563,20 +566,57 @@ level — import it directly (`from dotmac_kernel.messaging import ...`).
   envelope). `process_once_platform(db, *, command_id, command_type, handler,
   correlation_id=None) -> ProcessOutcome` runs `handler` (a
   `PlatformCommandHandler`, `Callable[[Session], Mapping | None]`) AT MOST ONCE
-  per `command_id` ALONE (globally unique, not per-tenant) and records a
-  `PlatformInboxRecord`; a later delivery replays the result. Concurrency-safe via
-  the `uq_platform_inbox_command_id` constraint + the same SAVEPOINT-rollback of
-  the losing racer.
-- **Persisted state** — `InboxRecord` / `OutboxEvent` (both tenant-scoped,
-  RLS-protected, kernel migration `0008`); `PlatformInboxRecord` (a PLATFORM
-  catalog table — no `tenant_id`, no RLS, grants-not-RLS, kernel migration
-  `0009`); `InboxStatus` (`PROCESSED`/`FAILED`) and `OutboxStatus`
-  (`PENDING`/`SENT`/`FAILED`) status vocabularies.
+  per `command_id` ALONE (globally unique, not per-tenant); a later delivery
+  replays the result. Also a thin adapter over `dotmac_kernel.idempotency` since
+  0.1.0a33.
+- **Persisted state** — `OutboxEvent` (tenant-scoped, RLS-protected, kernel
+  migration `0008`); `PlatformOutboxEvent` (a PLATFORM catalog table — no
+  `tenant_id`, no RLS, grants-not-RLS, kernel migration `0012`); `OutboxStatus`
+  (`PENDING`/`CLAIMED`/`SENT`/`FAILED`/`DEAD`). The idempotency ledger moved to
+  `dotmac_kernel.idempotency_models` in 0.1.0a33 — see below.
 
 Transaction-authority contract: `process_once` / `process_once_platform` /
 `enqueue_event` RECEIVE a `Session` and only `add`/`flush` — they never construct
 a session or `commit`/`rollback`; the request (or a `platform_session`) boundary
 owns that.
+
+### At-most-once execution (ADR-0014)
+
+`dotmac_kernel.idempotency` is the ONE owner of "has this been done" — the
+ledger, the engine, the conflict rule and the retention sweep. `messaging`'s
+`process_once`/`process_once_platform` are adapters over it. Submodule-only, for
+the same reason as `messaging`.
+
+- **Run once** — `execute_once(db, *, tenant_id, scope, key, operation,
+  operation_name=None, fingerprint=None, correlation_id=None, expires_at=None)
+  -> IdempotentOutcome` runs `operation` (an `Operation`,
+  `Callable[[Session], Mapping | None]`) AT MOST ONCE per
+  `(tenant_id, scope, key)`. `execute_once_platform(db, *, scope, key, ...)` is
+  the tenant-free peer. `IdempotentOutcome(scope, key, result, replayed)`.
+- **`scope`** names the OPERATION FAMILY, never an HTTP route — the same logical
+  operation reached through a second surface must land in the same ledger. An
+  open string, not an enum (ADR-0008's registry principle).
+- **`fingerprint`** — `fingerprint_of(payload)` gives a stable SHA256 (sorted
+  keys, compact separators, `model_dump` honoured, `str` fallback). A key reused
+  with a DIFFERENT fingerprint raises `IdempotencyConflict` (a `ConflictError` →
+  409). `None` on either side means the caller asserts the key alone identifies
+  the request, and the call replays.
+- **No reservation** — the effect and the ledger row commit in the SAME
+  transaction. A crashed attempt leaves NO row, so the retry re-drives; there is
+  no "in progress" state, no lease, and no stuck-placeholder recovery to run.
+- **Retention is yours** — `expires_at` is nullable and the kernel sets NO
+  default TTL. `purge_expired(db, *, now=None, scope=None, platform=False)`
+  deletes only rows that carry an expiry, and never commits.
+- **Not for non-transactional effects** — if the effect is an external call that
+  cannot join the transaction, use the outbox instead (ADR-0014 § 7).
+- **Header** — `dotmac_kernel.deps.idempotency_key` reads `Idempotency-Key` and
+  enforces its length. Optional: which routes REQUIRE a key is the product's
+  call.
+- **Persisted state** — `IdempotencyRecord` (tenant-scoped, RLS-protected) and
+  `PlatformIdempotencyRecord` (PLATFORM catalog, grants-not-RLS), kernel
+  migration `0018`; `IdempotencyStatus` (`EXECUTED`/`FAILED`).
+
+Transaction-authority contract: RECEIVES a `Session`, only `add`/`flush`.
 
 ### Capability catalogue + deployment profiles (WS1)
 

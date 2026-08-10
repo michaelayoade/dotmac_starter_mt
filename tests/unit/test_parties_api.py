@@ -150,3 +150,76 @@ def test_non_admin_person_is_forbidden(
 
     resp = app_client.request(method, path, json=json_body)
     assert resp.status_code == 403, resp.text
+
+
+# ── Idempotency-Key (ADR-0014) ───────────────────────────────────────────────
+# The starter's real consumer of `dotmac_kernel.idempotency`. These prove the
+# whole seam — header dependency, service wrapper, ledger — through the API,
+# not just the engine in isolation.
+def test_create_person_without_a_key_behaves_as_before(
+    app_client: TestClient,
+) -> None:
+    """The key is optional: the kernel takes no position on which routes require
+    one. Two keyless posts of the same person collide on email, as they always
+    did — idempotency did not quietly become the new duplicate guard."""
+    first = app_client.post("/parties/people", json=_person_payload())
+    second = app_client.post("/parties/people", json=_person_payload())
+    assert first.status_code == 201, first.text
+    assert second.status_code == 409, second.text
+
+
+def test_a_retried_create_returns_the_same_party(app_client: TestClient) -> None:
+    headers = {"Idempotency-Key": "req-1"}
+    first = app_client.post("/parties/people", json=_person_payload(), headers=headers)
+    second = app_client.post("/parties/people", json=_person_payload(), headers=headers)
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["id"] == second.json()["id"]
+
+
+def test_the_same_key_with_a_different_body_is_a_conflict(
+    app_client: TestClient,
+) -> None:
+    """A reused key must never replay a result that belongs to a different
+    request — the defect Sub's overloaded ledger column makes possible."""
+    headers = {"Idempotency-Key": "req-2"}
+    first = app_client.post("/parties/people", json=_person_payload(), headers=headers)
+    assert first.status_code == 201, first.text
+
+    second = app_client.post(
+        "/parties/people",
+        json=_person_payload(email="grace@example.com", first_name="Grace"),
+        headers=headers,
+    )
+    assert second.status_code == 409, second.text
+
+
+def test_the_same_key_on_a_different_operation_is_independent(
+    app_client: TestClient,
+) -> None:
+    """Scope names the operation, so one key can be spent once per operation —
+    a person create does not suppress an organization create."""
+    headers = {"Idempotency-Key": "shared-key"}
+    person = app_client.post("/parties/people", json=_person_payload(), headers=headers)
+    org = app_client.post(
+        "/parties/organizations", json={"legal_name": "Acme Corp"}, headers=headers
+    )
+    assert person.status_code == 201, person.text
+    assert org.status_code == 201, org.text
+
+
+def test_a_blank_key_is_rejected(app_client: TestClient) -> None:
+    resp = app_client.post(
+        "/parties/people", json=_person_payload(), headers={"Idempotency-Key": "   "}
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_an_over_long_key_is_rejected(app_client: TestClient) -> None:
+    resp = app_client.post(
+        "/parties/people",
+        json=_person_payload(),
+        headers={"Idempotency-Key": "x" * 201},
+    )
+    assert resp.status_code == 400, resp.text

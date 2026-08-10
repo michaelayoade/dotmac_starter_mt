@@ -1,11 +1,16 @@
-"""`dotmac_kernel.messaging` — transactional outbox/inbox + idempotent command
+"""`dotmac_kernel.messaging` — transactional outbox + idempotent command
 envelope (kernel WS3).
 
 The kernel primitive downstream workflows (deployment intent, allocation,
 commercial contracts, observed health) build on: process a command exactly once
-(`process_once` + the inbox ledger), and emit a domain event atomically with its
-state change (`enqueue_event` + the outbox), delivered later by a relay
-(slice 2). Supported public API — see `COMPATIBILITY.md`.
+(`process_once`), and emit a domain event atomically with its state change
+(`enqueue_event` + the outbox), delivered later by a relay (slice 2). Supported
+public API — see `COMPATIBILITY.md`.
+
+`process_once` / `process_once_platform` are thin adapters over
+`dotmac_kernel.idempotency`, which owns the ledger and the engine (ADR-0014).
+Import the record models and `IdempotencyStatus` from
+`dotmac_kernel.idempotency_models`, not from here.
 
 Submodule-only (like `dotmac_kernel.deps`): the write helpers pull in the DB
 transaction authority, so this package is NOT re-exported at the DB-free top
@@ -21,11 +26,8 @@ from dotmac_kernel.messaging.inbox import (
     process_once,
 )
 from dotmac_kernel.messaging.models import (
-    InboxRecord,
-    InboxStatus,
     OutboxEvent,
     OutboxStatus,
-    PlatformInboxRecord,
     PlatformOutboxEvent,
 )
 from dotmac_kernel.messaging.outbox import enqueue_event, enqueue_platform_event
@@ -87,9 +89,6 @@ __all__ = [
     "PlatformDeliveryTransport",
     "LoggingPlatformTransport",
     # persisted state
-    "InboxRecord",
-    "PlatformInboxRecord",
-    "InboxStatus",
     "OutboxEvent",
     "PlatformOutboxEvent",
     "OutboxStatus",

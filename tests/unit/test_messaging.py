@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from dotmac_kernel.idempotency_models import IdempotencyRecord
 from dotmac_kernel.messaging import (
     CommandEnvelope,
     OutboxEvent,
@@ -19,7 +20,6 @@ from dotmac_kernel.messaging import (
     enqueue_platform_event,
     process_once,
 )
-from dotmac_kernel.messaging.models import InboxRecord
 from dotmac_kernel.models import Tenant
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -92,10 +92,10 @@ def test_process_once_runs_handler_and_records_result(
     assert calls == ["cmd-1"]
 
     record = db.execute(
-        select(InboxRecord).where(InboxRecord.command_id == "cmd-1")
+        select(IdempotencyRecord).where(IdempotencyRecord.key == "cmd-1")
     ).scalar_one()
     assert record.tenant_id == tenant_row.id
-    assert record.status == "processed"
+    assert record.status == "executed"
     assert record.result == {"handled": "cmd-1"}
     assert record.correlation_id == "corr-9"
 
@@ -124,7 +124,7 @@ def test_process_once_is_idempotent_and_replays_result(
 
     # Only one ledger row exists.
     rows = db.execute(
-        select(InboxRecord).where(InboxRecord.command_id == "cmd-dup")
+        select(IdempotencyRecord).where(IdempotencyRecord.key == "cmd-dup")
     ).all()
     assert len(rows) == 1
 

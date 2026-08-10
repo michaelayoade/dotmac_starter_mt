@@ -90,7 +90,10 @@ def _cleanup(admin_session):
     yield
     admin_session.execute(text("DELETE FROM platform_outbox_events"))
     admin_session.execute(
-        text("DELETE FROM platform_inbox_records WHERE command_type = 'test.consume'")
+        text(
+            "DELETE FROM platform_idempotency_records "
+            "WHERE operation = 'test.consume'"
+        )
     )
     admin_session.commit()
 

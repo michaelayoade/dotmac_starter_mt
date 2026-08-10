@@ -6,6 +6,54 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a33 — 2026-08-10
+
+At-most-once execution gets one owner (ADR-0014). **Breaking** (alpha window)
+and carries kernel migration `0018`.
+
+### Added
+- **`dotmac_kernel.idempotency`** — `execute_once` / `execute_once_platform` run
+  an effect at most once per `(tenant_id, scope, key)` and replay the recorded
+  result otherwise. `fingerprint_of(payload)` builds the stable request digest;
+  a key replayed with a DIFFERENT fingerprint raises `IdempotencyConflict` (a
+  `ConflictError`, so existing HTTP mapping gives 409) instead of silently
+  returning someone else's result. `IdempotentOutcome.replayed` lets a caller
+  tell a replay from a first execution. `purge_expired` applies retention.
+- **`dotmac_kernel.idempotency_models`** — `IdempotencyRecord`,
+  `PlatformIdempotencyRecord`, `IdempotencyStatus`, `INBOX_SCOPE`.
+- **`dotmac_kernel.deps.idempotency_key`** — the `Idempotency-Key` header
+  dependency. Optional by design: which routes REQUIRE a key is the product's
+  decision; the kernel owns the header's spelling and its length limit.
+
+### Changed — BREAKING
+- `InboxRecord` → `IdempotencyRecord`, `PlatformInboxRecord` →
+  `PlatformIdempotencyRecord`, and both moved from `dotmac_kernel.messaging
+  .models` to `dotmac_kernel.idempotency_models`. Tables renamed
+  (`inbox_records` → `idempotency_records`, `platform_inbox_records` →
+  `platform_idempotency_records`), columns renamed (`command_id` → `key`,
+  `command_type` → `operation`), columns added (`scope`, `fingerprint`,
+  `expires_at`), recorded status `'processed'` → `'executed'`.
+- `messaging.process_once` / `process_once_platform` / `ProcessOutcome` keep
+  their exact signatures and behaviour — they are now thin adapters over
+  `idempotency`, writing `scope="inbox"`. Consumers of those functions need no
+  source change; a consumer importing the RECORD MODELS does.
+
+### Migration
+- `0018_idempotency_one_owner` — RENAMEs both ledgers rather than
+  create-and-copy, so no dedup marker is lost in the window (a lost marker means
+  a processed command re-executing). Backfills `scope='inbox'`, widens the
+  tenant unique to `(tenant_id, scope, key)`, and re-points the RLS policy,
+  FK and index names.
+
+### Why
+Six idempotency mechanisms existed across the fleet
+(`docs/inventories/idempotency-sources.md`): Sub's shared ledger overloads one
+untyped column with three incompatible meanings across 26 hand-rolled call
+sites; ERP reserves a placeholder BEFORE the effect, so a died request is
+replayed as "in progress" for 24h with no recovery path; Sub's task retry key
+embeds a timestamp, making the retry itself non-idempotent. The kernel already
+had the correct primitive and had filed it under "inbox", where nobody found it.
+
 ## 0.1.0a32 — 2026-08-10
 
 Two things an assembly could not get from the public surface. No migration; the

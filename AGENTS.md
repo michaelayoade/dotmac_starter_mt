@@ -191,6 +191,20 @@ specifics) points here and must never fork these rules.
     Honoured by single-key AND bulk reads (ADR-0012).
     (`tests/unit/test_setting_inherits.py`)
 
+23. **At-most-once execution has ONE owner.** `dotmac_kernel.idempotency`
+    owns the ledger, the engine, the conflict rule and the retention sweep;
+    `messaging.process_once`/`process_once_platform` are adapters over it, not
+    a second mechanism. A scope names the OPERATION, never an HTTP route. The
+    effect and its ledger row commit in the SAME transaction — nothing is
+    reserved before the effect, so a crashed attempt leaves no marker and the
+    retry re-drives, and there is no "in progress" state to get stuck in. The
+    request fingerprint is its own column and is never overloaded onto a result
+    id; a key reused with a different fingerprint is a conflict, not a replay.
+    Retention is the product's policy: `expires_at` is nullable and the kernel
+    sets no default TTL. Non-transactional effects belong in the outbox
+    instead (ADR-0014).
+    (`tests/unit/test_idempotency.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
