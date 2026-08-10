@@ -96,6 +96,52 @@ def test_tenant_session_does_not_widen_to_other_tenants(
         admin_session.commit()
 
 
+def test_the_scope_survives_a_commit_inside_the_block(
+    admin_session: Session, tenant_a
+) -> None:
+    """The 0.1.0a28 defect. Every intended caller commits more than once.
+
+    `SET LOCAL` dies with the transaction, so the first commit inside the block
+    left the rest of it unscoped — and against a fail-closed policy that shows
+    up as a row the session just wrote coming back missing, not as an error.
+    """
+    role = _seed_role(admin_session, tenant_a, "commit-canary")
+    try:
+        with tenant_session(tenant_a.id) as db:
+            assert role.slug in _slugs(db)
+            db.commit()
+            assert role.slug in _slugs(db)
+            db.commit()
+            assert role.slug in _slugs(db)
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
+def test_the_scope_is_reset_before_the_connection_is_reused(
+    admin_session: Session, tenant_a
+) -> None:
+    """A session-level scope must not ride the pooled connection out.
+
+    That would be the cross-tenant leak `get_db` uses SET LOCAL to avoid, so the
+    fix for one hazard must not introduce the other.
+    """
+    role = _seed_role(admin_session, tenant_a, "reset-canary")
+    try:
+        with tenant_session(tenant_a.id) as db:
+            assert role.slug in _slugs(db)
+
+        leaked = SessionLocal()
+        try:
+            assert role.slug not in _slugs(leaked)
+        finally:
+            leaked.rollback()
+            leaked.close()
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
 def test_the_scope_is_applied_before_the_caller_gets_the_session(tenant_a) -> None:
     """No window in which a query can run unscoped.
 
