@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-kernel"
-version = "0.1.0a30"
+version = "0.1.0a31"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -43,7 +43,13 @@ python = ">=3.11,<3.14"
 # job that installs the wheel at the exact floor and exercises the supported
 # surface; without that job this range would be an assertion rather than a
 # claim. See COMPATIBILITY.md § "Dependency floors".
-fastapi = ">=0.111,<0.116"
+# Upper bound is a compatibility ceiling, not a preference. It was <0.116
+# while every assembly sat on 0.111; dotmac_academy_app is on 0.140, and a
+# kernel that cannot be installed beside a consumer is not a shared kernel.
+# The floor stays 0.111 because erp and sub pin it exactly, and `kernel-floors`
+# in CI proves that floor is real rather than aspirational — so this range is
+# exercised at BOTH ends: floors at 0.111, the main matrix at the newest.
+fastapi = ">=0.111,<0.141"
 sqlalchemy = "^2.0"
 # `email` extra pulls email-validator — a REAL kernel runtime dep, not an
 # assembly concern: the kernel's own `platform_auth` public surface (mounted

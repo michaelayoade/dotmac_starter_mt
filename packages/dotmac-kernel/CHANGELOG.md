@@ -6,6 +6,28 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a31 — 2026-08-10
+
+Widen the FastAPI ceiling so a consumer on a newer web stack can install the
+kernel at all. No migration, no API change.
+
+### Changed
+- **`fastapi` moves from `>=0.111,<0.116` to `>=0.111,<0.141`.** The ceiling was
+  set when every assembly sat on 0.111. `dotmac_academy_app` is on 0.140, and
+  resolution failed outright — a kernel that cannot be installed beside a
+  consumer is not a shared kernel, whatever its API looks like.
+
+  The floor stays 0.111 because erp and sub pin it exactly. Both ends of the
+  range are exercised: `kernel-floors` installs the declared floor and proves it
+  is real, and the main matrix resolves to the newest allowed.
+
+### Why the ceiling was wrong
+
+An upper bound is a claim about compatibility, and this one had become a claim
+about the fleet's habits instead. Nothing in the kernel needed `<0.116`; it was
+where everyone happened to be. That is the kind of constraint that silently
+decides who is allowed to adopt the platform.
+
 ## 0.1.0a30 — 2026-08-10
 
 `tenant_session_by_slug`. No migration, no breaking change.
