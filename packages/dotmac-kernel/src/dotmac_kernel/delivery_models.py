@@ -1,0 +1,150 @@
+"""Delivery receipts — what the PROVIDER said (ADR-0006 § 5c).
+
+One tenant-scoped table, `communication_deliveries`. The kernel outbox records
+that we dispatched something; this records what came back — the provider's id for
+the message, its verdict, and when.
+
+Ported from `dotmac_sub:app/models/notification.py::NotificationDelivery`, minus
+the queue that surrounds it there. Sub's queue is the kernel's `OutboxEvent`
+built twice (evidence: `docs/inventories/delivery-outbox-sources.md`), so only
+the receipt comes across.
+
+## Why the receipt is its own table rather than columns on the outbox row
+
+A dispatch has one outbox row and can have SEVERAL receipts: the provider accepts
+at 10:00, reports delivered at 10:01, and reports a bounce at 10:06 when the
+recipient's server finally rejects it. Flattening those onto the dispatch row
+would lose the sequence and, worse, would make the late bounce look like a failed
+send that could be retried.
+
+## `provider_message_id` is the idempotency key for INBOUND callbacks
+
+A provider webhook is at-least-once: the same bounce notification arrives twice.
+The partial unique index on `(tenant_id, provider, provider_message_id)` makes the
+second one a no-op instead of a second suppression event. It is partial because a
+receipt written at send time may not have an id yet (a synchronous SMTP failure
+never gets one), and NULLs must not collide.
+
+## The status vocabulary, and the one that is a trap
+
+`accepted` → the provider took it. `delivered` → it arrived. `failed` → the
+attempt failed and MAY be retried. `rejected` → the provider refused it.
+`bounced` → permanent, non-deliverable. `complaint` → the recipient marked it as
+spam.
+
+**Only `bounced` and `complaint` suppress.** A soft bounce — mailbox full, server
+temporarily unavailable — must be recorded as `failed`, not `bounced`, or a full
+inbox would permanently stop that customer's invoices. Sub does not draw this
+distinction because nothing in Sub ever writes a bounce at all; the distinction is
+introduced here deliberately, and `dotmac_kernel.delivery.record_receipt`
+documents where the judgement belongs.
+
+Import-safe: this module touches only ``Base.metadata``, never the engine.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    Uuid,
+    func,
+    text,
+)
+from sqlalchemy.orm import Mapped, mapped_column
+
+from dotmac_kernel.models import Base, uuid_pk
+
+DELIVERY_ACCEPTED = "accepted"
+DELIVERY_DELIVERED = "delivered"
+DELIVERY_FAILED = "failed"
+DELIVERY_REJECTED = "rejected"
+DELIVERY_BOUNCED = "bounced"
+DELIVERY_COMPLAINT = "complaint"
+
+DELIVERY_STATUSES: tuple[str, ...] = (
+    DELIVERY_ACCEPTED,
+    DELIVERY_DELIVERED,
+    DELIVERY_FAILED,
+    DELIVERY_REJECTED,
+    DELIVERY_BOUNCED,
+    DELIVERY_COMPLAINT,
+)
+
+#: The verdicts that mean "never send here again". Read by
+#: `dotmac_kernel.delivery.record_receipt`, which turns them into an `all`-scoped
+#: suppression. Deliberately NOT `failed` or `rejected`: both can be transient.
+SUPPRESSING_STATUSES: frozenset[str] = frozenset({DELIVERY_BOUNCED, DELIVERY_COMPLAINT})
+
+
+class CommunicationDelivery(Base):
+    """One thing a provider told us about one outbound message."""
+
+    __tablename__ = "communication_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('accepted', 'delivered', 'failed', 'rejected', "
+            "'bounced', 'complaint')",
+            name="ck_communication_deliveries_status",
+        ),
+        # Idempotency for inbound provider callbacks. PARTIAL: a receipt written
+        # at send time may carry no provider id, and NULLs must not collide.
+        Index(
+            "uq_communication_deliveries_provider_message",
+            "tenant_id",
+            "provider",
+            "provider_message_id",
+            unique=True,
+            postgresql_where=text("provider_message_id IS NOT NULL"),
+            sqlite_where=text("provider_message_id IS NOT NULL"),
+        ),
+        Index("ix_communication_deliveries_tenant_id", "tenant_id"),
+        # "What happened to messages for this address?" — the operator question.
+        Index(
+            "ix_communication_deliveries_address",
+            "tenant_id",
+            "channel",
+            "address",
+        ),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(String(40), nullable=False)
+    #: Normalised, by the same rule the consent ledger uses — otherwise a bounce
+    #: for `Jane@Example.com` would not suppress `jane@example.com`.
+    address: Mapped[str] = mapped_column(String(320), nullable=False)
+    provider: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    response_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: When the PROVIDER says it happened, which is not when we recorded it.
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+__all__ = [
+    "DELIVERY_ACCEPTED",
+    "DELIVERY_BOUNCED",
+    "DELIVERY_COMPLAINT",
+    "DELIVERY_DELIVERED",
+    "DELIVERY_FAILED",
+    "DELIVERY_REJECTED",
+    "DELIVERY_STATUSES",
+    "SUPPRESSING_STATUSES",
+    "CommunicationDelivery",
+]

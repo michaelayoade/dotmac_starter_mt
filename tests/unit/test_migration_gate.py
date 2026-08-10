@@ -113,7 +113,7 @@ def _messages(report) -> str:
 
 
 def test_the_real_repo_composes() -> None:
-    """The repo's OWN composition — kernel (`0001`…`0019`), assembly
+    """The repo's OWN composition — kernel (`0001`…`0020`), assembly
     (`a001`…`a003`), and the first installed MODULE lineage (`ts_0001`,
     `ts_0002`) — must pass. The two host lineages are grandfathered (legacy
     revision-id format, tables in `public`); `template_studio` gets the strict
@@ -128,7 +128,7 @@ def test_the_real_repo_composes() -> None:
     assert report.ok, report.render()
     # Non-vacuity: a gate that walked an empty set would pass silently. Bump
     # this deliberately when a lineage gains a revision.
-    assert len(report.revisions) == 25
+    assert len(report.revisions) == 26
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio"}
 

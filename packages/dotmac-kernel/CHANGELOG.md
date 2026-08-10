@@ -6,6 +6,47 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a35 — 2026-08-10
+
+Delivery receipts, and the loop that keeps the consent ledger honest (ADR-0006
+§ 5c). Additive; carries kernel migration `0020`.
+
+### Added
+- **`dotmac_kernel.delivery`** and **`delivery_models`** —
+  `communication_deliveries` records what the PROVIDER said about an outbound
+  message (its id, verdict, response code, when), and `record_receipt` is the
+  only writer.
+- **The bounce→consent feedback loop.** A `bounced` or `complaint` receipt
+  suppresses the address with scope `all`, in the SAME transaction as the
+  receipt. **This loop exists in neither product**: verified in `dotmac_sub` at
+  `5d6f115b7`, `DeliveryStatus.bounced` is declared and never assigned,
+  `SuppressionReason.bounce`/`.complaint` have zero call sites, and the campaign
+  unsubscribe link is the only writer of a suppression anywhere. Sub's ledger is
+  unsubscribe-only in practice, so the `all` scope that protects transactional
+  delivery is never populated by anything automated. A consent ledger nothing
+  writes to answers "yes, send" forever.
+- **Idempotent provider callbacks.** A partial unique index on
+  `(tenant_id, provider, provider_message_id) WHERE provider_message_id IS NOT
+  NULL` makes an at-least-once webhook safe to redeliver, while still allowing
+  receipts for synchronous failures that never got an id.
+
+### Deliberately NOT added
+- **A queue.** Sub's `Notification` table is `dotmac_kernel.messaging`'s
+  `OutboxEvent` built a second time — status/attempts/backoff/lease-reclaim/
+  dead-letter all appear twice. Porting it would install the duplicate
+  permanently; ADR-0014 already says non-transactional effects belong in the
+  outbox. Evidence: `docs/inventories/delivery-outbox-sources.md`.
+- **Provider clients.** SMTP, Twilio and Meta Cloud API clients are product
+  dependencies, as ADR-0009 ships a `SecretSource` seam and no store client.
+
+### Note for adapter authors
+Only `bounced` and `complaint` suppress. A SOFT bounce — mailbox full,
+greylisted — must be recorded as `failed`, never `bounced`, or a full inbox
+permanently stops that customer's invoices. The kernel cannot classify that
+("5.1.1 user unknown" is permanent, "4.2.2 mailbox full" is not, and every
+provider spells them differently), so the adapter classifies and this module acts
+on the classification.
+
 ## 0.1.0a34 — 2026-08-10
 
 The do-not-contact ledger gets one owner (ADR-0006 § 5c). Additive; carries

@@ -293,6 +293,7 @@ def test_metadata_matches_live_tables(admin_engine) -> None:
     from dotmac_kernel import (  # noqa: F401
         audit,
         consent_models,
+        delivery_models,
         idempotency_models,
         models_platform,
         settings_models,
