@@ -1,7 +1,7 @@
 """Targeted coverage for the tenant-resolution health-path bypass.
 
 `_HEALTH_PATHS` short-circuits `TenantResolverMiddleware.dispatch` before it
-ever calls `self._resolve()` (and therefore `SessionLocal()`), because health
+ever calls `self._resolve()` (and therefore `resolver_session()`), because health
 probes must succeed even when the DB is unreachable (see
 dotmac_kernel/middleware/tenant.py's module docstring and the "/health does not
 touch DB" contract referenced there). This file drives the real middleware
@@ -9,9 +9,9 @@ over a raw ASGI scope (mirroring tests/unit/test_logging.py's middleware
 test) to prove:
 
 - exact `_HEALTH_PATHS` members bypass resolution entirely — the DB seam
-  (`SessionLocal`) is never touched
+  (`resolver_session`) is never touched
 - near-miss paths ("/health2", "/health/ready/x") are NOT exempted and must
-  still go through `_resolve()` / `SessionLocal()`
+  still go through `_resolve()` / `resolver_session()`
 """
 
 from __future__ import annotations
@@ -82,15 +82,15 @@ def _drive(
     return scope, status.get("code", 0)
 
 
-def _exploding_session_local(*args: object, **kwargs: object) -> None:
+def _exploding_resolver(*args: object, **kwargs: object) -> None:
     raise AssertionError(
-        "SessionLocal() was called while handling a health-path request; "
+        "resolver_session() was called while handling a health-path request; "
         "health checks must not touch the DB."
     )
 
 
-def _recording_session_local() -> tuple[Callable[..., object], dict[str, int]]:
-    """Fake SessionLocal that records each open and resolves to 'no tenant'.
+def _recording_resolver() -> tuple[Callable[..., object], dict[str, int]]:
+    """Fake resolver_session that records each open and resolves to 'no tenant'.
 
     Used for the near-miss paths, which must reach the DB seam but should
     resolve benignly (no tenant found) rather than raise, so the test proves
@@ -125,12 +125,12 @@ def test_health_paths_bypass_tenant_resolution_without_db_access(
 ) -> None:
     """Exact `_HEALTH_PATHS` members short-circuit before `_resolve()`.
 
-    The DB seam (`SessionLocal`) is stubbed to raise `AssertionError` on any
+    The DB seam (`resolver_session`) is stubbed to raise `AssertionError` on any
     call. If the middleware attempted resolution for a health path, this test
     would fail with that AssertionError propagating out of `app(...)` instead
     of reaching the response assertions below.
     """
-    monkeypatch.setattr(tenant_module, "SessionLocal", _exploding_session_local)
+    monkeypatch.setattr(tenant_module, "resolver_session", _exploding_resolver)
     app = TenantResolverMiddleware(_ok_inner_app)
 
     scope, status = _drive(app, path)
@@ -143,8 +143,8 @@ def test_unresolved_tenant_404_uses_error_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The middleware's hand-built 404 must match the app-wide error envelope."""
-    session_local, _ = _recording_session_local()
-    monkeypatch.setattr(tenant_module, "SessionLocal", session_local)
+    session_local, _ = _recording_resolver()
+    monkeypatch.setattr(tenant_module, "resolver_session", session_local)
     app = TenantResolverMiddleware(_ok_inner_app)
 
     messages: list[dict[str, object]] = []
@@ -203,8 +203,8 @@ def test_near_miss_paths_do_not_bypass_resolution(
     stub proves that seam was actually invoked (rather than the request
     failing/erroring before ever reaching it).
     """
-    session_local, calls = _recording_session_local()
-    monkeypatch.setattr(tenant_module, "SessionLocal", session_local)
+    session_local, calls = _recording_resolver()
+    monkeypatch.setattr(tenant_module, "resolver_session", session_local)
     app = TenantResolverMiddleware(_ok_inner_app)
 
     _drive(app, path)
@@ -231,7 +231,7 @@ def test_static_paths_bypass_tenant_resolution_without_db_access(
 ) -> None:
     """Exact `/static` and anything under `/static/` short-circuit before
     `_resolve()` — mirrors the health-path bypass test above."""
-    monkeypatch.setattr(tenant_module, "SessionLocal", _exploding_session_local)
+    monkeypatch.setattr(tenant_module, "resolver_session", _exploding_resolver)
     app = TenantResolverMiddleware(_ok_inner_app)
 
     scope, status = _drive(app, path)
@@ -247,9 +247,9 @@ def test_static_near_miss_paths_do_not_bypass_resolution(
     """`/staticevil` and `/static2/x` merely start with the string "static"
     but are neither `/static` nor under `/static/` — a naive
     `path.startswith("/static")` check (no trailing slash) would wrongly
-    bypass these. They must still hit `_resolve()` / `SessionLocal()`."""
-    session_local, calls = _recording_session_local()
-    monkeypatch.setattr(tenant_module, "SessionLocal", session_local)
+    bypass these. They must still hit `_resolve()` / `resolver_session()`."""
+    session_local, calls = _recording_resolver()
+    monkeypatch.setattr(tenant_module, "resolver_session", session_local)
     app = TenantResolverMiddleware(_ok_inner_app)
 
     _drive(app, path)

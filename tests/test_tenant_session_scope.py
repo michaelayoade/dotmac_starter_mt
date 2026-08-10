@@ -37,6 +37,7 @@ import pytest
 from dotmac_kernel.db import (
     SessionLocal,
     set_tenant,
+    resolver_session,
     tenant_session,
     tenant_session_by_slug,
 )
@@ -254,3 +255,60 @@ def test_by_slug_resets_the_scope_on_exit(admin_session: Session, tenant_a) -> N
     finally:
         admin_session.delete(role)
         admin_session.commit()
+
+
+def test_resolver_session_sees_every_tenant(
+    admin_session: Session, tenant_a, tenant_b
+) -> None:
+    """Unscoped is the point: a resolver must see a tenant it has not scoped to.
+
+    If this ever came back scoped, resolution would fail closed — a valid host
+    would resolve to no tenant, and the symptom would be a 404 rather than an
+    error.
+    """
+    a = _seed_role(admin_session, tenant_a, "resolver-a")
+    b = _seed_role(admin_session, tenant_b, "resolver-b")
+    try:
+        with resolver_session() as db:
+            slugs = _slugs(db)
+            assert a.slug in slugs
+            assert b.slug in slugs
+    finally:
+        admin_session.delete(a)
+        admin_session.delete(b)
+        admin_session.commit()
+
+
+def test_resolver_session_clears_an_inherited_scope(
+    admin_session: Session, tenant_a, tenant_b
+) -> None:
+    """A scope left on a pooled connection must not filter the resolver.
+
+    Simulated by scoping the connection first, then asserting the resolver still
+    sees the other tenant's rows.
+    """
+    b = _seed_role(admin_session, tenant_b, "inherited-scope")
+    try:
+        leaked = SessionLocal()
+        try:
+            set_tenant(leaked, tenant_a.id, transaction_local=False)
+            assert b.slug not in _slugs(leaked)
+        finally:
+            leaked.rollback()
+            leaked.close()
+
+        with resolver_session() as db:
+            assert b.slug in _slugs(db)
+    finally:
+        admin_session.delete(b)
+        admin_session.commit()
+
+
+def test_resolver_session_never_commits(admin_session: Session, tenant_a) -> None:
+    """Read-only by construction: it cannot become a back door for unscoped writes."""
+    slug = f"resolver-write-{uuid.uuid4().hex[:8]}"
+    with resolver_session() as db:
+        db.add(Role(tenant_id=tenant_a.id, slug=slug, name=slug))
+        db.flush()
+
+    assert slug not in _slugs(admin_session)

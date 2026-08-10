@@ -6,6 +6,46 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a32 — 2026-08-10
+
+Two things an assembly could not get from the public surface. No migration; the
+new setting defaults to the existing behaviour.
+
+### Added
+- **`resolver_session()`** — an UNSCOPED session on the main engine, for
+  deciding which tenant to scope to. This was the one legitimate reason to run
+  without a scope and the one thing the surface had no name for: the kernel's own
+  `TenantResolverMiddleware` reached for `SessionLocal` while the public-surface
+  test forbade consumers the same import. That is not a rule with an exception,
+  it is a missing primitive — and an assembly reimplementing tenant resolution
+  had no choice but to break the rule.
+
+  Read-only by construction (always rolls back, never commits) so it cannot
+  become a back door for unscoped writes. It also RESETs the tenant setting
+  before yielding: a scope inherited from a pooled connection would filter the
+  resolver's own lookup, and because RLS fails closed the symptom would be a
+  valid host resolving to no tenant.
+
+- **`single_tenant_slug` deployment setting**, enforced by
+  `TenantResolverMiddleware`. ADR-0003 makes a dedicated one-tenant deployment
+  per ISP the safe default, but nothing enforced it: a deployment that acquired
+  rows for a second tenant — restored backup, migration rehearsal, a shared
+  database someone meant to split — would serve them to anyone who knew the
+  host, with no error state, because the host resolved perfectly well.
+
+  Empty means multi-tenant, so every existing assembly keeps its current
+  behaviour. Set it and a host resolving to any other tenant is refused rather
+  than substituted: quietly serving the right tenant for a wrong host would hide
+  the misconfiguration that produced the wrong host.
+
+### Why now
+
+`dotmac_academy_app` had implemented the lockdown privately, which is the only
+reason it was noticed — and it was the reason adopting the kernel's middleware
+would have been a downgrade. That generalises: **a shared component must be a
+superset of what it replaces, or adoption silently removes a control.** The
+assembly's tests cannot catch it, because they do not know the kernel exists.
+
 ## 0.1.0a31 — 2026-08-10
 
 Widen the FastAPI ceiling so a consumer on a newer web stack can install the

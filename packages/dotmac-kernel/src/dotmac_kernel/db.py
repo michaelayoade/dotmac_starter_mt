@@ -32,6 +32,7 @@ __all__ = [
     "get_platform_db",
     "platform_engine",
     "platform_session",
+    "resolver_session",
     "set_tenant",
     "tenant_session",
     "tenant_session_by_slug",
@@ -189,6 +190,43 @@ def tenant_session(tenant_id: object) -> Generator[Session, None, None]:
             db.rollback()
         finally:
             db.close()
+
+
+@contextmanager
+def resolver_session() -> Generator[Session, None, None]:
+    """An UNSCOPED session on the main engine, for deciding which tenant to scope to.
+
+    The one legitimate reason to run without a tenant scope, and until now the
+    one thing the public surface had no name for. `TenantResolverMiddleware`
+    needs it — you cannot scope to a tenant you are still identifying from a
+    Host header — so the kernel reached for `SessionLocal` internally while
+    forbidding consumers the same import. That is not a rule with an exception;
+    it is a missing primitive, and an assembly reimplementing tenant resolution
+    had no choice but to break the rule.
+
+    Why not the alternatives:
+
+    * `tenant_session_by_slug` needs a slug; a resolver has a host.
+    * `platform_session` fits semantically — resolution is a platform concern —
+      but runs on `platform_engine`, which is `pool_size=2, max_overflow=2`.
+      Resolution happens on EVERY request, so that would cap an entire
+      application at four connections.
+
+    Read-only by construction: it always rolls back and never commits, so it
+    cannot become a back door for unscoped writes.
+
+    It also RESETs the tenant setting before yielding. That is correctness, not
+    paranoia — a scope inherited from a pooled connection would filter the
+    resolver's own lookup, and because RLS fails closed the symptom would be a
+    valid host resolving to no tenant at all.
+    """
+    db = SessionLocal()
+    try:
+        db.execute(text("RESET app.current_tenant"))
+        yield db
+    finally:
+        db.rollback()
+        db.close()
 
 
 @contextmanager

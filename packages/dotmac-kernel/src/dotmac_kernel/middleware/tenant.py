@@ -36,7 +36,7 @@ from starlette.requests import Request
 from starlette.types import ASGIApp
 
 from dotmac_kernel.config import settings
-from dotmac_kernel.db import SessionLocal
+from dotmac_kernel.db import resolver_session
 from dotmac_kernel.errors import envelope
 from dotmac_kernel.models import Tenant, TenantDomain
 
@@ -58,6 +58,8 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
         self._root = settings.platform_root_domain.lower().lstrip(".")
+        # Empty => multi-tenant, the historical behaviour.
+        self._single_tenant = settings.single_tenant_slug.strip().lower()
 
     async def dispatch(self, request: Request, call_next):
         host = (request.headers.get("host") or "").split(":")[0].lower()
@@ -78,7 +80,7 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
             request.state.tenant = None
             return await call_next(request)
 
-        request.state.tenant = self._resolve(host)
+        request.state.tenant = self._allow(self._resolve(host))
 
         # Platform paths are allowed without a tenant.
         if request.state.tenant is None and not _is_platform_path(
@@ -95,7 +97,7 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
     def _resolve(self, host: str) -> Tenant | None:
         if not host:
             return None
-        with SessionLocal() as db:
+        with resolver_session() as db:
             # 1. Custom domain
             tenant = db.scalars(
                 select(Tenant)
@@ -128,6 +130,30 @@ class TenantResolverMiddleware(BaseHTTPMiddleware):
 
             # 4. Unknown host → caller decides (will 404)
             return None
+
+    def _allow(self, tenant: Tenant | None) -> Tenant | None:
+        """Enforce the single-tenant deployment fact, if one is declared.
+
+        ADR-0003 makes a dedicated one-tenant deployment per ISP the safe
+        default, but nothing enforced it: a deployment carrying rows for a second
+        tenant would happily serve them to anyone who knew the host. This is the
+        enforcement, and it lives here so every assembly gets it rather than each
+        reinventing it — `dotmac_academy_app` had, privately, and that is the
+        only reason it was noticed.
+
+        Refuses rather than substitutes: a host that resolves to the wrong tenant
+        is a misconfiguration, and quietly serving the right one would hide it.
+        """
+        if tenant is None or not self._single_tenant:
+            return tenant
+        if tenant.slug.lower() != self._single_tenant:
+            logger.warning(
+                "rejected host for tenant slug=%s on a deployment locked to slug=%s",
+                tenant.slug,
+                self._single_tenant,
+            )
+            return None
+        return tenant
 
 
 def _is_platform_path(path: str, host: str, root: str) -> bool:

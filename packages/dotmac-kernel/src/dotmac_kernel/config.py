@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     platform_database_url: str = ""
     migration_database_url: str = ""
     platform_root_domain: str = "localhost"
+    # A deployment fact, per ADR-0013: the module declares the question, the
+    # deployment declares the answer. Empty means multi-tenant, which is the
+    # existing behaviour and the default. Set it and the resolver refuses any
+    # host that resolves to a different tenant — the lockdown ADR-0003 Stage A
+    # ("dedicated one-tenant deployment per ISP") implies but nothing enforced.
+    single_tenant_slug: str = ""
     trusted_hosts: str = ""
     jwt_secret: str = "dev-insecure-change-me"
     session_hash_secret: str = "dev-insecure-change-me"
