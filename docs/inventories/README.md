@@ -72,6 +72,7 @@ Three readings that matter for the programme:
 | Template, CSS, static-asset, navigation inventory | same three |
 | Branding/settings inventory across starter, ERP, Sub | `branding-settings.md` |
 | Migration/table collision inventory | `migration-collisions.md` |
+| Kernel-restatement sweep (adoption recon) | `kernel-restatement-sweep.md` |
 | Supported product-profile matrix | ADR-0006 § 4 |
 | Brand precedence decision | ADR-0006 § 3 |
 | Module vs theme vs product-facet terminology | ADR-0006 § 1 |
