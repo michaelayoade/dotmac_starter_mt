@@ -34,7 +34,13 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from dotmac_kernel.db import SessionLocal, set_tenant, tenant_session
+from dotmac_kernel.db import (
+    SessionLocal,
+    set_tenant,
+    tenant_session,
+    tenant_session_by_slug,
+)
+from dotmac_kernel.exceptions import NotFoundError
 from dotmac_kernel.models import Role
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -182,6 +188,69 @@ def test_set_tenant_is_what_get_db_uses(admin_session: Session, tenant_a) -> Non
         finally:
             db.rollback()
             db.close()
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
+def test_by_slug_resolves_and_scopes_in_one_session(
+    admin_session: Session, tenant_a
+) -> None:
+    """The two steps every assembly CLI needs, without touching SessionLocal."""
+    role = _seed_role(admin_session, tenant_a, "slug-canary")
+    try:
+        with tenant_session_by_slug(tenant_a.slug) as (db, tenant):
+            assert tenant.id == tenant_a.id
+            assert role.slug in _slugs(db)
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
+def test_by_slug_yields_an_attached_tenant(tenant_a) -> None:
+    """Attached, not detached — the caller reads attributes off it.
+
+    Resolving in a separate session would hand back a detached instance whose
+    next attribute access either refreshes or raises. Sharing one session is
+    what makes `tenant.id` safe to use inside the block.
+    """
+    with tenant_session_by_slug(tenant_a.slug) as (db, tenant):
+        assert tenant.slug == tenant_a.slug
+        assert tenant in db
+
+
+def test_by_slug_raises_rather_than_yielding_none(tenant_a) -> None:
+    """A CLI handed a None carries on and prints an empty report."""
+    with pytest.raises(NotFoundError):
+        with tenant_session_by_slug("no-such-tenant-abcdef") as (_db, _t):
+            raise AssertionError("body must not run")
+
+
+def test_by_slug_does_not_widen_to_other_tenants(
+    admin_session: Session, tenant_a, tenant_b
+) -> None:
+    role = _seed_role(admin_session, tenant_a, "slug-widen-canary")
+    try:
+        with tenant_session_by_slug(tenant_b.slug) as (db, _tenant):
+            assert role.slug not in _slugs(db)
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()
+
+
+def test_by_slug_resets_the_scope_on_exit(admin_session: Session, tenant_a) -> None:
+    """Same pooled-connection hazard as `tenant_session`."""
+    role = _seed_role(admin_session, tenant_a, "slug-reset-canary")
+    try:
+        with tenant_session_by_slug(tenant_a.slug) as (db, _tenant):
+            assert role.slug in _slugs(db)
+
+        leaked = SessionLocal()
+        try:
+            assert role.slug not in _slugs(leaked)
+        finally:
+            leaked.rollback()
+            leaked.close()
     finally:
         admin_session.delete(role)
         admin_session.commit()

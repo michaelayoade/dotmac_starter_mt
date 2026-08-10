@@ -6,6 +6,31 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a30 — 2026-08-10
+
+`tenant_session_by_slug`. No migration, no breaking change.
+
+### Added
+- **`tenant_session_by_slug(slug)`** — yields `(db, tenant)`. Every assembly's
+  CLI needs the same two steps: look a tenant up by the slug an operator typed,
+  then act as that tenant. Each one solving it privately means each one reaching
+  for `SessionLocal`, which the public-surface test forbids — so the kernel owes
+  them the entry point.
+
+  The lookup and the scope share one session deliberately: `tenants` is not
+  tenant-scoped, so the pre-scope query is legal, the returned `Tenant` is still
+  attached when the caller gets it, and no second connection is taken to resolve
+  a name. It raises `NotFoundError` rather than yielding `None`, because a CLI
+  handed a `None` tends to carry on and print an empty report.
+
+### Why now
+
+That "legal unscoped lookup" is the trap. `dotmac_academy_app` resolved a tenant
+by slug, forgot the scope, and got a working query followed by silence — its
+`audit-banks` printed `TOTAL 0 0` against 333 banks. The lookup succeeding is
+precisely what made the omission invisible, so the fix is to stop asking callers
+to remember the second step at all.
+
 ## 0.1.0a29 — 2026-08-10
 
 Fixes a defect in `tenant_session` as shipped in 0.1.0a28. No migration.

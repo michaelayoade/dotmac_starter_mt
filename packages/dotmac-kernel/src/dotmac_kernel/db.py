@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any
 
 from fastapi import Request
 from sqlalchemy import create_engine, text
@@ -33,6 +34,7 @@ __all__ = [
     "platform_session",
     "set_tenant",
     "tenant_session",
+    "tenant_session_by_slug",
 ]
 
 engine = create_engine(
@@ -180,6 +182,57 @@ def tenant_session(tenant_id: object) -> Generator[Session, None, None]:
         # borrows it next — the exact cross-tenant leak `get_db` uses SET LOCAL
         # to avoid. Reset before close, and never let a failed reset mask the
         # caller's own exception.
+        try:
+            db.execute(text("RESET app.current_tenant"))
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+
+@contextmanager
+def tenant_session_by_slug(slug: str) -> Generator[tuple[Session, Any], None, None]:
+    """`tenant_session`, for callers that have a slug rather than an id.
+
+    Yields `(db, tenant)`. This exists because every assembly's CLI needs the
+    same two steps — look a tenant up by the slug an operator typed, then act as
+    that tenant — and each one solving it privately means each one reaching for
+    `SessionLocal`, which is the import the public-surface test forbids.
+
+    The lookup and the scope share one session on purpose. `tenants` is not
+    tenant-scoped, so querying it before any scope is set is legal; doing it here
+    means the returned `Tenant` is still attached when the caller gets it, and
+    that no second connection is taken to resolve a name.
+
+    That legality is also the trap this closes. Because the lookup succeeds
+    unscoped, a caller who resolves a tenant and then forgets the scope gets a
+    working query followed by silence — which is exactly how
+    `dotmac_academy_app` shipped an audit command that reported a clean estate
+    it could not see.
+
+    Raises `NotFoundError` rather than yielding `None`: a CLI handed a `None`
+    tends to carry on and produce an empty report, which is the failure this
+    module exists to stop being quiet.
+    """
+    from dotmac_kernel.exceptions import NotFoundError
+
+    # Local import: `models` pulls in every declarative class, and `db` is
+    # imported early by consumers that only want an engine.
+    from dotmac_kernel.models import Tenant
+
+    db = SessionLocal()
+    try:
+        tenant = db.query(Tenant).filter(Tenant.slug == slug).one_or_none()
+        if tenant is None:
+            raise NotFoundError(f"No tenant with slug {slug!r}.")
+        set_tenant(db, tenant.id, transaction_local=False)
+        yield db, tenant
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
         try:
             db.execute(text("RESET app.current_tenant"))
             db.commit()
