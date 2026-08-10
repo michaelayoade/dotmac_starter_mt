@@ -36,8 +36,8 @@ import uuid
 import pytest
 from dotmac_kernel.db import (
     SessionLocal,
-    set_tenant,
     resolver_session,
+    set_tenant,
     tenant_session,
     tenant_session_by_slug,
 )
@@ -312,3 +312,28 @@ def test_resolver_session_never_commits(admin_session: Session, tenant_a) -> Non
         db.flush()
 
     assert slug not in _slugs(admin_session)
+
+
+def test_resolver_result_is_usable_after_the_block(
+    admin_session: Session, tenant_a
+) -> None:
+    """A resolver hands something back, and its caller reads it later.
+
+    `TenantResolverMiddleware` puts the Tenant on `request.state`; the
+    rate-limit and observability middleware read `.id` well after the session
+    has closed. Rolling back without expunging first EXPIRES the instance, so it
+    comes back alive but hollow and the next attribute access raises
+    DetachedInstanceError — which is exactly how this shipped and how CI caught
+    it.
+    """
+    role = _seed_role(admin_session, tenant_a, "detached-canary")
+    try:
+        with resolver_session() as db:
+            found = db.query(Role).filter(Role.slug == role.slug).one()
+
+        # Outside the block, on a closed session: must not raise.
+        assert found.slug == role.slug
+        assert found.tenant_id == tenant_a.id
+    finally:
+        admin_session.delete(role)
+        admin_session.commit()

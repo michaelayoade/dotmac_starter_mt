@@ -225,6 +225,17 @@ def resolver_session() -> Generator[Session, None, None]:
         db.execute(text("RESET app.current_tenant"))
         yield db
     finally:
+        # Detach before rolling back, in that order and deliberately. A resolver
+        # exists to hand something back, and its result outlives the session:
+        # `TenantResolverMiddleware` puts the Tenant on `request.state` and later
+        # middleware reads `tenant.id` long after this block has exited.
+        #
+        # `rollback()` EXPIRES every instance still in the session, so the object
+        # would come back alive but hollow — the next attribute access tries to
+        # refresh against a closed session and raises DetachedInstanceError.
+        # `expunge_all()` first removes the instances, so the rollback has
+        # nothing to expire and they keep the values already loaded.
+        db.expunge_all()
         db.rollback()
         db.close()
 
