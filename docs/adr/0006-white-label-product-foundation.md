@@ -586,16 +586,37 @@ So, before a product cuts over to a kernel subsystem:
    for delegating, and the remaining restatements are a list that may only
    shrink.
 
+5. **The sweep PARSES. It does not grep.** This is a correction to the first
+   version of this amendment, and the correction is the worked example.
+
+   That version cited a striking finding: eleven of `dotmac_erp`'s twenty-nine
+   value-type branches were in HR employee filtering, so `SettingValueType` had
+   been borrowed as a general "what kind of value is this" vocabulary. **That
+   was false.** HR's `value_type` is
+   `Literal["uuid", "date", "string", "enum", "bool"]` — an unrelated
+   filter-field type that happens to share an attribute name. A grep for
+   `value_type ==` matched it, and a design narrative was built on the match.
+
+   The same grep-shaped sweep under-reported twice more within the hour, in
+   `dotmac_sub`: it missed setting specs declared through a
+   `build_*_specs(setting_spec)` CALLABLE rather than a literal constructor,
+   which caused a duplicate spec to be registered and every test to fail at
+   import; and it missed `from ... import DEFAULTS as _ALIAS`, because the
+   alias was searched for instead of the name.
+
+   Three misses, one cause: a pattern was guessed at where the question needed
+   the syntax tree. `scripts/restatement_sweep.py` is the sweep, and a sweep
+   reported without it is an estimate.
+
+   A detector can also over-report, which is the same failure one sign away.
+   The first parsing run counted 139 "local cache keys" in Sub — nearly all of
+   them permission codes like `"settings:manage"` — and counted a
+   `query().filter().filter()` chain as three reads. A finding is only a
+   finding once the detector has been checked against what it matched.
+
 This does not gate adoption on a clean sweep — a product with restatements
 still adopts. It gates adoption on a KNOWN sweep, so the cutover's cost is
 visible before it is paid rather than discovered one CI run at a time.
-
-A worked consequence of doing it: the first sweep of `dotmac_erp` found eleven
-of its twenty-nine value-type branches in HR employee filtering, which is not a
-settings surface. `SettingValueType` had been borrowed as a general "what kind
-of value is this" vocabulary. That must NOT follow the settings cutover into the
-kernel registry; it needs its own type. Found by sweeping, it is a design
-question. Found mid-cutover, it would have looked like a blocker.
 
 ## Consequences
 
