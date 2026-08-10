@@ -53,6 +53,11 @@ from dotmac_template_studio.contexts import (
     registered_contexts,
 )
 from dotmac_template_studio.manifest import module
+from dotmac_template_studio.seeding import (
+    SeedOutcome,
+    TemplateSeed,
+    seed_templates,
+)
 from dotmac_template_studio.web import template_dir
 
 _PKG_DIR = Path(__file__).resolve().parent
@@ -60,7 +65,7 @@ _PKG_DIR = Path(__file__).resolve().parent
 # 0.2.0a1, not 0.1.0a2: § 5b is a BREAKING change to every part of the surface —
 # `kind` is gone, `channel` and `context` are required, and the render route
 # moved. Pre-1.0 a `0.MINOR` bump is how this package signals that (CHANGELOG).
-__version__ = "0.2.0a1"
+__version__ = "0.2.0a2"
 
 
 def migrations_dir() -> Path:
@@ -75,10 +80,13 @@ def migrations_dir() -> Path:
 
 __all__ = [
     "RenderContext",
+    "SeedOutcome",
+    "TemplateSeed",
     "__version__",
     "migrations_dir",
     "module",
     "register_contexts",
+    "seed_templates",
     "registered_contexts",
     "service",
     "template_dir",

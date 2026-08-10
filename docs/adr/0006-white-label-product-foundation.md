@@ -780,6 +780,68 @@ unextractable, 2026-08-09 kept consent and document provenance in the shared
 layer, and 2026-08-08 named Sub and ERP as the sources for the pieces that
 survived.
 
+#### 5d. What the per-owner dossiers changed — six owners became four
+
+5c named six owners and required a dossier per owner before extraction. Three of
+those dossiers have now been taken, and two of them shrank their own owner. The
+map named the DECISIONS correctly; two of them turned out to already have homes.
+
+| § 5c owner | Dossier outcome | Where it landed |
+|---|---|---|
+| template studio | unchanged | `dotmac-template-studio` 0.2.0a2 |
+| consent / suppression | unchanged | `dotmac_kernel.consent` (0.1.0a34) |
+| delivery / outbox | **shrank** — not a queue | `dotmac_kernel.delivery` (0.1.0a35) |
+| channel policy | **dissolved** — it is a setting | `dotmac_kernel.channel_policy`, a reader over one `SettingSpec` |
+| document generation | not yet taken | — |
+| product domain | unchanged | stays in ERP and Sub |
+
+**Delivery is not a queue.** `docs/inventories/delivery-outbox-sources.md` found
+Sub's `Notification` and the kernel's `OutboxEvent` to be the same machine built
+twice — status, attempts, backoff, worker lease, stale reclaim and dead-letter all
+appear in both. Sub's predates the kernel's. ADR-0014 already routes
+non-transactional effects to the outbox, and sending an email is the canonical
+one. The delivery owner therefore reduces to a receipt table, a provider seam,
+and the feedback loop below.
+
+**Channel policy is a setting, not a subsystem.**
+`docs/inventories/channel-policy-sources.md` found Sub stores its entire policy as
+one JSON document in `domain_settings` and resolves it through ordinary settings
+precedence. The kernel already owns the resolver, the scope chain, ADR-0012
+inheritance, change history and the admin surface; what was missing was a typed
+reader. This owner is therefore **folded into settings** rather than standing
+alone — the reason it read as "the weakest of the three" in 5c was that the unit
+was drawn one size too large, not that the capability was doubtful.
+
+Sub's legacy per-event shadow setting (`notification_event_<code>_channels`),
+which its own docstring calls legacy, is deliberately not ported: a second writer
+for one decision on day one is the parallel authority the source-of-truth
+standard exists to prevent.
+
+#### 5e. Consent needs a writer, or it answers "yes" forever
+
+Taking the delivery dossier surfaced a defect in the source that changes what
+consent is worth in production, and it is recorded here because it is a
+FLEET-WIDE lesson rather than a Sub bug.
+
+Verified in `dotmac_sub` at `5d6f115b7`: `DeliveryStatus.bounced` is declared and
+never assigned; `SuppressionReason.bounce` and `.complaint` have zero call sites;
+exactly one site in the product writes a suppression at all — the campaign
+unsubscribe link. Sub's consent ledger is therefore **unsubscribe-only in
+practice**, and the `all` scope that protects transactional delivery is designed,
+documented and never populated by anything automated.
+
+**The ruling: a consent ledger with no automated writer is not a consent
+mechanism.** Any product adopting the consent facility must also wire the
+provider feedback loop — a hard bounce or spam complaint suppresses the address
+with scope `all` — or it has a table that answers "yes, send" forever. The kernel
+now ships that loop (`dotmac_kernel.delivery.record_receipt`), so the obligation
+is to route sends through it rather than to reimplement it.
+
+The corollary for adapter authors is stated where it can do damage: only a
+PERMANENT failure is `bounced`. A soft bounce recorded as `bounced` permanently
+stops that customer's invoices, and the kernel cannot classify the difference
+because every provider spells it differently.
+
 
 ## Consequences
 

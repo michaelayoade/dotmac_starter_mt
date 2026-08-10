@@ -7,6 +7,27 @@ changes, each called out here.
 
 ## Unreleased
 
+## 0.2.0a2 — 2026-08-10
+
+Seeding — the gap the source audit found and named Sub's implementation as the
+source for. Additive; no migration.
+
+### Added
+- **`TemplateSeed` / `seed_templates()` / `SeedOutcome`.** Create a tenant's
+  default templates, idempotently, on every deploy. Three rules, each carried
+  across from Sub:
+  1. **Upsert by identity** (`slug`, `channel`), never by content — matching on
+     body would re-create a template every time an operator edited it.
+  2. **Never clobber an edit.** An existing template is left completely alone:
+     no new version, no republish, no metadata touch. `SeedOutcome` reports what
+     it `skipped` rather than returning a bare count, so "why is my wording
+     back?" has the answer "it never was".
+  3. **Derive from the declaration**, so a default's wording has one home.
+- Seeded templates are **published**, not left as drafts — a draft is invisible
+  to `render_published`, so a seeded draft would make the deployment look broken.
+- Seeds are validated against their render context at seed time, so a broken
+  default fails the DEPLOY rather than the send.
+
 ## 0.2.0a1 — 2026-08-10
 
 Re-based on the notification contract selected by the Template Studio source

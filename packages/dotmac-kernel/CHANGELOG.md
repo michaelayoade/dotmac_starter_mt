@@ -6,6 +6,41 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a36 — 2026-08-10
+
+The provider seam and the channel-policy reader (ADR-0006 § 5c/5d). Additive; no
+migration.
+
+### Added
+- **`dotmac_kernel.delivery_providers`** — a `DeliveryProvider` Protocol, an
+  `OutboundMessage`/`ProviderResult` pair, and `send()`, the ONE send path.
+  `send` asks consent first and returns `Suppressed` **without calling the
+  provider** — no network request, no cost, no receipt to reconcile — then
+  records the receipt, which closes the bounce→consent loop.
+
+  Routing every send through one function is what makes "ask consent first"
+  structural rather than a convention. Sub's history is what a convention buys:
+  marketing eligibility lived inside the campaign segment filter, so the answer
+  depended on who was asking.
+
+  The kernel ships the Protocol and **no client** — SMTP, Twilio and Meta Cloud
+  API are product dependencies, mirroring ADR-0009's `SecretSource` seam.
+
+- **`dotmac_kernel.channel_policy`** — `make_spec()` builds the `SettingSpec` a
+  product registers in a domain it owns, `validate_policy_document` is its
+  write-time validator, and `resolve_channels()` reads it: event → category →
+  default → the caller's fallback.
+
+  **No table and no migration.** The channel-policy dossier found this § 5c owner
+  dissolves into the settings facility the kernel already has; what was missing
+  was a typed reader. Sub's legacy per-event shadow setting is deliberately not
+  ported.
+
+  A malformed stored document degrades to the caller's fallback on READ, because
+  resolution happens on the send path and one operator's typo must not become a
+  total delivery outage. The loud failure is on WRITE, where the operator is
+  present to see it.
+
 ## 0.1.0a35 — 2026-08-10
 
 Delivery receipts, and the loop that keeps the consent ledger honest (ADR-0006
