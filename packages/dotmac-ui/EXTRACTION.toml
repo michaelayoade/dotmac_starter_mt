@@ -1,0 +1,29 @@
+schema_version = 1
+package = "dotmac-ui"
+classification = "presentation-foundation"
+status = "historical-pre-rule"
+source_mode = "product-first"
+owner = "Dotmac design system"
+contract = "Framework-independent semantic tokens and compiled self-hosted UI assets"
+source_repositories = ["dotmac_sub", "dotmac_starter_mt", "dotmac_erp"]
+source_paths = [
+  "dotmac_sub:static/css/design-system.css",
+  "dotmac_starter_mt:packages/dotmac-ui/src/dotmac_ui/tokens.py",
+  "dotmac_erp:tailwind.config.js",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/architecture/test_ui_public_surface.py",
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_tokens.py",
+]
+contract_consumers = ["dotmac_starter_mt"]
+candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac_academy_app"]
+inventory_evidence = [
+  "docs/inventories/starter-surfaces.md",
+  "docs/inventories/sub-surfaces.md",
+  "docs/inventories/erp-vendor-surfaces.md",
+  "docs/inventories/branding-settings.md",
+]
+first_cutover = "The starter reference assembly consumes the package; the first external product cutover remains pending."
+shadow_and_drift = "Consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface during cutover."
+local_copy_retirement = "Retire overlapping product token/component owners slice by slice after the exact package pin passes the product UI gates."
+next_action = "Cut over an external product, preserve its visual proof, then add the second released consumer before declaring extraction complete."

@@ -139,7 +139,9 @@ assembly → module → dotmac-ui → dotmac-kernel
 - **Template Studio is a module, not a kernel facility.** It is stateful,
   optional, and has its own lifecycle. The kernel's own operational templates
   (error pages, the login screen) are code and stay in the kernel/UI packages —
-  they are not Template Studio content.
+  they are not Template Studio content. **Narrowed by the 2026-08-10 amendment
+  (§ 5b):** it owns *what the message says* and nothing else — not document
+  generation, not consent, not routing, not delivery.
 - **Navigation is derived, never authored twice.** A facet's navigation is
   composed from module manifest declarations. A hardcoded link list in a template
   is a defect. This is already the admin portal's design — the sidebar renders
@@ -411,6 +413,44 @@ tokens where possible, and explicitly retired. Unrepresentable rules are
 reported to the operator and are never silently copied or silently discarded.
 Sub's token-only pipeline is the reference posture.
 
+### Decision amendment — 2026-08-08 (product-first extraction)
+
+Section 5 prevents speculative extraction, but its phrase "left in place" did
+not say what to do once an extraction is approved and one product already has a
+mature, tested implementation. The owner has now resolved that ambiguity:
+
+1. **Inventory the products before writing shared behaviour.** For a candidate
+   kernel facility or optional module, ERP, Sub, and any other product named in
+   the candidate's scope are searched first. When a production-used,
+   sufficiently tested implementation already satisfies most of the agreed
+   contract, that implementation is the mandatory reference and initial code
+   source. A greenfield implementation is admissible only when the checked-in
+   inventory shows that no qualifying product implementation exists.
+2. **Copy means a one-time extraction, not a maintained fork.** The proven code
+   and its behaviour tests are moved or ported into the shared distribution.
+   Product-specific dependencies are cut at typed adapter/provider seams; the
+   underlying behaviour is not rewritten merely to look more generic. The
+   source product is the first cutover consumer and its local owner/writer is
+   then removed or explicitly gated for retirement.
+3. **Place the unit at the narrowest shared layer.** Behaviour required by every
+   assembly and free of business-domain policy belongs in `dotmac-kernel`.
+   Optional business capability belongs in its own independently versioned
+   `dotmac-<module>` distribution, with its own manifest and, when stateful,
+   its own schema and migration lineage. Product-only behaviour remains in its
+   product even if another implementation looks similar.
+4. **Preserve proof and make the cutover repairable.** Every shared distribution
+   carries an extraction dossier naming the contract, source repositories and
+   paths, source tests preserved as parity proof, two contract consumers, the
+   owner, first cutover, shadow/drift check, and local-copy retirement gate.
+   Existing distributions predating this amendment are recorded as explicit,
+   non-growing debt rather than silently treated as conforming.
+
+This amends, rather than relaxes, the original F0 gate. The two-consumer,
+named-owner, and migration requirements still decide **whether** a unit may be
+shared. Product-first extraction decides **how** it is implemented once that
+decision is made. It forbids both failure modes: speculative shared code with no
+real consumer, and a second implementation written beside mature product code.
+
 ### Live defects found while taking the inventory (owned elsewhere)
 
 F0 is documentation-only and fixed nothing. Three defects surfaced that are
@@ -618,6 +658,129 @@ This does not gate adoption on a clean sweep — a product with restatements
 still adopts. It gates adoption on a KNOWN sweep, so the cutover's cost is
 visible before it is paid rather than discovered one CI run at a time.
 
+### Decision amendment — 2026-08-10b (audit scope, and the communication capability map)
+
+The 2026-08-08 amendment made ERP and Sub mandatory *sources*. Executing the
+first audit it required — Template Studio's, in
+`docs/inventories/template-studio-source-audit.md` — exposed a gap in that
+amendment and produced a ruling large enough to record here.
+
+Dated `10b` because a separate amendment landed the same day (*sweep for
+restatements before a cutover*); the two are independent and neither supersedes
+the other. See the closing note for how this composes with the 2026-08-09
+build-once ruling rather than restating it.
+
+#### 5a. Product-first sources the implementation; ADR-0003 sets the scope
+
+Product-first extraction answers *"who already built this well?"*. It does **not**
+answer *"what should the foundation own?"* — ADR-0003 does, and it makes this repo
+the foundation for new SaaS, dedicated, self-hosted, OEM and single-tenant
+products that are not downstream of ERP or Sub. An audit run as *"which product's
+code do we port?"* silently lets the two existing products set the ceiling on what
+a capability may become.
+
+Two consequences bind every future audit:
+
+1. **"These implementations do not share a contract" never establishes "this
+   capability has no contract."** The first is a finding about implementations and
+   justifies rejecting a particular package shape. It does not license concluding
+   the capability is unextractable, and it does not license moving the capability
+   to an out-of-scope list.
+2. **A capability leaves the foundation's scope only when it encodes genuine
+   product-domain meaning** — ERP finance/HR entity semantics, Sub
+   subscriber/network policy. It does **not** leave scope because only one product
+   has built it so far, because it is entangled with one product's vocabulary (the
+   ADR-0008 split applies: generic mechanism, product-declared vocabulary), or
+   because it carries heavy native dependencies (that argues for an optional
+   `core=False` module with its own extra, not for exclusion).
+
+An audit concluding *"no single owner qualifies"* has found that the unit was
+drawn wrong, not that the work stops. It must then decompose to one decision per
+owner and re-run the sourcing question per owner.
+
+#### 5b. Template Studio narrows to one decision
+
+The audit disqualified the package's `kind ∈ {notification, document}` merge on
+evidence, not preference: the two products disagree on placeholder language,
+engine class, identity dimension and missing-variable policy, and the package's
+double-brace syntax is the syntax Sub rejects at save time after it leaked a
+literal `{{amount}}` to customers. Accordingly:
+
+- `kind=document` is dropped from the package.
+- The renderer re-bases on Sub's contract — single-brace, closed
+  per-send-context allowlist validated at save time, unresolved-placeholder
+  suppression on the live path — carrying Sub's seven renderer tests as parity
+  proof.
+- The three things neither product has are kept: tenant-scoped RLS from
+  migration 1, the `manage`/`publish` permission split, and immutable versioning
+  (ported from ERP's proven *workflow-rule* version history, not designed fresh).
+- Its contract is now **what the message says**. It renders and returns
+  `(subject, body)`. It does not decide whether to send, to whom, or over what.
+
+This supersedes the section 2 ownership map's implicit reading that Template
+Studio owns tenant document templates. It remains a module, not a kernel facility.
+
+#### 5c. The communication capability map — five owners, not one
+
+The capability a new product needs on day one is author → render → decide
+eligibility → route → send → prove. It decomposes into five foundation owners
+plus the products' own domain, and is mostly already built:
+
+| Owner | The one decision it owns | Qualifying source |
+|---|---|---|
+| `dotmac-template-studio` | what the message says | Sub's renderer |
+| consent / suppression | may we contact this address on this channel | Sub's `CommunicationSuppression` |
+| channel policy | which channels carry this class of message | Sub's matrix, mechanism only |
+| delivery / outbox | queue, retry, provider result, dedupe | Sub's `Notification` + `NotificationDelivery` |
+| document generation | render → PDF → durable record | ERP's `DocumentGeneratorService` + `GeneratedDocument` |
+| product domain | which messages exist and what they mean | stays in ERP and Sub |
+
+Three of these were nearly mis-scoped as product-specific, and the rulings that
+keep them in scope are the point of 5a:
+
+- **Consent is a legal decision, not an ISP one.** Erasure, hard bounce and
+  unsubscribe apply to any product that sends email, including an ERP that only
+  ever sends invoices and offer letters. Sub's model already holds the hard part:
+  scope `marketing` vs `all`, keyed on the **address** rather than the person,
+  with unsubscribe never permitting suppression of someone's invoice. A second
+  product reimplementing that is a build-once violation whose failure mode is a
+  billing incident, not a cosmetic drift.
+- **`GeneratedDocument` is the only concrete implementation of the SOT criterion
+  *"every projection has provenance"* in either product** — `content_hash`,
+  sanitised `context_snapshot`, `superseded_by` lifecycle. That is foundation
+  material.
+- **Channel policy generalises at the mechanism, not the vocabulary.** It is the
+  weakest of the three and its extraction is the least proven; it may not be
+  taken before its own dossier shows otherwise.
+
+**Each owner needs its own extraction dossier.** Bundling them under Template
+Studio's would repeat exactly the merge error this audit was commissioned to
+catch, and the 2026-08-08 amendment's per-distribution dossier requirement
+already forbids it.
+
+**Sequencing is a constraint, not a preference: consent must be answerable before
+delivery exists.** Otherwise the first product on the new stack sends without a
+suppression check and the legal gate is retrofitted behind live traffic.
+
+This amends, rather than relaxes, section 5 and the 2026-08-08 amendment, and it
+composes with the 2026-08-09 one as a third axis rather than restating it:
+
+- **Section 5 governs SIMILARITY** — two things that look alike are not one
+  contract.
+- **2026-08-09 governs SAMENESS** — one thing with one correct encoding must not
+  be built twice.
+- **2026-08-08 governs SOURCING** — once a unit may be shared, a qualifying
+  product implementation is where it comes from.
+- **5a governs SCOPE** — what the foundation should own is set by ADR-0003, and
+  an audit may not narrow it by reasoning from the products' current shapes.
+
+The Template Studio audit is a case where all four bite in sequence: § 5 refused
+the two-kind merge, 5a refused the conclusion that the capability was therefore
+unextractable, 2026-08-09 kept consent and document provenance in the shared
+layer, and 2026-08-08 named Sub and ERP as the sources for the pieces that
+survived.
+
+
 ## Consequences
 
 - F1–P1 have fixed vocabulary. "Module", "theme", "brand", and "facet" mean one
@@ -639,4 +802,7 @@ visible before it is paid rather than discovered one CI run at a time.
 - `docs/adr/0003-unified-deployment-profiles.md`
 - `docs/superpowers/reviews/2026-07-18-module-control-plane-directive.md`
 - `docs/inventories/README.md`
+- `docs/inventories/module-extraction-sources.md` (the product-first dossier index)
+- `docs/inventories/template-studio-source-audit.md` (evidence for the 2026-08-10
+  amendment)
 - `packages/dotmac-kernel/COMPATIBILITY.md` (kernel public surface + versioning)

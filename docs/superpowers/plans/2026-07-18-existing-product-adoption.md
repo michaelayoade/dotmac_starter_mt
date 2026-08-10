@@ -18,6 +18,13 @@
 > sequencing document, no phase commitments beyond Phase 0/1, and no authorized schema
 > work. The shared decisions, migration principles, and prohibited approaches here apply
 > to it in full.
+>
+> **2026-08-08 extraction clarification:** products are implementation sources, not merely
+> inspiration. Once ADR-0006's contract/owner/cutover gate is met, a qualifying mature,
+> tested ERP/Sub implementation is ported with its behaviour tests into the shared
+> distribution. "Do not copy wholesale" below forbids blind vendoring, product imports,
+> permanent forks, and parallel writers; it does not authorize rebuilding the same
+> behaviour from scratch.
 
 ## Recon basis
 
@@ -45,8 +52,11 @@ Added on 2026-08-07, from the local `origin/main` snapshot:
   and a `tailwind.config.js` + `src/input.css` CSS build. It already integrates outward
   to ERP over an API boundary (`app/services/erp_sync.py`).
 
-These products contain battle-tested behavior that may inform or implement optional
-platform contracts. They are not code donors to copy wholesale into the kernel.
+These products contain battle-tested behavior that must be reviewed as the implementation
+source for shared contracts. When one already satisfies most of an approved contract, its
+code and tests are the starting point for a one-time extraction into the kernel or an
+independently versioned module. They are not directories to vendor wholesale into the
+kernel, and the source product does not retain a permanent fork after cutover.
 
 ## Decision
 
@@ -330,11 +340,13 @@ and provider reconciliation—not only ORM queries.
 
 ## Phase 5 — Commercial and lifecycle convergence
 
-- Use ERP Money/functional-currency/FX/tax behavior as a candidate implementation/source
-  review for global commercial primitives, after extracting product-neutral contracts.
+- Use ERP Money/functional-currency/FX/tax behavior as the mandatory implementation-source
+  review for global commercial primitives. When it satisfies the agreed product-neutral
+  contract, port that implementation and its tests instead of rebuilding it.
 - Use subscriber-management catalog/subscription/billing/usage/dunning/service-state and
-  provisioning behavior as candidate implementations/source reviews for lifecycle,
-  rating, billing, and provider-job contracts.
+  provisioning behavior as the mandatory implementation-source review for lifecycle,
+  rating, billing, and provider-job contracts. Extract the qualifying implementation and
+  preserve its behaviour tests behind product adapters.
 - Do not make the kernel depend on ERP GL or ISP network models. Integrate via versioned
   events/adapters such as invoice-posted, payment-settled, entitlement-changed,
   service-activation-requested, and provisioning-result.
@@ -372,6 +384,8 @@ explicitly deferred the update with owner, reason, risk, and expiry.
 ## Prohibited approaches
 
 - Rebuilding ERP, subscriber management, or Academy from the starter in one branch.
+- Rebuilding a shared kernel/module capability beside an already qualifying, tested ERP
+  or Sub implementation instead of extracting it with its behaviour tests.
 - Copying the starter's core directory into any product and calling it shared.
 - Vendoring `dotmac_academy_app` into `dotmac_starter_mt` as a bundled LMS module, or
   otherwise moving a vertical product domain into the repository every other assembly
