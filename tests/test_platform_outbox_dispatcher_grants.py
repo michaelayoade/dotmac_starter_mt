@@ -107,7 +107,7 @@ def test_dispatcher_can_claim_and_settle_but_only_via_functions(
         "SELECT count(*) FROM platform_outbox_events",
         "UPDATE platform_outbox_events SET status = 'sent'",
         "SELECT count(*) FROM outbox_events",
-        "SELECT count(*) FROM platform_inbox_records",
+        "SELECT count(*) FROM platform_idempotency_records",
         "SELECT count(*) FROM parties",
     ],
 )

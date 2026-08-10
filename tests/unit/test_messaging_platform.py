@@ -53,7 +53,7 @@ def test_process_once_platform_runs_handler_and_records_result(db: Session) -> N
             PlatformIdempotencyRecord.key == "pcmd-1"
         )
     ).scalar_one()
-    assert record.command_type == "account.provision"
+    assert record.operation == "account.provision"
     assert record.status == "executed"
     assert record.result == {"provisioned": True}
     assert record.correlation_id == "corr-1"

@@ -125,7 +125,7 @@ def test_the_real_repo_composes() -> None:
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
     report = run_gate(assembly.modules, locations)
     assert report.ok, report.render()
-    assert len(report.revisions) == 22
+    assert len(report.revisions) == 23
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio"}
 

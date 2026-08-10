@@ -1,6 +1,6 @@
 """Outbox/inbox tenant-isolation canaries (kernel WS3).
 
-`outbox_events` and `inbox_records` are tenant-scoped tables with RLS (migration
+`outbox_events` and `idempotency_records` are tenant-scoped tables with RLS (migration
 0008). This is the load-bearing proof that a tenant cannot read another tenant's
 queued events / command ledger, and cannot INSERT a row for another tenant
 (the policy's `WITH CHECK`). Same convention as `tests/test_party_isolation.py`.
@@ -67,9 +67,10 @@ def _insert_inbox_record(
     record_id = uuid.uuid4()
     session.execute(
         text(
-            "INSERT INTO inbox_records "
-            "(id, tenant_id, command_id, command_type, status) "
-            "VALUES (:id, :tenant_id, :command_id, 'test.command', 'processed')"
+            "INSERT INTO idempotency_records "
+            "(id, tenant_id, scope, key, operation, status) "
+            "VALUES (:id, :tenant_id, 'inbox', :command_id, "
+            "'test.command', 'executed')"
         ),
         {"id": str(record_id), "tenant_id": str(tenant_id), "command_id": command_id},
     )
@@ -140,7 +141,7 @@ def test_inbox_record_in_tenant_a_invisible_to_tenant_b(
         b = _as_tenant(tenant_sessionmaker, tenant_b.id)
         try:
             rows = b.execute(
-                text("SELECT id FROM inbox_records WHERE id = :id"),
+                text("SELECT id FROM idempotency_records WHERE id = :id"),
                 {"id": str(record_id)},
             ).fetchall()
             assert rows == []
@@ -149,7 +150,8 @@ def test_inbox_record_in_tenant_a_invisible_to_tenant_b(
             b.close()
     finally:
         admin_session.execute(
-            text("DELETE FROM inbox_records WHERE id = :id"), {"id": str(record_id)}
+            text("DELETE FROM idempotency_records WHERE id = :id"),
+            {"id": str(record_id)},
         )
         admin_session.commit()
 
