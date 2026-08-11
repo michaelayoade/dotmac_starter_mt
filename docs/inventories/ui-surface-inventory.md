@@ -175,6 +175,14 @@ settle" — now answered, in the direction the question feared.
 **Sub's live token surface** is `static/css/design-system.css` (353 lines) plus
 the `@theme` block in `static/css/src/main.css` (Tailwind v4, CSS-first).
 
+This repo already recorded the corroborating fact and nobody read it as one:
+this README's scale table lists Sub's CSS toolchain as **Tailwind v4 CSS-first**
+and ERP's as **Tailwind v3.4.19 + JS config**. The shared `src/css/` tree is
+v3-era. Sub did not merely stop editing its copy — it moved to a different
+Tailwind major and left the fork behind, which is why the drift is one-sided.
+A shared file tree spanning two Tailwind majors was never going to be promoted
+as-is regardless of how many lines happened to match.
+
 ### Sub's live tokens share the package's role names, not its values
 
 `design-system.css` already uses `dotmac-ui`'s role vocabulary verbatim and

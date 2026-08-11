@@ -37,6 +37,7 @@ across repos.
 | Delivery and outbox sources | why Sub's notification queue is the kernel outbox built twice, the bounce→consent feedback loop that exists in neither product, and what a delivery owner is left owning | `delivery-outbox-sources.md` |
 | Channel policy sources | why the § 5c channel-policy owner resolves into a settings document with a typed reader rather than a fifth subsystem | `channel-policy-sources.md` |
 | Template Studio source audit | ERP document templates vs Sub notification templates vs the package across identity, versioning, publication, placeholder syntax, scoping, seeding, delivery, traceability, permissions and cutover shape — the audit `EXTRACTION.toml` blocks on, plus the six-owner capability map it resolves to | `template-studio-source-audit.md` |
+| UI surfaces | the ERP/Sub `src/css/` fork, drift file by file, class usage, the button vocabulary — **plus the 2026-08-11 correction that only ERP still runs its copy**, which supersedes the promotion steps | `ui-surface-inventory.md` |
 
 ## Cross-repo scale, at a glance
 
