@@ -1,6 +1,6 @@
 # ADR-0015: `dotmac_academy_app` is an assembly, or it is a fork
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-10
 **Scope:** `dotmac_academy_app`, with a fleet-wide rule in the Decision.
 **Relates to:** ADR-0003 (deployment profiles, the three assemblies), ADR-0013
