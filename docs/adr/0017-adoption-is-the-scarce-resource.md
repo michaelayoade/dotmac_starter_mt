@@ -1,6 +1,6 @@
 # ADR-0017: Adoption is the scarce resource, and Sub goes first
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-11
 **Decision owner:** Michael
 **Amends:** ADR-0003's *sequencing*, not its decisions. The composition model
