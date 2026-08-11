@@ -63,6 +63,12 @@ STYLESHEET_RELPATH: Final[str] = (
 #: pipeline, an air-gapped bundle check).
 MANIFEST_RELPATH: Final[str] = f"{ASSET_NAMESPACE}/manifest.json"
 
+#: The Tailwind preset, generated from the same tokens as the stylesheet so the
+#: two cannot disagree. Unhashed on purpose: it is consumed at BUILD time by a
+#: consumer's `tailwind.config.js`, never served to a browser, so a
+#: cache-busting digest would only make the import path churn.
+TAILWIND_PRESET_RELPATH: Final[str] = f"{ASSET_NAMESPACE}/tailwind-preset.js"
+
 #: Length of the truncated sha256 used as the cache-busting token.
 DIGEST_LENGTH: Final[int] = 12
 
@@ -79,6 +85,16 @@ def static_dir() -> Path:
 def stylesheet_path() -> Path:
     """Absolute path to the compiled stylesheet."""
     return _STATIC_DIR / STYLESHEET_RELPATH
+
+
+def tailwind_preset_path() -> Path:
+    """Filesystem path to the generated Tailwind preset.
+
+    A consumer's `tailwind.config.js` requires this path, so it is resolved from
+    the installed package rather than copied into each repository — copying is
+    what let two `_tokens.css` files drift 48% apart.
+    """
+    return static_dir() / TAILWIND_PRESET_RELPATH
 
 
 def manifest_path() -> Path:
@@ -120,10 +136,12 @@ __all__ = [
     "DIGEST_LENGTH",
     "MANIFEST_RELPATH",
     "STYLESHEET_RELPATH",
+    "TAILWIND_PRESET_RELPATH",
     "asset_digest",
     "asset_manifest",
     "manifest_path",
     "static_dir",
     "stylesheet_path",
     "stylesheet_url",
+    "tailwind_preset_path",
 ]
