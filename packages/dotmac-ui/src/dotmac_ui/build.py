@@ -49,8 +49,53 @@ from dotmac_ui.tokens import (
     TOKENS,
     declarations,
     iter_categories,
+    resolve_color,
     tokens_in,
 )
+
+#: The categories the preset maps as colours, and therefore the ones that need a
+#: channel form. Every other category (space, radius, shadow…) is used whole.
+_COLOUR_CATEGORIES: tuple[str, ...] = (
+    "color",
+    "surface",
+    "text",
+    "border",
+    "action",
+    "status",
+)
+
+
+def _channel_variable(name: str) -> str:
+    return f"{TOKEN_PREFIX}{name}-rgb"
+
+
+def _channels(hex_colour: str) -> str:
+    """`#3b82f6` -> `59 130 246`, the space-separated form `rgb()` wants.
+
+    Tailwind synthesises `bg-brand-500/50` as `rgb(<channels> / 0.5)`, so it
+    needs the components separately. A variable holding a complete colour cannot
+    take an alpha modifier at all — the utility silently renders opaque.
+    """
+    value = hex_colour.lstrip("#")
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    if len(value) != 6:
+        raise ValueError(f"expected a 6-digit hex colour, got {hex_colour!r}")
+    return " ".join(str(int(value[i : i + 2], 16)) for i in (0, 2, 4))
+
+
+def _channel_declarations(mode: str) -> list[tuple[str, str]]:
+    """`(--dmui-…-rgb, "R G B")` for every colour token, resolved for `mode`."""
+    out: list[tuple[str, str]] = []
+    for category in _COLOUR_CATEGORIES:
+        for design_token in tokens_in(category):
+            out.append(
+                (
+                    _channel_variable(design_token.name),
+                    _channels(resolve_color(design_token.name, mode)),
+                )
+            )
+    return out
 
 _INDENT = "  "
 
@@ -85,6 +130,10 @@ def _root_block() -> str:
         lines.append(f"{_INDENT}/* {category} */")
         for design_token in members:
             lines.append(f"{_INDENT}{design_token.variable}: {design_token.value};")
+    lines.append("")
+    lines.append(f"{_INDENT}/* channel forms, for alpha modifiers — see _channels */")
+    for variable, value in _channel_declarations("light"):
+        lines.append(f"{_INDENT}{variable}: {value};")
     lines.append("}")
     return "\n".join(lines)
 
@@ -100,6 +149,11 @@ def _dark_block() -> str:
         f"{selector} {{",
     ]
     for variable, value in declarations("dark"):
+        lines.append(f"{_INDENT}{variable}: {value};")
+    lines.append("")
+    lines.append(f"{_INDENT}/* channel forms restated: an alpha modifier must")
+    lines.append(f"{_INDENT} * darken with its colour, not stay on the light one. */")
+    for variable, value in _channel_declarations("dark"):
         lines.append(f"{_INDENT}{variable}: {value};")
     lines.append("}")
     return "\n".join(lines)
@@ -193,7 +247,9 @@ def _colors() -> dict[str, object]:
     colors: dict[str, object] = {}
     for category, prefix in _COLOR_GROUPS:
         flat = {
-            design_token.name[len(prefix) :]: f"var({design_token.variable})"
+            design_token.name[len(prefix) :]: (
+                f"rgb(var({_channel_variable(design_token.name)}) / <alpha-value>)"
+            )
             for design_token in tokens_in(category)
         }
         group = _COLOR_GROUP_NAMES.get(category, category)
