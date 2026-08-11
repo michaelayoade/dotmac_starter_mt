@@ -79,8 +79,8 @@ standing measure.
 
 ### 2. A moratorium on new kernel facilities
 
-No new facility from the gap list is started until **at least one product
-consumes kernel persistence in production**.
+No new facility from the gap list is started until **the kernel's migration
+lineage runs in a product database in production**.
 
 One exception, deliberately narrow: a facility a live adoption *asks for*.
 Demand-pulled, not supply-pushed. "A product will need this" is not demand; "a
@@ -88,6 +88,59 @@ product is blocked on this today" is.
 
 This does not stop bug fixes, security fixes, or improvements to already-adopted
 surface.
+
+#### Why the exit is the LINEAGE and not "consumes persistence"
+
+An earlier wording said "at least one product consumes kernel persistence in
+production", and it was ambiguous in a way that would have decided itself.
+`dotmac_sub` imports `dotmac_kernel.models.Tenant` today and runs it against a
+`tenants` table — so by one reading the gate was already met on the day it was
+written.
+
+It is not met, and the distinction is the whole point. Sub's own migration
+`508` created that table. A kernel MODEL on a product-owned table is code
+sharing: the product still owns the schema, the ordering, and the upgrade. The
+kernel owning the LINEAGE is where those transfer, and it is what makes a
+facility shared rather than its source copied — an idempotency facility whose
+table each product hand-creates is a library, not a kernel. That is precisely
+the failure ADR-0014 recorded.
+
+#### The gate, measured
+
+Per decision 5, applied to this ADR's own gate rather than only to the work it
+sequences. Counted 2026-08-11 against kernel `0.1.0a27` and `dotmac_sub`
+`origin/dev`:
+
+| | |
+|---|---|
+| Kernel lineage | 18 revisions, 19 tables |
+| Sub tables | 574 |
+| **Name collisions** | **6** — `parties`, `party_roles`, `roles`, `user_credentials`, `audit_events`, `domain_settings` |
+| **Already created by Sub's own lineage** | **2** — `tenants`, `tenant_domains` (migration `508`) |
+| Genuinely new to Sub | 11 |
+
+So the gate is 8 tables needing a decision and 11 needing only a run — not 19
+unknowns, and not the "224-table remediation" shape that ERP faces. That is the
+cost figure decision 4 rests on, and it is now countable rather than asserted.
+
+The moratorium burns this down; it does not wait on a binary. Each collision
+resolved or each table brought under the kernel lineage is progress against a
+number, which is the same treatment settings, migrations and RLS coverage
+already get.
+
+#### A stop rule needs a start rule
+
+A moratorium is a WIP limit, and a WIP limit only pays if the freed capacity
+moves to the constraint. Stopping gap-list work does not by itself make the gate
+arrive sooner — and while it holds, the duplication the gap list exists to
+retire keeps accruing in the products. ERP has five numbering implementations
+today; nothing here stops a sixth.
+
+So the moratorium is not self-executing. It holds only while the gate is an
+owned, reported workstream with the burn-down above as its measure. If the gate
+is not being worked, the moratorium is not disciplined restraint — it is the
+kernel idling while products pay the cost it was meant to remove, and it should
+be lifted or re-argued rather than left running.
 
 ### 3. E8 and S7 are separate workstreams
 
