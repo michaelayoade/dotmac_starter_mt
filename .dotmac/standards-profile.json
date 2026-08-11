@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 5,
   "profile_id": "dotmac-starter-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_starter_mt",
@@ -8,7 +8,7 @@
   "governance_model": {
     "kind": "pinned",
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
-    "revision": "1f5f1372238ef37eff71154694d5620008de0959",
+    "revision": "fbd47b8965002943bd5799992f4b29b04e361582",
     "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
     "status": "accepted"
   },
@@ -40,5 +40,168 @@
       "forbid_any": true,
       "require_immutable_records": true
     }
-  ]
+  ],
+  "module_declared_vocabularies": [
+    {
+      "vocabulary_id": "permission",
+      "subject": "Permission codes owned and declared by installed modules.",
+      "member_type": {
+        "kind": "declared",
+        "name": "PermissionSpec",
+        "path": "packages/dotmac-kernel/src/dotmac_kernel/permissions.py"
+      },
+      "registry_interface": "dotmac_kernel.permissions.PermissionCatalogue",
+      "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/permissions.py",
+      "declaration_field": "permissions",
+      "declaration_paths": [
+        "packages/dotmac-kernel/src/dotmac_kernel/features.py",
+        "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+      ],
+      "storage": null
+    },
+    {
+      "vocabulary_id": "capability",
+      "subject": "Capability codes owned and declared by installed modules.",
+      "member_type": {
+        "kind": "declared",
+        "name": "CapabilitySpec",
+        "path": "packages/dotmac-kernel/src/dotmac_kernel/capabilities.py"
+      },
+      "registry_interface": "dotmac_kernel.capabilities.CapabilityCatalogue",
+      "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/capabilities.py",
+      "declaration_field": "capabilities",
+      "declaration_paths": [
+        "packages/dotmac-kernel/src/dotmac_kernel/features.py",
+        "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+      ],
+      "storage": {
+        "column": "capability_code",
+        "paths": [
+          "packages/dotmac-kernel/src/dotmac_kernel/entitlements.py"
+        ]
+      }
+    },
+    {
+      "vocabulary_id": "audit-action",
+      "subject": "Audit action codes owned and declared by installed modules.",
+      "member_type": {
+        "kind": "builtin",
+        "name": "str"
+      },
+      "registry_interface": "dotmac_kernel.audit_actions.AuditActionRegistry",
+      "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/audit_actions.py",
+      "declaration_field": "audit_actions",
+      "declaration_paths": [
+        "packages/dotmac-kernel/src/dotmac_kernel/features.py",
+        "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+      ],
+      "storage": {
+        "column": "action",
+        "paths": [
+          "packages/dotmac-kernel/src/dotmac_kernel/audit.py",
+          "packages/dotmac-kernel/src/dotmac_kernel/models_platform.py"
+        ]
+      }
+    },
+    {
+      "vocabulary_id": "feature-flag",
+      "subject": "Feature flag codes owned and declared by installed modules.",
+      "member_type": {
+        "kind": "declared",
+        "name": "FeatureFlagSpec",
+        "path": "packages/dotmac-kernel/src/dotmac_kernel/flags.py"
+      },
+      "registry_interface": "dotmac_kernel.flags.FlagCatalogue",
+      "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/flags.py",
+      "declaration_field": "feature_flags",
+      "declaration_paths": [
+        "packages/dotmac-kernel/src/dotmac_kernel/features.py",
+        "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+      ],
+      "storage": {
+        "column": "flag_code",
+        "paths": [
+          "packages/dotmac-kernel/src/dotmac_kernel/flag_models.py"
+        ]
+      }
+    },
+    {
+      "vocabulary_id": "setting-domain",
+      "subject": "Setting domains owned and declared by installed modules.",
+      "member_type": {
+        "kind": "declared",
+        "name": "SettingDomain",
+        "path": "packages/dotmac-kernel/src/dotmac_kernel/settings_models.py"
+      },
+      "registry_interface": "dotmac_kernel.setting_domains.SettingDomainRegistry",
+      "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/setting_domains.py",
+      "declaration_field": "setting_domains",
+      "declaration_paths": [
+        "packages/dotmac-kernel/src/dotmac_kernel/features.py",
+        "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+      ],
+      "storage": {
+        "column": "domain",
+        "paths": [
+          "packages/dotmac-kernel/src/dotmac_kernel/settings_models.py"
+        ]
+      }
+    },
+    {
+      "vocabulary_id": "setting-value-type",
+      "subject": "Setting value types owned and declared by installed modules.",
+      "member_type": {
+        "kind": "declared",
+        "name": "SettingValueType",
+        "path": "packages/dotmac-kernel/src/dotmac_kernel/setting_value_types.py"
+      },
+      "registry_interface": "dotmac_kernel.setting_value_types.SettingValueTypeRegistry",
+      "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/setting_value_types.py",
+      "declaration_field": "setting_value_types",
+      "declaration_paths": [
+        "packages/dotmac-kernel/src/dotmac_kernel/features.py",
+        "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+      ],
+      "storage": {
+        "column": "value_type",
+        "paths": [
+          "packages/dotmac-kernel/src/dotmac_kernel/settings_models.py"
+        ]
+      }
+    },
+    {
+      "vocabulary_id": "setting-scope-kind",
+      "subject": "Setting scope kinds owned and declared by installed modules.",
+      "member_type": {
+        "kind": "declared",
+        "name": "ScopeKindSpec",
+        "path": "packages/dotmac-kernel/src/dotmac_kernel/setting_scopes.py"
+      },
+      "registry_interface": "dotmac_kernel.setting_scopes.ScopeKindRegistry",
+      "registry_implementation": "packages/dotmac-kernel/src/dotmac_kernel/setting_scopes.py",
+      "declaration_field": "scope_kinds",
+      "declaration_paths": [
+        "packages/dotmac-kernel/src/dotmac_kernel/features.py",
+        "packages/dotmac-kernel/src/dotmac_kernel/modules.py"
+      ],
+      "storage": {
+        "column": "scope_kind",
+        "paths": [
+          "packages/dotmac-kernel/src/dotmac_kernel/settings_models.py"
+        ]
+      }
+    }
+  ],
+  "testing_kit_boundary": {
+    "test_roots": ["tests"],
+    "kit_source_roots": [
+      "packages/dotmac-kernel/src/dotmac_kernel/testing"
+    ],
+    "conformance_probes": [
+      {
+        "path": "scripts/floor/probe.py",
+        "expected_import_count": 1
+      }
+    ]
+  }
 }
