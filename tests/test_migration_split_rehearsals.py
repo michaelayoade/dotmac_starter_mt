@@ -1,6 +1,6 @@
 """Migration-split acceptance suite (kernel-boundary Task 1c).
 
-The seven rehearsals the merged design
+The nine rehearsals the merged design
 (`docs/superpowers/reviews/2026-07-30-kernel-migration-split-design.md`) requires
 before the kernel/assembly migration split can be trusted — this suite, not a
 code review, is what proves existing-v0.8 databases are safe.
@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -193,7 +194,7 @@ def test_rehearsal_1_fresh_empty_assembly(scratch_db: str) -> None:
     assert _table_exists(scratch_db, "platform_audit_events")
     assert _table_exists(scratch_db, "platform_idempotency_records")
     assert _table_exists(scratch_db, "tenant_entitlement_grants")
-    assert _versions(scratch_db) == {"0020_delivery_receipts"}
+    assert _versions(scratch_db) == {"0021_setting_scope_alignment"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -212,7 +213,7 @@ def test_rehearsal_2_fresh_reference_assembly(scratch_db: str) -> None:
     # design anticipated ("if the kernel advances past what a001 depends on,
     # both heads would appear").
     assert _versions(scratch_db) == {
-        "0020_delivery_receipts",
+        "0021_setting_scope_alignment",
         "a004_backfill_capability_grants",
     }
     # RLS + grants correct: FORCE RLS on, the isolation policy present, and
@@ -247,7 +248,7 @@ def _simulate_v08(url: str) -> None:
     # kernel@head is now 0011 (relay leasing added atop 0010 entitlements),
     # but a001 is un-recorded — the "table present, a001 not recorded" state adoption
     # repairs.
-    assert _versions(url) == {"0020_delivery_receipts"}
+    assert _versions(url) == {"0021_setting_scope_alignment"}
 
 
 def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
@@ -278,7 +279,7 @@ def test_rehearsal_3_existing_v08_adoption(scratch_db: str) -> None:
     # lineage continues on the same upgrade.
     _upgrade(scratch_db, "heads")
     assert _versions(scratch_db) == {
-        "0020_delivery_receipts",
+        "0021_setting_scope_alignment",
         "a004_backfill_capability_grants",
     }
     # Data survived untouched.
@@ -404,13 +405,13 @@ def test_rehearsal_6_runtime_rollback(scratch_db: str) -> None:
     # a002) and leaves the kernel head; `kernel@head` no longer collapses the
     # branch now the kernel lineage has advanced past a001's `depends_on` pin.
     _stamp(scratch_db, "assembly@base")
-    assert _versions(scratch_db) == {"0020_delivery_receipts"}
+    assert _versions(scratch_db) == {"0021_setting_scope_alignment"}
     assert _table_exists(scratch_db, "custom_field_definitions")
 
     # Now the kernel-only migrator succeeds: it sees only the kernel head (0008),
     # which it knows — a001 is no longer recorded.
     _upgrade(scratch_db, "heads", version_locations=_kernel_only_locations())
-    assert _versions(scratch_db) == {"0020_delivery_receipts"}
+    assert _versions(scratch_db) == {"0021_setting_scope_alignment"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -431,7 +432,7 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     # installed stateful MODULES (ADR-0006 M1 and M2). One head per owner is
     # the invariant — a second head inside ONE lineage would be the real defect.
     assert heads == {
-        "0020_delivery_receipts",
+        "0021_setting_scope_alignment",
         "a004_backfill_capability_grants",
         "ts_0002_notify_identity",
         "tk_0001_tickets",
@@ -442,7 +443,167 @@ def test_rehearsal_7_expected_heads_per_lineage() -> None:
     assembly_head = script.get_revision("assembly@head")
     module_head = script.get_revision("template_studio@head")
     ticketing_head = script.get_revision("ticketing@head")
-    assert kernel_head.revision == "0020_delivery_receipts"
+    assert kernel_head.revision == "0021_setting_scope_alignment"
     assert assembly_head.revision == "a004_backfill_capability_grants"
     assert module_head.revision == "ts_0002_notify_identity"
     assert ticketing_head.revision == "tk_0001_tickets"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rehearsal 8 — adoption-discovered settings scope invariant
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_rehearsal_8_setting_scope_alignment_repairs_the_old_default(
+    scratch_db: str,
+) -> None:
+    """Upgrade the exact predecessor shape that Sub exposed as unsafe."""
+
+    _upgrade(scratch_db, "0020_delivery_receipts")
+    key = f"scope-default-{uuid.uuid4().hex[:8]}"
+
+    # This is the aperture in a27-a36: omitting both columns asks the database
+    # default, which creates tenant/NULL even though the Python default would
+    # derive platform for the same input.
+    engine = create_engine(scratch_db)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO domain_settings "
+                "(id, domain, key, value_type, value_text) "
+                "VALUES (gen_random_uuid(), 'audit', :key, 'string', 'value')"
+            ),
+            {"key": key},
+        )
+    engine.dispose()
+    assert (
+        _q(
+            scratch_db,
+            "SELECT scope_kind FROM domain_settings WHERE key = :key",
+            key=key,
+        )
+        == "tenant"
+    )
+    assert (
+        _q(
+            scratch_db,
+            "SELECT tenant_id FROM domain_settings WHERE key = :key",
+            key=key,
+        )
+        is None
+    )
+
+    _upgrade(scratch_db, "kernel@head")
+
+    assert (
+        _q(
+            scratch_db,
+            "SELECT scope_kind FROM domain_settings WHERE key = :key",
+            key=key,
+        )
+        == "platform"
+    )
+    assert (
+        _q(
+            scratch_db,
+            "SELECT tenant_id FROM domain_settings WHERE key = :key",
+            key=key,
+        )
+        is None
+    )
+    assert "platform" in str(
+        _q(
+            scratch_db,
+            "SELECT column_default FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'domain_settings' "
+            "AND column_name = 'scope_kind'",
+        )
+    )
+    assert (
+        _q(
+            scratch_db,
+            "SELECT 1 FROM pg_constraint "
+            "WHERE conname = 'ck_domain_settings_scope_alignment'",
+        )
+        == 1
+    )
+
+    # The repair is a constraint, not only a one-time cleanup.
+    engine = create_engine(scratch_db)
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO domain_settings "
+                    "(id, scope_kind, domain, key, value_type, value_text) "
+                    "VALUES (gen_random_uuid(), 'tenant', 'audit', :key, "
+                    "'string', 'value')"
+                ),
+                {"key": f"{key}-invalid"},
+            )
+    engine.dispose()
+
+
+def test_rehearsal_9_setting_scope_alignment_adopts_a_product_constraint(
+    scratch_db: str,
+) -> None:
+    """Sub's existing invariant survives both adoption and kernel downgrade."""
+
+    _upgrade(scratch_db, "0020_delivery_receipts")
+    engine = create_engine(scratch_db)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE domain_settings ALTER COLUMN scope_kind "
+                "SET DEFAULT 'platform'"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE domain_settings ADD CONSTRAINT "
+                "ck_domain_settings_scope_alignment CHECK ("
+                "(scope_kind = 'platform' AND tenant_id IS NULL) OR "
+                "(scope_kind <> 'platform' AND tenant_id IS NOT NULL))"
+            )
+        )
+    engine.dispose()
+
+    _upgrade(scratch_db, "kernel@head")
+
+    assert (
+        _q(
+            scratch_db,
+            "SELECT obj_description(c.oid, 'pg_constraint') "
+            "FROM pg_constraint c "
+            "WHERE c.conname = 'ck_domain_settings_scope_alignment'",
+        )
+        == "dotmac-kernel:0021:adopted-existing"
+    )
+
+    _downgrade(scratch_db, "0020_delivery_receipts")
+
+    assert (
+        _q(
+            scratch_db,
+            "SELECT 1 FROM pg_constraint "
+            "WHERE conname = 'ck_domain_settings_scope_alignment'",
+        )
+        == 1
+    )
+    assert "platform" in str(
+        _q(
+            scratch_db,
+            "SELECT column_default FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'domain_settings' "
+            "AND column_name = 'scope_kind'",
+        )
+    )
+    assert (
+        _q(
+            scratch_db,
+            "SELECT obj_description(c.oid, 'pg_constraint') "
+            "FROM pg_constraint c "
+            "WHERE c.conname = 'ck_domain_settings_scope_alignment'",
+        )
+        is None
+    )

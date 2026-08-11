@@ -6,6 +6,25 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a40 — 2026-08-11
+
+An adoption-demanded database invariant fix. Sub's S7 migration rehearsal found
+that raw SQL could create a `domain_settings` row with
+`scope_kind='tenant'` and `tenant_id IS NULL`: stored, but unreachable by the
+resolver.
+
+### Fixed
+- **Coherent database default.** `scope_kind` now defaults to `platform` at the
+  database boundary, matching nullable `tenant_id`. ORM writes keep the
+  context-aware default and still derive tenant scope when a tenant is named.
+- **Database enforcement.** Migration `0021_setting_scope_alignment` repairs
+  the exact tenant/NULL shape created by the old default, refuses ambiguous
+  rows, and adds `ck_domain_settings_scope_alignment`.
+- **Product adoption.** If a product already carries the exact CHECK and
+  platform default (Sub migration 514), migration 0021 verifies and adopts the
+  existing invariant. Its ownership marker makes downgrade preserve the
+  product-owned predecessor instead of deleting it.
+
 ## 0.1.0a39 — 2026-08-11
 
 Namespace allocation for the second installable module. Additive; no behaviour
