@@ -58,8 +58,13 @@ def test_other_scales_do_use_variables(key: str) -> None:
     assert all(v.startswith("var(--dmui-") for v in scale.values())
 
 
-def test_every_colour_resolves_to_a_token_variable() -> None:
-    """A literal colour in the preset is a value that a theme cannot move."""
+def test_every_colour_resolves_to_a_published_token() -> None:
+    """A literal colour in the preset is a value a theme cannot move.
+
+    Colours go through the channel form (`--dmui-x-rgb`) so alpha modifiers
+    work; this checks the colour it derives from (`--dmui-x`) is a real
+    published token, not an invented name that resolves to nothing.
+    """
     declared = {t.variable for t in tokens.TOKENS}
     stack = [_preset()["theme"]["extend"]["colors"]]
     seen = 0
@@ -70,8 +75,9 @@ def test_every_colour_resolves_to_a_token_variable() -> None:
                 stack.append(value)
                 continue
             seen += 1
-            assert value.startswith("var(--dmui-") and value.endswith(")")
-            assert value[4:-1] in declared, f"{value} is not a published token"
+            inner = value[len("rgb(var(") : value.index(") / <alpha-value>)")]
+            assert inner.endswith("-rgb"), f"{value} is not in channel form"
+            assert inner[: -len("-rgb")] in declared, f"{inner} has no published token"
     assert seen > 100, f"expected the full palette, mapped only {seen}"
 
 
@@ -124,9 +130,9 @@ def test_bootstrap_survives_storage_being_unavailable() -> None:
     third-party storage blocked. A theme script must never break a page."""
     script = theme.bootstrap_script()
     assert "try" in script and "catch" in script
-    assert script.count(contract.THEME_ATTRIBUTE) >= 2, (
-        "the catch must still set a theme"
-    )
+    assert (
+        script.count(contract.THEME_ATTRIBUTE) >= 2
+    ), "the catch must still set a theme"
 
 
 def test_set_theme_script_rejects_an_unknown_theme() -> None:
@@ -142,3 +148,78 @@ def test_set_theme_script_writes_both_halves(value: str) -> None:
     assert theme.THEME_STORAGE_KEY in script
     assert contract.THEME_ATTRIBUTE in script
     assert script.count(f"'{value}'") >= 2
+
+
+# --- alpha modifiers -------------------------------------------------------
+#
+# `bg-brand-500/50` is not a nicety: erp uses 4,372 opacity modifiers, sub
+# 5,872, academy 48. A token layer that cannot express alpha cannot be adopted
+# by any of them, and the failure is silent — the utility renders opaque.
+
+
+def test_every_preset_colour_supports_an_alpha_modifier() -> None:
+    """Tailwind can only synthesise alpha from separate channels.
+
+    A variable holding a complete colour renders opaque with no warning, so
+    every colour must go through the channel form.
+    """
+    stack = [_preset()["theme"]["extend"]["colors"]]
+    checked = 0
+    while stack:
+        for value in stack.pop().values():
+            if isinstance(value, dict):
+                stack.append(value)
+                continue
+            checked += 1
+            assert "<alpha-value>" in value, f"{value} cannot take an opacity modifier"
+            assert value.startswith("rgb(var(--dmui-")
+            assert value.endswith("-rgb) / <alpha-value>)")
+    assert checked > 100, f"expected the full palette, checked {checked}"
+
+
+def test_channel_tokens_exist_for_every_colour() -> None:
+    css = build.render_stylesheet("0.0.0test")
+    published = set(tokens.variable_names())
+    for design_token in tokens.colour_tokens():
+        variable = tokens.channel_variable(design_token.name)
+        assert (
+            f"{variable}:" in css
+        ), f"{variable} is referenced by the preset but never declared"
+        assert variable in published, (
+            f"{variable} is emitted but missing from variable_names() — that "
+            "would make it an undocumented public name"
+        )
+
+
+def test_dark_mode_restates_the_channel_forms() -> None:
+    """The subtle half: an alpha utility must darken with its colour.
+
+    If only the whole-colour variables are restated for dark, `bg-surface-primary/50`
+    keeps rendering the LIGHT surface at 50% — a bug that survives a screenshot
+    review because most of the page looks right.
+    """
+    css = build.render_stylesheet("0.0.0test")
+    dark = css[css.index(contract.DARK_THEME_SELECTORS[-1]) :]
+    changing = [
+        t
+        for t in tokens.tokens_in("surface")
+        if tokens.resolve_color(t.name, "light") != tokens.resolve_color(t.name, "dark")
+    ]
+    assert changing, "no surface token differs between modes — fixture is wrong"
+    for design_token in changing:
+        assert f"{tokens.channel_variable(design_token.name)}:" in dark
+
+
+@pytest.mark.parametrize(
+    "hex_colour,expected",
+    [("#3b82f6", "59 130 246"), ("#fff", "255 255 255"), ("#000000", "0 0 0")],
+)
+def test_channels_conversion(hex_colour: str, expected: str) -> None:
+    assert build._channels(hex_colour) == expected
+
+
+def test_channels_rejects_a_malformed_colour() -> None:
+    """Silently emitting a broken channel string would produce invalid CSS that
+    the browser drops, leaving the element transparent."""
+    with pytest.raises(ValueError):
+        build._channels("#12345")

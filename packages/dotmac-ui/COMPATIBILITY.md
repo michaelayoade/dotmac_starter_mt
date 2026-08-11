@@ -56,7 +56,7 @@ deprecation cycle**.
 | Module | Public names |
 |---|---|
 | `dotmac_ui.contract` | `UI_CONTRACT_VERSION`, `SUPPORTED_UI_CONTRACT_VERSIONS`, `TOKEN_PREFIX`, `CLASS_PREFIX`, `DATA_ATTRIBUTE_PREFIX`, `PUBLISHED_COMPONENT_CLASSES`, `THEME_ATTRIBUTE`, `DARK_THEME_SELECTORS`, `ACCESSIBILITY_TARGET` |
-| `dotmac_ui.tokens` | `DesignToken`, `TOKENS`, `TOKENS_BY_NAME`, `CATEGORIES`, `MODES`, `RAMP_STEPS`, `SEMANTIC_INTENTS`, `ACTION_INTENTS`, `ACTION_STATES`, `REDUCED_MOTION_DURATION`, `token`, `tokens_in`, `token_names`, `variable_names`, `css_variable`, `resolve_color`, `reference_target`, `declarations`, `iter_categories` |
+| `dotmac_ui.tokens` | `DesignToken`, `TOKENS`, `TOKENS_BY_NAME`, `CATEGORIES`, `MODES`, `RAMP_STEPS`, `SEMANTIC_INTENTS`, `ACTION_INTENTS`, `ACTION_STATES`, `REDUCED_MOTION_DURATION`, `token`, `tokens_in`, `token_names`, `variable_names`, `css_variable`, `resolve_color`, `reference_target`, `declarations`, `iter_categories`, `COLOUR_CATEGORIES`, `CHANNEL_SUFFIX`, `colour_tokens`, `channel_variable` |
 | `dotmac_ui.theme` | `bootstrap_script`, `set_theme_script`, `THEME_STORAGE_KEY`, `THEME_VALUES`, `DEFAULT_THEME` (pre-paint theme selection; returns source, not a `<script>` tag, so the host owns the CSP nonce) |
 | `dotmac_ui.assets` | `static_dir`, `stylesheet_path`, `stylesheet_url`, `manifest_path`, `asset_manifest`, `asset_digest`, `STYLESHEET_RELPATH`, `MANIFEST_RELPATH`, `ASSET_NAMESPACE`, `DIGEST_LENGTH` |
 | `dotmac_ui.a11y` | `ACCESSIBILITY_TARGET`, `TEXT_CONTRAST_MINIMUM`, `NON_TEXT_CONTRAST_MINIMUM`, `ContrastRequirement`, `ContrastFailure`, `CONTRAST_REQUIREMENTS`, `check_contrast`, `token_contrast`, `contrast_ratio`, `relative_luminance` |
@@ -206,6 +206,26 @@ stylesheet loaded last would win.
 at 11 steps each), `typography` (22), `action` (20), `status` (20), `space` (9),
 `radius` (7), `motion` (7), `breakpoint` (6), `surface` (5), `text` (5), `shadow`
 (5), `border` (4), `focus` (3).
+
+### The channel form
+
+Every colour token also publishes a **channel** variable holding space-separated
+components rather than a complete colour:
+
+    --dmui-color-brand-500:      #3b82f6
+    --dmui-color-brand-500-rgb:  59 130 246
+
+Both are public and both are restated for dark mode. The channel form exists
+because Tailwind can only synthesise alpha from separate components, so
+`bg-brand-500/50` compiles to `rgb(var(--dmui-color-brand-500-rgb) / 0.5)`. A
+variable holding a complete colour cannot take an opacity modifier at all — the
+utility renders **opaque with no warning**, which is why 0.1.0a2 could not be
+adopted by any consumer (`dotmac_sub` uses 5,872 opacity modifiers, `dotmac_erp`
+4,372). Plain CSS can use the channel form the same way:
+`rgba(var(--dmui-surface-primary-rgb) / 0.6)`.
+
+`variable_names()` returns **321** names: the 190 declared tokens plus the 131
+derived channel forms. Both are covered by this package's compatibility promise.
 
 **Two mechanics worth knowing.** Colour *ramps* are mode-independent — a step is
 the same colour in light and dark; what changes is which step a ROLE points at,

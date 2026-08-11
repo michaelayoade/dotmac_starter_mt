@@ -886,9 +886,53 @@ def token_names() -> tuple[str, ...]:
     return tuple(t.name for t in TOKENS)
 
 
+#: Categories whose tokens hold a colour, and therefore also publish a channel
+#: form. Kept here rather than in `build` so the derived names are part of the
+#: declared surface — see `channel_variable`.
+COLOUR_CATEGORIES: Final[tuple[str, ...]] = (
+    "color",
+    "surface",
+    "text",
+    "border",
+    "action",
+    "status",
+)
+
+#: Appended to a colour token's name to form its channel variable.
+CHANNEL_SUFFIX: Final[str] = "-rgb"
+
+
+def colour_tokens() -> tuple[DesignToken, ...]:
+    """Every token holding a colour, in emitted order."""
+    return tuple(t for c in COLOUR_CATEGORIES for t in tokens_in(c))
+
+
+def channel_variable(name: str) -> str:
+    """The channel-form custom property for a colour token.
+
+    `surface-primary` -> `--dmui-surface-primary-rgb`, holding `255 255 255`
+    rather than `#ffffff`.
+
+    This exists because Tailwind can only synthesise alpha from separate
+    channels: `bg-surface-primary/50` compiles to `rgb(<channels> / 0.5)`, and a
+    variable holding a complete colour renders opaque with no warning. It is a
+    *published* name, not an implementation detail — a consumer writing plain
+    CSS can and should use it for the same reason.
+    """
+    return f"{TOKEN_PREFIX}{name}{CHANNEL_SUFFIX}"
+
+
 def variable_names() -> tuple[str, ...]:
-    """Every published custom-property name, in emitted order."""
-    return tuple(t.variable for t in TOKENS)
+    """Every published custom-property name, in emitted order.
+
+    Includes the derived channel forms. They are emitted by the stylesheet and
+    consumers may reference them, so omitting them here would make them
+    undocumented public names — which is the one thing COMPATIBILITY.md must
+    never be wrong about.
+    """
+    return tuple(t.variable for t in TOKENS) + tuple(
+        channel_variable(t.name) for t in colour_tokens()
+    )
 
 
 def iter_categories() -> Iterable[tuple[str, Sequence[DesignToken]]]:
@@ -903,6 +947,8 @@ __all__ = [
     "ACTION_INTENTS",
     "ACTION_STATES",
     "CATEGORIES",
+    "CHANNEL_SUFFIX",
+    "COLOUR_CATEGORIES",
     "DesignToken",
     "MODES",
     "RAMP_STEPS",
@@ -910,6 +956,8 @@ __all__ = [
     "SEMANTIC_INTENTS",
     "TOKENS",
     "TOKENS_BY_NAME",
+    "channel_variable",
+    "colour_tokens",
     "css_variable",
     "declarations",
     "iter_categories",

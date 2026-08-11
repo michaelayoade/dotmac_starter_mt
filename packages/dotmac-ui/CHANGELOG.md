@@ -9,6 +9,37 @@ called out here.
 
 ## Unreleased
 
+## 0.1.0a3 — 2026-08-11
+
+Colour tokens gain a channel form, so alpha modifiers work. No API change.
+
+### Fixed
+- **`bg-brand-500/50` and every other opacity modifier now work.** 0.1.0a2
+  documented this as a known limitation; it is a blocker. `dotmac_sub` uses
+  5,872 opacity modifiers, `dotmac_erp` 4,372 and `dotmac_academy_app` 48 —
+  roughly 10,300 across the fleet. **No consumer could have adopted the token
+  layer**, and the failure was silent: Tailwind cannot synthesise alpha from a
+  variable holding a complete colour, so the utility renders opaque with no
+  warning.
+
+  Every colour token now also publishes `--dmui-<name>-rgb` holding
+  space-separated channels, and the preset emits
+  `rgb(var(--dmui-<name>-rgb) / <alpha-value>)`. The whole-colour variables are
+  unchanged, so CSS using them directly is unaffected.
+
+  The channel forms are **restated in the dark block**. Without that,
+  `bg-surface-primary/50` would keep rendering the light surface at 50% in dark
+  mode — a bug that survives a screenshot review because most of the page still
+  looks right.
+
+### Why it was missed
+
+0.1.0a2 recorded the limitation honestly and deferred it as "a token-layer
+change, not a preset change". That was true and beside the point: the first
+consumer examined needed it, and so does every other one. Measuring the fleet
+before deferring would have caught it — see
+`docs/inventories/ui-surface-inventory.md`.
+
 ## 0.1.0a2 — 2026-08-11
 
 The two things that stood between this package and its first consumer.
