@@ -14,12 +14,25 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
-from dotmac_kernel import NavItem, ProductAssemblySpec, create_app
-from dotmac_kernel.app_factory import LayeredStaticFiles
+from dotmac_kernel import (
+    NavItem,
+    ProductAssemblySpec,
+    ProductSecurityPolicy,
+    create_app,
+)
+from dotmac_kernel.app_factory import (
+    LayeredStaticFiles,
+    _referenced_capabilities,
+    _referenced_permissions,
+)
+from dotmac_kernel.deps import require_capability, require_permission
 from dotmac_kernel.features import FeatureManifest
 from dotmac_kernel.modules import UNVERSIONED
+from fastapi import Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
@@ -35,12 +48,19 @@ def _has_static_mount(app) -> bool:
 
 def test_spec_is_frozen_and_collections_immutable():
     spec = ProductAssemblySpec(
-        name="s", modules=[], disabled_modules={"x"}, providers={"a": 1}
+        name="s",
+        modules=[],
+        disabled_modules=frozenset({"x"}),
+        providers={"a": 1},
+        startup_checks=[lambda: ()],
+        startup_hooks=[lambda: None],
     )
     with pytest.raises(FrozenInstanceError):
         spec.name = "other"  # type: ignore[misc]
     assert isinstance(spec.modules, tuple)
     assert isinstance(spec.disabled_modules, frozenset)
+    assert isinstance(spec.startup_checks, tuple)
+    assert isinstance(spec.startup_hooks, tuple)
     # providers/settings_overrides are read-only mappings
     with pytest.raises(TypeError):
         spec.providers["b"] = 2  # type: ignore[index]
@@ -59,6 +79,28 @@ def test_empty_assembly_boots_to_kernel_surface_only():
     assert "/platform/tenants" not in paths
     assert not any(p.startswith("/parties") for p in paths)
     assert "/admin" not in paths
+
+
+def test_platform_surface_can_be_disabled_without_disabling_product_routes():
+    from fastapi import APIRouter
+
+    router = APIRouter()
+
+    @router.get("/product")
+    def product() -> dict[str, bool]:
+        return {"ok": True}
+
+    app = create_app(
+        ProductAssemblySpec(
+            name="dedicated-product",
+            modules=(FeatureManifest(name="product", routers=(router,)),),
+            platform_surface_enabled=False,
+        )
+    )
+
+    paths = _paths(app)
+    assert "/product" in paths
+    assert not any(path.startswith("/platform") for path in paths)
 
 
 def test_web_enabled_false_drops_web_but_keeps_json_api():
@@ -99,6 +141,133 @@ def test_security_headers_middleware_is_wired():
     assert "content-security-policy" in resp.headers
 
 
+def test_product_security_policy_supplies_csp_and_browser_isolation(monkeypatch):
+    from dotmac_kernel.app_factory import settings
+
+    monkeypatch.setattr(settings, "content_security_policy", "")
+    app = create_app(
+        ProductAssemblySpec(
+            name="secured-product",
+            security_policy=ProductSecurityPolicy(
+                content_security_policy="default-src 'none'",
+                cross_origin_opener_policy="same-origin",
+                cross_origin_resource_policy="same-origin",
+            ),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.headers["content-security-policy"] == "default-src 'none'"
+    assert response.headers["cross-origin-opener-policy"] == "same-origin"
+    assert response.headers["cross-origin-resource-policy"] == "same-origin"
+
+
+def test_environment_csp_overrides_the_product_default(monkeypatch):
+    from dotmac_kernel.app_factory import settings
+
+    monkeypatch.setattr(settings, "content_security_policy", "script-src 'self'")
+    app = create_app(
+        ProductAssemblySpec(
+            name="secured-product",
+            security_policy=ProductSecurityPolicy(
+                content_security_policy="default-src 'none'"
+            ),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.headers["content-security-policy"] == "script-src 'self'"
+
+
+def test_product_security_policy_rejects_header_injection():
+    with pytest.raises(ValueError, match="header value"):
+        ProductSecurityPolicy(cross_origin_opener_policy="same-origin\r\ninjected: yes")
+
+
+def test_product_startup_checks_and_hooks_run_in_declaration_order(monkeypatch):
+    from dotmac_kernel import app_factory
+
+    calls: list[str] = []
+
+    def check() -> tuple[()]:
+        calls.append("check")
+        return ()
+
+    def sync_hook() -> None:
+        calls.append("sync-hook")
+
+    async def async_hook() -> None:
+        calls.append("async-hook")
+
+    monkeypatch.setattr(app_factory, "_required_setting_errors", lambda: [])
+    monkeypatch.setattr(app_factory, "_tenancy_errors", lambda: [])
+    app = create_app(
+        ProductAssemblySpec(
+            name="lifecycle-product",
+            startup_checks=(check,),
+            startup_hooks=(sync_hook, async_hook),
+        )
+    )
+
+    with TestClient(app):
+        pass
+
+    assert calls == ["check", "sync-hook", "async-hook"]
+
+
+def test_product_startup_check_fails_closed_in_production(monkeypatch):
+    from dotmac_kernel import app_factory
+
+    monkeypatch.setattr(app_factory, "validate_settings", lambda _settings: [])
+    monkeypatch.setattr(app_factory.settings, "environment", "production")
+    app = create_app(
+        ProductAssemblySpec(
+            name="invalid-product",
+            startup_checks=(lambda: ("product contract is invalid",),),
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="product contract is invalid"):
+        with TestClient(app):
+            pass
+
+
+def test_route_code_walker_expands_fastapi_lazy_route_contexts():
+    """FastAPI 0.140 stores included routes behind `_IncludedRouter`.
+
+    Keep the test duck-typed so the repository's 0.115 floor environment can
+    prove the traversal shape while the wheel consumer check exercises the
+    real 0.140 implementation.
+    """
+    eager_app = FastAPI()
+
+    @eager_app.get(
+        "/probe",
+        dependencies=[
+            Depends(require_permission("probe.read")),
+            Depends(require_capability("probe.use")),
+        ],
+    )
+    def probe() -> dict[str, bool]:
+        return {"ok": True}
+
+    route = next(item for item in eager_app.routes if isinstance(item, APIRoute))
+    context = SimpleNamespace(
+        dependant=route.dependant,
+        methods={"GET"},
+        path="/included/probe",
+    )
+    lazy_route = SimpleNamespace(effective_route_contexts=lambda: (context,))
+    lazy_app = cast(FastAPI, SimpleNamespace(routes=(lazy_route,)))
+
+    assert ("GET /included/probe", "probe.read") in _referenced_permissions(lazy_app)
+    assert ("GET /included/probe", "probe.use") in _referenced_capabilities(lazy_app)
+
+
 def test_layered_static_prefers_assembly_over_kernel(tmp_path: Path):
     assembly_dir = tmp_path / "assembly_static"
     kernel_dir = tmp_path / "kernel_static"
@@ -125,15 +294,13 @@ def test_assembly_template_override_takes_precedence(tmp_path: Path):
         adir.mkdir()
         (adir / "_probe_override.html").write_text("ASSEMBLY-VERSION")
         templating.use_assembly_templates(adir)
+        loader = templating.templates.env.loader
+        assert loader is not None
         # The assembly template resolves...
-        src = templating.templates.env.loader.get_source(
-            templating.templates.env, "_probe_override.html"
-        )
+        src = loader.get_source(templating.templates.env, "_probe_override.html")
         assert src[0] == "ASSEMBLY-VERSION"
         # ...and a kernel template the assembly did NOT override still resolves.
-        templating.templates.env.loader.get_source(
-            templating.templates.env, "base.html"
-        )
+        loader.get_source(templating.templates.env, "base.html")
     finally:
         templating.templates.env.loader = original_loader
 

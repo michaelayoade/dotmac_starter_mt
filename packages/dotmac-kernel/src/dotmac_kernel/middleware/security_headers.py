@@ -74,10 +74,14 @@ class SecurityHeadersMiddleware:
         *,
         enabled: bool = True,
         content_security_policy: str = "",
+        cross_origin_opener_policy: str = "",
+        cross_origin_resource_policy: str = "",
     ) -> None:
         self.app = app
         self.enabled = enabled
         self.csp = content_security_policy or _STRICT_CSP
+        self.cross_origin_opener_policy = cross_origin_opener_policy
+        self.cross_origin_resource_policy = cross_origin_resource_policy
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not self.enabled:
@@ -105,6 +109,20 @@ class SecurityHeadersMiddleware:
                         (b"content-security-policy", self.csp.encode()),
                     ]
                 )
+                if self.cross_origin_opener_policy:
+                    headers.append(
+                        (
+                            b"cross-origin-opener-policy",
+                            self.cross_origin_opener_policy.encode("latin-1"),
+                        )
+                    )
+                if self.cross_origin_resource_policy:
+                    headers.append(
+                        (
+                            b"cross-origin-resource-policy",
+                            self.cross_origin_resource_policy.encode("latin-1"),
+                        )
+                    )
                 if add_hsts:
                     headers.append((b"strict-transport-security", _HSTS.encode()))
                 message["headers"] = headers

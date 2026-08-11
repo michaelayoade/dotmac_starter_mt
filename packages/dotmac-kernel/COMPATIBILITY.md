@@ -95,7 +95,7 @@ and may change or disappear without a deprecation cycle**.
 | Module | Public names |
 |---|---|
 | `dotmac_kernel.app_factory` | `create_app`, `LayeredStaticFiles` |
-| `dotmac_kernel.assembly` | `ProductAssemblySpec` |
+| `dotmac_kernel.assembly` | `ProductAssemblySpec`, `ProductSecurityPolicy`, `StartupCheck`, `StartupHook` |
 | `dotmac_kernel.audit` | `AuditEvent`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
@@ -381,9 +381,11 @@ constraint on the backing column. If you are adding a sixth, copy
 ### Composing an app: `ProductAssemblySpec` + `create_app`
 
 A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAssemblySpec`
-(`name`, `modules`, `settings_overrides`, `branding`, `providers`, `web_enabled`,
-`disabled_modules`, `assembly_template_dir`, `assembly_static_dir`,
-`packaged_static_dirs`, `stylesheets`, `assembly_migrations`)
+(`name`, `modules`, `setting_defaults`, `branding`, `providers`, `tenancy`,
+`platform_surface_enabled`, `web_enabled`, `startup_checks`, `startup_hooks`,
+`security_policy`, `disabled_modules`, `assembly_template_dir`,
+`assembly_static_dir`, `packaged_static_dirs`, `packaged_template_dirs`,
+`stylesheets`, `assembly_migrations`)
 and calls `dotmac_kernel.create_app(spec) -> FastAPI` (also reachable as
 `from dotmac_kernel import create_app`; it is lazily loaded so `import dotmac_kernel`
 stays DB-free). `create_app` wires logging, module-registry validation, the lifespan
@@ -392,6 +394,19 @@ platform-auth surface, the static mount, and module mounting.
 `assembly_template_dir`/`assembly_static_dir` layer the
 assembly's own templates/static OVER the kernel's (first-match-wins, via `use_assembly_templates`
 and `LayeredStaticFiles`).
+
+`platform_surface_enabled` is independent of `web_enabled`: the former decides
+whether the online kernel platform control plane exists at all, while the
+latter decides whether HTML/static surfaces are mounted. Product configuration
+checks and initialization belong in `startup_checks` / `startup_hooks`, not in
+a wrapper that mutates kernel settings before `create_app`; checks warn in
+development and fail startup in production, then sync or async hooks run in
+declaration order inside the lifespan and any exception fails startup.
+
+`security_policy=ProductSecurityPolicy(...)` supplies product-owned CSP, COOP,
+and CORP defaults to the one kernel-owned security-header middleware. An
+operator's `CONTENT_SECURITY_POLICY` value wins over the product CSP. Policy
+values must be single, Latin-1 HTTP header values and reject CR/LF injection.
 
 **Presentation-package composition (0.1.0a13).** `packaged_static_dirs` and
 `stylesheets` are the two slots an assembly fills to adopt an installed
@@ -768,7 +783,7 @@ acknowledges the applied `(licence_id, licence_version, digest)`.
 
 ## Dependency floors — and what they do and do not promise
 
-The kernel declares `fastapi>=0.111,<0.116`, `pydantic>=2.7.4,<3.0`,
+The kernel declares `fastapi>=0.111,<0.141`, `pydantic>=2.7.4,<3.0`,
 `pydantic-settings>=2.2,<3.0`, `python>=3.11,<3.14`, and (optional, via the
 `licensing` extra) `cryptography>=42` — every Ed25519 API the kernel uses
 predates 42, and the floor probe SIGNS AND VERIFIES a licence and a revocation
@@ -804,7 +819,10 @@ Everything else in this document — including `db`, `deps`, `app_factory`,
 proof. Those are exercised by this repo's full CI on current versions, and
 both products' architecture guards forbid importing them anyway. An assembly
 that mounts `create_app` should track a current FastAPI rather than sit at the
-floor.
+floor. The clean wheel-consumer gate pins FastAPI 0.140.13 and boots the full
+factory at the supported ceiling. It also mounts guarded routers and proves
+FastAPI 0.140's lazy included-router representation cannot hide either
+permission or capability codes from the boot-time declaration walker.
 
 **Why it is a floor and not a preference.** Products adopting the kernel
 selectively (`dotmac_sub`, `dotmac_erp`) pin fastapi 0.111.0 / pydantic 2.7.4.

@@ -88,10 +88,12 @@ jobs:
     # K4 empty-consumer WHEEL proof: build the kernel wheel, install it into a
     # CLEAN virtualenv (NOT the repo venv), and prove an external consumer that
     # imports only the public kernel surface boots and serves the DB-free
-    # /health from the installed wheel — no workspace `app/` on sys.path. Needs
-    # no Postgres: the consumer boots with a deliberately unreachable
-    # DATABASE_URL and /health never touches the DB. Poetry is installed only as
-    # the wheel BUILD tool; the consumer venv is separate and clean.
+    # /health from the installed wheel — no workspace `app/` on sys.path. The
+    # clean consumer pins FastAPI 0.140.13 and proves lazy included routers
+    # cannot hide permission/capability guards; `kernel-floors` separately
+    # proves 0.111. Needs no Postgres: the consumer boots with a deliberately
+    # unreachable DATABASE_URL and /health never touches the DB. Poetry is
+    # installed only as the wheel BUILD tool; the consumer venv is separate.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0

@@ -20,12 +20,47 @@ them empty.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
 from dotmac_kernel.modules import AnyManifest
+
+StartupCheck = Callable[[], Sequence[str]]
+StartupHook = Callable[[], None | Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class ProductSecurityPolicy:
+    """Product-owned defaults for browser response policy.
+
+    The kernel still owns the middleware and its invariant baseline headers.
+    This value declares only the policy that genuinely varies by product:
+    content sources and cross-origin isolation. Environment configuration wins
+    over ``content_security_policy`` so an operator can tighten or replace a
+    product default without mutating the assembly.
+    """
+
+    content_security_policy: str = ""
+    cross_origin_opener_policy: str = ""
+    cross_origin_resource_policy: str = ""
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "content_security_policy",
+            "cross_origin_opener_policy",
+            "cross_origin_resource_policy",
+        ):
+            value = getattr(self, field_name)
+            if "\r" in value or "\n" in value:
+                raise ValueError(f"{field_name} must be a single HTTP header value")
+            try:
+                value.encode("latin-1")
+            except UnicodeEncodeError as exc:
+                raise ValueError(
+                    f"{field_name} must be representable as an HTTP header value"
+                ) from exc
 
 
 @dataclass(frozen=True)
@@ -90,8 +125,27 @@ class ProductAssemblySpec:
     #   knows whether its rows are global or per-organisation — a question a
     #   declared topology answers instead of leaving to inspection.
     tenancy: str = "multi"
+    # Whether the kernel's online platform-control-plane routers are exposed.
+    # Dedicated and on-prem products commonly keep tenant/bootstrap
+    # administration offline; that is a product surface decision and must not
+    # require deleting FastAPI routes after the factory has validated them.
+    platform_surface_enabled: bool = True
     # Whole-portal surface switch — mount the admin/HTML surface or run API-only.
     web_enabled: bool = True
+    # Product-specific configuration checks. Each returns human-readable
+    # errors and follows the kernel's existing environment policy: warnings in
+    # development, fatal startup errors in production.
+    startup_checks: Sequence[StartupCheck] = ()
+    # Product initialization that belongs inside the FastAPI lifespan (for
+    # example telemetry/error tracking). Hooks run in declaration order after
+    # configuration checks; sync and async callables are both accepted, and an
+    # exception fails startup rather than producing a partially initialized app.
+    startup_hooks: Sequence[StartupHook] = ()
+    # Product-owned browser policy defaults, consumed by the one kernel-owned
+    # security-header middleware writer.
+    security_policy: ProductSecurityPolicy = field(
+        default_factory=ProductSecurityPolicy
+    )
     # Feature/module names to disable (JSON API + web together), per deployment.
     disabled_modules: frozenset[str] = frozenset()
     # The assembly's own template directory — layered OVER the kernel templates
@@ -139,6 +193,8 @@ class ProductAssemblySpec:
         )
         object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
         object.__setattr__(self, "disabled_modules", frozenset(self.disabled_modules))
+        object.__setattr__(self, "startup_checks", tuple(self.startup_checks))
+        object.__setattr__(self, "startup_hooks", tuple(self.startup_hooks))
         object.__setattr__(
             self, "packaged_static_dirs", tuple(self.packaged_static_dirs)
         )
@@ -148,4 +204,9 @@ class ProductAssemblySpec:
         object.__setattr__(self, "stylesheets", tuple(self.stylesheets))
 
 
-__all__ = ["ProductAssemblySpec"]
+__all__ = [
+    "ProductAssemblySpec",
+    "ProductSecurityPolicy",
+    "StartupCheck",
+    "StartupHook",
+]

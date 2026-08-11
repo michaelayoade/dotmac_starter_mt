@@ -1450,6 +1450,11 @@ the strict rules; no existing revision was renamed.
    FIRST and derives the startup order from it (see "Module registry" above).
    An incoherent module set raises here, before a single route is mounted.
    Steps 2–3 and 6 below all walk that one order.
+   The same spec explicitly controls whether the online kernel platform surface
+   exists (`platform_surface_enabled`), declares product configuration checks
+   and ordered lifespan startup hooks, and supplies a typed product browser
+   security policy. Products do not remove routes after construction or mutate
+   kernel settings to express those decisions.
 1. `app/main.py` imports `FEATURE_MODULES` from `app/features/__init__.py`
    — a plain list of dotted module paths (currently `tenants`, `auth`,
    `parties`, `rbac`, `settings`, `custom_fields`, `licensing`, `web`).
@@ -1483,6 +1488,14 @@ the strict rules; no existing revision was renamed.
    NON-FATAL — a failure is caught, logged (`Feature %s seed skipped: %s`),
    and swallowed rather than propagated, so an unreachable DB at boot can
    never take startup down (seeds are idempotent; the next boot retries).
+
+After every router is mounted, the permission and capability declaration
+validators walk each route's effective dependency tree. FastAPI through 0.115
+stores included `APIRoute` objects directly; FastAPI 0.140 stores lazy included
+routers and exposes their prefix-aware dependency trees through
+`effective_route_contexts()`. The kernel consumes either representation through
+one duck-typed walker, so a framework storage optimization cannot turn a
+fail-closed declaration check into a vacuous pass.
 
 ## Error handling
 
