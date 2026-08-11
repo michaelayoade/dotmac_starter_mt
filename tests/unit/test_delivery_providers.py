@@ -11,6 +11,7 @@ The fake provider here is the whole point of the seam — the kernel ships a
 
 from __future__ import annotations
 
+import inspect
 from uuid import uuid4
 
 import pytest
@@ -67,6 +68,7 @@ def tenant(db) -> Tenant:
 
 def _message(**kwargs) -> OutboundMessage:
     defaults = {
+        "dispatch_id": uuid4(),
         "channel": "email",
         "address": "jane@example.com",
         "body": "hello",
@@ -136,6 +138,7 @@ def test_a_successful_send_records_a_receipt(db, tenant) -> None:
     assert outcome.status == DELIVERY_ACCEPTED
     assert outcome.receipt.provider == "fake"
     assert outcome.receipt.provider_message_id == "msg-1"
+    assert outcome.receipt.dispatch_id == provider.calls[0].dispatch_id
 
 
 def test_a_bounce_reported_at_send_time_suppresses_immediately(db, tenant) -> None:
@@ -169,7 +172,63 @@ def test_the_provider_receives_the_message_unchanged(db, tenant) -> None:
     assert provider.calls == [message]
 
 
+def test_a_persisted_receipt_prevents_an_outbox_retry_from_calling_provider_again(
+    db, tenant
+) -> None:
+    """The relay is at-least-once. If tenant delivery committed but dispatcher
+    settlement crashed, replaying the outbox event must reuse its receipt before
+    touching the network again."""
+    provider = FakeProvider(
+        ProviderResult(status=DELIVERY_ACCEPTED, provider_message_id="stable-1")
+    )
+    message = _message()
+    tenant_id = tenant.id
+
+    first = send(db, tenant_id, provider=provider, message=message)
+    db.expunge_all()
+    second = send(db, tenant_id, provider=provider, message=message)
+
+    assert isinstance(first, Sent)
+    assert isinstance(second, Sent)
+    assert first.receipt.id == second.receipt.id
+    assert provider.calls == [message]
+
+
+def test_message_exposes_the_dispatch_id_as_the_provider_idempotency_key() -> None:
+    message = _message()
+    assert message.idempotency_key == str(message.dispatch_id)
+
+
+def test_dispatch_id_reuse_with_different_message_is_a_conflict(db, tenant) -> None:
+    provider = FakeProvider(
+        ProviderResult(status=DELIVERY_ACCEPTED, provider_message_id="stable-2")
+    )
+    original = _message(body="invoice one")
+    send(db, tenant.id, provider=provider, message=original)
+
+    with pytest.raises(ValueError, match="dispatch id"):
+        send(
+            db,
+            tenant.id,
+            provider=provider,
+            message=_message(
+                dispatch_id=original.dispatch_id, body="different invoice"
+            ),
+        )
+    assert provider.calls == [original]
+
+
 # ── The adapter's vocabulary is checked at construction ─────────────────────
+
+
+def test_category_is_a_required_constructor_argument() -> None:
+    parameter = inspect.signature(OutboundMessage).parameters["category"]
+    assert parameter.default is inspect.Parameter.empty
+
+
+def test_an_empty_category_is_refused() -> None:
+    with pytest.raises(ValueError, match="category"):
+        _message(category="  ")
 
 
 def test_an_unknown_provider_status_is_refused_at_construction(db) -> None:

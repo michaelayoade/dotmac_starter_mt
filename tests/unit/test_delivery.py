@@ -148,6 +148,33 @@ def test_a_redelivered_webhook_does_not_record_twice(db, tenant) -> None:
     )
 
 
+def test_one_provider_message_keeps_each_status_transition(db, tenant) -> None:
+    """A provider message id identifies the MESSAGE, not one receipt event.
+
+    The normal lifecycle is accepted -> delivered/bounced. Deduplicating solely
+    on the message id erases the late verdict and, for a bounce, leaves consent
+    open forever.
+    """
+    accepted = _receipt(
+        db, tenant, status=DELIVERY_ACCEPTED, provider_message_id="progress-1"
+    )
+    bounced = _receipt(
+        db, tenant, status=DELIVERY_BOUNCED, provider_message_id="progress-1"
+    )
+
+    assert accepted.id != bounced.id
+    assert accepted.dispatch_id == bounced.dispatch_id
+    assert [
+        row.status
+        for row in delivery.receipts_for_address(
+            db, tenant.id, channel="email", address="jane@example.com"
+        )
+    ] == [DELIVERY_BOUNCED, DELIVERY_ACCEPTED]
+    assert not consent.may_send(
+        db, tenant.id, channel="email", address="jane@example.com", category="billing"
+    )
+
+
 def test_receipts_without_a_provider_id_are_all_recorded(db, tenant) -> None:
     """A synchronous failure never gets an id, and there is nothing to dedupe on
     — the unique index is partial for exactly this reason."""

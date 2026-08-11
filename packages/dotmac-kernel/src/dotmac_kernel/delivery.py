@@ -38,10 +38,10 @@ reason `status` is a caller-supplied vocabulary rather than something parsed fro
 ## Idempotency
 
 Provider webhooks are at-least-once. `record_receipt` is idempotent on
-`(tenant, provider, provider_message_id)`: a redelivered bounce returns the
-existing row and does not suppress twice. A receipt with no provider id — a
-synchronous send failure that never got one — is always recorded, since there is
-nothing to deduplicate on.
+`(tenant, provider, provider_message_id, status)`: a redelivered bounce returns
+the existing bounce, while a later status for the same message is preserved. A
+receipt with no provider id — a synchronous send failure that never got one — is
+always recorded, since there is nothing to deduplicate on.
 
 ## Transactions
 
@@ -52,10 +52,11 @@ a recorded bounce with no suppression behind it.
 
 from __future__ import annotations
 
-from datetime import datetime
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_kernel import consent
@@ -64,6 +65,7 @@ from dotmac_kernel.consent_models import (
     REASON_COMPLAINT,
     SCOPE_ALL,
 )
+from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.delivery_models import (
     DELIVERY_BOUNCED,
     DELIVERY_STATUSES,
@@ -82,6 +84,73 @@ _REASON_FOR_STATUS = {
 }
 
 
+def _provider_name(provider: str | None) -> str:
+    return (provider or "").strip().lower()
+
+
+def _provider_receipt(
+    db: Session,
+    tenant_id: UUID,
+    *,
+    provider: str,
+    provider_message_id: str,
+    status: str,
+) -> CommunicationDelivery | None:
+    return db.execute(
+        select(CommunicationDelivery).where(
+            CommunicationDelivery.tenant_id == tenant_id,
+            CommunicationDelivery.provider == provider,
+            CommunicationDelivery.provider_message_id == provider_message_id,
+            CommunicationDelivery.status == status,
+        )
+    ).scalar_one_or_none()
+
+
+def _latest_provider_receipt(
+    db: Session,
+    tenant_id: UUID,
+    *,
+    provider: str,
+    provider_message_id: str,
+) -> CommunicationDelivery | None:
+    return db.execute(
+        select(CommunicationDelivery)
+        .where(
+            CommunicationDelivery.tenant_id == tenant_id,
+            CommunicationDelivery.provider == provider,
+            CommunicationDelivery.provider_message_id == provider_message_id,
+        )
+        .order_by(
+            CommunicationDelivery.occurred_at.desc(),
+            CommunicationDelivery.created_at.desc(),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def _assert_same_message(
+    receipt: CommunicationDelivery,
+    *,
+    channel: str,
+    address: str,
+    dispatch_id: UUID | None,
+    request_fingerprint: str | None,
+) -> None:
+    if receipt.channel != channel or receipt.address != address:
+        raise DeliveryError(
+            "provider message id and status were already recorded for a "
+            "different channel or address"
+        )
+    if dispatch_id is not None and receipt.dispatch_id != dispatch_id:
+        raise DeliveryError("dispatch id conflicts with the recorded provider message")
+    if (
+        request_fingerprint is not None
+        and receipt.request_fingerprint is not None
+        and receipt.request_fingerprint != request_fingerprint
+    ):
+        raise DeliveryError("dispatch id was already used for a different message")
+
+
 def record_receipt(
     db: Session,
     tenant_id: UUID,
@@ -90,6 +159,8 @@ def record_receipt(
     address: str,
     provider: str,
     status: str,
+    dispatch_id: UUID | None = None,
+    request_fingerprint: str | None = None,
     provider_message_id: str | None = None,
     response_code: str | None = None,
     response_body: str | None = None,
@@ -97,46 +168,107 @@ def record_receipt(
 ) -> CommunicationDelivery:
     """Record what a provider said, and act on it if it is final.
 
-    Idempotent on `(tenant, provider, provider_message_id)` when an id is
-    supplied. A `bounced` or `complaint` status additionally suppresses the
-    address with scope `all` — see the module docstring for why a soft bounce
-    must not be reported as `bounced`.
+    Idempotent on `(tenant, provider, provider_message_id, status)` when an id
+    is supplied. Distinct statuses for one provider message share a dispatch id
+    and remain distinct rows. A `bounced` or `complaint` status additionally
+    suppresses the address with scope `all` — see the module docstring for why a
+    soft bounce must not be reported as `bounced`.
     """
     if status not in DELIVERY_STATUSES:
         raise DeliveryError(
             f"unknown delivery status {status!r} — expected one of "
             f"{', '.join(DELIVERY_STATUSES)}"
         )
-    normalized = consent.normalize_address(channel, address)
+    normalized_channel = consent.normalize_channel(channel)
+    if not normalized_channel:
+        raise DeliveryError("cannot record a receipt for an empty channel")
+    normalized = consent.normalize_address(normalized_channel, address)
     if not normalized:
         raise DeliveryError("cannot record a receipt for an empty address")
+    normalized_provider = _provider_name(provider)
+    if not normalized_provider:
+        raise DeliveryError("cannot record a receipt for an empty provider")
+    normalized_message_id = (
+        provider_message_id.strip() if provider_message_id is not None else None
+    )
+    if normalized_message_id == "":
+        normalized_message_id = None
 
-    if provider_message_id is not None:
-        existing = db.execute(
-            select(CommunicationDelivery).where(
-                CommunicationDelivery.tenant_id == tenant_id,
-                CommunicationDelivery.provider == provider,
-                CommunicationDelivery.provider_message_id == provider_message_id,
-            )
-        ).scalar_one_or_none()
+    prior: CommunicationDelivery | None = None
+    if normalized_message_id is not None:
+        existing = _provider_receipt(
+            db,
+            tenant_id,
+            provider=normalized_provider,
+            provider_message_id=normalized_message_id,
+            status=status,
+        )
         if existing is not None:
-            # A redelivered webhook. Returning the first row rather than writing
-            # a second is what keeps one bounce from suppressing twice.
+            _assert_same_message(
+                existing,
+                channel=normalized_channel,
+                address=normalized,
+                dispatch_id=dispatch_id,
+                request_fingerprint=request_fingerprint,
+            )
             return existing
+        prior = _latest_provider_receipt(
+            db,
+            tenant_id,
+            provider=normalized_provider,
+            provider_message_id=normalized_message_id,
+        )
+        if prior is not None:
+            _assert_same_message(
+                prior,
+                channel=normalized_channel,
+                address=normalized,
+                dispatch_id=dispatch_id,
+                request_fingerprint=request_fingerprint,
+            )
+
+    resolved_dispatch_id = dispatch_id or (prior.dispatch_id if prior else uuid4())
+    resolved_fingerprint = request_fingerprint or (
+        prior.request_fingerprint if prior else None
+    )
 
     receipt = CommunicationDelivery(
         tenant_id=tenant_id,
-        channel=channel,
+        dispatch_id=resolved_dispatch_id,
+        request_fingerprint=resolved_fingerprint,
+        channel=normalized_channel,
         address=normalized,
-        provider=provider,
-        provider_message_id=provider_message_id,
+        provider=normalized_provider,
+        provider_message_id=normalized_message_id,
         status=status,
         response_code=response_code,
         response_body=response_body,
-        **({"occurred_at": occurred_at} if occurred_at is not None else {}),
+        occurred_at=occurred_at or datetime.now(UTC),
     )
-    db.add(receipt)
-    db.flush()
+    try:
+        with conflict_savepoint(db):
+            db.add(receipt)
+            db.flush()
+    except IntegrityError:
+        if normalized_message_id is None:
+            raise
+        winner = _provider_receipt(
+            db,
+            tenant_id,
+            provider=normalized_provider,
+            provider_message_id=normalized_message_id,
+            status=status,
+        )
+        if winner is None:
+            raise
+        _assert_same_message(
+            winner,
+            channel=normalized_channel,
+            address=normalized,
+            dispatch_id=dispatch_id,
+            request_fingerprint=request_fingerprint,
+        )
+        return winner
 
     if status in SUPPRESSING_STATUSES:
         # Same transaction as the receipt: a crash must not be able to leave a
@@ -144,15 +276,33 @@ def record_receipt(
         consent.suppress(
             db,
             tenant_id,
-            channel=channel,
+            channel=normalized_channel,
             address=address,
             scope=SCOPE_ALL,
             reason=_REASON_FOR_STATUS.get(status, REASON_COMPLAINT),
-            note=f"provider {provider} reported {status}"
+            note=f"provider {normalized_provider} reported {status}"
             + (f" ({response_code})" if response_code else ""),
-            created_by=f"delivery:{provider}",
+            created_by=f"delivery:{normalized_provider}",
         )
     return receipt
+
+
+def latest_receipt_for_dispatch(
+    db: Session, tenant_id: UUID, *, dispatch_id: UUID
+) -> CommunicationDelivery | None:
+    """Newest known provider status for one stable outbound dispatch."""
+    return db.execute(
+        select(CommunicationDelivery)
+        .where(
+            CommunicationDelivery.tenant_id == tenant_id,
+            CommunicationDelivery.dispatch_id == dispatch_id,
+        )
+        .order_by(
+            CommunicationDelivery.occurred_at.desc(),
+            CommunicationDelivery.created_at.desc(),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
 
 
 def receipts_for_address(
@@ -168,13 +318,14 @@ def receipts_for_address(
     The operator question behind a "why did this customer stop getting mail?"
     ticket.
     """
+    normalized_channel = consent.normalize_channel(channel)
     stmt = (
         select(CommunicationDelivery)
         .where(
             CommunicationDelivery.tenant_id == tenant_id,
-            CommunicationDelivery.channel == channel,
+            CommunicationDelivery.channel == normalized_channel,
             CommunicationDelivery.address
-            == consent.normalize_address(channel, address),
+            == consent.normalize_address(normalized_channel, address),
         )
         .order_by(CommunicationDelivery.occurred_at.desc())
         .limit(limit)
@@ -184,6 +335,7 @@ def receipts_for_address(
 
 __all__ = [
     "DeliveryError",
+    "latest_receipt_for_dispatch",
     "receipts_for_address",
     "record_receipt",
 ]

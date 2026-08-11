@@ -100,10 +100,16 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
+| `dotmac_kernel.channel_policy` | `CHANNEL_POLICY_KEY`, `ChannelPolicyError`, `make_spec`, `resolve_channels`, `validate_policy_document` |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |
+| `dotmac_kernel.consent` | `ConsentError`, `filter_eligible`, `is_marketing`, `list_suppressions`, `may_send`, `normalize_address`, `normalize_channel`, `register_marketing_categories`, `register_numeric_channels`, `registered_marketing_categories`, `suppress`, `suppression_reason`, `suppression_reasons_for_addresses`, `unsuppress`, `unsuppress_marketing` |
+| `dotmac_kernel.consent_models` | `REASON_BOUNCE`, `REASON_COMPLAINT`, `REASON_ERASURE`, `REASON_MANUAL`, `REASON_UNSUBSCRIBE`, `SCOPE_ALL`, `SCOPE_MARKETING`, `SUPPRESSION_REASONS`, `SUPPRESSION_SCOPES`, `CommunicationSuppression` |
 | `dotmac_kernel.entitlements` | `TenantEntitlementGrant`, `EntitlementDecision`, `grant_entitlement`, `is_entitled` (WS2 entitlement grant store + evaluator; also top-level) |
 | `dotmac_kernel.crud` | `CRUDManager` |
 | `dotmac_kernel.db` | `get_db`, `get_platform_db`, `platform_session`, `resolver_session`, `tenant_session`, `tenant_session_by_slug`, `set_tenant`, `conflict_savepoint`, `engine`, `platform_engine` |
+| `dotmac_kernel.delivery` | `DeliveryError`, `latest_receipt_for_dispatch`, `receipts_for_address`, `record_receipt` |
+| `dotmac_kernel.delivery_models` | `DELIVERY_ACCEPTED`, `DELIVERY_BOUNCED`, `DELIVERY_COMPLAINT`, `DELIVERY_DELIVERED`, `DELIVERY_FAILED`, `DELIVERY_REJECTED`, `DELIVERY_STATUSES`, `SUPPRESSING_STATUSES`, `CommunicationDelivery` |
+| `dotmac_kernel.delivery_providers` | `DeliveryProvider`, `OutboundMessage`, `ProviderResult`, `Sent`, `Suppressed`, `send` |
 | `dotmac_kernel.tenancy` | `bind_single_tenant`, `single_tenant_binding`, `clear_single_tenant_binding` (which tenant, if any, this deployment is bound to) |
 | `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
 | `dotmac_kernel.errors` | `register_error_handlers` |

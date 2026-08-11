@@ -6,6 +6,34 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a37 — 2026-08-11
+
+Review hardening for consent and provider delivery. This amends the unpublished
+kernel migration `0020` before its first product cutover.
+
+### Fixed
+- Provider callback idempotency is now
+  `(tenant_id, provider, provider_message_id, status)`, preserving real
+  `accepted` → `delivered`/`bounced` transitions while deduplicating repeated
+  copies of one status. Concurrent duplicates converge through a savepoint
+  instead of leaking `IntegrityError` or rolling back tenant context.
+- Consent canonicalises channel identity as well as the address, so spelling a
+  channel as `Email` cannot bypass an `email` suppression. Concurrent duplicate
+  suppressions likewise converge on the canonical row.
+- Every outbound message now carries a required stable `dispatch_id`. A
+  committed receipt short-circuits an outbox settlement retry before the
+  provider is called again, a request fingerprint rejects reuse for different
+  content, and adapters can forward `message.idempotency_key` to providers that
+  support idempotent requests.
+- `OutboundMessage.category` is now required and rejects blank values, closing
+  the path where an omitted category silently defaulted to transactional and
+  bypassed a marketing suppression.
+
+### Breaking
+- Construct `OutboundMessage` with both `dispatch_id=<UUID>` and a non-empty
+  `category`. The product/outbox creates the dispatch id once and reuses it on
+  every attempt.
+
 ## 0.1.0a36 — 2026-08-10
 
 The provider seam and the channel-policy reader (ADR-0006 § 5c/5d). Additive; no

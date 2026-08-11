@@ -11,10 +11,14 @@ Deliberately NOT a queue. Sub's `Notification` table is
 backoff/lease-reclaim/dead-letter all appear twice); porting it would install the
 duplicate permanently. Evidence: `docs/inventories/delivery-outbox-sources.md`.
 
-The unique index is PARTIAL on `provider_message_id IS NOT NULL`: it is what
-makes an at-least-once provider webhook safe to redeliver, while still allowing
-receipts for synchronous failures that never got an id. A plain unique index
-would make every id-less receipt collide with the last one.
+The unique index is PARTIAL on `provider_message_id IS NOT NULL` and includes
+`status`: it makes a redelivered copy of one webhook safe while preserving the
+normal accepted→delivered/bounced progression of one provider message. A plain
+unique index would make every id-less receipt collide with the last one.
+
+`dispatch_id` is the product/outbox identity created before the provider call;
+all status receipts for the same outbound message share it. The optional
+fingerprint prevents that identity being silently reused for different content.
 
 Tenant-scoped with RLS in the same migration (hard rule 11). A delivery receipt
 names an address and a verdict about it — the same disclosure risk as the consent
@@ -44,6 +48,8 @@ def upgrade() -> None:
         _TABLE,
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
+        sa.Column("dispatch_id", sa.Uuid(), nullable=False),
+        sa.Column("request_fingerprint", sa.String(64), nullable=True),
         sa.Column("channel", sa.String(40), nullable=False),
         sa.Column("address", sa.String(320), nullable=False),
         sa.Column("provider", sa.String(120), nullable=False),
@@ -77,14 +83,19 @@ def upgrade() -> None:
     )
     op.create_index("ix_communication_deliveries_tenant_id", _TABLE, ["tenant_id"])
     op.create_index(
+        "ix_communication_deliveries_dispatch",
+        _TABLE,
+        ["tenant_id", "dispatch_id"],
+    )
+    op.create_index(
         "ix_communication_deliveries_address",
         _TABLE,
         ["tenant_id", "channel", "address"],
     )
     op.create_index(
-        "uq_communication_deliveries_provider_message",
+        "uq_communication_deliveries_provider_message_status",
         _TABLE,
-        ["tenant_id", "provider", "provider_message_id"],
+        ["tenant_id", "provider", "provider_message_id", "status"],
         unique=True,
         postgresql_where=sa.text("provider_message_id IS NOT NULL"),
     )
@@ -104,7 +115,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(f"DROP POLICY IF EXISTS {_TABLE}_tenant_isolation ON {_TABLE};")
-    op.drop_index("uq_communication_deliveries_provider_message", table_name=_TABLE)
+    op.drop_index(
+        "uq_communication_deliveries_provider_message_status", table_name=_TABLE
+    )
     op.drop_index("ix_communication_deliveries_address", table_name=_TABLE)
+    op.drop_index("ix_communication_deliveries_dispatch", table_name=_TABLE)
     op.drop_index("ix_communication_deliveries_tenant_id", table_name=_TABLE)
     op.drop_table(_TABLE)

@@ -12,12 +12,25 @@ source_paths = [
   "dotmac_erp:app/services/domain_settings.py",
   "dotmac_sub:app/models/domain_settings.py",
   "dotmac_sub:app/services/domain_settings.py",
+  "dotmac_sub:app/models/notification.py",
+  "dotmac_sub:app/services/communication_eligibility.py",
+  "dotmac_sub:app/services/notification.py",
+  "dotmac_sub:app/tasks/notifications.py",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_kernel_public_surface.py",
   "dotmac_starter_mt:tests/unit/test_settings_service.py",
   "dotmac_erp:tests/test_domain_settings_services.py",
   "dotmac_sub:tests/test_domain_settings_services.py",
+  "dotmac_starter_mt:tests/unit/test_consent.py",
+  "dotmac_starter_mt:tests/unit/test_delivery.py",
+  "dotmac_starter_mt:tests/unit/test_delivery_providers.py",
+  "dotmac_starter_mt:tests/unit/test_channel_policy.py",
+  "dotmac_starter_mt:tests/test_consent_isolation.py",
+  "dotmac_starter_mt:tests/test_delivery_isolation.py",
+  "dotmac_sub:tests/test_communication_eligibility.py",
+  "dotmac_sub:tests/test_notification_queue_suppression.py",
+  "dotmac_sub:tests/test_email_services.py",
 ]
 contract_consumers = ["dotmac_starter_mt"]
 candidate_consumers = [
@@ -30,8 +43,11 @@ inventory_evidence = [
   "docs/inventories/starter-surfaces.md",
   "docs/inventories/branding-settings.md",
   "docs/inventories/module-extraction-sources.md",
+  "docs/inventories/consent-suppression-sources.md",
+  "docs/inventories/delivery-outbox-sources.md",
+  "docs/inventories/channel-policy-sources.md",
 ]
-first_cutover = "The starter reference assembly consumes the extracted package; product-by-product released-pin cutovers follow the existing-product adoption plan."
+first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities; product-by-product released-pin cutovers follow the existing-product adoption plan."
 shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
-local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair."
-next_action = "Apply this dossier contract per new kernel facility and complete the ERP/Sub settings cutover to kernel 0.1.0a14."
+local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
+next_action = "Cut Sub over first to the released consent, delivery, and channel-policy contracts, prove outbox/provider parity including stable dispatch ids, then retire its local decision paths; sequence ERP as the next consumer."

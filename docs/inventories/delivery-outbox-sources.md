@@ -68,7 +68,7 @@ slogan. A ledger nothing writes to is a ledger that answers "yes, send" forever.
 | Piece | Where | Keep |
 |---|---|---|
 | Delivery receipt | `NotificationDelivery` (`provider`, `provider_message_id`, `status`, `response_code`, `response_body`, `occurred_at`) | **Yes** — the kernel outbox records that we dispatched, never what the provider said |
-| Receipt idempotency | partial unique index on `(provider, provider_message_id) WHERE is_active AND both NOT NULL` | **Yes** — this is what makes a provider webhook safe to redeliver |
+| Receipt idempotency | partial unique index on `(provider, provider_message_id) WHERE is_active AND both NOT NULL` | **Yes, corrected at extraction** — provider message identity plus STATUS deduplicates one callback without erasing accepted→delivered/bounced progression |
 | Per-channel rate limit | `_per_channel_rate_limit(db)` | **Yes**, as an outbox dispatch policy |
 | Queue-age expiry | `_expire_stale_notifications` / `_max_queue_age_hours` | **Yes** — a two-day-old outage SMS should not send |
 | Provider adapters | `email.py` (1,651), `sms.py` (428), whatsapp capability | **Seam only** — see below |
@@ -95,7 +95,10 @@ Total source under review: `tasks/notifications.py` (877),
 ## The shape this points to
 
 1. **`communication_deliveries`** — the receipt. Tenant-scoped, RLS, keyed for
-   idempotent provider callbacks on `(tenant_id, provider, provider_message_id)`.
+   idempotent provider callbacks on
+   `(tenant_id, provider, provider_message_id, status)`. A product/outbox-owned
+   `dispatch_id` groups all status transitions and survives relay retries; its
+   request fingerprint rejects accidental identity reuse.
 2. **A provider `Protocol`** — `send(message) -> DeliveryReceipt`. Kernel-side
    contract, product-side implementation.
 3. **The feedback loop, which is new code rather than a port**: a receipt whose
@@ -103,7 +106,10 @@ Total source under review: `tasks/notifications.py` (877),
    `consent.suppress(scope=all, reason=...)`. This is the piece that makes the
    consent ledger self-maintaining, and no product has it.
 4. **Dispatch rides `dotmac_kernel.messaging`** — a typed outbox payload, not a
-   new table, not a new worker.
+   new table, not a new worker. The payload creates and retains `dispatch_id`
+   before the first attempt; the provider adapter forwards it as its external
+   idempotency key when supported. A committed receipt short-circuits an outbox
+   settlement retry before the provider is called again.
 
 Ordering note: (3) is the highest-value increment and the smallest. It is also
 the only part with no source implementation to port, so it needs its own tests
