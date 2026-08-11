@@ -7,6 +7,14 @@
 that included it ranked `flex` and `text-sm` as top "components", which would
 have argued for building `flex` once.
 
+> **Correction — 2026-08-11 (afternoon).** Executing this plan against Sub
+> measured two things it got wrong. Both are recorded in
+> [§ "Correction: only ERP runs its copy"](#correction-only-erp-runs-its-copy)
+> below and in `dotmac_sub`'s ADR-0010. **Read that section before acting on
+> "Recommended order" step 3 or 4** — as written, step 3 promotes files that
+> only one product runs, which is the extraction the ADR-0006 § 5 gate exists to
+> refuse. Everything above and below it still stands as measurement.
+
 ## The finding that changes the plan
 
 `dotmac_erp` and `dotmac_sub` do not have independent design systems. They have
@@ -125,16 +133,83 @@ component library in "later slices".
 2. **Migrate the token layer first**, in all three consumers. It retires two
    drifted `_tokens.css` copies and academy's palette, and it is the piece
    `dotmac-ui` can already satisfy today.
-3. **Promote the 8 byte-identical files as-is.** No design decisions required;
-   the second copy simply stops existing.
+3. **Promote the 8 byte-identical files as-is.** ⚠️ **Superseded — see the
+   correction below.** Sub does not run its copy, so this promotes a
+   single-consumer file set. Re-base it on the live trees first.
 4. **Reconcile the drifted five** — `_dashboard`, `_badges`, `_tokens`,
    `_tables`, `_buttons` — each as a deliberate decision recorded with the
-   promotion, not a merge.
+   promotion, not a merge. ⚠️ Same correction: in Sub these five are dead code,
+   so four of the five reconcile a live file against an abandoned one.
 5. **Then** design what nothing has: the missing state and size primitives that
    `btn-load` and `btn-fit` are standing in for.
 
 Step 5 is the only part that is design from scratch. Steps 1–4 are removing
 duplicates that already exist, which is where the build-once return is.
+
+## Correction: only ERP runs its copy
+
+**Measured 2026-08-11 at sub `1f41538e2`, erp `1e6b3270`, while executing step 2
+in `dotmac_sub` (PR #2296 / that repo's ADR-0010).**
+
+### Sub's `src/css/` tree is dead code
+
+Nothing builds it:
+
+- `package.json`'s `css:build` compiles `static/css/src/main.css` — **not**
+  `src/css/main.css`.
+- No Dockerfile, workflow, Makefile or module references `src/css`.
+- The compiled `static/css/main.css` contains **zero** `--ink` and **zero**
+  `--parchment`, the tokens that tree defines.
+- Last commit: **2026-02-16**, the commit that added it.
+
+ERP's identical tree is live: `build:css` compiles it, both Dockerfiles `COPY
+src/css`, the compiled `static/css/app.css` carries `--ink` and 35 `parchment`
+references, last touched **2026-07-24**.
+
+So "one system, forked once" is accurate as file archaeology and **misleading
+about running code**. A large share of the measured 24% drift is Sub's copy
+fossilising while ERP's kept moving. This is the "promoting dead CSS would be
+the same mistake in a new package" risk in § "What this inventory does not
+settle" — now answered, in the direction the question feared.
+
+**Sub's live token surface** is `static/css/design-system.css` (353 lines) plus
+the `@theme` block in `static/css/src/main.css` (Tailwind v4, CSS-first).
+
+This repo already recorded the corroborating fact and nobody read it as one:
+this README's scale table lists Sub's CSS toolchain as **Tailwind v4 CSS-first**
+and ERP's as **Tailwind v3.4.19 + JS config**. The shared `src/css/` tree is
+v3-era. Sub did not merely stop editing its copy — it moved to a different
+Tailwind major and left the fork behind, which is why the drift is one-sided.
+A shared file tree spanning two Tailwind majors was never going to be promoted
+as-is regardless of how many lines happened to match.
+
+### Sub's live tokens share the package's role names, not its values
+
+`design-system.css` already uses `dotmac-ui`'s role vocabulary verbatim and
+unprefixed — which is not coincidence: `COMPATIBILITY.md` § "Where the
+vocabulary came from" records that the package took it from this file, and
+`contract.py` explains the `--dmui-` prefix exists so the two cannot collide.
+
+Comparing all 85 by resolved value: **6 identical, 79 different.** The package
+shipped Tailwind's default ramps under Sub's role names. Sub's brand is green
+(`#367920`); the package's is blue (`#3b82f6`). Sub's neutrals are warm
+(`#596678`); the package's are slate (`#64748b`).
+
+**The vocabulary is already shared. Only the palette is not** — so "migrate the
+token layer" is a palette decision, not a mechanical alias, and adopting the
+package's values would repaint every Sub page. The choice is open in
+`dotmac_sub` ADR-0010 § 3: re-declare the `--dmui-*` ramps with Sub's values
+(the override path `COMPATIBILITY.md` sanctions — one vocabulary, zero visual
+change), or adopt the package's ramps (one fleet palette, repaints Sub).
+
+### Method note for anyone re-running this
+
+Compare tokens by **resolved value inside a category**, never by name alone. A
+first pass here matched on value across all categories and "found"
+`--radius-2xl → --dmui-font-size-base`, because both are `1rem` — nonsense that
+renders correctly until someone rescales type. Constrain candidates to the same
+family, resolve `var()` chains on both sides, and normalise units (`4px` ≡
+`0.25rem`) and hex casing before comparing. Check **both** themes.
 
 ## What this inventory does not settle
 
