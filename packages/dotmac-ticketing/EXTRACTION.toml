@@ -1,0 +1,57 @@
+schema_version = 1
+package = "dotmac-ticketing"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+owner = "Dotmac ticket lifecycle"
+# The 2026-08-11 audit (ticket-sources.md) found the three existing
+# implementations share no contract — but that is a finding about their
+# VOCABULARIES, not about the capability, and ADR-0006 5a forbids reading the
+# first as the second. Scope was set by ADR-0003: ERP, Sub, the vendor control
+# plane and future products each need a ticket; none needs an ISP ticket.
+#
+# The unit was re-drawn rather than abandoned. Status/priority/channel became a
+# CLOSED standard vocabulary plus an open, product-declared REASON layer, with
+# every status carrying a lifecycle class the module's guards key off. That is
+# what makes one module serve products whose domain terms cannot merge.
+contract = "A durable request for work: identity and number, a guarded lifecycle over a closed standard status vocabulary, assignment, comments, and the trail. NOT the subject it is about, not routing policy, not the product's category taxonomy."
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_crm", "dotmac_starter_mt"]
+source_paths = [
+  # Sub is the qualifying source for nearly every core element: its SOT map has
+  # `support.ticket_lifecycle` at authoritative_record / owner_managed /
+  # complete, and it carries 29 ticket test files.
+  "dotmac_sub:app/models/support.py",
+  "dotmac_sub:app/services/support.py",
+  "dotmac_sub:app/services/ticket_validation.py",
+  "dotmac_sub:app/services/sla_assignment.py",
+  "dotmac_sub:app/services/ticket_assignment/selectors.py",
+  # CRM is Sub's fork, already being retired. Read for the duplicate-detection
+  # scoring only; it is NOT a second consumer and must not be counted as one.
+  "dotmac_crm:app/services/tickets.py",
+  # ERP is a different domain (internal helpdesk + project support) and has ZERO
+  # ticket tests, so nothing is sourced from it. Listed because the audit
+  # required inventorying it, not because it supplied an implementation.
+  "dotmac_erp:app/models/support/ticket.py",
+  "dotmac_starter_mt:packages/dotmac-ticketing/src/dotmac_ticketing",
+]
+preserved_tests = [
+  # Sub's behavioural proofs, to be ported WITH the code they prove as each
+  # element lands. Not yet ported: 0.1.0a1 ships the lifecycle, vocabulary,
+  # tables and linking helper, whose own tests are below.
+  "dotmac_sub:tests/test_support_services.py",
+  "dotmac_sub:tests/test_ticket_status_transition.py",
+  "dotmac_sub:tests/test_ticket_assignment_engine.py",
+  "dotmac_sub:tests/test_support_automation.py",
+  "dotmac_starter_mt:tests/architecture/test_ticketing_module.py",
+  "dotmac_starter_mt:tests/unit/test_ticketing_lifecycle.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_erp", "dotmac_sub"]
+inventory_evidence = [
+  "docs/inventories/ticket-sources.md",
+  "docs/inventories/module-extraction-sources.md",
+]
+first_cutover = "The vendor control plane, chosen because it is GREENFIELD on tickets — no rows to migrate, no local writer to retire, so it proves the module lineage runs in production with no cutover risk. That is the scarce thing ADR-0017 identifies, and it is why the first adopter is deliberately not the source product. ERP and Sub follow with real cutovers against a contract already exercised."
+shadow_and_drift = "Sub's transition, assignment and automation suites are the parity proofs for the elements that port from it. Sub additionally needs shadow verification on one knowing divergence: this module pauses the SLA clock while WAITING, whereas Sub's SLA_APPLICABLE_STATUSES treats waiting_on_customer/on_hold as clock-running. Migrating Sub will change its SLA numbers, and that must be measured before cutover rather than discovered in a breach report."
+local_copy_retirement = "Sub retires its TicketStatus enum and its six hand-written status membership sets (SLA_APPLICABLE_STATUSES, _OPEN_STATUSES, OPEN_INFRASTRUCTURE_TICKET_STATUSES, the assignment selectors, notification-template conditions, status presentation) in favour of class predicates, declaring lastmile_rerun / site_under_construction / pending_confirmation as reasons. CRM's copy is retired by its existing cutover, which should land INTO this module rather than into Sub's local owner — otherwise the fleet gains a third implementation while removing a second."
+next_action = "0.1.0a1 ships the closed lifecycle, the reason registry, the two tables and link_subject(). Before this dossier can reach `approved`: (1) the vendor control plane adopts it on an exact pin and runs the mod_tkt lineage in production; (2) routers land, with the ticketing.use capability and the read/work/administer permission split declared in the SAME change as the guards that reference them; (3) a second consumer exercises the same contract. Do NOT absorb routing policy, category taxonomies, work-order handoff or the agent workqueue — those stay product-owned."

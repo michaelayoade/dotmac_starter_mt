@@ -6,6 +6,18 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a39 — 2026-08-11
+
+Namespace allocation for the second installable module. Additive; no behaviour
+change to any existing surface.
+
+### Added
+- `TICKETING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER` — schema `mod_tkt`,
+  revision prefix `tk`, branch label `ticketing`. Allocated for
+  `dotmac-ticketing`, whose manifest lands in the same change as the allocation
+  rule requires. Without this row `NamespaceRegistry.from_manifests` refuses the
+  module at boot, which is why the module's kernel floor is this release.
+
 ## 0.1.0a38 — 2026-08-11
 
 Academy's assembly adoption closes two composition gaps. Additive; no migration.

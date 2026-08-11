@@ -33,6 +33,7 @@ those to layer its own look over the kernel's.
 from __future__ import annotations
 
 import dotmac_template_studio
+import dotmac_ticketing
 import dotmac_ui
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.config import settings
@@ -76,7 +77,11 @@ assembly = ProductAssemblySpec(
     # it byte-for-byte equal to the features independence contract. The
     # assembly importing a module directly is the legal direction: `assembly →
     # module → dotmac-ui → dotmac-kernel`.
-    modules=[*load_manifests(FEATURE_MODULES), dotmac_template_studio.module],
+    modules=[
+        *load_manifests(FEATURE_MODULES),
+        dotmac_template_studio.module,
+        dotmac_ticketing.module,
+    ],
     web_enabled=settings.web_enabled,
     disabled_modules=frozenset(settings.disabled_feature_set),
     packaged_static_dirs=(dotmac_ui.static_dir(),),

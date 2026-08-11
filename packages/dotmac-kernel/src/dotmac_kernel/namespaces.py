@@ -402,9 +402,22 @@ TEMPLATE_STUDIO_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("tstudio"),
 )
 
+# `dotmac-ticketing` — the second allocated installable module. `tkt` rather
+# than `ticketing` because the short code is the permanent physical identity and
+# every qualified name pays for its length; `tk` leaves the revision-id budget
+# for a readable slug. The row lands in the same change as the module's manifest,
+# as the allocation rule above requires.
+TICKETING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="ticketing",
+    prefix="tk",
+    branch_label="ticketing",
+    db_schema=module_schema("tkt"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
+    TICKETING_MIGRATION_OWNER,
 )
 
 
@@ -633,6 +646,7 @@ __all__ = [
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "TICKETING_MIGRATION_OWNER",
     "MODULE_SCHEMA_PREFIX",
     "RESERVED_SCHEMAS",
     "REVISION_SEQUENCE_DIGITS",
