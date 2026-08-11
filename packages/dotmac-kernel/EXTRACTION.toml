@@ -20,6 +20,8 @@ source_paths = [
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_kernel_public_surface.py",
   "dotmac_starter_mt:tests/unit/test_settings_service.py",
+  "dotmac_starter_mt:tests/unit/test_setting_scopes.py",
+  "dotmac_starter_mt:tests/test_settings_isolation.py",
   "dotmac_erp:tests/test_domain_settings_services.py",
   "dotmac_sub:tests/test_domain_settings_services.py",
   "dotmac_starter_mt:tests/unit/test_consent.py",
@@ -31,6 +33,8 @@ preserved_tests = [
   "dotmac_sub:tests/test_communication_eligibility.py",
   "dotmac_sub:tests/test_notification_queue_suppression.py",
   "dotmac_sub:tests/test_email_services.py",
+  "dotmac_sub:tests/test_domain_settings_scope.py",
+  "dotmac_sub:tests/test_domain_settings_tenant_fk_migration.py",
 ]
 contract_consumers = ["dotmac_starter_mt"]
 candidate_consumers = [
@@ -49,5 +53,5 @@ inventory_evidence = [
 ]
 first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities; product-by-product released-pin cutovers follow the existing-product adoption plan."
 shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
-local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
-next_action = "Cut Sub over first to the released consent, delivery, and channel-policy contracts, prove outbox/provider parity including stable dispatch ids, then retire its local decision paths; sequence ERP as the next consumer."
+local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
+next_action = "Release the adoption-demanded scope-alignment fix as 0.1.0a40, remeasure Sub's lineage gate against that baseline, and complete the Sub settings cutover; then cut Sub over to the released consent, delivery, and channel-policy contracts before sequencing ERP."

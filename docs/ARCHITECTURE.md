@@ -375,19 +375,25 @@ for every model class in the repo — is the **Model provenance table** below.
 ## Settings resolution order + platform-row RLS design
 
 `domain_settings` (`dotmac_kernel/settings_models.py::DomainSetting`) is keyed by
-`(tenant_id, domain, key)` where `tenant_id` is **nullable**: a
+`(tenant_id, scope_kind, scope_id, domain, key)` where `tenant_id` is
+**nullable**: a
 `tenant_id IS NULL` row is a platform-level default, readable by every
 tenant but writable only by the `platform_api` role. This is the one
 tenant-scoped-ish table that deliberately does not follow the standard
 "NOT NULL + single RLS policy" template (see the hard-rules exception noted
 in `CLAUDE.md`):
 
-- Two partial unique indexes stand in for one composite `UniqueConstraint`,
-  because Postgres treats every `NULL` as distinct from every other `NULL` —
-  a plain `UNIQUE(tenant_id, domain, key)` would let unlimited
-  `tenant_id IS NULL` rows collide on `(domain, key)`:
-  `uq_domain_settings_platform` (`tenant_id IS NULL`) and
-  `uq_domain_settings_tenant` (`tenant_id IS NOT NULL`).
+- One expression index, `uq_domain_settings_scope`, coalesces nullable
+  `tenant_id`/`scope_id` to a UUID sentinel. Postgres otherwise treats every
+  `NULL` as distinct, so a conventional composite unique constraint would
+  admit duplicate platform or tenant-wide rows.
+- `tenant_id` and `scope_kind` form one database invariant:
+  platform requires a NULL tenant; every other scope requires a tenant. The
+  context-aware ORM default derives that pair. Raw SQL cannot inspect another
+  column, so its server default is the safe platform/NULL shape and a tenant
+  raw write must name both values. Migration `0021_setting_scope_alignment`
+  repairs the legacy tenant/NULL default shape and installs
+  `ck_domain_settings_scope_alignment`.
 - RLS is a **split read/write policy pair**, not the single
   `USING/WITH CHECK` policy every other tenant-scoped table gets: `app_user`
   may `SELECT` a row where `tenant_id = app_current_tenant_id() OR
@@ -441,19 +447,11 @@ string never appears as a literal anywhere under `app/` outside the
 `settings` package and the resolver module — a spec with no reader is a
 dead control an admin could "change" with zero effect.
 
-**Extension-point hazard for 2b feature authors**: a new `SettingSpec` under
-an EXISTING `SettingDomain` (`auth`/`audit`/`branding`/`custom_fields`) needs
-no migration — but adding a NEW `SettingDomain` member does, and it's a
-manual, unlinked two-place edit: the Python enum
-(`dotmac_kernel.settings_models.SettingDomain`) AND the migration's
-`ck_domain_settings_domain` CHECK constraint (`"domain IN ('auth', 'audit',
-'branding', 'custom_fields')"`, `alembic/versions/
-20260717_0002_settings_table.py`) must both change together. Nothing
-statically enforces this pairing; forgetting the migration means the enum
-member is valid Python but every `INSERT`/`UPDATE` against it fails the DB
-CHECK constraint at write time (a 500, not a clean validation error). See
-`docs/superpowers/phase2-backlog.md`'s SOT-complete gaps for the tracked
-ticket.
+**Extension point for feature authors**: a module declares each settings domain
+on its manifest. `SettingDomainRegistry` validates writes, the database column
+remains an open string, and the manifest declaration tests require every member
+to be both unique and consumed. Adding a product-owned domain therefore needs
+no kernel enum or CHECK migration (ADR-0008).
 
 Write path: `PUT /settings/{domain}/{key}` → `settings/service.py::
 update_setting` → `validate_spec_value` (raises `BadRequestError` on any

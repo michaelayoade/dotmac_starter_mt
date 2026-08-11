@@ -67,6 +67,7 @@ def _insert_row(
     session: Session,
     *,
     tenant_id: uuid.UUID | None,
+    scope_kind: str,
     key: str,
     value_text: str = "value",
     domain: str = "branding",
@@ -74,12 +75,14 @@ def _insert_row(
     session.execute(
         text(
             "INSERT INTO domain_settings "
-            "(id, tenant_id, domain, key, value_type, value_text) "
-            "VALUES (:id, :tenant_id, :domain, :key, 'string', :value_text)"
+            "(id, tenant_id, scope_kind, domain, key, value_type, value_text) "
+            "VALUES (:id, :tenant_id, :scope_kind, :domain, :key, 'string', "
+            ":value_text)"
         ),
         {
             "id": str(uuid.uuid4()),
             "tenant_id": str(tenant_id) if tenant_id else None,
+            "scope_kind": scope_kind,
             "domain": domain,
             "key": key,
             "value_text": value_text,
@@ -96,7 +99,13 @@ def test_tenant_a_row_invisible_to_tenant_b(
     key = f"canary-a-{uuid.uuid4().hex[:8]}"
     a = _as_tenant(tenant_sessionmaker, tenant_a.id)
     try:
-        _insert_row(a, tenant_id=tenant_a.id, key=key, value_text="tenant-a-value")
+        _insert_row(
+            a,
+            tenant_id=tenant_a.id,
+            scope_kind="tenant",
+            key=key,
+            value_text="tenant-a-value",
+        )
         a.commit()
     finally:
         a.close()
@@ -127,6 +136,7 @@ def test_platform_row_visible_to_both_tenants(
     _insert_row(
         admin_session,
         tenant_id=None,
+        scope_kind="platform",
         key=key,
         value_text="platform-default",
         domain="auth",
@@ -162,7 +172,7 @@ def test_tenant_a_cannot_insert_null_tenant_row(
     a = _as_tenant(tenant_sessionmaker, tenant_a.id)
     try:
         with pytest.raises(DBAPIError, match="row-level security"):
-            _insert_row(a, tenant_id=None, key=key)
+            _insert_row(a, tenant_id=None, scope_kind="platform", key=key)
     finally:
         a.rollback()
         a.close()
@@ -183,7 +193,7 @@ def test_tenant_a_cannot_insert_tenant_b_row(
     a = _as_tenant(tenant_sessionmaker, tenant_a.id)
     try:
         with pytest.raises(DBAPIError, match="row-level security"):
-            _insert_row(a, tenant_id=tenant_b.id, key=key)
+            _insert_row(a, tenant_id=tenant_b.id, scope_kind="tenant", key=key)
     finally:
         a.rollback()
         a.close()
@@ -226,7 +236,11 @@ def test_platform_api_manages_only_null_tenant_rows(
         key = f"canary-platform-api-{uuid.uuid4().hex[:8]}"
         try:
             _insert_row(
-                session, tenant_id=None, key=key, value_text="from-platform-api"
+                session,
+                tenant_id=None,
+                scope_kind="platform",
+                key=key,
+                value_text="from-platform-api",
             )
             session.commit()
 
@@ -239,7 +253,12 @@ def test_platform_api_manages_only_null_tenant_rows(
 
             # And platform_api cannot write into a tenant's own row.
             with pytest.raises(DBAPIError, match="row-level security"):
-                _insert_row(session, tenant_id=tenant_a.id, key=f"{key}-tenant-owned")
+                _insert_row(
+                    session,
+                    tenant_id=tenant_a.id,
+                    scope_kind="tenant",
+                    key=f"{key}-tenant-owned",
+                )
             session.rollback()
         finally:
             session.rollback()
@@ -251,6 +270,58 @@ def test_platform_api_manages_only_null_tenant_rows(
         admin_session.commit()
     finally:
         platform_engine.dispose()
+
+
+def test_database_default_creates_a_coherent_platform_row(
+    admin_session: Session,
+) -> None:
+    """The DB default protects writes that bypass the ORM entirely."""
+
+    key = f"canary-scope-default-{uuid.uuid4().hex[:8]}"
+    admin_session.execute(
+        text(
+            "INSERT INTO domain_settings "
+            "(id, domain, key, value_type, value_text) "
+            "VALUES (:id, 'audit', :key, 'string', 'value')"
+        ),
+        {"id": str(uuid.uuid4()), "key": key},
+    )
+    admin_session.commit()
+
+    row = admin_session.execute(
+        text("SELECT scope_kind, tenant_id FROM domain_settings WHERE key = :key"),
+        {"key": key},
+    ).one()
+    assert row.scope_kind == "platform"
+    assert row.tenant_id is None
+
+    admin_session.execute(
+        text("DELETE FROM domain_settings WHERE key = :key"), {"key": key}
+    )
+    admin_session.commit()
+
+
+@pytest.mark.parametrize(
+    ("tenant_id", "scope_kind"),
+    ((None, "tenant"), ("tenant", "platform")),
+)
+def test_database_rejects_an_incoherent_scope_pair(
+    admin_session: Session,
+    tenant_a,
+    tenant_id: str | None,
+    scope_kind: str,
+) -> None:
+    """The constraint closes both directions of the invalid-state aperture."""
+
+    actual_tenant_id = str(tenant_a.id) if tenant_id else None
+    with pytest.raises(DBAPIError, match="ck_domain_settings_scope_alignment"):
+        _insert_row(
+            admin_session,
+            tenant_id=uuid.UUID(actual_tenant_id) if actual_tenant_id else None,
+            scope_kind=scope_kind,
+            key=f"canary-scope-invalid-{uuid.uuid4().hex[:8]}",
+        )
+    admin_session.rollback()
 
 
 # ---------------------------------------------------------------------------

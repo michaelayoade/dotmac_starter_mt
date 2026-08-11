@@ -8,6 +8,25 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-11: the first adopter found a kernel invariant defect
+
+Sub's S7 PostgreSQL gate supplied the demand-pulled exception contemplated by
+decision 2. Kernel a27-a36 made `tenant_id` nullable and derived `scope_kind`
+from it in Python, but set the database default to `tenant` and enforced no
+alignment CHECK. A raw write omitting both columns could persist tenant/NULL: a
+row present in the table and unreachable by the resolver.
+
+Sub migration 514 already carried the stronger contract: platform server
+default plus `ck_domain_settings_scope_alignment`. Michael approved preserving
+that invariant rather than weakening the adopter to resemble a27.
+
+Kernel 0.1.0a40 is therefore adoption work, not a new supply-pushed facility.
+Migration `0021_setting_scope_alignment` repairs the exact legacy default
+shape, refuses ambiguous rows, installs the CHECK, and can verify/adopt Sub's
+existing constraint. The accepted a27 burn-down remains historical evidence;
+the executable adoption baseline must be remeasured against a40 before the
+kernel lineage is run in Sub.
+
 ## Context
 
 ADR-0003 made this repository the strategic foundation for new deployments and

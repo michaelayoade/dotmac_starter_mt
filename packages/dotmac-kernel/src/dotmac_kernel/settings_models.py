@@ -122,6 +122,15 @@ class DomainSetting(Base, TimestampMixin):
             "OR (value_text IS NULL AND value_json IS NOT NULL)",
             name="ck_domain_settings_value_alignment",
         ),
+        # A scope and its isolation owner form one fact. Without this CHECK a
+        # raw SQL write can persist tenant/NULL: present in the table, but
+        # unreachable by a resolver that filters on both columns. Sub found
+        # this aperture during the first product adoption (ADR-0017 amendment).
+        CheckConstraint(
+            "(scope_kind = 'platform' AND tenant_id IS NULL) "
+            "OR (scope_kind <> 'platform' AND tenant_id IS NOT NULL)",
+            name="ck_domain_settings_scope_alignment",
+        ),
         # ONE index, not a partial pair. Postgres treats every NULL as distinct
         # inside a unique constraint, so a nullable column in one admits
         # duplicates — that is how `dotmac_erp` came to hold duplicate global
@@ -161,7 +170,10 @@ class DomainSetting(Base, TimestampMixin):
         # `SettingScope.__post_init__` enforces, not an inference. Callers that
         # mean a finer level always name it; there is no level this can guess.
         default=_default_scope_kind,
-        server_default=TENANT,
+        # SQL defaults cannot inspect another column. The safe raw-write shape
+        # is therefore platform/NULL; tenant writes must name both values.
+        # ORM writes retain the context-aware default above.
+        server_default=PLATFORM,
     )
     scope_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
     # String, not a database enum: a CHECK constraint over a fixed member list

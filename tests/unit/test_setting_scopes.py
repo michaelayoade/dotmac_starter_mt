@@ -24,7 +24,8 @@ from dotmac_kernel.setting_scopes import (
     install_scope_kinds,
     resolution_chain,
 )
-from dotmac_kernel.settings_models import SettingDomain
+from dotmac_kernel.settings_models import DomainSetting, SettingDomain
+from sqlalchemy import CheckConstraint
 
 SITE = ScopeKindSpec(kind="site", rank=150, description="One physical site.")
 USER = ScopeKindSpec(kind="user", rank=200, description="One person.")
@@ -61,6 +62,34 @@ def test_the_platform_scope_cannot_carry_a_tenant() -> None:
 def test_the_tenant_scope_has_no_instance() -> None:
     with pytest.raises(ScopeError):
         SettingScope(kind=TENANT, tenant_id=uuid4(), scope_id=uuid4())
+
+
+def test_database_default_for_an_unscoped_raw_write_is_platform() -> None:
+    """A DB-side default cannot inspect tenant_id, so it takes the safe shape.
+
+    ORM writes use ``_default_scope_kind`` and still derive tenant scope when a
+    tenant is present. The server default exists for raw SQL and migrations;
+    those callers must name tenant scope explicitly rather than being allowed
+    to create a tenant-scoped row with no tenant.
+    """
+
+    default = DomainSetting.__table__.c.scope_kind.server_default
+
+    assert default is not None
+    assert str(default.arg) == PLATFORM
+
+
+def test_database_schema_enforces_scope_and_tenant_alignment() -> None:
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in DomainSetting.__table__.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+
+    assert constraints["ck_domain_settings_scope_alignment"] == (
+        "(scope_kind = 'platform' AND tenant_id IS NULL) "
+        "OR (scope_kind <> 'platform' AND tenant_id IS NOT NULL)"
+    )
 
 
 # ── Declaring a hierarchy ───────────────────────────────────────────────────
