@@ -363,7 +363,9 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
 
 ## Hard rules — canonical list lives in `AGENTS.md`
 
-**`AGENTS.md` is the single source of truth for the hard rules** (each with
+**`AGENTS.md` is the single source of truth for the hard rules**, and its
+numbering is authoritative — this index has drifted before and the entries
+below are summaries, not the rule text. (each with
 its enforcing test/contract). This section is only an index — adapters
 point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 `AGENTS.md` wins; fix the drift.
@@ -432,6 +434,19 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     `messaging.process_once` is an adapter over it. Nothing is reserved before
     the effect, the fingerprint is its own column, and retention is the
     product's policy (ADR-0014; `test_idempotency.py`).
+22. Shared capabilities are extracted PRODUCT-FIRST: inventory ERP/Sub before
+    adding kernel behaviour, port the qualifying production implementation and
+    its parity tests, and record owner/contract/consumers in the
+    distribution's `EXTRACTION.toml`. Copying is a one-time extraction, never
+    a permanent fork or a second writer (ADR-0006 amendment;
+    `test_product_first_extraction.py`).
+23. A guard exemption states an ENFORCEABLE premise, or the region is
+    unmonitored rather than exempt. Guards enumerate entry-point families
+    (tasks, scripts, CLI, workers, cron), not one directory; an existing
+    backlog is a two-directional ratchet that fails when the count rises OR
+    falls without being lowered; "grandfathered" stays distinct from
+    "reviewed and correct"; and the detector carries a sensitivity proof
+    (ADR-0018).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.
