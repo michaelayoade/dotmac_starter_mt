@@ -20,15 +20,15 @@ direction that matters.
 
 A product may genuinely not want tickets — the vendor control plane's licensing
 surface is a plausible deployment with none. Being non-core means "is this
-tenant entitled to it" is a real question with a real answer, enforced by
-`require_capability` on the router, rather than a formality.
+tenant entitled to it" is a real question with a real answer rather than a
+formality, and it is what a `ticketing.use` capability will gate once there is a
+router to gate. See the comment in the manifest body for why that declaration is
+deliberately absent from this release.
 """
 
 from __future__ import annotations
 
-from dotmac_kernel.capabilities import CapabilitySpec
 from dotmac_kernel.modules import ModuleManifest
-from dotmac_kernel.permissions import PermissionSpec
 
 module = ModuleManifest(
     code="ticketing",
@@ -39,46 +39,22 @@ module = ModuleManifest(
     migration_prefix="tk",
     migration_branch="ticketing",
     tables=("tickets", "ticket_comments"),
-    # ── Entitlement ─────────────────────────────────────────────────────────
-    capabilities=(
-        CapabilitySpec(
-            code="ticketing.use",
-            description="Raise, work and resolve tickets.",
-            default_granted=True,
-        ),
-    ),
-    # ── Permissions ─────────────────────────────────────────────────────────
-    # Split deliberately, on the same reasoning as Template Studio's
-    # manage/publish split: reading a ticket, working one, and administering the
-    # queue are three different decisions, and collapsing them is how an agent
-    # ends up able to delete a customer's history because they could reply to it.
-    permissions=(
-        PermissionSpec(
-            code="ticketing.read",
-            description="View tickets and their public comments.",
-        ),
-        PermissionSpec(
-            code="ticketing.work",
-            description=(
-                "Comment, transition status, and take assignment. The everyday "
-                "agent permission."
-            ),
-        ),
-        PermissionSpec(
-            code="ticketing.administer",
-            description=(
-                "Reassign across teams, merge, cancel, and edit another agent's "
-                "internal notes."
-            ),
-        ),
-    ),
-    audit_actions=(
-        "ticketing.ticket.created",
-        "ticketing.ticket.status_changed",
-        "ticketing.ticket.assigned",
-        "ticketing.ticket.merged",
-        "ticketing.comment.added",
-    ),
+    # ── No capabilities, permissions or audit actions YET ───────────────────
+    # This release ships no routers, and every one of those declarations exists
+    # to gate or annotate a route. CI proved the point rather than leaving it to
+    # judgement: `test_every_declared_capability_is_enforced_somewhere` failed
+    # this manifest with "capability code(s) declared but enforced by no mounted
+    # route: ['ticketing.use'] — wire a require_capability guard, or drop the
+    # declaration until there is something to gate."
+    #
+    # Dropping it is the honest half of that instruction. A declared code with
+    # no consumer is dead vocabulary that reads as a working gate, which is the
+    # failure mode ADR-0008's registries exist to prevent, and it would have
+    # shipped as a permanent allowlist entry if the contract were weaker.
+    #
+    # `ticketing.use`, the read/work/administer permission split, and the five
+    # audit actions all land in the release that ships the routers — with the
+    # guards that reference them in the same change.
 )
 
 __all__ = ["module"]
