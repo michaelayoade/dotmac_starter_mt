@@ -9,6 +9,64 @@ called out here.
 
 ## Unreleased
 
+## 0.1.0a4 — 2026-08-11
+
+Brand overrides become a generated, validated surface. Additive.
+
+### Added
+- **`dotmac_ui.brand`** — `BrandOverride(primary, accent)` in, CSS out, via
+  `render_brand_css()`. The two input fields are exactly what
+  `dotmac_kernel.branding` already stores, so an existing brand record maps on
+  without a migration.
+- **`dotmac_ui.color`** — sRGB ↔ OKLCH with a gamut clamp that holds lightness
+  and hue and reports the chroma it could not show.
+- `resolve_color`, `token_contrast` and `check_contrast` accept an `overrides`
+  palette. `check_contrast`'s docstring already promised this use — *"a product
+  that re-declares brand ramps at runtime runs this against its own resolved
+  palette"* — but there was no way to pass one in, so the promise was not
+  reachable.
+
+### Why generated rather than a `:root` block per product
+
+**0.1.0a3 made hand-written overrides unsafe.** Every colour now has two
+published variables. An override setting `--dmui-color-brand-500` but not
+`--dmui-color-brand-500-rgb` renders the brand on solid fills and the
+*placeholder blue* on every translucent one, silently — against roughly 10,300
+opacity modifiers across the fleet. Only something that knows both forms exist
+can emit them consistently.
+
+It is also the replacement ADR-0006 **D8** names for `custom_css`, which
+`dotmac_kernel.branding` still accepts, regex-sanitizes, and renders `| safe`
+into a `<style>` block. Output here is assembled from validated colours: there
+is no path by which a URL, an `@import` or a selector could appear.
+
+### One seed, not eleven steps
+
+Brand data in the wild is one or two colours; the token layer's roles derive
+from eleven-step ramps. The lightness, chroma and hue-drift curves are measured
+from this package's own brand ramp, so **regenerating from `#3b82f6` reproduces
+the built-in ramp exactly at all eleven steps** — the calibration test that
+caught two errors: averaging the brand and accent lightness profiles (which
+anchored the seed one step off) and holding hue constant (which oversaturated
+600 and 700, the steps primary buttons use).
+
+### Legibility is structural, not checked-and-hoped
+
+Because lightness is pinned by the curve, a generated brand cannot fail the
+contrast contract. Swept 480 seeds across the hue circle at four
+lightness/chroma combinations: **zero failures**. `check_contrast` is retained
+as a backstop against the curve changing, and a separate test proves it can
+still fail so it is not theatre.
+
+### Deliberately not warned about
+
+Chroma the gamut could not show. The clamp lands on the most saturated
+renderable colour at that step, so the result is the best available answer.
+Seeding with this package's own accent reported six clamped steps while
+producing a ramp within 0.012 chroma of the built-in one — six warnings an
+operator cannot act on, which would train them past the contrast ones. The
+colour they actually supplied is pinned verbatim and never clamped.
+
 ## 0.1.0a3 — 2026-08-11
 
 Colour tokens gain a channel form, so alpha modifiers work. No API change.

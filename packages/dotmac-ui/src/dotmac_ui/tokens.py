@@ -828,7 +828,11 @@ def reference_target(value: str) -> str | None:
     return match.group(1) if match else None
 
 
-def resolve_color(name: str, mode: str = "light") -> str:
+def resolve_color(
+    name: str,
+    mode: str = "light",
+    overrides: Mapping[str, str] | None = None,
+) -> str:
     """Resolve a colour token to a literal `#rrggbb`, following `var()` chains.
 
     Resolution is mode-aware all the way down: resolving `action-primary-on` in
@@ -837,6 +841,13 @@ def resolve_color(name: str, mode: str = "light") -> str:
     cascade does at runtime. A cycle or a non-colour terminal value raises,
     which is how a mistyped reference fails loudly instead of silently
     rendering black.
+
+    `overrides` maps a token NAME to a literal colour and is consulted at every
+    hop, which is what makes a brand override behave the way the cascade will:
+    replacing `color-brand-600` moves `action-primary-default` with it, because
+    the chain terminates on the override rather than the built-in value. Pass
+    the palette a product actually re-declares at runtime and this reports what
+    that product will really render.
     """
     seen: list[str] = []
     current = name
@@ -844,6 +855,8 @@ def resolve_color(name: str, mode: str = "light") -> str:
         if current in seen:
             raise ValueError(f"token reference cycle: {' -> '.join([*seen, current])}")
         seen.append(current)
+        if overrides and current in overrides:
+            return overrides[current]
         value = token(current).value_for(mode)
         target = reference_target(value)
         if target is None:
