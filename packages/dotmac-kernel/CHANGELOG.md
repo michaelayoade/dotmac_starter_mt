@@ -6,6 +6,128 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a36 — 2026-08-10
+
+The provider seam and the channel-policy reader (ADR-0006 § 5c/5d). Additive; no
+migration.
+
+### Added
+- **`dotmac_kernel.delivery_providers`** — a `DeliveryProvider` Protocol, an
+  `OutboundMessage`/`ProviderResult` pair, and `send()`, the ONE send path.
+  `send` asks consent first and returns `Suppressed` **without calling the
+  provider** — no network request, no cost, no receipt to reconcile — then
+  records the receipt, which closes the bounce→consent loop.
+
+  Routing every send through one function is what makes "ask consent first"
+  structural rather than a convention. Sub's history is what a convention buys:
+  marketing eligibility lived inside the campaign segment filter, so the answer
+  depended on who was asking.
+
+  The kernel ships the Protocol and **no client** — SMTP, Twilio and Meta Cloud
+  API are product dependencies, mirroring ADR-0009's `SecretSource` seam.
+
+- **`dotmac_kernel.channel_policy`** — `make_spec()` builds the `SettingSpec` a
+  product registers in a domain it owns, `validate_policy_document` is its
+  write-time validator, and `resolve_channels()` reads it: event → category →
+  default → the caller's fallback.
+
+  **No table and no migration.** The channel-policy dossier found this § 5c owner
+  dissolves into the settings facility the kernel already has; what was missing
+  was a typed reader. Sub's legacy per-event shadow setting is deliberately not
+  ported.
+
+  A malformed stored document degrades to the caller's fallback on READ, because
+  resolution happens on the send path and one operator's typo must not become a
+  total delivery outage. The loud failure is on WRITE, where the operator is
+  present to see it.
+
+## 0.1.0a35 — 2026-08-10
+
+Delivery receipts, and the loop that keeps the consent ledger honest (ADR-0006
+§ 5c). Additive; carries kernel migration `0020`.
+
+### Added
+- **`dotmac_kernel.delivery`** and **`delivery_models`** —
+  `communication_deliveries` records what the PROVIDER said about an outbound
+  message (its id, verdict, response code, when), and `record_receipt` is the
+  only writer.
+- **The bounce→consent feedback loop.** A `bounced` or `complaint` receipt
+  suppresses the address with scope `all`, in the SAME transaction as the
+  receipt. **This loop exists in neither product**: verified in `dotmac_sub` at
+  `5d6f115b7`, `DeliveryStatus.bounced` is declared and never assigned,
+  `SuppressionReason.bounce`/`.complaint` have zero call sites, and the campaign
+  unsubscribe link is the only writer of a suppression anywhere. Sub's ledger is
+  unsubscribe-only in practice, so the `all` scope that protects transactional
+  delivery is never populated by anything automated. A consent ledger nothing
+  writes to answers "yes, send" forever.
+- **Idempotent provider callbacks.** A partial unique index on
+  `(tenant_id, provider, provider_message_id) WHERE provider_message_id IS NOT
+  NULL` makes an at-least-once webhook safe to redeliver, while still allowing
+  receipts for synchronous failures that never got an id.
+
+### Deliberately NOT added
+- **A queue.** Sub's `Notification` table is `dotmac_kernel.messaging`'s
+  `OutboxEvent` built a second time — status/attempts/backoff/lease-reclaim/
+  dead-letter all appear twice. Porting it would install the duplicate
+  permanently; ADR-0014 already says non-transactional effects belong in the
+  outbox. Evidence: `docs/inventories/delivery-outbox-sources.md`.
+- **Provider clients.** SMTP, Twilio and Meta Cloud API clients are product
+  dependencies, as ADR-0009 ships a `SecretSource` seam and no store client.
+
+### Note for adapter authors
+Only `bounced` and `complaint` suppress. A SOFT bounce — mailbox full,
+greylisted — must be recorded as `failed`, never `bounced`, or a full inbox
+permanently stops that customer's invoices. The kernel cannot classify that
+("5.1.1 user unknown" is permanent, "4.2.2 mailbox full" is not, and every
+provider spells them differently), so the adapter classifies and this module acts
+on the classification.
+
+## 0.1.0a34 — 2026-08-10
+
+The do-not-contact ledger gets one owner (ADR-0006 § 5c). Additive; carries
+kernel migration `0019`.
+
+### Added
+- **`dotmac_kernel.consent`** — the one service that answers *may we send
+  `<category>` to `<address>` on `<channel>`?*, and
+  **`dotmac_kernel.consent_models`** with the tenant-scoped
+  `communication_suppressions` table behind it. Ported from
+  `dotmac_sub:app/services/communication_eligibility.py`, the fleet's only
+  qualifying implementation, with its 18 behaviour tests
+  (`tests/unit/test_consent.py`). ERP has no consent implementation at all while
+  sending invoices and offer letters by email — evidence in
+  `docs/inventories/consent-suppression-sources.md`.
+
+  The rule that carries: **an unsubscribe is a refusal of marketing, not
+  permission to stop sending someone their invoice.** A suppression is scoped
+  `marketing` or `all`; only bounces, complaints and erasure set `all`. An
+  unknown category is treated as TRANSACTIONAL, because the failure mode of that
+  default is an unwanted promo and the failure mode of the opposite default is
+  an unsent invoice.
+
+  Suppression escalates (`marketing` → `all`) and never de-escalates, so a hard
+  bounce cannot be downgraded by a later unsubscribe click.
+  `unsuppress_marketing` refuses to clear an `all`-scoped row, so campaign
+  administration is not authority to lift a bounce.
+
+- **`register_marketing_categories()` / `register_numeric_channels()`** — the
+  product declares its vocabulary, the kernel owns the rule (ADR-0008). Sub's
+  hardcoded `{"marketing", "campaign", "promotion"}` is a product's words; a
+  deployment that declares nothing gets a ledger where only `all` bites, which
+  is the safe direction.
+
+- **Migration `0019_communication_consent`** — `tenant_id NOT NULL`, a composite
+  unique including it, RLS ENABLEd and FORCEd, an isolation policy and the
+  online-role grants, all in the one migration. Sub's source table has none of
+  this (it is single-tenant); a consent ledger is the worst table to leak, since
+  a cross-tenant read exposes who complained and a cross-tenant write can
+  silence another tenant's invoices. Proven in `tests/test_consent_isolation.py`.
+
+### Deliberately not ported
+Sub's four `*_committed` wrappers (`suppress_committed` and siblings) call
+`db.commit()`. `dotmac_kernel.db` is the one transaction authority, and a service
+that manages its own transaction cannot compose into a caller's unit of work.
+
 ## 0.1.0a33 — 2026-08-10
 
 At-most-once execution gets one owner (ADR-0014). **Breaking** (alpha window)

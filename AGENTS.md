@@ -205,6 +205,20 @@ specifics) points here and must never fork these rules.
     instead (ADR-0014).
     (`tests/unit/test_idempotency.py`)
 
+24. **Shared capabilities are extracted product-first, not rebuilt beside a
+    mature product implementation.** Before adding kernel/module behaviour,
+    inventory ERP, Sub, and every product named in the candidate scope. A
+    qualifying production-used, tested implementation is the mandatory
+    reference and initial code source; port its behaviour and parity tests,
+    generalising only at typed product seams. Every distribution under
+    `packages/` carries `EXTRACTION.toml` with its owner, contract, source
+    paths/tests, consumers, first cutover, drift proof, and local-copy
+    retirement gate. A greenfield shared implementation requires checked-in
+    evidence that no qualifying product implementation exists. Copying is a
+    one-time extraction: no permanent fork, parallel writer, or second owner.
+    (`tests/architecture/test_product_first_extraction.py`; ADR-0006
+    § "Decision amendment — 2026-08-08 (product-first extraction)")
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
@@ -232,5 +246,9 @@ default in production are added to `validate_settings`'s prod-fatal list.
   `FEATURE_MODULES`, add to the import-linter independence contract, write
   the isolation test first. New settings/custom-field entities: follow the
   Extension points in `CLAUDE.md`.
+- **New kernel facility or shared module:** complete the product inventory and
+  `EXTRACTION.toml` dossier before implementation. Start from the qualifying
+  ERP/Sub implementation and its tests when one exists; an unresolved audit is
+  a stop condition, not permission to greenfield the shared version.
 - Zero-consumer code is deleted, not kept. Every new concept gets its owner
   row in `docs/ARCHITECTURE.md`'s provenance/ownership tables.

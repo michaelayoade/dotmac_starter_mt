@@ -55,7 +55,7 @@ module = ModuleManifest(
     capabilities=(
         CapabilitySpec(
             code="template_studio.use",
-            description="Author, publish and render tenant templates.",
+            description="Author, publish and render tenant notification templates.",
             # Bundled in the reference assembly, like custom fields. A product
             # that sells Template Studio as an add-on sets this False and the
             # module's routes 403 until an operator grants the capability —

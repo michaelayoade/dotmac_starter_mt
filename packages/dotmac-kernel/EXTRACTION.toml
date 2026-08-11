@@ -1,0 +1,37 @@
+schema_version = 1
+package = "dotmac-kernel"
+classification = "universal-facility"
+status = "historical-pre-rule"
+source_mode = "historical-mixed"
+owner = "Dotmac platform foundation"
+contract = "Universal assembly facilities and versioned cross-product contracts"
+source_repositories = ["dotmac_starter_mt", "dotmac_erp", "dotmac_sub"]
+source_paths = [
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel",
+  "dotmac_erp:app/models/domain_settings.py",
+  "dotmac_erp:app/services/domain_settings.py",
+  "dotmac_sub:app/models/domain_settings.py",
+  "dotmac_sub:app/services/domain_settings.py",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/architecture/test_kernel_public_surface.py",
+  "dotmac_starter_mt:tests/unit/test_settings_service.py",
+  "dotmac_erp:tests/test_domain_settings_services.py",
+  "dotmac_sub:tests/test_domain_settings_services.py",
+]
+contract_consumers = ["dotmac_starter_mt"]
+candidate_consumers = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_vendor_control_plane",
+  "dotmac_academy_app",
+]
+inventory_evidence = [
+  "docs/inventories/starter-surfaces.md",
+  "docs/inventories/branding-settings.md",
+  "docs/inventories/module-extraction-sources.md",
+]
+first_cutover = "The starter reference assembly consumes the extracted package; product-by-product released-pin cutovers follow the existing-product adoption plan."
+shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
+local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair."
+next_action = "Apply this dossier contract per new kernel facility and complete the ERP/Sub settings cutover to kernel 0.1.0a14."

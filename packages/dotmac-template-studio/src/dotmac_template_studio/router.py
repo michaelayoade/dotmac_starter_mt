@@ -51,12 +51,12 @@ router = APIRouter(
 
 @router.get("/templates", response_model=list[TemplateRead])
 def list_templates(
-    kind: str | None = Query(default=None),
+    channel: str | None = Query(default=None),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
     _: Party = Depends(require_permission("template_studio.templates.read")),
 ) -> list[Template]:
-    return service.list_templates(db, tenant.id, kind=kind)
+    return service.list_templates(db, tenant.id, channel=channel)
 
 
 @router.post(
@@ -71,11 +71,11 @@ def create_template(
     template = service.create_template(
         db,
         tenant.id,
-        kind=payload.kind,
         slug=payload.slug,
+        channel=payload.channel,
+        context=payload.context,
         name=payload.name,
         description=payload.description,
-        channel=payload.channel,
     )
     write_audit_event(
         db,
@@ -84,7 +84,11 @@ def create_template(
         action="template_studio.template.create",
         entity_type="template",
         entity_id=str(template.id),
-        details={"kind": template.kind, "slug": template.slug},
+        details={
+            "slug": template.slug,
+            "channel": template.channel,
+            "context": template.context,
+        },
     )
     return template
 
@@ -113,7 +117,6 @@ def update_template(
         template_id,
         name=payload.name,
         description=payload.description,
-        channel=payload.channel,
         is_active=payload.is_active,
     )
     write_audit_event(
@@ -140,7 +143,7 @@ def delete_template(
     actor: Party = Depends(require_permission("template_studio.templates.manage")),
 ) -> None:
     template = service.get_template(db, tenant.id, template_id)
-    slug, kind = template.slug, template.kind
+    slug, channel = template.slug, template.channel
     service.delete_template(db, tenant.id, template_id)
     write_audit_event(
         db,
@@ -149,7 +152,7 @@ def delete_template(
         action="template_studio.template.delete",
         entity_type="template",
         entity_id=str(template_id),
-        details={"kind": kind, "slug": slug},
+        details={"slug": slug, "channel": channel},
     )
 
 
@@ -253,21 +256,23 @@ def publish_version(
 # ── Rendering ───────────────────────────────────────────────────────────────
 
 
-@router.post("/render/{kind}/{slug}", response_model=RenderResult)
+@router.post("/render/{slug}/{channel}", response_model=RenderResult)
 def render_template(
-    kind: str,
     slug: str,
+    channel: str,
     payload: RenderRequest,
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
     _: Party = Depends(require_permission("template_studio.templates.render")),
 ) -> RenderResult:
-    """Render the PUBLISHED revision of `(kind, slug)`.
+    """Render the PUBLISHED revision of `(slug, channel)`.
 
     A caller addresses a template by its stable identity and never by version —
     which revision is live is the module's decision. No audit event: rendering
     reads state, and a per-render trail entry would flood the tenant's audit log
     with one row per outbound message.
     """
-    subject, body = service.render_published(db, tenant.id, kind, slug, payload.values)
+    subject, body = service.render_published(
+        db, tenant.id, slug, channel, payload.values
+    )
     return RenderResult(subject=subject, body=body)

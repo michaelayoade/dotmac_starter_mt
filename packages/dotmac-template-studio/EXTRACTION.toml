@@ -1,0 +1,47 @@
+schema_version = 1
+package = "dotmac-template-studio"
+classification = "optional-module"
+status = "audit-required"
+source_mode = "unresolved"
+owner = "Dotmac template capability"
+# The 2026-08-10 audit found the claimed two-kind contract does not hold: ERP
+# documents and Sub notifications disagree on placeholder syntax, engine class,
+# identity dimension and missing-variable policy. This package narrows to ONE
+# decision — what the message says. Deciding whether it may be sent (consent),
+# over what (channel policy), actually sending it (delivery) and producing a
+# traceable document are four SEPARATE foundation owners with their own dossiers;
+# see the audit's "Audit outcome, part 2 — the capability map".
+contract = "Tenant-authored, safely rendered notification templates: authoring, versioning, publication and render to (subject, body). Not consent, not routing, not delivery, not documents."
+source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_erp:app/models/finance/automation/document_template.py",
+  "dotmac_erp:app/services/automation/document_generator.py",
+  "dotmac_erp:app/services/automation/safe_template.py",
+  "dotmac_sub:app/models/notification.py",
+  "dotmac_sub:app/services/web_notifications.py",
+  "dotmac_sub:app/services/notification_template_renderer.py",
+  "dotmac_starter_mt:packages/dotmac-template-studio/src/dotmac_template_studio",
+]
+preserved_tests = [
+  "dotmac_erp:tests/integration/services/test_document_generator.py",
+  "dotmac_erp:tests/services/test_workflow_engine.py",
+  "dotmac_erp:tests/e2e/test_automation.py",
+  "dotmac_sub:tests/test_notification_template_renderer.py",
+  "dotmac_sub:tests/test_email_services.py",
+  "dotmac_sub:tests/test_settings_seed_services.py",
+  "dotmac_starter_mt:tests/architecture/test_template_studio_module.py",
+  # Sub's 7 renderer tests, PORTED 2026-08-10 with the code they prove
+  # (ADR-0006 5b). The header of that file records what changed in the port and
+  # why each change is faithful rather than a weakening.
+  "dotmac_starter_mt:tests/unit/test_template_studio_renderer.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_erp", "dotmac_sub"]
+inventory_evidence = [
+  "docs/inventories/module-extraction-sources.md",
+  "docs/inventories/template-studio-source-audit.md",
+]
+first_cutover = "Sub, on the notification contract only, once the renderer is re-based per ADR-0006 5b. The package cannot receive Sub's rows as built: its double-brace substitution syntax is the syntax Sub rejects at save time after it leaked a literal placeholder to customers."
+shadow_and_drift = "Sub's 7 notification_template_renderer tests are the parity proof; shadow rendering against the live single-brace renderer is required before Sub retires its local writer."
+next_action = "ADR-0006 5b IMPLEMENTED in 0.2.0a1 (2026-08-10): kind=document dropped, renderer re-based on Sub's single-brace allowlisted contract with its 7 tests ported, identity moved to (tenant, slug, channel), RenderContext registry added, migration ts_0002. Remaining before this dossier can reach `approved`: add the seeding mechanism (Sub's upsert-by-identity, never-clobber, derived-from-executable-spec), cut Sub over and retire its local renderer, then move a second consumer on an exact pin. Out of this package by ruling (5c): consent/suppression, channel policy, delivery/outbox and document generation are four separate foundation owners, each needing its own dossier, with consent sequenced before delivery. Do not absorb them here."
+local_copy_retirement = "The selected source product must consume the released module and retire or gate its local writer before a second product cutover."

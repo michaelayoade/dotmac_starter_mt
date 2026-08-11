@@ -65,8 +65,8 @@ def _insert_template(session: Session, *, tenant_id: uuid.UUID, slug: str) -> uu
     session.execute(
         text(
             "INSERT INTO mod_tstudio.templates "
-            "(id, tenant_id, kind, slug, name, is_active) "
-            "VALUES (:id, :tenant_id, 'notification', :slug, :slug, true)"
+            "(id, tenant_id, slug, channel, context, name, is_active) "
+            "VALUES (:id, :tenant_id, :slug, 'email', 'default', :slug, true)"
         ),
         {"id": str(tid), "tenant_id": str(tenant_id), "slug": slug},
     )
@@ -221,8 +221,8 @@ def test_composite_fk_blocks_a_cross_tenant_version_even_as_admin(
     admin_session.execute(
         text(
             "INSERT INTO mod_tstudio.templates "
-            "(id, tenant_id, kind, slug, name, is_active) "
-            "VALUES (:id, :tenant_id, 'notification', 'fk-probe', 'FK probe', true)"
+            "(id, tenant_id, slug, channel, context, name, is_active) "
+            "VALUES (:id, :tenant_id, 'fk-probe', 'email', 'default', 'FK probe', true)"
         ),
         {"id": str(tid), "tenant_id": str(tenant_a.id)},
     )

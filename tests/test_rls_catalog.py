@@ -292,6 +292,8 @@ def test_metadata_matches_live_tables(admin_engine) -> None:
     # idempotency ledgers moved to `idempotency_models` in ADR-0014).
     from dotmac_kernel import (  # noqa: F401
         audit,
+        consent_models,
+        delivery_models,
         idempotency_models,
         models_platform,
         settings_models,
