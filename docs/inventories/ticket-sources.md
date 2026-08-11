@@ -121,10 +121,71 @@ own states.
 **This is the whole reason a shared ticket module is possible at all.** Merge the
 enums and you get a 16-member union that means nothing in either product —
 exactly the `kind ∈ {notification, document}` error the Template Studio audit
-disqualified. Declare the vocabulary and classify it, and Sub's regulatory ISP
+disqualified. Declare the vocabulary and classify it, and Sub's ISP
 states and ERP's helpdesk states coexist without either product learning the
 other's language. It is ADR-0008's rule applied to a lifecycle instead of a
 settings domain.
+
+## Amendment — 2026-08-11: the line is *standard helpdesk*, and Sub is not exempt
+
+**Decision (Michael):** the module ships the **standard helpdesk vocabulary**.
+Any term that is not standard helpdesk is composable — declared by the product
+that needs it — **including Sub's own**. Being the source implementation buys
+Sub no right to bake its domain terms into the shared core.
+
+That settles open decision 2 below: ship a standard set, not "classes only".
+
+### The standard core the module ships
+
+Present across mainstream helpdesk systems (Zendesk, Jira Service Management,
+Freshdesk, osTicket) and the ITIL incident lifecycle:
+
+| status | class | why standard |
+|---|---|---|
+| `new` | open | raised, not yet triaged |
+| `open` | open | being worked |
+| `pending` | waiting | blocked, cause unspecified |
+| `waiting_on_customer` | waiting | awaiting requester reply |
+| `on_hold` | waiting | blocked on internal party or third party |
+| `resolved` | resolved | fixed, awaiting confirmation or auto-close |
+| `closed` | closed | terminal |
+| `cancelled` | cancelled | withdrawn or void |
+| `merged` | closed | folded into another ticket |
+
+Priorities: `low`, `medium`, `high`, `urgent`.
+Channels: `web`, `email`, `phone`, `chat`, `api`.
+Comment authors: `customer`, `staff`, `system`.
+
+### What each product must now declare
+
+| term | product | why it is not standard |
+|---|---|---|
+| `lastmile_rerun` | **Sub** | fiber last-mile re-run — an ISP field operation |
+| `site_under_construction` | **Sub** | ISP build-phase state |
+| `pending_confirmation` | **Sub** | Sub's own resolution-confirmation flow; the standard expresses this as `resolved` awaiting close |
+| `lower`, `normal` | **Sub** | extra priority rungs beyond the standard four |
+| `replied` | **ERP** | or map onto `waiting_on_customer`, which is the standard role it fills |
+| NCC categories | **Sub** | Nigerian regulatory taxonomy |
+
+### Two things this exposes in Sub
+
+1. **Sub has no `resolved` state.** It goes `pending_confirmation → closed`, so
+   it is missing a standard rung and carries a bespoke one in its place.
+   Adopting the standard core gives Sub `resolved` and makes
+   `pending_confirmation` either a declared Sub state layered on top of it or a
+   retirement.
+2. **Sub declares both `medium` and `normal`** as separate priorities — two
+   names for one rung, which no consumer can order meaningfully.
+
+### Retirement surface
+
+`lastmile_rerun` and `site_under_construction` appear in **16 Python locations**
+in `dotmac_sub/app/` and **0 templates**. So Sub's cutover is a bounded code
+change, not a UI rewrite — the terms never leaked into markup. Sub's
+`TicketStatus` Python enum is itself the thing being retired: after this, no
+repository holds an ISP term in an enum, and every non-standard term is a row in
+a declaration registry that CI can check for an owner and a consumer, exactly as
+ADR-0008 requires of `SettingDomain`.
 
 ## Source selection
 
@@ -170,12 +231,10 @@ standard warns about, and ticket→subscriber is operational state, not a loose
 annotation. (a) is cheaper and has fleet precedent, so it is a legitimate
 choice — but it is a decision, not a default.
 
-### 2. Does the module ship any statuses at all?
+### 2. ~~Does the module ship any statuses at all?~~ — SETTLED 2026-08-11
 
-If it ships none, every product declares five before it can create a ticket. If
-it ships a default set, that set becomes a de-facto vocabulary products will
-inherit unexamined. Suggested: ship **classes** only, plus a
-`register_default_vocabulary()` helper a product may opt into.
+The module ships the **standard helpdesk vocabulary**; everything else is
+declared by the product that needs it, Sub included. See the amendment above.
 
 ### 3. ADR-0017 interaction
 
