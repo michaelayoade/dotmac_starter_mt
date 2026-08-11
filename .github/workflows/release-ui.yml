@@ -1,0 +1,244 @@
+name: Release ui
+
+# Publish `dotmac-ui` to the PRIVATE Forgejo index at registry.dotmac.io, on the
+# same terms as `release-kernel.yml` (R0, ratified 2026-07-30): protected
+# workflow_dispatch with an explicit version, publish gated on Michael's
+# approval in the `registry-release` environment, a re-check that the approved
+# SHA is still main's tip, verification by installing the PUBLISHED artifact
+# from the index, and only then a tag.
+#
+# Two things differ from the kernel's, and both are deliberate:
+#
+#   * There is no `npm run css:build`. `dotmac-ui` generates its stylesheet,
+#     Tailwind preset and manifest from the token source with
+#     `python -m dotmac_ui.build`, and the results are committed. So instead of
+#     compiling, this REGENERATES and asserts the tree is unchanged — which
+#     proves the published assets are the ones the token source produces. A
+#     stylesheet edited by hand, or a preset left stale after a token change,
+#     fails here rather than shipping.
+#
+#   * There is no `consumer_boot_check.sh` equivalent: dotmac-ui mounts no
+#     routes and boots no app. The smoke instead asserts the wheel actually
+#     contains its published artifacts and that the preset is loadable
+#     JavaScript — a preset that is not valid CommonJS breaks every consumer's
+#     build, and nothing else in the pipeline would notice.
+#
+# Every THIRD-PARTY action is pinned to the same reviewed commit SHAs as
+# release-kernel.yml; the trailing comment records the human-readable version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "dotmac-ui version to publish (MUST equal packages/dotmac-ui pyproject version, e.g. 0.1.0a2)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Fail closed unless THIS run is the exact current tip of protected main
+      # (not merely an ancestor) — a stale or side-branch dispatch cannot publish.
+      - name: Assert run is on the current protected main SHA
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+      - uses: ./.github/actions/setup-poetry
+
+      # The dispatched version must equal the package metadata — no inference.
+      - name: Assert version input matches package metadata
+        working-directory: packages/dotmac-ui
+        run: |
+          PKG_VERSION="$(poetry version --short)"
+          if [ "${{ inputs.version }}" != "${PKG_VERSION}" ]; then
+            echo "::error::input '${{ inputs.version }}' != package version '${PKG_VERSION}'"
+            exit 1
+          fi
+          echo "version matches: ${PKG_VERSION}"
+
+      # The published assets must be exactly what the token source generates.
+      # Regenerate in place and require a clean tree: a hand-edited stylesheet,
+      # or a preset left stale after a token change, fails here.
+      - name: Assert committed assets match the token source
+        run: |
+          python -c "import sys; sys.path.insert(0, 'packages/dotmac-ui/src'); \
+            from dotmac_ui import __version__; from dotmac_ui.build import write_assets; \
+            write_assets(__version__)"
+          if ! git diff --quiet -- packages/dotmac-ui/src/dotmac_ui/static; then
+            echo "::error::committed assets differ from the generated output — run python -m dotmac_ui.build"
+            git --no-pager diff --stat -- packages/dotmac-ui/src/dotmac_ui/static
+            exit 1
+          fi
+          echo "generated assets match the committed tree"
+
+      - name: Build wheel + sdist
+        working-directory: packages/dotmac-ui
+        run: poetry build
+
+      # Inspection gate: the wheel must carry its published artifacts and the
+      # PEP 561 marker, and must not carry tests or the reference assembly.
+      - name: Inspect artifacts
+        working-directory: packages/dotmac-ui
+        run: |
+          WHEEL="$(ls dist/*.whl)"
+          echo "inspecting ${WHEEL}"
+          CONTENTS="$(python -m zipfile -l "${WHEEL}")"
+          for required in \
+            "dotmac_ui/static/dotmac-ui/dotmac-ui-1.css" \
+            "dotmac_ui/static/dotmac-ui/tailwind-preset.js" \
+            "dotmac_ui/static/dotmac-ui/manifest.json" \
+            "dotmac_ui/py.typed" ; do
+            echo "${CONTENTS}" | grep -q "${required}" \
+              || { echo "::error::wheel is missing ${required}"; exit 1; }
+          done
+          for forbidden in "tests/" "app/" ".env" ; do
+            if echo "${CONTENTS}" | grep -q "^\s*${forbidden}"; then
+              echo "::error::wheel contains ${forbidden}"; exit 1
+            fi
+          done
+          echo "wheel contents OK"
+
+      # Release-artifact smoke: install the freshly built wheel into a clean
+      # venv, confirm the version it reports, and confirm the preset it ships is
+      # loadable CommonJS. An invalid preset breaks every consumer's Tailwind
+      # build and nothing else here would catch it.
+      - name: Release wheel smoke
+        working-directory: packages/dotmac-ui
+        run: |
+          python -m venv /tmp/uismoke
+          /tmp/uismoke/bin/pip install --quiet "$(ls dist/*.whl)"
+          /tmp/uismoke/bin/python - <<'PY'
+          import dotmac_ui
+          from dotmac_ui.assets import stylesheet_path, tailwind_preset_path
+          from dotmac_ui.theme import bootstrap_script
+          assert stylesheet_path().is_file(), "stylesheet missing from the installed wheel"
+          assert tailwind_preset_path().is_file(), "preset missing from the installed wheel"
+          assert bootstrap_script(), "theme bootstrap is empty"
+          print("installed dotmac-ui", dotmac_ui.__version__)
+          print("preset:", tailwind_preset_path())
+          PY
+          PRESET="$(/tmp/uismoke/bin/python -c 'from dotmac_ui.assets import tailwind_preset_path; print(tailwind_preset_path())')"
+          node -e "const p=require('${PRESET}'); if(!p.theme||!p.theme.extend||!p.theme.extend.colors){throw new Error('preset has no colours')} console.log('preset loads as CommonJS')"
+
+      - name: Upload built artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dotmac-ui-dist
+          path: packages/dotmac-ui/dist/*
+          retention-days: 90
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: registry-release    # protected: main-only + required review (Michael)
+    permissions:
+      contents: read
+    steps:
+      # RE-check freshness AFTER the approval wait, before anything is
+      # published. `build` proved this run was main's tip at dispatch time, but
+      # a protected environment can sit pending for hours or days — and the
+      # approval is a decision about a SHA, not about a run id.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Re-assert the approved SHA is still the current protected main
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+      - name: Download the exact built bytes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dotmac-ui-dist
+          path: dist
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # Publish the SAME bytes `build` inspected + smoked (downloaded, not
+      # rebuilt). `FORGEJO_PUBLISH_TOKEN` is a protected `registry-release`
+      # environment secret whose CANONICAL source is OpenBao
+      # (secret/dotmac/forgejo/ci-publisher-token) — rotate there, re-sync here.
+      - name: Publish to the Forgejo private index
+        env:
+          TWINE_USERNAME: ci-publisher
+          TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+        run: |
+          python -m pip install --quiet twine
+          python -m twine upload \
+            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
+
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: registry-release    # reuse the scoped token; still Michael-gated
+    permissions:
+      contents: write                # create the post-verification tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+
+      # The Forgejo index may lag a few seconds after publish — poll the simple
+      # index for the version before smoking it.
+      - name: Wait for the release on the Forgejo index
+        env:
+          IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/dotmac-ui/
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
+              echo "available on the Forgejo index"; exit 0
+            fi
+            echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
+          done
+          echo "::error::dotmac-ui ${{ inputs.version }} did not appear on the Forgejo index in time"
+          exit 1
+
+      # Install the PUBLISHED release FROM THE INDEX into a clean venv and smoke
+      # it — the same checks as the build-time smoke, against the artifact a
+      # consumer would actually resolve.
+      - name: Install from the Forgejo registry and verify
+        env:
+          UI_INDEX_URL: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python -m venv /tmp/uiverify
+          /tmp/uiverify/bin/pip install --quiet \
+            --index-url "${UI_INDEX_URL}" \
+            --extra-index-url "https://pypi.org/simple" \
+            "dotmac-ui==${{ inputs.version }}"
+          /tmp/uiverify/bin/python - <<'PY'
+          import dotmac_ui
+          from dotmac_ui.assets import asset_manifest, stylesheet_path, tailwind_preset_path
+          from dotmac_ui.theme import bootstrap_script
+          assert stylesheet_path().is_file()
+          assert tailwind_preset_path().is_file()
+          assert bootstrap_script()
+          print("verified dotmac-ui", dotmac_ui.__version__, asset_manifest()["ui_contract_version"])
+          PY
+          PRESET="$(/tmp/uiverify/bin/python -c 'from dotmac_ui.assets import tailwind_preset_path; print(tailwind_preset_path())')"
+          node -e "const p=require('${PRESET}'); if(!p.theme.extend.colors){throw new Error('preset has no colours')} console.log('published preset loads as CommonJS')"
+
+      # Only AFTER registry verification: tag the published SHA.
+      - name: Tag the verified release
+        run: |
+          TAG="dotmac-ui-v${{ inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "dotmac-ui ${{ inputs.version }} (verified on the Forgejo registry)" "${GITHUB_SHA}"
+          git push origin "${TAG}"
+          echo "tagged ${TAG} on ${GITHUB_SHA}"
