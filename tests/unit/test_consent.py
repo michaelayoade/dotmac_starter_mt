@@ -129,6 +129,15 @@ def test_email_suppression_is_case_insensitive(db, tenant) -> None:
     )
 
 
+def test_channel_identity_is_case_and_whitespace_insensitive(db, tenant) -> None:
+    """An adapter spelling `Email` must not bypass a suppression stored as
+    `email`; channel identity is canonical in the same way address identity is."""
+    consent.suppress(db, tenant.id, channel=" Email ", address="jane@example.com")
+    assert not consent.may_send(
+        db, tenant.id, channel="email", address="jane@example.com", category="marketing"
+    )
+
+
 def test_phone_suppression_ignores_punctuation(db, tenant) -> None:
     consent.suppress(db, tenant.id, channel="sms", address="+234 801 234 5678")
     assert not consent.may_send(

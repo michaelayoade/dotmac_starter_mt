@@ -15,14 +15,19 @@ Requires real Postgres (`make test-db-up` / `make test-integration`).
 from __future__ import annotations
 
 import os
+import threading
 import uuid
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from sqlalchemy import create_engine, text
+from dotmac_kernel import delivery
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+
+TABLE = "communication_deliveries"
 
 
 @pytest.fixture(scope="module")
@@ -57,17 +62,22 @@ def _insert(
     provider: str = "ses",
     provider_message_id: str | None = "msg-1",
     status: str = "bounced",
+    dispatch_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     row_id = uuid.uuid4()
+    dispatch_id = dispatch_id or uuid.uuid4()
     session.execute(
         text(
             "INSERT INTO communication_deliveries "
-            "(id, tenant_id, channel, address, provider, provider_message_id, status) "
-            "VALUES (:id, :tenant_id, 'email', :address, :provider, :mid, :status)"
+            "(id, tenant_id, dispatch_id, channel, address, provider, "
+            "provider_message_id, status) "
+            "VALUES (:id, :tenant_id, :dispatch_id, 'email', :address, :provider, "
+            ":mid, :status)"
         ),
         {
             "id": str(row_id),
             "tenant_id": str(tenant_id),
+            "dispatch_id": str(dispatch_id),
             "address": address,
             "provider": provider,
             "mid": provider_message_id,
@@ -113,10 +123,10 @@ def test_a_tenant_cannot_write_a_receipt_against_another_tenant(
         a.close()
 
 
-def test_the_provider_message_id_is_unique_within_a_tenant(
+def test_one_provider_status_is_unique_within_a_tenant(
     tenant_a, tenant_sessionmaker: sessionmaker[Session]
 ) -> None:
-    """What makes a redelivered webhook a no-op rather than a second bounce."""
+    """What makes a redelivered copy of the SAME webhook a no-op."""
     a = _as_tenant(tenant_sessionmaker, tenant_a.id)
     try:
         _insert(a, tenant_id=tenant_a.id, provider_message_id="dupe-1")
@@ -132,6 +142,79 @@ def test_the_provider_message_id_is_unique_within_a_tenant(
     finally:
         a.rollback()
         a.close()
+
+
+def test_one_provider_message_may_progress_through_distinct_statuses(
+    tenant_a, tenant_sessionmaker: sessionmaker[Session]
+) -> None:
+    """Message identity cannot collapse accepted -> delivered -> bounced."""
+    shared_dispatch = uuid.uuid4()
+    a = _as_tenant(tenant_sessionmaker, tenant_a.id)
+    try:
+        _insert(
+            a,
+            tenant_id=tenant_a.id,
+            provider_message_id="progress-1",
+            status="accepted",
+            dispatch_id=shared_dispatch,
+        )
+        _insert(
+            a,
+            tenant_id=tenant_a.id,
+            provider_message_id="progress-1",
+            status="bounced",
+            dispatch_id=shared_dispatch,
+        )
+        a.commit()
+    finally:
+        a.close()
+
+
+def test_concurrent_duplicate_receipts_converge_on_one_row(
+    tenant_a,
+    tenant_engine: Engine,
+    tenant_sessionmaker: sessionmaker[Session],
+) -> None:
+    """Two simultaneous copies of one provider callback replay one receipt."""
+    barrier = threading.Barrier(2)
+    marker = f"delivery-race-{uuid.uuid4()}"
+
+    def synchronise_initial_lookup(conn, cursor, statement, params, context, many):
+        if (
+            statement.lstrip().startswith("SELECT")
+            and TABLE in statement
+            and not conn.info.get(marker)
+        ):
+            conn.info[marker] = True
+            barrier.wait(timeout=10)
+
+    event.listen(tenant_engine, "after_cursor_execute", synchronise_initial_lookup)
+
+    def worker() -> uuid.UUID:
+        db = _as_tenant(tenant_sessionmaker, tenant_a.id)
+        try:
+            row = delivery.record_receipt(
+                db,
+                tenant_a.id,
+                channel="email",
+                address="concurrent@example.com",
+                provider="ses",
+                provider_message_id="concurrent-callback",
+                status="accepted",
+            )
+            row_id = row.id
+            db.commit()
+            return row_id
+        finally:
+            db.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            row_ids = list(pool.map(lambda _: worker(), range(2)))
+    finally:
+        event.remove(tenant_engine, "after_cursor_execute", synchronise_initial_lookup)
+
+    assert row_ids[0] == row_ids[1]
 
 
 def test_receipts_without_a_provider_id_do_not_collide(

@@ -15,14 +15,17 @@ is what a convention gets you: marketing eligibility lived inside the campaign
 segment filter, so the answer depended on who was asking. Routing every send
 through one function makes the check structural.
 
-`send` does exactly four things, in order:
+`send` does exactly five things, in order:
 
-1. **Ask consent.** A suppressed address returns a `Suppressed` outcome and the
+1. **Replay a completed dispatch.** A stable `dispatch_id` lets an outbox retry
+   return the committed receipt without calling the provider again.
+2. **Ask consent.** A suppressed address returns a `Suppressed` outcome and the
    provider is never called — no network, no cost, no receipt.
-2. **Call the provider.**
-3. **Record the receipt**, which is what closes the bounce→consent loop
+3. **Call the provider.** The adapter passes `message.idempotency_key` to a
+   provider that supports idempotency, covering an unknown external outcome.
+4. **Record the receipt**, which is what closes the bounce→consent loop
    (`dotmac_kernel.delivery.record_receipt`).
-4. **Return the outcome**, so the caller can retry or give up on its own terms.
+5. **Return the outcome**, so the caller can retry or give up on its own terms.
 
 ## What it deliberately does NOT do
 
@@ -50,21 +53,55 @@ from dotmac_kernel.delivery_models import (
     DELIVERY_STATUSES,
     CommunicationDelivery,
 )
+from dotmac_kernel.idempotency import fingerprint_of
 
 
 @dataclass(frozen=True, slots=True)
 class OutboundMessage:
     """What a provider is asked to send. Already rendered, already addressed."""
 
+    #: Product/outbox identity created before the first provider call and reused
+    #: on every relay attempt. Provider adapters use `idempotency_key` where the
+    #: external API supports idempotent requests.
+    dispatch_id: UUID
     channel: str
     address: str
     body: str
-    subject: str | None = None
     #: Why this is being sent — `billing`, `marketing`, … The consent decision
     #: turns on it, so it is required rather than defaulted: a caller that has to
     #: name the category cannot accidentally get the marketing rule applied to an
     #: invoice, or the reverse.
-    category: str = ""
+    category: str
+    subject: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.dispatch_id, UUID):
+            raise ValueError("dispatch_id must be a UUID")
+        if not consent.normalize_channel(self.channel):
+            raise ValueError("channel is required")
+        if not consent.normalize_address(self.channel, self.address):
+            raise ValueError("address is required")
+        if not (self.category or "").strip():
+            raise ValueError("category is required")
+
+    @property
+    def idempotency_key(self) -> str:
+        """Stable external-provider key for this outbox dispatch."""
+        return str(self.dispatch_id)
+
+    @property
+    def request_fingerprint(self) -> str:
+        """Bind the stable dispatch id to exactly one rendered request."""
+        channel = consent.normalize_channel(self.channel)
+        return fingerprint_of(
+            {
+                "channel": channel,
+                "address": consent.normalize_address(channel, self.address),
+                "category": self.category.strip().lower(),
+                "subject": self.subject,
+                "body": self.body,
+            }
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +177,17 @@ def send(
     Flush-only: the receipt and any suppression it triggers belong to the
     caller's transaction.
     """
+    fingerprint = message.request_fingerprint
+    existing = delivery.latest_receipt_for_dispatch(
+        db, tenant_id, dispatch_id=message.dispatch_id
+    )
+    if existing is not None:
+        if existing.request_fingerprint != fingerprint:
+            raise delivery.DeliveryError(
+                "dispatch id was already used for a different message"
+            )
+        return Sent(receipt=existing)
+
     reason = consent.suppression_reason(
         db,
         tenant_id,
@@ -158,6 +206,8 @@ def send(
         address=message.address,
         provider=provider.name,
         status=result.status,
+        dispatch_id=message.dispatch_id,
+        request_fingerprint=fingerprint,
         provider_message_id=result.provider_message_id,
         response_code=result.response_code,
         response_body=result.response_body,

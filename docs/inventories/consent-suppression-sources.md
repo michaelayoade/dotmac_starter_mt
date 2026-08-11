@@ -74,6 +74,10 @@ gains a capability it never had.
    `whatsapp`, lowercase otherwise. `raw_address` keeps what the customer
    actually clicked, so the row stays auditable.
 
+   The extraction also canonicalises CHANNEL identity (`strip().lower()`) on
+   every read and write. Without that companion rule, `Email` and `email` create
+   different ledger keys and casing becomes a suppression bypass.
+
 6. **Suppression escalates, never de-escalates.** Re-suppressing an address
    raises `marketing → all` but never the reverse, so a hard bounce cannot be
    downgraded by a later unsubscribe click. Sub's code carries a scar comment on
@@ -118,6 +122,11 @@ gains a capability it never had.
   it also means an `all`-scoped bounce record can be erased with no trace of it
   having existed. Worth an explicit decision at port time rather than an
   inherited default.
+- **The check-then-insert mutator races.** Concurrent callbacks can both miss
+  the initial lookup and one receives a raw unique-constraint error. The kernel
+  insert runs inside `dotmac_kernel.db.conflict_savepoint`; the loser re-reads
+  and returns/escalates the winner without rolling back the outer transaction's
+  tenant context.
 
 ## Where the extracted owner belongs
 

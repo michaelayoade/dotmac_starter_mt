@@ -56,6 +56,7 @@ from collections.abc import Iterable
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.consent_models import (
@@ -66,6 +67,7 @@ from dotmac_kernel.consent_models import (
     SUPPRESSION_SCOPES,
     CommunicationSuppression,
 )
+from dotmac_kernel.db import conflict_savepoint
 
 _DIGITS = re.compile(r"\D+")
 
@@ -132,7 +134,12 @@ def _reset_registries_for_tests(
     return previous
 
 
-# ── Address canonicalisation ────────────────────────────────────────────────
+# ── Channel and address canonicalisation ───────────────────────────────────
+
+
+def normalize_channel(channel: str | None) -> str:
+    """Canonical channel identity used by every ledger read and write."""
+    return (channel or "").strip().lower()
 
 
 def normalize_address(channel: str, address: str | None) -> str:
@@ -144,7 +151,7 @@ def normalize_address(channel: str, address: str | None) -> str:
     value = (address or "").strip()
     if not value:
         return ""
-    if (channel or "").strip().lower() in _NUMERIC_CHANNELS:
+    if normalize_channel(channel) in _NUMERIC_CHANNELS:
         return _DIGITS.sub("", value)
     return value.lower()
 
@@ -182,7 +189,8 @@ def suppression_reason(
     category: str | None,
 ) -> str | None:
     """The canonical reason this send is blocked, or None when sendable."""
-    normalized = normalize_address(channel, address)
+    normalized_channel = normalize_channel(channel)
+    normalized = normalize_address(normalized_channel, address)
     if not normalized:
         # No address is a DELIVERY bug, not a consent decision — let the sender
         # fail loudly on its own terms rather than being silently classed as
@@ -192,7 +200,7 @@ def suppression_reason(
     row = db.execute(
         select(CommunicationSuppression).where(
             CommunicationSuppression.tenant_id == tenant_id,
-            CommunicationSuppression.channel == channel,
+            CommunicationSuppression.channel == normalized_channel,
             CommunicationSuppression.address == normalized,
         )
     ).scalar_one_or_none()
@@ -212,10 +220,11 @@ def suppression_reasons_for_addresses(
     category: str | None,
 ) -> dict[str, str]:
     """Blocked canonical addresses → reason, in ONE query."""
+    normalized_channel = normalize_channel(channel)
     normalized = {
-        normalize_address(channel, address)
+        normalize_address(normalized_channel, address)
         for address in addresses
-        if normalize_address(channel, address)
+        if normalize_address(normalized_channel, address)
     }
     if not normalized:
         return {}
@@ -223,7 +232,7 @@ def suppression_reasons_for_addresses(
     rows = db.execute(
         select(CommunicationSuppression).where(
             CommunicationSuppression.tenant_id == tenant_id,
-            CommunicationSuppression.channel == channel,
+            CommunicationSuppression.channel == normalized_channel,
             CommunicationSuppression.address.in_(normalized),
         )
     ).scalars()
@@ -287,19 +296,23 @@ def suppress(
             f"unknown suppression reason {reason!r} — expected one of "
             f"{', '.join(SUPPRESSION_REASONS)}"
         )
-    normalized = normalize_address(channel, address)
+    normalized_channel = normalize_channel(channel)
+    if not normalized_channel:
+        raise ConsentError("cannot suppress on an empty channel")
+    normalized = normalize_address(normalized_channel, address)
     if not normalized:
         raise ConsentError("cannot suppress an empty address")
 
-    existing = db.execute(
-        select(CommunicationSuppression).where(
-            CommunicationSuppression.tenant_id == tenant_id,
-            CommunicationSuppression.channel == channel,
-            CommunicationSuppression.address == normalized,
-        )
-    ).scalar_one_or_none()
+    def lookup() -> CommunicationSuppression | None:
+        return db.execute(
+            select(CommunicationSuppression).where(
+                CommunicationSuppression.tenant_id == tenant_id,
+                CommunicationSuppression.channel == normalized_channel,
+                CommunicationSuppression.address == normalized,
+            )
+        ).scalar_one_or_none()
 
-    if existing is not None:
+    def escalate(existing: CommunicationSuppression) -> CommunicationSuppression:
         if existing.scope == SCOPE_MARKETING and scope == SCOPE_ALL:
             existing.scope = scope
             existing.reason = reason
@@ -310,9 +323,13 @@ def suppress(
             db.flush()
         return existing
 
+    existing = lookup()
+    if existing is not None:
+        return escalate(existing)
+
     row = CommunicationSuppression(
         tenant_id=tenant_id,
-        channel=channel,
+        channel=normalized_channel,
         address=normalized,
         raw_address=address,
         party_id=party_id,
@@ -321,8 +338,18 @@ def suppress(
         note=note,
         created_by=created_by,
     )
-    db.add(row)
-    db.flush()
+    try:
+        # Provider callbacks and imports can race. The unique constraint picks
+        # one winner while the savepoint keeps the caller's outer transaction
+        # (and its SET LOCAL tenant context) usable for replay.
+        with conflict_savepoint(db):
+            db.add(row)
+            db.flush()
+    except IntegrityError:
+        winner = lookup()
+        if winner is None:
+            raise
+        return escalate(winner)
     return row
 
 
@@ -332,11 +359,13 @@ def unsuppress(db: Session, tenant_id: UUID, *, channel: str, address: str) -> b
     Deletes an `all`-scoped row too, so this is the operator-authority form —
     see `unsuppress_marketing` for the one campaign administration may call.
     """
+    normalized_channel = normalize_channel(channel)
     row = db.execute(
         select(CommunicationSuppression).where(
             CommunicationSuppression.tenant_id == tenant_id,
-            CommunicationSuppression.channel == channel,
-            CommunicationSuppression.address == normalize_address(channel, address),
+            CommunicationSuppression.channel == normalized_channel,
+            CommunicationSuppression.address
+            == normalize_address(normalized_channel, address),
         )
     ).scalar_one_or_none()
     if row is None:
@@ -354,11 +383,13 @@ def unsuppress_marketing(
     Campaign administration is not authority to clear a hard bounce, complaint or
     erasure row, whose `all` scope also protects transactional delivery.
     """
+    normalized_channel = normalize_channel(channel)
     row = db.execute(
         select(CommunicationSuppression).where(
             CommunicationSuppression.tenant_id == tenant_id,
-            CommunicationSuppression.channel == channel,
-            CommunicationSuppression.address == normalize_address(channel, address),
+            CommunicationSuppression.channel == normalized_channel,
+            CommunicationSuppression.address
+            == normalize_address(normalized_channel, address),
         )
     ).scalar_one_or_none()
     if row is None or row.scope != SCOPE_MARKETING:
@@ -381,7 +412,9 @@ def list_suppressions(
         CommunicationSuppression.tenant_id == tenant_id
     )
     if channel is not None:
-        stmt = stmt.where(CommunicationSuppression.channel == channel)
+        stmt = stmt.where(
+            CommunicationSuppression.channel == normalize_channel(channel)
+        )
     if scope is not None:
         stmt = stmt.where(CommunicationSuppression.scope == scope)
     return list(
@@ -400,6 +433,7 @@ __all__ = [
     "list_suppressions",
     "may_send",
     "normalize_address",
+    "normalize_channel",
     "register_marketing_categories",
     "register_numeric_channels",
     "registered_marketing_categories",
