@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 # Only names whose defining module has no import-time engine/I/O side effect,
 # so `import dotmac_kernel` never requires DATABASE_URL. Engine-touching APIs
 # (db sessions, guards, middleware, platform auth) are submodule imports.
-from dotmac_kernel.assembly import ProductAssemblySpec
+from dotmac_kernel.assembly import ProductAssemblySpec, ProductSecurityPolicy
 from dotmac_kernel.audit import (
     AuditEvent,
     PlatformAuditEvent,
@@ -185,7 +185,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a37"
+__version__ = "0.1.0a38"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -296,6 +296,7 @@ __all__ = [
     "INTERNAL_MODULES",
     # assembly composition
     "ProductAssemblySpec",
+    "ProductSecurityPolicy",
     "create_app",
     # audit
     "AuditEvent",

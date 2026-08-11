@@ -82,6 +82,9 @@ else
 fi
 # Well-formed but deliberately unreachable — proves /health never touches the DB.
 CONSUMER_DB_URL="${CONSUMER_DB_URL:-postgresql+psycopg://x:x@127.0.0.1:59999/x}"
+# The wheel consumer is also the declared FastAPI ceiling proof. The floor job
+# covers 0.111; this exact pin covers 0.140's lazy included-router shape.
+export CONSUMER_FASTAPI="${CONSUMER_FASTAPI:-0.140.13}"
 
 # ── Temp workspace (venv + consumer app), removed on exit ───────────────────
 WORKDIR=$(mktemp -d)
@@ -146,6 +149,7 @@ echo "==> [3/6] Install the kernel + its declared deps into the clean venv"
 # Starlette's TestClient). httpx is pinned to the TestClient-compatible range
 # (matches the kernel's `testing` extra) for the same reason.
 _HTTPX='httpx>=0.27,<1'
+_FASTAPI="fastapi==${CONSUMER_FASTAPI}"
 if [ "$MODE" = "registry" ]; then
   # Install from the PRIVATE Forgejo simple index (auth carried in
   # KERNEL_INDEX_URL), with PyPI as an extra index ONLY for the public transitive
@@ -155,9 +159,9 @@ if [ "$MODE" = "registry" ]; then
   # alone. This is the release VERIFY smoke of an internal alpha.
   "$VPY" -m pip install --quiet --index-url "$KERNEL_INDEX_URL" \
     --extra-index-url "${PUBLIC_INDEX_URL:-https://pypi.org/simple}" \
-    "$INSTALL_SPEC" "psycopg[binary]" "$_HTTPX"
+    "$INSTALL_SPEC" "psycopg[binary]" "$_HTTPX" "$_FASTAPI"
 else
-  "$VPY" -m pip install --quiet "$INSTALL_SPEC" "psycopg[binary]" "$_HTTPX"
+  "$VPY" -m pip install --quiet "$INSTALL_SPEC" "psycopg[binary]" "$_HTTPX" "$_FASTAPI"
 fi
 
 echo "==> [4/6] Write the minimal EXTERNAL consumer app (public names only)"
@@ -185,13 +189,19 @@ cat > "$WORKDIR/consumer_check.py" <<'PY'
 
 import os
 import sys
+from importlib.metadata import version
 from pathlib import Path
 
+from fastapi import APIRouter, Depends
 from fastapi.testclient import TestClient
 
 import dotmac_kernel
 import dotmac_kernel.migrations as kmig
 import dotmac_kernel.templating as ktpl
+from dotmac_kernel import FeatureManifest, ProductAssemblySpec, create_app
+from dotmac_kernel.capabilities import UndeclaredCapabilityError
+from dotmac_kernel.deps import require_capability, require_permission
+from dotmac_kernel.permissions import UndeclaredPermissionError
 from consumer_main import app
 
 repo_root = Path(os.environ["REPO_ROOT"]).resolve()
@@ -217,6 +227,36 @@ with TestClient(app) as client:
 assert resp.status_code == 200, f"/health returned {resp.status_code}"
 assert resp.json() == {"status": "ok"}, resp.text
 print(f"    GET /health        -> {resp.status_code} {resp.json()}")
+
+# ── 2b. FastAPI ceiling: lazy included routers cannot hide route guards ─────
+expected_fastapi = os.environ["CONSUMER_FASTAPI"]
+assert version("fastapi") == expected_fastapi, (
+    f"FastAPI ceiling drift: expected {expected_fastapi}, got {version('fastapi')}"
+)
+for kind, guard, expected_error in (
+    ("permission", require_permission("ghost.read"), UndeclaredPermissionError),
+    ("capability", require_capability("ghost.use"), UndeclaredCapabilityError),
+):
+    router = APIRouter(prefix=f"/{kind}")
+
+    @router.get("/probe", dependencies=[Depends(guard)])
+    def guarded_probe() -> dict[str, bool]:
+        return {"ok": True}
+
+    try:
+        create_app(
+            ProductAssemblySpec(
+                name=f"lazy-{kind}-probe",
+                modules=(FeatureManifest(name=kind, routers=(router,)),),
+            )
+        )
+    except expected_error:
+        pass
+    else:
+        raise AssertionError(
+            f"FastAPI {expected_fastapi} lazy route bypassed {kind} declaration validation"
+        )
+print(f"    fastapi {expected_fastapi} -> lazy permission/capability routes fail closed")
 
 # ── 3. packaged TEMPLATES resolve from the wheel ─────────────────────────────
 templates_dir = ktpl.TEMPLATES_DIR

@@ -21,6 +21,7 @@ Re-exported as `dotmac_kernel.create_app`.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Mapping, Sequence, Set
 from contextlib import asynccontextmanager
@@ -29,7 +30,7 @@ from fastapi import FastAPI
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from dotmac_kernel.assembly import ProductAssemblySpec
+from dotmac_kernel.assembly import ProductAssemblySpec, StartupHook
 from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.capabilities import (
     CAPABILITY_CODE_ATTR,
@@ -177,6 +178,23 @@ def _required_setting_errors() -> list[str]:
         return []
 
 
+def _effective_route_contexts(app: FastAPI):
+    """Yield route-like objects with their effective dependency trees.
+
+    FastAPI through 0.115 materializes included ``APIRoute`` instances in
+    ``app.routes``. FastAPI 0.140 stores an included router lazily and exposes
+    its flattened, prefix-aware routes through ``effective_route_contexts``.
+    Duck typing keeps the kernel independent of FastAPI's private wrapper class
+    while supporting both representations across the declared version range.
+    """
+    for route in app.routes:
+        contexts = getattr(route, "effective_route_contexts", None)
+        if callable(contexts):
+            yield from contexts()
+        else:
+            yield route
+
+
 def _referenced_codes(app: FastAPI, attr: str) -> list[tuple[str, str]]:
     """(route label, declared code) for every code a MOUNTED route references
     through a guard that stamps `attr` on its dependency callable.
@@ -191,7 +209,7 @@ def _referenced_codes(app: FastAPI, attr: str) -> list[tuple[str, str]]:
     must not be failed for a code it never exposes.
     """
     found: list[tuple[str, str]] = []
-    for route in app.routes:
+    for route in _effective_route_contexts(app):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue
@@ -207,6 +225,20 @@ def _referenced_codes(app: FastAPI, attr: str) -> list[tuple[str, str]]:
         label = f"{'/'.join(methods)} {getattr(route, 'path', '?')}"
         found.extend((label, code) for code in sorted(codes))
     return found
+
+
+def _product_startup_errors(spec: ProductAssemblySpec) -> list[str]:
+    errors: list[str] = []
+    for check in spec.startup_checks:
+        errors.extend(check())
+    return errors
+
+
+async def _run_product_startup_hooks(hooks: Sequence[StartupHook]) -> None:
+    for hook in hooks:
+        result = hook()
+        if inspect.isawaitable(result):
+            await result
 
 
 def _referenced_permissions(app: FastAPI) -> list[tuple[str, str]]:
@@ -395,6 +427,11 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
             if settings.is_production:
                 raise RuntimeError(f"Configuration error: {err}")
             logger.warning("Config: %s", err)
+        for err in _product_startup_errors(spec):
+            if settings.is_production:
+                raise RuntimeError(f"Product configuration error: {err}")
+            logger.warning("Product config: %s", err)
+        await _run_product_startup_hooks(spec.startup_hooks)
         if settings.seed_on_startup:
             await _run_enabled_seeds(enabled_manifests, disabled)
         for err in await asyncio.to_thread(_required_setting_errors):
@@ -442,7 +479,14 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     app.add_middleware(
         SecurityHeadersMiddleware,
         enabled=settings.security_headers_enabled,
-        content_security_policy=settings.content_security_policy,
+        content_security_policy=(
+            settings.content_security_policy
+            or spec.security_policy.content_security_policy
+        ),
+        cross_origin_opener_policy=(spec.security_policy.cross_origin_opener_policy),
+        cross_origin_resource_policy=(
+            spec.security_policy.cross_origin_resource_policy
+        ),
     )
 
     register_error_handlers(app)
@@ -476,11 +520,12 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
 
     # Platform auth mounts DIRECTLY (not a feature manifest) — the platform
     # control plane must exist even with every feature disabled.
-    app.include_router(platform_auth_router)
+    if spec.platform_surface_enabled:
+        app.include_router(platform_auth_router)
     # The platform ADMINISTRATION surface (step 6). Gated on `web_enabled` like
     # every other HTML surface — an API-only deployment serves no portal of
     # either plane — while the platform JSON API above stays mounted regardless.
-    if web_enabled:
+    if spec.platform_surface_enabled and web_enabled:
         app.include_router(platform_web_router)
 
     mount_features(

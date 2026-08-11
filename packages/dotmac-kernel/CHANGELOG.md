@@ -6,6 +6,31 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a38 — 2026-08-11
+
+Academy's assembly adoption closes two composition gaps. Additive; no migration.
+
+### Fixed
+- Permission and capability declaration validation now expands FastAPI 0.140's
+  lazy included-router contexts. Included product routes can no longer bypass
+  the boot-time walker simply because they are not materialized as `APIRoute`
+  objects in `app.routes`. The wheel-consumer gate pins FastAPI 0.140.13 and
+  proves both undeclared guard types still fail closed; the existing floor gate
+  continues to cover FastAPI 0.111.
+
+### Added
+- **Explicit product surface control.**
+  `ProductAssemblySpec.platform_surface_enabled=False` omits both kernel
+  platform routers without a product deleting already-mounted FastAPI routes.
+- **Product startup lifecycle.** `startup_checks` declares product validation
+  with the kernel's warning-in-development/fatal-in-production semantics;
+  ordered sync or async `startup_hooks` run inside the FastAPI lifespan and
+  fail startup if initialization is incomplete.
+- **`ProductSecurityPolicy`.** A product can declare a default CSP plus COOP
+  and CORP values while the kernel remains the single security-header writer.
+  The environment CSP still wins over the product default, and policy values
+  reject newline/header injection at assembly construction.
+
 ## 0.1.0a37 — 2026-08-11
 
 Review hardening for consent and provider delivery. This amends the unpublished

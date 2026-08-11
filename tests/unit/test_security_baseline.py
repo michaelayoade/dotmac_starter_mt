@@ -181,10 +181,15 @@ class TestSecurityHeaders:
         assert "strict-transport-security" in forwarded.headers
 
     def test_csp_override_and_disable(self):
-        client = _headers_app(content_security_policy="default-src 'none'")
-        assert (
-            client.get("/ok").headers["content-security-policy"] == "default-src 'none'"
+        client = _headers_app(
+            content_security_policy="default-src 'none'",
+            cross_origin_opener_policy="same-origin",
+            cross_origin_resource_policy="same-origin",
         )
+        headers = client.get("/ok").headers
+        assert headers["content-security-policy"] == "default-src 'none'"
+        assert headers["cross-origin-opener-policy"] == "same-origin"
+        assert headers["cross-origin-resource-policy"] == "same-origin"
         off = _headers_app(enabled=False)
         assert "content-security-policy" not in off.get("/ok").headers
 
