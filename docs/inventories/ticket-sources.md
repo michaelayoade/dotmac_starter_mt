@@ -23,8 +23,11 @@ channel become *declared* vocabularies rather than enums (ADR-0008), what is
 left is a single coherent lifecycle that all four products need and none of them
 should own.
 
-`lastmile_rerun` is not a ticket state. It is a *Sub* ticket state. That
-distinction is the whole design.
+`lastmile_rerun` is not a ticket state at all — it is a *reason* a ticket is
+waiting. Sub's own code proves it: all 16 references lump it into a set with the
+standard statuses, and every one of those sets is asking a lifecycle-class
+question. Separating **class** from **status** from **reason** is the whole
+design; the two amendments below are how it got there.
 
 ## The four products
 
@@ -79,8 +82,8 @@ The module owns that sentence and nothing else. Concretely:
 |---|---|
 | identity + human-readable number | every product allocates one; ERP has **five** separate numbering implementations today |
 | title, description | universal |
-| **status as a declared vocabulary** | see "the variant seam" below |
-| **priority as a declared vocabulary** | ditto |
+| **status — the closed standard vocabulary** | products extend the REASON layer, never the status layer |
+| **lifecycle class** | fixed at five; the machine semantics everything else keys off |
 | guarded transitions | "which transitions are legal" is a mechanism; *which states exist* is not |
 | assignment (person + team) | universal; Sub's assignment-rule engine and round-robin cursor are the qualifying source |
 | comments, internal vs public | all three have exactly this, with the same semantics |
@@ -94,8 +97,8 @@ The module owns that sentence and nothing else. Concretely:
 
 | Element | Declared by | Example |
 |---|---|---|
-| status vocabulary | product manifest | Sub `lastmile_rerun`; ERP `REPLIED` |
-| priority vocabulary | product manifest | Sub's 6 vs ERP's 4 |
+| **status reason** | product manifest | Sub `lastmile_rerun`; ERP `replied` — see the second amendment: these are reasons, not statuses |
+| priority vocabulary | product manifest | Sub's extra `lower`/`normal` rungs |
 | channel vocabulary | product manifest | Sub's 5; ERP declares none |
 | category taxonomy | product | Sub's NCC regulatory categories; ERP's `category_id` |
 | **subject linkage** | product | Sub → subscriber/lead; ERP → project/customer; vendor → licence |
@@ -105,18 +108,22 @@ The module owns that sentence and nothing else. Concretely:
 
 ## The mechanism that makes the vocabulary open
 
-A declared status is not enough on its own: SLA clocks, workqueues and
-"is this ticket still open?" need to reason about states they have never heard
-of. So each declared status also declares its **lifecycle class**:
+> **Superseded in part by the second amendment below.** This section's original
+> claim was that products declare *statuses*. They declare *reasons*; the status
+> vocabulary is closed. The class mechanism it describes is unchanged and is
+> what the rest of the design rests on.
+
+SLA clocks, workqueues and "is this ticket still open?" must not depend on
+knowing every term a product invents. So every status carries a **lifecycle
+class**:
 
 ```
 open · waiting · resolved · closed · cancelled
 ```
 
-`lastmile_rerun` is class `waiting`. `REPLIED` is class `waiting`. `merged` is
-class `closed`. The module's guards, clocks and projections key off the class;
-the product owns the name, the label, and the transitions it permits between its
-own states.
+The module's guards, clocks and projections key off the class. A product's
+`lastmile_rerun` is a reason attached to a `waiting`-class status, so those
+consumers need no knowledge of it whatsoever.
 
 **This is the whole reason a shared ticket module is possible at all.** Merge the
 enums and you get a 16-member union that means nothing in either product —
@@ -176,6 +183,66 @@ Comment authors: `customer`, `staff`, `system`.
    retirement.
 2. **Sub declares both `medium` and `normal`** as separate priorities — two
    names for one rung, which no consumer can order meaningfully.
+
+### Second amendment — they are not statuses at all
+
+Testing the previous amendment against Sub's code changes the answer again, and
+in the better direction.
+
+**All 16 references to `lastmile_rerun` and `site_under_construction` put them
+in a SET alongside the standard statuses**, and every one of those sets is
+answering a *class* question:
+
+| site | set | the question it asks |
+|---|---|---|
+| `services/sla_assignment.py` | `SLA_APPLICABLE_STATUSES` | does the SLA clock run? |
+| `services/ticket_validation.py` | `_OPEN_STATUSES` | is this ticket open? |
+| `services/customer_service_state.py` | `OPEN_INFRASTRUCTURE_TICKET_STATUSES` | is this ticket open? |
+| `services/ticket_assignment/selectors.py` | routing set | who should work it? |
+| `services/notification_template_conditions.py` | condition list | should this notification fire? |
+| `services/status_presentation.py` | label/colour map | how is it displayed? |
+
+**Not one site branches on `lastmile_rerun` to do something no other waiting
+status does.** As a *status* it carries no behaviour its class does not already
+carry. Its actual job is to record **why** the ticket is waiting, and to be
+filtered and searched on.
+
+That is a **reason**, not a state. So the model gains a layer and the status
+vocabulary gets to be *closed*:
+
+| layer | who owns it | extensible | what it decides |
+|---|---|---|---|
+| **lifecycle class** — `open`/`waiting`/`resolved`/`closed`/`cancelled` | module | **no**, fixed at 5 | machine semantics: does the SLA clock run, does it count as open |
+| **status** — the 9 standard terms | module | **no** | what the UI calls it; which transitions are guarded |
+| **status reason** — `lastmile_rerun`, `site_under_construction`, `awaiting_parts` | **product declares** | yes | *why* it is in this status; filterable, searchable, drives routing and notification conditions |
+| **tag** — free-form | operator creates | yes | searchable only; no behaviour |
+| **comment** | anyone | n/a | narrative; never queried for behaviour |
+
+**The test for which layer a term belongs in: does any code branch on it?**
+If code branches → a declared reason, with an owner and a consumer CI can check.
+If only humans search → a tag, needing no declaration.
+If it is prose → a comment.
+
+Applied to Sub: nothing branches on its ISP terms individually, but
+`notification_template_conditions` and the assignment selectors *do* consume
+them as filters — so they are **reasons**, not free-form tags.
+
+### What this buys
+
+- **The status vocabulary closes.** No product ever adds a status, so no
+  product can quietly redefine what "open" means for the fleet. Composability
+  moves to the reason layer, where it belongs and where it is cheap.
+- **Sub's six hardcoded membership lists collapse into class predicates.** All
+  16 sites become `status.class in {open, waiting}`. The ISP terms stop being
+  something every new call site must remember to include — which is exactly the
+  bug shape those lists invite: add a tenth status, forget one of six lists,
+  and the SLA clock silently stops for it.
+- **`pending_confirmation` resolves cleanly**: it becomes the standard
+  `resolved` (class `resolved`) plus reason `awaiting_customer_confirmation` —
+  which also fixes Sub's missing standard rung noted above.
+- Reasons are filterable and searchable **as data**, so "show me every ticket
+  waiting on a last-mile re-run" is a query rather than a status filter that
+  only exists because someone widened an enum.
 
 ### Retirement surface
 
