@@ -9,6 +9,47 @@ called out here.
 
 ## Unreleased
 
+## 0.1.0a2 — 2026-08-11
+
+The two things that stood between this package and its first consumer.
+
+### Added
+- **A generated Tailwind preset**, shipped as package data
+  (`dotmac_ui.assets.tailwind_preset_path()`). It maps every utility at
+  `var(--dmui-*)`, so a consumer's compiled CSS contains variable references
+  rather than values: one stylesheet swap re-themes it, and dark mode needs no
+  `dark:` variant on any element. Generated from the same tokens as the
+  stylesheet, because a hand-maintained preset is a second copy of the token
+  names and a second copy drifts.
+- **`dotmac_ui.theme`** — `bootstrap_script()` for pre-paint theme selection and
+  `set_theme_script()` for a switcher. Returns source, not a `<script>` tag: the
+  host owns the CSP nonce.
+
+### Why
+
+`dotmac-ui` shipped 190 tokens and a dark theme, and no assembly used it.
+Adopting it still meant hand-writing a Tailwind mapping and a pre-paint script
+per consumer. `dotmac_academy_app` wrote both by hand — the script four times,
+under a non-matching attribute name — and `dotmac_erp` and `dotmac_sub` have two
+copies of `base/_tokens.css` that are now 48% divergent. Anything a consumer must
+copy will drift, so both are generated and shipped. Evidence:
+`docs/inventories/ui-surface-inventory.md`.
+
+### Known limitation
+
+Opacity modifiers (`bg-brand-500/50`) do not work on token colours: Tailwind
+needs channel components to synthesise alpha, and the tokens hold complete
+colours. Fixing that means publishing channel-form tokens — a token-layer
+change, not a preset change.
+
+### Note for reviewers
+
+`screens` deliberately emits **literal** values while every other scale emits
+`var()`. `@media (min-width: var(--x))` is not valid CSS, and a preset emitting
+`var()` there would compile silently and break every responsive utility.
+Breakpoints are therefore fixed at build time, which is correct: a breakpoint is
+a layout contract, not a brand decision.
+
 ## 0.1.0a1 — 2026-08-02
 
 First alpha. The design-system foundation (ADR-0006 U1): the semantic token

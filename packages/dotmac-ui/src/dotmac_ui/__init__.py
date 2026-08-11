@@ -43,11 +43,13 @@ from dotmac_ui.a11y import (
 from dotmac_ui.assets import (
     MANIFEST_RELPATH,
     STYLESHEET_RELPATH,
+    TAILWIND_PRESET_RELPATH,
     asset_digest,
     asset_manifest,
     static_dir,
     stylesheet_path,
     stylesheet_url,
+    tailwind_preset_path,
 )
 from dotmac_ui.contract import (
     ACCESSIBILITY_TARGET,
@@ -59,6 +61,13 @@ from dotmac_ui.contract import (
     THEME_ATTRIBUTE,
     TOKEN_PREFIX,
     UI_CONTRACT_VERSION,
+)
+from dotmac_ui.theme import (
+    DEFAULT_THEME,
+    THEME_STORAGE_KEY,
+    THEME_VALUES,
+    bootstrap_script,
+    set_theme_script,
 )
 from dotmac_ui.tokens import (
     ACTION_INTENTS,
@@ -80,7 +89,7 @@ from dotmac_ui.tokens import (
 #: `test_declared_version_matches_pyproject` — `importlib.metadata` is not used
 #: because the package must be importable straight from a source checkout (an
 #: air-gapped or vendored consumer) where no distribution is installed.
-__version__: Final[str] = "0.1.0a1"
+__version__: Final[str] = "0.1.0a2"
 
 #: Public submodules. `from dotmac_ui.<module> import X` is supported for any
 #: `X` in that module's `__all__`.
@@ -89,6 +98,7 @@ SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
         "dotmac_ui.a11y",
         "dotmac_ui.assets",
         "dotmac_ui.contract",
+        "dotmac_ui.theme",
         "dotmac_ui.tokens",
     }
 )
@@ -106,7 +116,7 @@ __all__ = [
     "CONTRAST_REQUIREMENTS",
     "DARK_THEME_SELECTORS",
     "DATA_ATTRIBUTE_PREFIX",
-    "DesignToken",
+    "DEFAULT_THEME",
     "INTERNAL_MODULES",
     "MANIFEST_RELPATH",
     "MODES",
@@ -116,23 +126,30 @@ __all__ = [
     "STYLESHEET_RELPATH",
     "SUPPORTED_MODULES",
     "SUPPORTED_UI_CONTRACT_VERSIONS",
+    "TAILWIND_PRESET_RELPATH",
     "TEXT_CONTRAST_MINIMUM",
     "THEME_ATTRIBUTE",
+    "THEME_STORAGE_KEY",
+    "THEME_VALUES",
     "TOKENS",
     "TOKEN_PREFIX",
     "UI_CONTRACT_VERSION",
     "ContrastFailure",
     "ContrastRequirement",
+    "DesignToken",
     "__version__",
     "asset_digest",
     "asset_manifest",
+    "bootstrap_script",
     "check_contrast",
     "contrast_ratio",
     "css_variable",
     "resolve_color",
+    "set_theme_script",
     "static_dir",
     "stylesheet_path",
     "stylesheet_url",
+    "tailwind_preset_path",
     "token",
     "token_contrast",
     "token_names",

@@ -57,6 +57,7 @@ deprecation cycle**.
 |---|---|
 | `dotmac_ui.contract` | `UI_CONTRACT_VERSION`, `SUPPORTED_UI_CONTRACT_VERSIONS`, `TOKEN_PREFIX`, `CLASS_PREFIX`, `DATA_ATTRIBUTE_PREFIX`, `PUBLISHED_COMPONENT_CLASSES`, `THEME_ATTRIBUTE`, `DARK_THEME_SELECTORS`, `ACCESSIBILITY_TARGET` |
 | `dotmac_ui.tokens` | `DesignToken`, `TOKENS`, `TOKENS_BY_NAME`, `CATEGORIES`, `MODES`, `RAMP_STEPS`, `SEMANTIC_INTENTS`, `ACTION_INTENTS`, `ACTION_STATES`, `REDUCED_MOTION_DURATION`, `token`, `tokens_in`, `token_names`, `variable_names`, `css_variable`, `resolve_color`, `reference_target`, `declarations`, `iter_categories` |
+| `dotmac_ui.theme` | `bootstrap_script`, `set_theme_script`, `THEME_STORAGE_KEY`, `THEME_VALUES`, `DEFAULT_THEME` (pre-paint theme selection; returns source, not a `<script>` tag, so the host owns the CSP nonce) |
 | `dotmac_ui.assets` | `static_dir`, `stylesheet_path`, `stylesheet_url`, `manifest_path`, `asset_manifest`, `asset_digest`, `STYLESHEET_RELPATH`, `MANIFEST_RELPATH`, `ASSET_NAMESPACE`, `DIGEST_LENGTH` |
 | `dotmac_ui.a11y` | `ACCESSIBILITY_TARGET`, `TEXT_CONTRAST_MINIMUM`, `NON_TEXT_CONTRAST_MINIMUM`, `ContrastRequirement`, `ContrastFailure`, `CONTRAST_REQUIREMENTS`, `check_contrast`, `token_contrast`, `contrast_ratio`, `relative_luminance` |
 
