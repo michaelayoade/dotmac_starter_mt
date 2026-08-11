@@ -56,8 +56,10 @@ ratification.
 carrying `tenant_id`. Its isolation is already two independent layers — a
 SQLAlchemy ORM listener and PostgreSQL RLS — and the first live-catalog
 measurement (ERP #255, #256) put RLS coverage at **85 of 309 scoped tables, 27.5
-per cent**, with 158 unprotected and 66 enabled-but-not-`FORCE`d. It also has a
-session-settable `app.bypass_rls` escape the kernel has no equivalent of.
+per cent**, with 158 unprotected and 66 enabled-but-not-`FORCE`d. It also has an
+`app.bypass_rls` escape the kernel has no equivalent of — transaction-scoped
+(`SET LOCAL`, context-managed, 22 call sites across 6 files), so narrower than
+its name suggests, but an escape expressed in POLICY rather than in ROLE.
 
 Sub is weeks of ratification and cleanup. ERP is a staged migration program.
 Treating them as one workstream has been hiding how close Sub is, and
@@ -157,7 +159,7 @@ untested surface a future adopter must swallow at once.
 
 **ERP first, because it is the larger prize.** ERP is the larger prize and the
 worse pilot. Its tenancy question is unresolved at the security level
-(`app.bypass_rls`), its RLS estate is 72.5 per cent incomplete, and a contract
+(`app.bypass_rls` is a policy-level escape where the kernel uses role privilege), its RLS estate is 72.5 per cent incomplete, and a contract
 defect discovered there is discovered on ledgers and bank accounts.
 
 **Both at once.** This is the 2026-07-18 framing being retired. It produced a
@@ -177,6 +179,8 @@ exactly that incomplete state and should not be joined by more.
    revisited.
 2. **ERP's `app.bypass_rls`.** Whether a session may switch isolation off is a
    security posture decision, not a naming reconciliation, and it gates every
-   ERP table-family migration.
+   ERP table-family migration. The question is not whether the capability
+   should exist — it should — but whether it belongs in the policy predicate or
+   in a role privilege.
 3. **ERP's `continue-on-error: true`** on the integration CI job, which
    currently prevents the RLS ratchet from failing a build.
