@@ -17,7 +17,9 @@ Jinja/HTMX component library, layouts, and navigation primitives that ADR-0006
 
 A vocabulary of 190 role-named CSS custom properties (`--dmui-surface-primary`,
 `--dmui-action-destructive-hover`, `--dmui-status-warning-foreground`), compiled
-into one plain stylesheet that any product can link. It has **no dependencies**,
+into one plain stylesheet that any product can link. Each colour also publishes a
+channel form (`--dmui-color-brand-500-rgb: 59 130 246`) so opacity modifiers like
+`bg-brand-500/50` work — see COMPATIBILITY.md. It has **no dependencies**,
 reads no database, mounts no route, and imports no kernel — so a product adopts
 the design system without adopting anything else.
 

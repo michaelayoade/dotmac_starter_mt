@@ -47,26 +47,13 @@ from dotmac_ui.contract import (
 from dotmac_ui.tokens import (
     REDUCED_MOTION_DURATION,
     TOKENS,
+    channel_variable,
+    colour_tokens,
     declarations,
     iter_categories,
     resolve_color,
     tokens_in,
 )
-
-#: The categories the preset maps as colours, and therefore the ones that need a
-#: channel form. Every other category (space, radius, shadow…) is used whole.
-_COLOUR_CATEGORIES: tuple[str, ...] = (
-    "color",
-    "surface",
-    "text",
-    "border",
-    "action",
-    "status",
-)
-
-
-def _channel_variable(name: str) -> str:
-    return f"{TOKEN_PREFIX}{name}-rgb"
 
 
 def _channels(hex_colour: str) -> str:
@@ -86,16 +73,14 @@ def _channels(hex_colour: str) -> str:
 
 def _channel_declarations(mode: str) -> list[tuple[str, str]]:
     """`(--dmui-…-rgb, "R G B")` for every colour token, resolved for `mode`."""
-    out: list[tuple[str, str]] = []
-    for category in _COLOUR_CATEGORIES:
-        for design_token in tokens_in(category):
-            out.append(
-                (
-                    _channel_variable(design_token.name),
-                    _channels(resolve_color(design_token.name, mode)),
-                )
-            )
-    return out
+    return [
+        (
+            channel_variable(design_token.name),
+            _channels(resolve_color(design_token.name, mode)),
+        )
+        for design_token in colour_tokens()
+    ]
+
 
 _INDENT = "  "
 
@@ -248,7 +233,7 @@ def _colors() -> dict[str, object]:
     for category, prefix in _COLOR_GROUPS:
         flat = {
             design_token.name[len(prefix) :]: (
-                f"rgb(var({_channel_variable(design_token.name)}) / <alpha-value>)"
+                f"rgb(var({channel_variable(design_token.name)}) / <alpha-value>)"
             )
             for design_token in tokens_in(category)
         }
@@ -326,8 +311,8 @@ def render_tailwind_preset(package_version: str) -> str:
         "//   module.exports = { presets: [preset], content: [...] };\n"
         "//\n"
         "// Resolve <dotmac_ui> from the installed package rather than copying\n"
-        "// this file: `python -c \"import dotmac_ui.assets as a;"
-        " print(a.tailwind_preset_path())\"`.\n"
+        '// this file: `python -c "import dotmac_ui.assets as a;'
+        ' print(a.tailwind_preset_path())"`.\n'
         f"module.exports = {body};\n"
     )
 

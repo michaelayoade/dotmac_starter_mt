@@ -130,9 +130,9 @@ def test_bootstrap_survives_storage_being_unavailable() -> None:
     third-party storage blocked. A theme script must never break a page."""
     script = theme.bootstrap_script()
     assert "try" in script and "catch" in script
-    assert script.count(contract.THEME_ATTRIBUTE) >= 2, (
-        "the catch must still set a theme"
-    )
+    assert (
+        script.count(contract.THEME_ATTRIBUTE) >= 2
+    ), "the catch must still set a theme"
 
 
 def test_set_theme_script_rejects_an_unknown_theme() -> None:
@@ -179,12 +179,16 @@ def test_every_preset_colour_supports_an_alpha_modifier() -> None:
 
 def test_channel_tokens_exist_for_every_colour() -> None:
     css = build.render_stylesheet("0.0.0test")
-    for category in build._COLOUR_CATEGORIES:
-        for design_token in tokens.tokens_in(category):
-            variable = build._channel_variable(design_token.name)
-            assert f"{variable}:" in css, (
-                f"{variable} is referenced by the preset but never declared"
-            )
+    published = set(tokens.variable_names())
+    for design_token in tokens.colour_tokens():
+        variable = tokens.channel_variable(design_token.name)
+        assert (
+            f"{variable}:" in css
+        ), f"{variable} is referenced by the preset but never declared"
+        assert variable in published, (
+            f"{variable} is emitted but missing from variable_names() — that "
+            "would make it an undocumented public name"
+        )
 
 
 def test_dark_mode_restates_the_channel_forms() -> None:
@@ -197,12 +201,13 @@ def test_dark_mode_restates_the_channel_forms() -> None:
     css = build.render_stylesheet("0.0.0test")
     dark = css[css.index(contract.DARK_THEME_SELECTORS[-1]) :]
     changing = [
-        t for t in tokens.tokens_in("surface")
+        t
+        for t in tokens.tokens_in("surface")
         if tokens.resolve_color(t.name, "light") != tokens.resolve_color(t.name, "dark")
     ]
     assert changing, "no surface token differs between modes — fixture is wrong"
     for design_token in changing:
-        assert f"{build._channel_variable(design_token.name)}:" in dark
+        assert f"{tokens.channel_variable(design_token.name)}:" in dark
 
 
 @pytest.mark.parametrize(
