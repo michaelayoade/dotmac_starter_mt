@@ -122,17 +122,40 @@ status enum, and never written by application code.**
    every document in every product, which is precisely the case ADR-0008 says an
    enum is right for.
 
-3. **The database derives it.** Coverage is a Postgres generated column
-   (`GENERATED ALWAYS AS (...) STORED`), indexable and filterable like any other
-   column, but with no writer. Drift becomes structurally impossible rather than
-   merely discouraged — there is no code path that can set it wrong, so there is
-   nothing to consolidate, reconcile or repair.
+3. **The database derives the ARITHMETIC; code applies the POLICY.** The
+   generated column is `balance_due`, not `coverage`:
 
-4. **The tolerance is declared once per product, not per module.** Sub-cent
-   rounding dust is a real quantity; two modules independently choosing
-   `Decimal("0.01")` is how they later diverge. It is a setting with a spec
-   (ADR-0011/0012), read once and compiled into the generated-column expression
-   at migration time.
+       balance_due GENERATED ALWAYS AS (total_amount - amount_paid) STORED
+
+   Pure subtraction, no threshold, no vocabulary. It is indexable and
+   filterable like any other column and has no writer, so drift becomes
+   structurally impossible rather than merely discouraged.
+
+   Coverage — `UNPAID`/`PARTIAL`/`PAID`/`OVERPAID` — is then derived from
+   `balance_due` and the configured tolerance by one owning function. Still no
+   stored status, still one owner, but the *threshold* is not welded into a
+   schema object.
+
+   **Generating `coverage` directly was the first draft of this ADR and is
+   rejected**, because it compiles policy into the schema: changing the dust
+   threshold would become a migration, and altering a generated expression
+   means dropping and re-adding the column. That contradicts "everything by
+   config" for a value that is explicitly a business tolerance.
+
+   `balance_due` is also the smaller, more obviously correct change. It
+   *already exists* as a Python `@property` on `Invoice` and
+   `SupplierInvoice` — `total_amount - amount_paid` — and because a property
+   is not queryable, at least three services hand-write the same expression
+   as SQL (`ar_overdue.py` twice, `ap_due.py`). Making it a column collapses
+   those onto one definition and lets the ORM and SQL agree, which is worth
+   doing on its own merits.
+
+4. **The tolerance is a setting, declared once per product.** Sub-cent
+   rounding dust is a real quantity; modules independently choosing
+   `Decimal("0.01")` is how they later diverge — this codebase produced four
+   such declarations (AR, AP, GL posting, period close). It is a setting with
+   a spec (ADR-0011/0012), read at the point coverage is derived and applied
+   in the query (`WHERE balance_due > :dust`), never baked into DDL.
 
 5. **Any document with an amount gets coverage.** A shared mixin supplies
    `total_amount`, `amount_paid` and the derived column. Partial payment stops
@@ -175,16 +198,36 @@ per-repository through expand/contract.
 
 ## Migration
 
+Two stages, and **stage 1 is worth doing even if stage 2 never happens** —
+which is a property a first step should have.
+
+### Stage 1 — `balance_due` becomes a generated column
+
+Touches no status enum and changes no behaviour.
+
+1. Add `balance_due GENERATED ALWAYS AS (total_amount - amount_paid) STORED`
+   to `ar.invoice` and `ap.supplier_invoice`, replacing the Python
+   `@property` of the same name and value.
+2. Point the three hand-written SQL copies (`ar_overdue.py` ×2, `ap_due.py`)
+   at the column.
+3. Index it where aging and dunning filter on it.
+
+The payoff is immediate and independent: one definition instead of four, and
+`balance_due` becomes queryable, which it never was.
+
+### Stage 2 — coverage stops being a status
+
 Per table, expand/contract, never big-bang:
 
-1. **Expand** — add `amount_paid` where missing (payroll, expense, lease), plus
-   the generated coverage column. Nothing reads it yet.
-2. **Shadow** — assert derived coverage agrees with the stored status for every
-   row whose status is PAID/PARTIALLY_PAID. Disagreements are pre-existing data
-   defects being surfaced, and are triaged before cutover — expect a non-zero
-   count, because the twelve divergent rules produced it.
-3. **Cut reads over** — callers move from `status` to `coverage`, one call site
-   at a time, disambiguating "settled" from "terminal" as they go.
+1. **Expand** — add `amount_paid` and `balance_due` where missing (payroll,
+   expense, lease). Nothing reads coverage yet.
+2. **Shadow** — assert derived coverage agrees with the stored status for
+   every row whose status is PAID/PARTIALLY_PAID. Disagreements are
+   pre-existing data defects being surfaced, and are triaged before cutover —
+   expect a non-zero count, because the twelve divergent rules produced it.
+3. **Cut reads over** — callers move from `status` to derived coverage, one
+   call site at a time, disambiguating "settled" from "terminal" as they go.
+   This is the real work; no mechanism avoids it.
 4. **Contract** — remove `PAID`/`PARTIALLY_PAID` from the lifecycle enums and
    delete the repair paths that maintained them.
 
@@ -218,11 +261,20 @@ writer, so `data_health`'s repair task must stay, VOID and OVERDUE still share a
 field with coverage, and the three documents without a `PARTIALLY_PAID` member
 still cannot express one. Correct as a step; insufficient as the destination.
 
-**Compute coverage in Python at read time, with no column.** Drift-free, but
-unfilterable and unindexable: `WHERE coverage = 'PARTIAL'` becomes a full scan
-plus application-side filtering, which AR aging and dunning cannot afford. The
-generated column buys the same guarantee with the query characteristics of a
-stored one.
+**Generate `coverage` itself, rather than `balance_due`.** This was the first
+draft of this ADR. It is rejected because it compiles a business tolerance
+into DDL: changing the dust threshold becomes a migration, and altering a
+generated expression means dropping and re-adding the column. A threshold is
+policy, and policy belongs in settings (ADR-0011/0012), not welded to a
+schema object. Generating the subtraction and applying the threshold in the
+query gets the same drift-impossibility with none of that.
+
+**Compute everything in Python at read time, with no column at all.**
+Drift-free, but unfilterable and unindexable: `WHERE balance_due > :dust`
+becomes a full scan plus application-side filtering, which AR aging and
+dunning cannot afford. Note this is what the codebase does TODAY —
+`balance_due` is a Python `@property` — which is precisely why three services
+hand-write the subtraction as SQL to get a query they can run.
 
 **A database trigger maintaining a normal column.** Equivalent in effect to a
 generated column but strictly worse: triggers are invisible at the model layer,
