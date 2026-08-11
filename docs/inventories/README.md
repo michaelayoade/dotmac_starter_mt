@@ -39,6 +39,7 @@ across repos.
 | Template Studio source audit | ERP document templates vs Sub notification templates vs the package across identity, versioning, publication, placeholder syntax, scoping, seeding, delivery, traceability, permissions and cutover shape — the audit `EXTRACTION.toml` blocks on, plus the six-owner capability map it resolves to | `template-studio-source-audit.md` |
 | UI surfaces | the ERP/Sub `src/css/` fork, drift file by file, class usage, the button vocabulary — **plus the 2026-08-11 correction that only ERP still runs its copy**, which supersedes the promotion steps | `ui-surface-inventory.md` |
 | Ticket module sources | Sub/CRM/ERP ticket implementations, why their vocabularies cannot merge and why that does not block the capability, the product-neutral core vs the per-product variant seam, the lifecycle-class mechanism that makes the vocabulary open, and the subject-linkage decision | `ticket-sources.md` |
+| Sub lineage dispositions | the twelve kernel/Sub table-name collisions measured against released a40, grouped by what each actually needs — stamp, adopt, delete, reconcile, or union — plus the two ways the measurement was wrong first | `sub-lineage-dispositions.md` |
 
 ## Cross-repo scale, at a glance
 
