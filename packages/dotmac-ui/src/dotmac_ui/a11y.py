@@ -41,6 +41,7 @@ token collapses to 1ms under `prefers-reduced-motion: reduce` (SC 2.3.3), which
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -109,10 +110,20 @@ def contrast_ratio(first: str, second: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def token_contrast(foreground: str, background: str, mode: str = "light") -> float:
-    """Contrast ratio between two TOKENS in `mode`, resolving `var()` chains."""
+def token_contrast(
+    foreground: str,
+    background: str,
+    mode: str = "light",
+    overrides: Mapping[str, str] | None = None,
+) -> float:
+    """Contrast ratio between two TOKENS in `mode`, resolving `var()` chains.
+
+    `overrides` is passed through to `resolve_color`, so a re-declared brand
+    ramp is measured as the product will render it.
+    """
     return contrast_ratio(
-        resolve_color(foreground, mode), resolve_color(background, mode)
+        resolve_color(foreground, mode, overrides),
+        resolve_color(background, mode, overrides),
     )
 
 
@@ -251,18 +262,21 @@ class ContrastFailure:
 
 def check_contrast(
     requirements: tuple[ContrastRequirement, ...] = CONTRAST_REQUIREMENTS,
+    overrides: Mapping[str, str] | None = None,
 ) -> tuple[ContrastFailure, ...]:
     """Every requirement that is not met, in declaration order.
 
     Public API on purpose: a consuming product that re-declares brand ramps at
     runtime (U2) runs this against its own resolved palette rather than
     re-deriving the pair list, so "the brand is legible" is one call, not a
-    review habit.
+    review habit. `overrides` is how that palette gets in — without it the
+    promise in the previous sentence was not reachable, because resolution
+    always read the built-in values.
     """
     failures: list[ContrastFailure] = []
     for requirement in requirements:
         ratio = token_contrast(
-            requirement.foreground, requirement.background, requirement.mode
+            requirement.foreground, requirement.background, requirement.mode, overrides
         )
         if ratio + 1e-9 < requirement.minimum:
             failures.append(ContrastFailure(requirement, ratio))

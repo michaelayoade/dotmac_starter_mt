@@ -51,6 +51,14 @@ from dotmac_ui.assets import (
     stylesheet_url,
     tailwind_preset_path,
 )
+from dotmac_ui.brand import (
+    BrandOverride,
+    BrandWarning,
+    GeneratedBrand,
+    generate_ramp,
+    render_brand_css,
+)
+from dotmac_ui.color import OKLCH, ClampedColor, hex_to_oklch, oklch_to_hex
 from dotmac_ui.contract import (
     ACCESSIBILITY_TARGET,
     CLASS_PREFIX,
@@ -89,7 +97,7 @@ from dotmac_ui.tokens import (
 #: `test_declared_version_matches_pyproject` — `importlib.metadata` is not used
 #: because the package must be importable straight from a source checkout (an
 #: air-gapped or vendored consumer) where no distribution is installed.
-__version__: Final[str] = "0.1.0a3"
+__version__: Final[str] = "0.1.0a4"
 
 #: Public submodules. `from dotmac_ui.<module> import X` is supported for any
 #: `X` in that module's `__all__`.
@@ -108,6 +116,15 @@ SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
 INTERNAL_MODULES: Final[frozenset[str]] = frozenset({"dotmac_ui.build"})
 
 __all__ = [
+    "render_brand_css",
+    "oklch_to_hex",
+    "hex_to_oklch",
+    "generate_ramp",
+    "OKLCH",
+    "GeneratedBrand",
+    "ClampedColor",
+    "BrandWarning",
+    "BrandOverride",
     "ACCESSIBILITY_TARGET",
     "ACTION_INTENTS",
     "ACTION_STATES",
