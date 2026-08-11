@@ -1,6 +1,6 @@
 # ADR 0016 — Payment coverage is derived arithmetic, never a lifecycle status
 
-**Status:** Proposed — **fleet-wide**
+**Status:** Accepted — **fleet-wide**
 **Date:** 2026-08-10
 **Applies to:** every Dotmac repository that models a monetary document —
 `dotmac_erp` (AR, AP, payroll, expense, lease, IPSAS), `dotmac_sub` (invoices,
