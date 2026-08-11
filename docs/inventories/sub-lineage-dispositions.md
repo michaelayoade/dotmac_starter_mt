@@ -1,4 +1,4 @@
-# Sub's kernel-lineage dispositions — twelve collisions, five that are real work
+# Sub's kernel-lineage dispositions — ten collisions, five that are real work
 
 **As of:** 2026-08-11 · **Kernel:** `0.1.0a40` (released, `b37d25b`) · **Sub:** `8e8c2c658` (`origin/dev`)
 
@@ -6,32 +6,55 @@ The per-table dispositions ADR-0017's gate requires. It supersedes the a27
 6/2/11 figures as the working baseline, and it exists because the previous
 number was measured against a kernel two months of releases ago.
 
-**The headline: twelve name collisions, but only five need design work.** Two
-are already the kernel's own shape, two are byte-identical, two are dead in both
-repositories, and one is a near-match. Grouping them that way is most of the
-value here — "twelve collisions" reads as a wall; the actual work is five
-tables that share one pattern.
+> **Correction, 2026-08-11 (same day).** This document first said TWELVE
+> collisions and proposed deleting `people`/`person_roles` from the kernel.
+> Both were wrong: kernel revision `0003`'s `upgrade()` already drops those two
+> tables, so they do not exist at lineage head and never collided. **The count
+> is TEN**, former Group C is empty, and the rest of the analysis stands. What
+> made the measurement finally trustworthy is described under "Method" below.
 
-## Method, and the two ways it was wrong first
+**The headline: ten name collisions, but only five need design work.** Two are
+already the kernel's own shape, two are byte-identical, and one is a near-match.
+Grouping them that way is most of the value here — "ten collisions" reads as a
+wall; the actual work is five tables that share one pattern.
+
+## Method, and the four ways it was wrong first
 
 Kernel columns come from imported SQLAlchemy metadata (exact). Sub columns are
 parsed statically from its model files, because importing Sub's app needs a
 database environment this analysis has no business touching. Collisions come
 from a static parse of `op.create_table` across both lineages.
 
-Two corrections, both worth keeping for whoever remeasures:
+Four corrections, all worth keeping for whoever remeasures, because each one
+produced a confident wrong answer:
 
 1. **Sub squashed 155 early migrations into `alembic/versions_archive/`.** A
    first pass read only `alembic/versions/` and reported six collisions, missing
    `roles`, `audit_events`, `user_credentials` and `domain_settings` — all
    created in the archive. The tables still exist in the database. Any Sub
    schema analysis must include the archive.
-2. **Every `drop_table` in the kernel lineage is in `downgrade()`.** A second
-   pass tried to discount `people`/`person_roles` as transient and was wrong;
-   they survive to head. Compare net effect at head, and check which function
-   the drop is in.
+2. **Counting `create_table` and ignoring drops over-reports.** That is what put
+   `people`/`person_roles` in this document as collisions. A lineage is a net
+   effect, not an accumulation.
+3. **Scanning the body of `upgrade()` alone finds nothing.** Kernel `0001` and
+   `0003` do all their work in helper functions (`_create_people_table()`,
+   `_drop_old_person_shaped_tables()`). A per-function scan reported zero
+   creates and zero drops, which briefly looked like confirmation.
+4. **Order matters within one migration.** Applying all creates then all drops
+   removed `user_credentials` and `auth_sessions`, which `0003` drops and then
+   RECREATES with `party_id`. Operations have to be replayed in source order,
+   inlining each helper at its call site. `0018` additionally renames via raw
+   `op.execute("ALTER TABLE ... RENAME TO ...")` rather than `op.rename_table`,
+   which a parser looking only for the latter misses.
 
-## The twelve, grouped by what they actually need
+**What finally made it trustworthy was a self-check, not more care.** The
+measurement now asserts four things it already knows: `people`/`person_roles`
+absent (dropped, never recreated), `user_credentials`/`auth_sessions` present
+(dropped and recreated), and `idempotency_records` present (renamed from
+`inbox_records`). Every earlier version fails at least one. A schema measurement
+without such assertions is a guess with a table around it.
+
+## The ten, grouped by what they actually need
 
 ### Group A — already the kernel's shape: STAMP (2)
 
@@ -59,22 +82,22 @@ predecessor rather than deleting it.
 
 `domain_setting_history` needs the same treatment and nothing more.
 
-### Group C — dead in BOTH repositories: DELETE FROM THE KERNEL (2)
+### Group C — WITHDRAWN
 
-| table | kernel model | sub model |
-|---|---|---|
-| `people` | **none** — superseded by `parties` at revision `0003` | none |
-| `person_roles` | **none** — superseded by `party_roles` | none |
+This group claimed `people` and `person_roles` were dead-but-present in both
+repositories and proposed a kernel migration to drop them.
 
-The kernel lineage creates these at `0001` and its model layer has not used them
-since `0003`. Sub has no model for them either. **They are pure collision debt
-that neither product uses**, and the cheapest disposition is a kernel migration
-that drops them, removing two of the twelve outright.
+**The kernel already drops them.** Revision `0003`'s `upgrade()` calls
+`_drop_old_person_shaped_tables()`, which removes `people`, `person_roles`,
+`user_credentials` and `auth_sessions`; the last two are then recreated with
+`party_id`. The docstring says so plainly — *"this is a destructive replace
+(template repo), not a dual-write migration"* — and the measurement error was
+mine, not the lineage's.
 
-Worth noting how this arose: a lineage accumulates every table it ever created,
-so a superseded model leaves a table behind forever unless something removes it.
-That is a general cost of the expand/contract discipline, and it argues for a
-retirement step in the same change that supersedes a model.
+So there is no work here and never was. The general point the group was reaching
+for still holds and is worth keeping: **a superseded model can leave its table
+behind forever unless the same change removes it.** `0003` did exactly that,
+which is why this group is empty rather than why it exists.
 
 ### Group D — near-match: ONE COLUMN EACH WAY (1)
 
@@ -134,9 +157,12 @@ the lineage is a chain and every collision above sits at revisions `0001`–`000
 `0014` or `0019`. But the shape of the remaining work is now:
 
 - **4 tables need no design** (Group A stamp, Group B adopt)
-- **2 tables should be deleted from the kernel** (Group C)
 - **1 is a two-column reconciliation** (Group D)
 - **5 need a union, of which 2 need a real decision first** (Group E)
+
+`idempotency_records` is confirmed present at kernel head — `0018` renames
+`inbox_records` into it — and confirmed NOT to collide, since Sub's table is
+`idempotency_keys`.
 
 ## The rule this argues for
 
