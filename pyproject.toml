@@ -27,6 +27,9 @@ dotmac-ui = { path = "packages/dotmac-ui", develop = true }
 # `app/assembly.py` (its manifest, its packaged template dir) and its version
 # location in `alembic.ini`.
 dotmac-template-studio = { path = "packages/dotmac-template-studio", develop = true }
+# The second installable module (ADR-0006 M2). Same footing as the first: an
+# editable path dependency, no copied files, no import shims.
+dotmac-ticketing = { path = "packages/dotmac-ticketing", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -98,7 +101,13 @@ addopts = "-q"
 pythonpath = ["."]
 
 [tool.importlinter]
-root_packages = ["app", "dotmac_kernel", "dotmac_ui", "dotmac_template_studio"]
+root_packages = [
+    "app",
+    "dotmac_kernel",
+    "dotmac_ui",
+    "dotmac_template_studio",
+    "dotmac_ticketing",
+]
 
 [[tool.importlinter.contracts]]
 name = "Kernel must not import the assembly"
@@ -145,8 +154,19 @@ forbidden_modules = ["dotmac_kernel", "app"]
 [[tool.importlinter.contracts]]
 name = "Modules must not import the assembly"
 type = "forbidden"
-source_modules = ["dotmac_template_studio"]
+source_modules = ["dotmac_template_studio", "dotmac_ticketing"]
 forbidden_modules = ["app"]
+
+# The second module makes this contract bite. A module composes with another
+# through the assembly, an htmx-fetched fragment or a service call — never an
+# import, which would make either module un-releasable without the other.
+[[tool.importlinter.contracts]]
+name = "Modules are independent of each other"
+type = "independence"
+modules = [
+    "dotmac_template_studio",
+    "dotmac_ticketing",
+]
 
 [[tool.importlinter.contracts]]
 name = "Features are independent of each other"

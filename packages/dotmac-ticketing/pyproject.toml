@@ -1,0 +1,45 @@
+[tool.poetry]
+name = "dotmac-ticketing"
+version = "0.1.0a1"
+description = "DotMac Ticketing — a product-neutral ticket lifecycle: closed standard status vocabulary, product-declared reasons, product-owned subject links (ADR-0006 M2)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_ticketing", from = "src" }]
+include = [
+    # PEP 561 marker — the module's contracts are annotated, and a consuming
+    # assembly's type-checker cannot see them without this.
+    { path = "src/dotmac_ticketing/py.typed", format = ["sdist", "wheel"] },
+    # The module's OWN Alembic lineage (prefix `tk`, branch label `ticketing`),
+    # composed by a consuming assembly through `version_locations`. No
+    # `__init__` in versions/ (Alembic convention), so it is declared explicitly
+    # as package data.
+    { path = "src/dotmac_ticketing/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# Floor 3.11 to match the kernel and the products that consume it.
+python = ">=3.11,<3.14"
+# The one runtime dependency, and the direction ADR-0006 § 2 fixes:
+# `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
+# kernel; never on an assembly, and never on another module.
+#
+# The floor is the release that allocates `mod_tkt` in
+# `MIGRATION_OWNER_LEDGER`. An earlier kernel cannot register this module at
+# all — `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` —
+# so this is a hard floor rather than a preference.
+dotmac-kernel = ">=0.1.0a39"
+sqlalchemy = "^2.0"
+# `alembic` is imported by `dotmac_ticketing.linking`, which emits DDL into a
+# CONSUMING product's migration. That makes it a real runtime dependency of the
+# helper rather than a dev tool — a product calling `link_subject` from its own
+# migration already has Alembic loaded, but the import must resolve regardless.
+alembic = ">=1.13"
+
+# No `fastapi` and no `pydantic` yet: this release ships the lifecycle, the
+# vocabulary registry, the tables and the linking helper. Routers and schemas
+# land with the first adopter's surface, so the dependency arrives with the code
+# that needs it rather than ahead of it.
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
