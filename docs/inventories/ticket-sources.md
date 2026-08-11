@@ -277,7 +277,7 @@ product-first sources implementations *with* their tests.
 
 ## Open decisions
 
-### 1. Subject linkage — the one that shapes every migration
+### 1. ~~Subject linkage~~ — SETTLED 2026-08-11: (b), via the module-shipped helper
 
 A shared `tickets` table in `mod_tkt` cannot hold a foreign key to
 `subscribers`, `projects` or `licences`. Three options:
@@ -325,11 +325,28 @@ ordering constraint** — `public.sub_ticket_subscriber` referencing
 `mod_tkt.tickets` means the module's lineage must run before the product's. That
 ordering requirement is the one thing (b) costs that (a) does not.
 
-**Middle path worth considering:** the module ships a declarative
-`link_subject("subscriber", Subscriber)` helper that generates the table, both
-FKs, the index and the RLS policy *in the product's own lineage*. Products get
-one line, the schema still gets real constraints, and the module still never
-learns what a subscriber is.
+**DECIDED (Michael, 2026-08-11): option (b), delivered through the helper.**
+The module ships a declarative `link_subject("subscriber", Subscriber)` that
+generates the table, both foreign keys, the index and the RLS policy *in the
+product's own lineage*. Products get one line per subject, the schema still gets
+real constraints, and the module never learns what a subscriber is.
+
+Consequences to carry into the build:
+
+- The helper emits migration operations into the PRODUCT's lineage, never the
+  module's. It is a code generator for the product's own `mod_`/`public`
+  migration, not a table the module creates on the product's behalf — otherwise
+  the module would own a table outside `mod_tkt`, which rule 14 forbids.
+- Ordering is now a first-class cutover step: the module's lineage must run
+  before any product link-table migration, because the FK targets
+  `mod_tkt.tickets`. The composed migration gate should assert this rather than
+  leaving it to deploy order.
+- Every generated link table is tenant-scoped with its own RLS policy, per the
+  tenancy rule. The helper emitting that policy is the point — a hand-written
+  link table is exactly where an RLS policy gets forgotten.
+- `ON DELETE` is an explicit argument with no default. Whether deleting a
+  subscriber cascades the link or is restricted by it is a product policy
+  decision, and a silent default would make it an accident.
 
 ### 2. ~~Does the module ship any statuses at all?~~ — SETTLED 2026-08-11
 
