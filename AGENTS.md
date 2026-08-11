@@ -218,6 +218,18 @@ specifics) points here and must never fork these rules.
     one-time extraction: no permanent fork, parallel writer, or second owner.
     (`tests/architecture/test_product_first_extraction.py`; ADR-0006
     § "Decision amendment — 2026-08-08 (product-first extraction)")
+25. **A guard exemption states an enforceable premise, or it is not an
+    exemption.** Excluding a path from a lint, type, architecture or security
+    check requires a premise that is machine-checkable in the same change; an
+    unverifiable premise makes the region unmonitored, not exempt. Guards
+    enumerate ENTRY-POINT FAMILIES (tasks, scripts, CLI, workers, cron), never
+    a single directory — where a guard's docstring claims broader scope than
+    its configuration, the configuration is the defect. An existing backlog is
+    retired by a TWO-DIRECTIONAL ratchet that fails when the count rises OR
+    falls without being lowered, kept distinct from any per-line
+    "reviewed and correct" marker, and carrying a sensitivity proof that the
+    detector still fires. (ADR-0018; `dotmac_erp` reference implementation:
+    `scripts/check_session_context.py` + `session_context_legacy.txt`)
 
 ## Everything by config — no hardcoding
 
