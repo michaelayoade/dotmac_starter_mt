@@ -282,21 +282,54 @@ product-first sources implementations *with* their tests.
 A shared `tickets` table in `mod_tkt` cannot hold a foreign key to
 `subscribers`, `projects` or `licences`. Three options:
 
+**Measured 2026-08-11, and it mostly settles the question: a ticket does not
+have ONE subject.** Sub's ticket carries **six** subject links (`subscriber_id`,
+`customer_account_id`, `lead_id`, `customer_person_id`,
+`origin_conversation_id`, `service_team_id`); ERP's carries **five**
+(`raised_by_id`, `project_id`, `customer_id`, `category_id`, `team_id`).
+
+A single `(subject_type, subject_id)` pair holds exactly one of those. So the
+polymorphic option does not merely weaken integrity here — **it cannot
+represent what both products already do**, and the remainder would fall into
+`custom_fields` JSONB: no integrity *and* no queryability, worse than either
+option on its own.
+
 - **(a) Polymorphic `(subject_type, subject_id)`** on the shared table. Matches
   ERP's proven `GeneratedDocument` shape and the starter's `custom_fields`
   `ENTITY_MODELS` registry. **No referential integrity** — a deleted subscriber
-  leaves a dangling ticket.
+  leaves a dangling ticket, and Postgres cannot help because it does not know
+  `subject_id` means anything. **Holds one subject only.**
 - **(b) Product-owned link table** — `sub_ticket_subscriber(ticket_id,
   subscriber_id)` with real FKs, owned by the product's own lineage. Integrity
   preserved, one join per query, the module stays ignorant of product tables.
 - **(c) `custom_fields` JSONB.** Weakest; no integrity, no index. Not
   recommended.
 
-**Recommendation: (b).** A polymorphic id with no FK is precisely the "an
-imported identifier becomes the only copy of truth" failure the Dotmac SOT
-standard warns about, and ticket→subscriber is operational state, not a loose
-annotation. (a) is cheaper and has fleet precedent, so it is a legitimate
-choice — but it is a decision, not a default.
+**Recommendation: (b)** — on multiplicity first, integrity second. The
+one-subject limit is not a trade-off that can be accepted and moved past; it
+breaks on day one for both existing products. Integrity then compounds it: a
+polymorphic id with no FK is precisely the "an imported identifier becomes the
+only copy of truth" failure the Dotmac SOT standard warns about, and
+ticket→subscriber is operational state read by billing and field dispatch, not
+a loose annotation.
+
+**Where polymorphic IS right, so this is not read as a blanket rule:** ERP's
+`GeneratedDocument` uses `(entity_type, entity_id)` correctly — a generated
+document genuinely can attach to anything, the relationship is annotation, and
+it is one-of by nature. Open-ended, one-of, low integrity stakes: polymorphic.
+Closed set, known at design time, operational: link table.
+
+**Honest cost of (b):** one indexed join per subject-bearing query; ~10 lines of
+migration plus an RLS policy per link table per product; and a **migration
+ordering constraint** — `public.sub_ticket_subscriber` referencing
+`mod_tkt.tickets` means the module's lineage must run before the product's. That
+ordering requirement is the one thing (b) costs that (a) does not.
+
+**Middle path worth considering:** the module ships a declarative
+`link_subject("subscriber", Subscriber)` helper that generates the table, both
+FKs, the index and the RLS policy *in the product's own lineage*. Products get
+one line, the schema still gets real constraints, and the module still never
+learns what a subscriber is.
 
 ### 2. ~~Does the module ship any statuses at all?~~ — SETTLED 2026-08-11
 
