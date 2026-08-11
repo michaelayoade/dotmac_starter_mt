@@ -1,4 +1,4 @@
-# ADR 0015 — Payment coverage is derived arithmetic, never a lifecycle status
+# ADR 0016 — Payment coverage is derived arithmetic, never a lifecycle status
 
 **Status:** Proposed — **fleet-wide**
 **Date:** 2026-08-10
