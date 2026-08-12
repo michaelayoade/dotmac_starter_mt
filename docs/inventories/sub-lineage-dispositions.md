@@ -209,17 +209,23 @@ Disposition: Sub gains `tenant_id` (it has one operator tenant, so the backfill
 is a constant) and `party_id`; `subscriber_id` either becomes a Sub-local column
 or moves to a link table.
 
-### Group E — Sub's table is richer: KERNEL ADOPTS AND EXTENDS (5)
+### Group E — Sub's table is richer: KERNEL ADOPTS AND EXTENDS (4, was 5)
 
-**This is the real work, and all five share one shape.**
+**This is the real work, and all four share one shape.**
 
 | table | kernel | sub | shared | kernel-only | sub-only |
 |---|---|---|---|---|---|
 | `roles` | 6 | 6 | 4 | `slug`, `tenant_id` | `description`, `is_active` |
 | `parties` | 9 | 10 | 5 | `custom_fields`, `email`, `is_active`, `tenant_id` | `data_classification`, `merge_reason`, `merged_into_party_id`, `metadata_`, `status` |
-| `party_roles` | 6 | 11 | 4 | `role_id`, `tenant_id` | `role_key`, `role_type`, `source`, `status`, `valid_from`, `valid_until`, `metadata_` |
 | `audit_events` | 8 | 15 | 4 | `actor_party_id`, `created_at`, `details`, `tenant_id` | `actor_id`, `actor_label`, `actor_type`, `ip_address`, `user_agent`, `request_id`, `status_code`, `is_success`, `occurred_at`, `metadata_`, `is_active` |
 | `user_credentials` | 6 | 16 | 4 | `party_id`, `tenant_id` | `username`, `provider`, `subscriber_id`, `system_user_id`, `reseller_user_id`, `radius_server_id`, and six lockout/rotation columns |
+
+> **`party_roles` left this group on 2026-08-12.** It was
+> `| party_roles | 6 | 11 | 4 | role_id, tenant_id | role_key, role_type, source, status, valid_from, valid_until, metadata_ |`.
+> ADR-0019 renamed the kernel's grant to `party_role_grants`, so there is no
+> union to design — the two tables were never one contract. What remains is a
+> transient chain disposition, not a Group E row: `0003` still creates the old
+> name before `0022` renames it. See "Update 2026-08-12" below.
 
 The pattern in every row: **the kernel contributes `tenant_id` plus a small
 number of columns; Sub contributes substantially more operational detail.** The
@@ -255,7 +261,10 @@ the lineage is a chain and every collision above sits at revisions `0001`–`000
 
 - **4 tables need no design** (Group A stamp, Group B adopt)
 - **1 is a two-column reconciliation** (Group D)
-- **5 need a union, of which 2 need a real decision first** (Group E)
+- **4 need a union, of which 2 need a real decision first** (Group E) — was 5
+  until ADR-0019 took `party_roles` out of the group
+- **1 transient chain disposition**: `party_roles`, created in `0003` under the
+  old name and renamed by `0022`. Not a union; see "Update 2026-08-12"
 
 > **Read the next section before planning from this list.** Grouping by
 > difficulty is not the order the work can land in: five of the ten collisions —
