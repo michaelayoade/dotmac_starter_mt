@@ -319,9 +319,14 @@ verified.
   application. This is a real functional gap for a wave, and it is the honest
   consequence of decision 6 — the alternative was shipping a wire format we
   would have to unpick.
-- `dotmac-application-directory` ships with one consumer, the Workspace. Under
-  ADR-0017 §1 that is work in progress until the Workspace runs it, and the
-  module's dossier says so rather than claiming adoption it has not earned.
+- `dotmac-application-directory` ships with **zero** consumers and one
+  candidate adopter, the Workspace — which is a local scaffold with no remote,
+  no lock, no CI and no authentication path. Under ADR-0017 §1 that is work in
+  progress, and the module's dossier records `contract_consumers = []` rather
+  than claiming an adoption it has not earned. "Ships with one consumer" would
+  have been the same overstatement the dossier gate exists to catch: the module
+  becomes `adopted` when the Workspace actually runs it in production, and
+  `reuse-proven` only after a second real consumer.
 - A fourth plane's worth of operational surface — deployment, backups,
   monitoring, an on-call story — arrives with `dotmac_workspace`. Assemblies are
   not free, and this ADR is also a decision to carry that cost.
