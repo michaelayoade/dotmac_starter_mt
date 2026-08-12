@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -265,6 +266,17 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
 
     `--index` carries the authenticated simple-index URL. Exact pins only: a
     range would let this pass against a version nobody published in this run.
+
+    The private index is `--index-url` and the PUBLIC one is `--extra-index-url`,
+    which is not a convenience: `--index-url` REPLACES the default index, so with
+    it alone pip can see the Dotmac distributions and nothing they depend on.
+    Every module declares `sqlalchemy`, so verification failed for every module
+    that could ever be released — and it failed AFTER publishing, leaving the
+    artifact on the index with no tag. `scripts/consumer_boot_check.sh` pairs the
+    two flags for exactly this reason; the module path had only copied half of it.
+
+    `PUBLIC_INDEX_URL` overrides the public index so an air-gapped or mirrored
+    runner can point at its own, per the everything-by-config rule.
     """
     import tempfile
 
@@ -286,10 +298,20 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
         )
         specs.append(pair)
 
+    public_index = os.environ.get("PUBLIC_INDEX_URL", "https://pypi.org/simple")
     with tempfile.TemporaryDirectory() as tmp:
         python, pip = _venv(Path(tmp) / "venv")
         subprocess.run(
-            [str(pip), "install", "--quiet", "--index-url", args.index, *specs],
+            [
+                str(pip),
+                "install",
+                "--quiet",
+                "--index-url",
+                args.index,
+                "--extra-index-url",
+                public_index,
+                *specs,
+            ],
             check=True,
         )
         _verify_installed(python, targets)
