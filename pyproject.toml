@@ -30,6 +30,14 @@ dotmac-template-studio = { path = "packages/dotmac-template-studio", develop = t
 # The second installable module (ADR-0006 M2). Same footing as the first: an
 # editable path dependency, no copied files, no import shims.
 dotmac-ticketing = { path = "packages/dotmac-ticketing", develop = true }
+# The third installable module (ADR-0006 M3), and the first whose tables are
+# PLATFORM CATALOG rather than tenant-scoped. Same footing as the other two.
+#
+# A path dependency is correct WITHIN this repository — package and assembly are
+# released from one checkout. It is not correct ACROSS repositories: a consuming
+# assembly such as the vendor control plane pins an exact released version from
+# the private index, never a relative path.
+dotmac-release-catalog = { path = "packages/dotmac-release-catalog", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -69,9 +77,16 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106"]
 "alembic/*" = ["E501"]
-# Kernel base migrations moved here from alembic/versions in the kernel split
-# (Task 1c) — same Alembic-file relaxations apply (long DDL literals).
-"packages/dotmac-kernel/src/dotmac_kernel/migrations/*" = ["E501"]
+# EVERY migration lineage, in one rule rather than a path per package.
+#
+# Alembic files carry long DDL and GRANT literals, and wrapping them is worse
+# than the long line: a grant split across two string fragments stops being
+# greppable, which is the property those statements are written as literals to
+# have. This covers the assembly's `alembic/` above, the kernel base migrations
+# that moved into the package in Task 1c, and every installable module's own
+# lineage — including ones not yet written, so the third module does not
+# rediscover this as a one-off exemption the way it would with a path list.
+"packages/*/src/*/migrations/*" = ["E501"]
 "scripts/*" = ["S603", "S607"]  # trusted local ops tooling invoking git/docker
 
 [tool.mypy]
@@ -107,6 +122,7 @@ root_packages = [
     "dotmac_ui",
     "dotmac_template_studio",
     "dotmac_ticketing",
+    "dotmac_release_catalog",
 ]
 
 [[tool.importlinter.contracts]]
@@ -154,7 +170,11 @@ forbidden_modules = ["dotmac_kernel", "app"]
 [[tool.importlinter.contracts]]
 name = "Modules must not import the assembly"
 type = "forbidden"
-source_modules = ["dotmac_template_studio", "dotmac_ticketing"]
+source_modules = [
+    "dotmac_template_studio",
+    "dotmac_ticketing",
+    "dotmac_release_catalog",
+]
 forbidden_modules = ["app"]
 
 # The second module makes this contract bite. A module composes with another
@@ -166,6 +186,7 @@ type = "independence"
 modules = [
     "dotmac_template_studio",
     "dotmac_ticketing",
+    "dotmac_release_catalog",
 ]
 
 [[tool.importlinter.contracts]]
