@@ -8,9 +8,13 @@ ADR-0004 (the platform control plane), ADR-0006 (extraction and module
 lineages), ADR-0007 (deployment-authenticated applied state), ADR-0015 (an
 assembly, or it is a fork), ADR-0017 (adoption is the scarce resource)
 
-**Numbering note.** 0020 is held by *Billing owns operational receivables*,
-accepted the same day and not yet committed. This ADR took 0021 rather than
-race it.
+**Numbering note.** This ADR took 0021 to leave 0020 for *Billing owns
+operational receivables*, accepted the same day. That file is **untracked** at
+the time of writing, and an untracked file reserves nothing — a number is
+authoritative only once it is committed. So this number is provisional until
+Billing's ADR-0020 lands, and Billing's ADR-0020 must land **first**. If it does
+not, this ADR is renumbered to 0020 rather than leaving a permanent gap in the
+sequence.
 
 ## Context
 
@@ -259,12 +263,31 @@ Recorded because each of these has an owner already, and a workspace is exactly
 the kind of cross-cutting surface that attracts re-implementations:
 
 - **No proprietary identity provider.** Federated login is external OIDC. ERP
-  holds the fleet's only tested implementation — Authorization Code with PKCE,
+  holds the fleet's only implementation — Authorization Code with PKCE,
   discovery and JWKS validation, `(issuer, subject)` binding to a local person,
   external roles deliberately ignored, a local session issued only after
-  validation — which makes it the mandatory product-first source under ADR-0006.
-  The extraction waits on the same lineage gate; the source audit and parity
-  suite do not, and start now.
+  validation.
+
+  Whether that makes it the **mandatory product-first source** under ADR-0006 is
+  **conditional and currently unresolved**, and this ADR does not assert it.
+  `app/config.py:133` reads `OIDC_ENABLED` with a default of `false`, so whether
+  any production deployment authenticates through it is a fact on the ERP host
+  rather than in git:
+
+  - **enabled in production** → ERP is the mandatory product-first source; the
+    extraction ports that implementation and its four boundary tests, and ERP is
+    the first cutover;
+  - **not enabled anywhere** → there is no production implementation,
+    `product-first` does not apply, and the work is
+    `greenfield-after-inventory` *informed by* ERP's code — a materially weaker
+    claim about the design being proven.
+
+  Resolving it requires reading `OIDC_ENABLED` on the ERP production host, which
+  requires that host to be named explicitly. See
+  `docs/inventories/oidc-sources.md`, which this paragraph must not outrun.
+
+  The extraction itself waits on the ADR-0017 lineage gate either way; the source
+  audit and the parity suite do not, and have started.
 - **No global Party or person database.** Each application keeps its own.
 - **No shared session or cookie service.** Decision 1 forbids it.
 - **No shared application database.**
