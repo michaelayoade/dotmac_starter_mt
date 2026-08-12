@@ -1,0 +1,127 @@
+"""The allocation tables, bound to the `mod_ealloc` schema (ADR-0006 D1).
+
+Platform catalog tables: no `tenant_id`, no RLS, `app_user` REVOKEd. An
+allocation is a VENDOR-side record of what a customer's contract entitles; the
+product data plane never reads it. Ruling C4 is the reason — the control plane
+allocates, and the data plane is the only writer of its own
+`tenant_entitlement_grants`, learning what it may write from a signed envelope
+rather than by querying the vendor.
+
+## `product_code` is stored, and that is a correctness fix
+
+The source implementation did not persist it. A capability code is only
+meaningful against the product that declares it, so an allocation validated
+against product A could later be issued as a licence for product B — the codes
+would still resolve, just in a different catalogue. Persisting the product the
+allocation was VALIDATED against closes that relabelling path: licence issuance
+reads this column rather than accepting a fresh caller-supplied value.
+
+## No foreign key to a contract
+
+`contract_ref` is a bare UUID. An allocation is an immutable projection and must
+outlive the row it was projected from — a contract archived, corrected, or moved
+into whichever module ends up owning commercial contracts. A cross-module FK
+would also splice two independently released migration lineages, which D1
+forbids. `content_hash` and `source_event_id` carry the provenance the FK looked
+like it was providing.
+
+## Immutability
+
+`(contract_ref, content_hash)` is unique: one allocation per activated contract
+version, so re-delivery of the same activation is a no-op rather than a second
+row. As with the release catalogue, immutability is enforced by PRIVILEGE —
+`platform_api` holds SELECT and INSERT only — not by a convention the service is
+trusted to keep.
+"""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
+from dotmac_kernel.namespaces import module_schema, schema_table_args
+from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+#: Derived from the allocated short code — never a literal here. The migration
+#: uses a literal on purpose (a frozen historical artifact); runtime models
+#: resolve through the ledger so drift between the two is a boot failure.
+SCHEMA: str = module_schema("ealloc")
+
+_ALLOCATIONS = "allocations"
+_ENTRIES = "allocation_entries"
+
+#: The only status this release writes. Delivery and acknowledgement states
+#: belong to licence issuance, which is a different owner — an allocation that
+#: tracked its own delivery would become a second delivery authority.
+STAGED = "staged"
+
+
+class Allocation(Base, TimestampMixin):
+    """An immutable projection of an activated contract version's entitlement."""
+
+    __tablename__ = _ALLOCATIONS
+    __table_args__ = (
+        UniqueConstraint(
+            "contract_ref",
+            "content_hash",
+            name="uq_allocations_contract_content",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+
+    #: Provenance, not a reference. No FK — see the module docstring.
+    contract_ref: Mapped[UUID] = mapped_column(nullable=False, index=True)
+
+    #: The product whose manifest-declared catalogue every entry below was
+    #: validated against. Read by licence issuance; never re-supplied by a
+    #: caller at issuance time.
+    product_code: Mapped[str] = mapped_column(String(120), nullable=False)
+
+    customer_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=STAGED)
+
+    #: Which event produced this allocation. Idempotency provenance, kept so a
+    #: replayed delivery is explainable rather than merely silent.
+    source_event_id: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    entries: Mapped[list[AllocationEntry]] = relationship(
+        back_populates="allocation",
+        cascade="all, delete-orphan",
+        order_by="AllocationEntry.capability_code",
+    )
+
+
+class AllocationEntry(Base, TimestampMixin):
+    """One entitled capability and quantity within a staged allocation."""
+
+    __tablename__ = _ENTRIES
+    __table_args__ = (
+        UniqueConstraint(
+            "allocation_id",
+            "capability_code",
+            name="uq_allocation_entries_allocation_code",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    allocation_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.{_ALLOCATIONS}.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    #: Declared by `Allocation.product_code`'s manifest, proven at staging time.
+    #: A plain string, not an enum: the vocabulary belongs to the products, and
+    #: this module is deliberately not where new codes are invented.
+    capability_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    allocation: Mapped[Allocation] = relationship(back_populates="entries")
+
+
+__all__ = ["SCHEMA", "STAGED", "Allocation", "AllocationEntry"]

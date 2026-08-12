@@ -1,0 +1,53 @@
+schema_version = 1
+package = "dotmac-entitlement-allocation"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Dotmac entitlement allocation"
+# Full audit: docs/inventories/entitlement-allocation-sources.md (2026-08-12).
+# The vendor control plane is the ONLY implementation — the fleet sweep measures
+# entitlement-allocation at 0/0/0 for ERP/CRM/Sub. The kernel's `entitlements`
+# surface is the DATA-PLANE half that ruling C4 deliberately keeps separate: the
+# control plane allocates, the data plane is the only writer of its own
+# tenant_entitlement_grants.
+contract = "An immutable projection of what an activated contract version entitles, validated against the named product's manifest-declared capability catalogue. NOT a grant, NOT a licence, NOT a delivery record, and NOT a place where capability codes are invented."
+source_repositories = ["dotmac_vendor_control_plane", "dotmac_erp", "dotmac_crm", "dotmac_sub", "dotmac_starter_mt"]
+source_paths = [
+  # The qualifying source. Ported with three couplings CUT — see the audit: a
+  # cross-module FK, a direct session.get on another module's Contract model,
+  # and a hard-coded "contract.activated" literal.
+  "dotmac_vendor_control_plane:src/vendor_cp/allocations/models.py",
+  "dotmac_vendor_control_plane:src/vendor_cp/allocations/service.py",
+  "dotmac_vendor_control_plane:alembic/versions/v005_allocations.py",
+  # The consumer STAYS in the vendor CP as assembly wiring: it names one
+  # product's event vocabulary and one transport. It shrinks rather than moves.
+  "dotmac_vendor_control_plane:src/vendor_cp/allocations/consumer.py",
+  # The kernel's owner-validates pattern, followed here: grant_entitlement takes
+  # a catalogue and raises rather than trusting its caller.
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/entitlements.py",
+  "dotmac_starter_mt:packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation",
+]
+preserved_tests = [
+  # The source's behavioural proofs, to port with the cutover. Its idempotency
+  # and activation-projection tests are the parity evidence.
+  "dotmac_vendor_control_plane:tests/unit/test_allocations.py",
+  "dotmac_starter_mt:tests/unit/test_entitlement_allocation_service.py",
+  "dotmac_starter_mt:tests/architecture/test_entitlement_allocation_module.py",
+  "dotmac_starter_mt:tests/test_entitlement_allocation_canaries.py",
+]
+contract_consumers = []
+candidate_consumers = [
+  # One concrete candidate. As with the release catalogue, a second cannot exist
+  # until a second vendor or OEM control plane does: app_user is REVOKEd, and
+  # ruling C4 disqualifies a product data plane as a consumer by design.
+  "dotmac_vendor_control_plane",
+]
+inventory_evidence = [
+  "docs/inventories/entitlement-allocation-sources.md",
+  "docs/inventories/fleet-decomposition-matrix.md",
+  "docs/superpowers/plans/2026-08-12-vendor-cp-composable-parts.md",
+]
+first_cutover = "The vendor control plane, the qualifying source and only candidate consumer. It supplies a CapabilityCatalogueReader adapter over the kernel's CapabilityCatalogue.require (NOT over active_capabilities(), which describes the modules installed in the vendor CP rather than those declared by the target application), keeps allocations/consumer.py as the contract.activated binding, and deletes its local allocations models, service and v005 tables. That cutover is the transition to `adopted`. BLOCKED on the kernel carrying ENTITLEMENT_ALLOCATION_MIGRATION_OWNER being released and the vendor CP repinning off 0.1.0a9."
+shadow_and_drift = "One knowing divergence to verify at cutover: the source did NOT validate capability codes at all — it projected whatever the contract lines carried. This module refuses undeclared codes, so a cutover must first confirm every existing allocation entry is declared by its product's manifest, or staging will begin failing on data the old writer accepted. That check is the shadow phase, and it belongs before the switch rather than after. Second divergence: contract_ref loses its FK, so any query relying on a join to contracts becomes a lookup by reference."
+local_copy_retirement = "vendor_cp.allocations.models and .service are deleted; consumer.py is rewritten to build a ContractSnapshot and call stage_allocation. v005's tables are dropped once mod_ealloc holds the rows. A boundary test must fail if vendor_cp re-acquires an Allocation model. NOTE the inverse obligation: licence issuance currently accepts a product independently of the allocation — it must be changed to read allocation_product(), or the relabelling path this module's product_code exists to close stays open on the vendor side."
+next_action = "0.1.0a1 ships the ContractSnapshot/CapabilityCatalogueReader ports, the validating stage_allocation, the two tables and the ea lineage. To reach `adopted`: (1) the kernel allocating mod_ealloc is released; (2) the vendor CP repins, supplies its catalogue adapter, cuts over and retires its local copy; (3) licence issuance switches to allocation_product(). `reuse-proven` is not reachable until a second vendor or OEM control plane exists — the same structural case ADR-0006's 2026-08-12 amendment was written for. Do NOT add delivery or acknowledgement state here: that is licence issuance, a different owner, and an allocation tracking its own delivery would become a second delivery authority."

@@ -38,6 +38,8 @@ dotmac-ticketing = { path = "packages/dotmac-ticketing", develop = true }
 # assembly such as the vendor control plane pins an exact released version from
 # the private index, never a relative path.
 dotmac-release-catalog = { path = "packages/dotmac-release-catalog", develop = true }
+# The fourth installable module (ADR-0006 M4), and the second vendor-side one.
+dotmac-entitlement-allocation = { path = "packages/dotmac-entitlement-allocation", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -123,6 +125,7 @@ root_packages = [
     "dotmac_template_studio",
     "dotmac_ticketing",
     "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
 ]
 
 [[tool.importlinter.contracts]]
@@ -174,6 +177,7 @@ source_modules = [
     "dotmac_template_studio",
     "dotmac_ticketing",
     "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
 ]
 forbidden_modules = ["app"]
 
@@ -198,7 +202,7 @@ forbidden_modules = ["app"]
 name = "The assembly must not install vendor-only modules"
 type = "forbidden"
 source_modules = ["app"]
-forbidden_modules = ["dotmac_release_catalog"]
+forbidden_modules = ["dotmac_release_catalog", "dotmac_entitlement_allocation"]
 
 [[tool.importlinter.contracts]]
 name = "Modules are independent of each other"
@@ -207,6 +211,7 @@ modules = [
     "dotmac_template_studio",
     "dotmac_ticketing",
     "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
 ]
 
 [[tool.importlinter.contracts]]
