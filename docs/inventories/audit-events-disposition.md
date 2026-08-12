@@ -218,6 +218,64 @@ function, grants and FORCE RLS. Audit R1 being designable does not move the
 lineage; the complete gate still waits on the credential convergence and the
 tenant-context/RLS decisions.
 
+## How R1 lands — two dependency-ordered changes
+
+R1 is **not** one change. The kernel is a released package that Sub consumes by
+exact pin, so the order is forced:
+
+**1. Kernel release first.** Model, writer, forward migration, vocabulary
+validation, tests. Nothing in Sub can reference a column the released artifact
+does not yet have.
+
+**2. Sub PR second.** Pin the exact released artifact, add its own expand-only
+migration, dual-write, parity reports.
+
+The staging measurements above **do not gate either of these** — they gate only
+the separate `is_active` cleanup.
+
+### Compatibility requirement: the released Template Studio
+
+`dotmac-template-studio` is already released and calls `write_audit_event` with
+**only** `actor_party_id` — nine call sites across its `router.py` and `web.py`,
+and the assembly's own `settings`/`rbac` features do the same.
+
+The kernel must therefore accept that legacy shape and derive from it:
+
+```
+actor_party_id supplied, no actor_type  →  actor_type = "user"
+                                           actor_id   = str(actor_party_id)
+```
+
+Two rules that make this safe rather than a silent widening:
+
+- **If neither an actor type nor a Party is supplied, fail.** Never default to
+  `system`. A missing actor is a caller defect, and quietly recording it as the
+  system actor would manufacture false forensic data — the precise failure this
+  whole contract exists to prevent.
+- **Historical kernel rows keep `actor_type IS NULL`.** Their actor kind was
+  never recorded and must not be invented retroactively.
+
+The derivation is explicitly **temporary**, retired when Template Studio and the
+assembly callers are updated to pass the pair.
+
+### `created_at` needs two DDL operations, not one
+
+```sql
+ALTER TABLE audit_events ADD COLUMN created_at timestamptz;   -- 1. nullable, NO default
+ALTER TABLE audit_events ALTER COLUMN created_at SET DEFAULT now();  -- 2. future rows only
+```
+
+Doing it in one statement is the trap. `ADD COLUMN … DEFAULT now()` does not
+rewrite the table on modern PostgreSQL, but it *does* evaluate `now()` once at
+DDL time and store the result as the column's missing-value — so **every
+historical row reads back the migration's timestamp**. That is the falsehood
+this column exists to avoid, applied at scale and indistinguishable afterwards
+from genuine data.
+
+Split into two operations, existing rows keep `NULL` — correctly meaning
+"persistence time unknown" — and only inserts after the migration get a real
+value.
+
 ## Fleet-level: ERP has the same unaudited delete
 
 `dotmac_erp/app/services/audit.py` implements the identical pattern —
@@ -341,8 +399,36 @@ kernel contract". It is:
 Cost of removal is three call sites, all of which become no-ops when every row
 is `true`: the default `is_active IS TRUE` filter in `AuditEvents.list`, the
 exposed `is_active` filter parameter, and `billing_automation.py`'s two
-`is_active.is_(True)` predicates. This should be confirmed against any
-non-production database before the column is dropped.
+`is_active.is_(True)` predicates.
+
+#### Confirmed on staging — every database, every product
+
+Measured 2026-08-12 on the staging host (seabone), read-only, aggregates only.
+Every database there carrying an `audit_events` table:
+
+| database | rows | `is_active = false` |
+|---|---:|---:|
+| `dotmac_sub_db / dotmac_sub` | 71,788 | **0** |
+| `dotmac_sub_db / dotmac_sub_pre_sync_20260718…` | 74,320 | **0** |
+| `dotmac_sub_db / dotmac_sub_rollback_20260717_preserved` | 71,522 | **0** |
+| `dotmac_sub_db / dotmac_sub_staging_sync_overwrite_20260718` | 71,522 | **0** |
+| `dotmac_sub_db / dotmac_sub_fiber_inquiry_test` | 36 | **0** |
+| `dotmac_erp_db / dotmac_erp` | 178,003 | **0** |
+| `dotmac_omni_db / dotmac_crm` | 532,266 | **0** |
+| `dotmac_omni_db / dotmac_crm_pre_sync_20260812…` | 532,127 | **0** |
+
+With production, that is roughly **2.2 million audit rows across three products,
+two environments and several historical snapshots, and not one redacted row.**
+The `is_active` cleanup is safe to land in Sub and ERP on this evidence.
+
+CRM has the same table and the same zero — worth noting only because it means
+the pattern predates the fork rather than being introduced by either side.
+
+A discovery note for whoever re-runs this: the staging database containers are
+`dotmac_sub_db` / `dotmac_erp_db` / `dotmac_omni_db` running **`postgis/postgis`**
+images. A container filter matching `postgres|pg` finds none of them and reports
+"no database on this host", which is exactly the false-negative shape this
+document keeps warning about.
 
 ### `actor_type` — 97.7% of rows have a non-party actor
 
