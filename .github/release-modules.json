@@ -1,0 +1,55 @@
+{
+  "$comment": [
+    "The CLOSED set of installable modules this repository may publish, and the",
+    "facts each release is checked against. A package absent from this file",
+    "cannot be built or published by `release-module.yml` — the workflow resolves",
+    "its target here and fails closed, so adding a publishable module is a",
+    "reviewed diff rather than a dispatch-time string.",
+    "",
+    "`dotmac-kernel` and `dotmac-ui` are deliberately NOT here: they have their",
+    "own workflows with their own inspection rules (a kernel wheel must ship",
+    "compiled CSS; a module must not). One workflow pretending to cover both",
+    "would have to weaken whichever check the other cannot satisfy.",
+    "",
+    "kernel_floor is the release that allocated the module's schema in",
+    "MIGRATION_OWNER_LEDGER. It is not a preference: an earlier kernel raises",
+    "UnallocatedNamespaceError and the module cannot register at all, which is",
+    "why registry verification can only pass once that kernel is published."
+  ],
+  "modules": {
+    "dotmac-release-catalog": {
+      "package_dir": "packages/dotmac-release-catalog",
+      "import_name": "dotmac_release_catalog",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a44",
+      "db_schema": "mod_rel",
+      "tag_prefix": "dotmac-release-catalog-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_release_catalog/py.typed",
+          "dotmac_release_catalog/manifest.py",
+          "dotmac_release_catalog/migrations/versions/rl_0001_release_artifacts.py"
+        ],
+        "forbidden_prefixes": ["app/", "tests/", "alembic/", "scripts/"],
+        "allowed_requires": ["dotmac-kernel", "sqlalchemy", "python"]
+      }
+    },
+    "dotmac-entitlement-allocation": {
+      "package_dir": "packages/dotmac-entitlement-allocation",
+      "import_name": "dotmac_entitlement_allocation",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a45",
+      "db_schema": "mod_ealloc",
+      "tag_prefix": "dotmac-entitlement-allocation-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_entitlement_allocation/py.typed",
+          "dotmac_entitlement_allocation/manifest.py",
+          "dotmac_entitlement_allocation/migrations/versions/ea_0001_allocations.py"
+        ],
+        "forbidden_prefixes": ["app/", "tests/", "alembic/", "scripts/"],
+        "allowed_requires": ["dotmac-kernel", "sqlalchemy", "python"]
+      }
+    }
+  }
+}

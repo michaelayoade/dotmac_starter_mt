@@ -1,0 +1,217 @@
+name: Release module
+
+# Publish ONE installable module to the PRIVATE Forgejo index at
+# registry.dotmac.io. The same security sequence as `release-kernel.yml`, and
+# deliberately not a generalisation of it: a kernel wheel MUST ship compiled
+# CSS and a module wheel must NOT, so one workflow covering both would have to
+# weaken whichever check the other cannot satisfy.
+#
+# Flow, unchanged from the kernel path: build once (on the exact current
+# protected-main SHA) -> inspect the bytes -> smoke them -> AWAIT environment
+# approval -> re-assert the approved SHA is still main's tip -> publish THOSE
+# SAME bytes -> install the published release from the index and verify ->
+# tag only then.
+#
+# ONE MODULE PER RUN, on purpose. Releasing two in a single dispatch would read
+# as transactional when it is not: the second upload can fail with the first
+# already public, leaving a "failed" run that published half its subject. Two
+# approvals for two releases is the honest shape, and the composition proof runs
+# afterwards against both published versions.
+#
+# The target is resolved from `.github/release-modules.json` — a CLOSED,
+# reviewed allowlist. `scripts/release_module.py resolve` fails on anything
+# absent from it, so a dispatch cannot build an arbitrary directory. The
+# `choice` input below constrains the same set at the UI layer;
+# `tests/architecture/test_module_release_allowlist.py` asserts the two agree,
+# so the convenience list cannot drift from the enforced one.
+#
+# Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release`
+# environment secret whose canonical source is OpenBao
+# (secret/dotmac/forgejo/ci-publisher-token). Third-party actions are pinned to
+# reviewed full commit SHAs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Which allowlisted module to publish"
+        required: true
+        type: choice
+        options:
+          - dotmac-release-catalog
+          - dotmac-entitlement-allocation
+      version:
+        description: "Version to publish (MUST equal the package's pyproject version)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      package_dir: ${{ steps.resolve.outputs.package_dir }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      kernel_floor: ${{ steps.resolve.outputs.kernel_floor }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Fail closed unless THIS run is the exact current tip of protected main
+      # (not merely an ancestor) — a stale or side-branch dispatch cannot publish.
+      - name: Assert run is on the current protected main SHA
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+
+      # THE GATE. Refuses an unallowlisted distribution, a pyproject whose name
+      # disagrees with the dispatch, a version that was not typed exactly, and a
+      # kernel floor that no longer matches the release which allocated this
+      # module's schema. Everything after this step uses only its output.
+      - name: Resolve the allowlisted module
+        id: resolve
+        run: |
+          python scripts/release_module.py resolve \
+            "${{ inputs.module }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      - name: Build wheel + sdist
+        working-directory: ${{ steps.resolve.outputs.package_dir }}
+        run: poetry build
+
+      # Wheel-content policy: py.typed and the migration lineage present, no
+      # assembly/test/tooling content, dependency closure limited to the kernel,
+      # no secret-shaped files.
+      - name: Inspect artifacts
+        run: |
+          python scripts/release_module.py inspect "${{ inputs.module }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+
+      # The smoke needs a kernel ARTIFACT. The module floors at the release
+      # that allocated its schema, and that kernel may not be published yet —
+      # this step runs before any publication. Building it here keeps the smoke
+      # self-contained; proving the module against the PUBLISHED kernel is the
+      # verify job's separate, stronger claim.
+      - name: Build the kernel wheel for the smoke
+        working-directory: packages/dotmac-kernel
+        run: poetry build --output "${GITHUB_WORKSPACE}/kernel-dist"
+
+      # Release-artifact smoke: install the freshly built wheel into a clean
+      # venv and register its manifest through NamespaceRegistry. Proves the
+      # bytes about to be published are installable and registrable, not merely
+      # well-formed.
+      - name: Release wheel smoke
+        run: |
+          python scripts/release_module.py verify-wheel "${{ inputs.module }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
+            --kernel-dist "${GITHUB_WORKSPACE}/kernel-dist"
+
+      - name: Upload built artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.module }}-dist
+          path: ${{ steps.resolve.outputs.package_dir }}/dist/*
+          retention-days: 90
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: registry-release    # protected: main-only + required review
+    permissions:
+      contents: read
+    steps:
+      # RE-check freshness AFTER the approval wait, before anything is
+      # published. `build` proved this run was main's tip at dispatch time, but
+      # a protected environment can sit pending for hours — and the approval is
+      # a decision about a SHA, not about a run id. First step in the job, so it
+      # fails before the artifact is fetched or the publish token is used.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Re-assert the approved SHA is still the current protected main
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      # Defence in depth: the allowlist is re-checked on the publish side, so a
+      # tampered `build` output cannot smuggle a target past the gate.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Re-assert the target is allowlisted
+        run: |
+          python scripts/release_module.py resolve \
+            "${{ inputs.module }}" --version "${{ inputs.version }}" >/dev/null
+
+      - name: Download the exact built bytes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.module }}-dist
+          path: dist
+
+      # Publish the SAME bytes `build` inspected and smoked — downloaded, never
+      # rebuilt.
+      - name: Publish to the Forgejo private index
+        env:
+          TWINE_USERNAME: ci-publisher
+          TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+        run: |
+          python -m pip install --quiet twine
+          python -m twine upload \
+            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
+
+  verify:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    environment: registry-release
+    permissions:
+      contents: write                # create the post-verification tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The index may lag a few seconds after publish.
+      - name: Wait for the release on the Forgejo index
+        env:
+          IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/${{ inputs.module }}/
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
+              echo "available on the Forgejo index"; exit 0
+            fi
+            echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
+          done
+          echo "::error::${{ inputs.module }} ${{ inputs.version }} did not appear in time"
+          exit 1
+
+      # Install the PUBLISHED release from the index into a clean venv and
+      # register it. Requires the kernel at `kernel_floor` to already be
+      # published — an earlier kernel raises UnallocatedNamespaceError, which is
+      # why the kernel release always precedes a module release.
+      - name: Install from the Forgejo registry and verify
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python scripts/release_module.py verify-registry \
+            --index "${INDEX}" \
+            --pin "${{ inputs.module }}==${{ inputs.version }}"
+
+      # Only AFTER registry verification: tag the published SHA.
+      - name: Tag the verified release
+        run: |
+          TAG="${{ needs.build.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" \
+            -m "${{ inputs.module }} ${{ inputs.version }} (verified on the Forgejo registry)" \
+            "${GITHUB_SHA}"
+          git push origin "${TAG}"
+          echo "tagged ${TAG} on ${GITHUB_SHA}"
