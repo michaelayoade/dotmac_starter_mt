@@ -14,12 +14,18 @@ A data plane installing this module would be acquiring the wrong half. Being
 non-core is the first guard; the import-linter contract forbidding the assembly
 from importing it is the second.
 
-## No capabilities, permissions or audit actions YET
+## One audit action, declared because it HAS a consumer
 
-This release ships no routers, and each of those declarations exists to gate or
-annotate a route. `dotmac-ticketing` proved the point the loud way — CI rejected
-a declared capability code no mounted route enforced. They land with the routers,
-in the same change as the guards that reference them.
+`entitlement_allocation.staged` is written by `service.stage_allocation` inside
+its idempotent operation, so the declaration is live rather than aspirational —
+which is the whole test ADR-0008's registries apply: a declared code with no
+consumer is dead vocabulary that reads as a working gate.
+
+Capabilities and permissions stay undeclared for exactly the same reason
+inverted: this release ships no routers, so there is nothing for them to gate.
+`dotmac-ticketing` proved the point the loud way — CI rejected a declared
+capability code no mounted route enforced. They land with the routers, in the
+same change as the guards that reference them.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ module = ModuleManifest(
     migration_prefix="ea",
     migration_branch="entitlement_allocation",
     tables=("allocations", "allocation_entries"),
+    audit_actions=("entitlement_allocation.staged",),
 )
 
 __all__ = ["module"]

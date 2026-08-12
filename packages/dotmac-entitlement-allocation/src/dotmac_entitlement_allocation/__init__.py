@@ -27,6 +27,13 @@ The port lives HERE rather than in the kernel deliberately. Adding it there
 would be a new kernel facility, and ADR-0017's moratorium holds until the kernel
 lineage runs in a production product database.
 
+## An adapter TRANSLATES; the module does not guess
+
+Your `require_declared` must raise this module's `UnknownProductError` or
+`UndeclaredCapabilityError` — not the backing store's own exception type. The
+service catches nothing broad, so an adapter defect surfaces as itself rather
+than being reported as an undeclared capability.
+
 ## Two rules that are easy to get wrong
 
 - **Never wrap `active_capabilities()`.** It describes the modules installed in
@@ -51,39 +58,53 @@ from dotmac_entitlement_allocation.models import (
     STAGED,
     Allocation,
     AllocationEntry,
+    AllocationStatus,
 )
 from dotmac_entitlement_allocation.ports import (
+    AllocationConflictError,
     AllocationError,
     CapabilityCatalogueReader,
     ContractEntitlement,
     ContractSnapshot,
+    DuplicateCapabilityError,
     EmptyAllocationError,
     UndeclaredCapabilityError,
     UnknownProductError,
 )
 from dotmac_entitlement_allocation.service import (
+    AUDIT_ACTION_STAGED,
+    IDEMPOTENCY_SCOPE,
+    AllocatedCapability,
     AllocationView,
     allocation_product,
+    snapshot_fingerprint,
     stage_allocation,
 )
 
 __version__ = "0.1.0a1"
 
 __all__ = [
+    "AUDIT_ACTION_STAGED",
+    "IDEMPOTENCY_SCOPE",
     "SCHEMA",
     "STAGED",
+    "AllocatedCapability",
     "Allocation",
+    "AllocationConflictError",
     "AllocationEntry",
     "AllocationError",
+    "AllocationStatus",
     "AllocationView",
     "CapabilityCatalogueReader",
     "ContractEntitlement",
     "ContractSnapshot",
+    "DuplicateCapabilityError",
     "EmptyAllocationError",
     "UndeclaredCapabilityError",
     "UnknownProductError",
     "__version__",
     "allocation_product",
     "module",
+    "snapshot_fingerprint",
     "stage_allocation",
 ]

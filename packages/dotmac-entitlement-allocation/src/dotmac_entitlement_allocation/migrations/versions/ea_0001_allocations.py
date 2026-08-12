@@ -26,6 +26,21 @@ What a contract entitles is a vendor-side fact, not a per-tenant one — no
   is the only writer of its own `tenant_entitlement_grants` and learns what it
   may write from a signed envelope, never by reading the vendor's allocations.
 
+## An INSERT-only grant does not make a CHILD table immutable
+
+The parent is immutable because `platform_api` has no UPDATE. The child cannot
+be protected the same way — staging needs INSERT — so without more, an
+already-staged allocation stays APPENDABLE and raw SQL can add a capability that
+never met the catalogue. `refuse_late_entry` closes that: entries may only be inserted while the parent
+is UNSEALED, and the service seals it once staging is complete.
+
+The seal is explicit rather than inferred from transaction identity. Comparing
+the parent's `xmin` to the current transaction cannot work here — the kernel's
+at-most-once owner runs inside `conflict_savepoint`, and a SAVEPOINT is a
+subtransaction whose writes carry a subtransaction xid. `sealed` is writable by
+`platform_api` only through a COLUMN-LEVEL grant, and `seal_is_one_way` makes
+the flip irreversible.
+
 ## No CHECK on `capability_code`
 
 The vocabulary belongs to the PRODUCTS, is manifest-derived, and differs per
@@ -71,6 +86,7 @@ def upgrade() -> None:
         sa.Column("content_hash", sa.String(length=128), nullable=False),
         sa.Column("status", sa.String(length=20), nullable=False),
         sa.Column("source_event_id", sa.String(length=200), nullable=False),
+        sa.Column("snapshot_fingerprint", sa.String(length=64), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -128,6 +144,8 @@ def upgrade() -> None:
             "capability_code",
             name="uq_allocation_entries_allocation_code",
         ),
+        # A service rule cannot police a path that never calls the service.
+        sa.CheckConstraint("quantity > 0", name="ck_allocation_entries_quantity"),
         schema="mod_ealloc",
     )
     op.create_index(
@@ -137,9 +155,100 @@ def upgrade() -> None:
         schema="mod_ealloc",
     )
 
+    # ── The append defence ──────────────────────────────────────────────────
+    #
+    # `platform_api` needs INSERT on allocation_entries to stage at all, so the
+    # SELECT+INSERT grant that makes the PARENT immutable leaves the CHILD
+    # appendable: raw SQL could add a capability to an already-staged allocation
+    # and skip catalogue validation entirely.
+    #
+    # The seal is EXPLICIT rather than inferred from transaction identity. An
+    # earlier attempt compared the parent's `xmin` against the current
+    # transaction, which cannot work here: the kernel's at-most-once owner runs
+    # inside `conflict_savepoint`, and a SAVEPOINT is a SUBTRANSACTION whose
+    # writes carry a subtransaction xid that never equals `pg_current_xact_id()`.
+    # It rejected legitimate staging. A boolean the service flips once is
+    # duller and correct.
+    #
+    # `sealed` is writable by `platform_api` through a COLUMN-LEVEL grant, so
+    # every other column stays immutable to the online role, and a second
+    # trigger makes the flip one-way.
+    op.add_column(
+        "allocations",
+        sa.Column(
+            "sealed",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("false"),
+        ),
+        schema="mod_ealloc",
+    )
+
+    op.execute(
+        """
+        CREATE FUNCTION mod_ealloc.refuse_late_entry() RETURNS trigger AS $$
+        DECLARE parent_sealed boolean;
+        BEGIN
+            SELECT sealed INTO parent_sealed
+            FROM mod_ealloc.allocations WHERE id = NEW.allocation_id;
+            IF parent_sealed IS NULL THEN
+                RAISE EXCEPTION 'allocation % does not exist', NEW.allocation_id
+                    USING ERRCODE = '23503';
+            END IF;
+            IF parent_sealed THEN
+                RAISE EXCEPTION
+                    'allocation % is already staged; entries are immutable',
+                    NEW.allocation_id USING ERRCODE = '23514';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER refuse_late_entry
+        BEFORE INSERT ON mod_ealloc.allocation_entries
+        FOR EACH ROW EXECUTE FUNCTION mod_ealloc.refuse_late_entry();
+        """
+    )
+
+    # One-way. Without this, sealing could be undone and the allocation would be
+    # appendable again by anyone who could flip it back.
+    op.execute(
+        """
+        CREATE FUNCTION mod_ealloc.seal_is_one_way() RETURNS trigger AS $$
+        BEGIN
+            IF OLD.sealed AND NOT NEW.sealed THEN
+                RAISE EXCEPTION
+                    'allocation % is sealed; the seal cannot be lifted', OLD.id
+                    USING ERRCODE = '23514';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER seal_is_one_way
+        BEFORE UPDATE ON mod_ealloc.allocations
+        FOR EACH ROW EXECUTE FUNCTION mod_ealloc.seal_is_one_way();
+        """
+    )
+
     # Written out per table and per role rather than looped: these six lines are
     # the module's entire access-control surface and should be greppable.
     op.execute("GRANT SELECT, INSERT ON mod_ealloc.allocations TO platform_api;")
+    # Column-level. `sealed` is the only DECISION the online role may write, and
+    # `seal_is_one_way` makes even that irreversible. `updated_at` rides along
+    # because it is TimestampMixin's `onupdate` — writing the seal through the
+    # ORM touches it, and raw SQL that avoided it would lose the dialect's UUID
+    # adaptation. It is metadata; every BUSINESS column stays unwritable, which
+    # is the property the grant exists to state.
+    op.execute(
+        "GRANT UPDATE (sealed, updated_at) ON mod_ealloc.allocations TO platform_api;"
+    )
     op.execute("GRANT SELECT, INSERT ON mod_ealloc.allocation_entries TO platform_api;")
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_ealloc.allocations TO app_admin;"
@@ -153,6 +262,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER IF EXISTS refuse_late_entry ON mod_ealloc.allocation_entries;"
+    )
+    op.execute("DROP FUNCTION IF EXISTS mod_ealloc.refuse_late_entry();")
+    op.execute("DROP TRIGGER IF EXISTS seal_is_one_way ON mod_ealloc.allocations;")
+    op.execute("DROP FUNCTION IF EXISTS mod_ealloc.seal_is_one_way();")
     op.drop_index(
         "ix_allocation_entries_allocation_id",
         "allocation_entries",
