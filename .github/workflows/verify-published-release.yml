@@ -1,0 +1,132 @@
+name: Verify a published release
+
+# RECOVERY. Verifies and tags a module release whose artifact is ALREADY on the
+# index but whose verification did not complete — and it deliberately cannot
+# publish anything.
+#
+# Why this exists rather than re-running the release: twine refuses a duplicate
+# version, so a re-run of `release-module.yml` fails at the upload step and can
+# never reach its own verify job. Without a path like this, a release that
+# published successfully and then failed verification is stuck: good bytes on
+# the index, no verification, no tag, and the only "fix" would be republishing
+# different bytes under a new version to work around a broken CHECK.
+#
+# That distinction is the whole justification. Use this when the ARTIFACT is
+# sound and the verification was wrong. When the artifact itself is wrong, cut a
+# new version — a published release is never mutated, and this workflow cannot
+# mutate one: it has no publish token usage and no upload step.
+#
+# The tag points at the SHA the release was BUILT from, supplied explicitly and
+# checked: the package version at that commit must equal the version being
+# verified. Tagging the verification run's own SHA would attach the release to a
+# commit that may not even contain it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Allowlisted module whose published release needs verifying"
+        required: true
+        type: choice
+        options:
+          - dotmac-release-catalog
+          - dotmac-entitlement-allocation
+      version:
+        description: "The PUBLISHED version to verify (e.g. 0.1.0a1)"
+        required: true
+        type: string
+      sha:
+        description: "The commit the release was built from (the tag lands here)"
+        required: true
+        type: string
+      compose_kernel:
+        description: "Optional. Exact published kernel version for a composition check."
+        required: false
+        default: ""
+        type: string
+      compose_with:
+        description: >-
+          Optional. Space-separated exact pins of published siblings to register
+          alongside this module.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: registry-release    # the scoped index token lives here
+    permissions:
+      contents: write                # create the verification tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.sha }}
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The supplied SHA must actually contain the version being verified, and
+      # must be an ancestor of main. Together those stop a tag being written on
+      # an unrelated or abandoned commit.
+      - name: Assert the SHA carries this version and is on main
+        run: |
+          python scripts/release_module.py resolve \
+            "${{ inputs.module }}" --version "${{ inputs.version }}" >/dev/null
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "${{ inputs.sha }}" origin/main; then
+            echo "::error::${{ inputs.sha }} is not an ancestor of main"
+            exit 1
+          fi
+          echo "SHA carries ${{ inputs.module }} ${{ inputs.version }} and is on main"
+
+      - name: Install the published release from the index and verify
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python scripts/release_module.py verify-registry \
+            --index "${INDEX}" \
+            --pin "${{ inputs.module }}==${{ inputs.version }}"
+
+      - name: Verify the published composition
+        if: inputs.compose_with != ''
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          if [ -z "${{ inputs.compose_kernel }}" ]; then
+            echo "::error::compose_with is set but compose_kernel is empty"
+            exit 1
+          fi
+          ARGS=""
+          for pin in ${{ inputs.compose_with }}; do ARGS="${ARGS} --pin ${pin}"; done
+          python scripts/release_module.py verify-registry \
+            --index "${INDEX}" \
+            --kernel "${{ inputs.compose_kernel }}" \
+            --pin "${{ inputs.module }}==${{ inputs.version }}" ${ARGS}
+
+      - name: Tag the verified release
+        run: |
+          python - <<'PY' > /tmp/tag
+          import json, pathlib
+          entry = json.loads(
+              pathlib.Path(".github/release-modules.json").read_text()
+          )["modules"]["${{ inputs.module }}"]
+          print(entry["tag_prefix"] + "${{ inputs.version }}")
+          PY
+          TAG="$(cat /tmp/tag)"
+          COMPOSED="${{ inputs.compose_with }}"
+          if [ -n "${COMPOSED}" ]; then
+            NOTE="verified on the Forgejo registry; composes with ${COMPOSED} on kernel ${{ inputs.compose_kernel }}"
+          else
+            NOTE="verified on the Forgejo registry (installed and registered alone)"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "${{ inputs.module }} ${{ inputs.version }} (${NOTE})" "${{ inputs.sha }}"
+          git push origin "${TAG}"
+          echo "tagged ${TAG} on ${{ inputs.sha }}"

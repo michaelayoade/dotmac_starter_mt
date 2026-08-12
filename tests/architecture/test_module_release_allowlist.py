@@ -265,6 +265,40 @@ def test_the_tag_message_states_what_was_verified() -> None:
     assert "composes with" in source
 
 
+def test_registry_verification_keeps_the_private_index_primary() -> None:
+    """The bug this guards cost two published-but-unverified releases.
+
+    `--index-url` REPLACES PyPI. Pointed at a registry that hosts only dotmac
+    packages, pip cannot resolve `sqlalchemy` and every verification fails —
+    after the artifact is already public. The private index must be PRIMARY with
+    PyPI as an EXTRA, and not the reverse: with PyPI primary, anyone publishing
+    a `dotmac-*` name there could satisfy the resolve instead of us.
+    """
+    source = (PROJECT_ROOT / "scripts" / "release_module.py").read_text(
+        encoding="utf-8"
+    )
+    install = source.split("def cmd_verify_registry", 1)[1]
+    assert "args.index" in install, "the private index must be passed"
+    assert "args.public_index" in install, "PyPI must be supplied as the extra"
+    # Order is the property: primary first, extra second.
+    assert install.index("--index-url") < install.index("--extra-index-url")
+
+
+def test_the_recovery_workflow_cannot_publish() -> None:
+    """It exists because twine refuses a duplicate version, so a failed
+    verification cannot be repaired by re-running the release. That is only
+    acceptable while it is incapable of publishing anything."""
+    recovery = _executable(
+        PROJECT_ROOT / ".github" / "workflows" / "verify-published-release.yml"
+    )
+    assert "twine" not in recovery
+    assert "poetry build" not in recovery
+    assert "upload-artifact" not in recovery
+    # It DOES tag, and only at a SHA the caller names and the workflow checks.
+    assert "git tag" in recovery
+    assert "is not an ancestor of main" in recovery
+
+
 def test_the_composition_check_cannot_publish_or_tag() -> None:
     """It runs after releases exist and only reports. A composition failure is
     repaired by a NEW release, never by mutating a published one."""

@@ -263,8 +263,19 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
 def cmd_verify_registry(args: argparse.Namespace) -> None:
     """Post-publish: install the PUBLISHED release from the private index.
 
-    `--index` carries the authenticated simple-index URL. Exact pins only: a
-    range would let this pass against a version nobody published in this run.
+    `--index` carries the authenticated simple-index URL, and it is the PRIMARY
+    index so a `dotmac-*` name always resolves from OUR registry. PyPI is added
+    as an EXTRA index for public transitive dependencies only.
+
+    That order matters twice over. The first version of this used `--index-url`
+    alone, which REPLACES PyPI rather than adding to it — so pip went looking
+    for `sqlalchemy` on a Forgejo index that hosts only dotmac packages, and
+    every module verification failed after its artifact was already published.
+    Reversing the two would be worse: with PyPI primary, anyone publishing a
+    `dotmac-*` name there could satisfy the resolve instead of us.
+
+    Exact pins only: a range would let this pass against a version nobody
+    published in this run.
     """
     import tempfile
 
@@ -289,7 +300,16 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         python, pip = _venv(Path(tmp) / "venv")
         subprocess.run(
-            [str(pip), "install", "--quiet", "--index-url", args.index, *specs],
+            [
+                str(pip),
+                "install",
+                "--quiet",
+                "--index-url",
+                args.index,
+                "--extra-index-url",
+                args.public_index,
+                *specs,
+            ],
             check=True,
         )
         _verify_installed(python, targets)
@@ -325,6 +345,11 @@ def main() -> int:
     )
     p.add_argument("--index", required=True)
     p.add_argument("--kernel", default="", help="exact published kernel version")
+    p.add_argument(
+        "--public-index",
+        default="https://pypi.org/simple",
+        help="EXTRA index for public transitive dependencies (never primary)",
+    )
     p.add_argument("--pin", action="append", required=True)
     p.set_defaults(func=cmd_verify_registry)
 
