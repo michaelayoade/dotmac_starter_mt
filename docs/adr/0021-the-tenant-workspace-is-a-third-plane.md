@@ -9,12 +9,10 @@ lineages), ADR-0007 (deployment-authenticated applied state), ADR-0015 (an
 assembly, or it is a fork), ADR-0017 (adoption is the scarce resource)
 
 **Numbering note.** This ADR took 0021 to leave 0020 for *Billing owns
-operational receivables*, accepted the same day. That file is **untracked** at
-the time of writing, and an untracked file reserves nothing — a number is
-authoritative only once it is committed. So this number is provisional until
-Billing's ADR-0020 lands, and Billing's ADR-0020 must land **first**. If it does
-not, this ADR is renumbered to 0020 rather than leaving a permanent gap in the
-sequence.
+operational receivables*. That number was only a claim while Billing's file sat
+untracked — an untracked file reserves nothing — so 0021 was held provisional
+rather than submitted. Billing's ADR-0020 landed first, in #121, and this number
+is now authoritative.
 
 ## Context
 
