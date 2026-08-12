@@ -301,15 +301,26 @@ def test_activation_is_refused_when_the_application_names_another_tenant(
     db: Session, tenant_row: Tenant
 ) -> None:
     """A descriptor for a different local tenant is proof of a different
-    binding. Compared against the value stored at invitation, since reconciling
-    adopts the observed one."""
+    binding.
+
+    The version is bumped deliberately. At the SAME version a changed
+    `local_tenant_ref` changes the digest, so reconciliation refuses it as a
+    content conflict and activation never reaches the tenant check. The tenant
+    check is reachable exactly when the application publishes a NEW version that
+    names a different local tenant — which reconciliation adopts, and which
+    activation must still refuse.
+
+    Compared against the value captured before reconciling: adopting rewrites
+    `local_tenant_ref`, so a post-reconcile comparison would compare it to
+    itself.
+    """
     binding = _attached(db, tenant_row)
     with pytest.raises(ActivationRefused, match="local tenant"):
         activate_binding(
             db,
             tenant_id=tenant_row.id,
             binding_id=binding.id,
-            observed=_descriptor(local_tenant_ref="someone-else"),
+            observed=_descriptor(descriptor_version=2, local_tenant_ref="someone-else"),
             now=NOW,
         )
     assert binding.state == BindingState.INVITED
