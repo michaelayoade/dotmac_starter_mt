@@ -180,6 +180,26 @@ forbidden_modules = ["app"]
 # The second module makes this contract bite. A module composes with another
 # through the assembly, an htmx-fetched fragment or a service call — never an
 # import, which would make either module un-releasable without the other.
+# VENDOR-ASSEMBLY-ONLY parts (ADR-0006 M3; ruling C1).
+#
+# `app_user` being REVOKEd from `mod_rel` proves the tenant data plane cannot
+# READ the catalogue. It says nothing about INSTALLATION — this assembly is the
+# reference product data plane, and nothing stopped it importing the module and
+# mounting it. That is the gap this contract closes.
+#
+# The rule is the substance of C1: the kernel stays product-neutral and fleet
+# workflow does not leak into every data plane. Putting the tables in an
+# optional module satisfies C1 only while a product assembly cannot install it.
+#
+# `dotmac-fleet`, `dotmac-fleet-health`, `dotmac-support-access` and
+# `dotmac-licence-issuance` join this list as they land; licence-issuance most
+# of all, since it holds a signing key that must never reach a data plane.
+[[tool.importlinter.contracts]]
+name = "The assembly must not install vendor-only modules"
+type = "forbidden"
+source_modules = ["app"]
+forbidden_modules = ["dotmac_release_catalog"]
+
 [[tool.importlinter.contracts]]
 name = "Modules are independent of each other"
 type = "independence"

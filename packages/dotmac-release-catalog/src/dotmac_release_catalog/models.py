@@ -37,15 +37,24 @@ what is claimed about it. That is the whole first slice. Notably absent:
 * **No `is_current`, no `latest` flag.** Both are a mutable tag with a different
   spelling. What is current is a property of a *deployment*, not of an artifact.
 
-## Immutability is enforced by the service, not a trigger
+## Immutability is enforced by PRIVILEGE, not by convention
 
-Rows are never updated after insert. That is a service-layer rule (and the
-reason `updated_at` exists but should always equal `created_at` on this table),
-matching the precedent set by the vendor control plane's `offer_versions`. A
-database trigger would enforce it harder, at the cost of a per-deployment
-migration to change and a failure mode that is invisible in the ORM; the
-`(product_code, version, artifact_kind)` and `digest` uniques already make the
-damaging cases — two artifacts claiming one identity — unrepresentable.
+Rows are never updated after insert, and that is not a rule a service is trusted
+to keep: `platform_api` — the online request-path role — is granted SELECT and
+INSERT and nothing else, so no request handler, no future router and no ad-hoc
+query on that connection *can* rewrite a published artifact. `app_admin`, the
+offline migration role, retains UPDATE/DELETE, because a mis-recorded artifact
+has to be correctable by someone and confining that to reviewed migrations makes
+it a deliberate act rather than an accident during a request.
+
+`ck_release_artifacts_ref_pins_digest` closes the remaining gap in the other
+direction: raw SQL that never calls `identity.pinned_reference` still cannot
+store a reference addressing different bytes than the `digest` column beside it.
+
+`updated_at` therefore exists and should always equal `created_at` on rows the
+online role wrote. The live proofs are in
+`tests/test_release_catalog_immutability.py`, which drives the real roles rather
+than asserting this paragraph.
 """
 
 from __future__ import annotations
@@ -116,7 +125,14 @@ class ReleaseArtifact(Base, TimestampMixin):
     artifact_kind: Mapped[str] = mapped_column(String(40), nullable=False)
 
     #: `<algorithm>:<hex>`, validated by `identity.Digest` on the way in.
-    digest: Mapped[str] = mapped_column(String(80), nullable=False)
+    #:
+    #: 160 is sized for the vocabulary this module says it does NOT close, not
+    #: for the one algorithm it accepts today: `sha512:` + 128 hex is 135
+    #: characters. An 80-char column would have made the "a second algorithm is
+    #: a module release, not a migration" claim false — the release would still
+    #: need an ALTER TABLE on every deployment. Caught by
+    #: `test_the_constraint_does_not_close_the_algorithm_vocabulary`.
+    digest: Mapped[str] = mapped_column(String(160), nullable=False)
 
     #: The digest-pinned pull reference. Validated by `identity.pinned_reference`
     #: against the `digest` column above, so the two cannot address different
@@ -183,8 +199,9 @@ class ArtifactAttestation(Base, TimestampMixin):
     uri: Mapped[str] = mapped_column(Text, nullable=False)
 
     #: The digest OF THE ATTESTATION DOCUMENT, not of the artifact. Without it,
-    #: "the SBOM at this URI" is a mutable tag by another route.
-    digest: Mapped[str] = mapped_column(String(80), nullable=False)
+    #: "the SBOM at this URI" is a mutable tag by another route. Same 160-char
+    #: sizing, for the same reason.
+    digest: Mapped[str] = mapped_column(String(160), nullable=False)
 
     artifact: Mapped[ReleaseArtifact] = relationship(back_populates="attestations")
 

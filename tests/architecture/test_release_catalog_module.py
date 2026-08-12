@@ -168,11 +168,44 @@ def test_the_migration_revokes_the_data_plane_role_from_every_table() -> None:
         assert f"REVOKE ALL ON mod_rel.{table} FROM app_user;" in source
 
 
-def test_the_migration_grants_only_platform_roles() -> None:
+def test_the_online_role_holds_no_privilege_that_can_rewrite_history() -> None:
+    """Where immutability is actually enforced.
+
+    `platform_api` is the request-path role. Granting it UPDATE or DELETE would
+    make "rows are never updated" a convention a service is trusted to keep,
+    which every raw SQL path and every future router is free to break. The live
+    canaries in `tests/test_release_catalog_immutability.py` prove the database
+    refuses; this proves the migration never asks.
+    """
     source = _migration_source()
     for table in module.tables:
-        for role in ("platform_api", "app_admin"):
-            assert f"ON mod_rel.{table} TO {role};" in source
+        assert f"GRANT SELECT, INSERT ON mod_rel.{table} TO platform_api;" in source
+    for verb in ("UPDATE", "DELETE"):
+        assert f"{verb} ON mod_rel.release_artifacts TO platform_api" not in source
+        assert f"{verb} ON mod_rel.artifact_attestations TO platform_api" not in source
+
+
+def test_the_offline_role_keeps_a_repair_path() -> None:
+    """Immutability must not mean unrepairable.
+
+    A mis-recorded artifact or a legally required erasure has to be possible by
+    someone; confining it to the role that already runs reviewed migrations is
+    what makes it deliberate rather than accidental.
+    """
+    source = _migration_source()
+    for table in module.tables:
+        assert (
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON mod_rel.{table} TO app_admin;"
+            in source
+        )
+
+
+def test_the_reference_cannot_drift_from_the_digest_in_raw_sql() -> None:
+    """`pinned_reference(expected=...)` proves this on the way in and is
+    stronger. The constraint exists for the path that never calls it."""
+    source = _migration_source()
+    assert "ck_release_artifacts_ref_pins_digest" in source
+    assert "artifact_ref LIKE '%@' || digest" in source
 
 
 def test_the_migration_fully_qualifies_every_object() -> None:
@@ -238,6 +271,33 @@ def test_the_module_imports_no_assembly_and_no_sibling_module() -> None:
                 assert not name.startswith(forbidden), f"{path.name}: {name}"
 
 
+def test_the_assembly_cannot_install_this_vendor_only_module() -> None:
+    """`app_user` being REVOKEd proves the tenant data plane cannot READ the
+    catalogue. It says nothing about INSTALLATION — this assembly is the
+    reference product data plane, and nothing stopped it importing the module
+    and mounting it. That gap is closed by an import-linter contract, and this
+    test fails if the contract is dropped."""
+    manifest = tomllib.loads(
+        (PACKAGE_ROOT.parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    contracts = manifest["tool"]["importlinter"]["contracts"]
+    wanted = "The assembly must not install vendor-only modules"
+    vendor_only = [c for c in contracts if c["name"] == wanted]
+    assert vendor_only, "the vendor-only installation contract is missing"
+    assert vendor_only[0]["source_modules"] == ["app"]
+    assert "dotmac_release_catalog" in vendor_only[0]["forbidden_modules"]
+
+
+def test_the_write_path_is_the_only_documented_entry_point() -> None:
+    """A model is constructible a dozen ways the class never sees. The service
+    is the seam, and it must not be joined by an update path the online role has
+    no privilege to perform."""
+    import dotmac_release_catalog as package
+
+    assert {"publish_artifact", "attest_artifact"} <= set(package.__all__)
+    assert not {"update_artifact", "delete_artifact"} & set(package.__all__)
+
+
 def test_the_extraction_dossier_records_a_greenfield_inventory() -> None:
     """Hard rule 24 was executed even though nothing qualified as a source. The
     dossier is the evidence that the inventory ran, not a step skipped because
@@ -253,3 +313,7 @@ def test_the_extraction_dossier_records_a_greenfield_inventory() -> None:
         "dotmac_vendor_control_plane",
     }
     assert dossier["contract_consumers"] == []
+    # ADR-0006's 2026-08-12 evidence ladder: zero adopters is exactly
+    # `audit-complete`, and one concrete candidate is enough to be a module.
+    assert dossier["status"] == "audit-complete"
+    assert len(dossier["candidate_consumers"]) >= 1

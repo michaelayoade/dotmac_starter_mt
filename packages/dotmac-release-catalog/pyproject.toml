@@ -28,9 +28,10 @@ python = ">=3.11,<3.14"
 # all — `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` —
 # so this is a hard floor rather than a preference.
 #
-# PLACEHOLDER until that kernel is released: the allocation currently exists
-# only on this branch. The pin is corrected to the real released version before
-# this package is submitted for review, per the no-path-dependencies rule.
+# 0.1.0a42 is the kernel version bumped IN THIS CHANGE, which is what carries
+# the allocation. It is a real floor, not a placeholder: no earlier kernel can
+# contain the row, so whether a41 exists in the private registry is irrelevant
+# to this dependency.
 dotmac-kernel = ">=0.1.0a42"
 sqlalchemy = "^2.0"
 

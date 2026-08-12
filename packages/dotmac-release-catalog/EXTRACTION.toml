@@ -40,7 +40,14 @@ preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_release_catalog_module.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_vendor_control_plane"]
+candidate_consumers = [
+  # ONE concrete candidate, and structurally there cannot be a second yet.
+  # ADR-0006's 2026-08-12 amendment exists because of this exact case: the
+  # tables REVOKE `app_user`, so a product data plane is disqualified as a
+  # consumer ON PURPOSE, and the second consumer arrives only with a second
+  # vendor or OEM control plane.
+  "dotmac_vendor_control_plane",
+]
 inventory_evidence = [
   "docs/inventories/fleet-decomposition-matrix.md",
   "docs/superpowers/plans/2026-08-12-vendor-cp-composable-parts.md",

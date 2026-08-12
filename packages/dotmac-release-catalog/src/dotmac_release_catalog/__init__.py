@@ -32,6 +32,14 @@ over a pin and a compatibility range — it belongs to the fleet part that reads
 this catalogue), the artifact bytes themselves, and any `is_current` flag, which
 is a mutable tag with a different spelling.
 
+## Writing
+
+`publish_artifact` and `attest_artifact` are the seam, and both route through
+the validators unconditionally. There is no `update_artifact`: the online
+`platform_api` role holds SELECT and INSERT only, so a published artifact cannot
+be rewritten from the request path at all. Correcting one is an offline
+`app_admin` migration under review — a different act, with a different trail.
+
 ## Where it may be installed
 
 Vendor and OEM control-plane assemblies only. Its tables are platform catalog
@@ -61,6 +69,11 @@ from dotmac_release_catalog.models import (
     ArtifactAttestation,
     ReleaseArtifact,
 )
+from dotmac_release_catalog.service import (
+    UnknownArtifactError,
+    attest_artifact,
+    publish_artifact,
+)
 from dotmac_release_catalog.vocabulary import (
     ARTIFACT_KINDS,
     ATTESTATION_KINDS,
@@ -82,8 +95,11 @@ __all__ = [
     "Digest",
     "DigestError",
     "ReleaseArtifact",
+    "UnknownArtifactError",
     "UnpinnedReferenceError",
     "__version__",
+    "attest_artifact",
     "module",
     "pinned_reference",
+    "publish_artifact",
 ]
