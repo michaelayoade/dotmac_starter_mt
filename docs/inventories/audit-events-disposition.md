@@ -2,7 +2,7 @@
 
 **As of:** 2026-08-12 · **Sub:** `638c7f8bb` (`origin/dev`) · **Kernel:** `0.1.0a41`
 **Gates:** kernel revision `0001_initial_tenant_schema`, which creates `audit_events`
-**Production measured:** `selfcare.dotmac.io`, read-only, 767,769 rows — see [Production](#production-measurement-767769-rows)
+**Production measured:** `selfcare.dotmac.io` 767,769 rows · `erp.dotmac.io` 696,553 rows — read-only, aggregates only
 **Status: audit R1 is designable.** Both blockers are closed — `is_active` by the
 production data, actor identity by an accepted kernel contract. The *complete*
 lineage remains gated by credentials and tenant-context/RLS, because kernel
@@ -236,14 +236,82 @@ One difference makes ERP's worse, not better: its route depends on
 `get_db_admin_bypass`, so the hiding runs on an admin-bypass session rather than
 an ordinary tenant-scoped one.
 
-**Sub's zero-usage result cannot be assumed for ERP.** ERP's `is_active`
-disposition needs its own aggregate-only measurement against an explicitly named
-ERP database before its endpoint and column are removed — the two products share
-an implementation, not a usage history.
+Sub's zero-usage result could not be assumed for ERP, so it was measured
+separately.
 
-Either way, the kernel conclusion is unchanged and does not depend on ERP's
-numbers: **mutable hiding stays out of the kernel audit contract.** ERP's count
-decides how ERP retires its own copy, not whether the kernel gains one.
+### ERP production measurement (696,553 rows)
+
+`erp.dotmac.io`, read-only, aggregates only, 2026-08-12.
+
+| `is_active` | rows |
+|---|---:|
+| `true` | **696,553** |
+| `false` | **0** |
+
+**ERP has also never redacted an audit row.** Both products can remove the
+endpoint and the column; each on its own evidence, now that both have it.
+
+| `actor_type` | rows | share |
+|---|---:|---:|
+| `system` | 649,855 | 93.29% |
+| `user` | 46,676 | 6.70% |
+| `service` | 22 | 0.003% |
+| `api_key` | **0** | — |
+
+**93.3% non-party actors**, against Sub's 97.7%. Two products, independently
+built, agree that the party-capable actor is a small minority. The contract is
+corroborated rather than accommodated.
+
+Better still, the enrichment model matches reality exactly:
+`actor_person_id` is populated on **46,676** rows — *precisely* the `user`
+count. ERP's person reference is populated if and only if the actor is a user,
+which is the "normalized Party when available" rule already implemented.
+(`actor_id` covers 46,699 — the users plus the 22 `service` rows.)
+
+### One divergence to fix in ERP, not to copy
+
+`actor_person_id` is declared `ForeignKey("people.id")`. That is the one place
+the fleet breaks the deletion-survival property: the kernel's `actor_party_id`
+and Sub's `actor_id` are both deliberately non-FK so an audit row outlives its
+actor, and ERP's FK means deleting a person is either blocked by, or cascades
+into, its audit history. **ERP should drop that FK to match the contract**; the
+kernel must not gain one.
+
+### What ERP reveals about Sub
+
+Same columns, same purpose, wildly different populations:
+
+| column | ERP | Sub |
+|---|---:|---:|
+| `request_id` | **89.2%** | **0.23%** |
+| `user_agent` | 99.93% | 23.4% |
+| `ip_address` | 99.997% | 96.6% |
+
+This reframes the earlier reading of Sub's `request_id` sparsity. It is not a
+property of the field — ERP populates it on nine rows in ten. **Sub's audit
+write path fails to populate `request_id` on almost every route**, which means
+request correlation is effectively unavailable in Sub's audit trail. That is a
+Sub product defect worth raising independently of this disposition, and the same
+pattern applies more mildly to `user_agent`.
+
+It also settles `status_code` from the other direction: ERP's 100% is *genuine*
+(the column has no default and the writer always supplies one), while Sub's 100%
+is an artifact of `default=200`. Two products disagree about whether the field is
+mandatory, which is exactly why the kernel column stays **nullable**.
+
+### A finding beyond audit
+
+`organization_id` — ERP's tenancy column — is populated on **46,689 rows,
+6.70%**. **93.3% of ERP's audit history has no organization at all.** That
+matters well beyond this table: it is a direct input to ERP's E8
+Organization→Tenant gate, since those rows cannot be tenant-scoped by backfill.
+Recorded here because the measurement surfaced it; it belongs to the tenancy
+decision, not to audit.
+
+### The kernel conclusion is unchanged
+
+It never depended on either product's numbers: **mutable hiding stays out of the
+kernel audit contract.** The counts decide how each product retires its own copy.
 
 ## Production measurement (767,769 rows)
 
@@ -328,10 +396,10 @@ Two readings:
   moving it into a JSON blob is a real loss, not a tidy-up.
 - **`request_id` is an exposed filter over an almost-empty column.** 0.23%
   populated. The filter works and is nearly useless in practice. It still gets
-  promoted (it is genuinely queryable and correlates a request across rows when
-  present), but the sparsity is worth knowing before anyone treats it as a
-  primary correlation key, and it suggests the write path populates it on only
-  one of several routes.
+  promoted (genuinely queryable, correlates a request across rows when present)
+  and must be nullable. **The sparsity is a Sub defect, not a property of the
+  field** — ERP populates the same column on 89.2% of its rows. See
+  [What ERP reveals about Sub](#what-erp-reveals-about-sub).
 
 ## What production could not answer
 
