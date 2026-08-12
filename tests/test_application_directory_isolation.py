@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -143,13 +144,12 @@ def _seed_two_tenants(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:
                         "INSERT INTO mod_appdir.application_bindings ("
                         "  id, tenant_id, application_code, instance_ref,"
                         "  local_tenant_ref, admin_url, api_audience,"
-                        "  descriptor_version, descriptor_digest,"
-                        "  role_catalogue_digest, state, source,"
-                        "  reconciliation_status"
+                        "  descriptor_version, descriptor_digest, state,"
+                        "  source, reconciliation_status"
                         ") VALUES ("
                         "  :id, :tenant_id, 'sub', :instance, 'local-ref',"
                         "  'https://sub.example.net/admin',"
-                        "  'https://sub.example.net/api', 1, :digest, :digest,"
+                        "  'https://sub.example.net/api', 1, :digest,"
                         "  'active', 'vendor_allocation', 'fresh'"
                         ")"
                     ),
@@ -304,13 +304,12 @@ def test_a_tenant_cannot_insert_a_binding_for_another_tenant(
                         "INSERT INTO mod_appdir.application_bindings ("
                         "  id, tenant_id, application_code, instance_ref,"
                         "  local_tenant_ref, admin_url, api_audience,"
-                        "  descriptor_version, descriptor_digest,"
-                        "  role_catalogue_digest, state, source,"
-                        "  reconciliation_status"
+                        "  descriptor_version, descriptor_digest, state,"
+                        "  source, reconciliation_status"
                         ") VALUES ("
                         "  :id, :tenant_id, 'erp', 'erp-1', 'local',"
                         "  'https://erp.example.net/admin',"
-                        "  'https://erp.example.net/api', 1, :digest, :digest,"
+                        "  'https://erp.example.net/api', 1, :digest,"
                         "  'active', 'customer_attached', 'fresh'"
                         ")"
                     ),
@@ -350,13 +349,12 @@ def _bind_one(db_url: str) -> tuple[uuid.UUID, uuid.UUID]:
                     "INSERT INTO mod_appdir.application_bindings ("
                     "  id, tenant_id, application_code, instance_ref,"
                     "  local_tenant_ref, admin_url, api_audience,"
-                    "  descriptor_version, descriptor_digest,"
-                    "  role_catalogue_digest, state, source,"
-                    "  reconciliation_status"
+                    "  descriptor_version, descriptor_digest, state,"
+                    "  source, reconciliation_status"
                     ") VALUES ("
                     "  :id, :tenant_id, 'sub', 'sub-1', 'local',"
                     "  :admin_url, 'https://sub.example.net/api', 1,"
-                    "  :digest, :digest, 'active', 'vendor_allocation', 'fresh'"
+                    "  :digest, 'active', 'vendor_allocation', 'fresh'"
                     ")"
                 ),
                 {
@@ -371,57 +369,76 @@ def _bind_one(db_url: str) -> tuple[uuid.UUID, uuid.UUID]:
     return tenant_id, binding_id
 
 
-def test_a_second_writer_blocks_until_the_first_commits(
+def _service_session(db_url: str):
+    """A real ORM session on the scratch database, for driving the service."""
+    from sqlalchemy.orm import Session as OrmSession
+
+    return OrmSession(bind=create_engine(db_url))
+
+
+def test_a_service_mutation_holds_the_row_lock(
     migrated_scratch: tuple[str, str],
 ) -> None:
-    """`FOR UPDATE` actually serialises two transactions on the same binding.
+    """The lock is proven THROUGH the public service, not beside it.
 
-    Without it, two reconcilers reading v1 concurrently — one observing v2, the
-    other v3 — both pass their version checks against the stale copy they hold,
-    and whichever commits last wins. A binding can then store v2 after v3, with
-    `descriptor_refreshed_at` attesting to a descriptor already replaced.
+    The first version of this canary issued its own literal `SELECT ... FOR
+    UPDATE` from both transactions, which proved only that PostgreSQL implements
+    row locks — deleting `with_for_update()` from the service would have left it
+    green. So transaction one now calls a public mutating operation and holds its
+    transaction open, and transaction two proves that call is what holds the lock.
     """
+    from dotmac_application_directory import BindingState, transition
+
     admin_url, _ = migrated_scratch
     tenant_id, binding_id = _bind_one(admin_url)
 
-    engine = create_engine(admin_url)
+    session = _service_session(admin_url)
+    probe = create_engine(admin_url).connect()
     try:
-        first = engine.connect()
-        second = engine.connect()
-        try:
-            first.execute(text("BEGIN"))
-            first.execute(
+        # The service call takes the lock and does NOT commit — the transaction
+        # belongs to the caller (hard rule 8).
+        transition(
+            session,
+            tenant_id=tenant_id,
+            binding_id=binding_id,
+            target=BindingState.SUSPENDED,
+        )
+
+        probe.execute(text("BEGIN"))
+        with pytest.raises(DBAPIError) as caught:
+            probe.execute(
                 text(
                     "SELECT id FROM mod_appdir.application_bindings "
-                    "WHERE tenant_id = :t AND id = :b FOR UPDATE"
+                    "WHERE tenant_id = :t AND id = :b FOR UPDATE NOWAIT"
                 ),
                 {"t": tenant_id, "b": binding_id},
             )
+        assert "could not obtain lock" in str(caught.value).lower(), (
+            "the service mutation did not hold a row lock — has "
+            "`with_for_update()` been removed from `_load`?"
+        )
+        probe.execute(text("ROLLBACK"))
 
-            # The second writer must not be able to take the same lock while the
-            # first holds it. NOWAIT turns "would block" into an immediate,
-            # assertable error instead of a hung test.
-            second.execute(text("BEGIN"))
-            with pytest.raises(DBAPIError) as caught:
-                second.execute(
-                    text(
-                        "SELECT id FROM mod_appdir.application_bindings "
-                        "WHERE tenant_id = :t AND id = :b FOR UPDATE NOWAIT"
-                    ),
-                    {"t": tenant_id, "b": binding_id},
-                )
-            assert "could not obtain lock" in str(caught.value).lower()
-
-            second.execute(text("ROLLBACK"))
-            first.execute(text("ROLLBACK"))
-        finally:
-            first.close()
-            second.close()
+        # Negative control: once the service's transaction ends, the lock is
+        # gone. Without this the test would also pass against a permanently
+        # wedged row, which is not the property being claimed.
+        session.rollback()
+        session.close()
+        probe.execute(text("BEGIN"))
+        probe.execute(
+            text(
+                "SELECT id FROM mod_appdir.application_bindings "
+                "WHERE tenant_id = :t AND id = :b FOR UPDATE NOWAIT"
+            ),
+            {"t": tenant_id, "b": binding_id},
+        )
+        probe.execute(text("ROLLBACK"))
     finally:
-        engine.dispose()
+        session.close()
+        probe.close()
 
 
-def test_a_different_binding_is_not_blocked(
+def test_a_service_mutation_does_not_lock_a_different_binding(
     migrated_scratch: tuple[str, str],
 ) -> None:
     """The lock is per binding, not a table-wide bottleneck.
@@ -429,59 +446,113 @@ def test_a_different_binding_is_not_blocked(
     A guard that serialised every tenant's reconciliation would be correct and
     unusable; asserting the negative keeps the fix honest about its cost.
     """
+    from dotmac_application_directory import BindingState, transition
+
     admin_url, _ = migrated_scratch
     tenant_id, first_binding = _bind_one(admin_url)
 
     second_binding = uuid.uuid4()
     engine = create_engine(admin_url)
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO mod_appdir.application_bindings ("
-                    "  id, tenant_id, application_code, instance_ref,"
-                    "  local_tenant_ref, admin_url, api_audience,"
-                    "  descriptor_version, descriptor_digest,"
-                    "  role_catalogue_digest, state, source,"
-                    "  reconciliation_status"
-                    ") VALUES ("
-                    "  :id, :tenant_id, 'erp', 'erp-1', 'local',"
-                    "  'https://erp.example.net/admin',"
-                    "  'https://erp.example.net/api', 1, :digest, :digest,"
-                    "  'active', 'vendor_allocation', 'fresh'"
-                    ")"
-                ),
-                {
-                    "id": second_binding,
-                    "tenant_id": tenant_id,
-                    "digest": f"sha256:{'0' * 64}",
-                },
-            )
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO mod_appdir.application_bindings ("
+                "  id, tenant_id, application_code, instance_ref,"
+                "  local_tenant_ref, admin_url, api_audience,"
+                "  descriptor_version, descriptor_digest, state,"
+                "  source, reconciliation_status"
+                ") VALUES ("
+                "  :id, :tenant_id, 'erp', 'erp-1', 'local',"
+                "  'https://erp.example.net/admin',"
+                "  'https://erp.example.net/api', 1, :digest,"
+                "  'active', 'vendor_allocation', 'fresh'"
+                ")"
+            ),
+            {
+                "id": second_binding,
+                "tenant_id": tenant_id,
+                "digest": f"sha256:{'0' * 64}",
+            },
+        )
 
-        first = engine.connect()
-        second = engine.connect()
-        try:
-            first.execute(text("BEGIN"))
-            first.execute(
-                text(
-                    "SELECT id FROM mod_appdir.application_bindings "
-                    "WHERE tenant_id = :t AND id = :b FOR UPDATE"
-                ),
-                {"t": tenant_id, "b": first_binding},
-            )
-            second.execute(text("BEGIN"))
-            # Must succeed: a different row.
-            second.execute(
-                text(
-                    "SELECT id FROM mod_appdir.application_bindings "
-                    "WHERE tenant_id = :t AND id = :b FOR UPDATE NOWAIT"
-                ),
-                {"t": tenant_id, "b": second_binding},
-            )
-            second.execute(text("ROLLBACK"))
-            first.execute(text("ROLLBACK"))
-        finally:
-            first.close()
-            second.close()
+    session = _service_session(admin_url)
+    probe = engine.connect()
+    try:
+        transition(
+            session,
+            tenant_id=tenant_id,
+            binding_id=first_binding,
+            target=BindingState.SUSPENDED,
+        )
+        probe.execute(text("BEGIN"))
+        # Must succeed: a different row.
+        probe.execute(
+            text(
+                "SELECT id FROM mod_appdir.application_bindings "
+                "WHERE tenant_id = :t AND id = :b FOR UPDATE NOWAIT"
+            ),
+            {"t": tenant_id, "b": second_binding},
+        )
+        probe.execute(text("ROLLBACK"))
     finally:
+        session.rollback()
+        session.close()
+        probe.close()
         engine.dispose()
+
+
+def test_identity_refusal_survives_commit_and_reload(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """A refused reconciliation leaves NOTHING written — proven across a commit.
+
+    The earlier defect was invisible in memory: reconciliation assigned
+    `local_tenant_ref` from the observed descriptor and only then raised, so a
+    caller that caught the error and committed persisted another tenant's
+    reference. Asserting on the in-memory object would have passed; this reloads
+    from the database in a fresh session.
+    """
+    from dotmac_application_directory import (
+        ApplicationDescriptor,
+        DirectoryError,
+        get_binding,
+        reconcile_descriptor,
+    )
+
+    admin_url, _ = migrated_scratch
+    tenant_id, binding_id = _bind_one(admin_url)
+
+    hostile = ApplicationDescriptor(
+        application_code="sub",
+        instance_ref="sub-1",
+        # A NEW version, so version and digest checks both pass — only the
+        # identity assertion catches this.
+        local_tenant_ref="another-tenant",
+        admin_url="https://sub.example.net/admin",
+        api_audience="https://sub.example.net/api",
+        descriptor_version=2,
+    )
+
+    session = _service_session(admin_url)
+    try:
+        with pytest.raises(DirectoryError, match="immutable"):
+            reconcile_descriptor(
+                session,
+                tenant_id=tenant_id,
+                binding_id=binding_id,
+                observed=hostile,
+                now=datetime(2026, 8, 12, tzinfo=UTC),
+            )
+        # The caller commits anyway — the refusal must have written nothing.
+        session.commit()
+    finally:
+        session.close()
+
+    fresh = _service_session(admin_url)
+    try:
+        reloaded = get_binding(fresh, tenant_id=tenant_id, binding_id=binding_id)
+        assert reloaded.local_tenant_ref == "local"
+        assert reloaded.descriptor_version == 1
+        assert reloaded.state == "active"
+    finally:
+        fresh.close()

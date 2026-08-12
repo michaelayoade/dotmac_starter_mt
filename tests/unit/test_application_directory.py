@@ -15,7 +15,6 @@ import pytest
 from dotmac_application_directory import (
     ActivationRefused,
     ApplicationDescriptor,
-    ApplicationRole,
     BindingLifecycleError,
     BindingSource,
     BindingState,
@@ -51,10 +50,6 @@ def _descriptor(**overrides) -> ApplicationDescriptor:
         "admin_url": "https://sub.example.net/admin",
         "api_audience": "https://sub.example.net/api",
         "descriptor_version": 1,
-        "roles": (
-            ApplicationRole("support.agent", "Support agent", delegable=True),
-            ApplicationRole("owner", "Account owner"),
-        ),
     }
     return ApplicationDescriptor(**{**base, **overrides})
 
@@ -66,69 +61,34 @@ def test_a_descriptor_digest_is_deterministic() -> None:
     assert _descriptor().digest == _descriptor().digest
 
 
-def test_role_order_does_not_change_the_catalogue_digest() -> None:
-    """Two applications listing the same roles in different orders agree.
+def test_any_field_change_moves_the_digest() -> None:
+    """The digest is the drift signal, so every identity-or-content field has to
+    reach it. A field silently outside the digest is drift nobody detects."""
+    base = _descriptor().digest
+    for change in (
+        {"admin_url": "https://sub2.example.net/admin"},
+        {"api_audience": "https://sub2.example.net/api"},
+        {"local_tenant_ref": "other"},
+        {"descriptor_version": 2},
+        {"instance_ref": "sub-abuja-1"},
+        {"application_code": "erp"},
+    ):
+        assert _descriptor(**change).digest != base, change
 
-    Without this, a target application that reorders its catalogue for display
-    would look to the Workspace like it had changed its roles.
+
+def test_the_module_ships_no_role_catalogue_surface() -> None:
+    """Deferred from 0.1.0a1: nothing consumes it.
+
+    The access module that would is deferred, and the launcher never reads a
+    role. Shipping it would publish a contract — and a database column — designed
+    against zero consumers. Asserting the absence so it cannot creep back without
+    a consumer arriving with it.
     """
-    forward = _descriptor(
-        roles=(
-            ApplicationRole("a.one", "One", delegable=True),
-            ApplicationRole("b.two", "Two"),
-        )
-    )
-    reverse = _descriptor(
-        roles=(
-            ApplicationRole("b.two", "Two"),
-            ApplicationRole("a.one", "One", delegable=True),
-        )
-    )
-    assert forward.role_catalogue_digest == reverse.role_catalogue_digest
-    assert forward.digest == reverse.digest
+    import dotmac_application_directory as package
 
-
-def test_the_two_digests_answer_different_questions() -> None:
-    """A moved admin URL changes the descriptor digest and not the catalogue's.
-
-    That is the whole reason there are two: an allocation authored against the
-    role catalogue does not need re-issuing because someone changed a hostname.
-    """
-    original = _descriptor()
-    moved = _descriptor(admin_url="https://sub2.example.net/admin")
-    assert moved.role_catalogue_digest == original.role_catalogue_digest
-    assert moved.digest != original.digest
-
-
-def test_changing_a_role_changes_both_digests() -> None:
-    original = _descriptor()
-    widened = _descriptor(
-        roles=(
-            ApplicationRole("support.agent", "Support agent", delegable=True),
-            # The application newly permits delegation of `owner`.
-            ApplicationRole("owner", "Account owner", delegable=True),
-        )
-    )
-    assert widened.role_catalogue_digest != original.role_catalogue_digest
-    assert widened.digest != original.digest
-
-
-def test_the_catalogue_and_descriptor_domains_are_separated() -> None:
-    """An empty catalogue's digest is not the empty descriptor's digest.
-
-    Domain separation, so a digest computed over one kind of payload can never
-    be presented as a digest of the other.
-    """
-    empty = _descriptor(roles=())
-    assert empty.role_catalogue_digest != empty.digest
-
-
-def test_only_delegable_roles_are_requestable() -> None:
-    """`delegable` is the APPLICATION's statement, and defaults to False.
-
-    A catalogue that has not thought about delegation delegates nothing.
-    """
-    assert _descriptor().delegable_role_codes == frozenset({"support.agent"})
+    for absent in ("ApplicationRole", "delegable_role_codes"):
+        assert not hasattr(package, absent), absent
+    assert not hasattr(_descriptor(), "role_catalogue_digest")
 
 
 @pytest.mark.parametrize(
@@ -141,12 +101,6 @@ def test_only_delegable_roles_are_requestable() -> None:
         {"descriptor_version": 0},
         {"admin_url": "sub.example.net/admin"},  # no scheme
         {"admin_url": "ftp://sub.example.net"},  # wrong scheme
-        {
-            "roles": (
-                ApplicationRole("dup", "One"),
-                ApplicationRole("dup", "Two"),
-            )
-        },
     ],
 )
 def test_an_invalid_descriptor_fails_closed_at_construction(overrides) -> None:
@@ -300,19 +254,12 @@ def test_activation_is_refused_when_the_descriptor_is_not_adopted(
 def test_activation_is_refused_when_the_application_names_another_tenant(
     db: Session, tenant_row: Tenant
 ) -> None:
-    """A descriptor for a different local tenant is proof of a different
-    binding.
+    """A descriptor for a different local tenant is proof of a different binding.
 
-    The version is bumped deliberately. At the SAME version a changed
-    `local_tenant_ref` changes the digest, so reconciliation refuses it as a
-    content conflict and activation never reaches the tenant check. The tenant
-    check is reachable exactly when the application publishes a NEW version that
-    names a different local tenant — which reconciliation adopts, and which
-    activation must still refuse.
-
-    Compared against the value captured before reconciling: adopting rewrites
-    `local_tenant_ref`, so a post-reconcile comparison would compare it to
-    itself.
+    The version is bumped deliberately, because that is the dangerous shape: a
+    genuine version bump carrying a changed local tenant passes both the version
+    and digest checks. Only the identity assertion catches it, and it must fire
+    BEFORE anything is written.
     """
     binding = _attached(db, tenant_row)
     with pytest.raises(ActivationRefused, match="local tenant"):
@@ -523,3 +470,45 @@ def test_every_mutation_takes_ids_rather_than_a_loaded_row(
         assert "binding_id" in parameters, name
         assert "tenant_id" in parameters, name
         assert "binding" not in parameters, name
+
+
+def test_reconciliation_never_rewrites_binding_identity(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The defect: an ACTIVE binding adopting a descriptor for another tenant.
+
+    Ordinary reconciliation had no tenant-reference check at all, so a live
+    binding could adopt a newer descriptor naming a different local tenant and
+    stay launchable — silently re-pointing a tenant administrator's tile at
+    another tenant's instance inside the same application. Version and digest
+    checks cannot catch it; a genuine version bump passes both.
+    """
+    binding = _live(db, tenant_row)
+    with pytest.raises(DirectoryError, match="immutable"):
+        _reconcile(
+            db,
+            tenant_row,
+            binding,
+            _descriptor(descriptor_version=2, local_tenant_ref="another-tenant"),
+        )
+    assert binding.local_tenant_ref == "local-9f2c"
+    assert binding.descriptor_version == 1
+    assert binding.state == BindingState.ACTIVE
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"application_code": "erp"},
+        {"instance_ref": "sub-abuja-1"},
+        {"local_tenant_ref": "another-tenant"},
+    ],
+)
+def test_all_three_identity_fields_are_immutable(
+    db: Session, tenant_row: Tenant, change: dict
+) -> None:
+    """`(application_code, instance_ref, local_tenant_ref)` is binding identity."""
+    binding = _live(db, tenant_row)
+    with pytest.raises(DirectoryError):
+        _reconcile(db, tenant_row, binding, _descriptor(descriptor_version=2, **change))
+    assert binding.descriptor_version == 1

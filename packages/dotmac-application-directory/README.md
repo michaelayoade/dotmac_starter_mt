@@ -30,7 +30,7 @@ signed-document mechanism exists in the kernel.
 
 | | |
 |---|---|
-| `ApplicationDescriptor` | what an application publishes about one instance: code, instance, local tenant ref, admin URL, API audience, version, role catalogue, and two digests |
+| `ApplicationDescriptor` | what an application publishes about one instance: code, instance, local tenant ref, admin URL, API audience, version, and one content digest |
 | `ApplicationBinding` | one row per connected instance, in `mod_appdir` |
 | `BindingState` | `invited → pending_verification → active ⇄ suspended`, `detached` terminal |
 | `BindingSource` | `vendor_allocation`, `oem_allocation`, `customer_attached` — provenance, never authority |
@@ -48,7 +48,7 @@ concept-to-owner table.
 
 ```python
 from dotmac_application_directory import (
-    ApplicationDescriptor, ApplicationRole, BindingSource, BindingState,
+    ApplicationDescriptor, BindingSource, BindingState,
     activate_binding, attach_application, launchable_bindings,
     reconcile_descriptor, transition,
 )
@@ -60,13 +60,6 @@ descriptor = ApplicationDescriptor(
     admin_url="https://sub.example.net/admin",
     api_audience="https://sub.example.net/api",
     descriptor_version=1,
-    roles=(
-        ApplicationRole("support.agent", "Support agent", delegable=True),
-        ApplicationRole("billing.admin", "Billing administrator", delegable=True),
-        # Not delegable: the application declines to let a Workspace
-        # administrator ever request it.
-        ApplicationRole("owner", "Account owner"),
-    ),
 )
 
 # Always created INVITED and unverified. There is no `state` argument.
@@ -106,6 +99,27 @@ the observed descriptor:
 
 A failed read never moves `descriptor_refreshed_at`, so an unreachable
 application cannot look freshly checked.
+
+## Binding identity is immutable
+
+`(tenant_id, application_code, instance_ref, local_tenant_ref)` identifies the
+binding, and reconciliation never rewrites any of it. A descriptor disagreeing on
+any of the three application-side values is refused — `DirectoryError`, raised
+**before** anything is written — because it describes a different instance, not a
+newer version of this one.
+
+`local_tenant_ref` is the load-bearing member. Without it, a live binding could
+adopt a newer descriptor naming a different local tenant and stay launchable,
+silently re-pointing a tenant administrator's tile at another tenant's instance
+inside the same application. Version and digest checks cannot catch that: a
+genuine version bump carrying a changed local tenant passes both.
+
+## No role catalogue in 0.1.0a1
+
+`ApplicationRole`, `delegable_role_codes` and a separate role-catalogue digest
+are deferred: nothing consumes them. The access module that would is deferred by
+ADR-0021 §5, and the launcher never reads a role. They return with that slice,
+designed against its real needs rather than guessed ahead of them.
 
 ## ACTIVE carries proof, and mutations lock the row
 

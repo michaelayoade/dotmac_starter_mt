@@ -4,6 +4,15 @@
 per application instance the tenant has, carrying the descriptor copy, the
 lifecycle state, the provenance and the reconciliation state.
 
+## Identity is immutable
+
+`(tenant_id, application_code, instance_ref, local_tenant_ref)` identifies the
+binding, and reconciliation never rewrites any of it. A descriptor that disagrees
+on any of the three application-side values is not a newer version of THIS
+binding — it describes a different one, and adopting it would silently re-point a
+launchable tile at another tenant's instance. The service refuses before it
+mutates; see its `_assert_describes`.
+
 ## The column that is not here
 
 There is **no** column naming a person, a member, a group, a role, a grant or a
@@ -21,8 +30,8 @@ the target application and to nothing else.
 
 ## Why the descriptor is copied rather than referenced
 
-The binding stores `descriptor_version`, `descriptor_digest` and
-`role_catalogue_digest` — a copy of what the application last said about itself.
+The binding stores `descriptor_version` and `descriptor_digest` — a copy of what
+the application last said about itself.
 A reference would mean the Workspace could not answer "what did we believe, and
 when" without reaching the application, which is exactly what it cannot do when
 the application is unreachable. The copy is a cache with one canonical writer
@@ -118,13 +127,6 @@ class ApplicationBinding(Base, TimestampMixin):
     api_audience: Mapped[str] = mapped_column(String(200), nullable=False)
     descriptor_version: Mapped[int] = mapped_column(Integer, nullable=False)
     descriptor_digest: Mapped[str] = mapped_column(
-        String(_DIGEST_LENGTH), nullable=False
-    )
-    #: Stored alongside the whole-descriptor digest because they answer
-    #: different questions — see `descriptor.py`. A binding whose
-    #: `descriptor_digest` moved but whose `role_catalogue_digest` did not has
-    #: had its admin URL or audience change, and no allocation needs re-issuing.
-    role_catalogue_digest: Mapped[str] = mapped_column(
         String(_DIGEST_LENGTH), nullable=False
     )
 
