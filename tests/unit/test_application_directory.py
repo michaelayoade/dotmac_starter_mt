@@ -262,7 +262,7 @@ def test_activation_is_refused_when_the_application_names_another_tenant(
     BEFORE anything is written.
     """
     binding = _attached(db, tenant_row)
-    with pytest.raises(ActivationRefused, match="local tenant"):
+    with pytest.raises(DirectoryError, match="immutable"):
         activate_binding(
             db,
             tenant_id=tenant_row.id,
@@ -271,6 +271,9 @@ def test_activation_is_refused_when_the_application_names_another_tenant(
             now=NOW,
         )
     assert binding.state == BindingState.INVITED
+    # Nothing was written before the refusal — the defect this closes.
+    assert binding.local_tenant_ref == "local-9f2c"
+    assert binding.descriptor_version == 1
 
 
 def test_a_detached_binding_cannot_be_reactivated(
