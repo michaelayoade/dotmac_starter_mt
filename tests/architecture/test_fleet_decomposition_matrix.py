@@ -23,7 +23,12 @@ MATRIX = INVENTORIES / "fleet-decomposition-matrix.md"
 BASELINE = INVENTORIES / "fleet-decomposition-baseline.json"
 VISION = PROJECT_ROOT / "docs" / "PRODUCT_VISION.md"
 
-REPOS = ("dotmac_erp", "dotmac_crm", "dotmac_sub")
+# Column order in the doc's family table. The vendor control plane is measured
+# for a different reason than the three it follows — it is a consumer assembly,
+# not a monolith being decomposed — so the two sets are named separately and
+# nothing here may quietly mean "all four" when it means "the monoliths".
+REPOS = ("dotmac_erp", "dotmac_crm", "dotmac_sub", "dotmac_vendor_control_plane")
+SOURCE_MONOLITHS = ("dotmac_erp", "dotmac_crm", "dotmac_sub")
 
 # The columns PRODUCT_VISION § 2 requires the matrix to record.
 REQUIRED_COLUMNS = (
@@ -71,13 +76,14 @@ def _baseline() -> dict:
 
 
 def _family_rows(source: str) -> dict[str, tuple[int, ...]]:
-    """Every `| family | erp | crm | sub | exact | alias | disposition |` row."""
+    """`| family | erp | crm | sub | vendor | exact | alias | disposition |` rows."""
+    columns = len(REPOS) + 2
     pattern = re.compile(
-        r"^\|\s*([a-z][a-z-]+)\s*\|" + r"\s*(\d+)\s*\|" * 5 + r"[^|]*\|\s*$",
+        r"^\|\s*([a-z][a-z-]+)\s*\|" + r"\s*(\d+)\s*\|" * columns + r"[^|]*\|\s*$",
         re.MULTILINE,
     )
     return {
-        m.group(1): tuple(int(m.group(i)) for i in range(2, 7))
+        m.group(1): tuple(int(m.group(i)) for i in range(2, columns + 2))
         for m in pattern.finditer(source)
     }
 
@@ -117,7 +123,7 @@ def test_matrix_measures_progress_by_adoption_not_duplicate_counts() -> None:
 
 def _disposition_cells(source: str) -> list[str]:
     return re.findall(
-        r"^\|\s*[a-z][a-z-]+\s*\|(?:\s*\d+\s*\|){5}([^|]*)\|\s*$",
+        r"^\|\s*[a-z][a-z-]+\s*\|(?:\s*\d+\s*\|){%d}([^|]*)\|\s*$" % (len(REPOS) + 2),
         source,
         re.MULTILINE,
     )
@@ -204,22 +210,59 @@ def test_headline_totals_match_the_frozen_baseline() -> None:
         ), f"{repo} total {total} not in the table"
 
 
-def test_baseline_covers_all_three_source_monoliths() -> None:
+def test_baseline_covers_every_measured_repository() -> None:
     """A baseline measured with a repo missing would freeze its duplication at 0."""
     baseline = _baseline()
     assert sorted(baseline["repos_measured"]) == sorted(REPOS)
     assert all(total > 0 for total in baseline["totals"].values())
+    assert set(SOURCE_MONOLITHS) <= set(baseline["repos_measured"])
+
+
+def test_the_fourth_repository_is_not_presented_as_a_fourth_monolith() -> None:
+    """The vendor CP is a consumer assembly; the matrix must say so.
+
+    Adding a column is the easy half. The failure mode is a reader taking the
+    fourth column to mean "a fourth monolith to de-duplicate", which would make
+    its 22 tables look like debt to retire rather than a build-once source and a
+    set of capabilities nothing in the fleet implements.
+    """
+    normalized = " ".join(MATRIX.read_text().lower().split())
+    assert "not a fourth monolith" in normalized
+    assert "consumer" in normalized
+
+
+def test_capability_gaps_are_recorded_separately_from_measured_families() -> None:
+    """A family table cannot say "nobody built this".
+
+    A capability implemented in no repository produces no `__tablename__`, so it
+    can never appear as a measured row — it would silently read as out of scope.
+    The gaps therefore get their own section, and it must name every one of them.
+    """
+    normalized = " ".join(MATRIX.read_text().lower().split())
+    assert "capability gaps" in normalized
+    for capability in (
+        "release catalogue",
+        "fleet desired state",
+        "resumable run engine",
+        "support access",
+        "observed health",
+        "update authority",
+    ):
+        assert capability in normalized, capability
 
 
 def test_family_row_detector_is_sensitive() -> None:
     """A wrong number in the doc must fail, not be skipped as an unparsed row."""
     parsed = _family_rows(
-        "| ticketing-sla | 6 | 17 | 22 | 10 | 6 | module |\n"
-        "| projects-tasks | 10 | 11 | 11 | 10 | 0 | module candidate |\n"
-        "| not-a-row | many | 17 | 22 | 10 | 6 | module |\n"
+        "| ticketing-sla | 6 | 17 | 22 | 0 | 10 | 6 | module |\n"
+        "| projects-tasks | 10 | 11 | 11 | 0 | 10 | 0 | module candidate |\n"
+        "| not-a-row | many | 17 | 22 | 0 | 10 | 6 | module |\n"
+        # A row that still carries the pre-vendor column count is stale, not a
+        # row with a missing number, and must not parse as if it were current.
+        "| stale-shape | 6 | 17 | 22 | 10 | 6 | module |\n"
     )
 
     assert parsed == {
-        "ticketing-sla": (6, 17, 22, 10, 6),
-        "projects-tasks": (10, 11, 11, 10, 0),
+        "ticketing-sla": (6, 17, 22, 0, 10, 6),
+        "projects-tasks": (10, 11, 11, 0, 10, 0),
     }
