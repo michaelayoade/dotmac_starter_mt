@@ -842,6 +842,61 @@ PERMANENT failure is `bounced`. A soft bounce recorded as `bounced` permanently
 stops that customer's invoices, and the kernel cannot classify the difference
 because every provider spells it differently.
 
+### Decision amendment — 2026-08-12 (a second consumer is evidence, not permission)
+
+Section 5 point 1 requires "two independent consumers of the same CONTRACT" as a
+condition of extraction, and the 2026-08-08 amendment's point 4 requires a
+dossier naming "two contract consumers". Read as written, both make two
+consumers a **prerequisite for sharing at all**.
+
+That is now amended, following an owner ruling on 2026-08-12:
+
+> A second consumer proves reuse and constrains generalisation; it does **not**
+> determine whether a coherent capability belongs in a module.
+
+The contradiction was found by a build rather than a reading. The release
+catalogue is a vendor-side capability whose tables REVOKE `app_user` — a product
+data plane is disqualified as a consumer **on purpose**, because it must learn
+which artifact to run from a signed licence or a deployment plan rather than by
+reading the vendor's catalogue. Its second consumer cannot exist until a second
+vendor or OEM control plane does. The same holds for the fleet, fleet-health,
+support-access and licence-issuance units. A rule requiring two consumers before
+sharing does not delay those modules; it forbids them, and pushes the capability
+back into the single assembly this programme exists to thin.
+
+**Three dossier states replace the two-state model. All three permit a shared
+module.** The state records the evidence level, never the placement permission:
+
+| State | Means | Requires |
+|---|---|---|
+| `audit-complete` | The inventory ran and the unit was drawn deliberately. Nothing has adopted it. | An audited `source_mode`, **at least one concrete** candidate consumer, and **zero** contract consumers. |
+| `adopted` | One real consumer is on the contract and its first cutover is complete. | An audited `source_mode` and **exactly one** contract consumer. |
+| `reuse-proven` | Two or more independent consumers exercise the same contract. | An audited `source_mode` and **two or more** contract consumers. |
+
+`approved` becomes `reuse-proven`. The old name described a permission, which is
+precisely what the state no longer grants; keeping it would leave the amended
+rule readable as the rule it replaces. Grandfathered pre-rule packages keep
+their separate, exact debt map — ADR-0018 requires "grandfathered" to stay
+distinguishable from "reviewed and correct", and adding a third correct state
+does not change that.
+
+**Why the candidate count is lowered to one rather than dropped.** A dossier with
+no named candidate is a package built for nobody, which is the speculative
+extraction section 5 exists to stop. One *concrete* candidate — an assembly that
+exists and will consume it — is the smallest claim that still carries evidence.
+Two remain required to reach `reuse-proven`.
+
+**Why `adopted` is a distinct state, not a loosened `audit-complete`.** The
+two-state model let a package with one live consumer keep describing itself as
+"nothing has adopted it yet". That is a false statement about the fleet, and it
+hides the transition ADR-0017 calls the scarce resource — the first cutover.
+Splitting the state surfaces the first adoption in the dossier the moment it
+happens, and makes a package that has a consumer while claiming none a build
+failure rather than a stale comment.
+
+The ratchet holds in both directions: a package may not sit in a state weaker
+than its evidence supports (one consumer forces `adopted`, two force
+`reuse-proven`), and may not claim a state stronger than its consumers prove.
 
 ## Consequences
 
