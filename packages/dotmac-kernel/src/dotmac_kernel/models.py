@@ -1,11 +1,12 @@
 """Declarative base + shared mixins + core cross-cutting models.
 
 `Tenant`, `TenantDomain`, `Party` (+ subtype tables `PartyPerson`/
-`PartyOrganization`), `Role`, `PartyRole`, and `AuthSession` live here — not
-under `app/features/*` — because core code needs them directly:
-`dotmac_kernel.deps` (the `require_*` route guards) queries `Party`, `AuthSession`,
-`Role`, and `PartyRole`, and `dotmac_kernel.middleware.tenant` (the tenant resolver)
-queries `Tenant`/`TenantDomain`. Core must not import features (import-linter
+`PartyOrganization`), `Role`, `PartyRoleGrant`, and `AuthSession` live here —
+not under `app/features/*` — because core code needs them directly:
+`dotmac_kernel.deps` (the `require_*` route guards) queries `Party`,
+`AuthSession`, `Role`, and `PartyRoleGrant`, and
+`dotmac_kernel.middleware.tenant` (the tenant resolver) queries
+`Tenant`/`TenantDomain`. Core must not import features (import-linter
 enforces this), so these identity/tenancy primitives — genuinely cross-cutting,
 same rationale as `dotmac_kernel.audit.AuditEvent` — live in core instead.
 
@@ -258,23 +259,35 @@ class Role(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
 
 
-class PartyRole(Base, TimestampMixin):
-    __tablename__ = "party_roles"
+class PartyRoleGrant(Base, TimestampMixin):
+    """An RBAC grant: this party holds this `Role` (a permission bundle).
+
+    NOT the Party archetype's "PartyRole", which is a concurrent, temporal
+    business capacity — customer, reseller, staff. ADR-0019 reserves the name
+    `party_roles` for that concept fleet-wide. This table answers "what may they
+    do", which the archetype attaches to a capacity rather than being one.
+
+    Renamed from the former "PartyRole"/`party_roles` by kernel migration
+    `0022_party_role_grants`. No compatibility alias is exported, deliberately:
+    an alias would preserve exactly the ambiguity ADR-0019 removes.
+    """
+
+    __tablename__ = "party_role_grants"
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "party_id", "role_id", name="uq_party_roles_member"
+            "tenant_id", "party_id", "role_id", name="uq_party_role_grants_member"
         ),
         ForeignKeyConstraint(
             ["tenant_id", "party_id"],
             ["parties.tenant_id", "parties.id"],
             ondelete="CASCADE",
-            name="fk_party_roles_tenant_party",
+            name="fk_party_role_grants_tenant_party",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "role_id"],
             ["roles.tenant_id", "roles.id"],
             ondelete="CASCADE",
-            name="fk_party_roles_tenant_role",
+            name="fk_party_role_grants_tenant_role",
         ),
     )
 
@@ -371,7 +384,7 @@ __all__ = [
     "Party",
     "PartyOrganization",
     "PartyPerson",
-    "PartyRole",
+    "PartyRoleGrant",
     "PartyType",
     "Role",
     "Tenant",

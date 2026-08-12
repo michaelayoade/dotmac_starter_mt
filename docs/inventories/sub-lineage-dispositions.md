@@ -230,9 +230,134 @@ the lineage is a chain and every collision above sits at revisions `0001`–`000
 - **1 is a two-column reconciliation** (Group D)
 - **5 need a union, of which 2 need a real decision first** (Group E)
 
+> **Read the next section before planning from this list.** Grouping by
+> difficulty is not the order the work can land in: five of the ten collisions —
+> including both tables that need a decision — are inside revision `0001`, which
+> applies atomically and is the lineage root. See "Where the gate actually sits".
+
 `idempotency_records` is confirmed present at kernel head — `0018` renames
 `inbox_records` into it — and confirmed NOT to collide, since Sub's table is
 `idempotency_keys`.
+
+## Where the gate actually sits: revision `0001` is the atomic unit
+
+**Added 2026-08-12.** The grouping above is right about the *tables* and
+misleading about the *order*. It reads as though the four no-design tables could
+land first and move `EXPECTED_FIRST_FAILURE` forward while the five unions are
+designed. They cannot. Grouping by difficulty hid the fact that difficulty is
+not how the lineage is packaged — revisions are.
+
+**Five of the ten collisions are created inside revision `0001` alone:**
+
+| collision | created in | group above |
+|---|---|---|
+| `tenants` | `0001` | A — stamp |
+| `tenant_domains` | `0001` | A — stamp |
+| `roles` | `0001` | E — union |
+| `user_credentials` | `0001` (dropped + recreated with `party_id` in `0003`) | E — union, **needs a decision** |
+| `audit_events` | `0001` | E — union, **needs a decision** |
+
+The remaining five sit later: `domain_settings` (`0002`), `parties` and
+`party_roles` (`0003`), `domain_setting_history` (`0017`), and
+`communication_suppressions` (`0019`).
+
+Alembic applies a revision atomically, and `0001` is the lineage root — nothing
+can be inserted before it. So the first movement of `EXPECTED_FIRST_FAILURE`
+requires all five above to be dispositioned in one change, and that set contains
+**both** of the two tables this document already flagged as needing a real
+decision before a union can be planned. There is no cheap first slice on this
+workstream. `auth_sessions` does not collide: Sub's table is `sessions`.
+
+### `0001` does four things beyond creating tables
+
+`upgrade()` is `_ensure_roles()`, seven `create_table` calls, then
+`_create_current_tenant_function()`, `_apply_rls()`, `_grant_roles()`. Every one
+of the last four has to be adopt-aware too, and the third is the dangerous one.
+
+**`_apply_rls()` is the real blocker, and it is a fail-silent one.** It runs, for
+`people`, `user_credentials`, `auth_sessions`, `roles`, `person_roles` and
+`audit_events`:
+
+```
+ALTER TABLE <t> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <t> FORCE ROW LEVEL SECURITY;
+CREATE POLICY <t>_tenant_isolation ON <t>
+    USING (tenant_id = app_current_tenant_id()) ...
+```
+
+Sub has three of those six tables (`roles`, `user_credentials`, `audit_events`),
+all populated, and **none of them has a `tenant_id` column** — confirmed in
+source: `app/models/rbac.py:20-41` and `app/models/audit.py` contain no
+`tenant_id` at all. Two consequences, in order:
+
+1. **Before the union lands**, `CREATE POLICY` fails on a missing column. That is
+   the benign outcome — it fails loudly and the rehearsal pins it.
+2. **After the union lands** — once `tenant_id` exists — the policy succeeds, and
+   `FORCE ROW LEVEL SECURITY` then applies to the table owner as well as to
+   `app_user`. Sub's application never calls `app_current_tenant_id()`, so the
+   GUC is unset, the comparison yields NULL, and **every read of `roles`,
+   `user_credentials` and `audit_events` returns zero rows.** Authentication and
+   RBAC stop working, and nothing raises. This is exactly the fail-silent class
+   recorded in the 2026-08-10 assembly RLS audit, where ERP's policy helper
+   returns NULL when unset and unscoped queries return nothing.
+
+So the union is not the end of the `0001` disposition; it is the point at which
+the disposition becomes hazardous. Landing `tenant_id` without simultaneously
+deciding Sub's GUC/session contract converts a loud failure into a silent one.
+
+`_ensure_roles()` and `_grant_roles()` are smaller but not free: they create and
+grant to `app_user`/`platform_api`, which requires role-creation privilege on
+Sub's database and grants against roles Sub's application does not connect as.
+`_create_current_tenant_function()` defines `app_current_tenant_id()` in
+`public`, which Sub does not have.
+
+### Update 2026-08-12 — `party_roles` is reduced, not removed
+
+ADR-0019 renamed the kernel's RBAC grant to `party_role_grants` (migration
+`0022`, kernel `0.1.0a41`), because Sub holds the archetype-correct meaning of
+`party_roles` and the kernel had the right name on the wrong table.
+
+**At lineage head the `party_roles` collision is gone.** But the lineage is a
+chain, and revision `0003` still calls `op.create_table("party_roles")` before
+`0022` renames it — so a product running the kernel chain from base still passes
+through the colliding name. This is the same "a lineage is a net effect, not an
+accumulation" lesson as correction 2 under "Method", arriving from the other
+direction: measuring the *head* would now under-report, exactly as counting
+*creates* previously over-reported.
+
+What changes is the disposition's difficulty, not its existence. `party_roles`
+moves out of Group E: it is no longer a semantic union of two different concepts
+under one name, but a question of when the kernel's grant table takes its final
+name. Two ways to close it, both cheaper than a union:
+
+- have `0003` create `party_role_grants` directly and make `0022` a no-op for
+  fresh databases — amends a released migration, safe for recorded installs
+  (they never re-run it) but a change to shipped content that needs recording;
+- make `0003`'s create of `party_roles` adopt-aware, as `0021` is for
+  `domain_settings`.
+
+**Revised count for revision `0001`:** unchanged at five, because `party_roles`
+is created in `0003`, not `0001`. The `0001` gate is untouched by ADR-0019.
+
+### What this means for sequencing
+
+- The `0001` disposition must be planned as **one change covering five tables,
+  the RLS/GUC contract, the tenant function, and the grants** — not as five
+  independent table unions.
+- `user_credentials` is the hardest of the five and gates the rest of `0001`. The
+  kernel binds a credential to one `party_id`; Sub binds to four principal kinds
+  (`subscriber_id`, `system_user_id`, `reseller_user_id`, `radius_server_id`).
+  Until it is decided whether Sub's principals become parties, `0001` cannot be
+  dispositioned, and therefore **no** collision after it can be reached.
+- That decision is the same one the Party cutover needs for
+  `PARTY_PRINCIPAL_CONTEXT_BINDING`. The lineage workstream and the principal
+  slice of the Party cutover are not independent tracks; they share this gate.
+- The measurement here is from source reading plus the existing staging
+  measurement, **not from a rehearsal run**. `test_kernel_lineage_rehearsal.py`
+  needs Postgres and `TEST_DATABASE_URL`; per the standing rule it runs on the
+  Git-hosted CI/Observe runners, not locally. Consequence 2 above is a read of
+  `_apply_rls()` and Sub's models, and should be confirmed by that rehearsal
+  before it is relied on.
 
 ## The rule this argues for
 

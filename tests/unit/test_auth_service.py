@@ -24,7 +24,13 @@ from __future__ import annotations
 
 import pytest
 from dotmac_kernel.exceptions import ForbiddenError, UnauthorizedError
-from dotmac_kernel.models import Party, PartyRole, PartyType, Tenant, UserCredential
+from dotmac_kernel.models import (
+    Party,
+    PartyRoleGrant,
+    PartyType,
+    Tenant,
+    UserCredential,
+)
 from dotmac_kernel.security import hash_password
 from dotmac_kernel.settings_models import DomainSetting, SettingDomain, SettingValueType
 from sqlalchemy import func, select
@@ -249,7 +255,7 @@ def test_register_open_policy_grants_no_role(db: Session, tenant_row: Tenant) ->
     assert view.email == "plain@example.com"
     grants = db.scalar(
         select(func.count())
-        .select_from(PartyRole)
-        .where(PartyRole.tenant_id == tenant_row.id)
+        .select_from(PartyRoleGrant)
+        .where(PartyRoleGrant.tenant_id == tenant_row.id)
     )
     assert grants == 0

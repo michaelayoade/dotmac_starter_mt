@@ -6,6 +6,32 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a41 — 2026-08-12
+
+Adopts the Party archetype's vocabulary (ADR-0019). The kernel's RBAC grant was
+called `party_roles`/`PartyRole` — the archetype's name for a concurrent,
+temporal business capacity (customer, reseller, staff), which is how Sub already
+uses it. The kernel held the right name on the wrong table.
+
+### Changed — BREAKING
+- **`PartyRole` → `PartyRoleGrant`, `party_roles` → `party_role_grants`.**
+  Migration `0022_party_role_grants` renames the table with its three
+  constraints, three indexes and RLS policy in one revision. Rows, grants and
+  foreign keys are preserved — this is `ALTER TABLE ... RENAME`, not a rebuild.
+- **No compatibility alias**, deliberately: an alias would preserve exactly the
+  ambiguity the rename removes. Consumers update the import when they next move
+  their pin. `dotmac_kernel.models.PartyRole` no longer exists.
+
+### Migration notes
+- `0022` refuses to run when both `party_roles` and `party_role_grants` exist,
+  rather than guessing which holds the authoritative grants — the case that
+  matters for a product carrying its own archetype-shaped `party_roles`.
+- It is a no-op when the kernel's grant table was never present, so a product
+  adopting the lineage without it is unaffected.
+- `docs/adr/0019-party-identity-follows-the-archetype.md` records the reasoning
+  and supersedes the opposite recommendation in
+  `docs/inventories/party-module-sources.md`.
+
 ## 0.1.0a40 — 2026-08-11
 
 An adoption-demanded database invariant fix. Sub's S7 migration rehearsal found

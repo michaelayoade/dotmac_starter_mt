@@ -24,7 +24,7 @@ from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.models import (
     Party,
     PartyPerson,
-    PartyRole,
+    PartyRoleGrant,
     PartyType,
     Role,
     Tenant,
@@ -72,7 +72,7 @@ def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
     role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
     db.add(role)
     db.flush()
-    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
+    db.add(PartyRoleGrant(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.commit()
     return {"email": party.email, "party_id": party.id}
 

@@ -16,7 +16,7 @@ from uuid import UUID
 from dotmac_kernel.audit import AuditEvent
 from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
-from dotmac_kernel.models import Party, PartyRole, Role, Tenant
+from dotmac_kernel.models import Party, PartyRoleGrant, Role, Tenant
 from dotmac_kernel.query import apply_pagination, escape_like
 from dotmac_kernel.settings_resolver import resolve
 from sqlalchemy import func, or_, select
@@ -106,7 +106,9 @@ def list_grantable_parties(
     return list(db.scalars(stmt).all())
 
 
-def assign_role(db: Session, tenant: Tenant, payload: RoleGrantRequest) -> PartyRole:
+def assign_role(
+    db: Session, tenant: Tenant, payload: RoleGrantRequest
+) -> PartyRoleGrant:
     party = db.scalars(
         select(Party)
         .where(Party.tenant_id == tenant.id)
@@ -120,23 +122,23 @@ def assign_role(db: Session, tenant: Tenant, payload: RoleGrantRequest) -> Party
     if party is None or role is None:
         raise NotFoundError("Party or role not found")
 
-    party_role = PartyRole(tenant_id=tenant.id, party_id=party.id, role_id=role.id)
+    grant = PartyRoleGrant(tenant_id=tenant.id, party_id=party.id, role_id=role.id)
     # See create_role's comment: `db.add` must happen INSIDE the savepoint,
     # not before it.
     try:
         with conflict_savepoint(db):
-            db.add(party_role)
+            db.add(grant)
             db.flush()
     except IntegrityError as exc:
         raise ConflictError("Role already assigned") from exc
-    return party_role
+    return grant
 
 
 class GrantView(NamedTuple):
     """Read-model row for the `/admin/role-grants` recent-grants list — a
-    joined projection (`PartyRole` + `Role.name`/`slug` + `Party.
+    joined projection (`PartyRoleGrant` + `Role.name`/`slug` + `Party.
     display_name`) so the template never has to resolve a bare `party_id`/
-    `role_id` itself. There is no ORM relationship from `PartyRole` to
+    `role_id` itself. There is no ORM relationship from `PartyRoleGrant` to
     `Party`/`Role` (plain FK columns by design — see `dotmac_kernel/models.py`),
     so `list_recent_grants` below does one explicit join, not lazy-loaded
     attribute access (no N+1).
@@ -153,23 +155,25 @@ class GrantView(NamedTuple):
 def list_recent_grants(db: Session, tenant: Tenant, *, limit: int) -> list[GrantView]:
     stmt = (
         select(
-            PartyRole.party_id,
+            PartyRoleGrant.party_id,
             Party.display_name,
-            PartyRole.role_id,
+            PartyRoleGrant.role_id,
             Role.name,
             Role.slug,
-            PartyRole.created_at,
+            PartyRoleGrant.created_at,
         )
         .join(
             Party,
-            (Party.id == PartyRole.party_id) & (Party.tenant_id == PartyRole.tenant_id),
+            (Party.id == PartyRoleGrant.party_id)
+            & (Party.tenant_id == PartyRoleGrant.tenant_id),
         )
         .join(
             Role,
-            (Role.id == PartyRole.role_id) & (Role.tenant_id == PartyRole.tenant_id),
+            (Role.id == PartyRoleGrant.role_id)
+            & (Role.tenant_id == PartyRoleGrant.tenant_id),
         )
-        .where(PartyRole.tenant_id == tenant.id)
-        .order_by(PartyRole.created_at.desc())
+        .where(PartyRoleGrant.tenant_id == tenant.id)
+        .order_by(PartyRoleGrant.created_at.desc())
         .limit(limit)
     )
     return [GrantView(*row) for row in db.execute(stmt).all()]

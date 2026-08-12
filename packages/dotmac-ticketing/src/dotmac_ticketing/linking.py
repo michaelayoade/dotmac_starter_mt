@@ -43,7 +43,7 @@ silent:
 2. **The composite tenant key.** A plain ``ticket_id`` FK lets one tenant's link
    row point at another tenant's ticket the moment an id leaks. The composite
    ``(tenant_id, ticket_id)`` reference is the same defence the kernel's
-   ``party_roles`` uses.
+   ``party_role_grants`` uses.
 3. **``ON DELETE``.** Whether removing a subscriber cascades the link or is
    restricted by it is a product policy decision. This helper gives it no
    default, so it cannot be decided by accident.
