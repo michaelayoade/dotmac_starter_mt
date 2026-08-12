@@ -45,6 +45,7 @@ from dotmac_application_directory.lifecycle import (
     require_transition,
 )
 from dotmac_application_directory.manifest import module
+from dotmac_application_directory.migrations import versions_dir
 from dotmac_application_directory.models import SCHEMA, ApplicationBinding
 from dotmac_application_directory.service import (
     BindingAlreadyExists,
@@ -89,4 +90,5 @@ __all__ = [
     "reconcile_descriptor",
     "require_transition",
     "transition",
+    "versions_dir",
 ]
