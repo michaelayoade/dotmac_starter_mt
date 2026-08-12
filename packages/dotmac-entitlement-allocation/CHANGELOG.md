@@ -69,8 +69,10 @@ discovering that event-b belonged to a different request. An activation race
 retries THROUGH the kernel, so the losing delivery key also receives its ledger
 row.
 
-**An unsealed allocation is not history.** A committed but unsealed row can only
-come from a crash between the parent insert and the seal, or from raw SQL. Both
+**An unsealed allocation is not history.** Staging writes the parent, the
+entries and the seal in one transaction, so this service cannot leave an
+unsealed row behind by crashing; a committed one means raw SQL, an offline
+repair, or a writer that split the sequence across transactions. Both
 paths that consume an allocation — replay resolution and `allocation_product` —
 raise `IncompleteAllocationError` rather than treating it as a fact, because the
 row cannot say whether its missing entries were rejected or merely never

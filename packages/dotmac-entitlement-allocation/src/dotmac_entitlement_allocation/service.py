@@ -175,11 +175,13 @@ def _view(allocation: Allocation, *, replayed: bool) -> AllocationView:
 def _existing(db: Session, snapshot: ContractSnapshot) -> Allocation | None:
     """The allocation for this activation, or None.
 
-    An UNSEALED row raises rather than being returned. It is an incomplete
-    write — a crash between the parent insert and the seal, or raw SQL — and
-    adopting it as a replay would hand back an entitlement set nobody finished
-    validating. The row cannot tell us whether its missing entries were rejected
-    or merely never written, so the only safe reading is to refuse.
+    An UNSEALED row raises rather than being returned. Staging writes the
+    parent, the entries and the seal in ONE transaction, so this service cannot
+    leave one behind by crashing — a committed unsealed row means raw SQL, an
+    offline repair, or a writer that split the sequence across transactions.
+    Adopting it as a replay would hand back an entitlement set nobody finished
+    validating, and the row cannot tell us whether its missing entries were
+    rejected or merely never written. The only safe reading is to refuse.
     """
     row = db.execute(
         select(Allocation).where(

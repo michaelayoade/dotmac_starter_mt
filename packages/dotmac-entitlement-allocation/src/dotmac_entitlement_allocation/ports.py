@@ -122,9 +122,15 @@ class AllocationConflictError(AllocationError):
 class IncompleteAllocationError(AllocationError):
     """An allocation row exists but was never sealed.
 
-    It can only arise from a crash between the parent insert and the seal, or
-    from raw SQL. Either way it is an INCOMPLETE WRITE, not a fact: its entries
-    may be a partial set nobody finished validating.
+    It cannot arise from a crash in this service: the parent insert, the entry
+    inserts and the seal all happen in ONE transaction, so a failure anywhere
+    rolls the parent back with them. A committed unsealed row therefore means
+    raw SQL, an offline repair, or a writer that split the sequence across
+    transactions — and each of those is a reason to trust the row less, not
+    more.
+
+    Either way it is an INCOMPLETE WRITE, not a fact: its entries may be a
+    partial set nobody finished validating.
 
     Both paths that consume an allocation raise this rather than treating the
     row as history — replaying it would adopt an unfinished entitlement set,

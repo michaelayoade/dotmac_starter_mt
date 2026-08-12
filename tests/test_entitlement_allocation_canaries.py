@@ -371,82 +371,159 @@ class TestAStagedAllocationCannotBeAppendedTo:
 
 
 class TestConcurrentStaging:
-    def test_two_sessions_racing_one_activation_produce_one_allocation(
-        self,
-        allocation_schema: None,
-        admin_session: Session,
-        catalogue: LiveCatalogue,
+    """A REAL race, not a sequence.
+
+    The previous version staged the winner and COMMITTED before the loser
+    called `stage_allocation`. Under READ COMMITTED the loser's internal
+    activation read then saw the winner, returned a replay from inside the
+    operation, and never reached the IntegrityError retry — deleting that retry
+    would have left the test green. A canary that cannot fail when the thing it
+    guards is removed is not a canary.
+
+    The barrier goes in the CATALOGUE PORT, which is the exact seam: inside the
+    operation the order is activation-read, then catalogue check, then insert.
+    Rendezvousing on the first `require_declared` call therefore holds both
+    sessions after both have read nothing and before either has written, using
+    only the module's own public contract — no patching, no private hooks.
+    """
+
+    def test_two_concurrent_sessions_produce_one_allocation_and_one_audit_event(
+        self, allocation_schema: None, admin_session: Session
     ) -> None:
-        """REQUIRED CANARY. The check-then-insert path has a TOCTOU window: two
-        deliveries of one activation under DIFFERENT event ids both read
-        nothing, both insert, and the unique constraint decides. The loser must
-        resolve to a replay of the winner, not surface an IntegrityError.
-        """
+        """REQUIRED CANARY. Both sessions read nothing, then race to insert."""
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        from dotmac_kernel.audit import PlatformAuditEvent
+        from dotmac_kernel.idempotency_models import PlatformIdempotencyRecord
+
         url = os.getenv("TEST_PLATFORM_DATABASE_URL")
         if not url:
             pytest.skip("TEST_PLATFORM_DATABASE_URL not set")
-        engine = create_engine(url, future=True)
-        factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-        first, second = factory(), factory()
+
+        run = uuid.uuid4().hex[:8]
         contract, digest = uuid.uuid4(), uuid.uuid4().hex * 2
+        # 30s: generous for a blocked INSERT waiting on the winner's commit,
+        # short enough that a genuine deadlock fails the run instead of hanging
+        # it. A barrier without a timeout turns a bug into a stuck CI job.
+        barrier = threading.Barrier(2, timeout=30)
+
+        class RendezvousCatalogue(LiveCatalogue):
+            """Blocks once, on the first check, then behaves normally."""
+
+            def __init__(self, declared: dict[str, set[str]]) -> None:
+                super().__init__(declared)
+                self._waited = False
+
+            def require_declared(
+                self, *, product_code: str, capability_code: str
+            ) -> None:
+                if not self._waited:
+                    self._waited = True
+                    barrier.wait()
+                super().require_declared(
+                    product_code=product_code, capability_code=capability_code
+                )
+
+        def stage(event_suffix: str) -> tuple[uuid.UUID, bool]:
+            engine = create_engine(url, future=True)
+            session = sessionmaker(bind=engine, autocommit=False, autoflush=False)()
+            try:
+                snapshot = _snapshot(
+                    contract_ref=contract,
+                    content_hash=digest,
+                    source_event_id=f"race-{event_suffix}-{run}",
+                )
+                view = stage_allocation(
+                    session,
+                    snapshot,
+                    catalogues=RendezvousCatalogue(
+                        {
+                            "dotmac-sub": {"billing.invoicing"},
+                            "dotmac-erp": {"finance.ledger"},
+                        }
+                    ),
+                )
+                session.commit()
+                return view.id, view.replayed
+            except BaseException:
+                session.rollback()
+                # Never leave the peer blocked on a barrier this thread will
+                # not reach — that would hang the suite rather than fail it.
+                barrier.abort()
+                raise
+            finally:
+                session.close()
+                engine.dispose()
+
         try:
-            # Unique per run: the kernel's `platform_idempotency_records` lives
-            # in `public` and survives a `mod_ealloc` drop, so a fixed key would
-            # collide with an earlier run's DIFFERENT request — which the
-            # at-most-once owner would correctly report as a conflict, failing
-            # this test for a reason that has nothing to do with the race.
-            run = uuid.uuid4().hex[:8]
-            a = _snapshot(
-                contract_ref=contract,
-                content_hash=digest,
-                source_event_id=f"race-a-{run}",
-            )
-            b = _snapshot(
-                contract_ref=contract,
-                content_hash=digest,
-                source_event_id=f"race-b-{run}",
-            )
-            # Both read before either writes — the race, made deterministic.
-            assert (
-                first.execute(
-                    select(Allocation).where(Allocation.contract_ref == contract)
-                ).scalar_one_or_none()
-                is None
-            )
-            assert (
-                second.execute(
-                    select(Allocation).where(Allocation.contract_ref == contract)
-                ).scalar_one_or_none()
-                is None
-            )
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = [
+                    f.result(timeout=60)
+                    for f in [
+                        pool.submit(stage, "a"),
+                        pool.submit(stage, "b"),
+                    ]
+                ]
 
-            winner = stage_allocation(first, a, catalogues=catalogue)
-            first.commit()
+            ids = {allocation_id for allocation_id, _ in results}
+            replayed = sorted(flag for _, flag in results)
 
-            loser = stage_allocation(second, b, catalogues=catalogue)
-            assert loser.replayed is True
-            assert loser.id == winner.id
-            second.rollback()
-
-            count = (
-                second.execute(
+            # ONE allocation, and both callers agree which one it is.
+            assert len(ids) == 1
+            rows = (
+                admin_session.execute(
                     select(Allocation).where(Allocation.contract_ref == contract)
                 )
                 .scalars()
                 .all()
             )
-            assert len(count) == 1
+            assert len(rows) == 1
+            assert rows[0].sealed is True
+
+            # Exactly one staged the allocation; exactly one replayed it.
+            assert replayed == [False, True]
+
+            # ONE audit event — the loser must not re-audit a staging it did
+            # not perform.
+            events = (
+                admin_session.query(PlatformAuditEvent)
+                .filter(
+                    PlatformAuditEvent.action == "entitlement_allocation.staged",
+                    PlatformAuditEvent.entity_id == str(rows[0].id),
+                )
+                .all()
+            )
+            assert len(events) == 1
+
+            # BOTH delivery keys recorded, with the same claim fingerprint —
+            # this is what the retry-through-the-kernel exists to guarantee.
+            ledger = (
+                admin_session.query(PlatformIdempotencyRecord)
+                .filter(
+                    PlatformIdempotencyRecord.key.in_(
+                        [f"race-a-{run}", f"race-b-{run}"]
+                    )
+                )
+                .all()
+            )
+            assert {record.key for record in ledger} == {
+                f"race-a-{run}",
+                f"race-b-{run}",
+            }
+            assert len({record.fingerprint for record in ledger}) == 1
+            assert all(record.fingerprint for record in ledger)
         finally:
-            first.rollback()
-            second.rollback()
-            for session in (first, second):
-                session.close()
-            engine.dispose()
-            # Cleanup runs as the OFFLINE role: `platform_api` has no DELETE,
-            # which is the property under test two classes down.
+            admin_session.rollback()
             admin_session.execute(
                 text("DELETE FROM mod_ealloc.allocations WHERE contract_ref = :c"),
                 {"c": contract},
+            )
+            admin_session.execute(
+                text(
+                    "DELETE FROM platform_idempotency_records WHERE key IN " "(:a, :b)"
+                ),
+                {"a": f"race-a-{run}", "b": f"race-b-{run}"},
             )
             admin_session.commit()
 
@@ -532,10 +609,14 @@ class TestEveryDeliveryIsRecorded:
 class TestAnUnsealedAllocationIsNotHistory:
     """A committed but unsealed row is an INCOMPLETE write, not a fact.
 
-    It can only exist if something crashed between the parent insert and the
-    seal, or if raw SQL wrote one. Either way it must never be replayed as
-    history, and must never feed licence issuance — which would issue against
-    an entitlement set nobody finished validating.
+    It cannot come from a crash in the service: the parent insert, the entries
+    and the seal share ONE transaction. A committed unsealed row means raw SQL,
+    an offline repair, or a writer that split the sequence — which is why the
+    fixture below produces one with raw SQL rather than by simulating a crash.
+
+    Either way it must never be replayed as history, and must never feed licence
+    issuance — which would issue against an entitlement set nobody finished
+    validating.
     """
 
     @pytest.fixture
