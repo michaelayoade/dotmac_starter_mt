@@ -6,6 +6,22 @@ The per-table dispositions ADR-0017's gate requires. It supersedes the a27
 6/2/11 figures as the working baseline, and it exists because the previous
 number was measured against a kernel two months of releases ago.
 
+> **Verified against a real database, 2026-08-11.** Everything below was
+> originally derived by parsing migration files in two repositories, which took
+> four attempts to get right. It has now been checked against the **staging Sub
+> database** (seabone, `dotmac_sub`, alembic head `519_fiber_cost_items`, 595
+> live tables) — read-only, no test load. **The parse and the database agree**
+> once the baseline is aligned, which is the validation the method needed. See
+> "Measured against the database" below for what changed and what it settles.
+
+> **Superseded in part, 2026-08-12.** ADR-0019 renamed the kernel's RBAC grant
+> to `party_role_grants` (migration `0022`, kernel `0.1.0a41`), so `party_roles`
+> **no longer collides at lineage head**: nine collisions, five unions. The
+> title's "ten" is the measured baseline, kept because the corrections below
+> are the point of the document. The chain still creates the old name in `0003`,
+> which reduces that disposition rather than removing it — see "Update
+> 2026-08-12". Two `user_credentials` corrections are noted in place.
+
 > **Correction, 2026-08-11 (same day).** This document first said TWELVE
 > collisions and proposed deleting `people`/`person_roles` from the kernel.
 > Both were wrong: kernel revision `0003`'s `upgrade()` already drops those two
@@ -53,6 +69,82 @@ absent (dropped, never recreated), `user_credentials`/`auth_sessions` present
 (dropped and recreated), and `idempotency_records` present (renamed from
 `inbox_records`). Every earlier version fails at least one. A schema measurement
 without such assertions is a guess with a table around it.
+
+## Measured against the database
+
+Read-only queries against staging Sub (seabone, container `dotmac_sub_db`,
+database `dotmac_sub`, 4.4 GB, alembic head `519_fiber_cost_items`, **595 live
+tables**). No test load ran there; staging was the source of the schema, not the
+compute.
+
+### Collision count: 9 at staging, 10 at dev head — and that is not a discrepancy
+
+The database reports **nine** collisions. The parse reported ten. The single
+difference is `domain_setting_history`, created by Sub's migration `520`, and
+**staging is at `519`** — two revisions behind `dev`. Both numbers are right for
+their baseline.
+
+That agreement is the point. The parse-based method produced four different
+answers before it was correct; being able to reconcile it exactly against a real
+database is what makes the tenth answer trustworthy rather than merely the
+latest.
+
+### Three dispositions now settled by evidence, not inference
+
+Comparing kernel model columns against `information_schema.columns` on staging:
+
+| table | kernel | sub | shared | verdict |
+|---|---:|---:|---:|---|
+| `tenants` | 8 | 8 | **8** | IDENTICAL — stamp |
+| `tenant_domains` | 6 | 6 | **6** | IDENTICAL — stamp |
+| `domain_settings` | 13 | 13 | **13** | IDENTICAL — adopt in place |
+| `communication_suppressions` | 11 | 10 | 9 | union (kernel `party_id`+`tenant_id`; sub `subscriber_id`) |
+| `roles` | 6 | 6 | 4 | union (kernel `slug`+`tenant_id`; sub `description`+`is_active`) |
+| `parties` | 9 | 10 | 5 | union |
+| `party_roles` | 6 | 11 | 4 | ~~union~~ — **no longer collides** (ADR-0019 renamed the kernel's to `party_role_grants`) |
+| `audit_events` | 8 | 15 | 4 | union |
+| `user_credentials` | 6 | 16 | 4 | union |
+
+Group A's "stamp" and Group B's "adopt in place" were previously argued from
+migration 508's provenance and from model files. **They are now measured:** the
+column sets are byte-identical in the live database, so those three tables carry
+no schema risk at all.
+
+`domain_setting_history` will join them once staging runs `520` — its kernel and
+Sub column sets already match at 15/15.
+
+### What this leaves
+
+**Six unions**, of which two still need a decision before a migration:
+`user_credentials` (the kernel links one `party_id`; Sub links **three** —
+`subscriber_id`, `system_user_id`, `reseller_user_id` — an identity-model
+question) and `audit_events` (Sub's `ip_address`/`user_agent`/`request_id`/
+`status_code` versus the kernel's `details` JSON).
+
+> **Two corrections since this was measured (2026-08-12).**
+> **`party_roles` is no longer a union.** ADR-0019 renamed the kernel's RBAC
+> grant to `party_role_grants`, so at lineage head there is no collision on that
+> name — leaving **five** unions here, not six, and **nine** collisions at dev
+> head rather than ten. The chain still passes through the old name in `0003`;
+> see "Update 2026-08-12" below for why that reduces the disposition rather than
+> removing it.
+> **`user_credentials` has three principal kinds, not four.**
+> `ck_user_credentials_exactly_one_principal` sums only `subscriber_id`,
+> `system_user_id` and `reseller_user_id`. `radius_server_id` sits outside that
+> constraint and is read only under `provider == radius`, to select which RADIUS
+> server verifies the password — a provider qualifier, not an identity kind. Full
+> analysis in `docs/superpowers/reviews/2026-08-12-user-credentials-principal-decision.md`.
+
+### The method to use from here
+
+Stop parsing. The remaining question — *does the kernel lineage actually apply
+to this schema* — is one a database answers definitively and a parser cannot:
+column types, constraint conflicts, rows that violate a new CHECK, RLS
+interactions. Restore this schema into a scratch database and run the lineage
+against it. The rehearsal harness in `tests/test_migration_split_rehearsals.py`
+already provisions scratch databases and runs lineages as `app_admin`; pointing
+it at a restored Sub schema turns the six remaining dispositions from an
+analysis into failing assertions that get fixed one at a time.
 
 ## The ten, grouped by what they actually need
 
@@ -139,11 +231,16 @@ Two of the five are harder than a union suggests and should not be planned as
 mechanical:
 
 - **`user_credentials`** is not a superset in either direction. The kernel links
-  a credential to one `party_id`; Sub links to four different principal kinds
-  (`subscriber_id`, `system_user_id`, `reseller_user_id`, `radius_server_id`).
-  That is a genuine identity-model difference, not extra columns, and it needs a
-  decision about whether Sub's principals become parties before this table can
-  converge.
+  a credential to one `party_id`; Sub links to **three** different principal
+  kinds (`subscriber_id`, `system_user_id`, `reseller_user_id`), enforced as
+  exactly-one by `ck_user_credentials_exactly_one_principal`. That is a genuine
+  identity-model difference, not extra columns, and it needs a decision about
+  whether Sub's principals become parties before this table can converge.
+  (`radius_server_id` is on the table but outside that constraint — it is a
+  provider qualifier, not a fourth principal. This document said four until
+  2026-08-12.) ADR-0019 fixes the target — authenticate the Party, authorize the
+  PartyRole — and the recommendation is dossiered in
+  `docs/superpowers/reviews/2026-08-12-user-credentials-principal-decision.md`.
 - **`audit_events`** carries request-forensic columns the kernel folds into a
   `details` JSON. Flattening Sub's `ip_address`/`user_agent`/`request_id`/
   `status_code` into `details` loses queryability that Sub's audit surface may
@@ -275,10 +372,13 @@ is created in `0003`, not `0001`. The `0001` gate is untouched by ADR-0019.
   the RLS/GUC contract, the tenant function, and the grants** — not as five
   independent table unions.
 - `user_credentials` is the hardest of the five and gates the rest of `0001`. The
-  kernel binds a credential to one `party_id`; Sub binds to four principal kinds
-  (`subscriber_id`, `system_user_id`, `reseller_user_id`, `radius_server_id`).
-  Until it is decided whether Sub's principals become parties, `0001` cannot be
-  dispositioned, and therefore **no** collision after it can be reached.
+  kernel binds a credential to one `party_id`; Sub binds to **three** principal
+  kinds (`subscriber_id`, `system_user_id`, `reseller_user_id`) under an
+  exactly-one CHECK. Until it is decided whether Sub's principals become parties,
+  `0001` cannot be dispositioned, and therefore **no** collision after it can be
+  reached. *(This bullet said four principal kinds when first written on
+  2026-08-12; `radius_server_id` is outside the CHECK and is a provider
+  qualifier. Corrected the same day.)*
 - That decision is the same one the Party cutover needs for
   `PARTY_PRINCIPAL_CONTEXT_BINDING`. The lineage workstream and the principal
   slice of the Party cutover are not independent tracks; they share this gate.
