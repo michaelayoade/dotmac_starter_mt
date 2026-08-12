@@ -43,23 +43,71 @@ column that is not part of it.**
 
 ## Recommendation
 
-> **The credential's identity is the Party. Its access context stays an explicit
-> column on the same row. Uniqueness becomes `(tenant_id, party_id, context)`,
-> and the kernel gives up its one-credential-per-party assumption.**
+> ### ⚠️ SUPERSEDED, 2026-08-12 — the `context` key below is not the target
+>
+> This dossier was written before ADR-0019 was accepted. The ADR rules against
+> the key recommended here, in two places:
+>
+> - **§2** — a credential may repeat per **authentication mechanism**, "never per
+>   *principal kind*";
+> - **§5c** — *identity does not multiply with relationships*: one login per
+>   person **not** per account, and a person in two resellers keeps **one**
+>   credential.
+>
+> `context ∈ {customer_portal, staff, reseller_portal}` is a portal vocabulary,
+> and a portal is a relationship surface. Keying the credential on it does
+> exactly what §5c forbids, one indirection removed — and it hardcodes Sub's
+> product topology into an identity table, so adding a portal would become a
+> schema change. **The target is `(tenant_id, party_id, <authentication mechanism
+> binding>)`.** See "The composable target" below.
+>
+> The rest of this dossier stands: the three-principals correction, the
+> per-principal migration effects, the organization-party canary, the `api_keys`
+> defect, and the three-release rollout are unaffected by the key change.
 
-Target shape, kernel-owned and product-neutral:
+Superseded target shape, kernel-owned and product-neutral:
 
 | column | note |
 |---|---|
 | `tenant_id` | kernel contract; Sub has one operator tenant, so the backfill is a constant |
 | `party_id` | **person** Party — the identity |
-| `context` | which access surface this credential authenticates for; an ADR-0008 open registered vocabulary, not an enum. Sub registers `customer_portal`, `staff`, `reseller_portal` |
+| ~~`context`~~ | ~~which access surface this credential authenticates for~~ — **superseded**, see the banner above |
 | `password_hash`, `provider`, `username` | unchanged |
 | lockout/rotation columns | Sub's six; the kernel adopts them (a40 direction) |
 | `radius_server_id` | stays, Sub-local, renamed — see below |
 
-`UNIQUE (tenant_id, party_id, context)` replaces both Sub's exactly-one-principal
-CHECK and the kernel's implicit one-row-per-party assumption.
+~~`UNIQUE (tenant_id, party_id, context)`~~ — superseded. What it replaces is
+unchanged: Sub's exactly-one-principal CHECK and the kernel's implicit
+one-row-per-party assumption both still have to go.
+
+## The composable target
+
+The discriminator is **which authentication mechanism proves you are this
+party** — never which portal, role, account or membership you reach afterwards.
+Those are resolved from PartyRoles and memberships *after* authentication, which
+is ADR-0019 §2's whole point.
+
+Composable means the mechanism vocabulary is **open and declared**, not a kernel
+enum or a fixed CHECK: a product names `local`, `oidc`, `radius`, or something
+not yet imagined, without a kernel migration (ADR-0008). Typed means the *code*
+is open while the *contract behind it* is closed — the kernel types the
+verifier interface, not the list of names:
+
+- a declared mechanism carries a **typed provider binding**, not a JSON blob;
+- provider-specific state lives behind that binding, so **the kernel never
+  acquires a `radius_server_id`** — Sub's RADIUS verifier is binding config,
+  which is exactly why it was never a principal;
+- the credential column stays a plain string, validated against the registry at
+  the use boundary — the same shape as `SettingDomain` (ADR-0008) rather than a
+  native enum.
+
+**One thing this still gets wrong and needs evidence for.** The key cannot be
+the mechanism *code*. Two OIDC issuers, or two RADIUS verifiers, are two
+mechanisms of the same code, and `(tenant, party, 'radius')` would forbid a
+party holding a credential against each. The key is the **binding** — the
+installed, configured instance — not its type. Confirming Sub's real
+cardinality here (how many verifiers, whether any party authenticates against
+more than one) is a prerequisite for R1, and it is measurable today.
 
 ### Why not the alternatives
 
@@ -266,19 +314,33 @@ rollback, and that must be written before R3 ships.
 Flagged rather than assumed, because guessing any of these would be worse than
 asking:
 
-1. **One login per person per context, or per account?** The subscriber case
-   above. Materially changes customer-facing behaviour; not a schema question.
-2. **A person with memberships in two resellers.** Whether the context key
-   includes the membership, or this is declared unsupported.
-3. **Do Sub's `sessions` and `api_keys` cut over in the same slice** as
+1. ~~**One login per person per context, or per account?**~~ **DECIDED** by
+   ADR-0019 §5c: per person. An account is a relationship, not an identity.
+2. ~~**A person with memberships in two resellers.**~~ **DECIDED** by §5c: one
+   credential, two `party_memberships`, a switcher after login. The key must not
+   include the membership.
+3. **Mechanism-binding cardinality — NEW, and now the blocker.** The key is the
+   authentication *binding*, not the mechanism code, or a party could not hold
+   credentials against two OIDC issuers or two RADIUS verifiers. How many
+   verifier/issuer bindings does Sub actually have, and does any party
+   authenticate against more than one? Measurable today; see "The composable
+   target".
+4. **Many-to-one merge policy.** §5c fixes the target cardinality but not which
+   password, MFA methods, sessions and lockout state survive when several
+   credentials collapse onto one party. That is a security-sensitive policy
+   needing production evidence, not a schema choice.
+5. **Do Sub's `sessions` and `api_keys` cut over in the same slice** as
    `user_credentials`, or follow? They share the triple, so the schema answer is
    the same, but the blast radius differs.
-4. **`audit_events`** is the other `0001` union and is untouched here. Its
+6. **`audit_events`** is the other `0001` union and is untouched here. Its
    request-forensic columns (`ip_address`, `user_agent`, `request_id`,
    `status_code`) need measuring against real audit queries before the kernel
    folds or promotes them.
 
-Items 1 and 2 are the only ones that block drafting the R1 migration.
+**Items 3 and 4 now block R1.** Items 1 and 2 no longer do — §5c settled them.
+R1's additive half (nullable columns, backfill, collision reporting, start
+setting the GUC) is draftable without 3 and 4; the uniqueness constraint and any
+credential merging are not.
 
 ---
 
