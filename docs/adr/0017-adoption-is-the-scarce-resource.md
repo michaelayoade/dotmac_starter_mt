@@ -8,6 +8,19 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-12: `webhooks` names the facility family
+
+Decision 2's gap-list entry `webhooks` covers reusable **inbound and outbound**
+webhook facilities. The Consequences section's phrase `outbound webhooks` was
+an incomplete example, not a narrowing of the list. An inbound receiver for
+payment-provider events therefore remains under the same moratorium unless a
+live adopter is blocked on it today.
+
+This clarification governs shared facilities. It does not prohibit a product
+from maintaining its existing product-owned adapter while adoption is blocked,
+and it does not turn a proposed future consumer into the demand-pulled
+exception.
+
 ## Amendment, 2026-08-11: the first adopter found a kernel invariant defect
 
 Sub's S7 PostgreSQL gate supplied the demand-pulled exception contemplated by
@@ -211,7 +224,7 @@ instrumentation for that sentence.
 ## Consequences
 
 - Several genuine gaps stay open on purpose: numbering/gapless sequences,
-  outbound webhooks, job scheduling, object storage, import/export, the SOT
+  inbound/outbound webhooks, job scheduling, object storage, import/export, the SOT
   registry mechanism. Each is real. Each would land unadopted today.
 - The kernel's persistence contracts remain, for now, **designed against zero
   production consumers**. `idempotency_records` is theory until Sub runs it.
