@@ -367,7 +367,7 @@ def test_load_branding_failure_yields_static_branded_error_page(
         AuthSession,
         Party,
         PartyPerson,
-        PartyRole,
+        PartyRoleGrant,
         PartyType,
         Role,
     )
@@ -389,7 +389,7 @@ def test_load_branding_failure_yields_static_branded_error_page(
     role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
     db.add(role)
     db.flush()
-    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
+    db.add(PartyRoleGrant(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.flush()
 
     token, expires_at = issue_access_token(party.id, tenant_row.id)

@@ -74,7 +74,7 @@ path dependency — the assembly imports `dotmac_kernel.*`, never a copied modul
 **Model placement rule:** models queried by core (deps/middleware) live in
 core; feature-local models live in the feature. Concretely: `Tenant`,
 `TenantDomain`, `Party` (+ subtype tables `PartyPerson`/`PartyOrganization`),
-`Role`, `PartyRole`, `AuthSession` live in `dotmac_kernel/models.py` because
+`Role`, `PartyRoleGrant`, `AuthSession` live in `dotmac_kernel/models.py` because
 `dotmac_kernel.deps` (the `require_*` guards) and `dotmac_kernel.middleware.tenant`
 (the resolver) query them directly, and core cannot import features to get
 at them. `Party` (`party_type` person|organization) is the fleet-wide

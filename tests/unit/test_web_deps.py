@@ -20,7 +20,7 @@ from dotmac_kernel.models import (
     Party,
     PartyOrganization,
     PartyPerson,
-    PartyRole,
+    PartyRoleGrant,
     PartyType,
     Role,
     Tenant,
@@ -46,7 +46,7 @@ def admin_party(db: Session, tenant_row: Tenant) -> Party:
     role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
     db.add(role)
     db.flush()
-    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
+    db.add(PartyRoleGrant(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.flush()
     return party
 

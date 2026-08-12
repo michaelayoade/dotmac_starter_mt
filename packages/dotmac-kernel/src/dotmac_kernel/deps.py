@@ -14,7 +14,14 @@ from dotmac_kernel.capabilities import CAPABILITY_CODE_ATTR, active_capabilities
 from dotmac_kernel.db import get_db, get_platform_db
 from dotmac_kernel.entitlements import EntitlementDecision, is_entitled
 from dotmac_kernel.idempotency import MAX_KEY_LENGTH as MAX_IDEMPOTENCY_KEY_LENGTH
-from dotmac_kernel.models import AuthSession, Party, PartyRole, PartyType, Role, Tenant
+from dotmac_kernel.models import (
+    AuthSession,
+    Party,
+    PartyRoleGrant,
+    PartyType,
+    Role,
+    Tenant,
+)
 from dotmac_kernel.permissions import PERMISSION_CODE_ATTR, active_permissions
 from dotmac_kernel.security import decode_access_token, hash_token
 
@@ -114,14 +121,14 @@ def _holds_any_role(
     token/session seam behind both the bearer and cookie flows."""
     return (
         db.scalars(
-            select(PartyRole)
+            select(PartyRoleGrant)
             .join(
                 Role,
-                (Role.id == PartyRole.role_id)
-                & (Role.tenant_id == PartyRole.tenant_id),
+                (Role.id == PartyRoleGrant.role_id)
+                & (Role.tenant_id == PartyRoleGrant.tenant_id),
             )
-            .where(PartyRole.tenant_id == tenant.id)
-            .where(PartyRole.party_id == party.id)
+            .where(PartyRoleGrant.tenant_id == tenant.id)
+            .where(PartyRoleGrant.party_id == party.id)
             .where(Role.tenant_id == tenant.id)
             .where(Role.slug.in_(tuple(role_slugs)))
         ).first()

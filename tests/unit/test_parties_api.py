@@ -20,7 +20,14 @@ from collections.abc import Generator
 
 import pytest
 from dotmac_kernel.deps import get_db, require_user_auth
-from dotmac_kernel.models import Party, PartyPerson, PartyRole, PartyType, Role, Tenant
+from dotmac_kernel.models import (
+    Party,
+    PartyPerson,
+    PartyRoleGrant,
+    PartyType,
+    Role,
+    Tenant,
+)
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -42,7 +49,7 @@ def admin_person(db: Session, tenant_row: Tenant) -> Party:
     role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
     db.add(role)
     db.flush()
-    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
+    db.add(PartyRoleGrant(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.flush()
     return party
 

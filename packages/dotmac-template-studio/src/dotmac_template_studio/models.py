@@ -40,7 +40,7 @@ EXISTS-join subtype), because both are independently queried. `template_versions
 additionally carries a COMPOSITE foreign key `(tenant_id, template_id)` →
 `templates (tenant_id, id)` rather than a plain `template_id` FK: a single-column
 reference would let one tenant's version row point at another tenant's template
-whenever an id leaked. That is the same defence `party_roles` uses in the kernel,
+whenever an id leaked. That is the same defence `party_role_grants` uses in the kernel,
 and it is why `templates` declares the otherwise-redundant
 `uq_templates_tenant_id_id`.
 """

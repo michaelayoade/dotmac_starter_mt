@@ -237,7 +237,7 @@ def provision_owner(
     from dotmac_kernel.models import (
         Party,
         PartyPerson,
-        PartyRole,
+        PartyRoleGrant,
         PartyType,
         Role,
         UserCredential,
@@ -273,7 +273,7 @@ def provision_owner(
         admin_session.add(role)
         admin_session.flush()
     admin_session.add(
-        PartyRole(tenant_id=tenant.id, party_id=party.id, role_id=role.id)
+        PartyRoleGrant(tenant_id=tenant.id, party_id=party.id, role_id=role.id)
     )
     admin_session.commit()
     # Cleanup rides on the tenant fixture's teardown (tenants delete cascades).
