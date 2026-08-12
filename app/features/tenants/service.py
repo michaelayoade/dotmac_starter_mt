@@ -155,10 +155,18 @@ def provision_tenant(
             source="provisioning-default",
         )
 
+    # The actor is a PLATFORM admin, which is deliberately not a tenant Party —
+    # platform principals live in `platform_admins`, a separate catalogue. Before
+    # kernel a42 the audit model had nowhere to put a non-party actor, so this
+    # identity was buried in `details["platform_actor"]`: present, but unfilterable
+    # and unindexed. `(actor_type, actor_id)` is where it belongs. `details` keeps
+    # its copy for now — expand-only; removing the duplicate is a later contraction.
     write_audit_event(
         db,
         tenant_id=tenant.id,
-        actor_party_id=None,
+        actor_type="user",
+        actor_id=actor_email,
+        actor_label=actor_email,
         action="platform.tenant.create",
         entity_type="tenant",
         entity_id=str(tenant.id),
@@ -167,7 +175,9 @@ def provision_tenant(
     write_audit_event(
         db,
         tenant_id=tenant.id,
-        actor_party_id=None,
+        actor_type="user",
+        actor_id=actor_email,
+        actor_label=actor_email,
         action="platform.tenant.owner_provision",
         entity_type="party",
         entity_id=str(owner.id),
