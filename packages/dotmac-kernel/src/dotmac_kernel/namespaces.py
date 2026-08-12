@@ -445,6 +445,8 @@ ENTITLEMENT_ALLOCATION_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     prefix="ea",
     branch_label="entitlement_allocation",
     db_schema=module_schema("ealloc"),
+)
+
 # `dotmac-application-directory` — the FIFTH allocated installable module, and
 # the first allocated for an assembly OTHER than this repository's: its consumer
 # is the Tenant Workspace (ADR-0021). `appdir` rather than
