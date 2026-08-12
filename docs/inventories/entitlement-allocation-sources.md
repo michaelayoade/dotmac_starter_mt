@@ -5,7 +5,7 @@
 (404 LOC, 7 files, migration `v005_allocations`, tables `allocations` +
 `allocation_entries`)
 **Also inventoried:** `dotmac_erp` @ `0f4b1698`, `dotmac_crm` @ `c64b5aa0`,
-`dotmac_sub` @ `9f6f9f36`, `dotmac-kernel` @ `0.1.0a42`
+`dotmac_sub` @ `9f6f9f36`, `dotmac-kernel` @ `0.1.0a45`
 
 Hard rule 24 requires inventorying the products before writing shared behaviour.
 This records what that inventory found and, more importantly, the three

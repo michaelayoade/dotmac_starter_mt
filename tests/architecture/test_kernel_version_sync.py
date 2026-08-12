@@ -29,8 +29,10 @@ import tomllib
 from pathlib import Path
 
 import dotmac_kernel
+import pytest
 
-_KERNEL = Path(__file__).resolve().parents[2] / "packages" / "dotmac-kernel"
+PACKAGES = Path(__file__).resolve().parents[2] / "packages"
+_KERNEL = PACKAGES / "dotmac-kernel"
 _PYPROJECT = _KERNEL / "pyproject.toml"
 
 
@@ -55,3 +57,68 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
     assert re.fullmatch(
         r"\d+\.\d+\.\d+(?:a|b|rc)?\d*", dotmac_kernel.__version__
     ), f"not a PEP 440 version: {dotmac_kernel.__version__!r}"
+
+
+# ── A module's floor is the kernel release that allocated its schema ─────────
+
+# Each installable module's `dotmac-kernel` floor, and the CHANGELOG heading that
+# must document why that release exists. A module cannot be registered by a
+# kernel predating its `MIGRATION_OWNER_LEDGER` row — `NamespaceRegistry
+# .from_manifests` raises `UnallocatedNamespaceError` — so the floor is not a
+# preference and drifting it produces a runtime boot failure, not a warning.
+#
+# The exact numbers matter beyond correctness: a42 and a43 belong to the
+# upstream train (Audit R1, Application Directory / Workspace). Two branches
+# minting one kernel version collide in the changelog and leave a consumer
+# unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
+# rather than the foundations renumbering around them.
+LEDGER_ALLOCATION_RELEASES = {
+    "dotmac-release-catalog": "0.1.0a44",
+    "dotmac-entitlement-allocation": "0.1.0a45",
+}
+
+
+def _kernel_changelog() -> str:
+    return (PACKAGES / "dotmac-kernel" / "CHANGELOG.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("distribution", "release"), sorted(LEDGER_ALLOCATION_RELEASES.items())
+)
+def test_module_floor_is_the_release_that_allocated_its_schema(
+    distribution: str, release: str
+) -> None:
+    manifest = tomllib.loads(
+        (PACKAGES / distribution / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    floor = manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"]
+    assert floor == f">={release}", (
+        f"{distribution} pins {floor!r}; its ledger row landed in {release}, and "
+        "an earlier kernel cannot register the module at all"
+    )
+
+
+@pytest.mark.parametrize("release", sorted(LEDGER_ALLOCATION_RELEASES.values()))
+def test_each_allocation_release_is_documented(release: str) -> None:
+    """A floor pointing at a release the changelog never explains is a version
+    number nobody can audit."""
+    assert f"## {release} —" in _kernel_changelog()
+
+
+def test_no_vendor_module_claims_an_upstream_train_version() -> None:
+    """a42 and a43 are spoken for. This test is the reason the renumber cannot
+    silently come back: it fails if any vendor module's floor lands on one."""
+    contested = {"0.1.0a42", "0.1.0a43"}
+    assert set(LEDGER_ALLOCATION_RELEASES.values()) & contested == set()
+
+
+def test_the_kernel_is_at_least_every_module_floor() -> None:
+    """The composed assembly ships ONE kernel, so it must satisfy every module
+    installed beside it — otherwise the composition cannot boot."""
+    declared = tomllib.loads(
+        (PACKAGES / "dotmac-kernel" / "pyproject.toml").read_text(encoding="utf-8")
+    )["tool"]["poetry"]["version"]
+    for release in LEDGER_ALLOCATION_RELEASES.values():
+        assert (
+            declared >= release
+        ), f"kernel is {declared} but a module floors at {release}"

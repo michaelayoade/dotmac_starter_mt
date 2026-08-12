@@ -17,11 +17,15 @@ python = ">=3.11,<3.14"
 # `ContractSnapshot` port, which is what makes this module extractable before
 # the A2 adjudication settles where contracts live.
 #
-# 0.1.0a43 is the kernel bumped IN THIS CHANGE, carrying the `mod_ealloc`
+# 0.1.0a45 is the kernel bumped IN THIS CHANGE, carrying the `mod_ealloc`
 # allocation. No earlier kernel can register this module —
 # `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` — so it
 # is a hard floor.
-dotmac-kernel = ">=0.1.0a43"
+#
+# a45, not a43: a42/a43 belong to the upstream train (Audit R1, Application
+# Directory / Workspace). The vendor modules renumber so no two branches mint
+# the same kernel version.
+dotmac-kernel = ">=0.1.0a45"
 sqlalchemy = "^2.0"
 
 [build-system]

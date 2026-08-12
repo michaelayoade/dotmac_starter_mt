@@ -82,4 +82,4 @@ written.
 a bare string and a positional pair; every public value object is frozen and
 slotted with no mutable collection fields; the package type-checks strict.
 
-Requires `dotmac-kernel >= 0.1.0a43`.
+Requires `dotmac-kernel >= 0.1.0a45`.

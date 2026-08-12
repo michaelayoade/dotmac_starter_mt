@@ -32,4 +32,4 @@ migration on every deployment.
 `is_current` flag. Channels and pins wait for update authority, because a pin is
 desired state only under vendor-automatic authority and is otherwise an offer.
 
-Requires `dotmac-kernel >= 0.1.0a42`, the release that allocates `mod_rel`.
+Requires `dotmac-kernel >= 0.1.0a44`, the release that allocates `mod_rel`.

@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a43 — 2026-08-12
+## 0.1.0a45 — 2026-08-12
 
 Allocates `mod_ealloc` for `dotmac-entitlement-allocation`, the fourth
 installable module and the second vendor-side one.
@@ -20,7 +20,7 @@ No behaviour change. Note what did NOT move: the module's
 kernel would be a new kernel facility, and ADR-0017's moratorium holds until the
 kernel lineage runs in a production product database.
 
-## 0.1.0a42 — 2026-08-12
+## 0.1.0a44 — 2026-08-12
 
 Allocates `mod_rel` for `dotmac-release-catalog`, the third installable module
 and the first whose tables are PLATFORM CATALOG rather than tenant-scoped.
