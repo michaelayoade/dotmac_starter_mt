@@ -86,7 +86,8 @@ def _state_for(consumer_count: int) -> str:
 
 # These packages predate the product-first dossier gate.  Keeping the status
 # map exact prevents "temporary" audit debt from becoming the default for the
-# next package.  A row is deleted when that package reaches approved status.
+# next package.  A row is deleted when that package first reaches an evidence
+# state — `adopted` for most, since leaving debt is what a real cutover proves.
 PRE_RULE_DEBT = {
     "dotmac-kernel": "historical-pre-rule",
     "dotmac-ui": "historical-pre-rule",
