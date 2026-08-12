@@ -6,6 +6,56 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a42 — 2026-08-12
+
+Gives the audit trail its real actor. `actor_party_id` was the only actor
+identity, and production says that was the wrong shape: across ERP and Sub,
+**93–98% of audit rows have a non-party actor** — a scheduled job, a service
+principal, an API key — so the column was NULL for almost every row it was meant
+to identify. ERP had independently built the polymorphic pair, making this a
+two-product contract rather than one product's accommodation.
+
+### Added
+- **`(actor_type, actor_id)` is the canonical forensic actor**, with
+  `actor_label` as a write-time display snapshot that carries no authority and
+  `actor_party_id` demoted to optional accountability enrichment. `ACTOR_TYPES`
+  declares the four kinds (`system`, `user`, `api_key`, `service`) as a Python
+  constant over a `String` column — **not** a PostgreSQL enum, which would need
+  `ALTER TYPE` to change (the ADR-0008 non-conformance already repaired for
+  `SettingDomain`).
+- **Request forensics as first-class columns**: `request_id`, `status_code`,
+  `is_success`, `ip_address`, `user_agent`. All nullable — `status_code`
+  included, because a reconciler or internal transition has no HTTP status and
+  `NOT NULL` would force it to invent a meaningless `200`, which destroys the
+  field as a filter.
+- **`occurred_at`** — domain event time, caller-supplyable, distinct from
+  `created_at` (persistence time, server-assigned). They are not aliases: a
+  reconstruction or scheduled effect carries a time that is not its insertion
+  time.
+- `resolve_audit_actor`, `MissingAuditActorError`, `UnknownAuditActorTypeError`.
+
+### Changed
+- `write_audit_event` accepts the actor pair and the forensic fields.
+  `actor_party_id` is now optional. **Supplying no actor at all raises** rather
+  than defaulting to `system`: recording a caller defect as a genuine system
+  action would be indistinguishable from one, forever.
+
+### Compatibility
+- **Released `dotmac-template-studio` is unaffected.** It calls
+  `write_audit_event` with only `actor_party_id` (nine call sites), so a party
+  with no kind derives `actor_type="user"` and uses the party id as the
+  principal identifier. This derivation is **temporary** and retires when those
+  callers pass the pair.
+- No column gained a foreign key, and none may: an audit row must stay readable
+  after its actor is deleted.
+- Migration `0023_audit_actor_and_forensics` is additive and **backfills
+  nothing**. Historical rows keep `actor_type IS NULL`, because their actor kind
+  was never recorded and inventing it is the failure the write side refuses.
+  `occurred_at` gets its default in a second `ALTER` deliberately —
+  `ADD COLUMN ... DEFAULT now()` evaluates `now()` once at DDL time and stores
+  it as the missing-value, stamping every historical row with the migration's
+  timestamp.
+
 ## 0.1.0a41 — 2026-08-12
 
 Adopts the Party archetype's vocabulary (ADR-0019). The kernel's RBAC grant was
