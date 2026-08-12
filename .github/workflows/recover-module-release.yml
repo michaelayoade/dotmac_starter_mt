@@ -1,0 +1,178 @@
+name: Recover module release
+
+# Recover a module release whose `publish` succeeded and whose `verify` then
+# FAILED, leaving an artifact on the private index with no tag.
+#
+# Why recover rather than delete and re-upload: delete-and-reupload makes one
+# version identify two different sets of bytes. Anyone who already resolved
+# `name==version` — a lockfile, a cached wheel, a running deployment — would be
+# holding something the index no longer serves, and no error would ever say so.
+# A version is an identity, not a slot. Deletion is for compromise, leaked
+# secrets, or legal necessity, and nothing else.
+#
+# So this workflow proves the PUBLISHED bytes are the ones the original run
+# built and inspected, verifies them the way the fixed release path does, and
+# only then writes the tag the failed run never wrote.
+#
+# THE TAG POINTS AT THE ORIGINAL RUN'S SOURCE SHA, not at current main. The
+# artifact was built from that tree; tagging today's main would attach the
+# release to code it does not contain — including, in the first use of this
+# workflow, the very fix that made verification possible (#124).
+#
+# It does NOT re-upload, and it cannot: no publish step, no write token beyond
+# the tag. If the hashes differ, or the published wheel will not install
+# cleanly, it refuses — at that point the correct move is to burn the version
+# and release the next one, leaving the published artifact in place and
+# documented as unverified and unsupported.
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Which allowlisted module to recover"
+        required: true
+        type: choice
+        options:
+          - dotmac-release-catalog
+          - dotmac-entitlement-allocation
+      version:
+        description: "The already-published version to recover, e.g. 0.1.0a1"
+        required: true
+        type: string
+      original_run_id:
+        description: >-
+          The failed release run whose `publish` succeeded. Supplies BOTH the
+          retained build artifacts to compare against and the source SHA to tag.
+        required: true
+        type: string
+      compose_kernel:
+        description: "Exact PUBLISHED kernel version to register against, e.g. 0.1.0a45"
+        required: true
+        type: string
+      compose_with:
+        description: >-
+          Space-separated exact pins of already-published siblings to register
+          alongside this one, e.g. "dotmac-release-catalog==0.1.0a1".
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    # Same protected environment as a release: recovery ends in a tag that
+    # states a version was verified, which is a claim worth an approval.
+    environment: registry-release
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve the original run's source SHA
+        id: origin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${{ inputs.original_run_id }}" -q .head_sha)"
+          CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${{ inputs.original_run_id }}" -q .conclusion)"
+          if [ -z "${SHA}" ]; then
+            echo "::error::could not resolve a head SHA for run ${{ inputs.original_run_id }}"
+            exit 1
+          fi
+          # A SUCCESSFUL run needs no recovery, and pointing this at one would
+          # write a second tag for an already-tagged release.
+          if [ "${CONCLUSION}" = "success" ]; then
+            echo "::error::run ${{ inputs.original_run_id }} succeeded — there is nothing to recover"
+            exit 1
+          fi
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "recovering from ${SHA} (original run conclusion: ${CONCLUSION})"
+
+      # Check out MAIN, not the original tree — deliberately, and it is the
+      # opposite of what the release path does.
+      #
+      # The original tree predates the fix that made verification possible
+      # (#124) and predates `compare-published` itself, so running the checks
+      # from it would run the broken tooling that caused this recovery. What
+      # ties the release to the original tree is the HASH COMPARISON, not which
+      # checkout performed it: the artifact is proven to be those bytes, and the
+      # tag is then written onto that SHA.
+      #
+      # `fetch-depth: 0` so the original SHA is present to tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Gate on the release allowlist
+        run: python scripts/release_module.py resolve "${{ inputs.module }}" --version "${{ inputs.version }}"
+
+      - name: Download the original run's build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p recovered-dist
+          gh run download "${{ inputs.original_run_id }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --name "${{ inputs.module }}-dist" \
+            --dir recovered-dist
+          ls -l recovered-dist
+
+      # The load-bearing check: the bytes on the index are the bytes that run
+      # built. `compare-published` refuses on any difference.
+      - name: Prove the published artifact matches the original build
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          python scripts/release_module.py compare-published "${{ inputs.module }}" \
+            --version "${{ inputs.version }}" \
+            --index "${INDEX}" \
+            --dist recovered-dist
+
+      # The verification the original run never completed — now with the public
+      # index available, which is what #124 fixed.
+      - name: Install from the registry, register, and compose
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          set -euo pipefail
+          PINS=(--pin "${{ inputs.module }}==${{ inputs.version }}")
+          for sibling in ${{ inputs.compose_with }}; do
+            PINS+=(--pin "${sibling}")
+          done
+          python scripts/release_module.py verify-registry \
+            --index "${INDEX}" \
+            --kernel "${{ inputs.compose_kernel }}" \
+            "${PINS[@]}"
+
+      # Only after every check: write the tag the failed run never wrote, on the
+      # ORIGINAL SHA.
+      - name: Tag the recovered release
+        run: |
+          set -euo pipefail
+          # `resolve` emits key=value lines, and its `tag=` line already pairs
+          # the allowlisted prefix with the PACKAGE's own version — so a
+          # dispatched version that disagrees with the tree has already been
+          # refused by the resolve gate above.
+          TAG="$(python scripts/release_module.py resolve "${{ inputs.module }}" --version "${{ inputs.version }}" | sed -n 's/^tag=//p')"
+          if [ -z "${TAG}" ]; then
+            echo "::error::could not resolve a tag name"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::${TAG} already exists — this release is not unrecovered"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" \
+            -m "${{ inputs.module }} ${{ inputs.version }} (RECOVERED: published by run ${{ inputs.original_run_id }}, verified afterwards)" \
+            "${{ steps.origin.outputs.sha }}"
+          git push origin "${TAG}"
+          echo "tagged ${TAG} on ${{ steps.origin.outputs.sha }}"
