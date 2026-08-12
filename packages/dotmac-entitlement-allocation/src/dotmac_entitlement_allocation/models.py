@@ -31,7 +31,9 @@ like it was providing.
 version, so re-delivery of the same activation is a no-op rather than a second
 row.
 
-`platform_api` holding SELECT and INSERT only stops the parent being rewritten —
+`platform_api` holds SELECT and INSERT, plus a COLUMN-LEVEL
+`UPDATE (sealed, updated_at)` and nothing more. That stops the parent being
+rewritten —
 but INSERT is exactly what staging needs, so on the CHILD table that same grant
 leaves the allocation **appendable**: raw SQL could add a capability to an
 already-staged allocation and bypass catalogue validation entirely. Restricting
