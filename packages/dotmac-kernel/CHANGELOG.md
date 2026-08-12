@@ -19,10 +19,11 @@ two-product contract rather than one product's accommodation.
 - **`(actor_type, actor_id)` is the canonical forensic actor**, with
   `actor_label` as a write-time display snapshot that carries no authority and
   `actor_party_id` demoted to optional accountability enrichment. `ACTOR_TYPES`
-  declares the four kinds (`system`, `user`, `api_key`, `service`) as a Python
-  constant over a `String` column — **not** a PostgreSQL enum, which would need
-  `ALTER TYPE` to change (the ADR-0008 non-conformance already repaired for
-  `SettingDomain`).
+  declares the four kernel-owned semantic kinds (`system`, `user`, `api_key`,
+  `service`) as a closed Python constant over a `String` column. Actor kinds are
+  not module-owned vocabulary, so ADR-0008 does not call for a declaration
+  registry; plain string storage keeps a future versioned contract addition
+  from requiring PostgreSQL enum surgery in every product database.
 - **Request forensics as first-class columns**: `request_id`, `status_code`,
   `is_success`, `ip_address`, `user_agent`. All nullable — `status_code`
   included, because a reconciler or internal transition has no HTTP status and
@@ -31,7 +32,8 @@ two-product contract rather than one product's accommodation.
 - **`occurred_at`** — domain event time, caller-supplyable, distinct from
   `created_at` (persistence time, server-assigned). They are not aliases: a
   reconstruction or scheduled effect carries a time that is not its insertion
-  time.
+  time. Ordinary new events receive `now()` from the database; the default is
+  declared in both migration and ORM metadata.
 - `resolve_audit_actor`, `MissingAuditActorError`, `UnknownAuditActorTypeError`.
 
 ### Changed
@@ -39,6 +41,9 @@ two-product contract rather than one product's accommodation.
   `actor_party_id` is now optional. **Supplying no actor at all raises** rather
   than defaulting to `system`: recording a caller defect as a genuine system
   action would be indistinguishable from one, forever.
+- `system` alone may omit `actor_id`. `user`, `service`, and `api_key` require a
+  non-empty stable identifier; a `user` accompanied by `actor_party_id` may
+  derive that Party UUID as its identifier.
 
 ### Compatibility
 - **Released `dotmac-template-studio` is unaffected.** It calls
@@ -46,8 +51,9 @@ two-product contract rather than one product's accommodation.
   with no kind derives `actor_type="user"` and uses the party id as the
   principal identifier. This derivation is **temporary** and retires when those
   callers pass the pair.
-- No column gained a foreign key, and none may: an audit row must stay readable
-  after its actor is deleted.
+- No actor column in this tenant `audit_events` migration gained a foreign key:
+  the row must stay readable after its actor is deleted. The separate,
+  pre-existing platform audit contract is outside this slice.
 - Migration `0023_audit_actor_and_forensics` is additive and **backfills
   nothing**. Historical rows keep `actor_type IS NULL`, because their actor kind
   was never recorded and inventing it is the failure the write side refuses.

@@ -22,9 +22,10 @@ API key), so a party-primary model would be NULL for almost every row. ERP
 independently arrived at the same polymorphic pair, so this is a two-product
 contract rather than one product's accommodation.
 
-No actor column is a foreign key, in any product. An audit row must remain
-readable after its actor is deleted, which is also why `actor_label` is stored
-rather than resolved on read.
+No actor column in the converging tenant `audit_events` contract gains a foreign
+key. An audit row must remain readable after its actor is deleted, which is also
+why `actor_label` is stored rather than resolved on read. The kernel's separate
+platform audit trail predates this contract and is not changed by this slice.
 """
 
 from __future__ import annotations
@@ -42,9 +43,10 @@ from dotmac_kernel.models import Base, uuid_pk
 from dotmac_kernel.models_platform import PlatformAuditEvent
 
 #: The four actor kinds the contract defines. Deliberately a Python constant
-#: over a `String` column, NOT a PostgreSQL enum: a native enum needs
-#: `ALTER TYPE` to change, which is the same non-conformance that had to be
-#: repaired for `SettingDomain` and `document_template_type` (ADR-0008).
+#: over a `String` column, NOT a PostgreSQL enum. Actor kinds are kernel-owned
+#: semantic categories, so ADR-0008's module-declared-vocabulary trigger does
+#: not apply. Plain string storage instead keeps a future, versioned kernel
+#: contract addition from requiring enum surgery in every product database.
 #:
 #: Closed rather than an open registry, because each member carries a defined
 #: resolution rule (below). A fifth kind is a contract change with an answer for
@@ -61,11 +63,11 @@ ACTOR_TYPES: frozenset[str] = frozenset({"system", "user", "api_key", "service"}
 
 
 class MissingAuditActorError(ValueError):
-    """Neither an actor type nor a party was supplied.
+    """The canonical actor pair cannot be resolved from the supplied fields.
 
-    Deliberately fatal rather than defaulting to `system`. A missing actor is a
-    caller defect; recording it as the system actor would manufacture false
-    forensic data in the one table whose purpose is to be trustworthy.
+    Deliberately fatal rather than defaulting a missing actor to `system` or
+    accepting a principal kind with no identifier. Either would manufacture
+    false or incomplete forensic data in the one table meant to be trustworthy.
     """
 
 
@@ -118,6 +120,7 @@ class AuditEvent(Base):
     occurred_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         index=True,
+        server_default=func.now(),
     )
     #: Persistence time — when the row was written. Server-assigned, never
     #: supplied by a caller.
@@ -147,6 +150,8 @@ def resolve_audit_actor(
     to `system` would be indistinguishable, forever, from a genuine system
     action.
     """
+    resolved_id = actor_id if actor_id is not None and actor_id.strip() else None
+
     if actor_type is None:
         if actor_party_id is None:
             raise MissingAuditActorError(
@@ -154,14 +159,25 @@ def resolve_audit_actor(
                 f"{sorted(ACTOR_TYPES)}) or actor_party_id. Refusing to default "
                 "to 'system' — that would record a caller defect as a real actor."
             )
-        return "user", actor_id or str(actor_party_id)
+        return "user", resolved_id or str(actor_party_id)
 
     if actor_type not in ACTOR_TYPES:
         raise UnknownAuditActorTypeError(
             f"unknown audit actor type {actor_type!r}; "
             f"the contract defines {sorted(ACTOR_TYPES)}"
         )
-    return actor_type, actor_id
+    if actor_type == "system":
+        return actor_type, resolved_id
+
+    if actor_type == "user" and resolved_id is None and actor_party_id is not None:
+        resolved_id = str(actor_party_id)
+
+    if resolved_id is None:
+        raise MissingAuditActorError(
+            f"audit actor type {actor_type!r} needs a non-empty actor_id"
+        )
+
+    return actor_type, resolved_id
 
 
 def write_audit_event(
@@ -197,10 +213,12 @@ def write_audit_event(
     `MissingAuditActorError` — validated with `action`, before anything is
     added to the session, for the same reason.
 
-    `occurred_at` is the DOMAIN time and is optional; leave it unset and the row
-    records only its persistence time (`created_at`, server-assigned). Do not
-    pass `created_at` — it is not a parameter, because a caller cannot know when
-    the row will be written.
+    `occurred_at` is the DOMAIN time and is optional; leave it unset for an
+    ordinary current event and the database supplies `now()`. Supply it for a
+    reconstruction or delayed observation whose domain time differs from its
+    persistence time (`created_at`, always server-assigned). Do not pass
+    `created_at` — it is not a parameter, because a caller cannot know when the
+    row will be written.
     """
     active_audit_actions().require(action)
     resolved_type, resolved_id = resolve_audit_actor(
@@ -254,8 +272,12 @@ def write_platform_audit_event(
 
 
 __all__ = [
+    "ACTOR_TYPES",
     "AuditEvent",
+    "MissingAuditActorError",
     "PlatformAuditEvent",
+    "UnknownAuditActorTypeError",
+    "resolve_audit_actor",
     "write_audit_event",
     "write_platform_audit_event",
 ]

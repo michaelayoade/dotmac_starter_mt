@@ -32,10 +32,18 @@ def test_every_declared_kind_is_accepted_with_its_identifier(kind: str) -> None:
     assert _resolve(actor_type=kind, actor_id="worker-7") == (kind, "worker-7")
 
 
-@pytest.mark.parametrize("kind", sorted(ACTOR_TYPES))
-def test_a_kind_may_carry_no_identifier(kind: str) -> None:
-    """`system` in particular often has nothing more specific to record."""
-    assert _resolve(actor_type=kind) == (kind, None)
+def test_system_may_carry_no_identifier() -> None:
+    """A genuine system action may have no more specific component to name."""
+    assert _resolve(actor_type="system") == ("system", None)
+
+
+@pytest.mark.parametrize("kind", ["user", "service", "api_key"])
+@pytest.mark.parametrize("actor_id", [None, "", "   "])
+def test_principal_kinds_require_a_non_empty_identifier(
+    kind: str, actor_id: str | None
+) -> None:
+    with pytest.raises(MissingAuditActorError):
+        _resolve(actor_type=kind, actor_id=actor_id)
 
 
 def test_an_undeclared_kind_is_refused() -> None:
@@ -60,6 +68,16 @@ def test_an_explicit_identifier_survives_the_legacy_derivation() -> None:
     party = uuid.uuid4()
 
     assert _resolve(actor_party_id=party, actor_id="alice") == ("user", "alice")
+
+
+def test_an_explicit_user_may_derive_its_party_identifier() -> None:
+    """A Party UUID is itself a stable user-principal identifier."""
+    party = uuid.uuid4()
+
+    assert _resolve(actor_type="user", actor_party_id=party) == (
+        "user",
+        str(party),
+    )
 
 
 def test_an_explicit_kind_wins_over_the_party_derivation() -> None:

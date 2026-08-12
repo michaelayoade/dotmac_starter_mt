@@ -78,12 +78,16 @@ def get_tenant(db: Session, tenant_id: UUID) -> Tenant:
 
 
 def provision_tenant(
-    db: Session, payload: TenantProvision, *, actor_email: str
+    db: Session,
+    payload: TenantProvision,
+    *,
+    actor_admin_id: UUID,
+    actor_email: str,
 ) -> Tenant:
     """Create tenant + login-able owner + admin grant + audit trail,
-    atomically, as the platform actor `actor_email` (recorded in both audit
-    events' details — platform admins are not tenant parties, so
-    `actor_party_id` stays NULL and the actor is named in `details`)."""
+    atomically, as the platform actor identified by the immutable
+    `actor_admin_id`. The mutable email is a display snapshot and remains in
+    details during the expand-only phase."""
     tenant = Tenant(slug=payload.slug, name=payload.name)
     # `db.add` happens INSIDE the savepoint, not before it (see
     # `conflict_savepoint`'s docstring — begin_nested auto-flushes pending
@@ -165,7 +169,7 @@ def provision_tenant(
         db,
         tenant_id=tenant.id,
         actor_type="user",
-        actor_id=actor_email,
+        actor_id=str(actor_admin_id),
         actor_label=actor_email,
         action="platform.tenant.create",
         entity_type="tenant",
@@ -176,7 +180,7 @@ def provision_tenant(
         db,
         tenant_id=tenant.id,
         actor_type="user",
-        actor_id=actor_email,
+        actor_id=str(actor_admin_id),
         actor_label=actor_email,
         action="platform.tenant.owner_provision",
         entity_type="party",
