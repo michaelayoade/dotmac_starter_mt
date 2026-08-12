@@ -417,10 +417,42 @@ TICKETING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("tkt"),
 )
 
+# `dotmac-release-catalog` — the third allocated installable module. `rel` reads
+# as "release" at a glance in a live catalog dump, which `rlc` would not; `rl`
+# leaves 20 characters of the revision-id budget for a readable slug. The row
+# lands in the same change as the module's manifest, as the rule above requires.
+#
+# Unlike the two above, this module's tables are PLATFORM catalog tables: a
+# published artifact is a vendor-wide fact, not a per-tenant one, so they carry
+# no `tenant_id` and take grants rather than RLS (hard rule 11's documented
+# platform-catalog case). The allocation is identical either way — the ledger
+# owns physical identity, not tenancy policy.
+RELEASE_CATALOG_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="release_catalog",
+    prefix="rl",
+    branch_label="release_catalog",
+    db_schema=module_schema("rel"),
+)
+
+# `dotmac-entitlement-allocation` — the fourth allocated installable module, and
+# the second vendor-side one. `ealloc` rather than `alloc` because "allocation"
+# alone is ambiguous in a fleet that also allocates IPs, ports and stock; `ea`
+# leaves 20 characters of the revision-id budget for a readable slug. Platform
+# catalog tables again, for the same reason as `mod_rel`: what a contract
+# entitles is a vendor-side fact, not a per-tenant one.
+ENTITLEMENT_ALLOCATION_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="entitlement_allocation",
+    prefix="ea",
+    branch_label="entitlement_allocation",
+    db_schema=module_schema("ealloc"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
     TICKETING_MIGRATION_OWNER,
+    RELEASE_CATALOG_MIGRATION_OWNER,
+    ENTITLEMENT_ALLOCATION_MIGRATION_OWNER,
 )
 
 
@@ -650,6 +682,8 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "TICKETING_MIGRATION_OWNER",
+    "RELEASE_CATALOG_MIGRATION_OWNER",
+    "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
     "MODULE_SCHEMA_PREFIX",
     "RESERVED_SCHEMAS",
     "REVISION_SEQUENCE_DIGITS",

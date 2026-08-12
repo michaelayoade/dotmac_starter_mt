@@ -6,6 +6,33 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a45 — 2026-08-12
+
+Allocates `mod_ealloc` for `dotmac-entitlement-allocation`, the fourth
+installable module and the second vendor-side one.
+
+`ENTITLEMENT_ALLOCATION_MIGRATION_OWNER` (`entitlement_allocation` / `ealloc` /
+`ea` / `entitlement_allocation`) joins `MIGRATION_OWNER_LEDGER`, in the same
+change as the module's manifest as the allocation rule requires.
+
+No behaviour change. Note what did NOT move: the module's
+`CapabilityCatalogueReader` port stays in the MODULE, not here. Adding it to the
+kernel would be a new kernel facility, and ADR-0017's moratorium holds until the
+kernel lineage runs in a production product database.
+
+## 0.1.0a44 — 2026-08-12
+
+Allocates `mod_rel` for `dotmac-release-catalog`, the third installable module
+and the first whose tables are PLATFORM CATALOG rather than tenant-scoped.
+
+`RELEASE_CATALOG_MIGRATION_OWNER` (`release_catalog` / `rel` / `rl` /
+`release_catalog`) joins `MIGRATION_OWNER_LEDGER`. Adding a row is an
+allocation, so it lands in the same change as the module's manifest and gets a
+kernel release — the ledger is what makes "globally unique across Dotmac repos"
+true, and a module cannot be registered by a kernel that predates its row
+(`NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError`).
+
+No behaviour change. Nothing else in the kernel's surface moved.
 ## 0.1.0a42 — 2026-08-12
 
 Gives the audit trail its real actor. `actor_party_id` was the only actor

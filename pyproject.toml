@@ -30,6 +30,16 @@ dotmac-template-studio = { path = "packages/dotmac-template-studio", develop = t
 # The second installable module (ADR-0006 M2). Same footing as the first: an
 # editable path dependency, no copied files, no import shims.
 dotmac-ticketing = { path = "packages/dotmac-ticketing", develop = true }
+# The third installable module (ADR-0006 M3), and the first whose tables are
+# PLATFORM CATALOG rather than tenant-scoped. Same footing as the other two.
+#
+# A path dependency is correct WITHIN this repository — package and assembly are
+# released from one checkout. It is not correct ACROSS repositories: a consuming
+# assembly such as the vendor control plane pins an exact released version from
+# the private index, never a relative path.
+dotmac-release-catalog = { path = "packages/dotmac-release-catalog", develop = true }
+# The fourth installable module (ADR-0006 M4), and the second vendor-side one.
+dotmac-entitlement-allocation = { path = "packages/dotmac-entitlement-allocation", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -69,9 +79,16 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106"]
 "alembic/*" = ["E501"]
-# Kernel base migrations moved here from alembic/versions in the kernel split
-# (Task 1c) — same Alembic-file relaxations apply (long DDL literals).
-"packages/dotmac-kernel/src/dotmac_kernel/migrations/*" = ["E501"]
+# EVERY migration lineage, in one rule rather than a path per package.
+#
+# Alembic files carry long DDL and GRANT literals, and wrapping them is worse
+# than the long line: a grant split across two string fragments stops being
+# greppable, which is the property those statements are written as literals to
+# have. This covers the assembly's `alembic/` above, the kernel base migrations
+# that moved into the package in Task 1c, and every installable module's own
+# lineage — including ones not yet written, so the third module does not
+# rediscover this as a one-off exemption the way it would with a path list.
+"packages/*/src/*/migrations/*" = ["E501"]
 "scripts/*" = ["S603", "S607"]  # trusted local ops tooling invoking git/docker
 
 [tool.mypy]
@@ -80,6 +97,25 @@ ignore_missing_imports = true
 disallow_untyped_defs = false
 check_untyped_defs = true
 warn_unused_ignores = true
+
+# The vendor-side modules are held to FULLY TYPED contracts (the fleet-wide
+# typed-contracts standard), which the assembly-wide settings above deliberately
+# are not: `app/` predates the standard and relaxing it there is tracked debt.
+# A new module has no such history, so it starts strict — and every one of these
+# packages ships `py.typed`, meaning a consuming assembly's type-checker treats
+# these annotations as the contract.
+[[tool.mypy.overrides]]
+module = [
+    "dotmac_entitlement_allocation.*",
+    "dotmac_release_catalog.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_any_generics = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
 
 [tool.bandit]
 # Alembic migrations (assembly `alembic/` + the kernel base migrations, which
@@ -107,6 +143,8 @@ root_packages = [
     "dotmac_ui",
     "dotmac_template_studio",
     "dotmac_ticketing",
+    "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
 ]
 
 [[tool.importlinter.contracts]]
@@ -154,18 +192,45 @@ forbidden_modules = ["dotmac_kernel", "app"]
 [[tool.importlinter.contracts]]
 name = "Modules must not import the assembly"
 type = "forbidden"
-source_modules = ["dotmac_template_studio", "dotmac_ticketing"]
+source_modules = [
+    "dotmac_template_studio",
+    "dotmac_ticketing",
+    "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
+]
 forbidden_modules = ["app"]
 
 # The second module makes this contract bite. A module composes with another
 # through the assembly, an htmx-fetched fragment or a service call — never an
 # import, which would make either module un-releasable without the other.
+# VENDOR-ASSEMBLY-ONLY parts (ADR-0006 M3; ruling C1).
+#
+# `app_user` being REVOKEd from `mod_rel` proves the tenant data plane cannot
+# READ the catalogue. It says nothing about INSTALLATION — this assembly is the
+# reference product data plane, and nothing stopped it importing the module and
+# mounting it. That is the gap this contract closes.
+#
+# The rule is the substance of C1: the kernel stays product-neutral and fleet
+# workflow does not leak into every data plane. Putting the tables in an
+# optional module satisfies C1 only while a product assembly cannot install it.
+#
+# `dotmac-fleet`, `dotmac-fleet-health`, `dotmac-support-access` and
+# `dotmac-licence-issuance` join this list as they land; licence-issuance most
+# of all, since it holds a signing key that must never reach a data plane.
+[[tool.importlinter.contracts]]
+name = "The assembly must not install vendor-only modules"
+type = "forbidden"
+source_modules = ["app"]
+forbidden_modules = ["dotmac_release_catalog", "dotmac_entitlement_allocation"]
+
 [[tool.importlinter.contracts]]
 name = "Modules are independent of each other"
 type = "independence"
 modules = [
     "dotmac_template_studio",
     "dotmac_ticketing",
+    "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
 ]
 
 [[tool.importlinter.contracts]]

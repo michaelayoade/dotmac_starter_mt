@@ -5,21 +5,38 @@ source evidence.  This gate makes a missing dossier, missing product audit, or
 new unresolved package fail in the fast architecture suite.  The existing debt
 map is exact and may only shrink.
 
-A dossier's `status` is one of exactly three things:
+A dossier's `status` records the EVIDENCE LEVEL, never permission to be a shared
+module.  ADR-0006's 2026-08-12 amendment separates the two: a second consumer
+proves reuse, it does not decide placement.  Requiring two before sharing does
+not delay a vendor-side capability whose data-plane consumer is revoked on
+purpose — it forbids it.
 
-``approved``
-    Two independent products are on the contract.  Requires an audited
-    `source_mode` and two `contract_consumers`, and the package must not
-    appear in ``PRE_RULE_DEBT``.
+All three states below permit a shared module.  They differ in what is proven:
+
 ``audit-complete``
-    The inventory was done and the unit was drawn deliberately, but nothing has
-    adopted it yet.  ADR-0017 makes this gap unavoidable — the first cutover is
-    what earns approval, and it cannot precede the first release.  It expires:
-    once two contract consumers exist, the dossier must move to ``approved``.
+    The inventory ran and the unit was drawn deliberately.  Nothing has adopted
+    it.  Requires an audited `source_mode`, at least ONE concrete
+    `candidate_consumers` entry, and ZERO `contract_consumers`.
+``adopted``
+    One real consumer is on the contract and its first cutover is complete.
+    Requires an audited `source_mode` and exactly one `contract_consumers`
+    entry.  It is a distinct state rather than a loosened `audit-complete`
+    because a package with a live consumer that still claims "nothing has
+    adopted it" makes a false statement about the fleet, and hides the first
+    cutover ADR-0017 calls the scarce resource.
+``reuse-proven``
+    Two or more independent consumers exercise the same contract.  Requires an
+    audited `source_mode` and two or more `contract_consumers`.  Formerly
+    ``approved``; renamed because the old name described a permission, which is
+    what this state no longer grants.
 ``PRE_RULE_DEBT[package]``
     Grandfathered.  The map is exact and only shrinks, and this is deliberately
     NOT the same claim as ``audit-complete`` (ADR-0018: "grandfathered" must
     stay distinguishable from "reviewed and correct").
+
+The ratchet runs both ways.  A package may not claim more than its consumers
+prove, and may not sit in a state weaker than its evidence supports: one
+consumer forces ``adopted``, two force ``reuse-proven``.
 """
 
 from __future__ import annotations
@@ -48,9 +65,29 @@ VALID_SOURCE_MODES = {
 # that claims the audit was done has to be backed by one of them.
 AUDITED_SOURCE_MODES = {"product-first", "greenfield-after-inventory"}
 
+# The evidence ladder (ADR-0006, 2026-08-12).  Every one of these permits a
+# shared module; they differ only in what has been proven about reuse.
+EVIDENCE_STATES = ("audit-complete", "adopted", "reuse-proven")
+
+
+def _state_for(consumer_count: int) -> str:
+    """The one evidence state a given number of contract consumers supports.
+
+    Exact rather than a floor, in both directions.  A floor would let a package
+    with two consumers keep claiming `audit-complete` forever, which is how the
+    previous model let the gate quietly stop meaning anything.
+    """
+    if consumer_count == 0:
+        return "audit-complete"
+    if consumer_count == 1:
+        return "adopted"
+    return "reuse-proven"
+
+
 # These packages predate the product-first dossier gate.  Keeping the status
 # map exact prevents "temporary" audit debt from becoming the default for the
-# next package.  A row is deleted when that package reaches approved status.
+# next package.  A row is deleted when that package first reaches an evidence
+# state — `adopted` for most, since leaving debt is what a real cutover proves.
 PRE_RULE_DEBT = {
     "dotmac-kernel": "historical-pre-rule",
     "dotmac-ui": "historical-pre-rule",
@@ -168,52 +205,42 @@ def _validate_dossier(
             "source_repositories must show both ERP and Sub were inventoried"
         )
 
+    # A dossier with no named candidate is a package built for nobody, which is
+    # the speculative extraction ADR-0006 section 5 exists to stop.  ONE
+    # concrete candidate is the smallest claim that still carries evidence;
+    # `reuse-proven` is where two become mandatory, and that is checked below
+    # against CONTRACT consumers, which are the real ones.
     candidate_consumers = dossier.get("candidate_consumers")
-    if isinstance(candidate_consumers, list) and len(set(candidate_consumers)) < 2:
-        problems.append("candidate_consumers must name two independent products")
+    if isinstance(candidate_consumers, list) and not candidate_consumers:
+        problems.append("candidate_consumers must name at least one concrete consumer")
 
     status = dossier.get("status")
     expected_debt = PRE_RULE_DEBT.get(directory_name)
     consumers = dossier.get("contract_consumers")
     consumer_count = len(set(consumers)) if isinstance(consumers, list) else 0
-    if status == "approved":
+
+    if status in EVIDENCE_STATES:
         if source_mode not in AUDITED_SOURCE_MODES:
             problems.append(
-                "an approved package must be product-first or "
-                "greenfield-after-inventory"
-            )
-        if consumer_count < 2:
-            problems.append(
-                "an approved package needs two independent contract consumers"
+                f"{status} claims the inventory was done; source_mode must be "
+                "product-first or greenfield-after-inventory to back that"
             )
         if expected_debt is not None:
             problems.append(
-                "remove this package from PRE_RULE_DEBT when its dossier "
-                "becomes approved"
+                "remove this package from PRE_RULE_DEBT when its dossier claims "
+                "an evidence state"
             )
-    elif status == "audit-complete" and expected_debt is None:
-        # The state between "inventoried and correctly drawn" and "two products
-        # have proven the contract".  ADR-0017 makes that gap unavoidable: the
-        # first cutover is what earns approval, and it cannot precede the first
-        # release.  Without this status a new package must either claim
-        # `approved` on zero evidence or be filed as pre-rule debt it is not —
-        # and ADR-0018 is explicit that "grandfathered" and "reviewed, awaiting
-        # proof" must stay distinguishable.
-        if source_mode not in AUDITED_SOURCE_MODES:
+        # The two-directional ratchet.  Claiming MORE than the consumers prove is
+        # the obvious failure; claiming LESS is the one the two-state model
+        # allowed, and it is worse, because a package with a live consumer that
+        # still says "nothing has adopted it" is a false statement about the
+        # fleet rather than a missing one.
+        required = _state_for(consumer_count)
+        if status != required:
             problems.append(
-                "audit-complete claims the inventory was done; source_mode must "
-                "be product-first or greenfield-after-inventory to back that"
+                f"status is {status} with {consumer_count} contract consumer(s); "
+                f"that evidence level is exactly {required}"
             )
-        if consumer_count >= 2:
-            # The ratchet: once the consumers exist the claim is provable, so
-            # this status stops being available.  Otherwise a package parks here
-            # permanently and the gate silently stops meaning anything.
-            problems.append(
-                "audit-complete is a pre-adoption status; with two contract "
-                "consumers the dossier must move to approved"
-            )
-        # `candidate_consumers` — who it is being built for — is already
-        # required to name two independent products for every dossier above.
     elif status != expected_debt:
         problems.append(
             "only the exact PRE_RULE_DEBT map may carry an unresolved or "
@@ -266,19 +293,23 @@ def test_a_new_package_cannot_hide_behind_audit_required() -> None:
         )
 
 
-def test_an_approved_package_needs_two_contract_consumers() -> None:
-    """Sensitivity proof for the original ADR-0006 F0 extraction gate."""
+def test_reuse_proven_needs_two_contract_consumers() -> None:
+    """Sensitivity proof: the top of the ladder still means what it says.
+
+    ADR-0006's 2026-08-12 amendment lowered what a module needs to EXIST; it did
+    not lower what "reuse is proven" claims.
+    """
     dossier = _load_toml(PACKAGES_DIR / "dotmac-template-studio/EXTRACTION.toml")
     dossier.update(
         {
             "package": "dotmac-new-module",
-            "status": "approved",
+            "status": "reuse-proven",
             "source_mode": "product-first",
             "contract_consumers": ["dotmac_erp"],
         }
     )
 
-    with pytest.raises(ExtractionDossierError, match="two independent"):
+    with pytest.raises(ExtractionDossierError, match="exactly adopted"):
         _validate_dossier(
             dossier,
             directory_name="dotmac-new-module",
@@ -286,23 +317,64 @@ def test_an_approved_package_needs_two_contract_consumers() -> None:
         )
 
 
-def test_audit_complete_expires_once_the_consumers_exist() -> None:
-    """The ratchet on the pre-adoption status.
+def test_the_ladder_climbs_when_the_second_consumer_arrives() -> None:
+    """The ratchet upward.
 
-    `audit-complete` is honest while nothing has adopted the module.  The moment
-    two products are on the contract the claim is provable, and a package that
-    stays parked here would be carrying an unearned exemption — exactly the
-    shape ADR-0018 rejects.
+    Two products on the contract make the reuse claim provable, and a package
+    parked below its evidence carries an unearned understatement — the shape
+    ADR-0018 rejects in the other direction.
     """
     dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
     dossier["contract_consumers"] = ["dotmac_vendor_control_plane", "dotmac_sub"]
 
-    with pytest.raises(ExtractionDossierError, match="must move to approved"):
+    with pytest.raises(ExtractionDossierError, match="exactly reuse-proven"):
         _validate_dossier(
             dossier,
             directory_name="dotmac-ticketing",
             distribution_name="dotmac-ticketing",
         )
+
+
+def test_a_package_with_one_consumer_may_not_claim_nothing_adopted_it() -> None:
+    """The defect the two-state model allowed, and the reason `adopted` exists.
+
+    Under the old ladder a package could gain its first real consumer and keep
+    describing itself as "nothing has adopted it yet" indefinitely — a FALSE
+    statement about the fleet, not merely an incomplete one, and it concealed
+    the first cutover that ADR-0017 calls the scarce resource.
+    """
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
+    dossier["contract_consumers"] = ["dotmac_vendor_control_plane"]
+
+    with pytest.raises(ExtractionDossierError, match="exactly adopted"):
+        _validate_dossier(
+            dossier,
+            directory_name="dotmac-ticketing",
+            distribution_name="dotmac-ticketing",
+        )
+
+
+def test_one_consumer_is_enough_to_be_a_shared_module() -> None:
+    """The amendment's substance: a single consumer is evidence, not a veto.
+
+    A vendor-side capability whose data-plane consumer is REVOKEd on purpose
+    cannot acquire a second consumer until a second control plane exists.  The
+    old gate did not delay such a module — it forbade it.
+    """
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
+    dossier.update(
+        {
+            "status": "adopted",
+            "candidate_consumers": ["dotmac_vendor_control_plane"],
+            "contract_consumers": ["dotmac_vendor_control_plane"],
+        }
+    )
+
+    _validate_dossier(
+        dossier,
+        directory_name="dotmac-ticketing",
+        distribution_name="dotmac-ticketing",
+    )
 
 
 def test_audit_complete_cannot_be_claimed_without_the_inventory() -> None:
@@ -322,19 +394,31 @@ def test_audit_complete_cannot_be_claimed_without_the_inventory() -> None:
         )
 
 
-def test_a_module_must_name_two_candidate_consumers() -> None:
-    """A module with one candidate consumer is a product feature, not a module.
+def test_a_module_must_name_at_least_one_candidate_consumer() -> None:
+    """A package built for nobody is the speculative extraction §5 forbids.
 
-    ADR-0006 §5 forbids extracting on resemblance; naming two independent
-    products is the cheapest available proof that the unit was drawn for more
-    than the repository it happens to live in.
+    One CONCRETE candidate — an assembly that exists and will consume it — is
+    the smallest claim that still carries evidence.  Zero is a package with no
+    reason to be a package.
     """
     dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
-    dossier["candidate_consumers"] = ["dotmac_sub"]
+    dossier["candidate_consumers"] = []
 
-    with pytest.raises(ExtractionDossierError, match="candidate_consumers"):
+    with pytest.raises(ExtractionDossierError, match="at least one concrete"):
         _validate_dossier(
             dossier,
             directory_name="dotmac-ticketing",
             distribution_name="dotmac-ticketing",
         )
+
+
+def test_one_candidate_consumer_is_accepted() -> None:
+    """The half of the previous rule that was actually wrong."""
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
+    dossier["candidate_consumers"] = ["dotmac_vendor_control_plane"]
+
+    _validate_dossier(
+        dossier,
+        directory_name="dotmac-ticketing",
+        distribution_name="dotmac-ticketing",
+    )
