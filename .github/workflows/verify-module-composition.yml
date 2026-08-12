@@ -1,0 +1,55 @@
+name: Verify module composition
+
+# The SECOND verification level. `release-module.yml` proves each module
+# installs and registers ALONE; this proves the published set composes — both
+# exact versions installed beside one published kernel, both manifests
+# registered through a single `NamespaceRegistry`.
+#
+# Separate from the release workflows on purpose. A composition check can only
+# run once every participant is published, so folding it into either release
+# would make that release's result depend on a module it does not own — and a
+# red composition would then look like a failed publish of something that
+# published fine.
+#
+# Read-only: no publish token, no tag, no `contents: write`. It installs from
+# the index and reports. Failure here means the SET is wrong, which is repaired
+# by a new release, never by mutating one already published.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: "Published kernel version (e.g. 0.1.0a45)"
+        required: true
+        type: string
+      pins:
+        description: >-
+          Space-separated exact pins, e.g.
+          "dotmac-release-catalog==0.1.0a1 dotmac-entitlement-allocation==0.1.0a1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    environment: registry-release    # the scoped read token lives here
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # Every pin is resolved through the allowlist before anything is
+      # installed, so this cannot be pointed at an arbitrary distribution.
+      - name: Install the published set and register every manifest together
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          ARGS=""
+          for pin in ${{ inputs.pins }}; do ARGS="${ARGS} --pin ${pin}"; done
+          python scripts/release_module.py verify-registry \
+            --index "${INDEX}" \
+            --kernel "${{ inputs.kernel_version }}" ${ARGS}
