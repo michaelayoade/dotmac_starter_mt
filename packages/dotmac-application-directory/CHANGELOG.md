@@ -30,6 +30,21 @@ home of the `ApplicationDescriptor` contract (ADR-0021 §4).
   `ReconciliationStatus`. Closed in Python, stored as text, per ADR-0008.
 - **`service`** — the one writer of a binding row. Never commits, never rolls
   back; uses `conflict_savepoint` with the mutation inside the block.
+- **`activate_binding`** is the ONLY route to `ACTIVE`, and requires a
+  descriptor read from the application. It refuses if reconciling that
+  descriptor would not adopt it, or if the application names a different local
+  tenant than the binding was created for. `attach_application` takes no `state`
+  argument and `transition` refuses `ACTIVE` outright, so a binding that is
+  launchable and has never been verified is not a state this module can produce.
+- **Every mutation takes `(tenant_id, binding_id)` and locks the row**
+  (`SELECT ... FOR UPDATE`) rather than accepting a caller-supplied object.
+  Reconciliation is not commutative: two reconcilers reading v1 concurrently,
+  one observing v2 and the other v3, would both pass their version checks
+  against the stale copy they hold, and the last to commit would win. The same
+  race let a suspend land after a detach and resurrect a disconnected binding.
+  Both were invisible at the call site, which is why the object-taking
+  signatures were removed rather than supplemented. Proven by PostgreSQL
+  concurrency canaries — SQLite omits `FOR UPDATE` silently.
 - **`reconcile_descriptor`** — four outcomes, only two of which adopt. A version
   regression is `stale` and keeps the stored copy; the same version carrying
   different content is `failed` and is never adopted, because a version is a

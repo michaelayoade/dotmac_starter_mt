@@ -48,10 +48,12 @@ from dotmac_application_directory.manifest import module
 from dotmac_application_directory.migrations import versions_dir
 from dotmac_application_directory.models import SCHEMA, ApplicationBinding
 from dotmac_application_directory.service import (
+    ActivationRefused,
     BindingAlreadyExists,
     BindingNotFound,
     DirectoryError,
     ReconcileOutcome,
+    activate_binding,
     attach_application,
     get_binding,
     launchable_bindings,
@@ -65,6 +67,7 @@ __version__ = "0.1.0a1"
 
 __all__ = [
     "SCHEMA",
+    "ActivationRefused",
     "ApplicationBinding",
     "ApplicationDescriptor",
     "ApplicationRole",
@@ -78,6 +81,7 @@ __all__ = [
     "ReconcileOutcome",
     "ReconciliationStatus",
     "__version__",
+    "activate_binding",
     "allowed_transitions",
     "attach_application",
     "can_transition",

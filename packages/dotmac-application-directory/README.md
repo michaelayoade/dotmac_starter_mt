@@ -49,7 +49,8 @@ concept-to-owner table.
 ```python
 from dotmac_application_directory import (
     ApplicationDescriptor, ApplicationRole, BindingSource, BindingState,
-    attach_application, launchable_bindings, reconcile_descriptor, transition,
+    activate_binding, attach_application, launchable_bindings,
+    reconcile_descriptor, transition,
 )
 
 descriptor = ApplicationDescriptor(
@@ -68,15 +69,24 @@ descriptor = ApplicationDescriptor(
     ),
 )
 
+# Always created INVITED and unverified. There is no `state` argument.
 binding = attach_application(
     db, tenant_id=tenant.id, descriptor=descriptor,
     source=BindingSource.VENDOR_ALLOCATION,
 )
-transition(db, binding, BindingState.PENDING_VERIFICATION)
-transition(db, binding, BindingState.ACTIVE)
 
-# Later, having re-read the descriptor from the application:
-outcome = reconcile_descriptor(db, binding, observed, now=utcnow())
+# ACTIVE requires PROOF: a descriptor actually read from the application.
+# `transition` refuses to produce ACTIVE at all.
+activate_binding(
+    db, tenant_id=tenant.id, binding_id=binding.id,
+    observed=read_from_application(), now=utcnow(),
+)
+
+# Later, having re-read the descriptor again:
+outcome = reconcile_descriptor(
+    db, tenant_id=tenant.id, binding_id=binding.id,
+    observed=observed, now=utcnow(),
+)
 
 for b in launchable_bindings(db, tenant_id=tenant.id):
     ...  # render a tile linking to b.admin_url
@@ -96,6 +106,23 @@ the observed descriptor:
 
 A failed read never moves `descriptor_refreshed_at`, so an unreachable
 application cannot look freshly checked.
+
+## ACTIVE carries proof, and mutations lock the row
+
+`ACTIVE` is reachable only through `activate_binding`, which requires a
+descriptor read from the application and refuses if reconciling it would not
+adopt, or if the application names a different local tenant than the binding was
+created for. `transition` refuses `ACTIVE` outright. There is no `state`
+argument on `attach_application`: a binding that is launchable and has never
+been verified is not a state this module can produce.
+
+Every mutation takes `(tenant_id, binding_id)` and re-reads the row `FOR UPDATE`
+rather than accepting a caller-supplied object. Two reconcilers reading v1
+concurrently — one observing v2, the other v3 — would otherwise both pass their
+version checks against the stale copy they hold, and the last to commit wins. The
+same race let a suspend land after a detach and resurrect a disconnected binding.
+Proven by the PostgreSQL concurrency canaries; SQLite omits `FOR UPDATE`
+silently, so the unit lane cannot show it.
 
 ## Composition
 

@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -287,8 +288,6 @@ def test_a_tenant_cannot_insert_a_binding_for_another_tenant(
 ) -> None:
     """The WITH CHECK half. A USING-only policy hides other tenants' rows while
     happily letting you write into their scope."""
-    from sqlalchemy.exc import DBAPIError
-
     admin_url, app_user_url = migrated_scratch
     tenant_a, tenant_b = _seed_two_tenants(admin_url)
 
@@ -321,5 +320,168 @@ def test_a_tenant_cannot_insert_a_binding_for_another_tenant(
                         "digest": f"sha256:{'0' * 64}",
                     },
                 )
+    finally:
+        engine.dispose()
+
+
+# ── Concurrency: the row lock the mutations depend on ────────────────────────
+#
+# The service serialises mutations with `SELECT ... FOR UPDATE`, which SQLite
+# silently omits — so the unit lane cannot prove it and these canaries must.
+# Both races below were reachable when mutations took a caller-supplied object
+# instead of ids, and neither was visible at the call site.
+
+
+def _bind_one(db_url: str) -> tuple[uuid.UUID, uuid.UUID]:
+    """Seed one tenant with one ACTIVE binding; return (tenant_id, binding_id)."""
+    tenant_id, binding_id = uuid.uuid4(), uuid.uuid4()
+    engine = create_engine(db_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO public.tenants (id, slug, name) "
+                    "VALUES (:id, 'concur', 'Concurrency')"
+                ),
+                {"id": tenant_id},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_appdir.application_bindings ("
+                    "  id, tenant_id, application_code, instance_ref,"
+                    "  local_tenant_ref, admin_url, api_audience,"
+                    "  descriptor_version, descriptor_digest,"
+                    "  role_catalogue_digest, state, source,"
+                    "  reconciliation_status"
+                    ") VALUES ("
+                    "  :id, :tenant_id, 'sub', 'sub-1', 'local',"
+                    "  :admin_url, 'https://sub.example.net/api', 1,"
+                    "  :digest, :digest, 'active', 'vendor_allocation', 'fresh'"
+                    ")"
+                ),
+                {
+                    "id": binding_id,
+                    "tenant_id": tenant_id,
+                    "admin_url": "https://sub.example.net/admin",
+                    "digest": f"sha256:{'0' * 64}",
+                },
+            )
+    finally:
+        engine.dispose()
+    return tenant_id, binding_id
+
+
+def test_a_second_writer_blocks_until_the_first_commits(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """`FOR UPDATE` actually serialises two transactions on the same binding.
+
+    Without it, two reconcilers reading v1 concurrently — one observing v2, the
+    other v3 — both pass their version checks against the stale copy they hold,
+    and whichever commits last wins. A binding can then store v2 after v3, with
+    `descriptor_refreshed_at` attesting to a descriptor already replaced.
+    """
+    admin_url, _ = migrated_scratch
+    tenant_id, binding_id = _bind_one(admin_url)
+
+    engine = create_engine(admin_url)
+    try:
+        first = engine.connect()
+        second = engine.connect()
+        try:
+            first.execute(text("BEGIN"))
+            first.execute(
+                text(
+                    "SELECT id FROM mod_appdir.application_bindings "
+                    "WHERE tenant_id = :t AND id = :b FOR UPDATE"
+                ),
+                {"t": tenant_id, "b": binding_id},
+            )
+
+            # The second writer must not be able to take the same lock while the
+            # first holds it. NOWAIT turns "would block" into an immediate,
+            # assertable error instead of a hung test.
+            second.execute(text("BEGIN"))
+            with pytest.raises(DBAPIError) as caught:
+                second.execute(
+                    text(
+                        "SELECT id FROM mod_appdir.application_bindings "
+                        "WHERE tenant_id = :t AND id = :b FOR UPDATE NOWAIT"
+                    ),
+                    {"t": tenant_id, "b": binding_id},
+                )
+            assert "could not obtain lock" in str(caught.value).lower()
+
+            second.execute(text("ROLLBACK"))
+            first.execute(text("ROLLBACK"))
+        finally:
+            first.close()
+            second.close()
+    finally:
+        engine.dispose()
+
+
+def test_a_different_binding_is_not_blocked(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The lock is per binding, not a table-wide bottleneck.
+
+    A guard that serialised every tenant's reconciliation would be correct and
+    unusable; asserting the negative keeps the fix honest about its cost.
+    """
+    admin_url, _ = migrated_scratch
+    tenant_id, first_binding = _bind_one(admin_url)
+
+    second_binding = uuid.uuid4()
+    engine = create_engine(admin_url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO mod_appdir.application_bindings ("
+                    "  id, tenant_id, application_code, instance_ref,"
+                    "  local_tenant_ref, admin_url, api_audience,"
+                    "  descriptor_version, descriptor_digest,"
+                    "  role_catalogue_digest, state, source,"
+                    "  reconciliation_status"
+                    ") VALUES ("
+                    "  :id, :tenant_id, 'erp', 'erp-1', 'local',"
+                    "  'https://erp.example.net/admin',"
+                    "  'https://erp.example.net/api', 1, :digest, :digest,"
+                    "  'active', 'vendor_allocation', 'fresh'"
+                    ")"
+                ),
+                {
+                    "id": second_binding,
+                    "tenant_id": tenant_id,
+                    "digest": f"sha256:{'0' * 64}",
+                },
+            )
+
+        first = engine.connect()
+        second = engine.connect()
+        try:
+            first.execute(text("BEGIN"))
+            first.execute(
+                text(
+                    "SELECT id FROM mod_appdir.application_bindings "
+                    "WHERE tenant_id = :t AND id = :b FOR UPDATE"
+                ),
+                {"t": tenant_id, "b": first_binding},
+            )
+            second.execute(text("BEGIN"))
+            # Must succeed: a different row.
+            second.execute(
+                text(
+                    "SELECT id FROM mod_appdir.application_bindings "
+                    "WHERE tenant_id = :t AND id = :b FOR UPDATE NOWAIT"
+                ),
+                {"t": tenant_id, "b": second_binding},
+            )
+            second.execute(text("ROLLBACK"))
+            first.execute(text("ROLLBACK"))
+        finally:
+            first.close()
+            second.close()
     finally:
         engine.dispose()
