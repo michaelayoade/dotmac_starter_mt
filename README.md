@@ -25,6 +25,13 @@ tenant-local entitlements, and a WS8 licence receiver alongside the legacy
 `FeatureManifest`, `DISABLED_FEATURES`, and `WEB_ENABLED`. Runtime provider
 selection and the complete effective-capability lifecycle remain follow-on work.
 
+The strategic end state is broader than a reusable starter template:
+`dotmac_erp`, `dotmac_crm`, and `dotmac_sub` are transitional source monoliths
+being recomposed into a universal kernel, shared UI, independently versioned
+domain modules, and thin product assemblies. Read
+[`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md) for why Starter exists, what
+“build once” means, the ownership boundaries, and the path to full adoption.
+
 See [`docs/adr/0001-multi-tenant-architecture.md`](docs/adr/0001-multi-tenant-architecture.md)
 for the founding tenancy design, [`docs/adr/0002-starter-consolidation.md`](docs/adr/0002-starter-consolidation.md)
 for how this repo became the org's one starter template,
@@ -48,6 +55,9 @@ for its scope wins and the stale one gets fixed:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — **as-built truth**: what
   the system actually does today (model provenance, ownership, transaction
   authority, settings, portal).
+- [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md) — **strategic north
+  star**: why Starter exists and the target ecosystem into which ERP, CRM, and
+  Sub are being recomposed. It does not claim as-built behaviour.
 - [`docs/adr/`](docs/adr/) — **decisions + status**: why the system is
   shaped this way; each ADR carries its status, and amendments are dated
   notes, never rewritten history.
@@ -121,14 +131,19 @@ adapters. Keep the working admin portal when useful, use `WEB_ENABLED=false`
 for API-only deployments, or build separate SPA/mobile/partner frontends
 against versioned OpenAPI contracts and the same authorization/capability APIs.
 
-Existing `dotmac_erp` and `dotmac_sub` are adoption candidates, not rewrite
-targets; `dotmac_academy_app` joined the same plan on 2026-08-07 as a
-discovery target only. Adopting products stay in their own repositories — the
-starter does not absorb a product's vertical domain.
-ERP and ISP subscriber management remain separate product assemblies
-and normally separate deployments/databases. Other ISP operators should first
-receive dedicated one-tenant ISP deployments; shared multi-ISP SaaS follows only
-after an explicit cross-ISP isolation program. See the
+Existing `dotmac_erp`, `dotmac_crm`, and `dotmac_sub` are transitional source
+monoliths, not big-bang rewrite targets; `dotmac_academy_app` joined the same
+plan on 2026-08-07 as a discovery target only. Their proven capabilities move
+through product-first vertical extraction into shared domain modules, while the
+source product becomes that module's first cutover consumer and retires its
+local writer. Product assemblies stay in their own repositories — Starter
+publishes the platform and module contracts rather than absorbing every product
+into one application or database. Backoffice/ERP, Engagement/CRM, and ISP
+Operations/Sub normally remain separate deployments and integrate through
+versioned APIs/events where one assembly does not install a capability locally.
+Other ISP operators should first receive dedicated one-tenant ISP deployments;
+shared multi-ISP SaaS follows only after an explicit cross-ISP isolation
+program. See the
 [`existing product adoption plan`](docs/superpowers/plans/2026-07-18-existing-product-adoption.md).
 
 Do not create a permanent ISP branch or clone from this repository. Continue the

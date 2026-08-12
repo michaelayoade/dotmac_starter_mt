@@ -1,0 +1,207 @@
+{
+  "duplicated_table_names": {
+    "aliased": 23,
+    "exact": 125
+  },
+  "families": {
+    "analytics-reporting": {
+      "aliased": 0,
+      "collisions": 2,
+      "dotmac_crm": 2,
+      "dotmac_erp": 16,
+      "dotmac_sub": 3
+    },
+    "assets-fleet": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 23,
+      "dotmac_sub": 0
+    },
+    "audit-events": {
+      "aliased": 0,
+      "collisions": 2,
+      "dotmac_crm": 2,
+      "dotmac_erp": 6,
+      "dotmac_sub": 7
+    },
+    "authorization": {
+      "aliased": 0,
+      "collisions": 4,
+      "dotmac_crm": 5,
+      "dotmac_erp": 4,
+      "dotmac_sub": 8
+    },
+    "billing-revenue": {
+      "aliased": 0,
+      "collisions": 2,
+      "dotmac_crm": 3,
+      "dotmac_erp": 12,
+      "dotmac_sub": 74
+    },
+    "branding-templates": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 1,
+      "dotmac_sub": 1
+    },
+    "content-help": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 7,
+      "dotmac_sub": 1
+    },
+    "engagement-inbox": {
+      "aliased": 9,
+      "collisions": 0,
+      "dotmac_crm": 28,
+      "dotmac_erp": 0,
+      "dotmac_sub": 29
+    },
+    "expenses": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 5,
+      "dotmac_erp": 14,
+      "dotmac_sub": 0
+    },
+    "field-workforce": {
+      "aliased": 0,
+      "collisions": 15,
+      "dotmac_crm": 26,
+      "dotmac_erp": 10,
+      "dotmac_sub": 38
+    },
+    "finance-ledger": {
+      "aliased": 0,
+      "collisions": 1,
+      "dotmac_crm": 0,
+      "dotmac_erp": 80,
+      "dotmac_sub": 7
+    },
+    "geospatial-qualification": {
+      "aliased": 0,
+      "collisions": 5,
+      "dotmac_crm": 6,
+      "dotmac_erp": 2,
+      "dotmac_sub": 11
+    },
+    "governance-workflow": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 20,
+      "dotmac_sub": 2
+    },
+    "identity-access": {
+      "aliased": 0,
+      "collisions": 8,
+      "dotmac_crm": 10,
+      "dotmac_erp": 5,
+      "dotmac_sub": 17
+    },
+    "integration-external": {
+      "aliased": 0,
+      "collisions": 4,
+      "dotmac_crm": 10,
+      "dotmac_erp": 6,
+      "dotmac_sub": 27
+    },
+    "inventory-procurement": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 3,
+      "dotmac_erp": 39,
+      "dotmac_sub": 4
+    },
+    "network-operations": {
+      "aliased": 0,
+      "collisions": 1,
+      "dotmac_crm": 2,
+      "dotmac_erp": 3,
+      "dotmac_sub": 72
+    },
+    "notifications-comms": {
+      "aliased": 5,
+      "collisions": 11,
+      "dotmac_crm": 18,
+      "dotmac_erp": 7,
+      "dotmac_sub": 21
+    },
+    "outside-plant": {
+      "aliased": 0,
+      "collisions": 30,
+      "dotmac_crm": 33,
+      "dotmac_erp": 0,
+      "dotmac_sub": 94
+    },
+    "party-identity": {
+      "aliased": 0,
+      "collisions": 4,
+      "dotmac_crm": 7,
+      "dotmac_erp": 5,
+      "dotmac_sub": 12
+    },
+    "people-payroll": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 97,
+      "dotmac_sub": 0
+    },
+    "projects-tasks": {
+      "aliased": 0,
+      "collisions": 10,
+      "dotmac_crm": 11,
+      "dotmac_erp": 10,
+      "dotmac_sub": 11
+    },
+    "sales-agreements": {
+      "aliased": 2,
+      "collisions": 8,
+      "dotmac_crm": 13,
+      "dotmac_erp": 7,
+      "dotmac_sub": 24
+    },
+    "scheduling-runtime": {
+      "aliased": 0,
+      "collisions": 1,
+      "dotmac_crm": 1,
+      "dotmac_erp": 9,
+      "dotmac_sub": 6
+    },
+    "settings": {
+      "aliased": 1,
+      "collisions": 4,
+      "dotmac_crm": 7,
+      "dotmac_erp": 6,
+      "dotmac_sub": 9
+    },
+    "subscriber-service": {
+      "aliased": 0,
+      "collisions": 3,
+      "dotmac_crm": 9,
+      "dotmac_erp": 2,
+      "dotmac_sub": 76
+    },
+    "ticketing-sla": {
+      "aliased": 6,
+      "collisions": 10,
+      "dotmac_crm": 17,
+      "dotmac_erp": 6,
+      "dotmac_sub": 22
+    }
+  },
+  "repos_measured": [
+    "dotmac_crm",
+    "dotmac_erp",
+    "dotmac_sub"
+  ],
+  "totals": {
+    "dotmac_crm": 218,
+    "dotmac_erp": 397,
+    "dotmac_sub": 576
+  }
+}
