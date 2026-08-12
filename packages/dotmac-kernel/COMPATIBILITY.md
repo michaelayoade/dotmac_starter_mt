@@ -96,7 +96,7 @@ and may change or disappear without a deprecation cycle**.
 |---|---|
 | `dotmac_kernel.app_factory` | `create_app`, `LayeredStaticFiles` |
 | `dotmac_kernel.assembly` | `ProductAssemblySpec`, `ProductSecurityPolicy`, `StartupCheck`, `StartupHook` |
-| `dotmac_kernel.audit` | `AuditEvent`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
+| `dotmac_kernel.audit` | `ACTOR_TYPES`, `AuditEvent`, `MissingAuditActorError`, `UnknownAuditActorTypeError`, `resolve_audit_actor`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
@@ -377,6 +377,37 @@ constraint on the backing column. If you are adding a sixth, copy
   no partial state. `write_platform_audit_event` is deliberately NOT validated
   this way: platform actions are written by the kernel's own control plane, which
   has no module manifest to declare them on.
+
+#### Audit actor and time contract
+
+The tenant audit actor is the canonical `(actor_type, actor_id)` pair.
+`actor_party_id` is optional accountability enrichment and `actor_label` is a
+write-time display snapshot; neither replaces the pair. `ACTOR_TYPES` is the
+closed, kernel-owned semantic set `system`, `user`, `service`, and `api_key`.
+It is deliberately not a module declaration registry: modules own audit action
+codes, while the kernel owns how an actor identity is interpreted. The backing
+column remains a plain string so a future versioned kernel addition does not
+require PostgreSQL enum surgery in every product database.
+
+`resolve_audit_actor` and `write_audit_event` enforce these meanings:
+
+- `system` may omit an identifier when no component or job can be named;
+- `user`, `service`, and `api_key` require a non-empty stable identifier;
+- `api_key` stores a key ID, never the credential or token;
+- an explicit or legacy `user` with only `actor_party_id` derives the Party UUID
+  as its identifier; and
+- omitting both actor kind and Party raises `MissingAuditActorError` instead of
+  fabricating a `system` actor.
+
+`occurred_at` is domain time. The database supplies `now()` for an ordinary new
+event, while a caller supplies an earlier or later value for a reconstruction or
+delayed observation. `created_at` is separate server-assigned persistence time
+and is not accepted by the writer. Historical unknowns remain NULL.
+
+No actor column in the converging tenant `audit_events` contract gains a foreign
+key, so the forensic row survives actor deletion. `platform_audit_events` is a
+separate, pre-existing control-plane authority and is not converged by this
+release.
 
 ### Composing an app: `ProductAssemblySpec` + `create_app`
 

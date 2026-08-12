@@ -253,6 +253,16 @@ mechanical:
   depend on; promoting them into the kernel is the safer direction and should be
   measured against real audit queries first.
 
+  **Measured 2026-08-12 —
+  [`audit-events-disposition.md`](audit-events-disposition.md).** The query
+  surface settles the forensic columns, but the slice is blocked on two policy
+  questions the measurement cannot answer: Sub's audit rows are *mutable* (a
+  guarded `DELETE` sets `is_active = false`, and records nothing about the
+  redaction) while the kernel's are immutable by design; and the kernel's
+  `actor_party_id` cannot replace Sub's polymorphic actor, because three of the
+  four `AuditActorType` members are not parties. `occurred_at` and `created_at`
+  also turn out not to be aliases — Sub's is caller-supplyable domain time.
+
 ## What this changes about the gate
 
 `idempotency_records` still cannot be reached before these are dispositioned —

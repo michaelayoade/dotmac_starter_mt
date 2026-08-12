@@ -9,6 +9,8 @@ undeclared action rejected BEFORE anything reaches the session.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from dotmac_kernel import (
     AuditActionRegistry,
@@ -89,7 +91,26 @@ def test_declared_action_is_written(
         entity_type="probe",
     )
     assert event.action == "probe.ok"
+    assert event.occurred_at is not None
     assert _count(db) == before + 1
+
+
+def test_explicit_domain_time_is_preserved(
+    db: Session, tenant_row: Tenant, party_row: Party
+) -> None:
+    install_audit_actions(AuditActionRegistry.from_manifests([_m("probe", "probe.ok")]))
+    domain_time = datetime(2026, 8, 1, 12, 30, tzinfo=UTC)
+
+    event = write_audit_event(
+        db,
+        tenant_id=tenant_row.id,
+        actor_party_id=party_row.id,
+        action="probe.ok",
+        entity_type="probe",
+        occurred_at=domain_time,
+    )
+
+    assert event.occurred_at == domain_time
 
 
 def test_undeclared_action_is_rejected_and_writes_nothing(

@@ -41,6 +41,7 @@ across repos.
 | Ticket module sources | Sub/CRM/ERP ticket implementations, why their vocabularies cannot merge and why that does not block the capability, the product-neutral core vs the per-product variant seam, the lifecycle-class mechanism that makes the vocabulary open, and the subject-linkage decision | `ticket-sources.md` |
 | Sub lineage dispositions | the ten kernel/Sub table-name collisions measured against released a40, grouped by what each actually needs — stamp, adopt, reconcile, or union — plus the four ways the measurement was wrong first and the self-check that caught them | `sub-lineage-dispositions.md` |
 | Party module sources | CRM/ERP/Sub identity models audited for a composable party module: why Sub is the only qualifying source and ERP/CRM are requirement inputs, the `party_roles` name-vs-meaning collision that blocks extraction, the tenancy delta and the one unique constraint that is a cross-tenant leak, and why gate 5 (Sub's own cutover) is currently binding | `party-module-sources.md` |
+| `audit_events` disposition | the measured Group E union and implemented R1 integration contract: retained forensic columns, distinct event/persistence time, the closed polymorphic actor identity, immutable audit semantics, coordinated integration branches, and dependency-ordered releases | `audit-events-disposition.md` |
 
 ## Cross-repo scale, at a glance
 

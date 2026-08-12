@@ -41,7 +41,12 @@ def create_tenant(
     # request, so this only names the already-authenticated actor for audit.
     admin: PlatformAdmin = Depends(require_platform_admin),
 ) -> Tenant:
-    return tenants_service.provision_tenant(db, payload, actor_email=admin.email)
+    return tenants_service.provision_tenant(
+        db,
+        payload,
+        actor_admin_id=admin.id,
+        actor_email=admin.email,
+    )
 
 
 @router.get("", response_model=list[TenantRead])
