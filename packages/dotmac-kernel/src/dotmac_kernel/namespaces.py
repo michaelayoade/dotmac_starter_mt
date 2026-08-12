@@ -445,6 +445,24 @@ ENTITLEMENT_ALLOCATION_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     prefix="ea",
     branch_label="entitlement_allocation",
     db_schema=module_schema("ealloc"),
+# `dotmac-application-directory` — the FIFTH allocated installable module, and
+# the first allocated for an assembly OTHER than this repository's: its consumer
+# is the Tenant Workspace (ADR-0021). `appdir` rather than
+# `application_directory` because the short code is the permanent physical
+# identity and every qualified name pays for its length; `ad` leaves the
+# revision-id budget for a readable slug. The row lands in the same change as
+# the module's manifest, as the allocation rule above requires.
+#
+# An allocation is not a facility. This row adds no kernel behaviour, and nothing
+# consumes it but the module it names — which is why it is compatible with
+# ADR-0017's moratorium where a new kernel primitive would not be. ADR-0021 §7
+# records that reasoning, and records that the moratorium's demand-pulled
+# exception was deliberately NOT invoked for the same programme's contracts.
+APPLICATION_DIRECTORY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="application_directory",
+    prefix="ad",
+    branch_label="application_directory",
+    db_schema=module_schema("appdir"),
 )
 
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
@@ -453,6 +471,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     TICKETING_MIGRATION_OWNER,
     RELEASE_CATALOG_MIGRATION_OWNER,
     ENTITLEMENT_ALLOCATION_MIGRATION_OWNER,
+    APPLICATION_DIRECTORY_MIGRATION_OWNER,
 )
 
 
@@ -673,6 +692,7 @@ class NamespaceRegistry:
 
 
 __all__ = [
+    "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",

@@ -6,6 +6,38 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a46 — 2026-08-12
+
+Allocates `mod_appdir` to `dotmac-application-directory` (ADR-0021).
+
+### Added
+
+- `APPLICATION_DIRECTORY_MIGRATION_OWNER` in `dotmac_kernel.namespaces`, and its
+  row in `MIGRATION_OWNER_LEDGER`: schema `mod_appdir`, revision prefix `ad`,
+  branch label `application_directory`. The third allocated installable module,
+  and the first allocated for an assembly other than this repository's — its
+  consumer is the Tenant Workspace.
+
+### Why this is not a moratorium breach
+
+ADR-0017 §2 stops new kernel FACILITIES. A ledger row adds no behaviour: it is
+the checked-in allocation record that makes "globally unique" enforceable across
+repositories, and nothing consumes it but the module it names. This is the same
+change `dotmac-ticketing` made after ADR-0017 was accepted.
+
+The same programme's three application contracts deliberately did **not** take
+this route. ADR-0021 §7 records why: the moratorium's demand-pulled exception
+requires a live product blocked today, and two greenfield consumers arriving
+together is not that test. `ApplicationDescriptor` therefore ships inside
+`dotmac-application-directory` as its permanent owner, not as module code
+awaiting promotion — and the signed-envelope mechanism the access slice would
+have needed stays unextracted, which is why that slice is deferred rather than
+built on a wrong wire format (ADR-0021 §6).
+
+### Version note
+
+`0.1.0a42` is taken by the in-flight audit-actor change on another branch; this
+release took `a46` rather than race it.
 ## 0.1.0a45 — 2026-08-12
 
 Allocates `mod_ealloc` for `dotmac-entitlement-allocation`, the fourth

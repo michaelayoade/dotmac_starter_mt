@@ -30,10 +30,11 @@ KERNEL_SRC ?= packages/dotmac-kernel/src/dotmac_kernel
 UI_SRC ?= packages/dotmac-ui/src/dotmac_ui
 MODULE_SRC ?= packages/dotmac-template-studio/src/dotmac_template_studio
 TICKETING_SRC ?= packages/dotmac-ticketing/src/dotmac_ticketing
+APPDIR_SRC ?= packages/dotmac-application-directory/src/dotmac_application_directory
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
