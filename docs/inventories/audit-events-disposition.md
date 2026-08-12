@@ -1,7 +1,8 @@
 # `audit_events` — the Group E disposition, measured
 
-**As of:** 2026-08-12 · **Sub candidate:** `integration/kernel-adoption` from
-`73c9d9003` · **Kernel candidate:** `0.1.0a42` at `efdf4b9`
+**As of:** 2026-08-12 · **Sub candidate:** `integration/kernel-adoption` at
+`b41a7dcd8` (implementation `0bdb4f291`) · **Kernel candidate:** `0.1.0a42`
+at `efdf4b9`
 **Gates:** kernel revision `0001_initial_tenant_schema`, which creates `audit_events`
 **Production measured:** `selfcare.dotmac.io` 767,769 rows · `erp.dotmac.io` 696,553 rows — read-only, aggregates only
 **Status: audit R1 is implemented on local integration branches, but is not
