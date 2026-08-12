@@ -1,7 +1,7 @@
 # Dotmac product vision — build once, compose every product
 
-**Status:** Accepted north-star direction  
-**Decision owner:** Michael  
+**Status:** Accepted north-star direction
+**Decision owner:** Michael
 **Last updated:** 2026-08-12
 
 This document owns the strategic **why** and the target product shape for
