@@ -191,8 +191,11 @@ def test_rls_is_enabled_and_forced(migrated_scratch: tuple[str, str]) -> None:
         with engine.connect() as conn:
             enabled, forced = conn.execute(
                 text(
+                    # `CAST(... AS regclass)`, not `:t::regclass` — SQLAlchemy's
+                    # `text()` bind parser reads the `::` cast as the start of
+                    # another parameter.
                     "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
-                    "WHERE oid = :t::regclass"
+                    "WHERE oid = CAST(:t AS regclass)"
                 ),
                 {"t": _TABLE},
             ).one()
