@@ -78,12 +78,16 @@ def get_tenant(db: Session, tenant_id: UUID) -> Tenant:
 
 
 def provision_tenant(
-    db: Session, payload: TenantProvision, *, actor_email: str
+    db: Session,
+    payload: TenantProvision,
+    *,
+    actor_admin_id: UUID,
+    actor_email: str,
 ) -> Tenant:
     """Create tenant + login-able owner + admin grant + audit trail,
-    atomically, as the platform actor `actor_email` (recorded in both audit
-    events' details — platform admins are not tenant parties, so
-    `actor_party_id` stays NULL and the actor is named in `details`)."""
+    atomically, as the platform actor identified by the immutable
+    `actor_admin_id`. The mutable email is a display snapshot and remains in
+    details during the expand-only phase."""
     tenant = Tenant(slug=payload.slug, name=payload.name)
     # `db.add` happens INSIDE the savepoint, not before it (see
     # `conflict_savepoint`'s docstring — begin_nested auto-flushes pending
@@ -155,10 +159,18 @@ def provision_tenant(
             source="provisioning-default",
         )
 
+    # The actor is a PLATFORM admin, which is deliberately not a tenant Party —
+    # platform principals live in `platform_admins`, a separate catalogue. Before
+    # kernel a42 the audit model had nowhere to put a non-party actor, so this
+    # identity was buried in `details["platform_actor"]`: present, but unfilterable
+    # and unindexed. `(actor_type, actor_id)` is where it belongs. `details` keeps
+    # its copy for now — expand-only; removing the duplicate is a later contraction.
     write_audit_event(
         db,
         tenant_id=tenant.id,
-        actor_party_id=None,
+        actor_type="user",
+        actor_id=str(actor_admin_id),
+        actor_label=actor_email,
         action="platform.tenant.create",
         entity_type="tenant",
         entity_id=str(tenant.id),
@@ -167,7 +179,9 @@ def provision_tenant(
     write_audit_event(
         db,
         tenant_id=tenant.id,
-        actor_party_id=None,
+        actor_type="user",
+        actor_id=str(actor_admin_id),
+        actor_label=actor_email,
         action="platform.tenant.owner_provision",
         entity_type="party",
         entity_id=str(owner.id),

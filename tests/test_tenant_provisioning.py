@@ -125,7 +125,8 @@ def test_provisioning_creates_a_working_tenant_atomically(
     # Two audit events under the NEW tenant, naming the platform actor.
     rows = admin_session.execute(
         text(
-            "SELECT action, details FROM audit_events "
+            "SELECT action, actor_type, actor_id, actor_label, details "
+            "FROM audit_events "
             "WHERE tenant_id = :tid ORDER BY action"
         ),
         {"tid": tenant_id},
@@ -136,6 +137,9 @@ def test_provisioning_creates_a_working_tenant_atomically(
         "platform.tenant.owner_provision",
     ], actions
     for row in rows:
+        assert row.actor_type == "user"
+        assert row.actor_id == str(platform_admin.id)
+        assert row.actor_label == platform_admin.email
         assert row.details["platform_actor"] == platform_admin.email
 
 

@@ -36,8 +36,12 @@ if TYPE_CHECKING:
 # (db sessions, guards, middleware, platform auth) are submodule imports.
 from dotmac_kernel.assembly import ProductAssemblySpec, ProductSecurityPolicy
 from dotmac_kernel.audit import (
+    ACTOR_TYPES,
     AuditEvent,
+    MissingAuditActorError,
     PlatformAuditEvent,
+    UnknownAuditActorTypeError,
+    resolve_audit_actor,
     write_audit_event,
     write_platform_audit_event,
 )
@@ -303,6 +307,10 @@ __all__ = [
     "write_audit_event",
     "PlatformAuditEvent",
     "write_platform_audit_event",
+    "ACTOR_TYPES",
+    "resolve_audit_actor",
+    "MissingAuditActorError",
+    "UnknownAuditActorTypeError",
     # config
     "Settings",
     "settings",
