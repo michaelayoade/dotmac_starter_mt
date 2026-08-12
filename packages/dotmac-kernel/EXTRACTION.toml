@@ -10,6 +10,9 @@ source_paths = [
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel",
   "dotmac_erp:app/models/domain_settings.py",
   "dotmac_erp:app/services/domain_settings.py",
+  "dotmac_erp:app/services/finance/coverage.py",
+  "dotmac_erp:app/models/finance/ar/invoice.py",
+  "dotmac_erp:app/models/finance/ap/supplier_invoice.py",
   "dotmac_sub:app/models/domain_settings.py",
   "dotmac_sub:app/services/domain_settings.py",
   "dotmac_sub:app/models/notification.py",
@@ -23,11 +26,14 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_setting_scopes.py",
   "dotmac_starter_mt:tests/test_settings_isolation.py",
   "dotmac_erp:tests/test_domain_settings_services.py",
+  "dotmac_erp:tests/integration/test_coverage_parity.py",
   "dotmac_sub:tests/test_domain_settings_services.py",
   "dotmac_starter_mt:tests/unit/test_consent.py",
   "dotmac_starter_mt:tests/unit/test_delivery.py",
   "dotmac_starter_mt:tests/unit/test_delivery_providers.py",
   "dotmac_starter_mt:tests/unit/test_channel_policy.py",
+  "dotmac_starter_mt:tests/unit/test_monetary_coverage.py",
+  "dotmac_starter_mt:tests/test_monetary_coverage_parity.py",
   "dotmac_starter_mt:tests/test_consent_isolation.py",
   "dotmac_starter_mt:tests/test_delivery_isolation.py",
   "dotmac_sub:tests/test_communication_eligibility.py",
@@ -50,8 +56,9 @@ inventory_evidence = [
   "docs/inventories/consent-suppression-sources.md",
   "docs/inventories/delivery-outbox-sources.md",
   "docs/inventories/channel-policy-sources.md",
+  "docs/inventories/billing-sources.md",
 ]
-first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities; product-by-product released-pin cutovers follow the existing-product adoption plan."
+first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities. Monetary coverage's named first cutover is ERP on an exact released pin; other product-by-product cutovers follow their existing-product adoption plans."
 shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
-local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
-next_action = "Release the adoption-demanded scope-alignment fix as 0.1.0a40, remeasure Sub's lineage gate against that baseline, and complete the Sub settings cutover; then cut Sub over to the released consent, delivery, and channel-policy contracts before sequencing ERP."
+local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate. For monetary coverage, ERP must consume the released dotmac_kernel.monetary_coverage surface on an exact pin and delete app/services/finance/coverage.py; its organization-specific settings lookup stays only as a thin adapter until ERP adopts kernel settings persistence. Task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
+next_action = "After the already-allocated kernel a41 change lands, release the monetary-coverage surface in the next alpha and cut ERP over on an exact pin, preserving its PostgreSQL parity proof and deleting the local coverage owner. In parallel, continue the ADR-0017 Sub lineage gate; no billing module package starts before that gate."

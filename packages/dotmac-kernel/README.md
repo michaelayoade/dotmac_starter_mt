@@ -9,7 +9,9 @@ tenancy models (Party family, tenants, roles, auth sessions, platform admins),
 security primitives, platform-admin auth, the middleware stack (security
 headers, tenant resolver, rate limiting, CSRF, observability), errors,
 templating, the settings resolver, the feature-manifest registry, and the
-audit write side.
+audit write side. It also supplies exact money/FX values and ADR-0016's
+portable monetary-coverage arithmetic, query expression, and generated-column
+mixin; products continue to own their settings rows and document lifecycles.
 
 Boundary: the kernel never imports a product assembly (`app`, feature packages)
 — assemblies consume the kernel, not the reverse. Enforced by the repo's

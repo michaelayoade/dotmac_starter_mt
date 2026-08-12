@@ -6,6 +6,16 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## Unreleased
+
+### Added
+- **ADR-0016 monetary coverage owner.** `dotmac_kernel.monetary_coverage`
+  ports ERP's four-state coverage decision and PostgreSQL parity proof, adds the
+  query-usable SQL twin, and supplies the `total_amount` / `amount_paid` /
+  generated-`balance_due` mixin. Settings storage remains product-owned through
+  a pure dust parser, so the shared rule imports no ERP organization model or
+  kernel tenant resolver.
+
 ## 0.1.0a40 — 2026-08-11
 
 An adoption-demanded database invariant fix. Sub's S7 migration rehearsal found

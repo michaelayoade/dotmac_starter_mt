@@ -140,6 +140,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE` (the post-migration live-catalog contract — see the same section) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
+| `dotmac_kernel.monetary_coverage` | `PaymentCoverage`, `MonetaryCoverageMixin`, `PAYMENT_DUST_DEFAULT`, `PAYMENT_DUST_KEY`, `coverage_of`, `coverage_case`, `parse_payment_dust` (ADR-0016's derived payment-coverage owner, ported from ERP; also top-level) |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
 | `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
@@ -798,8 +799,9 @@ licensing crypto stack. `[licensing]` pulls `cryptography` and is also what
 `FakeLicenceSigner` needs — install `[testing,licensing]` to use the fake
 signer.
 
-**Scope of the claim.** The floor is proven for exactly the union of the two
-adopting products' kernel allowlists, and nothing wider:
+**Scope of the claim.** The floor is proven for the union of the two adopting
+products' kernel allowlists plus the accepted next-adoption contracts
+(`modules` and ERP's `monetary_coverage`), and nothing wider:
 
 | Module | Exercised at the floor by |
 |---|---|
@@ -808,6 +810,7 @@ adopting products' kernel allowlists, and nothing wider:
 | `features` | building a `FeatureManifest` |
 | `modules` | building a dependency graph, asserting the order, serializing the inventory, and proving a missing dependency fails closed |
 | `money` | exact addition and an `ExchangeRate` conversion |
+| `monetary_coverage` | boundary classification, query-expression construction, mixin mapping, and malformed-setting fallback |
 | `profiles` | building a spec + registry and reading provider selections |
 | `providers.provisioning` | the protocol, `FakeProvisioningProvider`, and the reusable contract suite |
 | `licensing` | signing AND verifying a licence and a revocation list, plus an applied-state round-trip |
@@ -835,9 +838,9 @@ into a clean virtualenv with all four floors pinned EXACTLY — failing if the
 resolver moves past any of them, which would make the check vacuous — then
 CONSTRUCTS, not merely imports, the union of the two products' kernel
 allowlists (`assembly`, `capabilities`, `features`, `licensing`, `modules`,
-`money` incl. `ExchangeRate`, `profiles`, `providers.provisioning` incl. the
-fake and the reusable contract suite, and `testing`), with no `DATABASE_URL`
-present. The
+`money` incl. `ExchangeRate`, `monetary_coverage` boundary classification and
+fallback parsing, `profiles`, `providers.provisioning` incl. the fake and the
+reusable contract suite, and `testing`), with no `DATABASE_URL` present. The
 licensing leg SIGNS and VERIFIES a licence and a revocation list rather than
 merely building keys, because a crypto backend only fails when it is used.
 

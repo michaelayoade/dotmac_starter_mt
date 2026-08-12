@@ -1038,6 +1038,7 @@ source-of-truth for the modules phase 2b introduced. "ST" = `dotmac_starter`
 | `dotmac_kernel/branding.py` | `get_brand()` (static) + `load_branding()` (DB overlay) + `sanitize_branding_css` | SUB (`app/services/branding_config.py::get_brand`) for the static layer; ST (`app/services/branding.py::get_branding`/`sanitize_branding_css`) for the DB-overlay + sanitizer, adapted from ST's single-tenant "one row, no tenant_id" model to this app's tenant-scoped resolver |
 | `dotmac_kernel/web_deps.py` | `require_web_auth`, `WebAuthRedirect`, `safe_next_url`, `is_secure_request` | ST (`app/web/deps.py`), routed through this app's `authenticate_request` shared seam (native adaptation — ST had no bearer/cookie seam to share) |
 | `dotmac_kernel/identity.py` | `normalize_email`, `person_display_name` — the single-owner Party-invariant helpers | native (closes the SOT gap tracked from 2a-T6/T7; no upstream port — see "Known dual-writer: Parties" below) |
+| `dotmac_kernel/monetary_coverage.py` | ADR-0016's closed payment-coverage vocabulary, pure evaluator, query-usable SQL twin, malformed-setting parser, and generated-balance mixin | ERP (`app/services/finance/coverage.py`, AR/AP invoice generated columns, and `tests/integration/test_coverage_parity.py`), ported without ERP's organization-specific settings reader |
 
 ## Model provenance table
 

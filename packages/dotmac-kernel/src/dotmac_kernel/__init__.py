@@ -125,6 +125,15 @@ from dotmac_kernel.modules import (
     ModuleRegistryError,
     UnknownModuleError,
 )
+from dotmac_kernel.monetary_coverage import (
+    PAYMENT_DUST_DEFAULT,
+    PAYMENT_DUST_KEY,
+    MonetaryCoverageMixin,
+    PaymentCoverage,
+    coverage_case,
+    coverage_of,
+    parse_payment_dust,
+)
 from dotmac_kernel.money import (
     Currency,
     CurrencyMismatchError,
@@ -237,6 +246,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.migrations.gate",
         "dotmac_kernel.models",
         "dotmac_kernel.models_platform",
+        "dotmac_kernel.monetary_coverage",
         "dotmac_kernel.modules",
         "dotmac_kernel.money",
         "dotmac_kernel.namespaces",
@@ -423,6 +433,14 @@ __all__ = [
     "ExchangeRate",
     "MoneyError",
     "CurrencyMismatchError",
+    # monetary document coverage (ADR-0016)
+    "PAYMENT_DUST_DEFAULT",
+    "PAYMENT_DUST_KEY",
+    "MonetaryCoverageMixin",
+    "PaymentCoverage",
+    "coverage_case",
+    "coverage_of",
+    "parse_payment_dust",
     # query
     "apply_pagination",
     "escape_like",

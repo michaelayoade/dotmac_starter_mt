@@ -1,12 +1,12 @@
 """Exercise the UNION of the products' kernel allowlists at the floor.
 
 Sub (S2) allows: assembly, capabilities, features, money, profiles, providers,
-providers.provisioning. ERP (E2) adds: licensing, testing. This probe covers
-that union — anything a product may import must work here, or the floor is a
-claim about a surface nobody actually checked. `modules` is covered too: it is
-the same category (a pure, FastAPI-light contract both products will consume
-next), and adding it to the probe when it ships is cheaper than discovering at
-adoption that the floor claim never included it.
+providers.provisioning. ERP (E2) adds: licensing and testing; ADR-0016 names it
+as the first adopter of monetary coverage. This probe covers that union plus
+the two accepted next-adoption contracts, `modules` and `monetary_coverage` —
+anything a product may import must work here, or the floor is a claim about a
+surface nobody actually checked. Exercising them before release is cheaper
+than discovering at adoption that the floor claim never included them.
 
 Importing is a weak check: a pydantic model only fails when it is BUILT, and a
 crypto backend only fails when it SIGNS. So each contract is constructed and,
@@ -34,16 +34,21 @@ from dotmac_kernel import (
     MissingModuleDependencyError,
     ModuleManifest,
     ModuleRegistry,
+    MonetaryCoverageMixin,
     Money,
     NamespaceRegistry,
+    PaymentCoverage,
     PermissionCatalogue,
     PermissionSpec,
     ProductAssemblySpec,
     UnallocatedNamespaceError,
     UndeclaredAuditActionError,
     UndeclaredPermissionError,
+    coverage_case,
+    coverage_of,
     currency,
     module_schema,
+    parse_payment_dust,
     qualified,
     revision_id,
     schema_table_args,
@@ -74,6 +79,8 @@ from dotmac_kernel.testing import (
     fake_branding,
     isolated_session,
 )
+from sqlalchemy import Integer, literal
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 print(f"    kernel {dotmac_kernel.__version__}")
 now = datetime(2026, 8, 2, 12, 0, 0, tzinfo=UTC)
@@ -200,6 +207,33 @@ rate = ExchangeRate(
 )
 converted = rate.convert(Money(Decimal("10.00"), usd))
 assert converted.currency == eur, converted
+
+# ADR-0016 monetary coverage: ERP is the named first adopter and sits at these
+# dependency floors. Exercise the boundary values and product-owned setting
+# parser here so adding the module to ERP's allowlist is a proven support claim.
+assert (
+    coverage_of(total_amount=Decimal("100"), amount_paid=Decimal("0.02"))
+    is PaymentCoverage.PARTIAL
+)
+assert (
+    coverage_of(total_amount=Decimal("100"), amount_paid=Decimal("100.02"))
+    is PaymentCoverage.OVERPAID
+)
+assert parse_payment_dust("invalid") == Decimal("0.01")
+assert "CASE" in str(coverage_case(literal(Decimal("99.98")), literal(Decimal("0.02"))))
+
+
+class _FloorBase(DeclarativeBase):
+    pass
+
+
+class _FloorMonetaryDocument(MonetaryCoverageMixin, _FloorBase):
+    __tablename__ = "floor_monetary_document"
+
+    document_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+
+assert _FloorMonetaryDocument.__table__.c.balance_due.computed is not None
 
 # Provisioning contract + its fake, incl. the reusable contract suite
 fake = FakeProvisioningProvider()
