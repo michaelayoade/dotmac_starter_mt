@@ -49,13 +49,12 @@ _AUTHORIZATION_VOCABULARY = (
     "actor",
 )
 
-# The one legitimate near-miss: the binding stores a digest OF the application's
-# role catalogue. That is a content address of a menu the application published,
-# not a record that anyone holds a role — see `descriptor.py`. Allowlisted by
-# exact name so a second role-shaped column cannot hide behind the same
-# exemption, and stated here rather than by loosening the vocabulary above
-# (ADR-0018: an exemption states an enforceable premise).
-_ROLE_COLUMN_EXEMPTIONS = frozenset({"role_catalogue_digest"})
+# No exemptions. 0.1.0a1 had one — `role_catalogue_digest`, a content address of
+# the menu an application published — and deferring the whole role-catalogue
+# surface (nothing consumed it) removed the need for it. An empty exemption set
+# is the strongest form of this rule, and re-introducing one requires arguing
+# for it here.
+_ROLE_COLUMN_EXEMPTIONS: frozenset[str] = frozenset()
 
 
 # ── The property the module exists to protect ────────────────────────────────
@@ -87,12 +86,13 @@ def test_the_directory_holds_no_authorization_column() -> None:
     )
 
 
-def test_the_exemption_is_load_bearing_not_decorative() -> None:
-    """The allowlist above must describe a column that actually exists.
+def test_the_exemption_set_is_empty_or_load_bearing() -> None:
+    """Every exemption must name a column that actually exists.
 
     ADR-0018's sensitivity requirement: an exemption for a column nobody
     declares is an exemption nobody reviews, and it would silently pre-authorise
-    whatever later claimed that name.
+    whatever later claimed that name. Empty at 0.1.0a1, which is the strongest
+    form of the rule.
     """
     declared = {column.name for column in models.ApplicationBinding.__table__.columns}
     assert (

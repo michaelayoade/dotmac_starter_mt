@@ -19,7 +19,7 @@ the application itself.
 
 Public surface, in dependency order:
 
-- `descriptor` — `ApplicationDescriptor`, `ApplicationRole`, and the two digests
+- `descriptor` — `ApplicationDescriptor` and its content digest
 - `lifecycle` — `BindingState`, `BindingSource`, `ReconciliationStatus`, the
   guarded transitions and `is_launchable`
 - `models` — `ApplicationBinding`, bound to `mod_appdir`
@@ -31,7 +31,6 @@ from __future__ import annotations
 
 from dotmac_application_directory.descriptor import (
     ApplicationDescriptor,
-    ApplicationRole,
     DescriptorError,
 )
 from dotmac_application_directory.lifecycle import (
@@ -70,7 +69,6 @@ __all__ = [
     "ActivationRefused",
     "ApplicationBinding",
     "ApplicationDescriptor",
-    "ApplicationRole",
     "BindingAlreadyExists",
     "BindingLifecycleError",
     "BindingNotFound",

@@ -159,6 +159,45 @@ def launchable_bindings(db: Session, *, tenant_id: UUID) -> list[ApplicationBind
     return list_bindings(db, tenant_id=tenant_id, states=states)
 
 
+def _assert_describes(
+    binding: ApplicationBinding, observed: ApplicationDescriptor
+) -> None:
+    """Refuse a descriptor that is not about this binding, before any mutation.
+
+    `(application_code, instance_ref, local_tenant_ref)` is the binding's
+    application-side identity and is IMMUTABLE. A descriptor disagreeing on any
+    of the three is not a newer version of this binding — it describes a
+    different one.
+
+    `local_tenant_ref` is the load-bearing member. Without it here, an ACTIVE
+    binding could adopt a newer descriptor naming a different local tenant and
+    remain launchable, which would silently re-point a tenant administrator's
+    tile at another tenant's instance inside the same application. Version and
+    digest checks cannot catch that: a genuine version bump carrying a changed
+    local tenant passes both.
+
+    Raised, not returned, and raised BEFORE the row is touched — a refusal that
+    has already written something is not a refusal.
+    """
+    mismatches = [
+        (name, getattr(binding, name), getattr(observed, name))
+        for name in ("application_code", "instance_ref", "local_tenant_ref")
+        if getattr(binding, name) != getattr(observed, name)
+    ]
+    if not mismatches:
+        return
+    detail = "; ".join(
+        f"{name}: binding {stored!r}, descriptor {seen!r}"
+        for name, stored, seen in mismatches
+    )
+    raise DirectoryError(
+        f"descriptor does not describe this binding — {detail}. "
+        "(application_code, instance_ref, local_tenant_ref) is immutable "
+        "binding identity; a change there is a different application instance, "
+        "not a new version of this one."
+    )
+
+
 def _load(
     db: Session, *, tenant_id: UUID, binding_id: UUID, lock: bool
 ) -> ApplicationBinding:
@@ -207,7 +246,6 @@ def attach_application(
         api_audience=descriptor.api_audience,
         descriptor_version=descriptor.descriptor_version,
         descriptor_digest=descriptor.digest,
-        role_catalogue_digest=descriptor.role_catalogue_digest,
         state=str(BindingState.INVITED),
         source=str(source),
         descriptor_refreshed_at=None,
@@ -241,30 +279,22 @@ def activate_binding(
     reconciling it ADOPTS — a regression or a same-version content conflict
     refuses, because neither is a descriptor to make a binding launchable on.
 
-    Also requires the application to agree about which of its tenants this
-    binding is for. A descriptor whose `local_tenant_ref` differs from the
-    stored one is not proof of this binding; it is proof of a different one.
+    A descriptor naming a different local tenant is refused by reconciliation
+    itself (`DirectoryError`), before anything is written: it is not proof of
+    this binding, it is proof of a different one.
     """
     binding = _load(db, tenant_id=tenant_id, binding_id=binding_id, lock=True)
     require_transition(BindingState(binding.state), BindingState.ACTIVE)
 
-    # Captured BEFORE reconciling, which ADOPTS `local_tenant_ref` from the
-    # observed descriptor — comparing afterwards would compare the value to
-    # itself and pass unconditionally.
-    claimed_local_tenant = binding.local_tenant_ref
-
+    # `_reconcile_locked` refuses a descriptor that does not describe THIS
+    # binding — including one naming a different local tenant — before it
+    # mutates anything, so there is no post-hoc comparison to make here.
     outcome = _reconcile_locked(db, binding, observed, now=now)
     if outcome not in _ADOPTING_OUTCOMES:
         raise ActivationRefused(
             f"cannot activate {binding_id}: the descriptor read from the "
             f"application was not adopted ({outcome}). "
             f"{binding.reconciliation_error}"
-        )
-    if observed.local_tenant_ref != claimed_local_tenant:
-        raise ActivationRefused(
-            f"cannot activate {binding_id}: the application reports local tenant "
-            f"{observed.local_tenant_ref!r}, not the {claimed_local_tenant!r} "
-            f"this binding was created for"
         )
 
     binding.state = str(BindingState.ACTIVE)
@@ -314,15 +344,7 @@ def _reconcile_locked(
     Private because calling it without the lock is the race the public entry
     points exist to close.
     """
-    if (
-        observed.application_code != binding.application_code
-        or observed.instance_ref != binding.instance_ref
-    ):
-        raise DirectoryError(
-            f"descriptor {observed.application_code!r}/{observed.instance_ref!r} "
-            f"does not describe binding "
-            f"{binding.application_code!r}/{binding.instance_ref!r}"
-        )
+    _assert_describes(binding, observed)
 
     observed_digest = observed.digest
     if observed.descriptor_version < binding.descriptor_version:
@@ -349,12 +371,15 @@ def _reconcile_locked(
         return ReconcileOutcome.CONFLICT
 
     unchanged = observed_digest == binding.descriptor_digest
-    binding.local_tenant_ref = observed.local_tenant_ref
+    # `local_tenant_ref` is NOT assigned: it is binding identity, and
+    # `_assert_describes` has already refused any descriptor that disagrees.
+    # Assigning it here was the defect — an ACTIVE binding could adopt a newer
+    # descriptor naming a different local tenant and stay launchable, silently
+    # re-pointing a tile at another tenant's instance.
     binding.admin_url = observed.admin_url
     binding.api_audience = observed.api_audience
     binding.descriptor_version = observed.descriptor_version
     binding.descriptor_digest = observed_digest
-    binding.role_catalogue_digest = observed.role_catalogue_digest
     binding.descriptor_refreshed_at = now
     binding.reconciliation_status = str(ReconciliationStatus.FRESH)
     # Cleared on every success, so a stale explanation cannot outlive the

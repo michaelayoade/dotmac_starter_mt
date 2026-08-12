@@ -75,7 +75,6 @@ def upgrade() -> None:
         sa.Column("api_audience", sa.String(200), nullable=False),
         sa.Column("descriptor_version", sa.Integer(), nullable=False),
         sa.Column("descriptor_digest", sa.String(_DIGEST_LENGTH), nullable=False),
-        sa.Column("role_catalogue_digest", sa.String(_DIGEST_LENGTH), nullable=False),
         # Lifecycle and provenance.
         sa.Column("state", sa.String(32), nullable=False),
         sa.Column("source", sa.String(32), nullable=False),

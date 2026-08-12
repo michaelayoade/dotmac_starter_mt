@@ -16,7 +16,8 @@ Allocates `mod_appdir` to `dotmac-application-directory` (ADR-0021).
   row in `MIGRATION_OWNER_LEDGER`: schema `mod_appdir`, revision prefix `ad`,
   branch label `application_directory`. The third allocated installable module,
   and the first allocated for an assembly other than this repository's — its
-  consumer is the Tenant Workspace.
+  intended adopter is the Tenant Workspace, which is a local scaffold and not
+  yet a consumer.
 
 ### Why this is not a moratorium breach
 

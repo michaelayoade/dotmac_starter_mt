@@ -12,13 +12,16 @@ home of the `ApplicationDescriptor` contract (ADR-0021 §4).
 
 ### Added
 
-- **`ApplicationDescriptor` + `ApplicationRole`** — what a target application
-  publishes about one instance. Two deterministic digests, deliberately
-  separate: `role_catalogue_digest` (what a future grant set binds itself to)
-  and `digest` (the whole descriptor, which is what tells the Workspace that
-  anything at all moved). Both are domain-separated and order-independent, and
-  the descriptor's field list is written out explicitly so that adding a field
-  is a decision about identity rather than an accident of declaration order.
+- **`ApplicationDescriptor`** — what a target application publishes about one
+  instance, with one deterministic, domain-separated content digest. The field
+  list is written out explicitly so that adding a field is a decision about
+  identity rather than an accident of declaration order.
+- **Binding identity is immutable.** `(application_code, instance_ref,
+  local_tenant_ref)` is refused-on-mismatch before any mutation. Without the
+  `local_tenant_ref` member a live binding could adopt a newer descriptor naming
+  a different local tenant and stay launchable, silently re-pointing a tile at
+  another tenant's instance; version and digest checks cannot catch it, because
+  a genuine version bump carrying a changed local tenant passes both.
   Fails closed at construction: a bad URL, a version below 1, a duplicate role
   code or an empty required field raises `DescriptorError` rather than reaching
   a binding whose digest would then attest to nonsense.
@@ -54,6 +57,14 @@ home of the `ApplicationDescriptor` contract (ADR-0021 §4).
   checked.
 
 ### Deliberately absent
+
+- **The role catalogue.** `ApplicationRole`, a `delegable` flag,
+  `delegable_role_codes` and a separate `role_catalogue_digest` were drafted and
+  cut, because nothing consumes them: the access module that would is deferred
+  (ADR-0021 §5) and the launcher never reads a role. Shipping them would publish
+  a contract — and a database column — designed against zero consumers, which is
+  the failure ADR-0008 records against declarations with no reader and ADR-0017
+  against facilities with no adopter. They return with the access slice.
 
 - **Any authorization column.** No person, member, group, role, grant or
   permission column exists, and `test_the_directory_holds_no_authorization_column`

@@ -8,47 +8,41 @@ kernel-promotion candidate.
 
 A descriptor is what a target application publishes about one of its instances:
 where its admin surface is, which audience its API accepts, which tenant inside
-it corresponds to the Workspace tenant, and what its role catalogue currently
-looks like. The Workspace stores a copy on the binding and compares digests to
-notice drift.
+it corresponds to the Workspace tenant. The Workspace stores a copy on the
+binding and compares digests to notice drift.
 
 ## What a descriptor is NOT
 
-It is not an authorization document, and `ApplicationRole` is not a grant.
-The role catalogue is the application saying *these roles exist and these of
-them may be delegated by a tenant administrator* — a menu, not an order. The
-directory never records that anyone holds one of these roles; per ADR-0021 §3
-directory visibility is not authorization, and the target application remains
-the only writer of its own effective role grants.
+It is not an authorization document. It says where an application instance is
+and which tenant inside it corresponds to the Workspace tenant. It says nothing
+about who may enter — per ADR-0021 §3 directory visibility is not authorization,
+and the target application remains the only writer of its own effective role
+grants.
 
-`delegable` is the application's own statement about which of its roles a
-Workspace administrator may ever request. It exists so that the eventual access
-slice has an application-declared allowlist to validate against, rather than the
-Workspace inventing one. A role absent from the catalogue, or present but not
-delegable, is not requestable — and the decision belongs to the application
-because the application is the one that has to live with it.
+## No role catalogue in 0.1.0a1
 
-## Digests
+An earlier draft carried `ApplicationRole`, a `delegable` flag, a
+`delegable_role_codes` set and a separate `role_catalogue_digest`, so that a
+future `AccessGrantSet` could bind itself to the exact catalogue it was authored
+against.
 
-Two, because they answer different questions and a single one would conflate
-them:
+All of it is deferred, because **nothing consumes it**. The access module that
+would is deferred by ADR-0021 §5, and the Workspace launcher never reads a role.
+Shipping it now would be a published contract — with a database column and a
+digest other planes could start depending on — designed against zero consumers,
+which is the failure ADR-0008 records against declarations with no reader and
+ADR-0017 records against facilities with no adopter.
 
-``role_catalogue_digest``
-    Covers the role catalogue alone. This is what a future ``AccessGrantSet``
-    binds itself to, so that an allocation authored against one catalogue cannot
-    be applied silently against a different one.
+It returns with the access slice, designed against that slice's real needs
+rather than guessed ahead of them.
 
-``digest``
-    Covers the whole descriptor, including the role-catalogue digest. This is
-    what the binding stores, and what tells the Workspace that *anything* about
-    the application changed — a moved admin URL, a new audience — not only its
-    roles.
+## The digest
 
-Both are deterministic over the descriptor's content: same content, same digest,
-on any machine and any Python version. Field order is fixed by this module, not
-by dataclass declaration order or dict iteration, and roles are sorted by code
-before hashing so that two descriptors listing the same roles in different
-orders agree.
+One, over the whole descriptor. It tells the Workspace that *anything* about the
+application changed — a moved admin URL, a new audience. It is deterministic
+over the descriptor's content: same content, same digest, on any machine and any
+Python version, with field order fixed by this module rather than by dataclass
+declaration order or dict iteration.
 
 A digest is content-addressing, not a signature. It proves that two parties are
 looking at the same descriptor; it proves nothing about who wrote it. Signed
@@ -59,15 +53,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
-#: Prefixed onto every canonical payload before hashing, so a digest computed
-#: over a role catalogue can never equal one computed over a whole descriptor
-#: even if their canonical bytes coincided. The trailing NUL cannot occur in the
-#: label, so no payload can complete a different prefix. Changing either value
-#: changes every digest and is a compatibility break.
-_ROLE_CATALOGUE_DOMAIN = b"dotmac-application-role-catalogue/1\x00"
+#: Prefixed onto the canonical payload before hashing. Domain separation is kept
+#: even with a single digest, so that a later second digest kind (the deferred
+#: role catalogue) cannot collide with this one, and so a digest of these bytes
+#: computed for any other purpose is not this digest. The trailing NUL cannot
+#: occur in the label, so no payload can complete a different prefix. Changing
+#: the value changes every digest and is a compatibility break.
 _DESCRIPTOR_DOMAIN = b"dotmac-application-descriptor/1\x00"
 
 #: Schemes an admin URL may use. `http` is permitted because a development or
@@ -81,31 +75,6 @@ class DescriptorError(ValueError):
     """A descriptor is structurally invalid. Fails closed at construction: an
     invalid descriptor must never reach a binding, because the binding's digest
     would then attest to nonsense."""
-
-
-@dataclass(frozen=True, slots=True)
-class ApplicationRole:
-    """One role a target application declares in its catalogue.
-
-    `code` is the application's own role code, uninterpreted here — the
-    directory carries it, never resolves it. `label` is for the Workspace's UI.
-    `delegable` is the application's statement about whether a tenant
-    administrator may ever request this role for someone; it defaults to False
-    so that a catalogue which forgets to think about delegation delegates
-    nothing.
-    """
-
-    code: str
-    label: str
-    delegable: bool = False
-
-    def __post_init__(self) -> None:
-        if not self.code or not self.code.strip():
-            raise DescriptorError("application role requires a non-empty `code`")
-        if not self.label or not self.label.strip():
-            raise DescriptorError(
-                f"application role {self.code!r} requires a non-empty `label`"
-            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,9 +104,6 @@ class ApplicationDescriptor:
     #: Monotonic within an (application_code, instance_ref). Lets a receiver
     #: reject an older descriptor without comparing digests it may not hold.
     descriptor_version: int
-    #: The roles the application declares. Empty is legal and means "this
-    #: application publishes no delegable roles yet" — not "all roles allowed".
-    roles: tuple[ApplicationRole, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         for name in (
@@ -166,41 +132,7 @@ class ApplicationDescriptor:
                 f"{self.admin_url!r}"
             )
 
-        if not isinstance(self.roles, tuple):
-            raise DescriptorError("`roles` must be a tuple (descriptors are frozen)")
-        seen: set[str] = set()
-        for role in self.roles:
-            if role.code in seen:
-                raise DescriptorError(
-                    f"duplicate role code in catalogue: {role.code!r}"
-                )
-            seen.add(role.code)
-
-    # ── Derived content addresses ───────────────────────────────────────────
-
-    @property
-    def delegable_role_codes(self) -> frozenset[str]:
-        """The codes a tenant administrator may ever request.
-
-        The access slice validates a requested role against this set. It is a
-        frozenset rather than a tuple because membership is the only question
-        anyone asks of it, and because an ordered type invites someone to treat
-        position as precedence.
-        """
-        return frozenset(role.code for role in self.roles if role.delegable)
-
-    @property
-    def role_catalogue_digest(self) -> str:
-        """`sha256:<hex>` over the role catalogue alone, order-independent."""
-        payload = json.dumps(
-            [
-                [role.code, role.label, role.delegable]
-                for role in sorted(self.roles, key=lambda r: r.code)
-            ],
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        return _digest(_ROLE_CATALOGUE_DOMAIN + payload)
+    # ── Derived content address ─────────────────────────────────────────────
 
     @property
     def digest(self) -> str:
@@ -220,7 +152,6 @@ class ApplicationDescriptor:
                 self.admin_url,
                 self.api_audience,
                 self.descriptor_version,
-                self.role_catalogue_digest,
             ],
             separators=(",", ":"),
             ensure_ascii=False,
@@ -234,6 +165,5 @@ def _digest(payload: bytes) -> str:
 
 __all__ = [
     "ApplicationDescriptor",
-    "ApplicationRole",
     "DescriptorError",
 ]
