@@ -75,10 +75,19 @@ def migrated_scratch() -> Iterator[tuple[str, str]]:
     setup = create_engine(_url_for(superuser, name), isolation_level="AUTOCOMMIT")
     with setup.connect() as conn:
         conn.execute(text("ALTER SCHEMA public OWNER TO app_admin"))
-        # The migration rehearsals never connect as the ONLINE role, so they do
-        # not need this. This canary does — and the isolation it proves is only
-        # meaningful when driven as `app_user`, since `app_admin` carries
-        # BYPASSRLS. A fresh database grants CONNECT to nobody but its owner.
+        # A MODULE lineage creates its own schema, and `CREATE SCHEMA` needs
+        # CREATE on the DATABASE — not merely ownership of `public`. The
+        # migration rehearsals never needed this because the kernel and assembly
+        # lineages build only in `public`, whose ownership is transferred above.
+        # `mod_appdir` is the first schema this repository's tests create on a
+        # scratch database, so this is the first place it bites. In production
+        # the migration role holds the same privilege on the application
+        # database, which is how `mod_tstudio` and `mod_tkt` get created there.
+        conn.execute(text(f'GRANT CREATE ON DATABASE "{name}" TO app_admin'))
+        # The rehearsals never connect as the ONLINE role, so they do not need
+        # this. This canary does — and the isolation it proves is only
+        # meaningful driven as `app_user`, since `app_admin` carries BYPASSRLS.
+        # A fresh database grants CONNECT to nobody but its owner.
         conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO app_user'))
         # `app_current_tenant_id()` lives in `public`, and every policy calls it.
         conn.execute(text("GRANT USAGE ON SCHEMA public TO app_user"))
