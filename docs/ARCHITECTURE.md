@@ -310,6 +310,21 @@ packages/dotmac-template-studio/ the first optional stateful module (distributio
   EXTRACTION.toml                two contract consumers exist — ADR-0006 § 5b)
   src/dotmac_template_studio/    module manifest, service, API/web adapters,
                  package templates, models, and its own `ts` Alembic lineage
+packages/dotmac-application-directory/ a tenant's connected-application
+  pyproject.toml                 portfolio, and the permanent owner of the
+  EXTRACTION.toml                `ApplicationDescriptor` contract (ADR-0021 §4).
+  src/dotmac_application_directory/  manifest, descriptor, lifecycle, models,
+                 service, and its own `ad` lineage in schema `mod_appdir`.
+                 BUILT AND TESTED HERE, COMPOSED ELSEWHERE: this assembly does
+                 NOT list it in `app/assembly.py` and `alembic.ini` does NOT
+                 carry its lineage — the starter is a target application, not a
+                 workspace, and composing it would create `mod_appdir` in every
+                 starter deployment. Its consumer is `dotmac_workspace`. The
+                 Postgres proof therefore provisions its own scratch database
+                 (`tests/test_application_directory_isolation.py`) and the
+                 composed migration gate runs over the same composition from
+                 `tests/architecture/test_application_directory_module.py`,
+                 since `make migration-gate` reads the shipped `alembic.ini`.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
