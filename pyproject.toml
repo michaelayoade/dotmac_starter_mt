@@ -40,6 +40,14 @@ dotmac-ticketing = { path = "packages/dotmac-ticketing", develop = true }
 dotmac-release-catalog = { path = "packages/dotmac-release-catalog", develop = true }
 # The fourth installable module (ADR-0006 M4), and the second vendor-side one.
 dotmac-entitlement-allocation = { path = "packages/dotmac-entitlement-allocation", develop = true }
+# The third installable module (ADR-0021), and the first whose consumer is a
+# DIFFERENT assembly: the Tenant Workspace. This repository builds, tests and
+# releases it, but `app/assembly.py` deliberately does NOT compose it and
+# `alembic.ini` deliberately omits its lineage — the starter is a target
+# application, not a workspace, and composing it here would put `mod_appdir`
+# into every starter deployment. Its Postgres proof runs against a scratch
+# database in `tests/test_application_directory_isolation.py` instead.
+dotmac-application-directory = { path = "packages/dotmac-application-directory", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -145,6 +153,7 @@ root_packages = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_application_directory",
 ]
 
 [[tool.importlinter.contracts]]
@@ -197,6 +206,7 @@ source_modules = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_application_directory",
 ]
 forbidden_modules = ["app"]
 
@@ -231,6 +241,7 @@ modules = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_application_directory",
 ]
 
 [[tool.importlinter.contracts]]

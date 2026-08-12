@@ -16,6 +16,17 @@ from collections.abc import Generator
 import dotmac_template_studio as template_studio
 import pytest
 
+# Same reason, for `mod_appdir`. The reference assembly does NOT compose
+# `dotmac-application-directory` — its consumer is the Tenant Workspace, and the
+# starter is a target application rather than a workspace (ADR-0021) — but the
+# module's service tests run in this lane, so its models must be in
+# `Base.metadata` before `create_test_engine` ATTACHes the schemas it finds.
+# Deliberately NOT added to `_all_manifests()` below: that list is what the
+# reference assembly composes, and this module is not part of it.
+from dotmac_application_directory import (
+    models as application_directory_models,  # noqa: F401
+)
+
 # DATABASE_URL is pinned to a hermetic placeholder in tests/conftest.py (the
 # root conftest), which pytest imports before this module — see the comment
 # there about import-time engine creation in dotmac_kernel.db.

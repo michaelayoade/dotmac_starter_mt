@@ -494,6 +494,24 @@ trio = ["trio (>=0.30)"]
 wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
+name = "dotmac-application-directory"
+version = "0.1.0a1"
+description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a46"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-application-directory"
+
+[[package]]
 name = "dotmac-entitlement-allocation"
 version = "0.1.0a1"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
@@ -513,7 +531,7 @@ url = "packages/dotmac-entitlement-allocation"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a45"
+version = "0.1.0a46"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2573,4 +2591,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "a7e91806bcd2417c1a5d6763aa66f7eaa8b302a4d5a940c10378d769cdbfc9f3"
+content-hash = "c39febb663fea8297f84e7804df15683e186c15c5c64e9ca2a98f25eee171890"
