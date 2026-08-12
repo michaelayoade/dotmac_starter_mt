@@ -228,6 +228,43 @@ def test_one_module_per_run() -> None:
     assert "ONE MODULE PER RUN" in WORKFLOW.read_text(encoding="utf-8")
 
 
+def test_composition_runs_before_the_tag_and_is_optional() -> None:
+    """Level 2 in the release run itself, when a release completes a set.
+
+    Ordering matters: the module is already published by then, so a failure
+    cannot unpublish it — but the tag is this repository's assertion that the
+    release is good, and writing it for a version whose SET does not compose
+    would make the tag a lie. Hence composition, then tag.
+
+    Optional matters too: the FIRST module of a set has nothing published to
+    compose with, and a composition of one is just level 1 again.
+    """
+    verify = _executable(WORKFLOW).split("verify:", 1)[1]
+    assert "Verify the published composition" in verify
+    assert "if: inputs.compose_with != ''" in verify
+    assert verify.index("Verify the published composition") < verify.index("git tag")
+
+
+def test_composition_requires_an_exact_published_kernel() -> None:
+    """Without a pinned kernel the check proves the set against whatever pip
+    resolves — which may not be the kernel anyone published."""
+    verify = _executable(WORKFLOW).split("verify:", 1)[1]
+    assert "compose_kernel" in verify
+    assert "--kernel" in verify
+    # The guard that refuses the half-specified case.
+    assert "compose_with is set but compose_kernel is empty" in WORKFLOW.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_the_tag_message_states_what_was_verified() -> None:
+    """A tag reading "verified" without saying verified HOW invites the reader
+    to assume the stronger claim."""
+    source = WORKFLOW.read_text(encoding="utf-8")
+    assert "installed and registered alone" in source
+    assert "composes with" in source
+
+
 def test_the_composition_check_cannot_publish_or_tag() -> None:
     """It runs after releases exist and only reports. A composition failure is
     repaired by a NEW release, never by mutating a published one."""
