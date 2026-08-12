@@ -318,6 +318,91 @@ def cmd_verify_registry(args: argparse.Namespace) -> None:
     print(f"registry verification OK for {', '.join(specs)}")
 
 
+def cmd_compare_published(args: argparse.Namespace) -> None:
+    """Prove the PUBLISHED artifact is byte-identical to what a run built.
+
+    The recovery case: a release whose `publish` succeeded and whose `verify`
+    then failed leaves an artifact on the index with no tag. Deleting and
+    re-uploading is the wrong repair — it would make one version identify two
+    different sets of bytes, and every consumer that already resolved it would
+    be silently holding something else. So the artifact is RECOVERED instead,
+    and recovery has to start by proving the published bytes are the ones the
+    original run inspected and smoked.
+
+    Downloads both distribution forms from the index and compares SHA-256
+    against the retained build artifacts. Any difference, or any file present on
+    one side only, refuses — at that point the version is burned rather than
+    recovered.
+    """
+    import hashlib
+    import tempfile
+
+    entry = resolve(args.distribution)
+    built = Path(args.dist)
+    if not built.is_dir():
+        raise ReleaseRefused(f"--dist is not a directory: {built}")
+
+    def digests(directory: Path) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for path in sorted(directory.iterdir()):
+            if path.suffix not in {".whl", ".gz"} and not path.name.endswith(".tar.gz"):
+                continue
+            found[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return found
+
+    pin = f"{entry['distribution']}=={args.version}"
+    with tempfile.TemporaryDirectory() as tmp:
+        downloaded = Path(tmp) / "published"
+        downloaded.mkdir()
+        # `--no-deps` because only THIS artifact is under comparison, and
+        # `--index-url` alone is correct here for the same reason: nothing else
+        # is being resolved.
+        for extra in (["--no-binary", ":all:"], []):
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "download",
+                    "--quiet",
+                    "--no-deps",
+                    "--index-url",
+                    args.index,
+                    "--dest",
+                    str(downloaded),
+                    *extra,
+                    pin,
+                ],
+                check=True,
+            )
+        published = digests(downloaded)
+
+    local = digests(built)
+    if not published:
+        raise ReleaseRefused(f"nothing downloaded from the index for {pin}")
+
+    problems: list[str] = []
+    for name, digest in sorted(published.items()):
+        if name not in local:
+            problems.append(f"{name}: on the index, absent from the build artifacts")
+        elif local[name] != digest:
+            problems.append(
+                f"{name}: index {digest[:16]}… != built {local[name][:16]}…"
+            )
+    for name in sorted(set(local) - set(published)):
+        problems.append(f"{name}: built but never published")
+
+    if problems:
+        raise ReleaseRefused(
+            "published bytes do not match the original build:\n  "
+            + "\n  ".join(problems)
+            + "\nDo NOT delete and re-upload. Burn this version and release the "
+            "next one, leaving the published artifact documented as unverified."
+        )
+    for name, digest in sorted(published.items()):
+        print(f"{name}: sha256 {digest} — identical to the original build")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -341,6 +426,16 @@ def main() -> int:
         help="directory holding a locally built dotmac-kernel wheel",
     )
     p.set_defaults(func=cmd_verify_wheel)
+
+    p = sub.add_parser(
+        "compare-published",
+        help="prove the published artifact matches a run's build artifacts",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--version", required=True)
+    p.add_argument("--index", required=True)
+    p.add_argument("--dist", required=True)
+    p.set_defaults(func=cmd_compare_published)
 
     p = sub.add_parser(
         "verify-registry", help="install exact pins from the index and register"
