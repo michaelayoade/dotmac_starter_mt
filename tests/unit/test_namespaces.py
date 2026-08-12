@@ -174,11 +174,16 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         assert owner.db_schema is not None
         assert owner.db_schema.startswith("mod_")
         assert not owner.is_legacy
+    # Pinned so that adding an allocation is a visible, argued diff rather than
+    # something that arrives unnoticed with a module. `application_directory`
+    # (ADR-0021) is the fifth, and the first allocated for an assembly other
+    # than this repository's — its consumer is the Tenant Workspace.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
         "release_catalog",
         "entitlement_allocation",
+        "application_directory",
     }
 
 

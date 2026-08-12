@@ -253,27 +253,54 @@ def test_the_migration_never_relies_on_search_path() -> None:
     """`search_path` is connection state a pooler, a psql session or another
     module can change, so every object is named schema-first.
 
-    Checked against the JOINED source rather than line by line: the formatter
-    splits long DDL into implicitly concatenated literals, which puts the table
-    and its schema on different physical lines while producing one correct
-    statement. A line-oriented assertion would fail on formatting.
+    Reads the `op.execute` arguments through `ast.literal_eval` rather than
+    grepping the file. The formatter splits long DDL into implicitly
+    concatenated literals — `"ALTER TABLE mod_appdir.x " "ENABLE RLS;"` — which
+    is ONE correct string to Python and two fragments to a text search.
+    Evaluating the literal is what the database will see; anything else tests
+    the formatter.
     """
     source = _migration_source()
-    joined = "".join(part.strip().strip('"') for part in source.split("\n"))
-
     assert "schema=_SCHEMA" in source
     assert '_SCHEMA = "mod_appdir"' in source
     assert "search_path" not in source
 
+    executed: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "execute"
+            and node.args
+        ):
+            try:
+                value = ast.literal_eval(node.args[0])
+            except ValueError:  # a computed statement — see the next assertion
+                executed.append("<computed>")
+                continue
+            executed.append(" ".join(str(value).split()))
+
+    assert executed, "no op.execute statements found — did the file move?"
+    # A computed statement is uninspectable by the composed gate, which reads
+    # this file WITHOUT importing it. Fail closed on one.
+    assert "<computed>" not in executed, "migration builds SQL dynamically"
+
     for statement in (
-        "ALTER TABLE mod_appdir.application_bindings ENABLE ROW LEVEL SECURITY",
-        "ALTER TABLE mod_appdir.application_bindings FORCE ROW LEVEL SECURITY",
-        "ON mod_appdir.application_bindings TO app_user",
-        "ON mod_appdir.application_bindings TO platform_api",
+        "ALTER TABLE mod_appdir.application_bindings ENABLE ROW LEVEL SECURITY;",
+        "ALTER TABLE mod_appdir.application_bindings FORCE ROW LEVEL SECURITY;",
+        "GRANT SELECT, INSERT, UPDATE, DELETE "
+        "ON mod_appdir.application_bindings TO app_user;",
+        "GRANT SELECT, INSERT, UPDATE, DELETE "
+        "ON mod_appdir.application_bindings TO platform_api;",
     ):
-        assert statement.replace(" ", "") in joined.replace(
-            " ", ""
-        ), f"missing or unqualified DDL: {statement}"
+        assert statement in executed, f"missing or unqualified DDL: {statement}"
+
+    # Every object named in every statement carries its schema.
+    for statement in executed:
+        if "application_bindings" in statement:
+            assert (
+                "mod_appdir.application_bindings" in statement
+            ), f"unqualified table reference: {statement}"
 
 
 # ── Independence ─────────────────────────────────────────────────────────────
@@ -303,15 +330,15 @@ def test_the_lineage_passes_the_composed_migration_gate() -> None:
     """`make migration-gate` reads the shipped `alembic.ini`, which deliberately
     omits this module — so the gate would never see `ad_0001` otherwise.
 
-    Composing it here is what a Workspace's own `alembic.ini` will do, and it is
-    the only place in this repository where that composition is checked.
+    Composed as a WORKSPACE composes it — the kernel's lineage plus this
+    module's — rather than as the starter composes it. Passing the starter's
+    other modules here would demand their version locations too, and would be
+    testing a composition no deployment actually runs.
     """
     from dotmac_kernel.migrations.gate import run_gate
 
-    from app.assembly import assembly
-
     report = run_gate(
-        [*assembly.modules, module],
+        [module],
         [
             REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
             REPO_ROOT / "alembic/versions",
