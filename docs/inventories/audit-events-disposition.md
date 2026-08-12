@@ -1,12 +1,16 @@
 # `audit_events` — the Group E disposition, measured
 
-**As of:** 2026-08-12 · **Sub:** `638c7f8bb` (`origin/dev`) · **Kernel:** `0.1.0a41`
+**As of:** 2026-08-12 · **Sub candidate:** `integration/kernel-adoption` from
+`73c9d9003` · **Kernel candidate:** `0.1.0a42` at `efdf4b9`
 **Gates:** kernel revision `0001_initial_tenant_schema`, which creates `audit_events`
 **Production measured:** `selfcare.dotmac.io` 767,769 rows · `erp.dotmac.io` 696,553 rows — read-only, aggregates only
-**Status: audit R1 is designable.** Both blockers are closed — `is_active` by the
-production data, actor identity by an accepted kernel contract. The *complete*
-lineage remains gated by credentials and tenant-context/RLS, because kernel
-`0001` is atomic.
+**Status: audit R1 is implemented on local integration branches, but is not
+released or deployed.** Both blockers are closed — `is_active` by the production
+data, actor identity by an accepted kernel contract. Kernel migration `0023`
+implements the union; Sub migration `524_audit_events_kernel_r1`, the centralized
+dual-write, and aggregate parity report implement the product side. The
+*complete* lineage remains gated by credentials and tenant-context/RLS, because
+kernel `0001` is atomic.
 
 [`sub-lineage-dispositions.md`](sub-lineage-dispositions.md) put `audit_events`
 in Group E and refused to plan it mechanically:
@@ -218,17 +222,26 @@ function, grants and FORCE RLS. Audit R1 being designable does not move the
 lineage; the complete gate still waits on the credential convergence and the
 tenant-context/RLS decisions.
 
-## How R1 lands — two dependency-ordered changes
+## How R1 lands — one integration slice, two dependency-ordered releases
 
-R1 is **not** one change. The kernel is a released package that Sub consumes by
-exact pin, so the order is forced:
+R1 is authored and reviewed as one coordinated programme slice. Kernel work is
+on `integration/audit-r1`; Sub's product-owned migration, writer convergence,
+and parity evidence are on `integration/kernel-adoption`. This makes the whole
+contract reviewable before either side ships and prevents an artificial wait
+between implementation slices.
 
-**1. Kernel release first.** Model, writer, forward migration, vocabulary
-validation, tests. Nothing in Sub can reference a column the released artifact
-does not yet have.
+The release order is still forced because Sub consumes the kernel as an exact,
+immutable package pin:
 
-**2. Sub PR second.** Pin the exact released artifact, add its own expand-only
-migration, dual-write, parity reports.
+**1. Release the kernel candidate first.** Publish a42 from the reviewed source,
+verify the immutable artifact, and retain the model, writer, forward migration,
+closed actor vocabulary, and compatibility tests as one release unit.
+
+**2. Bind and release Sub second.** Add a separate dependency commit that pins
+the exact released a42 artifact and regenerates the lock, then rehearse the
+complete Sub chain and application against that artifact before merge or
+deployment. The Sub R1 implementation can be committed on its integration
+branch before a42 exists; it must not claim the unreleased candidate as its pin.
 
 The staging measurements above **do not gate either of these** — they gate only
 the separate `is_active` cleanup.
