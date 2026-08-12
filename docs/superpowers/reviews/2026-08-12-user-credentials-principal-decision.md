@@ -105,9 +105,53 @@ verifier interface, not the list of names:
 the mechanism *code*. Two OIDC issuers, or two RADIUS verifiers, are two
 mechanisms of the same code, and `(tenant, party, 'radius')` would forbid a
 party holding a credential against each. The key is the **binding** — the
-installed, configured instance — not its type. Confirming Sub's real
-cardinality here (how many verifiers, whether any party authenticates against
-more than one) is a prerequisite for R1, and it is measurable today.
+installed, configured instance — not its type.
+
+### Measured, 2026-08-12: Sub has one binding per mechanism today
+
+From source, at Sub `9f6f9f36b`. The data half (whether any credential row
+actually carries a `radius_server_id`) still needs a named database.
+
+| mechanism | bindings today | evidence |
+|---|---|---|
+| `local` | **1** | the hash is in the credential row; nothing external to bind |
+| `radius` | **1 logical** | see below |
+| `sso` | **0 — never implemented** | `AuthProvider.sso` has *zero* references outside its own declaration, and there is no OIDC or SAML anywhere under `app/`. `auth_flow.py:1083` accepts only `radius` and `local` at login |
+
+**RADIUS is one logical binding even though `radius_servers` is a multi-row
+table.** Everything that would make two servers two independent authentication
+*authorities* is global, not per-server:
+
+- the shared secret is a single held value —
+  `held_secret("radius_auth_shared_secret")` (`radius_auth.py`), not a
+  per-server column;
+- the dictionary path and timeout come from the `radius/*` settings domain;
+- `_pick_radius_server` falls back to the `auth_server_id` **setting**, and if
+  that is unset picks *the most recently created active server* — an implicit
+  default, not a binding decision.
+
+So `RadiusServer` rows differ only in host and ports: they are **routing
+targets sharing one authentication authority**. `credential.radius_server_id`
+is an optional override of which host to send the packet to, which is the same
+conclusion the exactly-one-principal CHECK already implied — it is not an
+identity.
+
+**What this settles, and what it does not.** `(tenant_id, party_id,
+mechanism_code)` would be sufficient *today* — but only by accident of
+configuration, not by structure. The table permits N servers; the day one gets
+its own shared secret, two genuine bindings exist and a code-keyed unique index
+forbids the second credential. Keying on the binding costs one small table now
+(two rows: `local`, `radius`) and is expensive to retrofit after the constraint
+ships.
+
+**Latent defect, worth raising separately:** two RADIUS servers configured today
+cannot be independent authentication authorities, because they must share one
+secret. That is a limitation nothing states.
+
+**`AuthProvider.sso` is the ADR-0008 argument in miniature** — a closed enum
+carrying a value no code implements, which has been quietly asserting a
+capability Sub does not have. An open declared vocabulary would have had zero
+declarations for it.
 
 ### Why not the alternatives
 
@@ -319,12 +363,13 @@ asking:
 2. ~~**A person with memberships in two resellers.**~~ **DECIDED** by §5c: one
    credential, two `party_memberships`, a switcher after login. The key must not
    include the membership.
-3. **Mechanism-binding cardinality — NEW, and now the blocker.** The key is the
-   authentication *binding*, not the mechanism code, or a party could not hold
-   credentials against two OIDC issuers or two RADIUS verifiers. How many
-   verifier/issuer bindings does Sub actually have, and does any party
-   authenticate against more than one? Measurable today; see "The composable
-   target".
+3. ~~**Mechanism-binding cardinality.**~~ **MEASURED from source 2026-08-12** —
+   one binding per mechanism today (`local` 1, `radius` 1 logical, `sso` never
+   implemented). See "The composable target". Key on the binding anyway: today's
+   sufficiency is a configuration accident, not structure. **One data question
+   remains and needs a named database:** do any credential rows carry a
+   non-null `radius_server_id`? If none do, the R1 backfill has no override
+   cases to preserve.
 4. **Many-to-one merge policy.** §5c fixes the target cardinality but not which
    password, MFA methods, sessions and lockout state survive when several
    credentials collapse onto one party. That is a security-sensitive policy
