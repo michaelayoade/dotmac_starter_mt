@@ -1,0 +1,65 @@
+schema_version = 1
+package = "dotmac-application-directory"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+owner = "The tenant's connected-application portfolio"
+# The 2026-08-12 audit (`application-portfolio-sources.md`) ran two mechanical
+# sweeps across all four repositories and found NO owner: the name sweep
+# returned nothing, and the attribute sweep returned only false positives where
+# "application" means applying a credit, a tax or a leave request. The vendor
+# control plane's assembly composes eight features and none is a portfolio; its
+# `allocations` — the nearest neighbour — is an immutable projection of a
+# contract's entitlement, carrying no application instance, admin URL, audience,
+# local tenant reference or lifecycle.
+#
+# So this is greenfield, and greenfield AFTER the inventory rather than instead
+# of it. The audit is what makes that claim checkable.
+contract = "Which applications a tenant has, how to reach each one, which tenant it corresponds to inside the target — as IMMUTABLE binding identity, never rewritten by reconciliation — and how much the stored descriptor can currently be trusted. NOT who may enter them (ADR-0021 §3), not the deployment, not the product catalogue, not the entitlement, not the remote application."
+source_repositories = [
+  # Both named because the gate requires proof that ERP and Sub were
+  # inventoried — and here the finding is a negative in both.
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_vendor_control_plane",
+  "dotmac_academy_app",
+  "dotmac_starter_mt",
+]
+source_paths = [
+  # Read and REJECTED as sources. Listed because the audit required inventorying
+  # them, not because any supplied an implementation.
+  #
+  # The vendor CP's nearest neighbour: commercial entitlement projected from a
+  # contract. A different unit from a connected-application binding — see the
+  # inventory's side-by-side.
+  "dotmac_vendor_control_plane:src/vendor_cp/allocations/models.py",
+  "dotmac_vendor_control_plane:src/vendor_cp/assembly.py",
+  # The false positives, recorded so a future audit does not re-investigate
+  # them: "application" in the sense of applying a thing.
+  "dotmac_erp:app/models/people/leave/leave_application.py",
+  "dotmac_sub:app/models/billing.py",
+  "dotmac_starter_mt:packages/dotmac-application-directory/src/dotmac_application_directory",
+]
+preserved_tests = [
+  # Nothing to preserve FROM a source — there is no source. These are this
+  # module's own proofs, which is what a greenfield dossier can honestly list.
+  "dotmac_starter_mt:tests/architecture/test_application_directory_module.py",
+  "dotmac_starter_mt:tests/unit/test_application_directory.py",
+  "dotmac_starter_mt:tests/test_application_directory_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = [
+  # The one concrete consumer, and the only one. A speculative vendor-CP entry
+  # was removed on review: the control plane has no descriptor cutover, and a
+  # candidate named without one inflates the reuse case for a capability with a
+  # single consumer. It returns if and when an actual cutover is planned.
+  "dotmac_workspace",
+]
+inventory_evidence = [
+  "docs/inventories/application-portfolio-sources.md",
+  "docs/adr/0021-the-tenant-workspace-is-a-third-plane.md",
+]
+first_cutover = "The Tenant Workspace (`dotmac_workspace`) is the CANDIDATE first cutover, and has not happened: that repository is a local scaffold with no remote, no lock, no CI and no authentication path, so `contract_consumers` is empty and the status is `audit-complete`. Unlike `dotmac-ticketing`, the cutover is not chosen for being greenfield among several candidates — there is exactly one intended adopter, and the module exists because that adopter needs it. It will carry no migration risk: no rows exist anywhere to move."
+shadow_and_drift = "No shadow verification is possible or needed: there is no prior implementation to run beside, and no existing rows whose behaviour could diverge. The drift this module must detect is a different kind — between its stored descriptor copy and what the target application currently publishes — and that is a first-class feature rather than a migration concern: `reconcile_descriptor` returns UNCHANGED/UPDATED/REGRESSED/CONFLICT, refuses to adopt a descriptor whose version regressed or whose content changed under a fixed version, and records `reconciliation_status` + `descriptor_refreshed_at` so an unreachable application never looks freshly checked."
+local_copy_retirement = "Nothing to retire. No repository holds an implementation of this capability — that is the audit's finding, not an omission, and `application-portfolio-sources.md` records the two sweeps that establish it. The one thing this module must NOT absorb is listed in that inventory's concept-to-owner table: commercial entitlement stays with the vendor CP's allocations/contracts, local capability evaluation stays with `dotmac_kernel.entitlements`, signed licence delivery stays with `dotmac_kernel.licensing`, and who may enter an application stays with the target application."
+next_action = "0.1.0a1 ships the `ApplicationDescriptor` contract, the three closed vocabularies, `application_bindings` and the service. The lifecycle from here is the dossier gate's, and each step is earned rather than declared: `audit-complete` today (ZERO production consumers — `dotmac_workspace` is a local scaffold with no remote, no lock, no CI and no authentication path, so it is not a consumer); `adopted` when Workspace actually runs the `mod_appdir` lineage in production, moving `contract_consumers` from empty to exactly one; `reuse-proven` only after a second real consumer exercises the same contract. Do NOT absorb access requests, approvals, delegation policy, grant sets or acknowledgement: those are `dotmac-application-access`, deferred by ADR-0021 §5 until a generic signed-document mechanism exists. Do NOT add a column naming a person, member, group, role, grant or permission — `test_the_directory_holds_no_authorization_column` fails the build on one, and that test is the executable half of ADR-0021 §3."

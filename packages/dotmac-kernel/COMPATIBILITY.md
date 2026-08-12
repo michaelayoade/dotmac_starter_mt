@@ -280,6 +280,22 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
+**Allocated module namespaces**, as of `0.1.0a46`. Each row is permanent: a
+namespace that moves is a data-loss event, so an entry is never repointed and a
+retired prefix is never reused.
+
+| Module | Schema | Prefix | Branch label |
+|---|---|---|---|
+| `template_studio` | `mod_tstudio` | `ts` | `template_studio` |
+| `ticketing` | `mod_tkt` | `tk` | `ticketing` |
+| `release_catalog` | `mod_rel` | `rl` | `release_catalog` |
+| `entitlement_allocation` | `mod_ealloc` | `ea` | `entitlement_allocation` |
+| `application_directory` | `mod_appdir` | `ad` | `application_directory` |
+
+Adding a row is an allocation, not a facility — it adds no kernel behaviour and
+nothing consumes it but the module it names. That distinction is what makes an
+allocation compatible with ADR-0017's moratorium; see ADR-0021 §7.
+
 **`NamespaceRegistry`** is construction-is-validation and rejects a duplicate
 schema claim (`DuplicateSchemaError`), migration prefix
 (`DuplicateMigrationPrefixError`), branch label (`DuplicateBranchLabelError`)

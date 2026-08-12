@@ -1,0 +1,43 @@
+[tool.poetry]
+name = "dotmac-application-directory"
+version = "0.1.0a1"
+description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_application_directory", from = "src" }]
+include = [
+    # PEP 561 marker — this module's whole reason to exist is a typed contract
+    # (`ApplicationDescriptor`), and a consuming assembly's type-checker cannot
+    # see it without this.
+    { path = "src/dotmac_application_directory/py.typed", format = ["sdist", "wheel"] },
+    # The module's OWN Alembic lineage (prefix `ad`, branch label
+    # `application_directory`), composed by a consuming assembly through
+    # `version_locations`. No `__init__` in versions/ (Alembic convention), so
+    # it is declared explicitly as package data.
+    { path = "src/dotmac_application_directory/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# Floor 3.11 to match the kernel and the products that consume it.
+python = ">=3.11,<3.14"
+# The one runtime dependency, and the direction ADR-0006 § 2 fixes:
+# `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
+# kernel; never on an assembly, and never on another module.
+#
+# The floor is the release that allocates `mod_appdir` in
+# `MIGRATION_OWNER_LEDGER`. An earlier kernel cannot register this module at
+# all — `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` —
+# so this is a hard floor rather than a preference.
+dotmac-kernel = ">=0.1.0a46"
+sqlalchemy = "^2.0"
+
+# No `fastapi` and no `pydantic`: this module ships no routers. ADR-0021 puts
+# the launcher in the `dotmac_workspace` assembly (the portal is an assembly's
+# UI facet, not a domain module), so the web dependency belongs there and never
+# arrives here. `alembic` is likewise absent — unlike `dotmac-ticketing`, this
+# module imports nothing from it at runtime; its migration is loaded by the
+# consuming assembly's Alembic, which already has it.
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

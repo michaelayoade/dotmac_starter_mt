@@ -45,6 +45,22 @@ path dependency — the assembly imports `dotmac_kernel.*`, never a copied modul
   UI contract version (ADR-0006 U1; see "Design system" under "Web portal
   (admin UI)" below). Dependency-free and one-way: `assembly → module →
   dotmac-ui → dotmac-kernel`.
+- `dotmac_application_directory` (`packages/dotmac-application-directory/`,
+  distribution `dotmac-application-directory`) — a tenant's
+  connected-application portfolio, and the PERMANENT owner of the
+  `ApplicationDescriptor` contract (ADR-0021 §4 — not module code awaiting
+  kernel promotion; only the generic signed-envelope mechanism is a promotion
+  candidate). **Built and tested here, composed elsewhere:** `app/assembly.py`
+  does not list it and `alembic.ini` does not carry its `ad` lineage, because
+  the starter is a target application rather than a workspace and composing it
+  would create `mod_appdir` in every starter deployment. Its consumer is the
+  `dotmac_workspace` assembly (a separate repository). The one rule to know:
+  **directory visibility is not authorization** — a binding is inventory,
+  `ACTIVE` means launchable rather than permitted, the table may never hold a
+  person/role/grant column (`test_the_directory_holds_no_authorization_column`),
+  and the target application stays the only writer of its own effective role
+  grants. Access allocation is `dotmac-application-access`, deferred by
+  ADR-0021 §5 until the kernel has a generic signed-document mechanism.
 - `app/features/<name>/` — self-contained: `models.py`, `schemas.py`,
   `service.py`, `router.py` (JSON API), `web.py` (HTML/HTMX admin-portal
   routes, mounted under `/admin/...` — see "Web portal (admin UI)" below),
