@@ -197,6 +197,101 @@ def test_the_module_never_reaches_for_the_process_capability_catalogue() -> None
                 assert "active_capabilities" not in imported, path.name
 
 
+# ── Typed contracts (the fleet-wide standard) ────────────────────────────────
+
+
+def test_every_public_value_object_is_frozen_and_slotted() -> None:
+    """Deeply immutable, not merely annotated.
+
+    A mutable contract type lets a consumer change what it was handed and pass
+    it on, so two owners disagree about a value neither of them wrote. Frozen
+    plus slots also refuses an attribute nobody declared, which is how a typo
+    becomes a silent second field.
+    """
+    import dataclasses
+
+    import dotmac_entitlement_allocation as package
+
+    # Only types this package DEFINES. `module` is the kernel's ModuleManifest
+    # — re-asserting its shape here would test the kernel's contract from the
+    # wrong repository, and fail for reasons that are not this module's.
+    value_objects = [
+        getattr(package, name)
+        for name in package.__all__
+        if dataclasses.is_dataclass(getattr(package, name))
+        and getattr(package, name).__module__.startswith(
+            "dotmac_entitlement_allocation"
+        )
+    ]
+    assert value_objects, "no public dataclasses found — the surface moved"
+    for cls in value_objects:
+        params = cls.__dataclass_params__
+        assert params.frozen, f"{cls.__name__} is not frozen"
+        assert getattr(cls, "__slots__", None) is not None, f"{cls.__name__} slotless"
+
+
+def test_no_public_contract_carries_a_mutable_collection() -> None:
+    """A `list` or `dict` field is a hole in immutability: the dataclass is
+    frozen, the list inside it is not."""
+    import dataclasses
+    import typing
+
+    import dotmac_entitlement_allocation as package
+
+    for name in package.__all__:
+        member = getattr(package, name)
+        if not dataclasses.is_dataclass(member) or not member.__module__.startswith(
+            "dotmac_entitlement_allocation"
+        ):
+            continue
+        hints = typing.get_type_hints(member)
+        for field in dataclasses.fields(member):
+            annotation = hints[field.name]
+            origin = typing.get_origin(annotation) or annotation
+            assert origin not in (list, dict, set), (
+                f"{member.__name__}.{field.name} is {annotation!r}; "
+                "use a tuple or a frozen value object"
+            )
+
+
+def test_every_public_callable_is_fully_annotated() -> None:
+    """Including the return. An unannotated public function is a contract the
+    consumer's type-checker cannot see, which is what `py.typed` promises it
+    can."""
+    import inspect
+
+    import dotmac_entitlement_allocation as package
+
+    for name in package.__all__:
+        member = getattr(package, name)
+        if not inspect.isfunction(member):
+            continue
+        signature = inspect.signature(member)
+        assert signature.return_annotation is not inspect.Signature.empty, name
+        for parameter in signature.parameters.values():
+            assert (
+                parameter.annotation is not inspect.Parameter.empty
+            ), f"{name}({parameter.name})"
+
+
+def test_the_status_vocabulary_has_exactly_one_definition() -> None:
+    """Shared by persistence and by every owner reading the contract. Two
+    definitions drift, and the drift shows up as a row nobody can classify."""
+    from dotmac_entitlement_allocation import AllocationStatus
+
+    assert issubclass(AllocationStatus, str)
+    assert [member.value for member in AllocationStatus] == ["staged"]
+    # The model's default is the SAME object, not a parallel literal.
+    default = models.Allocation.__table__.c["status"].default.arg
+    assert default == AllocationStatus.STAGED.value
+
+
+def test_the_package_ships_a_pep561_marker() -> None:
+    """Without it a consuming assembly's type-checker treats every one of these
+    contracts as `Any`."""
+    assert (MODULE_ROOT / "py.typed").is_file()
+
+
 # ── Platform catalog, not tenant-scoped ──────────────────────────────────────
 
 
@@ -217,6 +312,66 @@ def test_the_online_role_cannot_rewrite_a_staged_allocation() -> None:
     for verb in ("UPDATE", "DELETE"):
         for table in module.tables:
             assert f"{verb} ON mod_ealloc.{table} TO platform_api" not in source
+
+
+def test_a_staged_allocation_cannot_be_appended_to() -> None:
+    """An INSERT-only grant makes the PARENT immutable and leaves the CHILD
+    appendable — staging needs INSERT. The trigger is what closes it."""
+    source = _migration_source()
+    assert "CREATE TRIGGER refuse_late_entry" in source
+    assert "BEFORE INSERT ON mod_ealloc.allocation_entries" in source
+    # The seal is explicit. Transaction-identity inference cannot work here: the
+    # kernel's at-most-once owner runs inside `conflict_savepoint`, and a
+    # SAVEPOINT is a subtransaction whose writes carry a subtransaction xid.
+    assert "sealed" in source
+    assert "CREATE TRIGGER seal_is_one_way" in source
+    assert (
+        "GRANT UPDATE (sealed, updated_at) ON mod_ealloc.allocations TO platform_api;"
+        in source
+    )
+    # No BUSINESS column is grantable to the online role.
+    for column in ("product_code", "customer_ref", "content_hash", "contract_ref"):
+        assert f"GRANT UPDATE ({column}" not in source
+
+
+def test_the_quantity_floor_is_a_database_constraint() -> None:
+    """The service checks it; the service cannot police a path that never calls
+    it."""
+    assert "ck_allocation_entries_quantity" in _migration_source()
+    assert "quantity > 0" in _migration_source()
+
+
+def test_the_claim_fingerprint_is_stored_on_the_allocation() -> None:
+    """Not only in the idempotency record: those have a retention policy and
+    allocations do not, so a purge must not turn a conflict back into a silent
+    replay."""
+    assert "snapshot_fingerprint" in {
+        c.name for c in models.Allocation.__table__.columns
+    }
+    assert "snapshot_fingerprint" in _migration_source()
+
+
+def test_the_module_uses_the_kernel_at_most_once_owner() -> None:
+    """ADR-0014 gives at-most-once ONE owner. A module rolling its own would be
+    the second implementation the ADR exists to prevent — and the source's
+    idempotency behaviour would have been silently dropped in extraction."""
+    service_source = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
+    assert "execute_once_platform" in service_source
+    assert "write_platform_audit_event" in service_source
+
+
+def test_the_module_stays_importable_without_a_database() -> None:
+    """`dotmac_kernel.idempotency` reaches `dotmac_kernel.db`, which builds the
+    engine at import. A module-scope import would make this package
+    unimportable without a DATABASE_URL and break the import-safety a migration
+    gate and an offline type-check rely on."""
+    tree = ast.parse((MODULE_ROOT / "service.py").read_text(encoding="utf-8"))
+    module_level = {
+        node.module
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    assert "dotmac_kernel.idempotency" not in module_level
 
 
 def test_the_data_plane_role_is_revoked_from_every_table() -> None:

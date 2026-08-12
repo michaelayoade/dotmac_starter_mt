@@ -29,8 +29,8 @@ from dotmac_entitlement_allocation import (
     allocation_product,
     stage_allocation,
 )
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import DBAPIError, ProgrammingError
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 
 
@@ -231,6 +231,223 @@ class TestLicenceIssuanceReadsTheStoredProduct:
             "allocation_id",
         }
         platform_session.rollback()
+
+
+class TestAStagedAllocationCannotBeAppendedTo:
+    """The hole an INSERT-only grant leaves on a CHILD table.
+
+    `platform_api` needs INSERT on allocation_entries to stage at all, so the
+    grant that makes the PARENT immutable leaves the child appendable: raw SQL
+    could add a capability to an already-staged allocation and bypass catalogue
+    validation entirely. The earlier canaries covered parent UPDATE and child
+    DELETE and missed exactly this.
+    """
+
+    def test_platform_api_cannot_append_an_entry_after_staging(
+        self,
+        allocation_schema: None,
+        platform_session: Session,
+        catalogue: LiveCatalogue,
+    ) -> None:
+        """REQUIRED CANARY. The capability appended here was never validated."""
+        view = stage_allocation(platform_session, _snapshot(), catalogues=catalogue)
+        platform_session.commit()
+
+        with pytest.raises((IntegrityError, DBAPIError), match="already staged"):
+            platform_session.execute(
+                text(
+                    "INSERT INTO mod_ealloc.allocation_entries "
+                    "(id, allocation_id, capability_code, quantity) "
+                    "VALUES (gen_random_uuid(), :aid, 'never.validated', 1)"
+                ),
+                {"aid": view.id},
+            )
+        platform_session.rollback()
+
+    def test_app_admin_cannot_append_either(
+        self,
+        allocation_schema: None,
+        admin_session: Session,
+        platform_session: Session,
+        catalogue: LiveCatalogue,
+    ) -> None:
+        """The trigger deliberately does NOT exempt the offline role. A reviewed
+        repair that must add an entry disables the trigger explicitly in its own
+        migration, which leaves the exemption visible in a diff rather than
+        baked into the trigger where nobody would look for it."""
+        view = stage_allocation(platform_session, _snapshot(), catalogues=catalogue)
+        platform_session.commit()
+
+        with pytest.raises((IntegrityError, DBAPIError), match="already staged"):
+            admin_session.execute(
+                text(
+                    "INSERT INTO mod_ealloc.allocation_entries "
+                    "(id, allocation_id, capability_code, quantity) "
+                    "VALUES (gen_random_uuid(), :aid, 'never.validated', 1)"
+                ),
+                {"aid": view.id},
+            )
+        admin_session.rollback()
+
+    def test_staging_itself_still_works(
+        self,
+        allocation_schema: None,
+        platform_session: Session,
+        catalogue: LiveCatalogue,
+    ) -> None:
+        """Specificity: the trigger must block LATE inserts, not all inserts.
+        Without this, "deny appends" could be implemented as "deny entries" and
+        the canary above would still pass."""
+        view = stage_allocation(platform_session, _snapshot(), catalogues=catalogue)
+        assert view.entries
+        platform_session.rollback()
+
+    def test_the_seal_cannot_be_lifted(
+        self,
+        allocation_schema: None,
+        platform_session: Session,
+        catalogue: LiveCatalogue,
+    ) -> None:
+        """One-way. Without this, sealing could be undone and the allocation
+        would be appendable again by anyone who could flip it back."""
+        view = stage_allocation(platform_session, _snapshot(), catalogues=catalogue)
+        platform_session.commit()
+        with pytest.raises((IntegrityError, DBAPIError), match="cannot be lifted"):
+            platform_session.execute(
+                text("UPDATE mod_ealloc.allocations SET sealed = false WHERE id = :id"),
+                {"id": view.id},
+            )
+        platform_session.rollback()
+
+    def test_the_online_role_may_update_no_business_column(
+        self,
+        allocation_schema: None,
+        platform_session: Session,
+        catalogue: LiveCatalogue,
+    ) -> None:
+        """The column-level grant is what keeps every business column immutable
+        while still letting the service seal. `updated_at` rides along with the
+        seal as ORM metadata; nothing that carries meaning does."""
+        view = stage_allocation(platform_session, _snapshot(), catalogues=catalogue)
+        platform_session.commit()
+        with pytest.raises((ProgrammingError, DBAPIError), match="permission denied"):
+            platform_session.execute(
+                text(
+                    "UPDATE mod_ealloc.allocations SET customer_ref = 'x' "
+                    "WHERE id = :id"
+                ),
+                {"id": view.id},
+            )
+        platform_session.rollback()
+
+    def test_a_non_positive_quantity_is_refused_by_the_database(
+        self,
+        allocation_schema: None,
+        admin_session: Session,
+    ) -> None:
+        """REQUIRED. The service checks it, but the service cannot police a path
+        that never calls it."""
+        allocation_id = uuid.uuid4()
+        admin_session.execute(
+            text(
+                "INSERT INTO mod_ealloc.allocations (id, contract_ref, product_code,"
+                " customer_ref, content_hash, status, source_event_id,"
+                " snapshot_fingerprint) VALUES (:id, :cref, 'p', 'c', :h, 'staged',"
+                " 'e', 'f')"
+            ),
+            {"id": allocation_id, "cref": uuid.uuid4(), "h": uuid.uuid4().hex},
+        )
+        with pytest.raises(IntegrityError, match="ck_allocation_entries_quantity"):
+            admin_session.execute(
+                text(
+                    "INSERT INTO mod_ealloc.allocation_entries "
+                    "(id, allocation_id, capability_code, quantity) "
+                    "VALUES (gen_random_uuid(), :aid, 'x', 0)"
+                ),
+                {"aid": allocation_id},
+            )
+        admin_session.rollback()
+
+
+class TestConcurrentStaging:
+    def test_two_sessions_racing_one_activation_produce_one_allocation(
+        self,
+        allocation_schema: None,
+        admin_session: Session,
+        catalogue: LiveCatalogue,
+    ) -> None:
+        """REQUIRED CANARY. The check-then-insert path has a TOCTOU window: two
+        deliveries of one activation under DIFFERENT event ids both read
+        nothing, both insert, and the unique constraint decides. The loser must
+        resolve to a replay of the winner, not surface an IntegrityError.
+        """
+        url = os.getenv("TEST_PLATFORM_DATABASE_URL")
+        if not url:
+            pytest.skip("TEST_PLATFORM_DATABASE_URL not set")
+        engine = create_engine(url, future=True)
+        factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+        first, second = factory(), factory()
+        contract, digest = uuid.uuid4(), uuid.uuid4().hex * 2
+        try:
+            # Unique per run: the kernel's `platform_idempotency_records` lives
+            # in `public` and survives a `mod_ealloc` drop, so a fixed key would
+            # collide with an earlier run's DIFFERENT request — which the
+            # at-most-once owner would correctly report as a conflict, failing
+            # this test for a reason that has nothing to do with the race.
+            run = uuid.uuid4().hex[:8]
+            a = _snapshot(
+                contract_ref=contract,
+                content_hash=digest,
+                source_event_id=f"race-a-{run}",
+            )
+            b = _snapshot(
+                contract_ref=contract,
+                content_hash=digest,
+                source_event_id=f"race-b-{run}",
+            )
+            # Both read before either writes — the race, made deterministic.
+            assert (
+                first.execute(
+                    select(Allocation).where(Allocation.contract_ref == contract)
+                ).scalar_one_or_none()
+                is None
+            )
+            assert (
+                second.execute(
+                    select(Allocation).where(Allocation.contract_ref == contract)
+                ).scalar_one_or_none()
+                is None
+            )
+
+            winner = stage_allocation(first, a, catalogues=catalogue)
+            first.commit()
+
+            loser = stage_allocation(second, b, catalogues=catalogue)
+            assert loser.replayed is True
+            assert loser.id == winner.id
+            second.rollback()
+
+            count = (
+                second.execute(
+                    select(Allocation).where(Allocation.contract_ref == contract)
+                )
+                .scalars()
+                .all()
+            )
+            assert len(count) == 1
+        finally:
+            first.rollback()
+            second.rollback()
+            for session in (first, second):
+                session.close()
+            engine.dispose()
+            # Cleanup runs as the OFFLINE role: `platform_api` has no DELETE,
+            # which is the property under test two classes down.
+            admin_session.execute(
+                text("DELETE FROM mod_ealloc.allocations WHERE contract_ref = :c"),
+                {"c": contract},
+            )
+            admin_session.commit()
 
 
 class TestImmutabilityIsAPrivilege:

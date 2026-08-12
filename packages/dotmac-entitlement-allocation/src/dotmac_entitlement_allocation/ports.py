@@ -80,6 +80,45 @@ class UndeclaredCapabilityError(AllocationError):
         )
 
 
+class DuplicateCapabilityError(AllocationError):
+    """The same capability code appears twice in one snapshot.
+
+    Refused rather than aggregated. Deciding that two lines of 10 seats mean 20
+    — or that the second supersedes the first — is a COMMERCIAL rule owned by
+    whoever owns contracts. Inventing one here would make this module a
+    quantity authority as well as a projection, and the two products would
+    disagree about it within a release.
+
+    The contract owner supplies a normalized snapshot. Until then this fails
+    early with a clear message rather than late, through a unique constraint,
+    with a message about an index.
+    """
+
+    def __init__(self, codes: tuple[str, ...]) -> None:
+        self.codes = codes
+        super().__init__(
+            f"capability code(s) {', '.join(repr(c) for c in codes)} appear more "
+            "than once; supply a normalized snapshot — this module does not "
+            "aggregate quantities, because deciding what a repeat MEANS is a "
+            "commercial rule it does not own"
+        )
+
+
+class AllocationConflictError(AllocationError):
+    """This activation was already staged, from different inputs.
+
+    `(contract_ref, content_hash)` identifies an activated contract version, so
+    the same pair arriving with a different product, customer or entry set is
+    not a replay — it is two different claims about one activation, and
+    returning the first silently would hide the disagreement forever.
+
+    The comparison is against a fingerprint stored ON THE ALLOCATION, not
+    against an idempotency record: idempotency records have a retention policy
+    (ADR-0014 leaves it to the product) and allocations do not, so a purge must
+    not be able to turn a conflict back into a silent replay.
+    """
+
+
 class EmptyAllocationError(AllocationError):
     """A snapshot with no entries entitles nothing.
 
@@ -128,6 +167,20 @@ class CapabilityCatalogueReader(Protocol):
     the process doing the asking, not the ones declared by the target
     application. Those are different sets, and confusing them would validate an
     allocation against the wrong product's manifest.
+
+    ## The adapter TRANSLATES; the module does not guess
+
+    An adapter must raise `UnknownProductError` or `UndeclaredCapabilityError`
+    from this module. It must not leak its backing store's own exception type —
+    the kernel's `UndeclaredCapabilityError` is a `KeyError`, a directory client
+    might raise `HTTPError`, and a dict-backed fake raises `KeyError` for a
+    missing product as readily as for a missing code.
+
+    The service therefore does NOT catch broad exception types. An earlier
+    revision caught every `KeyError` and reported it as an undeclared
+    capability, which would have disguised an adapter defect, a missing
+    product, and a genuine undeclared code as the same finding — the most
+    expensive of the three to debug being reported as the cheapest.
     """
 
     def require_declared(
@@ -145,10 +198,12 @@ class CapabilityCatalogueReader(Protocol):
 
 
 __all__ = [
+    "AllocationConflictError",
     "AllocationError",
     "CapabilityCatalogueReader",
     "ContractEntitlement",
     "ContractSnapshot",
+    "DuplicateCapabilityError",
     "EmptyAllocationError",
     "UndeclaredCapabilityError",
     "UnknownProductError",

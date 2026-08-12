@@ -25,22 +25,33 @@ would also splice two independently released migration lineages, which D1
 forbids. `content_hash` and `source_event_id` carry the provenance the FK looked
 like it was providing.
 
-## Immutability
+## Immutability, including against APPEND
 
 `(contract_ref, content_hash)` is unique: one allocation per activated contract
 version, so re-delivery of the same activation is a no-op rather than a second
-row. As with the release catalogue, immutability is enforced by PRIVILEGE —
-`platform_api` holds SELECT and INSERT only — not by a convention the service is
-trusted to keep.
+row.
+
+`platform_api` holding SELECT and INSERT only stops the parent being rewritten —
+but INSERT is exactly what staging needs, so on the CHILD table that same grant
+leaves the allocation **appendable**: raw SQL could add a capability to an
+already-staged allocation and bypass catalogue validation entirely. Restricting
+INSERT is not available, so the entries table carries a trigger
+(`refuse_late_entry`) that rejects any entry once the parent is SEALED. The
+service seals it after writing every entry, so an allocation is written once,
+wholly, or not at all.
+
+`quantity > 0` is a CHECK rather than only a service rule, for the same reason:
+the service cannot police a path that never calls it.
 """
 
 from __future__ import annotations
 
+from enum import StrEnum
 from uuid import UUID
 
 from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 #: Derived from the allocated short code — never a literal here. The migration
@@ -51,10 +62,28 @@ SCHEMA: str = module_schema("ealloc")
 _ALLOCATIONS = "allocations"
 _ENTRIES = "allocation_entries"
 
-#: The only status this release writes. Delivery and acknowledgement states
-#: belong to licence issuance, which is a different owner — an allocation that
-#: tracked its own delivery would become a second delivery authority.
-STAGED = "staged"
+
+class AllocationStatus(StrEnum):
+    """The allocation lifecycle, as a value object rather than a bare string.
+
+    ONE definition, shared by persistence and by every owner that reads the
+    contract — the typed-contracts standard's requirement, and the reason this
+    is not two constants that drift.
+
+    Only `STAGED` exists in this release. Delivery and acknowledgement states
+    belong to licence issuance, a different owner; an allocation that tracked
+    its own delivery would become a second delivery authority.
+
+    Stored as text with no CHECK, for the reason ADR-0008 records against native
+    enums: adding a member should cost a module release, not an `ALTER TYPE` on
+    every deployment.
+    """
+
+    STAGED = "staged"
+
+
+#: Back-compat alias for the value, so call sites read naturally.
+STAGED = AllocationStatus.STAGED
 
 
 class Allocation(Base, TimestampMixin):
@@ -82,11 +111,31 @@ class Allocation(Base, TimestampMixin):
 
     customer_ref: Mapped[str] = mapped_column(String(200), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default=STAGED)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=AllocationStatus.STAGED.value
+    )
 
     #: Which event produced this allocation. Idempotency provenance, kept so a
     #: replayed delivery is explainable rather than merely silent.
     source_event_id: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    #: A stable digest of the snapshot's CLAIM — product, customer, content hash
+    #: and normalized entries, excluding the delivery id. Finding an existing
+    #: `(contract_ref, content_hash)` is only a REPLAY if this matches;
+    #: otherwise it is two different claims about one activation and staging
+    #: raises rather than silently returning the first.
+    #:
+    #: Stored HERE rather than only in the idempotency record because
+    #: idempotency records have a retention policy (ADR-0014 leaves it to the
+    #: product) and allocations do not. A purge must not be able to turn a
+    #: conflict back into a silent replay.
+    snapshot_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    #: Set once, by the service, after every entry is written. While False the
+    #: entries table accepts inserts; once True the `refuse_late_entry` trigger
+    #: refuses them, and `seal_is_one_way` refuses to lift it. This is the ONLY
+    #: column `platform_api` may update, granted at column level.
+    sealed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     entries: Mapped[list[AllocationEntry]] = relationship(
         back_populates="allocation",
@@ -124,4 +173,10 @@ class AllocationEntry(Base, TimestampMixin):
     allocation: Mapped[Allocation] = relationship(back_populates="entries")
 
 
-__all__ = ["SCHEMA", "STAGED", "Allocation", "AllocationEntry"]
+__all__ = [
+    "SCHEMA",
+    "STAGED",
+    "Allocation",
+    "AllocationEntry",
+    "AllocationStatus",
+]
