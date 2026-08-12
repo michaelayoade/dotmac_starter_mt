@@ -36,7 +36,7 @@ Both tables carry a real `tenant_id NOT NULL`, and `ticket_comments` references
 its parent through the COMPOSITE `(tenant_id, ticket_id)` rather than a bare
 `ticket_id` — a single-column reference would let one tenant's comment point at
 another tenant's ticket the moment an id leaked. Same defence the kernel's
-`party_roles` uses, and the reason `tickets` declares the otherwise-redundant
+`party_role_grants` uses, and the reason `tickets` declares the otherwise-redundant
 `uq_tickets_tenant_id_id`.
 """
 

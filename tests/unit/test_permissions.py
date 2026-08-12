@@ -35,7 +35,7 @@ from dotmac_kernel.errors import register_error_handlers
 from dotmac_kernel.models import (
     Party,
     PartyPerson,
-    PartyRole,
+    PartyRoleGrant,
     PartyType,
     Role,
     Tenant,
@@ -201,7 +201,7 @@ def _actor_with_role(db: Session, tenant: Tenant, email: str, role_slug: str) ->
     role = Role(tenant_id=tenant.id, slug=role_slug, name=role_slug.title())
     db.add(role)
     db.flush()
-    db.add(PartyRole(tenant_id=tenant.id, party_id=party.id, role_id=role.id))
+    db.add(PartyRoleGrant(tenant_id=tenant.id, party_id=party.id, role_id=role.id))
     db.commit()
 
 

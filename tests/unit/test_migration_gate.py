@@ -128,7 +128,7 @@ def test_the_real_repo_composes() -> None:
     assert report.ok, report.render()
     # Non-vacuity: a gate that walked an empty set would pass silently. Bump
     # this deliberately when a lineage gains a revision.
-    assert len(report.revisions) == 28
+    assert len(report.revisions) == 29
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 

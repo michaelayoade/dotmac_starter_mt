@@ -22,7 +22,7 @@ from dotmac_kernel.exceptions import BadRequestError
 from dotmac_kernel.models import (
     Party,
     PartyPerson,
-    PartyRole,
+    PartyRoleGrant,
     PartyType,
     Role,
     Tenant,
@@ -227,7 +227,7 @@ class TestLocalFilters:
 def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
     """A provisioned admin — party + person + credential + "admin" role
     grant, built directly on core models; registration no longer grants any
-    role (Task 2). The PartyRole grant row created here is also what the
+    role (Task 2). The grant row created here is also what the
     grants page's recent-grants list renders, so no separate
     rbac.assign_role call is needed.
     """
@@ -250,7 +250,7 @@ def provisioned_admin(db: Session, tenant_row: Tenant) -> dict:
     role = Role(tenant_id=tenant_row.id, slug="admin", name="Admin")
     db.add(role)
     db.flush()
-    db.add(PartyRole(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
+    db.add(PartyRoleGrant(tenant_id=tenant_row.id, party_id=party.id, role_id=role.id))
     db.commit()
     return {"email": party.email, "party_id": party.id}
 
@@ -312,7 +312,7 @@ class TestGrantsPageUsesTenantDisplay:
         assert resp.status_code == 200
         # Test files may query directly (thin-wrapper rule scopes to app/).
         grant_created = db.scalars(
-            select(PartyRole.created_at).order_by(PartyRole.created_at.desc())
+            select(PartyRoleGrant.created_at).order_by(PartyRoleGrant.created_at.desc())
         ).first()
         assert grant_created is not None
         expected = (

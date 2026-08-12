@@ -333,7 +333,7 @@ static/          Tailwind v4 CSS + vendored htmx/Alpine JS for the portal
 
 Core never imports `app/features` (import-linter contract). Features never
 import each other (import-linter contract). Cross-feature references are
-FK/UUID columns, never a Python import — e.g. `rbac`'s `PartyRole` refers
+FK/UUID columns, never a Python import — e.g. `rbac`'s `PartyRoleGrant` refers
 to `parties` via a composite FK, not by importing `app.features.parties`.
 
 The package dependency direction is one-way and enforced (ADR-0006 § 2):
@@ -348,7 +348,7 @@ it, and `tests/architecture/test_ui_public_surface.py` additionally forbids
 ### Model placement: core vs. feature
 
 `Tenant`, `TenantDomain`, `Party` (+ subtype tables `PartyPerson`/
-`PartyOrganization`), `Role`, `PartyRole`, `AuthSession` live in
+`PartyOrganization`), `Role`, `PartyRoleGrant`, `AuthSession` live in
 `dotmac_kernel/models.py`; `AuditEvent` + `write_audit_event` live in
 `dotmac_kernel/audit.py`. These are the models `dotmac_kernel.deps` (route guards) and
 `dotmac_kernel.middleware.tenant` (the resolver) query directly — and since core
@@ -491,7 +491,7 @@ load-bearing proof this pattern actually holds — it's the pattern any
 future subtype/detail table hanging off `parties` (or off any other
 identity-shaped entity) should copy rather than adding its own `tenant_id`.
 
-Auth credentials (`UserCredential`), RBAC grants (`PartyRole`), audit actors
+Auth credentials (`UserCredential`), RBAC grants (`PartyRoleGrant`), audit actors
 (`AuditEvent.actor_party_id`), and auth sessions (`AuthSession`) all bind to
 `party_id` — there is exactly one identity table for every feature to peg
 to, replacing the old bare `Person` model (spec amendment 2026-07-17).
@@ -1057,7 +1057,7 @@ made concrete — every model has exactly one declared owner.
 | `PartyPerson` | `party_persons` | core | native (spec amendment 2026-07-17) |
 | `PartyOrganization` | `party_organizations` | core | native (spec amendment 2026-07-17) |
 | `Role` | `roles` | core | dotmac_sub (`app/models/rbac.py`, tenant-adapted) |
-| `PartyRole` | `party_roles` | core | dotmac_sub (`app/models/rbac.py::PersonRole`, tenant-adapted + renamed for Party) |
+| `PartyRoleGrant` | `party_role_grants` | core | dotmac_sub (`app/models/rbac.py::PersonRole`, tenant-adapted + renamed for Party) |
 | `AuthSession` | `auth_sessions` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted) |
 | `AuditEvent` | `audit_events` | core | dotmac_sub (`app/models/audit.py`, tenant-adapted) |
 | `DomainSetting` | `domain_settings` | core | dotmac_starter (`app/models/domain_settings.py`, tenant-adapted), with `CheckConstraint` restored from dotmac_sub |

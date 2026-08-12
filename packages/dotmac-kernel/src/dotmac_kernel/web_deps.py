@@ -35,7 +35,7 @@ from dotmac_kernel.branding import get_request_branding
 from dotmac_kernel.db import get_db
 from dotmac_kernel.deps import authenticate_request
 from dotmac_kernel.display import get_request_display
-from dotmac_kernel.models import PartyRole, Role
+from dotmac_kernel.models import PartyRoleGrant, Role
 
 
 def safe_next_url(url: str | None, default: str = "/admin") -> str:
@@ -141,12 +141,12 @@ def require_web_auth(
         db.scalars(
             select(Role.slug)
             .join(
-                PartyRole,
-                (PartyRole.role_id == Role.id)
-                & (PartyRole.tenant_id == Role.tenant_id),
+                PartyRoleGrant,
+                (PartyRoleGrant.role_id == Role.id)
+                & (PartyRoleGrant.tenant_id == Role.tenant_id),
             )
             .where(Role.tenant_id == tenant.id)
-            .where(PartyRole.party_id == party.id)
+            .where(PartyRoleGrant.party_id == party.id)
         ).all()
     )
     if "admin" not in roles:

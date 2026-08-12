@@ -14,7 +14,10 @@ the one authority that answers, for a composed deployment:
 ``docs/inventories/migration-collisions.md`` verified real cross-repo table-name
 collisions: ``starter ∩ ERP`` on ``audit_events``, ``domain_settings``,
 ``people``, ``person_roles``, ``roles``, ``user_credentials``; ``starter ∩ Sub``
-on ``parties``, ``party_roles``. Sixteen of seventeen duplicate names are
+on ``parties``, ``party_roles`` (that last one no longer collides at lineage
+head — ADR-0019 renamed the kernel's grant to ``party_role_grants`` in migration
+``0022``; the chain still passes through the old name in ``0003``, so the
+disposition is reduced rather than removed). Sixteen of seventeen duplicate names are
 **same-name / different-shape**, and three of four repos use no schema
 namespacing at all. Unlike a revision-ID clash — which fails loudly when Alembic
 loads the script directory — a same-name/different-shape collision fails

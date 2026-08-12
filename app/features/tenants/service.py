@@ -7,7 +7,7 @@ calls these functions, and shapes the response.
 Provisioning (control-plane security Task 2) is ONE transaction on the
 platform session (`get_platform_db` owns commit/rollback): tenant row →
 `SET LOCAL app.current_tenant` → owner `Party(person)` + `PartyPerson` +
-`UserCredential` → `admin` `Role` + `PartyRole` grant → two audit events.
+`UserCredential` → `admin` `Role` + `PartyRoleGrant` → two audit events.
 Any failure anywhere rolls the WHOLE thing back — a tenant without a
 login-able owner can never persist.
 
@@ -35,7 +35,7 @@ from dotmac_kernel.identity import normalize_email, person_display_name
 from dotmac_kernel.models import (
     Party,
     PartyPerson,
-    PartyRole,
+    PartyRoleGrant,
     PartyType,
     Role,
     Tenant,
@@ -131,7 +131,7 @@ def provision_tenant(
     role = Role(tenant_id=tenant.id, slug="admin", name="Admin")
     db.add(role)
     db.flush()
-    db.add(PartyRole(tenant_id=tenant.id, party_id=owner.id, role_id=role.id))
+    db.add(PartyRoleGrant(tenant_id=tenant.id, party_id=owner.id, role_id=role.id))
     db.flush()
 
     # Default entitlements, in the SAME transaction that creates the tenant
