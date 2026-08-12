@@ -1,0 +1,51 @@
+[tool.poetry]
+name = "dotmac-release-catalog"
+version = "0.1.0a1"
+description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_release_catalog", from = "src" }]
+include = [
+    # PEP 561 marker — the module's contracts are annotated, and a consuming
+    # assembly's type-checker cannot see them without this.
+    { path = "src/dotmac_release_catalog/py.typed", format = ["sdist", "wheel"] },
+    # The module's OWN Alembic lineage (prefix `rl`, branch label
+    # `release_catalog`), composed by a consuming assembly through
+    # `version_locations`. No `__init__` in versions/ (Alembic convention), so
+    # it is declared explicitly as package data.
+    { path = "src/dotmac_release_catalog/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# Floor 3.11 to match the kernel and the products that consume it.
+python = ">=3.11,<3.14"
+# The one runtime dependency, and the direction ADR-0006 § 2 fixes:
+# `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
+# kernel; never on an assembly, and never on another module.
+#
+# The floor is the release that allocates `mod_rel` in
+# `MIGRATION_OWNER_LEDGER`. An earlier kernel cannot register this module at
+# all — `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` —
+# so this is a hard floor rather than a preference.
+#
+# 0.1.0a42 is the kernel version bumped IN THIS CHANGE, which is what carries
+# the allocation. It is a real floor, not a placeholder: no earlier kernel can
+# contain the row, so whether a41 exists in the private registry is irrelevant
+# to this dependency.
+dotmac-kernel = ">=0.1.0a42"
+sqlalchemy = "^2.0"
+
+# No `alembic` runtime dependency: unlike `dotmac_ticketing.linking`, nothing
+# here emits DDL into a consuming product's migration. The module's own lineage
+# is data files that a consuming assembly's Alembic reads; this package never
+# imports Alembic outside those version files, which run inside the consumer's
+# migration process.
+#
+# No `fastapi` and no `pydantic` yet: this release ships identity, the closed
+# vocabularies, the tables and the lineage. Routers and schemas land with the
+# first adopter's surface, so the dependency arrives with the code that needs it
+# rather than ahead of it.
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

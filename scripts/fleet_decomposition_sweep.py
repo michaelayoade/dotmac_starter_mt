@@ -387,7 +387,9 @@ def main() -> int:
     if not args.check:
         return 0
     if absent:
-        print("\nRatchet abstains: the baseline covers every repository in MODEL_ROOTS.")
+        print(
+            "\nRatchet abstains: the baseline covers every repository in MODEL_ROOTS."
+        )
         return 2
     failures = _ratchet(measured, json.loads(BASELINE.read_text()))
     for failure in failures:
