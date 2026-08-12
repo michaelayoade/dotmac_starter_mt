@@ -119,6 +119,21 @@ class AllocationConflictError(AllocationError):
     """
 
 
+class IncompleteAllocationError(AllocationError):
+    """An allocation row exists but was never sealed.
+
+    It can only arise from a crash between the parent insert and the seal, or
+    from raw SQL. Either way it is an INCOMPLETE WRITE, not a fact: its entries
+    may be a partial set nobody finished validating.
+
+    Both paths that consume an allocation raise this rather than treating the
+    row as history — replaying it would adopt an unfinished entitlement set,
+    and reading its product would let licence issuance issue against one.
+    Failing closed is the only safe reading, because the row cannot tell us
+    whether the missing entries were rejected or merely never written.
+    """
+
+
 class EmptyAllocationError(AllocationError):
     """A snapshot with no entries entitles nothing.
 
@@ -205,6 +220,7 @@ __all__ = [
     "ContractSnapshot",
     "DuplicateCapabilityError",
     "EmptyAllocationError",
+    "IncompleteAllocationError",
     "UndeclaredCapabilityError",
     "UnknownProductError",
 ]

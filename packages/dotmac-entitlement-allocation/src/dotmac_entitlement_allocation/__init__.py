@@ -68,6 +68,7 @@ from dotmac_entitlement_allocation.ports import (
     ContractSnapshot,
     DuplicateCapabilityError,
     EmptyAllocationError,
+    IncompleteAllocationError,
     UndeclaredCapabilityError,
     UnknownProductError,
 )
@@ -100,6 +101,7 @@ __all__ = [
     "ContractSnapshot",
     "DuplicateCapabilityError",
     "EmptyAllocationError",
+    "IncompleteAllocationError",
     "UndeclaredCapabilityError",
     "UnknownProductError",
     "__version__",

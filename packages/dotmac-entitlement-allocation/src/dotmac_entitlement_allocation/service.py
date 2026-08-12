@@ -76,6 +76,7 @@ from dotmac_entitlement_allocation.ports import (
     ContractSnapshot,
     DuplicateCapabilityError,
     EmptyAllocationError,
+    IncompleteAllocationError,
     UndeclaredCapabilityError,
     UnknownProductError,
 )
@@ -172,12 +173,27 @@ def _view(allocation: Allocation, *, replayed: bool) -> AllocationView:
 
 
 def _existing(db: Session, snapshot: ContractSnapshot) -> Allocation | None:
-    return db.execute(
+    """The allocation for this activation, or None.
+
+    An UNSEALED row raises rather than being returned. It is an incomplete
+    write — a crash between the parent insert and the seal, or raw SQL — and
+    adopting it as a replay would hand back an entitlement set nobody finished
+    validating. The row cannot tell us whether its missing entries were rejected
+    or merely never written, so the only safe reading is to refuse.
+    """
+    row = db.execute(
         select(Allocation).where(
             Allocation.contract_ref == snapshot.contract_ref,
             Allocation.content_hash == snapshot.content_hash,
         )
     ).scalar_one_or_none()
+    if row is not None and not row.sealed:
+        raise IncompleteAllocationError(
+            f"allocation {row.id} for activation ({snapshot.contract_ref}, "
+            f"{snapshot.content_hash}) was never sealed; it is an incomplete "
+            "write, not history. Repair or remove it before staging again."
+        )
+    return row
 
 
 def _replay_or_conflict(
@@ -281,13 +297,27 @@ def stage_allocation(
     _check_shape(snapshot)
     fingerprint = snapshot_fingerprint(snapshot)
 
-    existing = _existing(db, snapshot)
-    if existing is not None:
-        return _replay_or_conflict(existing, snapshot, fingerprint)
-
-    _check_catalogue(snapshot, catalogues)
+    # Deferred for the same import-safety reason as `fingerprint_of` above.
+    from dotmac_kernel.idempotency import execute_once_platform
 
     def _operation(session: Session) -> dict[str, object]:
+        """Resolve an existing activation, or validate and stage a new one.
+
+        This runs INSIDE the at-most-once owner, and that placement is the
+        point. An earlier revision short-circuited an activation replay BEFORE
+        reaching it, so a delivery key could be spent without ever being
+        recorded: stage claim A under event-a and claim B under event-b, then
+        replay claim A under event-b — A already existed, the call succeeded,
+        and nothing discovered that event-b belonged to a different request.
+        Every call now presents its delivery key first.
+        """
+        already = _existing(session, snapshot)
+        if already is not None:
+            view = _replay_or_conflict(already, snapshot, fingerprint)
+            return {"allocation_id": str(view.id), "activation_replayed": True}
+
+        _check_catalogue(snapshot, catalogues)
+
         allocation = Allocation(
             contract_ref=snapshot.contract_ref,
             product_code=snapshot.product_code,
@@ -337,13 +367,10 @@ def stage_allocation(
                 "snapshot_fingerprint": fingerprint,
             },
         )
-        return {"allocation_id": str(allocation.id)}
+        return {"allocation_id": str(allocation.id), "activation_replayed": False}
 
-    # Deferred for the same import-safety reason as `fingerprint_of` above.
-    from dotmac_kernel.idempotency import execute_once_platform
-
-    try:
-        execute_once_platform(
+    def _run() -> tuple[UUID, bool]:
+        outcome = execute_once_platform(
             db,
             scope=IDEMPOTENCY_SCOPE,
             key=snapshot.source_event_id,
@@ -351,21 +378,29 @@ def stage_allocation(
             operation_name=IDEMPOTENCY_SCOPE,
             fingerprint=fingerprint,
         )
+        allocation_id = UUID(str(outcome.result["allocation_id"]))
+        # Either the DELIVERY was a replay (the kernel returned a stored
+        # result) or the ACTIVATION was (this delivery is new, the allocation
+        # was not). Both are replays to the caller; conflating them into
+        # `False` would tell a consumer it did work it did not do.
+        replayed = outcome.replayed or bool(outcome.result["activation_replayed"])
+        return allocation_id, replayed
+
+    try:
+        allocation_id, replayed = _run()
     except IntegrityError:
         # A concurrent delivery of the SAME activation under a DIFFERENT
-        # source_event_id: both passed the read above, both inserted, and the
-        # `(contract_ref, content_hash)` unique constraint decided. The kernel
-        # resolves a same-KEY race itself; this resolves the same-ACTIVATION
-        # race, which it cannot see.
-        winner = _existing(db, snapshot)
-        if winner is None:
-            raise
-        return _replay_or_conflict(winner, snapshot, fingerprint)
+        # source_event_id: both operations found nothing, both inserted, and the
+        # `(contract_ref, content_hash)` unique constraint decided. Retry
+        # THROUGH the kernel rather than resolving here, so the losing delivery
+        # key still receives its ledger row — otherwise the race is a second way
+        # to spend a key without recording it.
+        allocation_id, replayed = _run()
 
-    staged = _existing(db, snapshot)
+    staged = db.get(Allocation, allocation_id)
     if staged is None:  # pragma: no cover — written above, or raised above
         raise RuntimeError("allocation missing after staging")
-    return _view(staged, replayed=False)
+    return _view(staged, replayed=replayed)
 
 
 def allocation_product(db: Session, allocation_id: UUID) -> str:
@@ -376,12 +411,23 @@ def allocation_product(db: Session, allocation_id: UUID) -> str:
     licence for product B: every code still resolves, just in a different
     catalogue, and nothing in the licence records that the swap happened.
     """
-    product = db.execute(
-        select(Allocation.product_code).where(Allocation.id == allocation_id)
-    ).scalar_one_or_none()
-    if product is None:
+    row = db.execute(
+        select(Allocation.product_code, Allocation.sealed).where(
+            Allocation.id == allocation_id
+        )
+    ).one_or_none()
+    if row is None:
         raise LookupError(f"no allocation {allocation_id}")
-    return product
+    product, sealed = row
+    if not sealed:
+        # Fail closed. An unsealed row's entries may be a partial set nobody
+        # finished validating, and answering here is how a licence gets issued
+        # against entitlements that were never authorized.
+        raise IncompleteAllocationError(
+            f"allocation {allocation_id} was never sealed; it is an incomplete "
+            "write and must not be issued against"
+        )
+    return str(product)
 
 
 __all__ = [

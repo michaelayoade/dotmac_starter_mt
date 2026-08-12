@@ -351,6 +351,45 @@ def test_the_claim_fingerprint_is_stored_on_the_allocation() -> None:
     assert "snapshot_fingerprint" in _migration_source()
 
 
+def test_no_path_returns_before_the_at_most_once_owner_is_consulted() -> None:
+    """Every call must present its delivery key, including an activation replay.
+
+    The defect this guards: a short-circuit that returned an existing allocation
+    before reaching `execute_once_platform`, letting a delivery key be spent
+    without being recorded. The resolution of an existing activation therefore
+    belongs INSIDE the operation, not ahead of it.
+    """
+    tree = ast.parse((MODULE_ROOT / "service.py").read_text(encoding="utf-8"))
+    stage = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "stage_allocation"
+    )
+    # `_existing` may be called only from within the nested operation, never
+    # from `stage_allocation`'s own body.
+    top_level_calls = {
+        child.func.id
+        for statement in stage.body
+        if not isinstance(statement, ast.FunctionDef)
+        for child in ast.walk(statement)
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+    }
+    assert "_existing" not in top_level_calls, (
+        "stage_allocation resolves an existing activation before entering the "
+        "at-most-once owner; the delivery key would go unrecorded"
+    )
+    assert "_replay_or_conflict" not in top_level_calls
+
+
+def test_both_consumers_of_an_allocation_check_the_seal() -> None:
+    """An unsealed row is an incomplete write, not a fact. Replay resolution and
+    `allocation_product` both fail closed on one."""
+    source = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
+    assert source.count("IncompleteAllocationError") >= 3  # import + two raises
+    assert "not row.sealed" in source
+    assert "not sealed" in source
+
+
 def test_the_module_uses_the_kernel_at_most_once_owner() -> None:
     """ADR-0014 gives at-most-once ONE owner. A module rolling its own would be
     the second implementation the ADR exists to prevent — and the source's
@@ -372,6 +411,39 @@ def test_the_module_stays_importable_without_a_database() -> None:
         if isinstance(node, ast.ImportFrom) and node.module
     }
     assert "dotmac_kernel.idempotency" not in module_level
+
+
+def test_the_checked_in_docs_do_not_contradict_the_migration() -> None:
+    """Documentation drift is a defect, not a cosmetic problem.
+
+    The CHANGELOG described a mechanism the code no longer has (`age(xmin)`) and
+    a grant that is no longer accurate ("SELECT/INSERT only"). A reader trusting
+    either would reason about immutability from a model that does not exist —
+    and the second would hide the column-level UPDATE entirely.
+    """
+    changelog = (PACKAGE_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    readme = (PACKAGE_ROOT / "README.md").read_text(encoding="utf-8")
+    models_doc = (MODULE_ROOT / "models.py").read_text(encoding="utf-8")
+    migration = _migration_source()
+
+    # The abandoned mechanism may be named as HISTORY, never as behaviour.
+    for text_body, label in ((changelog, "CHANGELOG"), (readme, "README")):
+        if "age(xmin)" in text_body:
+            assert "earlier revision" in text_body or "rejected legitimate" in (
+                text_body
+            ), f"{label} presents age(xmin) as current behaviour"
+
+    # Anywhere the grant is described, the column-level UPDATE is part of it.
+    for text_body, label in (
+        (changelog, "CHANGELOG"),
+        (models_doc, "models.py"),
+        (migration, "migration"),
+    ):
+        assert "SELECT and INSERT only" not in text_body, (
+            f"{label} still claims SELECT/INSERT only; the online role also "
+            "holds a column-level UPDATE on the seal"
+        )
+        assert "sealed" in text_body, f"{label} omits the seal"
 
 
 def test_the_data_plane_role_is_revoked_from_every_table() -> None:

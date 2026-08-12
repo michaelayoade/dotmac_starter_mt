@@ -27,15 +27,23 @@ live catalogue would make a delivered entitlement unreplayable the day a
 capability is retired.
 
 Tables `allocations` + `allocation_entries` in `mod_ealloc`, lineage root
-`ea_0001_allocations`. Platform catalog: no `tenant_id`, no RLS, `platform_api`
-holds SELECT/INSERT only, `app_user` REVOKEd.
+`ea_0001_allocations`. Platform catalog: no `tenant_id`, no RLS, `app_user`
+REVOKEd. `platform_api` holds SELECT and INSERT, plus a COLUMN-LEVEL
+`UPDATE (sealed, updated_at)` on `allocations` — the seal is the one decision
+the online role may write, and every business column stays unwritable.
 
 **Immutability includes append.** `platform_api` needs INSERT on
 `allocation_entries` to stage at all, so the grant that makes the parent
 immutable leaves the child appendable — raw SQL could add an unvalidated
 capability to a staged allocation. A `refuse_late_entry` trigger rejects any
-entry whose parent was not created in the same transaction (`age(xmin) = 0`),
+entry once the parent is SEALED,
 and `quantity > 0` is a database CHECK rather than only a service rule.
+
+The seal is EXPLICIT, not inferred from transaction identity. An earlier
+revision tested `age(xmin) = 0` and rejected legitimate staging: the kernel's
+at-most-once owner runs inside `conflict_savepoint`, and a SAVEPOINT is a
+SUBTRANSACTION whose writes carry a subtransaction xid that never equals the
+top-level one. `seal_is_one_way` makes the flip irreversible.
 
 **Two identities, two protections.** `source_event_id` (a DELIVERY) goes through
 the kernel's `execute_once_platform` — ADR-0014's one at-most-once owner — which
@@ -52,6 +60,21 @@ seats mean twenty is a commercial rule owned by whoever owns contracts.
 **Adapters translate.** The service catches nothing broad, so an adapter that
 leaks its backing store's exception surfaces as a defect rather than being
 relabelled an undeclared capability.
+
+**Every delivery is recorded.** Every call enters the at-most-once owner before
+anything else, including an activation replay. Otherwise a delivery key could be
+spent without being recorded — stage claim A under event-a and claim B under
+event-b, then replay claim A under event-b, and the call would succeed without
+discovering that event-b belonged to a different request. An activation race
+retries THROUGH the kernel, so the losing delivery key also receives its ledger
+row.
+
+**An unsealed allocation is not history.** A committed but unsealed row can only
+come from a crash between the parent insert and the seal, or from raw SQL. Both
+paths that consume an allocation — replay resolution and `allocation_product` —
+raise `IncompleteAllocationError` rather than treating it as a fact, because the
+row cannot say whether its missing entries were rejected or merely never
+written.
 
 **Fully typed contracts.** `AllocationStatus` and `AllocatedCapability` replace
 a bare string and a positional pair; every public value object is frozen and

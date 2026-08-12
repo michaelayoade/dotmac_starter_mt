@@ -24,6 +24,7 @@ from dotmac_entitlement_allocation import (
     Allocation,
     ContractEntitlement,
     ContractSnapshot,
+    IncompleteAllocationError,
     UndeclaredCapabilityError,
     UnknownProductError,
     allocation_product,
@@ -448,6 +449,147 @@ class TestConcurrentStaging:
                 {"c": contract},
             )
             admin_session.commit()
+
+
+class TestEveryDeliveryIsRecorded:
+    """A delivery key must never be spendable without being recorded.
+
+    The hole: an activation replay that returned BEFORE reaching the
+    at-most-once owner. Stage claim A under event-a and claim B under event-b,
+    then replay claim A under event-b — because A already existed, the call
+    succeeded and never discovered that event-b belongs to a different request.
+    """
+
+    def test_replaying_one_claim_under_another_claims_event_id_conflicts(
+        self,
+        allocation_schema: None,
+        platform_session: Session,
+        catalogue: LiveCatalogue,
+    ) -> None:
+        """REQUIRED CANARY. The exact counterexample."""
+        from dotmac_kernel.idempotency import IdempotencyConflict
+
+        run = uuid.uuid4().hex[:8]
+        claim_a = _snapshot(source_event_id=f"event-a-{run}")
+        claim_b = _snapshot(source_event_id=f"event-b-{run}")
+
+        stage_allocation(platform_session, claim_a, catalogues=catalogue)
+        stage_allocation(platform_session, claim_b, catalogues=catalogue)
+        platform_session.commit()
+
+        # Claim A again, but spending claim B's delivery key.
+        replay_a_under_b = ContractSnapshot(
+            contract_ref=claim_a.contract_ref,
+            product_code=claim_a.product_code,
+            customer_ref=claim_a.customer_ref,
+            content_hash=claim_a.content_hash,
+            source_event_id=claim_b.source_event_id,
+            entries=claim_a.entries,
+        )
+        with pytest.raises(IdempotencyConflict):
+            stage_allocation(platform_session, replay_a_under_b, catalogues=catalogue)
+        platform_session.rollback()
+
+    def test_an_honest_replay_records_its_own_delivery_key(
+        self,
+        allocation_schema: None,
+        platform_session: Session,
+        catalogue: LiveCatalogue,
+    ) -> None:
+        """A redelivery under a NEW event id is a legitimate replay — and it must
+        still leave a ledger row, or the same key stays spendable for a
+        different request afterwards."""
+        from dotmac_kernel.idempotency_models import PlatformIdempotencyRecord
+
+        run = uuid.uuid4().hex[:8]
+        first = _snapshot(source_event_id=f"first-{run}")
+        again = ContractSnapshot(
+            contract_ref=first.contract_ref,
+            product_code=first.product_code,
+            customer_ref=first.customer_ref,
+            content_hash=first.content_hash,
+            source_event_id=f"second-{run}",
+            entries=first.entries,
+        )
+
+        stage_allocation(platform_session, first, catalogues=catalogue)
+        replay = stage_allocation(platform_session, again, catalogues=catalogue)
+        assert replay.replayed is True
+        platform_session.flush()
+
+        keys = {
+            row.key
+            for row in platform_session.query(PlatformIdempotencyRecord)
+            .filter(
+                PlatformIdempotencyRecord.key.in_([f"first-{run}", f"second-{run}"])
+            )
+            .all()
+        }
+        assert keys == {f"first-{run}", f"second-{run}"}
+        platform_session.rollback()
+
+
+class TestAnUnsealedAllocationIsNotHistory:
+    """A committed but unsealed row is an INCOMPLETE write, not a fact.
+
+    It can only exist if something crashed between the parent insert and the
+    seal, or if raw SQL wrote one. Either way it must never be replayed as
+    history, and must never feed licence issuance — which would issue against
+    an entitlement set nobody finished validating.
+    """
+
+    @pytest.fixture
+    def unsealed(self, admin_session: Session) -> uuid.UUID:
+        allocation_id = uuid.uuid4()
+        admin_session.execute(
+            text(
+                "INSERT INTO mod_ealloc.allocations (id, contract_ref, product_code,"
+                " customer_ref, content_hash, status, source_event_id,"
+                " snapshot_fingerprint, sealed) VALUES (:id, :cref, 'dotmac-sub',"
+                " 'acme-isp', :h, 'staged', 'orphan', 'deadbeef', false)"
+            ),
+            {"id": allocation_id, "cref": uuid.uuid4(), "h": uuid.uuid4().hex * 2},
+        )
+        admin_session.commit()
+        yield allocation_id
+        admin_session.execute(
+            text("DELETE FROM mod_ealloc.allocations WHERE id = :id"),
+            {"id": allocation_id},
+        )
+        admin_session.commit()
+
+    def test_licence_issuance_cannot_read_an_unsealed_allocations_product(
+        self,
+        allocation_schema: None,
+        platform_session: Session,
+        unsealed: uuid.UUID,
+    ) -> None:
+        """REQUIRED CANARY. `allocation_product` is what licence issuance calls;
+        answering for an unfinished allocation is how a licence gets issued
+        against entitlements nobody validated."""
+        with pytest.raises(IncompleteAllocationError):
+            allocation_product(platform_session, unsealed)
+
+    def test_an_unsealed_row_is_not_replayable_history(
+        self,
+        allocation_schema: None,
+        platform_session: Session,
+        catalogue: LiveCatalogue,
+        unsealed: uuid.UUID,
+    ) -> None:
+        """REQUIRED CANARY. Staging the same activation must not quietly adopt
+        the half-written row as a replay."""
+        row = platform_session.execute(
+            text(
+                "SELECT contract_ref, content_hash FROM mod_ealloc.allocations "
+                "WHERE id = :id"
+            ),
+            {"id": unsealed},
+        ).one()
+        snapshot = _snapshot(contract_ref=row[0], content_hash=row[1])
+        with pytest.raises(IncompleteAllocationError):
+            stage_allocation(platform_session, snapshot, catalogues=catalogue)
+        platform_session.rollback()
 
 
 class TestImmutabilityIsAPrivilege:

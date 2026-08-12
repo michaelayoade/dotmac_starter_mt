@@ -17,9 +17,11 @@ was projected from.
 What a contract entitles is a vendor-side fact, not a per-tenant one — no
 `tenant_id` to scope by, so RLS would have no predicate. Grants instead:
 
-- `platform_api` — the ONLINE request-path role — SELECT and INSERT **only**.
-  Same reasoning as `rl_0001`: an allocation is immutable, and immutability
-  enforced by privilege survives a future router that forgets.
+- `platform_api` — the ONLINE request-path role — SELECT and INSERT, plus a
+  COLUMN-LEVEL `UPDATE (sealed, updated_at)` on `allocations` and nothing else.
+  `sealed` is the one DECISION the online role may write; `updated_at` rides
+  along as ORM metadata. Every business column stays unwritable, so
+  immutability survives a future router that forgets.
 - `app_admin` — the OFFLINE migration role — full access, so a mis-staged
   allocation is correctable under review rather than not at all.
 - `app_user` — the product data-plane role — REVOKEd. Ruling C4: the data plane
