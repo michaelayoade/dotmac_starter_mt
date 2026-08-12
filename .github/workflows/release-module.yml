@@ -12,6 +12,13 @@ name: Release module
 # SAME bytes -> install the published release from the index and verify ->
 # tag only then.
 #
+# A release may also run the COMPOSITION check (level 2) when it completes a
+# set: `compose_with` lists already-published siblings, `compose_kernel` pins the
+# exact published kernel, and the check installs all of them from the index and
+# registers every manifest in one NamespaceRegistry before the tag is written.
+# The standalone `verify-module-composition.yml` remains, for re-checking a set
+# without cutting a release.
+#
 # ONE MODULE PER RUN, on purpose. Releasing two in a single dispatch would read
 # as transactional when it is not: the second upload can fail with the first
 # already public, leaving a "failed" run that published half its subject. Two
@@ -43,6 +50,22 @@ on:
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
+        type: string
+      compose_kernel:
+        description: >-
+          Optional. Exact PUBLISHED kernel version to run the composition check
+          against, e.g. 0.1.0a45. Required when compose_with is set.
+        required: false
+        default: ""
+        type: string
+      compose_with:
+        description: >-
+          Optional. Space-separated exact pins of already-published sibling
+          modules to register ALONGSIDE this one, e.g.
+          "dotmac-release-catalog==0.1.0a1". Left empty for the first module of
+          a set, when there is nothing yet to compose with.
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -204,14 +227,58 @@ jobs:
             --index "${INDEX}" \
             --pin "${{ inputs.module }}==${{ inputs.version }}"
 
+      # LEVEL 2 — composition, when this release completes a set.
+      #
+      # Level 1 above proves this module installs and registers ALONE. That is
+      # not the question a consuming assembly asks: it installs every module
+      # beside ONE kernel and registers them together, and construction of a
+      # NamespaceRegistry IS the validation — distinct schemas, distinct
+      # migration prefixes, distinct branch labels, no contested table. Two
+      # modules that each pass alone can still collide.
+      #
+      # Runs BEFORE the tag, deliberately. The module is already published by
+      # this point and a composition failure cannot unpublish it — but the tag
+      # is this repository's assertion that the release is good, and it should
+      # not be written for a version whose set does not compose. The honest
+      # intermediate state is "published, verified alone, composition failed",
+      # and a bad SET is repaired by a NEW release, never by mutating a
+      # published one.
+      #
+      # Skipped when `compose_with` is empty, which is correct for the first
+      # module of a set: there is nothing published to compose with yet, and a
+      # composition check against one module is just level 1 again.
+      - name: Verify the published composition
+        if: inputs.compose_with != ''
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+        run: |
+          if [ -z "${{ inputs.compose_kernel }}" ]; then
+            echo "::error::compose_with is set but compose_kernel is empty — the"
+            echo "::error::composition must pin an EXACT published kernel, or it"
+            echo "::error::proves the set against whatever pip happens to resolve."
+            exit 1
+          fi
+          ARGS=""
+          for pin in ${{ inputs.compose_with }}; do ARGS="${ARGS} --pin ${pin}"; done
+          python scripts/release_module.py verify-registry \
+            --index "${INDEX}" \
+            --kernel "${{ inputs.compose_kernel }}" \
+            --pin "${{ inputs.module }}==${{ inputs.version }}" ${ARGS}
+
       # Only AFTER registry verification: tag the published SHA.
       - name: Tag the verified release
         run: |
           TAG="${{ needs.build.outputs.tag }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          COMPOSED="${{ inputs.compose_with }}"
+          if [ -n "${COMPOSED}" ]; then
+            NOTE="verified on the Forgejo registry; composes with ${COMPOSED} on kernel ${{ inputs.compose_kernel }}"
+          else
+            NOTE="verified on the Forgejo registry (installed and registered alone)"
+          fi
           git tag -a "${TAG}" \
-            -m "${{ inputs.module }} ${{ inputs.version }} (verified on the Forgejo registry)" \
+            -m "${{ inputs.module }} ${{ inputs.version }} (${NOTE})" \
             "${GITHUB_SHA}"
           git push origin "${TAG}"
           echo "tagged ${TAG} on ${GITHUB_SHA}"
