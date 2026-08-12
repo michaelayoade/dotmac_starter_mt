@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "dotmac-entitlement-allocation"
+version = "0.1.0a1"
+description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_entitlement_allocation", from = "src" }]
+include = [
+    { path = "src/dotmac_entitlement_allocation/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_entitlement_allocation/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# The one runtime dependency (ADR-0006 § 2). Notably NOT
+# `dotmac-commercial-contracts`: the contract coupling is cut at the
+# `ContractSnapshot` port, which is what makes this module extractable before
+# the A2 adjudication settles where contracts live.
+#
+# 0.1.0a43 is the kernel bumped IN THIS CHANGE, carrying the `mod_ealloc`
+# allocation. No earlier kernel can register this module —
+# `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` — so it
+# is a hard floor.
+dotmac-kernel = ">=0.1.0a43"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

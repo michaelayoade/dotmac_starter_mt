@@ -178,6 +178,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "template_studio",
         "ticketing",
         "release_catalog",
+        "entitlement_allocation",
     }
 
 
