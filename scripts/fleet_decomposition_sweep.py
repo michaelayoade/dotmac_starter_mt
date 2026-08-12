@@ -1,4 +1,4 @@
-"""Measure the ERP/CRM/Sub duplication baseline the decomposition matrix freezes.
+"""Measure the fleet duplication baseline the decomposition matrix freezes.
 
 `docs/inventories/fleet-decomposition-matrix.md` claims, per capability family,
 how many persisted tables each source monolith owns and how many table NAMES are
@@ -33,12 +33,37 @@ import sys
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASELINE = PROJECT_ROOT / "docs" / "inventories" / "fleet-decomposition-baseline.json"
 
-REPOS = ("dotmac_erp", "dotmac_crm", "dotmac_sub")
+# Repo -> the subtree its persisted models live under. The three source
+# monoliths follow the same `app/models/` convention; the vendor control plane
+# is a thin assembly whose models sit beside their feature, so the path is
+# per-repo rather than assumed.
+MODEL_ROOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("dotmac_erp", ("app", "models")),
+    ("dotmac_crm", ("app", "models")),
+    ("dotmac_sub", ("app", "models")),
+    ("dotmac_vendor_control_plane", ("src", "vendor_cp")),
+)
+
+REPOS = tuple(repo for repo, _ in MODEL_ROOTS)
+
+# The three being decomposed. The vendor control plane is measured for a
+# different reason — see the matrix § "The fourth repository is not a fourth
+# monolith" — so anything that reasons about "the monoliths" must say so
+# explicitly rather than meaning "everything in REPOS".
+SOURCE_MONOLITHS = ("dotmac_erp", "dotmac_crm", "dotmac_sub")
 
 # Ordered: first match wins, so platform invariants claim their tables before a
 # broader domain pattern can. A family here is a MEASUREMENT bucket for the
 # matrix, not an approved package boundary (ADR-0006 § "The extraction rule").
 FAMILIES: tuple[tuple[str, str], ...] = (
+    # --- Vendor/product-lifecycle families, first because they are narrow and
+    # would otherwise be swallowed by a broader product pattern. `offer_versions`
+    # is the live example: an immutable priced VENDOR offer is not an ISP service
+    # offer, and `subscriber-service`'s `^offer` would have claimed it.
+    ("licensing-issuance", r"^(licence|license)"),
+    ("entitlement-allocation", r"^(allocation|allocations$|entitlement)"),
+    ("commercial-offers", r"^offer_version"),
+    ("fleet-deployment", r"^(deployment_|applied_state_)"),
     (
         "identity-access",
         r"^(sessions|user_credentials|mfa_|api_keys|oauth_tokens|"
@@ -55,7 +80,7 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         "party-identity",
         r"^(parties|party_|people|person_|organization|org_bank_directory|"
         r"tenants?$|contacts?$|addresses|resellers$|vendors$|"
-        r"customers?$|customer_identity)",
+        r"vendor_accounts$|customers?$|customer_identity)",
     ),
     ("audit-events", r"(^audit|^event_store$|_audit_|^cross_app_drift)"),
     (
@@ -262,8 +287,8 @@ def tables_in(models_root: pathlib.Path) -> set[str]:
 def measure(fleet_root: pathlib.Path) -> tuple[dict, list[str]]:
     per_repo: dict[str, set[str]] = {}
     absent: list[str] = []
-    for repo in REPOS:
-        models = fleet_root / repo / "app" / "models"
+    for repo, parts in MODEL_ROOTS:
+        models = fleet_root.joinpath(repo, *parts)
         if not models.is_dir():
             absent.append(repo)
             continue
@@ -362,7 +387,7 @@ def main() -> int:
     if not args.check:
         return 0
     if absent:
-        print("\nRatchet abstains: the baseline covers all three source monoliths.")
+        print("\nRatchet abstains: the baseline covers every repository in MODEL_ROOTS.")
         return 2
     failures = _ratchet(measured, json.loads(BASELINE.read_text()))
     for failure in failures:
