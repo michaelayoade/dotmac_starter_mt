@@ -1,9 +1,12 @@
 # `audit_events` — the Group E disposition, measured
 
-**As of:** 2026-08-12 · **Sub:** `638c7f8bb` (`origin/dev`) · **Kernel:** `0.1.0a40`
+**As of:** 2026-08-12 · **Sub:** `638c7f8bb` (`origin/dev`) · **Kernel:** `0.1.0a41`
 **Gates:** kernel revision `0001_initial_tenant_schema`, which creates `audit_events`
 **Production measured:** `selfcare.dotmac.io`, read-only, 767,769 rows — see [Production](#production-measurement-767769-rows)
-**Status:** one blocker dissolved by the data, one sharpened.
+**Status: audit R1 is designable.** Both blockers are closed — `is_active` by the
+production data, actor identity by an accepted kernel contract. The *complete*
+lineage remains gated by credentials and tenant-context/RLS, because kernel
+`0001` is atomic.
 
 [`sub-lineage-dispositions.md`](sub-lineage-dispositions.md) put `audit_events`
 in Group E and refused to plan it mechanically:
@@ -18,10 +21,11 @@ This is that measurement, plus what it does *not* settle.
 
 ## The two tables
 
-Kernel `dotmac_kernel/audit.py`: `id`, `tenant_id`, `actor_party_id`, `action`,
-`entity_type`, `entity_id`, `details` (JSON), `created_at`. **No `is_active`. No
-`occurred_at`.** The model is immutable by design — there is one writer,
-`write_audit_event`, and nothing mutates a row.
+Kernel `dotmac_kernel/audit.py`: `id`, `tenant_id`, `actor_party_id` (nullable,
+indexed, **not a foreign key**), `action`, `entity_type`, `entity_id`, `details`
+(JSON), `created_at`. **No `is_active`. No `occurred_at`.** The model is
+immutable by design — there is one writer, `write_audit_event`, and nothing
+mutates a row.
 
 Sub `app/models/audit.py`: 15 columns, including `occurred_at`, `actor_type`,
 `actor_id`, `actor_label`, `status_code`, `is_success`, `ip_address`,
@@ -48,14 +52,44 @@ write site (`audit.py` 169–170 capturing from the request, 217–218 persistin
 
 | Sub column | Disposition | Evidence |
 |---|---|---|
-| `request_id` | promote to a kernel column, **nullable** | exposed filter; only 0.23% populated |
-| `status_code` | promote, **`NOT NULL` viable** | exposed filter **and** order-by key; 100% populated |
-| `is_success` | promote | exposed filter in two services |
-| `actor_label` | promote, nullable | indexed, ILIKE-searched, stored-not-derived on purpose; 2.12% populated |
+| `(actor_type, actor_id)` | promote as the **canonical forensic actor**, no FK | 97.7% non-party actors; ERP has the same pair |
+| `actor_party_id` | optional enrichment, nullable, **no FK** | already non-FK in the kernel |
+| `actor_label` | promote, nullable — display snapshot, never authority | indexed, ILIKE-searched, stored-not-derived on purpose; 2.12% populated |
+| `request_id` | promote, **nullable** | exposed filter; only 0.23% populated |
+| `status_code` | promote, **nullable** | see below — 100% is an artifact, not a guarantee |
+| `is_success` | promote, nullable | exposed filter in two services |
 | `metadata_` | maps to the kernel's `details` | same role |
 | `ip_address`, `user_agent` | **keep as columns through expansion, and dual-populate `details`** | 96.6% / 23.4% populated; see below |
-| `occurred_at` **and** `created_at` | **keep both** | see below |
+| `occurred_at` **and** `created_at` | **keep both**; `created_at` nullable, server-populated, **not backfilled** | see below |
 | `is_active` | **remove, with the `DELETE` endpoint** | zero redacted rows in production |
+
+### `status_code` stays nullable, despite 100% population
+
+Sub's `status_code` is populated on every one of 767,769 rows — but the column
+is declared `nullable=False, default=200`, so **the 100% is an artifact of the
+default, not evidence that every audit event has an HTTP status.**
+
+Many domain audit events have no HTTP status at all: a scheduled job, a
+reconciler, a webhook consequence, an internal state transition. Making the
+kernel column `NOT NULL` would force every such event to invent a `200` that
+means nothing, and would make the field unusable as a filter — you could no
+longer distinguish "succeeded with 200" from "not an HTTP interaction". The
+kernel column is nullable; Sub's local default may stay for its own rows.
+
+This corrects an earlier revision of this document, which read the 100% figure
+as "`NOT NULL` is viable".
+
+### `created_at` is added nullable and never backfilled
+
+`created_at` is added to Sub as a **nullable** column, server-populated
+(`server_default now()`) for new rows only.
+
+Existing rows keep `created_at IS NULL`, which is the honest representation:
+their persistence time was never recorded and cannot be recovered. Two things
+are explicitly forbidden — backfilling historical rows with the *migration's*
+timestamp, which would assert a falsehood at scale, and copying `occurred_at`
+into `created_at`, which would erase the very distinction the column exists to
+make. `NULL` means "unknown", and that is correct here.
 
 ### `ip_address` / `user_agent` are kept, not folded
 
@@ -122,31 +156,40 @@ The unaudited-mutation defect goes away with the endpoint. If a redaction
 capability is ever genuinely wanted, it should be designed then, against a real
 requirement, and it must record itself.
 
-### 2. Actor identity — two identifiers, no defined precedence · **STILL OPEN**
+### 2. Actor identity · **RESOLVED — accepted kernel contract**
 
-| | Kernel | Sub |
+Production sized it first: **97.7% of rows have a non-party actor**, so
+`actor_party_id` would be NULL for the overwhelming majority. The accepted
+kernel contract follows that shape rather than fighting it:
+
+| Field | Role |
+|---|---|
+| `(actor_type, actor_id)` | **the canonical, immutable forensic actor** |
+| `actor_party_id` | optional accountability *enrichment* — never the primary identity |
+| `actor_label` | write-time display snapshot — **never authority** |
+
+Resolution per actor kind:
+
+| `actor_type` | `actor_id` | `actor_party_id` |
 |---|---|---|
-| Shape | `actor_party_id: UUID \| None`, indexed | `actor_type` enum + `actor_id: String(120)` + `actor_label: String(160)` |
-| FK | to a party | **deliberately not a foreign key** — the model comments that `actor_id` is not an FK so the row *survives deletion of the referenced actor* |
+| `system` | optional component/job identifier | — |
+| `service` | service-principal identifier | — |
+| `api_key` | key ID, **never the token** | optional owning Party |
+| `user` | principal identifier | normalized Party when available |
 
-`AuditActorType` has four members: `system`, `user`, `api_key`, `service`.
-**Three of the four are not parties.** So `actor_party_id` cannot simply replace
-the pair, and carrying both without a rule leaves two identifiers whose
-precedence is undefined — the ambiguity the source-of-truth standard exists to
-prevent.
+This is **already a two-product contract, not a Sub accommodation.** ERP
+independently arrived at the same shape: `app/models/audit.py` carries
+`actor_type`, `actor_id: String(120)` and a nullable `actor_person_id` — the
+same polymorphic pair plus an optional person reference.
 
-Sub's non-FK choice is also a real constraint, not an oversight: an audit row
-must remain readable after its actor is deleted, which an FK to `parties` would
-undermine.
-
-**Required first:** a decision on whether the kernel's actor is polymorphic, and
-if it stays `actor_party_id`, what a `system`/`api_key`/`service` actor resolves
-to and which identifier wins when both are present.
-
-Production sizes it: **97.7% of rows have a non-party actor**, so
-`actor_party_id` would be NULL for the overwhelming majority. This is the one
-genuine blocker left in the slice, and it is a kernel-contract decision, not a
-Sub measurement.
+**Correction to an earlier revision of this document:** it claimed the kernel's
+`actor_party_id` is a foreign key to a party. **It is not.**
+`dotmac_kernel/audit.py` declares `actor_party_id: Mapped[UUID | None] =
+mapped_column(Uuid(), index=True)` — a plain indexed UUID with no
+`ForeignKey`. So the kernel *already* has the deletion-survival property that
+Sub achieves by the same means, and the union preserves it rather than
+introducing it. Do not add an FK here: an audit row must stay readable after its
+actor is deleted, in all three products.
 
 ## What R1 may and may not do
 
@@ -164,11 +207,43 @@ confirmed against non-production databases too) rather than riding a
 convergence release.
 
 R1 **may not**: drop or rename `ip_address`/`user_agent`; collapse `occurred_at`
-into `created_at`; introduce `is_active` into the kernel contract; or pick an
-actor identifier. The last two are blocked above, and a roles-or-audit R1 is
-preparatory work — **it must not be described as lineage adoption**, because
-revision `0001` is atomic and cannot be reached until every table it creates has
-a settled disposition.
+into `created_at`; backfill `created_at` on historical rows; make `status_code`
+`NOT NULL`; add a foreign key on any actor column; or introduce `is_active` into
+the kernel contract.
+
+**A roles-or-audit R1 is preparatory work and must not be described as lineage
+adoption.** Revision `0001` is atomic — it creates `tenants`, `tenant_domains`,
+`roles`, `user_credentials` and `audit_events`, then installs the tenant
+function, grants and FORCE RLS. Audit R1 being designable does not move the
+lineage; the complete gate still waits on the credential convergence and the
+tenant-context/RLS decisions.
+
+## Fleet-level: ERP has the same unaudited delete
+
+`dotmac_erp/app/services/audit.py` implements the identical pattern —
+
+```
+event = db.get(AuditEvent, coerce_uuid(event_id))
+...
+event.is_active = False
+db.commit()
+```
+
+— with the same absence of any record of the redaction, behind
+`DELETE /audit-events/{event_id}`.
+
+One difference makes ERP's worse, not better: its route depends on
+`get_db_admin_bypass`, so the hiding runs on an admin-bypass session rather than
+an ordinary tenant-scoped one.
+
+**Sub's zero-usage result cannot be assumed for ERP.** ERP's `is_active`
+disposition needs its own aggregate-only measurement against an explicitly named
+ERP database before its endpoint and column are removed — the two products share
+an implementation, not a usage history.
+
+Either way, the kernel conclusion is unchanged and does not depend on ERP's
+numbers: **mutable hiding stays out of the kernel audit contract.** ERP's count
+decides how ERP retires its own copy, not whether the kernel gains one.
 
 ## Production measurement (767,769 rows)
 
@@ -239,7 +314,7 @@ distinction measurable at all** — today the question cannot be asked of the da
 
 | column | populated | share | consequence |
 |---|---:|---:|---|
-| `status_code` | 767,769 | **100%** | `NOT NULL` is viable |
+| `status_code` | 767,769 | **100%** | artifact of `default=200` — **stays nullable** in the kernel |
 | `ip_address` | 741,711 | 96.6% | substantial real forensic data |
 | `user_agent` | 179,929 | 23.4% | partial |
 | `actor_id` | 38,186 | 4.97% | must stay nullable |
