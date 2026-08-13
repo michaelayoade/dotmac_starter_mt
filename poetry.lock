@@ -513,7 +513,7 @@ url = "packages/dotmac-application-directory"
 
 [[package]]
 name = "dotmac-entitlement-allocation"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
 optional = false
 python-versions = ">=3.11,<3.14"

@@ -1,5 +1,14 @@
 # Changelog — dotmac-entitlement-allocation
 
+## 0.1.0a3 — 2026-08-13
+
+Allow the independent module's ORM models to coexist with same-named models in
+its extraction source during a shadow phase. Relationship targets and ordering
+now use class-bound callables instead of SQLAlchemy's global string registry,
+so a consuming control plane can load both `Allocation` / `AllocationEntry`
+pairs on the shared kernel `Base` without ambiguous mapper resolution. The
+schema and domain contract are unchanged.
+
 ## 0.1.0a2 — 2026-08-13
 
 Expose the installed Alembic lineage through the stable top-level
