@@ -65,7 +65,6 @@ def test_saved_branding_reflects_on_dashboard_and_own_login_but_not_other_tenant
             "logo_url": "",
             "primary_color": "#112233",
             "accent_color": "",
-            "custom_css": "",
         },
         headers={"x-csrf-token": csrf_a},
         follow_redirects=False,

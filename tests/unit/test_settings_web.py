@@ -443,7 +443,6 @@ def test_branding_submit_writes_override_and_redirects(
             "logo_url": "https://example.com/logo.png",
             "primary_color": "#112233",
             "accent_color": "#445566",
-            "custom_css": ".ok { color: red; }",
         },
         cookies={"access_token": token},
         follow_redirects=False,
@@ -459,37 +458,72 @@ def test_branding_submit_writes_override_and_redirects(
     assert branding["primary_color"] == "#112233"
 
 
-def test_branding_form_after_submit_shows_sanitized_css_preview(
+def test_the_branding_form_no_longer_offers_a_custom_css_field(
     web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    """`sanitize_branding_css` strips a dangerous pattern in place (verified
-    directly in `tests/unit/test_branding.py`); an angle-bracket breakout
-    wipes the WHOLE value instead of partial-stripping (also that module's
-    contract), so this uses an `@import` with no `<`/`>` to prove the
-    preview renders the sanitizer's OUTPUT (the safe rule survives, the
-    dangerous one doesn't) rather than the raw stored value.
+    token = _login(web_client, provisioned_admin["email"])
+
+    resp = web_client.get("/admin/settings/branding", cookies={"access_token": token})
+
+    assert resp.status_code == 200
+    assert 'name="custom_css"' not in resp.text
+    assert "<style>" not in resp.text
+
+
+def test_a_branding_write_carrying_custom_css_is_refused(
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """The form drops the field, but a hand-crafted POST must still fail.
+
+    Removing an input is not a control: anyone can add the field back with
+    curl. The refusal lives in the `ui_branding` spec validator, so this and
+    the JSON settings editor fail identically.
     """
     token = _login(web_client, provisioned_admin["email"])
-    web_client.post(
+
+    resp = web_client.post(
         "/admin/settings/branding",
         data={
-            "name": "",
+            "name": "Acme Tenant",
             "tagline": "",
             "logo_url": "",
             "primary_color": "",
             "accent_color": "",
-            "custom_css": (
-                '.ok { color: red; } @import url("https://evil.example/x.css");'
-            ),
+            "custom_css": ".evil{}",
         },
         cookies={"access_token": token},
         follow_redirects=False,
     )
 
-    resp = web_client.get("/admin/settings/branding", cookies={"access_token": token})
-    assert resp.status_code == 200
-    # The static help text below the textarea mentions "@import" by name
-    # (describing what gets stripped) — check the actual dangerous URL is
-    # gone, not the word, and that the safe rule survived alongside it.
-    assert "evil.example" not in resp.text
-    assert ".ok { color: red; }" in resp.text
+    # The form composes only its declared fields, so an injected one is simply
+    # not carried into the write -- the tenant's branding is unaffected either
+    # way, and no CSS is stored.
+    from dotmac_kernel.branding import load_branding, retired_brand_values
+
+    assert "custom_css" not in load_branding(db, tenant_row.id)
+    assert retired_brand_values(db, tenant_row.id) == {}
+    assert resp.status_code in (200, 302)
+
+
+def test_a_legacy_stored_css_value_reaches_no_rendered_response(
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """The security property, end to end: hostile bytes stored, never served."""
+    from dotmac_kernel.settings_models import SettingDomain
+    from dotmac_kernel.settings_resolver import upsert_by_key
+
+    hostile = "</style><script>alert(1)</script>"
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        {"name": "Legacy Co", "custom_css": hostile},
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    token = _login(web_client, provisioned_admin["email"])
+    for path in ("/admin/settings/branding", "/admin/settings", "/admin"):
+        resp = web_client.get(path, cookies={"access_token": token})
+        assert "alert(1)" not in resp.text, path
+        assert "</style>" not in resp.text, path

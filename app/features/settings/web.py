@@ -36,7 +36,7 @@ for most types anyway).
 JSON-typed spec (`branding/ui_branding`) — a raw JSON textarea would work
 (and the generic edit route above still functions for it), but this page
 exposes the actual sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/
-`accent_color`/`custom_css`) as normal form inputs and composes them back
+`accent_color`) as normal form inputs and composes them back
 into the `ui_branding` dict on submit, still through the SAME
 `service.update_setting` write path (SoT: one service, one write path, two
 edit UIs). It renders the CURRENT effective branding via
@@ -45,13 +45,14 @@ caller of that function (previously zero callers, per
 `docs/ARCHITECTURE.md`'s no-orphan-settings note) — and passes the result as
 this render's own `brand` context key, shadowing the process-global static
 `brand` template global for this response only (see
-`dotmac_kernel.templating`'s module docstring for that split). The `custom_css`
-preview block is the ONE place in this app's templates that uses `| safe`:
-`load_branding` already ran the stored value through
-`dotmac_kernel.branding.sanitize_branding_css` before this route ever sees it, so
-by the time `branding.html` renders `brand.custom_css`, it is guaranteed
-scrubbed of `@import`/`javascript:`/`expression()`/`behavior:`/angle-bracket
-breakouts — see that template's inline comment at the `| safe` usage.
+`dotmac_kernel.templating`'s module docstring for that split).
+
+This page accepts NO tenant CSS. `custom_css` and its regex sanitizer were
+removed on 2026-08-13 (ADR-0006 D8), and with them the only `| safe` in this
+app's templates. A write naming a retired key is refused by the `ui_branding`
+spec validator rather than dropped, so the generic JSON editor and the settings
+API refuse it identically — this route is not the enforcement point and must
+not become one.
 """
 
 from __future__ import annotations
@@ -244,7 +245,6 @@ def _branding_form(current: dict[str, object]) -> dict[str, str]:
         "logo_url": str(current.get("logo_url", "") or ""),
         "primary_color": str(current.get("primary_color", "") or ""),
         "accent_color": str(current.get("accent_color", "") or ""),
-        "custom_css": str(current.get("custom_css", "") or ""),
     }
 
 
@@ -296,7 +296,6 @@ async def branding_submit(
         "logo_url": str(form_data.get("logo_url", "")).strip(),
         "primary_color": str(form_data.get("primary_color", "")).strip(),
         "accent_color": str(form_data.get("accent_color", "")).strip(),
-        "custom_css": str(form_data.get("custom_css", "")),
     }
 
     try:

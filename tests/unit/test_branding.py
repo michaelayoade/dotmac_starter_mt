@@ -12,10 +12,12 @@ brand -- the split documented in `dotmac_kernel/templating.py`: the `brand`
 template global is the static part, `load_branding` is for routes that need
 the tenant override.
 
-`sanitize_branding_css` is a verbatim port of
-`dotmac_starter:app/services/branding.py::sanitize_branding_css`; the test
+The sanitizer these tests once covered is GONE (ADR-0006 D8, 2026-08-13):
+tenant-supplied CSS is refused rather than scrubbed. What replaced it is
+proved below — a write is refused, a legacy stored value is inert, and the
+value survives for inventory. The old
 cases below are ported from that repo's
-`tests/test_branding_service.py::test_sanitize_branding_css_*`.
+`tests/test_branding_service.py` sanitizer cases are deleted with it.
 """
 
 from __future__ import annotations
@@ -24,7 +26,14 @@ import json
 
 import pytest
 from dotmac_kernel import branding as branding_module
-from dotmac_kernel.branding import get_brand, load_branding, sanitize_branding_css
+from dotmac_kernel.branding import (
+    RETIRED_BRAND_KEYS,
+    get_brand,
+    load_branding,
+    reject_retired_brand_keys,
+    retired_brand_values,
+)
+from dotmac_kernel.exceptions import BadRequestError
 from dotmac_kernel.settings_models import SettingDomain
 
 # Import for the side effect: registers branding/ui_branding into the
@@ -178,19 +187,65 @@ def test_load_branding_is_scoped_per_tenant(db, tenant_row) -> None:
     assert load_branding(db, other.id)["name"] == get_brand()["name"]
 
 
-def test_load_branding_sanitizes_custom_css_in_override(db, tenant_row) -> None:
+_HOSTILE_CSS = ".ok{color:red}\n</style><script>alert(1)</script>"
+
+
+def _store_legacy_css(db, tenant_row) -> None:
+    """Plant a pre-retirement value the way a real deployment would carry it.
+
+    Written through the resolver directly, NOT the settings service, because
+    the service now refuses it — which is the point: only rows that predate the
+    refusal can exist.
+    """
     from dotmac_kernel.settings_resolver import upsert_by_key
 
     upsert_by_key(
         db,
         SettingDomain.branding,
         "ui_branding",
-        {"custom_css": ".ok { color: red; }\n</style><script>alert(1)</script>"},
+        {"name": "Legacy Co", "custom_css": _HOSTILE_CSS},
         tenant_id=tenant_row.id,
     )
 
+
+def test_a_legacy_custom_css_value_is_never_merged_into_branding(db, tenant_row):
+    """Inert, not sanitized. `custom_css` is outside the allowlist entirely."""
+    _store_legacy_css(db, tenant_row)
+
     branding = load_branding(db, tenant_row.id)
-    assert branding["custom_css"] == ""
+
+    assert "custom_css" not in branding
+    assert branding["name"] == "Legacy Co", "other keys must still merge"
+    assert not any("script" in str(v).lower() for v in branding.values())
+
+
+def test_a_legacy_value_survives_for_inventory_and_export(db, tenant_row) -> None:
+    """Retiring the feature must not destroy the evidence needed to migrate it."""
+    _store_legacy_css(db, tenant_row)
+
+    assert retired_brand_values(db, tenant_row.id) == {"custom_css": _HOSTILE_CSS}
+
+
+def test_inventory_is_empty_when_nothing_legacy_is_stored(db, tenant_row) -> None:
+    assert retired_brand_values(db, tenant_row.id) == {}
+
+
+def test_a_write_naming_a_retired_key_is_refused_not_dropped() -> None:
+    """Silently ignoring it would train an operator to think their CSS is live."""
+    with pytest.raises(BadRequestError, match="no longer accepts"):
+        reject_retired_brand_keys({"name": "Fine", "custom_css": ".x{}"})
+
+    reject_retired_brand_keys({"name": "Fine", "primary_color": "#112233"})
+    reject_retired_brand_keys({})
+    reject_retired_brand_keys("not a dict")
+
+
+def test_every_retired_key_is_refused(hidden_key=None) -> None:
+    """Sensitivity proof: the check follows the set, not one hardcoded name."""
+    assert RETIRED_BRAND_KEYS, "an empty retired set would make the guard vacuous"
+    for key in RETIRED_BRAND_KEYS:
+        with pytest.raises(BadRequestError):
+            reject_retired_brand_keys({key: "anything"})
 
 
 def test_load_branding_ignores_unknown_override_keys(db, tenant_row) -> None:
@@ -294,51 +349,6 @@ def test_get_request_branding_memoizes_one_load_branding_call_per_request(
 
     assert len(calls) == 1
     assert first is second
-
-
-# ---------------------------------------------------------------------------
-# sanitize_branding_css -- verbatim port, test cases ported from
-# dotmac_starter:tests/test_branding_service.py
-# ---------------------------------------------------------------------------
-
-
-def test_sanitize_branding_css_strips_dangerous_patterns() -> None:
-    css = """
-    .ok { color: red; }
-    @import url("https://evil.example/x.css");
-    .js { background: url("javascript:alert(1)"); }
-    .expr { width: expression(alert(1)); }
-    .legacy { behavior: url(#default#VML); }
-    .data { background-image: url("data:text/html;base64,QQ=="); }
-    .cdn { background-image: url("https://cdn.example.com/bg.png"); }
-    .relative { background-image: url("/img/bg.png"); }
-    """
-
-    sanitized = sanitize_branding_css(css)
-
-    assert ".ok { color: red; }" in sanitized
-    assert (
-        '.cdn { background-image: url("https://cdn.example.com/bg.png"); }' in sanitized
-    )
-    assert '.relative { background-image: url("/img/bg.png"); }' in sanitized
-    assert "@import" not in sanitized
-    assert "javascript:" not in sanitized.lower()
-    assert "expression(" not in sanitized.lower()
-    assert "behavior:" not in sanitized.lower()
-    assert "data:text" not in sanitized.lower()
-
-
-def test_sanitize_branding_css_rejects_angle_brackets() -> None:
-    css = ".ok { color: red; }\n</style><script>alert(1)</script>"
-    assert sanitize_branding_css(css) == ""
-
-
-def test_sanitize_branding_css_none_returns_empty_string() -> None:
-    assert sanitize_branding_css(None) == ""
-
-
-def test_sanitize_branding_css_blank_returns_empty_string() -> None:
-    assert sanitize_branding_css("   ") == ""
 
 
 # ---------------------------------------------------------------------------

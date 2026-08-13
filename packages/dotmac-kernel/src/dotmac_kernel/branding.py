@@ -21,16 +21,26 @@ docstring for how each is wired into template context):
   (the DB-override merge), adapted from that single-tenant app's
   "one row, no tenant_id" model to this app's tenant-scoped resolver.
 
-`sanitize_branding_css` is a verbatim port of
-`dotmac_starter:app/services/branding.py::sanitize_branding_css` -- an
-admin-supplied `custom_css` override must not smuggle in an `@import`,
-`javascript:`/`data:` URL, IE `behavior:`, CSS `expression()`, or a
-`<script>` breakout via unescaped angle brackets, since the value is
-rendered `| safe` into a `<style>` block. `load_branding`'s merge is also
-allowlisted to `_KNOWN_BRAND_KEYS` (2b review follow-up, folded into Task 4)
--- an override dict key outside that set is silently ignored, so a stale or
-hand-crafted `ui_branding` payload can never inject an arbitrary key into
-the template context.
+**A tenant cannot contribute CSS (2026-08-13, ADR-0006 D8).** `custom_css`
+used to be accepted, sanitized by regex, and rendered `| safe` into a
+`<style>` block. Both the field and `sanitize_branding_css` are gone:
+
+- a WRITE naming a retired key is REFUSED (`reject_retired_brand_keys`, wired
+  into the `ui_branding` spec validator so the form, the generic JSON settings
+  editor, and the API all fail the same way);
+- a legacy stored value is inert -- `custom_css` is outside
+  `_KNOWN_BRAND_KEYS`, so `load_branding` never merges it and no template can
+  reach it;
+- the stored value is NOT erased. `retired_brand_values` reads it back for
+  inventory and export, so legitimate intent can be mapped onto tokens before
+  the data is deleted as a separate, deliberate act.
+
+A denylist was the wrong shape for the problem: it had to enumerate every
+dangerous CSS construct, while an attacker needed only one it had not thought
+of. `load_branding`'s merge stays allowlisted to `_KNOWN_BRAND_KEYS` -- an
+override key outside that set is ignored, so a stale or hand-crafted
+`ui_branding` payload can never inject an arbitrary key into the template
+context.
 
 `get_request_branding(request, db)` -- Task 4 (F4 fix): resolves
 `load_branding` (or the static `get_brand()` fallback, no tenant on
@@ -73,6 +83,7 @@ from uuid import UUID
 from fastapi import Request
 from sqlalchemy.orm import Session
 
+from dotmac_kernel.exceptions import BadRequestError
 from dotmac_kernel.settings_models import SettingDomain
 from dotmac_kernel.settings_resolver import resolve_value
 
@@ -112,18 +123,22 @@ _DEFAULTS: dict[str, str] = {
 # rather than merged into the render context (2b final-review follow-up,
 # folded into Task 4 -- see this module's docstring).
 _KNOWN_BRAND_KEYS = frozenset(
-    {"name", "tagline", "logo_url", "primary_color", "accent_color", "custom_css"}
+    {"name", "tagline", "logo_url", "primary_color", "accent_color"}
 )
 
+#: Brand keys that were once accepted and are now REFUSED. A stored value for
+#: one of these is inert -- it is not in `_KNOWN_BRAND_KEYS`, so `load_branding`
+#: never merges it and no template can reach it -- but a WRITE naming one is
+#: rejected loudly rather than dropped, so an operator learns their input was
+#: not applied instead of discovering it silently vanished.
+#:
+#: `custom_css` was tenant-supplied raw CSS rendered into a `<style>` block
+#: behind a regex sanitizer. ADR-0006 D8 replaces it with an allowlisted token
+#: set: a denylist of dangerous constructs is the wrong shape for CSS, because
+#: it must enumerate every hazard while an attacker needs one it missed.
+RETIRED_BRAND_KEYS = frozenset({"custom_css"})
+
 _HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
-_CSS_URL = re.compile(r"""(?is)url\(\s*(["']?)(.*?)\1\s*\)""")
-_URL_SCHEME = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*):")
-_DANGEROUS_CSS_PATTERNS = (
-    re.compile(r"(?is)@import\b[^;{}]*;?"),
-    re.compile(r"(?is)\bbehavior\s*:[^;{}]*;?"),
-    re.compile(r"(?is)expression\s*\([^)]*\)"),
-    re.compile(r"(?i)javascript\s*:"),
-)
 
 
 def _config_path() -> Path:
@@ -183,33 +198,6 @@ def _normalize_hex(value: object, fallback: str) -> str:
     return candidate.upper() if _HEX_COLOR.match(candidate) else fallback
 
 
-def _sanitize_css_url(match: re.Match[str]) -> str:
-    raw_url = match.group(2).strip()
-    if not raw_url:
-        return ""
-    scheme_match = _URL_SCHEME.match(raw_url)
-    if scheme_match and scheme_match.group(1).lower() not in {"http", "https"}:
-        return ""
-    return match.group(0)
-
-
-def sanitize_branding_css(css: Any) -> str:
-    """Strip CSS constructs that could execute script or exfiltrate data.
-
-    Verbatim port of `dotmac_starter:app/services/branding.py::sanitize_branding_css`.
-    """
-    if css is None:
-        return ""
-    sanitized = str(css).strip()
-    if not sanitized or "<" in sanitized:
-        return ""
-
-    sanitized = _CSS_URL.sub(_sanitize_css_url, sanitized)
-    for pattern in _DANGEROUS_CSS_PATTERNS:
-        sanitized = pattern.sub("", sanitized)
-    return sanitized.strip()
-
-
 def load_branding(db: Session, tenant_id: UUID | None) -> dict[str, Any]:
     """Static brand, overridden per-tenant by the `ui_branding` domain setting.
 
@@ -217,11 +205,14 @@ def load_branding(db: Session, tenant_id: UUID | None) -> dict[str, Any]:
     value; keys the override doesn't mention keep the static brand's value.
     Only keys in `_KNOWN_BRAND_KEYS` are merged -- anything else in the
     stored dict is ignored (allowlist, see this module's docstring).
-    `primary_color`/`accent_color` overrides are validated as `#RRGGBB` hex
-    (falling back to the static color on a bad value) and `custom_css` is
-    run through `sanitize_branding_css` -- mirrors
-    `dotmac_starter:app/services/branding.py::get_branding`'s normalization,
-    since this value is admin-editable and rendered into the page.
+    `primary_color`/`accent_color` overrides are validated as `#RRGGBB` hex,
+    falling back to the static color on a bad value.
+
+    A tenant cannot contribute CSS. `RETIRED_BRAND_KEYS` is outside the
+    allowlist, so a legacy `custom_css` value still sitting in a stored
+    override is never merged here and no template can reach it. Reading it out
+    for inventory is `retired_brand_values`, which is deliberately a separate
+    call that returns data rather than a render context.
     """
     merged: dict[str, Any] = dict(get_brand())
     override = resolve_value(
@@ -241,9 +232,52 @@ def load_branding(db: Session, tenant_id: UUID | None) -> dict[str, Any]:
             merged["accent_color"] = _normalize_hex(
                 override.get("accent_color"), merged["accent_color"]
             )
-        if "custom_css" in override:
-            merged["custom_css"] = sanitize_branding_css(override.get("custom_css"))
     return merged
+
+
+def reject_retired_brand_keys(value: Any) -> None:
+    """Raise if a branding override names a key this contract has retired.
+
+    Called by the `ui_branding` spec validator, so it fires on EVERY write path
+    -- the branding form, the generic JSON settings editor, and the settings
+    API alike. Putting it in the editor instead would leave the API open, which
+    is the shape of gap that makes a "removed" feature reachable.
+
+    Refusing rather than dropping is the point: a silently ignored field trains
+    an operator to believe their CSS is live.
+    """
+    if not isinstance(value, dict):
+        return
+    offending = sorted(RETIRED_BRAND_KEYS.intersection(value))
+    if offending:
+        raise BadRequestError(
+            f"Branding no longer accepts {', '.join(offending)}. Tenant-supplied "
+            "CSS was removed: express brand colours through the allowlisted "
+            "token fields instead. Any previously stored value is inert and is "
+            "never rendered."
+        )
+
+
+def retired_brand_values(db: Session, tenant_id: UUID | None) -> dict[str, str]:
+    """Legacy values for retired keys, for INVENTORY and export only.
+
+    Reads the stored override directly rather than going through
+    `load_branding`, precisely because `load_branding` can no longer see these
+    keys. Nothing renders this: it exists so an operator can audit what a tenant
+    once supplied, map any legitimate intent onto tokens, and then delete the
+    data as a separate, deliberate act. Erasing it here instead would destroy
+    the evidence needed to do that mapping.
+    """
+    override = resolve_value(
+        db, SettingDomain.branding, "ui_branding", tenant_id=tenant_id, default={}
+    )
+    if not isinstance(override, dict):
+        return {}
+    return {
+        key: str(override[key])
+        for key in sorted(RETIRED_BRAND_KEYS)
+        if key in override and str(override[key]).strip()
+    }
 
 
 def get_request_branding(request: Request, db: Session) -> dict[str, Any]:
@@ -268,9 +302,11 @@ def get_request_branding(request: Request, db: Session) -> dict[str, Any]:
 
 
 __all__ = [
+    "RETIRED_BRAND_KEYS",
     "get_brand",
     "get_request_branding",
     "load_branding",
+    "reject_retired_brand_keys",
     "reset_brand_cache",
-    "sanitize_branding_css",
+    "retired_brand_values",
 ]

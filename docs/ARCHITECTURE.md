@@ -848,15 +848,25 @@ docstring):
   tenant→platform→spec-default resolver every other setting uses) overlaid
   on top. Per-request, not cached — a tenant admin's branding edit is live
   on the next page load, no restart. Only keys in `_KNOWN_BRAND_KEYS`
-  (`name`, `tagline`, `logo_url`, `primary_color`, `accent_color`,
-  `custom_css` — the branding editor's own form fields) are merged from the
-  stored override; anything else in that dict is ignored (2b final-review
-  follow-up, resolved 2b.1-T4/F4 — previously any key merged unchecked).
-  `primary_color`/`accent_color` overrides are validated as `#RRGGBB` hex
-  (falling back to the static color on a bad value); `custom_css` is run
-  through `sanitize_branding_css` (strips `@import`, `javascript:`/`data:`
-  URLs, `expression()`, `behavior:`, and any literal `<` — a `<script>`
-  breakout attempt) before it is ever rendered.
+  (`name`, `tagline`, `logo_url`, `primary_color`, `accent_color` — the
+  branding editor's own form fields) are merged from the stored override;
+  anything else in that dict is ignored (2b final-review follow-up, resolved
+  2b.1-T4/F4 — previously any key merged unchecked).
+  `primary_color`/`accent_color` overrides are validated as `#RRGGBB` hex,
+  falling back to the static color on a bad value.
+
+  **A tenant cannot contribute CSS (2026-08-13, ADR-0006 D8).** `custom_css`
+  was accepted, regex-sanitized on read, and rendered `| safe` into a `<style>`
+  block. The field and `sanitize_branding_css` are both gone. A write naming a
+  retired key is REFUSED by the `ui_branding` spec validator — so the branding
+  form, the generic JSON editor and the settings API all fail identically — and
+  a legacy stored value is inert, because `custom_css` is outside
+  `_KNOWN_BRAND_KEYS` and `load_branding` therefore cannot see it. The stored
+  bytes are deliberately NOT erased: `dotmac_kernel.branding
+  .retired_brand_values` reads them back for inventory and export so a
+  legitimate intent can be mapped onto tokens before the data is deleted as a
+  separate act. A denylist was the wrong shape — it had to enumerate every
+  dangerous CSS construct while an attacker needed one it had missed.
 
 **Portal-wide resolution (2b.1-T4, finding F4):** `load_branding` used to
 have exactly one caller (the branding editor's own preview) — every other
@@ -895,16 +905,15 @@ route override the per-request value) — it renders the CURRENT effective
 branding, and its own render context's `brand` key SHADOWS both the
 per-request tenant override and the process-global static `brand` template
 global for that one response only (the static global stays available to
-every other template unchanged). The same route is where
-`templates/admin/settings/branding.html`'s `custom_css` preview block uses
-`| safe` — the one real `| safe` usage in this app's templates, immediately
-preceded by a `SANITIZER:` comment pointing at `sanitize_branding_css`,
-which is what makes it safe (see the CLAUDE.md template-escaping rule and
-`test_safe_filter_only_used_with_a_sanitize_comment_nearby`).
+every other template unchanged). That route used to carry the app's ONLY
+`| safe` — the `custom_css` preview — and it went away with tenant CSS.
+There are now **zero** `| safe` usages in the tree; the guard stays, backed by
+`test_the_safe_filter_guard_still_bites`, because the rule is about the next
+one rather than the last one.
 
 Write path: `POST /admin/settings/branding` composes the submitted
-sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/`accent_color`/
-`custom_css`) back into the `ui_branding` dict and calls the SAME
+sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/`accent_color`) back
+into the `ui_branding` dict and calls the SAME
 `settings_service.update_setting(db, tenant, "branding", "ui_branding",
 raw)` the generic per-key editor (`POST /admin/settings/{domain}/{key}/edit`)
 and the JSON `PUT /settings/{domain}/{key}` API all call — one write path,
@@ -1050,7 +1059,7 @@ source-of-truth for the modules phase 2b introduced. "ST" = `dotmac_starter`
 | Module | Purpose | Port SoT |
 |---|---|---|
 | `dotmac_kernel/templating.py` | Jinja2 environment + `render()`, `static_asset_url` cache-busting | ST (`app/templates.py::_asset_version`/`_static_asset_url`); the `brand`/branding-DB-override wiring is native to this phase |
-| `dotmac_kernel/branding.py` | `get_brand()` (static) + `load_branding()` (DB overlay) + `sanitize_branding_css` | SUB (`app/services/branding_config.py::get_brand`) for the static layer; ST (`app/services/branding.py::get_branding`/`sanitize_branding_css`) for the DB-overlay + sanitizer, adapted from ST's single-tenant "one row, no tenant_id" model to this app's tenant-scoped resolver |
+| `dotmac_kernel/branding.py` | `get_brand()` (static) + `load_branding()` (DB overlay) + `reject_retired_brand_keys`/`retired_brand_values` | SUB (`app/services/branding_config.py::get_brand`) for the static layer; ST (`app/services/branding.py::get_branding`) for the DB overlay, adapted from ST's single-tenant "one row, no tenant_id" model to this app's tenant-scoped resolver. ST's `sanitize_branding_css` was ported and then RETIRED 2026-08-13 with the `custom_css` field it existed for (ADR-0006 D8) |
 | `dotmac_kernel/web_deps.py` | `require_web_auth`, `WebAuthRedirect`, `safe_next_url`, `is_secure_request` | ST (`app/web/deps.py`), routed through this app's `authenticate_request` shared seam (native adaptation — ST had no bearer/cookie seam to share) |
 | `dotmac_kernel/identity.py` | `normalize_email`, `person_display_name` — the single-owner Party-invariant helpers | native (closes the SOT gap tracked from 2a-T6/T7; no upstream port — see "Known dual-writer: Parties" below) |
 
