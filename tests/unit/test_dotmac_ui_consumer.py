@@ -51,6 +51,47 @@ def test_the_reference_assembly_declares_the_design_system() -> None:
     assert assembly.stylesheets == (dotmac_ui.stylesheet_url(),)
 
 
+def test_the_reference_assembly_declares_the_component_template_dir() -> None:
+    assert dotmac_ui.template_dir() in assembly.packaged_template_dirs
+
+
+def test_the_assembly_loader_resolves_a_packaged_component() -> None:
+    """The proof that was missing when `empty_state` first shipped.
+
+    The component-level tests render on a bare `Environment` built directly
+    over `template_dir()`, and the wheel test proves the file is packaged.
+    Neither exercises the path that actually matters: the SHARED loader behind
+    `dotmac_kernel.templating.templates`, composed by `create_app` from the
+    assembly's `packaged_template_dirs`.
+
+    Because nothing asserted that, a kernel template importing the macro
+    resolved fine in every component test and 500'd with `TemplateNotFound` on
+    every `/admin` page that renders an empty state. This test fails in exactly
+    that situation.
+    """
+    template = templates.env.get_template("dotmac_ui/components/empty_state.html")
+    rendered = template.module.empty_state(message="Nothing here")
+
+    assert "dmui-empty-state" in str(rendered)
+
+
+def test_a_kernel_template_can_import_the_packaged_macro() -> None:
+    """The real shape of the failure: the IMPORT, from a kernel-owned template.
+
+    `{% from "dotmac_ui/..." import ... %}` is resolved by the importing
+    template's environment, so this is the composition that broke — not the
+    component rendering in isolation.
+    """
+    source = (
+        '{% from "dotmac_ui/components/empty_state.html" import empty_state %}'
+        "{{ empty_state(message='No parties found') }}"
+    )
+    rendered = templates.env.from_string(source).render()
+
+    assert "dmui-empty-state__message" in rendered
+    assert "No parties found" in rendered
+
+
 def test_the_static_mount_serves_the_packaged_stylesheet() -> None:
     """Served from the INSTALLED package, not a vendored copy — the point of
     layering `packaged_static_dirs` into the existing `/static` mount."""
