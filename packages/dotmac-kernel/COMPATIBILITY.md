@@ -148,7 +148,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
 | `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
 | `dotmac_kernel.providers.provisioning` | `ProvisioningProvider`, `ProvisioningRequest`, `ProvisioningStep`, `PlanResult`, `ApplyResult`, `ObserveResult`, `ProvisioningStatus`, `StepStatus`, `ProvisioningError`, `ProvisioningRetryableError`, `ProvisioningTerminalError`, `ProvisioningPlanError`, `ProvisioningApplyError`, `ProvisioningCancelled` |
-| `dotmac_kernel.query` | `apply_pagination`, `escape_like` |
+| `dotmac_kernel.listing` | `ListFieldDefinition`, `ListDefinition`, `ListQuery`, `PageMeta`, `SortDirection`, `request_needs_canonicalization`, `apply_pagination`, `apply_ordering`, `escape_like` (the list surface: search/filter/sort/pagination/canonical URL, plus the SQL helpers that apply it) |
+| `dotmac_kernel.query` | `apply_pagination`, `apply_ordering`, `escape_like` — **DEPRECATED re-export shim**; the implementations moved to `dotmac_kernel.listing`. Kept for consumers pinned to an earlier release, has no in-repo callers, and is removed once no released consumer imports it. |
 | `dotmac_kernel.security` | `hash_password`, `verify_password`, `password_needs_rehash`, `hash_token`, `issue_access_token`, `decode_access_token` |
 | `dotmac_kernel.setting_domains` | `SettingDomainRegistry`, `SettingDomainsNotInstalledError`, `DuplicateSettingDomainError`, `UndeclaredSettingDomainError`, `install_setting_domains`, `active_setting_domains` |
 | `dotmac_kernel.settings_models` | `SettingDomain`, `SettingValueType`, `DomainSetting`, `KERNEL_SETTING_DOMAINS` |

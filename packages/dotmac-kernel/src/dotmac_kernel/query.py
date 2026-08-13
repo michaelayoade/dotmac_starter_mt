@@ -1,90 +1,38 @@
-"""Query helpers: pagination and ordering.
+"""DEPRECATED — the SQL query helpers moved to :mod:`dotmac_kernel.listing`.
 
-Ported from dotmac_sub:app/services/common.py (org infrastructure source of
-truth) — only `apply_pagination` and `apply_ordering` are carried over;
-`validate_enum` and the other helpers in that module are skipped (YAGNI,
-no Task 7 service needs them yet).
+This module is a **re-export shim, not a second implementation**. It exists for
+consumers pinned to a kernel release that published these names here; there is
+no behaviour in this file and nothing in this repository imports it.
 
-Adaptation note (see task-6-report.md PORT-DELTA for detail): SUB's
-`apply_ordering(query, order_by, order_dir, allowed_columns: dict)` raises an
-HTTP-layer 400 error on an invalid column. Task 6 now applies the same
-requirement here: raise BadRequestError (service-layer exception) when
-`order_by` is non-empty but not in `allowed`, following the decision to
-reject invalid ordering early. Falsy `order_by` (None/empty string) is a
-no-op, since it indicates the caller did not request ordering.
+## Why they moved
+
+Pagination, ordering and LIKE-escaping are the SQL half of one concern whose
+other half — what the caller actually asked for — arrived with the
+``ListDefinition``/``ListQuery``/``PageMeta`` port from ``dotmac_sub``. Keeping
+``apply_pagination`` in one module and ``ListQuery.offset`` in another would
+leave the list surface with two owners, which is the thing the Dotmac
+source-of-truth standard exists to prevent. ``dotmac_kernel.listing`` is that
+one owner.
+
+## Retirement
+
+The old import path is kept until every released consumer has moved. Retiring it
+is a deliberate step, not a cleanup someone does in passing:
+
+1. no in-repo importer (**already true** — this shim has zero callers here);
+2. no external consumer of a released kernel still importing it;
+3. then delete this module, remove it from ``SUPPORTED_MODULES``, and record the
+   removal in the kernel CHANGELOG as a breaking change.
+
+Import from ``dotmac_kernel.listing`` in new code.
 """
 
 from __future__ import annotations
 
-from typing import TypeVar
-
-from sqlalchemy import Select
-
-from dotmac_kernel.exceptions import BadRequestError
-
-T = TypeVar("T")
-
-
-def apply_pagination(stmt: Select, *, limit: int, offset: int) -> Select:
-    """Apply pagination to a select statement.
-
-    Args:
-        stmt: SQLAlchemy select statement.
-        limit: Maximum number of results.
-        offset: Number of results to skip.
-
-    Returns:
-        Statement with pagination applied.
-    """
-    return stmt.limit(limit).offset(offset)
-
-
-def escape_like(value: str) -> str:
-    """Escape SQL LIKE/ILIKE wildcards (`%`, `_`) and the escape character
-    itself (`\\`) so a caller's free-text search term matches literal
-    characters, not LIKE metacharacters (e.g. a search for `"50%"` should
-    match only the literal string `50%`, not any string starting with `50`).
-
-    Single owner (SoT) for this three-`.replace()` sequence — Task 6 pulled
-    it out of `app.features.parties.service._search_filter` (which used to
-    inline it) into core specifically so `app.features.rbac.service.
-    list_grantable_parties` can reach it too: `rbac` cannot import
-    `parties.service._search_filter` (it's feature-private, and features
-    never import each other), but both features may import core.
-
-    Callers still wrap the result in `%...%` (or a prefix/suffix-only
-    pattern) and pass `escape="\\\\"` to `.ilike()`/`.like()` themselves —
-    this function only escapes the value.
-    """
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
-def apply_ordering(
-    stmt: Select, model: type[T], order_by: str | None, allowed: set[str]
-) -> Select:
-    """Apply ordering to a select statement, validated against an allow-list.
-
-    Args:
-        stmt: SQLAlchemy select statement.
-        model: Model class to resolve the ordering column from.
-        order_by: Column name to order by (None or empty string is a no-op).
-        allowed: Set of column names permitted for ordering.
-
-    Returns:
-        Statement with ordering applied.
-
-    Raises:
-        BadRequestError: If order_by is non-empty but not in allowed.
-    """
-    if not order_by:
-        return stmt
-    if order_by not in allowed:
-        raise BadRequestError(f"Cannot order by {order_by!r}")
-    column = getattr(model, order_by)
-    return stmt.order_by(column)
-
+from dotmac_kernel.listing import apply_ordering, apply_pagination, escape_like
 
 __all__ = [
+    "apply_ordering",
     "apply_pagination",
     "escape_like",
 ]

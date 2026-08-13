@@ -16,6 +16,7 @@ source_paths = [
   "dotmac_sub:app/services/communication_eligibility.py",
   "dotmac_sub:app/services/notification.py",
   "dotmac_sub:app/tasks/notifications.py",
+  "dotmac_sub:app/services/list_query.py",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_kernel_public_surface.py",
@@ -35,6 +36,9 @@ preserved_tests = [
   "dotmac_sub:tests/test_email_services.py",
   "dotmac_sub:tests/test_domain_settings_scope.py",
   "dotmac_sub:tests/test_domain_settings_tenant_fk_migration.py",
+  "dotmac_sub:tests/test_list_query_contract.py",
+  "dotmac_starter_mt:tests/unit/test_listing.py",
+  "dotmac_starter_mt:tests/unit/test_query.py",
 ]
 contract_consumers = ["dotmac_starter_mt"]
 candidate_consumers = [
@@ -53,5 +57,5 @@ inventory_evidence = [
 ]
 first_cutover = "The starter reference assembly consumes the extracted settings, consent, delivery, and channel-policy facilities; product-by-product released-pin cutovers follow the existing-product adoption plan."
 shadow_and_drift = "Each product must run parity, profile, migration, and product behaviour tests before removing its local implementation."
-local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
-next_action = "Release the adoption-demanded scope-alignment fix as 0.1.0a40, remeasure Sub's lineage gate against that baseline, and complete the Sub settings cutover; then cut Sub over to the released consent, delivery, and channel-policy contracts before sequencing ERP."
+local_copy_retirement = "A product-local owner is removed only after its released kernel cutover and parity gate; Sub keeps app/services/list_query.py until it pins a kernel release carrying dotmac_kernel.listing and cuts one list over, and the in-kernel dotmac_kernel.query shim is deleted only once no released consumer imports it; task #22 owns the outstanding ERP/Sub settings-domain repair, while Sub's communication eligibility, notification receipt, and channel-policy paths retire only after their kernel adapters pass the preserved behavior proofs."
+next_action = "dotmac_kernel.listing is AUDIT-COMPLETE, not approved: Sub is one consumer of that contract and ERP has the same need with no equivalent contract, so cut one Sub list and then one representative ERP list onto it before claiming the list surface is extracted. Separately: release the adoption-demanded scope-alignment fix as 0.1.0a40, remeasure Sub's lineage gate against that baseline, and complete the Sub settings cutover; then cut Sub over to the released consent, delivery, and channel-policy contracts before sequencing ERP."

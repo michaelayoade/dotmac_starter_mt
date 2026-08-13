@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 from dotmac_kernel.exceptions import BadRequestError
+from dotmac_kernel.listing import apply_ordering
 from dotmac_kernel.models import Party
-from dotmac_kernel.query import apply_ordering
 from sqlalchemy import select
 
 

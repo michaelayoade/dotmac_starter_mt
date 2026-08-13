@@ -98,6 +98,14 @@ from dotmac_kernel.flags import (
     install_flags,
 )
 from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.listing import (
+    ListDefinition,
+    ListFieldDefinition,
+    ListQuery,
+    PageMeta,
+    apply_pagination,
+    escape_like,
+)
 from dotmac_kernel.models import (
     AuthSession,
     Base,
@@ -174,7 +182,6 @@ from dotmac_kernel.profiles import (
     ProfileValidationReport,
     UnknownProfileError,
 )
-from dotmac_kernel.query import apply_pagination, escape_like
 from dotmac_kernel.security import (
     hash_password,
     hash_token,
@@ -249,6 +256,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.profiles",
         "dotmac_kernel.providers",
         "dotmac_kernel.providers.provisioning",
+        "dotmac_kernel.listing",
         "dotmac_kernel.query",
         "dotmac_kernel.security",
         "dotmac_kernel.setting_domains",
@@ -431,7 +439,12 @@ __all__ = [
     "ExchangeRate",
     "MoneyError",
     "CurrencyMismatchError",
-    # query
+    # listing — the list surface (search/filter/sort/pagination/canonical URL)
+    # and the SQL helpers that apply it. `dotmac_kernel.query` is a shim.
+    "ListDefinition",
+    "ListFieldDefinition",
+    "ListQuery",
+    "PageMeta",
     "apply_pagination",
     "escape_like",
     # security

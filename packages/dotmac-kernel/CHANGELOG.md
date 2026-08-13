@@ -6,6 +6,53 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a43 — 2026-08-13
+
+Gives the list surface one owner. Additive: no name was removed, and
+`dotmac_kernel.query` keeps working.
+
+### Added
+- **`dotmac_kernel.listing`** — `ListFieldDefinition`, `ListDefinition`,
+  `ListQuery`, `PageMeta`, `SortDirection`, `request_needs_canonicalization`.
+  A list owner declares what its resource can be searched, filtered and sorted
+  by; routes hand the definition raw request values and get back normalized,
+  URL-serializable state; templates consume `ListQuery`/`PageMeta` instead of
+  each re-deriving query-string and pagination rules. Pure state normalization
+  — no database, no request object, no web framework.
+- `ListDefinition`, `ListFieldDefinition`, `ListQuery` and `PageMeta` are also
+  re-exported at the top level.
+
+### Changed
+- `apply_pagination`, `apply_ordering` and `escape_like` **moved** to
+  `dotmac_kernel.listing`. They are the SQL half of the same concern as
+  `ListQuery.offset` and `ListDefinition.sortable_keys`; leaving them in a
+  separate module would have given the list surface two owners.
+
+### Deprecated
+- **`dotmac_kernel.query`** is now a re-export shim with no behaviour of its
+  own. Existing imports keep working unchanged. It is removed only once no
+  released consumer imports it; import from `dotmac_kernel.listing` in new code.
+
+### Provenance (ADR-0006 rule 22)
+Ported product-first from `dotmac_sub:app/services/list_query.py` — 24 Sub
+services use it in production — together with the generic half of
+`dotmac_sub:tests/test_list_query_contract.py`. Sub's own customer/subscriber
+list definitions stay in Sub: product vocabulary, not mechanism.
+
+**Extraction status: audit-complete, NOT approved.** Sub is one consumer of this
+contract. ERP has independent search/filter/sort/pagination/bulk behaviour but
+no `ListDefinition`/`ListQuery`/`PageMeta`, so it is a second NEED, not a second
+consumer of the same contract. ADR-0006 section 5 is satisfied when one
+representative ERP list runs on this contract.
+
+### Deliberately out of scope
+Bulk actions and exports. They must reuse a `ListQuery` to describe their
+selection, but their authorization, idempotency, transaction and delivery
+policies are product-service concerns. There is also no list registry and no
+manifest field: a list owner declares its definition as a constant in its own
+service, and a registry is justified only when something must discover lists
+across modules.
+
 ## 0.1.0a42 — 2026-08-12
 
 Gives the audit trail its real actor. `actor_party_id` was the only actor

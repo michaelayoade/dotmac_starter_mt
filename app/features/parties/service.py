@@ -30,6 +30,7 @@ from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.listing import apply_pagination, escape_like
 from dotmac_kernel.models import (
     Party,
     PartyOrganization,
@@ -37,7 +38,6 @@ from dotmac_kernel.models import (
     PartyType,
     Tenant,
 )
-from dotmac_kernel.query import apply_pagination, escape_like
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -321,7 +321,7 @@ def _search_filter(
     4) — one place for the filter shape so the count and the page of rows it
     paginates can never drift apart.
 
-    LIKE-escaping is `dotmac_kernel.query.escape_like` (moved there in Task 6 so
+    LIKE-escaping is `dotmac_kernel.listing.escape_like` (moved there so
     `rbac.service.list_grantable_parties` can share it — see that helper's
     docstring).
     """

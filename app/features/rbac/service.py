@@ -16,8 +16,8 @@ from uuid import UUID
 from dotmac_kernel.audit import AuditEvent
 from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
+from dotmac_kernel.listing import apply_pagination, escape_like
 from dotmac_kernel.models import Party, PartyRoleGrant, Role, Tenant
-from dotmac_kernel.query import apply_pagination, escape_like
 from dotmac_kernel.settings_resolver import resolve
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -88,7 +88,7 @@ def list_grantable_parties(
 
     Explicit tenant filter (same convention as `list_roles` above) plus RLS
     as the defense-in-depth backstop. LIKE-escaping via the shared
-    `dotmac_kernel.query.escape_like` — see that helper's docstring for why it
+    `dotmac_kernel.listing.escape_like` — see that helper's docstring for why it
     lives in core rather than being imported from parties' feature-private
     `_search_filter`.
     """

@@ -35,7 +35,11 @@ path dependency — the assembly imports `dotmac_kernel.*`, never a copied modul
   `ModuleManifest` + the `ModuleRegistry` that validates unique codes,
   contract compatibility, dependencies and cycles, and derives the
   deterministic startup order `create_app` mounts in), audit write-side,
-  templating, settings resolver, branding, identity. The kernel never
+  templating, settings resolver, branding, identity, `listing` (the list
+  surface — `ListDefinition`/`ListQuery`/`PageMeta` for
+  search/filter/sort/pagination/canonical URL, ported product-first from
+  Sub, plus the SQL helpers that apply it; `dotmac_kernel.query` is now a
+  deprecated re-export shim with no in-repo callers). The kernel never
   imports `app` (import-linter contract
   "Kernel must not import the assembly", `make lint-imports`) and never
   imports `dotmac_ui` ("Kernel must not import the UI package").
