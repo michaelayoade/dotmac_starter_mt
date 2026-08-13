@@ -86,6 +86,16 @@ from dotmac_integration.models import (
     InboxReceipt,
     PollingCheckpoint,
 )
+from dotmac_integration.operations import (
+    AUDIT_ACTION_PREFIX,
+    HealthReport,
+    NotRepairable,
+    health_report,
+    record_operation,
+    release_expired_leases,
+    replay_delivery,
+    replay_receipt,
+)
 from dotmac_integration.retry import (
     DEFAULT_MAX_ATTEMPTS,
     Outcome,
@@ -118,6 +128,14 @@ from dotmac_integration.spi import (
 __version__ = "0.1.0a1"
 
 __all__ = [
+    "replay_receipt",
+    "replay_delivery",
+    "release_expired_leases",
+    "record_operation",
+    "health_report",
+    "NotRepairable",
+    "HealthReport",
+    "AUDIT_ACTION_PREFIX",
     "scope_for",
     "run_effect_once",
     "retry_delay_seconds",
