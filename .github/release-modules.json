@@ -28,6 +28,7 @@
         "required": [
           "dotmac_release_catalog/py.typed",
           "dotmac_release_catalog/manifest.py",
+          "dotmac_release_catalog/migrations/__init__.py",
           "dotmac_release_catalog/migrations/versions/rl_0001_release_artifacts.py"
         ],
         "forbidden_prefixes": ["app/", "tests/", "alembic/", "scripts/"],

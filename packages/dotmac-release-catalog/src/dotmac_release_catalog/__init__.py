@@ -64,6 +64,7 @@ from dotmac_release_catalog.identity import (
     pinned_reference,
 )
 from dotmac_release_catalog.manifest import module
+from dotmac_release_catalog.migrations import versions_dir
 from dotmac_release_catalog.models import (
     SCHEMA,
     ArtifactAttestation,
@@ -81,7 +82,7 @@ from dotmac_release_catalog.vocabulary import (
     AttestationKind,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "ARTIFACT_KINDS",
@@ -102,4 +103,5 @@ __all__ = [
     "module",
     "pinned_reference",
     "publish_artifact",
+    "versions_dir",
 ]

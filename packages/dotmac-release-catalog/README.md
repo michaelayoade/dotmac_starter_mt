@@ -80,3 +80,7 @@ cannot register this module at all.
 
 Everything importable from the top-level `dotmac_release_catalog` namespace is
 stable. Submodules are not — import from the top level.
+
+A consuming control-plane assembly adds `versions_dir()` to its Alembic
+`version_locations`; the locator resolves the installed wheel's path, so the
+consumer never hard-codes a source checkout or reaches into package internals.
