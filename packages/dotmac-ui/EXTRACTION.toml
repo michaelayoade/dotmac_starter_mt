@@ -1,7 +1,7 @@
 schema_version = 1
 package = "dotmac-ui"
 classification = "presentation-foundation"
-status = "historical-pre-rule"
+status = "reuse-proven"
 source_mode = "product-first"
 owner = "Dotmac design system"
 contract = "Framework-independent semantic tokens and compiled self-hosted UI assets"
@@ -14,16 +14,20 @@ source_paths = [
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_ui_public_surface.py",
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_tokens.py",
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_a11y.py",
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_consumer.py",
+  "dotmac_sub:tests/architecture/test_dotmac_ui_adoption.py",
 ]
-contract_consumers = ["dotmac_starter_mt"]
-candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac_academy_app"]
+contract_consumers = ["dotmac_starter_mt", "dotmac_sub", "dotmac_academy_app"]
+candidate_consumers = ["dotmac_erp", "dotmac_crm"]
 inventory_evidence = [
   "docs/inventories/starter-surfaces.md",
   "docs/inventories/sub-surfaces.md",
   "docs/inventories/erp-vendor-surfaces.md",
   "docs/inventories/branding-settings.md",
+  "docs/inventories/ui-surface-inventory.md",
 ]
-first_cutover = "The starter reference assembly consumes the package; the first external product cutover remains pending."
-shadow_and_drift = "Consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface during cutover."
-local_copy_retirement = "Retire overlapping product token/component owners slice by slice after the exact package pin passes the product UI gates."
-next_action = "Cut over an external product, preserve its visual proof, then add the second released consumer before declaring extraction complete."
+first_cutover = "Done, and twice over. dotmac_sub and dotmac_academy_app are both merged external consumers on their default branches: each pins the released 0.1.0a3 and serves the packaged asset through an assembly-owned app/ui.py rather than a copied stylesheet. Verified 2026-08-13 against each repository default branch, not a feature branch."
+shadow_and_drift = "Consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface during cutover. dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py, which holds its adoption seam in place after the fact; a further consumer brings its own equivalent rather than relying on the starter tests alone."
+local_copy_retirement = "Two overlapping local owners remain and neither is retired. dotmac_erp still builds its own live src/css tree, the fork dotmac_sub abandoned, so its adoption retires nothing until that tree goes. dotmac_sub re-declares the --dmui-* ramps with its own green palette through the override path COMPATIBILITY.md sanctions, so it shares the vocabulary and keeps its values; that is a deliberate outcome, not outstanding debt."
+next_action = "This state covers the TOKEN and compiled-asset contract only. The Jinja/HTMX component library that ADR-0006 section 2 also assigns to this package is a separate evidence question: PUBLISHED_COMPONENT_CLASSES is empty, no template ships as package data, and no component has any consumer. Train 1 of the 2026-08-13 amendment carries it, and its two external consumers are dotmac_erp and dotmac_academy_app, not dotmac_sub: Sub sits behind ADR-0017 lineage gating, ERP proves the contract stands without kernel adoption because dotmac-ui is dependency-free, and Academy is already a merged token consumer so its cutover tests the increment. Do not read reuse-proven as covering the component library."
