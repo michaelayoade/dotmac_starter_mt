@@ -125,12 +125,60 @@ class ExtractionDossierError(AssertionError):
     """The package cannot pass the product-first extraction gate."""
 
 
+def _required_slice_names(directory_name: str) -> set[str]:
+    """Slices a package MUST declare, probed from what it actually PUBLISHES.
+
+    Without this, a dossier can delete an inconvenient slice and restore a
+    stronger headline: the gate would happily validate the remaining rows. The
+    binding is to the live published surface, so the dossier cannot disagree
+    with the package about which contracts exist.
+    """
+    if directory_name != "dotmac-ui":
+        return set()
+
+    import dotmac_ui
+
+    required = {"tokens"}
+    # A published component class means the component CONTRACT exists, whatever
+    # the dossier says about it.
+    if dotmac_ui.PUBLISHED_COMPONENT_CLASSES:
+        required.add("components")
+    return required
+
+
 def _shared_package_dirs() -> list[Path]:
     return sorted(
         path
         for path in PACKAGES_DIR.iterdir()
         if path.is_dir() and (path / "pyproject.toml").is_file()
     )
+
+
+def _reference_problems(field: str, references: list[Any]) -> list[str]:
+    """`repo:path` shape, and local paths must actually exist.
+
+    One implementation, used by the package-level fields and by every slice —
+    two copies would drift, and a slice citing a deleted test is exactly the
+    evidence claim this gate exists to refuse.
+    """
+    problems: list[str] = []
+    for reference in references:
+        if not isinstance(reference, str) or not reference.strip():
+            problems.append(f"{field} entries must be non-empty strings")
+            continue
+        if ":" not in reference:
+            problems.append(f"{field} entries must use repository:path references")
+            continue
+        repository, relative_path = reference.split(":", 1)
+        if not repository.strip() or not relative_path.strip():
+            problems.append(f"{field} entries must use repository:path references")
+            continue
+        if (
+            repository == "dotmac_starter_mt"
+            and not (PROJECT_ROOT / relative_path).exists()
+        ):
+            problems.append(f"{field} local reference does not exist: {reference}")
+    return problems
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
@@ -164,16 +212,7 @@ def _validate_dossier(
         references = dossier.get(field)
         if not isinstance(references, list):
             continue
-        for reference in references:
-            if not isinstance(reference, str) or ":" not in reference:
-                problems.append(f"{field} entries must use repository:path references")
-                continue
-            repository, relative_path = reference.split(":", 1)
-            if (
-                repository == "dotmac_starter_mt"
-                and not (PROJECT_ROOT / relative_path).exists()
-            ):
-                problems.append(f"{field} local reference does not exist: {reference}")
+        problems.extend(_reference_problems(field, references))
 
     inventory_references = dossier.get("inventory_evidence")
     if isinstance(inventory_references, list):
@@ -263,6 +302,33 @@ def _validate_dossier(
             value = entry.get(field)
             if not isinstance(value, list) or not value:
                 problems.append(f"{label}: {field} must be a non-empty string list")
+                continue
+            # Same strictness as the package-level fields: a `repo:path`
+            # reference, and a local one has to exist. A list of arbitrary
+            # strings would let a slice cite evidence that was never there.
+            problems.extend(
+                f"{label}: {problem}" for problem in _reference_problems(field, value)
+            )
+
+        # Who this slice is FOR. Package-level `candidate_consumers` is not
+        # enough: an audit-complete slice would otherwise be satisfied by a
+        # candidate named for a different contract entirely.
+        candidates = entry.get("candidate_consumers")
+        if not isinstance(candidates, list) or not all(
+            isinstance(c, str) and c.strip() for c in candidates
+        ):
+            problems.append(f"{label}: candidate_consumers must be a string list")
+            candidates = []
+        elif len(set(candidates)) < 2:
+            problems.append(
+                f"{label}: candidate_consumers must name two independent products"
+            )
+        already = set(candidates) & set(entry.get("contract_consumers") or [])
+        if already:
+            problems.append(
+                f"{label}: {sorted(already)} listed as candidates but already "
+                "consume this slice"
+            )
         if isinstance(name, str):
             if name in seen_names:
                 problems.append(f"duplicate slice name {name!r}")
@@ -303,6 +369,29 @@ def _validate_dossier(
         if isinstance(entry_status, str):
             slice_states.append(entry_status)
         slice_consumers |= set(entry_consumers)
+
+    required_names = _required_slice_names(directory_name)
+    missing_slices = required_names - seen_names
+    if schema_version == 2 and missing_slices:
+        problems.append(
+            f"the package publishes contracts with no slice: {sorted(missing_slices)}"
+            " — a slice cannot be deleted to restore a stronger headline"
+        )
+
+    if schema_version == 2 and seen_names:
+        # Legacy top-level prose describes ONE contract; under schema 2 the
+        # headline describes the weakest slice, so the summary has to cover all
+        # of them or it silently keeps meaning the strongest.
+        for field in ("contract", "first_cutover"):
+            text = dossier.get(field)
+            if not isinstance(text, str):
+                continue
+            unmentioned = sorted(n for n in seen_names if n not in text)
+            if unmentioned:
+                problems.append(
+                    f"{field} is an aggregate under schema 2 but does not mention "
+                    f"slice(s): {unmentioned}"
+                )
 
     if slices and not problems:
         # The headline is the WEAKEST slice.  A package is only as proven as its
@@ -596,3 +685,72 @@ def test_the_current_ui_dossier_passes_unmodified() -> None:
     """Sensitivity in the other direction: the rules above must not reject the
     real dossier, or every proof here would pass for the wrong reason."""
     _validate_ui(_ui_dossier())
+
+
+def test_deleting_a_slice_cannot_restore_a_stronger_headline() -> None:
+    """The escape hatch this binding closes.
+
+    Drop the inconvenient `components` slice and the remaining rows validate
+    happily, with the headline back at `reuse-proven`. The required slice names
+    are probed from what the package actually PUBLISHES, so the dossier cannot
+    disagree with the package about which contracts exist.
+    """
+    import dotmac_ui
+
+    assert dotmac_ui.PUBLISHED_COMPONENT_CLASSES, (
+        "this proof is only meaningful while a component class is published; "
+        "if the library is withdrawn, the requirement correctly disappears"
+    )
+
+    dossier = _ui_dossier()
+    dossier["slices"] = [s for s in dossier["slices"] if s["name"] != "components"]
+    dossier["status"] = "reuse-proven"
+
+    with pytest.raises(ExtractionDossierError, match="no slice"):
+        _validate_ui(dossier)
+
+
+def test_a_slice_must_name_its_own_candidates() -> None:
+    """Package-level candidates say nothing about a particular contract."""
+    dossier = _ui_dossier()
+    components = next(s for s in dossier["slices"] if s["name"] == "components")
+
+    del components["candidate_consumers"]
+    with pytest.raises(ExtractionDossierError, match="candidate_consumers"):
+        _validate_ui(dossier)
+
+    components["candidate_consumers"] = ["dotmac_erp"]
+    with pytest.raises(ExtractionDossierError, match="two independent products"):
+        _validate_ui(dossier)
+
+
+def test_a_slice_cannot_name_an_existing_consumer_as_a_candidate() -> None:
+    dossier = _ui_dossier()
+    tokens = next(s for s in dossier["slices"] if s["name"] == "tokens")
+    tokens["candidate_consumers"] = ["dotmac_erp", "dotmac_sub"]
+
+    with pytest.raises(ExtractionDossierError, match="already"):
+        _validate_ui(dossier)
+
+
+def test_slice_evidence_references_are_checked_as_strictly_as_the_package() -> None:
+    dossier = _ui_dossier()
+    tokens = next(s for s in dossier["slices"] if s["name"] == "tokens")
+
+    tokens["preserved_tests"] = ["not-a-reference"]
+    with pytest.raises(ExtractionDossierError, match="repository:path"):
+        _validate_ui(dossier)
+
+    tokens["preserved_tests"] = ["dotmac_starter_mt:tests/unit/test_does_not_exist.py"]
+    with pytest.raises(ExtractionDossierError, match="does not exist"):
+        _validate_ui(dossier)
+
+
+def test_schema_2_summary_prose_must_cover_every_slice() -> None:
+    """The legacy top-level fields described ONE contract; the headline now
+    describes the weakest, so the summary has to name them all."""
+    dossier = _ui_dossier()
+    dossier["contract"] = "Semantic tokens and compiled assets"
+
+    with pytest.raises(ExtractionDossierError, match="does not mention"):
+        _validate_ui(dossier)

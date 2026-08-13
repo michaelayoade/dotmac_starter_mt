@@ -4,7 +4,7 @@ classification = "presentation-foundation"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Dotmac design system"
-contract = "Framework-independent semantic tokens and compiled self-hosted UI assets"
+contract = "Two published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) inert Jinja component templates with their declared contracts and token-native CSS. The headline status is the weaker of the two."
 source_repositories = ["dotmac_sub", "dotmac_starter_mt", "dotmac_erp"]
 source_paths = [
   "dotmac_sub:static/css/design-system.css",
@@ -32,7 +32,7 @@ inventory_evidence = [
   "docs/inventories/branding-settings.md",
   "docs/inventories/ui-surface-inventory.md",
 ]
-first_cutover = "Done, and twice over. dotmac_sub and dotmac_academy_app are both merged external consumers on their default branches: each pins the released 0.1.0a3 and serves the packaged asset through an assembly-owned app/ui.py rather than a copied stylesheet. Verified 2026-08-13 against each repository default branch, not a feature branch."
+first_cutover = "Per slice. tokens: done, and twice over -- dotmac_sub and dotmac_academy_app are both merged external consumers on their default branches, each pinning the released 0.1.0a3 and serving the packaged asset through an assembly-owned app/ui.py rather than a copied stylesheet, verified 2026-08-13 against each default branch. components: NOT done -- no external product has adopted a component, and the starter is reference proof rather than a cutover."
 shadow_and_drift = "Consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface during cutover. dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py, which holds its adoption seam in place after the fact; a further consumer brings its own equivalent rather than relying on the starter tests alone."
 local_copy_retirement = "Two overlapping local owners remain and neither is retired. dotmac_erp still builds its own live src/css tree, the fork dotmac_sub abandoned, so its adoption retires nothing until that tree goes. dotmac_sub re-declares the --dmui-* ramps with its own green palette through the override path COMPATIBILITY.md sanctions, so it shares the vocabulary and keeps its values; that is a deliberate outcome, not outstanding debt."
 next_action = "The COMPONENT slice is what gates this package now: it has zero independent consumers. Publish empty_state as an audit-complete CANDIDATE release so a product can adopt it -- a candidate carries no reuse claim and is what breaks the circularity of 'needs two consumers to release, needs a release to be consumed' -- then promote the slice to reuse-proven once two INDEPENDENT products are on it. The token slice needs nothing further. See docs/superpowers/plans/2026-08-13-presentation-system-programme.md."
@@ -60,6 +60,7 @@ preserved_tests = [
 ]
 contract_consumers = ["dotmac_sub", "dotmac_academy_app"]
 reference_consumers = ["dotmac_starter_mt"]
+candidate_consumers = ["dotmac_erp", "dotmac_crm"]
 local_copy_retirement = "dotmac_erp still builds its own live src/css tree, the fork dotmac_sub abandoned, so its adoption retires nothing until that tree goes. dotmac_sub re-declares the --dmui-* ramps with its own palette through the sanctioned override path, which is a deliberate outcome rather than outstanding debt."
 
 [[slices]]
@@ -80,4 +81,7 @@ preserved_tests = [
 # package proves the wiring, not that anyone independent chose the contract.
 contract_consumers = []
 reference_consumers = ["dotmac_starter_mt"]
+# Named per slice, not inherited from the package: an audit-complete slice
+# whose candidates were declared for a DIFFERENT contract has named nobody.
+candidate_consumers = ["dotmac_erp", "dotmac_academy_app"]
 local_copy_retirement = "dotmac_sub and dotmac_crm each carry a byte-identical local empty_state; neither is retired, and neither may be until that product pins a released candidate and its own tests pass against it. The starter's local macro in table_macros.html IS retired by this change."
