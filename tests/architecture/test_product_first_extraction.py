@@ -310,25 +310,6 @@ def _validate_dossier(
                 f"{label}: {problem}" for problem in _reference_problems(field, value)
             )
 
-        # Who this slice is FOR. Package-level `candidate_consumers` is not
-        # enough: an audit-complete slice would otherwise be satisfied by a
-        # candidate named for a different contract entirely.
-        candidates = entry.get("candidate_consumers")
-        if not isinstance(candidates, list) or not all(
-            isinstance(c, str) and c.strip() for c in candidates
-        ):
-            problems.append(f"{label}: candidate_consumers must be a string list")
-            candidates = []
-        elif len(set(candidates)) < 2:
-            problems.append(
-                f"{label}: candidate_consumers must name two independent products"
-            )
-        already = set(candidates) & set(entry.get("contract_consumers") or [])
-        if already:
-            problems.append(
-                f"{label}: {sorted(already)} listed as candidates but already "
-                "consume this slice"
-            )
         if isinstance(name, str):
             if name in seen_names:
                 problems.append(f"duplicate slice name {name!r}")
@@ -349,6 +330,44 @@ def _validate_dossier(
         ):
             problems.append(f"{label}: reference_consumers must be a string list")
             reference = []
+        # Who this slice is FOR. Package-level `candidate_consumers` is not
+        # enough: an audit-complete slice would otherwise be satisfied by a
+        # candidate named for a different contract entirely.
+        candidates = entry.get("candidate_consumers")
+        if not isinstance(candidates, list) or not all(
+            isinstance(c, str) and c.strip() for c in candidates
+        ):
+            problems.append(f"{label}: candidate_consumers must be a string list")
+            candidates = []
+        elif not set(candidates):
+            # ADR-0006 (2026-08-12): `audit-complete` requires "at least one
+            # concrete candidate consumer". ONE is the floor, and the amendment
+            # says why it was lowered rather than dropped: a dossier with no
+            # named candidate is a package built for nobody. TWO is the
+            # threshold for `reuse-proven`, and it counts CONTRACT consumers,
+            # not candidates -- requiring two candidates here was stricter than
+            # the decision this gate enforces.
+            problems.append(
+                f"{label}: candidate_consumers must name at least one concrete "
+                "product this slice is being built for"
+            )
+        # A candidate is a product that does NOT have this contract yet. An
+        # existing consumer and a reference consumer both already do, in their
+        # different ways, so neither can stand in as future demand.
+        already = set(candidates) & set(entry.get("contract_consumers") or [])
+        if already:
+            problems.append(
+                f"{label}: {sorted(already)} listed as candidates but already "
+                "consume this slice"
+            )
+        also_reference = set(candidates) & set(reference)
+        if also_reference:
+            problems.append(
+                f"{label}: {sorted(also_reference)} listed as candidates but "
+                "already recorded as reference consumers -- reference proof is "
+                "not future demand"
+            )
+
         overlap = set(entry_consumers) & set(reference)
         if overlap:
             problems.append(
@@ -719,8 +738,39 @@ def test_a_slice_must_name_its_own_candidates() -> None:
     with pytest.raises(ExtractionDossierError, match="candidate_consumers"):
         _validate_ui(dossier)
 
+    components["candidate_consumers"] = []
+    with pytest.raises(ExtractionDossierError, match="at least one concrete"):
+        _validate_ui(dossier)
+
+
+def test_one_concrete_candidate_is_enough_for_a_slice() -> None:
+    """The ADR floor is ONE, not two.
+
+    ADR-0006's 2026-08-12 amendment lowers the candidate count to one
+    deliberately -- "a dossier with no named candidate is a package built for
+    nobody" -- and reserves TWO for `reuse-proven`, which counts CONTRACT
+    consumers. A gate stricter than the decision it enforces sends people to
+    the wrong document, so this pins the floor in the permissive direction.
+    """
+    dossier = _ui_dossier()
+    components = next(s for s in dossier["slices"] if s["name"] == "components")
     components["candidate_consumers"] = ["dotmac_erp"]
-    with pytest.raises(ExtractionDossierError, match="two independent products"):
+
+    _validate_ui(dossier)
+
+
+def test_a_reference_consumer_cannot_be_a_slice_candidate() -> None:
+    """A candidate is a product that does NOT have the contract yet.
+
+    The starter already consumes the component slice as reference proof, so
+    naming it a candidate would let the same product satisfy both the "who is
+    this for" and the "who proved the wiring" columns.
+    """
+    dossier = _ui_dossier()
+    components = next(s for s in dossier["slices"] if s["name"] == "components")
+    components["candidate_consumers"] = ["dotmac_starter_mt", "dotmac_erp"]
+
+    with pytest.raises(ExtractionDossierError, match="not future demand"):
         _validate_ui(dossier)
 
 
