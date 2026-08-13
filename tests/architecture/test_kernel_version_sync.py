@@ -75,7 +75,42 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 LEDGER_ALLOCATION_RELEASES = {
     "dotmac-release-catalog": "0.1.0a44",
     "dotmac-entitlement-allocation": "0.1.0a45",
+    # ADR-0023 gave files two declared planes, but the capability it consumes
+    # (`platform_tables`, a53) landed BELOW its own namespace allocation (a54),
+    # so the allocation is the higher requirement and this stays the ordinary
+    # case. Ticketing is the exception only because `mod_tkt` was allocated
+    # long before the capability.
+    "dotmac-files": "0.1.0a54",
+    # ADR-0025. Tenant-plane only, so no kernel capability raises its floor
+    # above the release that allocated `mod_imports` — the ordinary case.
+    "dotmac-imports": "0.1.0a55",
 }
+
+# The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
+# rather than by its own ledger row, because that capability landed later. The
+# floor is always the HIGHER of the two — a kernel that cannot import the
+# manifest never reaches the allocation check.
+#
+# Kept as a separate, reasoned map rather than by quietly omitting the module
+# from the one above: an unlisted module is an untested floor, and "this one is
+# special" has to say why.
+CAPABILITY_RAISED_FLOORS = {
+    # ADR-0023: dual-plane. Its manifest passes `platform_tables`, added in a53;
+    # `mod_tkt` itself was allocated back in a39, so the capability is the
+    # higher requirement. Currently the only module in this shape.
+    "dotmac-ticketing": ("0.1.0a53", "0.1.0a39"),
+}
+
+
+def _alpha(release: str) -> int:
+    """The alpha serial from `0.1.0aNN`.
+
+    Compared as an int, not as a string: `"0.1.0a9" > "0.1.0a53"` is lexically
+    true and numerically false, and this whole train is `0.1.0a*`.
+    """
+    match = re.fullmatch(r"0\.1\.0a(\d+)", release)
+    assert match, f"unexpected release form {release!r}"
+    return int(match.group(1))
 
 
 def _kernel_changelog() -> str:
@@ -98,7 +133,43 @@ def test_module_floor_is_the_release_that_allocated_its_schema(
     )
 
 
-@pytest.mark.parametrize("release", sorted(LEDGER_ALLOCATION_RELEASES.values()))
+@pytest.mark.parametrize(
+    ("distribution", "floors"), sorted(CAPABILITY_RAISED_FLOORS.items())
+)
+def test_a_capability_raised_floor_is_above_its_allocation(
+    distribution: str, floors: tuple[str, str]
+) -> None:
+    """The exception, pinned so it stays deliberate.
+
+    A module consuming a kernel capability newer than its namespace must pin the
+    capability's release. Pinning the allocation instead would install a kernel
+    that cannot import the manifest at all — a `TypeError` at boot, not a
+    degraded feature.
+    """
+    floor, allocation = floors
+    manifest = tomllib.loads(
+        (PACKAGES / distribution / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == f">={floor}"
+    assert _alpha(floor) > _alpha(allocation), (
+        f"{distribution} is listed as capability-raised but its floor {floor} is "
+        f"not above its allocation {allocation} — move it to "
+        "LEDGER_ALLOCATION_RELEASES"
+    )
+
+
+def test_a_module_has_exactly_one_floor_rule() -> None:
+    """The two maps must not overlap, or a module's floor has two answers."""
+    assert not set(LEDGER_ALLOCATION_RELEASES) & set(CAPABILITY_RAISED_FLOORS)
+
+
+@pytest.mark.parametrize(
+    "release",
+    sorted(
+        {*LEDGER_ALLOCATION_RELEASES.values()}
+        | {floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()}
+    ),
+)
 def test_each_allocation_release_is_documented(release: str) -> None:
     """A floor pointing at a release the changelog never explains is a version
     number nobody can audit."""
@@ -118,7 +189,14 @@ def test_the_kernel_is_at_least_every_module_floor() -> None:
     declared = tomllib.loads(
         (PACKAGES / "dotmac-kernel" / "pyproject.toml").read_text(encoding="utf-8")
     )["tool"]["poetry"]["version"]
-    for release in LEDGER_ALLOCATION_RELEASES.values():
-        assert (
-            declared >= release
+    floors = {
+        *LEDGER_ALLOCATION_RELEASES.values(),
+        # The capability-raised floors belong here too, and are the ones most
+        # likely to outrun the kernel: they move when a module adopts a NEW
+        # kernel feature, not once when its namespace is allocated.
+        *(floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()),
+    }
+    for release in floors:
+        assert _alpha(declared) >= _alpha(
+            release
         ), f"kernel is {declared} but a module floors at {release}"

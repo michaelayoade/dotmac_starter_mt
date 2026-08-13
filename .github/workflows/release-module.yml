@@ -47,6 +47,9 @@ on:
         options:
           - dotmac-release-catalog
           - dotmac-entitlement-allocation
+          - dotmac-files
+          - dotmac-ticketing
+          - dotmac-imports
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true

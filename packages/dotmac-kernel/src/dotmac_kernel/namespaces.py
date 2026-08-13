@@ -467,6 +467,35 @@ APPLICATION_DIRECTORY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("appdir"),
 )
 
+# `dotmac-files` — the SIXTH allocated installable module. Stored bytes are a
+# reusable optional capability, not a universal kernel primitive. `files` is
+# intentionally plain in catalog dumps, while the distinct `fi` prefix keeps
+# its independently released Alembic lineage inside the revision-id budget.
+FILES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="files",
+    prefix="fi",
+    branch_label="files",
+    db_schema=module_schema("files"),
+)
+
+# `dotmac-imports` — the SEVENTH allocated installable module. The durable
+# record of a bulk import is a reusable optional capability (ADR-0025), not a
+# kernel primitive: most deployments never import a spreadsheet, and the ones
+# that do supply their own field vocabulary. `imports` is plain in a catalog
+# dump for the same reason `files` is, and the distinct `im` prefix keeps its
+# independently released lineage inside the revision-id budget.
+#
+# Tenant plane only. The audit behind ADR-0025 found no control-plane import
+# capability anywhere in the fleet, so the manifest declares no
+# `platform_tables` — an allocation records physical identity, and a plane no
+# product uses would be declared, not discovered.
+IMPORTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="imports",
+    prefix="im",
+    branch_label="imports",
+    db_schema=module_schema("imports"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -474,6 +503,8 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     RELEASE_CATALOG_MIGRATION_OWNER,
     ENTITLEMENT_ALLOCATION_MIGRATION_OWNER,
     APPLICATION_DIRECTORY_MIGRATION_OWNER,
+    FILES_MIGRATION_OWNER,
+    IMPORTS_MIGRATION_OWNER,
 )
 
 
@@ -489,13 +520,14 @@ class NamespaceRegistry:
     subclass — fail closed, never a half-namespaced database.
     """
 
-    __slots__ = ("_owners", "_tables_by_schema")
+    __slots__ = ("_owners", "_tables_by_schema", "_platform_tables_by_schema")
 
     def __init__(
         self,
         owners: Iterable[MigrationOwner],
         *,
         tables_by_owner: Mapping[str, Sequence[str]] | None = None,
+        platform_tables_by_owner: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         declared = tuple(owners)
         self._check_unique(declared, "owner", lambda o: o.owner, NamespaceError)
@@ -518,8 +550,27 @@ class NamespaceRegistry:
             DuplicateBranchLabelError,
         )
         self._owners: tuple[MigrationOwner, ...] = declared
+        tenant_declared = tables_by_owner or {}
+        platform_declared = platform_tables_by_owner or {}
+        # Claim BOTH planes in one pass, so "one table, one owning module" is a
+        # fact about the schema rather than about a plane. Two modules could
+        # otherwise claim the same name in different planes and neither would
+        # collide.
+        combined: dict[str, Sequence[str]] = {
+            owner: (
+                *tenant_declared.get(owner, ()),
+                *platform_declared.get(owner, ()),
+            )
+            for owner in {*tenant_declared, *platform_declared}
+        }
         self._tables_by_schema: dict[str, frozenset[str]] = self._claim_tables(
-            declared, tables_by_owner or {}
+            declared, combined
+        )
+        # The classification, kept separately: `declared_tables` stays the full
+        # ownership set the catalog gate checks in both directions, while this
+        # is what tells it WHICH contract each table is held to.
+        self._platform_tables_by_schema: dict[str, frozenset[str]] = self._claim_tables(
+            declared, platform_declared
         )
 
     # ── Construction from manifests ─────────────────────────────────────────
@@ -555,6 +606,7 @@ class NamespaceRegistry:
                 )
         owners: list[MigrationOwner] = list(host_owners)
         tables_by_owner: dict[str, Sequence[str]] = {}
+        platform_by_owner: dict[str, Sequence[str]] = {}
         for manifest in manifests:
             # Duck-typed on purpose: a plain `FeatureManifest` has no D1
             # declaration at all and is simply stateless here, so this module
@@ -594,7 +646,14 @@ class NamespaceRegistry:
                 )
             owners.append(allocated)
             tables_by_owner[allocated.owner] = tuple(getattr(manifest, "tables", ()))
-        return cls(owners, tables_by_owner=tables_by_owner)
+            platform_by_owner[allocated.owner] = tuple(
+                getattr(manifest, "platform_tables", ())
+            )
+        return cls(
+            owners,
+            tables_by_owner=tables_by_owner,
+            platform_tables_by_owner=platform_by_owner,
+        )
 
     # ── Validation helpers ──────────────────────────────────────────────────
 
@@ -682,9 +741,18 @@ class NamespaceRegistry:
         return None
 
     def declared_tables(self, schema: str) -> frozenset[str]:
-        """The tables the owning module declares in `schema` (empty if it
-        declares none)."""
+        """Every table the owning module declares in `schema`, BOTH planes
+        (empty if it declares none)."""
         return self._tables_by_schema.get(schema, frozenset())
+
+    def declared_platform_tables(self, schema: str) -> frozenset[str]:
+        """The subset of `declared_tables` held to the PLATFORM contract.
+
+        No `tenant_id`, no RLS, granted to the platform roles and REVOKEd from
+        the tenant application role — see ADR-0023. Always a subset of
+        `declared_tables(schema)`; everything not in it is tenant-scoped.
+        """
+        return self._platform_tables_by_schema.get(schema, frozenset())
 
     def table_owner(self, schema: str, table: str) -> str | None:
         for owner in self._owners:
@@ -696,8 +764,10 @@ class NamespaceRegistry:
 __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
+    "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
+    "IMPORTS_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",

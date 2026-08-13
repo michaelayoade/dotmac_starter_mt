@@ -18,11 +18,22 @@ the convenience list cannot drift away from the enforced one.
 
 ## Why the kernel floor is checked here
 
-`kernel_floor` is the release that allocated the module's schema in
-`MIGRATION_OWNER_LEDGER`. An earlier kernel raises `UnallocatedNamespaceError`
-and the module cannot register at all — so `verify-registry` can only pass once
-that kernel is published. Checking the declared floor against the allowlist
-catches the case where a module's pyproject is edited without the ledger moving.
+`kernel_floor` is the EARLIEST kernel that can actually load and register the
+module: the highest of everything it needs, not one fixed rule.
+
+Usually that is the release which allocated its schema in
+`MIGRATION_OWNER_LEDGER` — an earlier kernel raises `UnallocatedNamespaceError`
+and the module cannot register at all. But a module whose manifest consumes a
+newer kernel CAPABILITY floors at that release instead: ADR-0023's dual-plane
+`platform_tables` landed in `0.1.0a53`, and a kernel without the field raises
+`TypeError` at import, before the allocation check is ever reached. Where both
+apply, the higher wins.
+
+Either way `verify-registry` can only pass once that kernel is published.
+Checking the declared floor against the allowlist catches the case where a
+module's pyproject is edited without the allowlist following — and
+`tests/architecture/test_kernel_version_sync.py` keeps the allocation and
+capability cases in separate, reasoned maps so a module cannot sit in neither.
 
 Stdlib only, deliberately: this runs before anything is installed.
 """

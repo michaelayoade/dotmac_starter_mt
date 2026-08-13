@@ -72,6 +72,141 @@ def test_registered_module_schemas_are_compliant(admin_engine) -> None:
     assert not violations, "module schema violations:\n" + "\n".join(violations)
 
 
+def test_the_ticketing_module_schema_holds_both_planes(admin_engine) -> None:
+    """The DUAL-PLANE module's live proof (ADR-0023).
+
+    `test_registered_module_schemas_are_compliant` above already audits every
+    registered schema, `mod_tkt` included — but a green audit over a schema
+    whose platform tables were never created is indistinguishable from a green
+    audit that covered them. This asserts all FOUR tables exist, so the platform
+    half cannot pass vacuously, and then re-checks the plane facts the pure
+    contract can only assert against synthetic snapshots:
+
+    - the platform tables carry no `tenant_id` and no RLS;
+    - the tenant application role holds NOTHING on them;
+    - the online platform role has schema USAGE and row DML, through the gate.
+    """
+    registry = NamespaceRegistry.from_manifests(assembly.modules)
+    assert "mod_tkt" in audited_schemas(registry)
+
+    with admin_engine.connect() as conn:
+        live = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = 'mod_tkt'")
+            )
+        }
+        assert live == {
+            "tickets",
+            "ticket_comments",
+            "platform_tickets",
+            "platform_ticket_comments",
+        }, f"mod_tkt does not hold both declared planes: {live}"
+
+        for table in ("platform_tickets", "platform_ticket_comments"):
+            rls_on, rls_forced = conn.execute(
+                text(
+                    "SELECT relrowsecurity, relforcerowsecurity FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'mod_tkt' AND c.relname = :table"
+                ),
+                {"table": table},
+            ).one()
+            assert not rls_on and not rls_forced, (
+                f"mod_tkt.{table} is a PLATFORM table with RLS — with no tenant "
+                "column its predicate can only deny everything"
+            )
+            has_tenant = conn.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns "
+                    "WHERE table_schema = 'mod_tkt' AND table_name = :table "
+                    "AND column_name = 'tenant_id'"
+                ),
+                {"table": table},
+            ).scalar_one()
+            assert not has_tenant, f"mod_tkt.{table} carries a tenant_id"
+
+            for privilege in (
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "TRUNCATE",
+                "REFERENCES",
+                "TRIGGER",
+            ):
+                held = conn.execute(
+                    text(
+                        # Both parameters are cast: `has_table_privilege` is
+                        # overloaded, so Postgres cannot infer an untyped
+                        # placeholder's type and fails with
+                        # IndeterminateDatatype rather than running the check.
+                        "SELECT has_table_privilege('app_user', "
+                        "  format('mod_tkt.%I', CAST(:table AS text)), "
+                        "  CAST(:privilege AS text))"
+                    ),
+                    {"table": table, "privilege": privilege},
+                ).scalar_one()
+                assert not held, (
+                    f"app_user holds {privilege} on mod_tkt.{table} — on the "
+                    "platform plane the REVOKE is the isolation"
+                )
+
+
+def test_the_gate_flags_a_column_level_platform_grant(admin_engine) -> None:
+    """LIVE sensitivity proof for the column-level privilege seam.
+
+    `has_table_privilege` deliberately remains false for this grant; only
+    `has_any_column_privilege` can see it. The rollback leaves the migrated
+    schema exactly as the following tests found it.
+    """
+    registry = NamespaceRegistry.from_manifests(assembly.modules)
+    with admin_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            conn.execute(
+                text("GRANT SELECT (title) ON mod_tkt.platform_tickets TO app_user")
+            )
+            table_level = conn.execute(
+                text(
+                    "SELECT has_table_privilege("
+                    "'app_user', 'mod_tkt.platform_tickets', 'SELECT')"
+                )
+            ).scalar_one()
+            column_level = conn.execute(
+                text(
+                    "SELECT has_any_column_privilege("
+                    "'app_user', 'mod_tkt.platform_tickets', 'SELECT')"
+                )
+            ).scalar_one()
+            assert not table_level and column_level
+
+            violations = audit_live_schemas(conn, registry)
+            assert any(
+                "mod_tkt.platform_tickets" in violation and "SELECT" in violation
+                for violation in violations
+            ), violations
+        finally:
+            transaction.rollback()
+
+
+def test_the_gate_flags_missing_platform_schema_usage(admin_engine) -> None:
+    """LIVE sensitivity proof: table DML cannot bypass missing schema USAGE."""
+    registry = NamespaceRegistry.from_manifests(assembly.modules)
+    with admin_engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            conn.execute(text("REVOKE USAGE ON SCHEMA mod_tkt FROM platform_api"))
+            violations = audit_live_schemas(conn, registry)
+            assert any(
+                "mod_tkt" in violation
+                and "platform role 'platform_api' has no USAGE" in violation
+                for violation in violations
+            ), violations
+        finally:
+            transaction.rollback()
+
+
 def test_a_missing_module_schema_is_flagged(admin_engine) -> None:
     """A registered module whose migrations did not run must fail the gate —
     its models would map to tables that do not exist."""

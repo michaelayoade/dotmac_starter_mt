@@ -23,11 +23,19 @@ python = ">=3.11,<3.14"
 # `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
 # kernel; never on an assembly, and never on another module.
 #
-# The floor is the release that allocates `mod_tkt` in
-# `MIGRATION_OWNER_LEDGER`. An earlier kernel cannot register this module at
-# all — `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` —
-# so this is a hard floor rather than a preference.
-dotmac-kernel = ">=0.1.0a39"
+# TWO things set this floor, and the higher one wins.
+#
+# 1. `0.1.0a39` allocates `mod_tkt` in `MIGRATION_OWNER_LEDGER`. An earlier
+#    kernel cannot register this module at all — `NamespaceRegistry
+#    .from_manifests` raises `UnallocatedNamespaceError`.
+# 2. `0.1.0a53` adds `ModuleManifest.platform_tables` and the platform half of
+#    the live-catalog contract (ADR-0023). This module is DUAL-PLANE and its
+#    manifest passes that field, so an earlier kernel raises `TypeError` at
+#    import — before the allocation check is ever reached.
+#
+# So the floor is a49. Unlike the other modules, this one is NOT simply its
+# allocation release: it consumes a kernel capability newer than its namespace.
+dotmac-kernel = ">=0.1.0a53"
 sqlalchemy = "^2.0"
 # `alembic` is imported by `dotmac_ticketing.linking`, which emits DDL into a
 # CONSUMING product's migration. That makes it a real runtime dependency of the

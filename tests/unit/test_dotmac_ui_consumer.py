@@ -97,7 +97,11 @@ def test_a_kernel_template_can_import_the_packaged_macro() -> None:
     )
     rendered = templates.env.from_string(source).render()
 
-    assert "dmui-empty-state__message" in rendered
+    # `__title`, not `__message`: this call passes only a title, and the
+    # component correctly omits the message element. The assertion is about the
+    # IMPORT resolving at all — asserting an element this call never asks for
+    # would fail for a reason that has nothing to do with what the test proves.
+    assert "dmui-empty-state__title" in rendered
     assert "No parties found" in rendered
 
 

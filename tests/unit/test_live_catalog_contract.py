@@ -12,8 +12,11 @@ migrated database and is covered by the assembly's integration suite; see
 
 from __future__ import annotations
 
+import pytest
 from dotmac_kernel.migrations.catalog import (
     DEFAULT_APP_ROLE,
+    DEFAULT_PLATFORM_ROLE,
+    TABLE_PRIVILEGES,
     ForeignKeyFacts,
     PolicyFacts,
     SchemaSnapshot,
@@ -196,6 +199,206 @@ def test_missing_schema_usage_for_the_app_role_is_flagged() -> None:
 
 
 # ── SQL surface ─────────────────────────────────────────────────────────────
+
+
+# ── The platform plane (ADR-0023) ───────────────────────────────────────────
+
+
+def _platform_table(name: str = "platform_tickets", **kwargs: object) -> TableFacts:
+    """A COMPLIANT platform table: no tenant column, no RLS, fully revoked."""
+    defaults: dict[str, object] = {
+        "name": name,
+        "rls_enabled": False,
+        "rls_forced": False,
+        "has_tenant_column": False,
+        "policies": (),
+        "unique_constraints": (("uq_platform_tickets_number", ("number",)),),
+        "app_role_privileges": (),
+    }
+    defaults.update(kwargs)
+    return TableFacts(**defaults)  # type: ignore[arg-type]
+
+
+def test_a_declared_platform_table_is_held_to_the_platform_contract() -> None:
+    """The baseline. Before ADR-0023 every one of these facts — no RLS, no
+    policy, no tenant column — was three separate violations, which is why a
+    dual-plane module could not compose at all."""
+    snapshot = _snapshot(
+        _compliant_table(),
+        _platform_table(),
+        platform_tables=frozenset({"platform_tickets"}),
+    )
+    assert audit_snapshot(snapshot) == ()
+
+
+def test_a_platform_table_with_a_tenant_column_is_flagged() -> None:
+    """The nullable-tenant_id dodge, refused at the gate rather than in review."""
+    snapshot = _snapshot(
+        _platform_table(has_tenant_column=True, tenant_column_nullable=True),
+        platform_tables=frozenset({"platform_tickets"}),
+    )
+    assert any("has a tenant_id column" in v for v in audit_snapshot(snapshot))
+
+
+def test_a_platform_table_the_tenant_role_can_read_is_flagged() -> None:
+    """SENSITIVITY PROOF for the plane. On this side the REVOKE is the whole
+    isolation mechanism, so an un-revoked platform table must fail as loudly as
+    a tenant table with no RLS policy — otherwise "declare it platform" would be
+    a supported way to switch isolation off."""
+    snapshot = _snapshot(
+        _platform_table(app_role_privileges=("SELECT",)),
+        platform_tables=frozenset({"platform_tickets"}),
+    )
+    violations = audit_snapshot(snapshot)
+    assert any(
+        f"tenant role {DEFAULT_APP_ROLE!r} effectively holds" in v for v in violations
+    ), violations
+
+
+def test_a_platform_table_carrying_an_rls_policy_is_flagged() -> None:
+    """It has no tenant column to test, so the predicate can only deny
+    everything or nothing — its presence means the plane was misunderstood."""
+    snapshot = _snapshot(
+        _platform_table(rls_enabled=True, rls_forced=True, policies=(TENANT_POLICY,)),
+        platform_tables=frozenset({"platform_tickets"}),
+    )
+    assert any("carries RLS policies" in v for v in audit_snapshot(snapshot))
+
+
+def test_a_platform_table_with_rls_enabled_and_no_policy_is_flagged() -> None:
+    """The worse of the two RLS failures, and the one that reads as protected.
+
+    RLS with no matching policy denies EVERY row, so the control plane silently
+    gets an empty result rather than an error. Checked separately from the
+    policy case above, which this shape would otherwise slip past entirely.
+    """
+    snapshot = _snapshot(
+        _platform_table(rls_enabled=True, rls_forced=True, policies=()),
+        platform_tables=frozenset({"platform_tickets"}),
+    )
+    assert any("has row-level security" in v for v in audit_snapshot(snapshot))
+
+
+def test_a_platform_table_no_platform_role_can_reach_is_flagged() -> None:
+    """Declared-and-unusable is a violation too.
+
+    The prohibitions alone would pass a table nobody can read: fully isolated,
+    fully useless, and broken only at the first control-plane request.
+    """
+    snapshot = _snapshot(
+        _platform_table(platform_role_privileges=()),
+        platform_tables=frozenset({"platform_tickets"}),
+    )
+    violations = audit_snapshot(snapshot)
+    assert any(
+        f"platform role {DEFAULT_PLATFORM_ROLE!r} holds NO DML privilege" in v
+        for v in violations
+    ), violations
+
+
+@pytest.mark.parametrize("privilege", ("REFERENCES", "TRUNCATE", "TRIGGER"))
+def test_a_non_dml_privilege_does_not_make_a_platform_table_reachable(
+    privilege: str,
+) -> None:
+    """Metadata/destructive privileges are not online data-plane access.
+
+    A role that can only point an FK at a table, truncate it, or attach a
+    trigger still cannot perform the SELECT/INSERT/UPDATE/DELETE work the
+    platform surface exists to serve.
+    """
+    snapshot = _snapshot(
+        _platform_table(platform_role_privileges=(privilege,)),
+        platform_tables=frozenset({"platform_tickets"}),
+    )
+    violations = audit_snapshot(snapshot)
+    assert any("holds NO DML privilege" in v for v in violations), (
+        privilege,
+        violations,
+    )
+
+
+def test_platform_role_needs_schema_usage_to_reach_a_platform_table() -> None:
+    """A table grant is ineffective when the role cannot enter its schema."""
+    snapshot = _snapshot(
+        _platform_table(),
+        platform_tables=frozenset({"platform_tickets"}),
+        platform_role_has_usage=False,
+    )
+    violations = audit_snapshot(snapshot)
+    assert any(
+        f"platform role {DEFAULT_PLATFORM_ROLE!r} has no USAGE" in v for v in violations
+    ), violations
+
+
+@pytest.mark.parametrize("privilege", TABLE_PRIVILEGES)
+def test_every_table_privilege_counts_as_an_unrevoked_platform_table(
+    privilege: str,
+) -> None:
+    """SENSITIVITY PROOF across the WHOLE privilege set, not just DML.
+
+    An earlier version checked only SELECT/INSERT/UPDATE/DELETE. PostgreSQL also
+    grants TRUNCATE (empties the table), REFERENCES (lets an FK be pointed at
+    it) and TRIGGER (attaches code to it) — none harmless, all previously
+    invisible. This fails for any one of the seven, so the set cannot quietly
+    shrink back.
+    """
+    snapshot = _snapshot(
+        _platform_table(app_role_privileges=(privilege,)),
+        platform_tables=frozenset({"platform_tickets"}),
+    )
+    violations = audit_snapshot(snapshot)
+    assert any("effectively holds" in v for v in violations), (privilege, violations)
+
+
+def test_the_privilege_query_asks_about_column_level_grants_too() -> None:
+    """A column-level `GRANT SELECT (title)` does not register as a table-level
+    SELECT, so table-level inquiry alone reports a still-readable table as
+    fully revoked."""
+    sql = catalog_queries()["role_table_privileges"]
+    assert "has_any_column_privilege" in sql
+    for privilege in ("SELECT", "INSERT", "UPDATE", "REFERENCES"):
+        assert f"has_any_column_privilege(:role, c.oid, '{privilege}')" in sql
+    # The three that have no column-level form must still be asked at table level.
+    for privilege in ("DELETE", "TRUNCATE", "TRIGGER"):
+        assert f"has_table_privilege(:role, c.oid, '{privilege}')" in sql
+
+
+def test_an_undeclared_platform_table_still_gets_the_tenant_contract() -> None:
+    """SPECIFICITY for the test above it: the platform contract applies because
+    the table was DECLARED platform, not because it happens to lack a tenant
+    column. A table that merely forgot its `tenant_id` must still fail."""
+    snapshot = _snapshot(_platform_table(), platform_tables=frozenset())
+    violations = audit_snapshot(snapshot)
+    assert any("RLS must be ENABLEd AND FORCEd" in v for v in violations), violations
+
+
+def test_a_foreign_key_across_the_planes_is_flagged() -> None:
+    """They share a lifecycle, never a row. An FK is the one crossing the
+    database itself would enforce and therefore permit."""
+    snapshot = _snapshot(
+        _compliant_table(name="tickets"),
+        _platform_table(),
+        platform_tables=frozenset({"platform_tickets"}),
+        foreign_keys=(
+            ForeignKeyFacts(
+                table="tickets",
+                name="fk_tickets_platform",
+                columns=("platform_ticket_id",),
+                referenced_table="platform_tickets",
+            ),
+        ),
+    )
+    assert any(
+        "crosses the tenant/platform plane" in v for v in audit_snapshot(snapshot)
+    )
+
+
+def test_a_module_declaring_no_platform_tables_is_audited_exactly_as_before() -> None:
+    """The compatibility half: every module shipped before ADR-0023 declares no
+    platform plane, and none of them may change behaviour because of it."""
+    tenant_only = _snapshot(_compliant_table(), platform_role_has_usage=False)
+    assert audit_snapshot(tenant_only) == ()
+    assert tenant_only.platform_tables == frozenset()
 
 
 def test_no_query_interpolates_a_schema_name() -> None:

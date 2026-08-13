@@ -52,6 +52,10 @@ REQUIRED_DISPOSITIONS = (
     "consolidate →",
     "contract",
     "unassigned",
+    # ADR-0024 § 6: a separately deployed Dotmac application, not a module a
+    # product installs. Listed so the matrix cannot use the disposition in a row
+    # without defining it.
+    "independent <component>",
 )
 
 # The rule the matrix exists to state, and the one earlier revisions got wrong.
@@ -129,18 +133,32 @@ def _disposition_cells(source: str) -> list[str]:
     )
 
 
-def _has_destination(cell: str) -> bool:
-    """Does this disposition name a place the code ends up?
+# The CLOSED set of places a capability may end up. Each entry is matched in a
+# declared form rather than by keyword, because the defect this guard exists to
+# catch was literally the cell `contract, not a module` — which contains the
+# word "module" and means the opposite.
+#
+# `independent integrator` is NAMED rather than matched as `independent \w+` on
+# purpose. An open "independent <anything>" category would let any domain be
+# parked outside the fleet's layering by inventing a name for it, which is the
+# monolith-parking this test exists to prevent, one indirection later. Adding a
+# second independent component is therefore a reviewed diff here and in the
+# matrix's Dispositions table — the same treatment a namespace allocation gets.
+_DESTINATIONS = (
+    r"\bkernel\b",
+    r"module ←",
+    r"module source",
+    r"\bdotmac-ui\b",
+    # A settled module, named as its distribution once the package is real.
+    r"`dotmac-[a-z-]+`",
+    # The sole independently deployed Dotmac component (ADR-0024 § 6).
+    r"\bindependent (dotmac )?integrator\b",
+)
 
-    Substring-matching "module" is not enough: the defect this guard exists to
-    catch was literally the cell `contract, not a module`, which contains the
-    word. The destination vocabulary is matched in its declared arrow form so a
-    negation cannot satisfy it.
-    """
-    return any(
-        re.search(pattern, cell.lower())
-        for pattern in (r"\bkernel\b", r"module ←", r"module source", r"\bdotmac-ui\b")
-    )
+
+def _has_destination(cell: str) -> bool:
+    """Does this disposition name a place the code ends up?"""
+    return any(re.search(pattern, cell.lower()) for pattern in _DESTINATIONS)
 
 
 def test_every_family_resolves_to_kernel_ui_or_a_starter_module() -> None:
@@ -169,6 +187,36 @@ def test_destination_detector_rejects_transitions_and_metadata() -> None:
     assert _has_destination("module ← Sub + contract with ERP")
     assert _has_destination("kernel (cutover in flight)")
     assert _has_destination("dotmac-ui + template studio")
+
+
+def test_an_independent_component_is_a_destination_only_when_it_is_NAMED() -> None:
+    """The escape hatch this closed set exists to keep shut.
+
+    "Independent <something>" is a real destination — ADR-0024 § 6 makes the
+    Integrator a separately deployed application rather than a module a product
+    installs. But accepting the CATEGORY would let any domain be parked outside
+    the fleet's layering by inventing a name for it, which is monolith-parking
+    with an extra step. Only the adjudicated component matches.
+    """
+    assert _has_destination("independent Integrator + connector plugins ← Sub")
+    assert _has_destination("independent Dotmac Integrator core")
+
+    assert not _has_destination("independent service")
+    assert not _has_destination("independent product")
+    assert not _has_destination("independent ERP subsystem")
+    assert not _has_destination("stays independent in Sub")
+
+
+def test_a_settled_module_may_be_named_as_its_distribution() -> None:
+    """`module ← Sub` states an intended SOURCE; the backticked distribution
+    states a settled TARGET. Both are destinations; a bare product name is not.
+    """
+    assert _has_destination("`dotmac-ticketing`; ERP cutover 1, Vendor CP cutover 2")
+    assert _has_destination("`dotmac-files`")
+
+    # Not a distribution — an application. The backticks must not launder it.
+    assert not _has_destination("`dotmac_erp`")
+    assert not _has_destination("stays in `Sub`")
 
 
 def test_contract_and_consolidation_are_documented_as_non_destinations() -> None:
