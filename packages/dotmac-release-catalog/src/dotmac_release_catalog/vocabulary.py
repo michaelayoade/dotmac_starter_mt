@@ -57,11 +57,14 @@ class ArtifactKind(StrEnum):
 class AttestationKind(StrEnum):
     """What a recorded claim about an artifact actually proves.
 
-    Three distinct questions, deliberately not merged into "provenance":
+    Four distinct questions, deliberately not merged into "provenance":
 
     * `SBOM` — what is *inside* the artifact.
     * `PROVENANCE` — how and from what the artifact was *built*.
     * `SIGNATURE` — who *vouches* for it.
+    * `PRODUCT_MANIFEST` — which product and capabilities the exact product
+      assembly declares. Its document schema is owned by
+      `dotmac_kernel.product_manifest`; this enum classifies the attestation.
 
     An artifact can have any subset. Having none is a legal state and an
     informative one; it is the reason attestations are rows rather than columns
@@ -72,6 +75,7 @@ class AttestationKind(StrEnum):
     SBOM = "sbom"
     PROVENANCE = "provenance"
     SIGNATURE = "signature"
+    PRODUCT_MANIFEST = "product_manifest"
 
 
 #: Every member, for exhaustiveness checks in consumers and in tests.

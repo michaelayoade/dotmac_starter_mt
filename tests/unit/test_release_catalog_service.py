@@ -130,6 +130,18 @@ class TestAttest:
         assert attestation.attestation_kind == "sbom"
         assert attestation.digest == f"sha256:{_OTHER}"
 
+    def test_records_a_product_manifest_as_its_own_claim(self, db: Session) -> None:
+        artifact = _publish(db)
+        attestation = attest_artifact(
+            db,
+            artifact_id=artifact.id,
+            attestation_kind=AttestationKind.PRODUCT_MANIFEST,
+            uri="https://example.com/product-manifest.json",
+            digest=f"sha256:{_OTHER}",
+        )
+
+        assert attestation.attestation_kind == "product_manifest"
+
     def test_refuses_to_attest_an_artifact_that_does_not_exist(
         self, db: Session
     ) -> None:

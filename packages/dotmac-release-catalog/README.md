@@ -84,3 +84,15 @@ stable. Submodules are not — import from the top level.
 A consuming control-plane assembly adds `versions_dir()` to its Alembic
 `version_locations`; the locator resolves the installed wheel's path, so the
 consumer never hard-codes a source checkout or reaches into package internals.
+
+## Product-manifest attestations
+
+`AttestationKind.PRODUCT_MANIFEST` associates a canonical
+`dotmac_kernel.ProductManifestSnapshot` with exact artifact bytes. The
+attestation row stores the document URI and the digest of its exact bytes; this
+module neither fetches nor interprets it. A consumer fetches through its own
+transport, verifies the digest, and parses through the kernel contract.
+
+Do not record this as `PROVENANCE`. Provenance says how an artifact was built;
+the product manifest says which product and capability vocabulary that build
+declares. Conflating them makes presence of one appear to prove the other.
