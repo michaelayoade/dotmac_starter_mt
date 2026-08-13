@@ -68,7 +68,7 @@
             {% else %}
             <tr>
                 <td colspan="7">
-                    {{ empty_state(message="No custom fields for this entity type yet", action_url="/admin/custom-fields/create?entity_type=" ~ selected_entity_type, action_label="New Field") }}
+                    {{ empty_state(title="No custom fields for this entity type yet", action_label="New Field", action_url="/admin/custom-fields/create?entity_type=" ~ selected_entity_type) }}
                 </td>
             </tr>
             {% endfor %}

@@ -24,7 +24,7 @@
             {% else %}
             <tr>
                 <td colspan="2">
-                    {{ empty_state(message="No roles found", action_url="/admin/roles/create", action_label="New Role") }}
+                    {{ empty_state(title="No roles found", action_label="New Role", action_url="/admin/roles/create") }}
                 </td>
             </tr>
             {% endfor %}

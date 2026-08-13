@@ -37,14 +37,20 @@ claimed otherwise and was wrong.
 
 Sequencing is therefore about readiness, not permission:
 
-- **`dotmac_erp`** — has adopted no kernel at all, which makes it the strongest
-  evidence that the component contract stands on its own.
-- **`dotmac_academy_app`** — already a merged token consumer, so a component
-  cutover tests the increment rather than a first integration.
-- **`dotmac_sub`** — equally eligible; already a merged token consumer. Its
-  kernel-side work is gated, its UI-side work is not.
-- **`dotmac_crm`** — carries a byte-identical local `empty_state`, so it is a
-  natural retirement target once it has a UI composition boundary.
+- **`dotmac_erp` first** — its production macro and direct macro test are the
+  qualifying product-first source. Because ERP carries legacy aliases, icon
+  helpers and illustration policy outside the shared core, its first cutover is
+  a thin local compatibility adapter over the canonical package macro; callers
+  then move to the four canonical fields and the adapter is deleted.
+- **`dotmac_sub` second** — it already consumes released UI tokens and carries
+  six live includes of the byte-identical Sub/CRM template. Pin the component
+  release, cut those callers over, add a product-owned render/adoption proof,
+  and delete the local template. ERP + Sub establish `reuse-proven`.
+- **`dotmac_crm` third** — retire the other byte-identical template through the
+  same composition boundary, supplying a third independent consumer.
+- **`dotmac_academy_app` later** — already a token consumer and eligible, but it
+  has no measured local `empty_state` owner to retire, so it is weaker evidence
+  for this extraction than the three products above.
 
 Any two independent products move a component slice to `reuse-proven`.
 Consumption by the starter is reference proof, recorded separately in the
@@ -67,6 +73,13 @@ two states are distinct and the dossier now types them per slice:
 Shipping the candidate is therefore not "extraction on thin evidence": it is the
 only move that makes the evidence obtainable, and the dossier states plainly
 that the evidence is not yet there.
+
+The candidate itself is deliberately narrower than ERP's whole macro. The
+shared contract is `title`, optional `message`, and an action label/URL pair,
+with a package-owned decorative visual. Raw SVG input, host `/static/` paths,
+English-title illustration inference and ERP's alias set stay out: copying those
+would move product compatibility policy into the design-system owner rather
+than extract the independently shared behaviour.
 
 ## Train 5 — candidate rulings
 

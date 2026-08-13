@@ -13,23 +13,35 @@
 
   Usage:
     {% from "dotmac_ui/components/empty_state.html" import empty_state %}
-    {{ empty_state(message="No parties found",
-                   action_url="/admin/parties/create",
-                   action_label="New Party") }}
+    {{ empty_state(title="No parties found",
+                   message="Create a party to begin.",
+                   action_label="New Party",
+                   action_url="/admin/parties/create") }}
 
   In a table, the caller owns the row and the colspan:
-    <tr><td colspan="4">{{ empty_state(message="No parties found") }}</td></tr>
+    <tr><td colspan="4">{{ empty_state(title="No parties found") }}</td></tr>
 #}
-{% macro empty_state(message="No items found", action_url=none, action_label="Create") %}
+{% macro empty_state(title="No data found", message=none, action_label=none, action_url=none) %}
 <div class="dmui-empty-state">
-    <svg class="dmui-empty-state__icon" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
-        <path stroke-linecap="round" stroke-linejoin="round"
-              d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-    </svg>
+    <span class="dmui-empty-state__visual" aria-hidden="true">
+        <svg class="dmui-empty-state__icon" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="1.5" focusable="false">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+        </svg>
+    </span>
+    <p class="dmui-empty-state__title">{{ title }}</p>
+    {% if message %}
     <p class="dmui-empty-state__message">{{ message }}</p>
-    {% if action_url %}
-    <a class="dmui-empty-state__action" href="{{ action_url }}">{{ action_label }}</a>
+    {% endif %}
+    {% if action_label and action_url %}
+    <a class="dmui-empty-state__action" href="{{ action_url }}">
+        <svg class="dmui-empty-state__action-icon" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" aria-hidden="true" focusable="false">
+            <path stroke-linecap="round" d="M12 5v14M5 12h14" />
+        </svg>
+        {{ action_label }}
+    </a>
     {% endif %}
 </div>
 {% endmacro %}

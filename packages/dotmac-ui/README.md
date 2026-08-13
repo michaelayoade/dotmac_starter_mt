@@ -35,6 +35,22 @@ dotmac_ui.stylesheet_url()  # -> "/static/dotmac-ui/dotmac-ui-1.css?v=<digest>"
 Then one `<link rel="stylesheet">` at that URL, after your own stylesheet, and
 author against `var(--dmui-*)`.
 
+To consume the inert component data, add `dotmac_ui.template_dir()` to the
+host's Jinja loader and import from the namespaced path:
+
+```jinja
+{% from "dotmac_ui/components/empty_state.html" import empty_state %}
+{{ empty_state(
+    title="No invoices",
+    message="Create one to begin billing this customer.",
+    action_label="New invoice",
+    action_url="/invoices/new",
+) }}
+```
+
+Jinja remains the host's dependency; installing `dotmac-ui` does not install a
+template engine.
+
 **There is no build step for consumers.** No Tailwind, no PostCSS, no bundler,
 no npm, and no requirement to match a Tailwind major — ERP's v3.4 and the
 starter's v4 consume the identical file. See COMPATIBILITY.md § "The

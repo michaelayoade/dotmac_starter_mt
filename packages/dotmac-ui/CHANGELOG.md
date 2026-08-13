@@ -11,7 +11,8 @@ called out here.
 
 ## 0.1.0a7 — 2026-08-13
 
-One additive token; `UI_CONTRACT_VERSION` stays **1**.
+One additive token and a pre-release component-contract repair;
+`UI_CONTRACT_VERSION` stays **1**.
 
 ### Added
 
@@ -26,6 +27,20 @@ One additive token; `UI_CONTRACT_VERSION` stays **1**.
 - The starter's document canvas, tenant login, authenticated shell, sidebar,
   topbar and toast/status surfaces now consume semantic token roles without
   per-element light/dark colour branches.
+
+### Changed
+
+- Before the first component-bearing package release, `empty_state` was aligned
+  with the independently used ERP/Sub/CRM core: `(title, message,
+  action_label, action_url)`. It now renders a distinct title, optional message,
+  and an action only when label and URL are both present.
+- The richer markup remains portable: its visual and CTA icon are fixed package
+  markup styled only through published `.dmui-*` classes. ERP-only aliases,
+  host icon helpers, title-keyword illustration inference, raw SVG input and
+  product `/static/` paths are deliberately excluded.
+- The release workflow now requires the component template in the wheel and
+  renders it through a clean host-supplied Jinja environment both before
+  publication and after installation from the private registry.
 
 ## 0.1.0a6 — 2026-08-13
 
@@ -59,9 +74,8 @@ stays **1**, because publishing a new component class is additive under
   HOST adds `template_dir()` to its own environment's search path. A consumer's
   entire wiring is one more entry in `packaged_template_dirs`.
 - **`empty_state`** (`dotmac_ui/components/empty_state.html`) — the first
-  published component. Signature `(message, action_url, action_label)`;
-  classes `dmui-empty-state`, `__icon`, `__message`, `__action`, all styled
-  through tokens in the compiled stylesheet.
+  component candidate. Its initial development signature was superseded before
+  publication by the product-evidenced contract recorded under 0.1.0a7.
 - `PUBLISHED_COMPONENT_CLASSES` is now **derived** from `COMPONENTS` rather than
   maintained as a second list, so the registry and the markup cannot disagree.
 

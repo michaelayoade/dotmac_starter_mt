@@ -79,7 +79,7 @@ def test_the_assembly_loader_resolves_a_packaged_component() -> None:
     that situation.
     """
     template = templates.env.get_template("dotmac_ui/components/empty_state.html")
-    rendered = template.module.empty_state(message="Nothing here")
+    rendered = template.module.empty_state(title="Nothing here")
 
     assert "dmui-empty-state" in str(rendered)
 
@@ -93,7 +93,7 @@ def test_a_kernel_template_can_import_the_packaged_macro() -> None:
     """
     source = (
         '{% from "dotmac_ui/components/empty_state.html" import empty_state %}'
-        "{{ empty_state(message='No parties found') }}"
+        "{{ empty_state(title='No parties found') }}"
     )
     rendered = templates.env.from_string(source).render()
 

@@ -79,20 +79,16 @@ def test_dependent_role_channels_follow_the_brand_in_both_modes() -> None:
 
     light, dark = css.split("\n.dark,\n", 1)
     assert (
-        "--dmui-action-primary-default-rgb: "
-        "var(--dmui-color-brand-600-rgb);"
+        "--dmui-action-primary-default-rgb: " "var(--dmui-color-brand-600-rgb);"
     ) in light
     assert (
-        "--dmui-action-accent-default-rgb: "
-        "var(--dmui-color-accent-700-rgb);"
+        "--dmui-action-accent-default-rgb: " "var(--dmui-color-accent-700-rgb);"
     ) in light
     assert (
-        "--dmui-action-primary-default-rgb: "
-        "var(--dmui-color-brand-400-rgb);"
+        "--dmui-action-primary-default-rgb: " "var(--dmui-color-brand-400-rgb);"
     ) in dark
     assert (
-        "--dmui-action-accent-default-rgb: "
-        "var(--dmui-color-accent-400-rgb);"
+        "--dmui-action-accent-default-rgb: " "var(--dmui-color-accent-400-rgb);"
     ) in dark
 
 
