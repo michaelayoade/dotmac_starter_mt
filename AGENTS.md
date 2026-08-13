@@ -245,6 +245,72 @@ specifics) points here and must never fork these rules.
     scan, so a regenerated baseline cannot legalise a regression there. (Rule
     25's ratchet shape applied to the design system; `test_palette_ratchet.py`)
 
+27. **A dual-plane module has ONE behaviour and TWO DECLARED persistence
+    planes.** A capability that genuinely operates in both security contexts —
+    a tenant data plane and the control plane — ships one lifecycle, vocabulary
+    and transition engine, and two storage planes declared separately on its
+    manifest: `tables` (tenant: `tenant_id NOT NULL`, RLS ENABLEd *and* FORCEd,
+    composite uniques) and `platform_tables` (control plane: no tenant column,
+    no RLS at all — not even ENABLEd-with-no-policy, which denies every row to
+    the control plane while reading as protected — GRANTed to the platform roles
+    and **REVOKEd from the tenant app role** across ALL SEVEN table privileges
+    and their column-level forms; on that plane the revoke IS the isolation, and
+    it is checked as strictly as a policy is on the other side). A platform
+    table must also be REACHABLE by the online platform role: that role needs
+    schema `USAGE` plus at least one row DML privilege (`SELECT`, `INSERT`,
+    `UPDATE`, `DELETE`); `REFERENCES`, `TRIGGER` or `TRUNCATE` alone does not
+    make a request path usable. Declared-and-unusable is a violation too. The
+    plane is DECLARED, never inferred from a missing `tenant_id`, or a table
+    that merely forgot the
+    column would reclassify itself and lose isolation silently; a table may
+    appear in exactly one plane. **No foreign key crosses the planes** — they
+    share a lifecycle, never a row. The gate enforces that for FKs whose SOURCE
+    is in the module schema; a product-owned link table in `public` is
+    UNMONITORED rather than exempt, which is why a dual-plane module ships one
+    link helper PER PLANE and each refuses an unusable configuration. Nullable
+    `tenant_id`, sentinel/fake tenants and polymorphic scope columns are
+    rejected and refused by the gate. Two
+    planes require a real named assembly on each side TODAY; most modules are
+    tenant-only and must stay that way. (ADR-0023;
+    `tests/unit/test_live_catalog_contract.py`,
+    `tests/unit/test_namespaces.py`,
+    `tests/architecture/test_ticketing_module.py`)
+
+28. **Applications are independent; they compose by synchronizing DATA.**
+    Every application owns its runtime, database, migrations, sessions,
+    authorization and domain decisions. Cross-application integration is only
+    through versioned APIs/webhooks: an adapter records a typed, deduplicated
+    observation, then a local resolver updates a rebuildable projection or asks
+    the local owning service to act. An importer never assigns an authoritative
+    status, permission, entitlement or lifecycle field directly, and no app
+    reads another app's database, tables, ORM models or filesystem. An
+    installable module is also independent, but is composed LOCALLY: each app
+    pins its own copy, runs its own lineage and owns its own rows; the module
+    imports neither its assembly nor a sibling module. Shared execution paths
+    contain no product/provider branches or mode flags. Products declare only
+    provider-neutral domain ports and capability versions; provider identity,
+    wire mappings, endpoints and secret references stay in Integrator connector
+    plugins. Outbound synchronization leaves through a durable outbox after the
+    local transaction. Configuration binds a transport capability, never the
+    business owner. The independently deployed Dotmac Integrator is the sole
+    EXTERNAL connector control plane: products carry no provider clients,
+    provider credentials, provider webhook verification, connector schedules,
+    checkpoints or delivery retry engines. Products expose typed domain ports;
+    Integrator owns transport evidence and never writes product domain tables.
+    External systems are independently released connector PLUGINS discovered
+    from package metadata through one versioned SPI; the Integrator core has no
+    provider enum/import list/conditional. Plugins declare versioned
+    capabilities and config schemas, translate wire formats and perform I/O,
+    while the core exclusively owns bindings, secret materialization,
+    inbox/outbox, idempotency, retry, checkpoints, health and repair evidence.
+    One installation has exactly one active plugin per capability; duplicate or
+    incompatible bindings fail closed.
+    A remote projection requires a named local reader and reconciler; foreign-key
+    compatibility alone is not a reason to keep one. Correlation-only needs use
+    an opaque Integrator reference on the local owning record.
+    (ADR-0024; import-linter contracts `Modules must not import the assembly`
+    and `Modules are independent of each other`; ADR-0010/0014)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,

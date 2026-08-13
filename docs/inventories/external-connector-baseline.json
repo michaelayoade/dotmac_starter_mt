@@ -1,0 +1,67 @@
+{
+  "categories": [
+    "http_client",
+    "webhook_surface",
+    "provider_credential",
+    "connector_task",
+    "sync_checkpoint",
+    "delivery_retry"
+  ],
+  "counts": {
+    "dotmac_academy_app": {
+      "connector_task": 0,
+      "delivery_retry": 0,
+      "http_client": 3,
+      "provider_credential": 2,
+      "sync_checkpoint": 0,
+      "webhook_surface": 0
+    },
+    "dotmac_crm": {
+      "connector_task": 10,
+      "delivery_retry": 9,
+      "http_client": 33,
+      "provider_credential": 5,
+      "sync_checkpoint": 4,
+      "webhook_surface": 7
+    },
+    "dotmac_erp": {
+      "connector_task": 12,
+      "delivery_retry": 6,
+      "http_client": 21,
+      "provider_credential": 3,
+      "sync_checkpoint": 7,
+      "webhook_surface": 11
+    },
+    "dotmac_sub": {
+      "connector_task": 18,
+      "delivery_retry": 8,
+      "http_client": 37,
+      "provider_credential": 2,
+      "sync_checkpoint": 8,
+      "webhook_surface": 4
+    },
+    "dotmac_vendor_control_plane": {
+      "connector_task": 0,
+      "delivery_retry": 0,
+      "http_client": 0,
+      "provider_credential": 0,
+      "sync_checkpoint": 0,
+      "webhook_surface": 0
+    }
+  },
+  "repos_measured": [
+    "dotmac_academy_app",
+    "dotmac_crm",
+    "dotmac_erp",
+    "dotmac_sub",
+    "dotmac_vendor_control_plane"
+  ],
+  "totals": {
+    "connector_task": 40,
+    "delivery_retry": 23,
+    "http_client": 94,
+    "provider_credential": 12,
+    "sync_checkpoint": 19,
+    "webhook_surface": 22
+  }
+}

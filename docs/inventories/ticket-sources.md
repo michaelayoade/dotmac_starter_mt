@@ -29,6 +29,22 @@ standard statuses, and every one of those sets is asking a lifecycle-class
 question. Separating **class** from **status** from **reason** is the whole
 design; the two amendments below are how it got there.
 
+### Composition amendment — 2026-08-13
+
+The shared lifecycle is reusable code, not shared application authority
+(ADR-0024). Every adopter installs its own module lineage and owns only its
+local tickets. Applications exchange versioned API/webhook observations; they
+never query another adopter's module tables, and a remote status cannot write a
+local lifecycle directly.
+
+That distinction is material for ERP: its one table mixes internal
+back-office/project support with ERPNext/CRM-synchronized records. The former
+may cut over to ERP's local module installation after classification. The
+latter are archived and retired from ERP's operational schema, or cause
+creation of a separate ERP-owned work ticket when a named local workflow needs
+one. Provider-specific payload mapping stays in an Integrator connector plugin
+and does not enter ERP or this module.
+
 ## The four products
 
 | | Sub | CRM | ERP | Vendor CP |
@@ -58,11 +74,12 @@ importing into Sub during the transition. Sub's SOT map already names the owner:
 `support.ticket_lifecycle` is `authoritative_record` / `owner_managed` /
 **`complete`**.
 
-**ERP is a different domain** — internal helpdesk and project support, with
-`REPLIED` (an email-helpdesk state nothing else has), `project_id`,
-`contact_email`/`phone`/`address`, `resolution` text, ERPNext sync, and dates
-rather than timestamps. **It also has zero ticket tests**, so it supplies no
-behavioural proof to port.
+**ERP mixes two authority classes in one table** — locally owned internal
+helpdesk/project support and ERPNext/CRM-synchronized records — with `REPLIED`
+(an email-helpdesk state nothing else has), `project_id`, `contact_email`/
+`phone`/`address`, `resolution` text, and dates rather than timestamps. It needs
+a total authority classifier before migration. **It also has zero ticket
+tests**, so it supplies no behavioural proof to port.
 
 **Vendor CP is greenfield** — no ticket model at all. It does have
 `src/vendor_cp/approvals/`, which is the same request-lifecycle shape wearing a

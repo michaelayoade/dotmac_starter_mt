@@ -17,7 +17,7 @@ A consumer wires it exactly like the stylesheet, through an anonymous slot::
 and then, in any template::
 
     {% from "dotmac_ui/components/empty_state.html" import empty_state %}
-    {{ empty_state(message="No parties found") }}
+    {{ empty_state(title="No parties found") }}
 
 ## Why the namespaced path
 
@@ -83,13 +83,16 @@ class ComponentContract:
 EMPTY_STATE: Final[ComponentContract] = ComponentContract(
     template="dotmac_ui/components/empty_state.html",
     macro="empty_state",
-    parameters=("message", "action_url", "action_label"),
+    parameters=("title", "message", "action_label", "action_url"),
     classes=frozenset(
         {
             "dmui-empty-state",
+            "dmui-empty-state__visual",
             "dmui-empty-state__icon",
+            "dmui-empty-state__title",
             "dmui-empty-state__message",
             "dmui-empty-state__action",
+            "dmui-empty-state__action-icon",
         }
     ),
 )

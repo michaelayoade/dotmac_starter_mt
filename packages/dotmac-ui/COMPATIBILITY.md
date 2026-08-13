@@ -311,11 +311,25 @@ with none of the kernel's globals or filters installed.
 
 | Template | Macro | Parameters | Classes |
 |---|---|---|---|
-| `dotmac_ui/components/empty_state.html` | `empty_state` | `message`, `action_url`, `action_label` | `dmui-empty-state`, `dmui-empty-state__icon`, `dmui-empty-state__message`, `dmui-empty-state__action` |
+| `dotmac_ui/components/empty_state.html` | `empty_state` | `title`, `message`, `action_label`, `action_url` | `dmui-empty-state`, `dmui-empty-state__visual`, `dmui-empty-state__icon`, `dmui-empty-state__title`, `dmui-empty-state__message`, `dmui-empty-state__action`, `dmui-empty-state__action-icon` |
 
 `empty_state` renders the "nothing to show here" panel for a list, table body or
 card. In a table the **caller** owns the row and the `colspan`; the component
-owns only the panel. `action_url` is optional — omit it and no action renders.
+owns only the panel. `title` defaults to `"No data found"`; `message` is optional.
+The action renders only when **both** `action_label` and `action_url` are given.
+
+This is the shared core independently evidenced by ERP, Sub and CRM. It does
+not publish ERP's historical CTA aliases, choose an illustration from English
+words in the title, accept caller-supplied SVG, or resolve a host `/static/`
+path. The visual and action icon are fixed, decorative package markup. Those
+omissions are portability and safety boundaries, not missing richness; a
+product that must preserve an older call shape uses a temporary local adapter
+while it cuts callers onto this contract.
+
+`action_url` is a host-owned, trusted navigation target. Jinja autoescaping
+prevents attribute breakout, but this presentation component does not decide a
+product's allowed URL schemes or authorization policy; callers must not pass an
+untrusted URL.
 
 ## Accessibility contract
 

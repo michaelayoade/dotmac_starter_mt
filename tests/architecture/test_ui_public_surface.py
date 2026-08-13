@@ -53,10 +53,10 @@ UI_ROOT = Path(dotmac_ui.__file__).resolve().parent
 #                           can open a session will eventually resolve a brand
 #                           itself, which is the kernel's job.
 #   fastapi / starlette   — mounts no route. Presentation, not a surface.
-#   jinja2                — no templating engine at 0.1.0a1. The Jinja/HTMX
-#                           component API ADR-0006 § 2 anticipates is a LATER
-#                           slice; until it lands with its own contract, an
-#                           import here would be scope creep nobody voted for.
+#   jinja2                — components ship as inert package data. The HOST's
+#                           existing Jinja loader consumes them; importing the
+#                           engine here would break the dependency-free contract
+#                           and force it on token-only consumers.
 #   pydantic              — declares no schema; tokens are frozen dataclasses.
 FORBIDDEN_IMPORTS = frozenset(
     {

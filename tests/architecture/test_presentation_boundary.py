@@ -59,8 +59,7 @@ def test_the_boundary_detector_still_bites() -> None:
             "from dotmac_ui import BrandOverride\n"
         ),
         "web.py": (
-            "from dotmac_kernel.branding import get_brand\n"
-            "import dotmac_ui\n"
+            "from dotmac_kernel.branding import get_brand\n" "import dotmac_ui\n"
         ),
     }
     assert _authority_crossings(violating) == {"service.py", "web.py"}

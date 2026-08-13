@@ -7,14 +7,25 @@ exactly, or `NamespaceRegistry.from_manifests` refuses the composition at boot:
 - `short_code="tkt"` → the derived, read-only schema `mod_tkt`
 - `migration_prefix="tk"` → revision ids `tk_0001_…`
 - `migration_branch="ticketing"` → how an `alembic_version` row is attributed
-- `tables=(...)` → the composed gate rejects a migration creating anything
-  outside this declaration, in both directions
+- `tables=(...)` + `platform_tables=(...)` → the composed gate rejects a
+  migration creating anything outside these declarations, in both directions
+
+## Two planes (ADR-0023)
+
+This module is dual-plane: the same lifecycle serves a product data plane and a
+control plane, so it declares its tables in two sets held to opposite isolation
+contracts. `tables` is tenant-scoped (`tenant_id NOT NULL`, FORCEd RLS);
+`platform_tables` is control-plane (no tenant column, no RLS, schema `USAGE` +
+row DML for `platform_api`, REVOKEd from `app_user`). The classification is
+declared here rather than inferred from the absence of a `tenant_id`, because a
+tenant table that merely FORGOT its column would otherwise reclassify itself as
+platform and lose its isolation silently.
 
 **`tables` lists only this module's own tables.** Product link tables generated
-by `dotmac_ticketing.linking.link_subject` are NOT declared here and must not be:
-they live in the product's schema and lineage, and a module claiming ownership
-of a table it does not create would make the live-catalog gate wrong in the
-direction that matters.
+by `dotmac_ticketing.linking`'s per-plane helpers are NOT declared here and must
+not be: they live in the product's schema and lineage, and a module claiming
+ownership of a table it does not create would make the live-catalog gate wrong
+in the direction that matters.
 
 ## Why `core=False`
 
@@ -39,6 +50,7 @@ module = ModuleManifest(
     migration_prefix="tk",
     migration_branch="ticketing",
     tables=("tickets", "ticket_comments"),
+    platform_tables=("platform_tickets", "platform_ticket_comments"),
     # ── No capabilities, permissions or audit actions YET ───────────────────
     # This release ships no routers, and every one of those declarations exists
     # to gate or annotate a route. CI proved the point rather than leaving it to

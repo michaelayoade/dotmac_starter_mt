@@ -2,7 +2,7 @@
   "$comment": [
     "The CLOSED set of installable modules this repository may publish, and the",
     "facts each release is checked against. A package absent from this file",
-    "cannot be built or published by `release-module.yml` — the workflow resolves",
+    "cannot be built or published by `release-module.yml` \u2014 the workflow resolves",
     "its target here and fails closed, so adding a publishable module is a",
     "reviewed diff rather than a dispatch-time string.",
     "",
@@ -11,10 +11,22 @@
     "compiled CSS; a module must not). One workflow pretending to cover both",
     "would have to weaken whichever check the other cannot satisfy.",
     "",
-    "kernel_floor is the release that allocated the module's schema in",
-    "MIGRATION_OWNER_LEDGER. It is not a preference: an earlier kernel raises",
-    "UnallocatedNamespaceError and the module cannot register at all, which is",
-    "why registry verification can only pass once that kernel is published."
+    "kernel_floor is the EARLIEST kernel that can actually load and register",
+    "the module \u2014 the highest of everything the module needs, not one fixed",
+    "rule. Two things set it:",
+    "",
+    "  1. the release that allocated its schema in MIGRATION_OWNER_LEDGER; an",
+    "     earlier kernel raises UnallocatedNamespaceError and the module cannot",
+    "     register at all;",
+    "  2. the release that added any kernel CAPABILITY the manifest consumes \u2014",
+    "     e.g. ADR-0023's `platform_tables`, added in a49; an earlier kernel",
+    "     raises TypeError at import, before the allocation check is reached.",
+    "",
+    "For most modules (1) is the answer and (2) does not apply. Where both",
+    "apply the higher wins, and tests/architecture/test_kernel_version_sync.py",
+    "keeps the two cases in separate, reasoned maps so neither is silent.",
+    "Either way registry verification can only pass once that kernel is",
+    "published."
   ],
   "modules": {
     "dotmac-release-catalog": {
@@ -31,8 +43,17 @@
           "dotmac_release_catalog/migrations/__init__.py",
           "dotmac_release_catalog/migrations/versions/rl_0001_release_artifacts.py"
         ],
-        "forbidden_prefixes": ["app/", "tests/", "alembic/", "scripts/"],
-        "allowed_requires": ["dotmac-kernel", "sqlalchemy", "python"]
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
       }
     },
     "dotmac-entitlement-allocation": {
@@ -49,8 +70,142 @@
           "dotmac_entitlement_allocation/migrations/__init__.py",
           "dotmac_entitlement_allocation/migrations/versions/ea_0001_allocations.py"
         ],
-        "forbidden_prefixes": ["app/", "tests/", "alembic/", "scripts/"],
-        "allowed_requires": ["dotmac-kernel", "sqlalchemy", "python"]
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-ticketing": {
+      "$comment": [
+        "Listed for the ERP-first ticket adoption programme (ADR-0017's",
+        "2026-08-13 ticketing amendment). Until this entry existed the module",
+        "was unpublishable, so no product could pin it and the dossier's",
+        "`first_cutover` was unreachable by construction.",
+        "",
+        "kernel_floor is a49, NOT the a39 that allocated mod_tkt. This module is",
+        "dual-plane (ADR-0023) and its manifest passes `platform_tables`, which",
+        "a49 added \u2014 an earlier kernel raises TypeError at import, before the",
+        "allocation check runs. It is the one module whose floor is set by a",
+        "kernel capability rather than by its own namespace row.",
+        "",
+        "`alembic` is in allowed_requires and is NOT a packaging slip:",
+        "`dotmac_ticketing.linking`'s per-plane link helpers emit DDL into a",
+        "CONSUMING product's migration, so Alembic is imported at runtime by",
+        "them rather than used as a dev tool. The other modules ship no such",
+        "helper and correctly forbid it."
+      ],
+      "package_dir": "packages/dotmac-ticketing",
+      "import_name": "dotmac_ticketing",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a53",
+      "db_schema": "mod_tkt",
+      "tag_prefix": "dotmac-ticketing-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_ticketing/py.typed",
+          "dotmac_ticketing/manifest.py",
+          "dotmac_ticketing/migrations/__init__.py",
+          "dotmac_ticketing/migrations/versions/tk_0001_tickets.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "alembic",
+          "python"
+        ]
+      }
+    },
+    "dotmac-files": {
+      "$comment": [
+        "mod_files is allocated in kernel a54, and that allocation is ALSO the",
+        "floor: ADR-0023's dual-plane platform_tables landed earlier, in a53, so",
+        "the module's own namespace row is the higher of the two requirements.",
+        "This is the ordinary case; dotmac-ticketing is the exception."
+      ],
+      "package_dir": "packages/dotmac-files",
+      "import_name": "dotmac_files",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a54",
+      "db_schema": "mod_files",
+      "tag_prefix": "dotmac-files-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_files/py.typed",
+          "dotmac_files/manifest.py",
+          "dotmac_files/contracts.py",
+          "dotmac_files/models.py",
+          "dotmac_files/physical.py",
+          "dotmac_files/providers.py",
+          "dotmac_files/service.py",
+          "dotmac_files/migrations/__init__.py",
+          "dotmac_files/migrations/versions/fi_0001_stored_files.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-imports": {
+      "$comment": [
+        "The bulk-import run ledger (ADR-0025). kernel_floor is a50, the",
+        "release that allocated mod_imports; no kernel capability raises it",
+        "above its own allocation, so this is an ordinary case rather than a",
+        "ticketing/files-style exception.",
+        "",
+        "No alembic in allowed_requires: this module ships its own im lineage",
+        "but emits no DDL into a CONSUMING product's migration, so Alembic is a",
+        "packaging input rather than a runtime import."
+      ],
+      "package_dir": "packages/dotmac-imports",
+      "import_name": "dotmac_imports",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a55",
+      "db_schema": "mod_imports",
+      "tag_prefix": "dotmac-imports-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_imports/py.typed",
+          "dotmac_imports/manifest.py",
+          "dotmac_imports/contracts.py",
+          "dotmac_imports/models.py",
+          "dotmac_imports/service.py",
+          "dotmac_imports/tabular.py",
+          "dotmac_imports/migrations/__init__.py",
+          "dotmac_imports/migrations/versions/im_0001_import_runs.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
       }
     }
   }

@@ -19,9 +19,10 @@ name: Release ui
 #
 #   * There is no `consumer_boot_check.sh` equivalent: dotmac-ui mounts no
 #     routes and boots no app. The smoke instead asserts the wheel actually
-#     contains its published artifacts and that the preset is loadable
-#     JavaScript — a preset that is not valid CommonJS breaks every consumer's
-#     build, and nothing else in the pipeline would notice.
+#     contains its published artifacts, that the preset is loadable JavaScript,
+#     and that a clean HOST can resolve and render its inert Jinja component
+#     data. Jinja is installed separately so it never becomes a package runtime
+#     dependency.
 #
 # Every THIRD-PARTY action is pinned to the same reviewed commit SHAs as
 # release-kernel.yml; the trailing comment records the human-readable version.
@@ -100,6 +101,7 @@ jobs:
             "dotmac_ui/static/dotmac-ui/dotmac-ui-1.css" \
             "dotmac_ui/static/dotmac-ui/tailwind-preset.js" \
             "dotmac_ui/static/dotmac-ui/manifest.json" \
+            "dotmac_ui/templates/dotmac_ui/components/empty_state.html" \
             "dotmac_ui/py.typed" ; do
             echo "${CONTENTS}" | grep -q "${required}" \
               || { echo "::error::wheel is missing ${required}"; exit 1; }
@@ -112,21 +114,37 @@ jobs:
           echo "wheel contents OK"
 
       # Release-artifact smoke: install the freshly built wheel into a clean
-      # venv, confirm the version it reports, and confirm the preset it ships is
-      # loadable CommonJS. An invalid preset breaks every consumer's Tailwind
-      # build and nothing else here would catch it.
+      # venv, confirm the version it reports, render the packaged component
+      # through a host-supplied Jinja environment, and confirm the preset it
+      # ships is loadable CommonJS. These exercise the actual installed bytes.
       - name: Release wheel smoke
         working-directory: packages/dotmac-ui
         run: |
           python -m venv /tmp/uismoke
-          /tmp/uismoke/bin/pip install --quiet "$(ls dist/*.whl)"
+          /tmp/uismoke/bin/pip install --quiet --no-deps "$(ls dist/*.whl)"
+          /tmp/uismoke/bin/pip install --quiet "jinja2==3.1.6"
           /tmp/uismoke/bin/python - <<'PY'
           import dotmac_ui
           from dotmac_ui.assets import stylesheet_path, tailwind_preset_path
           from dotmac_ui.theme import bootstrap_script
+          from jinja2 import Environment, FileSystemLoader, StrictUndefined
           assert stylesheet_path().is_file(), "stylesheet missing from the installed wheel"
           assert tailwind_preset_path().is_file(), "preset missing from the installed wheel"
           assert bootstrap_script(), "theme bootstrap is empty"
+          env = Environment(
+              loader=FileSystemLoader(dotmac_ui.template_dir()),
+              autoescape=True,
+              undefined=StrictUndefined,
+          )
+          macro = getattr(
+              env.get_template(dotmac_ui.EMPTY_STATE.template).module,
+              dotmac_ui.EMPTY_STATE.macro,
+          )
+          rendered = str(
+              macro("No invoices", "Create one to begin.", "New invoice", "/invoices/new")
+          )
+          assert 'class="dmui-empty-state__title"' in rendered
+          assert 'href="/invoices/new"' in rendered
           print("installed dotmac-ui", dotmac_ui.__version__)
           print("preset:", tailwind_preset_path())
           PY
@@ -218,16 +236,33 @@ jobs:
         run: |
           python -m venv /tmp/uiverify
           /tmp/uiverify/bin/pip install --quiet \
+            --no-deps \
             --index-url "${UI_INDEX_URL}" \
             --extra-index-url "https://pypi.org/simple" \
             "dotmac-ui==${{ inputs.version }}"
+          /tmp/uiverify/bin/pip install --quiet "jinja2==3.1.6"
           /tmp/uiverify/bin/python - <<'PY'
           import dotmac_ui
           from dotmac_ui.assets import asset_manifest, stylesheet_path, tailwind_preset_path
           from dotmac_ui.theme import bootstrap_script
+          from jinja2 import Environment, FileSystemLoader, StrictUndefined
           assert stylesheet_path().is_file()
           assert tailwind_preset_path().is_file()
           assert bootstrap_script()
+          env = Environment(
+              loader=FileSystemLoader(dotmac_ui.template_dir()),
+              autoescape=True,
+              undefined=StrictUndefined,
+          )
+          macro = getattr(
+              env.get_template(dotmac_ui.EMPTY_STATE.template).module,
+              dotmac_ui.EMPTY_STATE.macro,
+          )
+          rendered = str(
+              macro("No invoices", "Create one to begin.", "New invoice", "/invoices/new")
+          )
+          assert 'class="dmui-empty-state__title"' in rendered
+          assert 'href="/invoices/new"' in rendered
           print("verified dotmac-ui", dotmac_ui.__version__, asset_manifest()["ui_contract_version"])
           PY
           PRESET="$(/tmp/uiverify/bin/python -c 'from dotmac_ui.assets import tailwind_preset_path; print(tailwind_preset_path())')"

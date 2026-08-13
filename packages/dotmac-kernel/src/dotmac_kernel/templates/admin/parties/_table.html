@@ -39,7 +39,7 @@
             {% else %}
             <tr>
                 <td colspan="4">
-                    {{ empty_state(message="No parties found", action_url="/admin/parties/create", action_label="New Party") }}
+                    {{ empty_state(title="No parties found", action_label="New Party", action_url="/admin/parties/create") }}
                 </td>
             </tr>
             {% endfor %}

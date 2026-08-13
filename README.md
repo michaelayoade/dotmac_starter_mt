@@ -251,7 +251,15 @@ productionize further, port what your project needs:
 - MFA, password reset, account lockout, and production auth hardening
   (phase 2c on this repo's own roadmap; fleet-specific rationale lives in
   `docs/adr/`, not here)
-- File uploads, notifications, scheduler
+- Product upload routes/UI, a concrete MinIO/S3 adapter, notifications,
+  scheduler. The optional `dotmac-files` package now owns dual-plane
+  validation, stored-object metadata and repairable physical lifecycle through
+  explicit tenant or platform scope, and the optional `dotmac-imports` package
+  owns the bulk-import run ledger, source-bound dry-run→apply promotion,
+  resumable caller-owned chunks and column mapping (the importing domain keeps
+  the field vocabulary, validation and mutation).
+  This reference assembly deliberately composes neither (ADR-0022, ADR-0023,
+  ADR-0025).
 - Manifest-owned declaration catalogues for settings, typed feature flags,
   entity types, and jobs, plus runtime migration-current/health evidence and
   the effective-capability admin UI described by the module control-plane

@@ -185,6 +185,17 @@ class ModuleManifest:
     # migration gate rejects a create outside this declaration; the live-catalog
     # gate checks the declaration in both directions after migrations run.
     tables: Sequence[str] = field(default_factory=tuple)
+    # The PLATFORM-plane tables this module owns inside the SAME schema: no
+    # `tenant_id`, no RLS, granted to the platform roles and REVOKEd from the
+    # tenant application role. Declared separately from `tables` rather than
+    # inferred, because the two planes are held to opposite contracts and an
+    # inferred plane is a plane nobody reviewed — a table that simply forgot its
+    # `tenant_id` would silently reclassify itself as platform and lose its
+    # isolation. See ADR-0023.
+    #
+    # A capability only declares both when it genuinely operates in both
+    # security contexts. Most modules leave this empty and stay tenant-only.
+    platform_tables: Sequence[str] = field(default_factory=tuple)
     core: bool = True
     enabled_by_default: bool = True
     seed: Callable[[], None] | None = None
@@ -208,6 +219,7 @@ class ModuleManifest:
             "setting_value_types",
             "scope_kinds",
             "tables",
+            "platform_tables",
             "feature_flags",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
@@ -226,6 +238,7 @@ class ModuleManifest:
             self.short_code is not None,
             self.migration_prefix is not None,
             bool(self.tables),
+            bool(self.platform_tables),
         )
         if not any(stateful_signals):
             if self.migration_branch is not None:
@@ -255,6 +268,19 @@ class ModuleManifest:
             if table in seen:
                 raise ModuleRegistryError(
                     f"module {self.code!r} declares table {table!r} twice"
+                )
+            seen.add(table)
+        # A table belongs to exactly ONE plane. Declaring it in both would ask
+        # the live-catalog gate to hold it to two opposite contracts at once —
+        # tenant-scoped WITH forced RLS and platform-scoped WITHOUT it — and
+        # whichever branch ran second would decide, silently. ADR-0023.
+        for table in self.platform_tables:
+            if table in seen:
+                raise ModuleRegistryError(
+                    f"module {self.code!r} declares table {table!r} in BOTH the "
+                    "tenant and platform planes — a table has one plane, and "
+                    "the two are held to opposite isolation contracts "
+                    "(ADR-0023)"
                 )
             seen.add(table)
 
@@ -317,6 +343,7 @@ class ModuleManifest:
         migration_prefix: str | None = None,
         migration_branch: str | None = None,
         tables: Sequence[str] = (),
+        platform_tables: Sequence[str] = (),
     ) -> ModuleManifest:
         """Adapt a `FeatureManifest` into a `ModuleManifest`.
 
@@ -337,6 +364,7 @@ class ModuleManifest:
             migration_prefix=migration_prefix,
             migration_branch=migration_branch,
             tables=tables,
+            platform_tables=platform_tables,
             api_routers=manifest.routers,
             web_routers=manifest.web_routers,
             nav=manifest.nav,

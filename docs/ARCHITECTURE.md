@@ -8,6 +8,48 @@ self-hosted/on-premise, OEM, and single-tenant deployments. ADR-0006 fixes the
 package/module/theme/brand/facet ownership boundaries and extraction rule for
 that target.
 
+## Application and module composition boundary (accepted)
+
+ADR-0024 makes the fleet boundary explicit: every application owns its own
+runtime, database, migrations, authorization and domain decisions. Applications
+exchange data through versioned APIs and webhooks; they never query or import
+one another's persistence. An Integrator connector plugin converts provider
+wire data into a typed, idempotent observation. A local resolver then updates a rebuildable
+projection or submits a command to the local owning service. The importer does
+not assign authoritative lifecycle state.
+
+Installable modules are independent distributions composed *inside* an
+application. Each adopter pins the package, runs its own module lineage and owns
+its own module rows. Sharing `dotmac-ticketing` or `dotmac-files` therefore
+shares a contract and implementation, never a cross-application database.
+Modules import neither the assembly nor sibling modules; the assembly connects
+published contracts and owns product relations.
+
+Shared execution paths have no product/provider switch. Provider connectors are
+installed into the Integrator through ADR-0024's versioned plugin SPI, while
+products expose provider-neutral capability ports. Endpoints and credentials are
+configuration, but business authority is an accepted ownership contract, not a
+configurable default. Outbound synchronization is delivered after commit
+through a durable outbox so a local transaction never depends on another
+application's uptime.
+
+Connector distributions register by package metadata and declare versioned
+capabilities; the Integrator core contains no provider catalogue. The core owns
+installations, immutable configuration revisions, one active binding per
+installation/capability, secret materialization, inbox/outbox, retry,
+checkpoints, health and repair evidence. Plugins own only provider wire
+translation and I/O. Products therefore add no provider client or conditional
+when an external system changes.
+
+For ticketing this means separate local installations: Sub owns operational
+customer/service tickets, ERP owns only its internal back-office tickets, and
+the vendor control plane owns vendor-support tickets. A remotely owned ticket
+does not become a compatibility projection merely to preserve a foreign key or
+dropdown. Correlation-only needs store an opaque Integrator reference on the
+local owning record; a separate locally owned ticket may be created only by the
+local ticket owner. Synchronization never makes either application a writer of
+the other's lifecycle.
+
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
 The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
@@ -325,6 +367,40 @@ packages/dotmac-application-directory/ a tenant's connected-application
                  composed migration gate runs over the same composition from
                  `tests/architecture/test_application_directory_module.py`,
                  since `make migration-gate` reads the shipped `alembic.ini`.
+packages/dotmac-ticketing/       optional dual-plane ticket lifecycle
+  pyproject.toml                 distribution dotmac-ticketing; audit-complete,
+  EXTRACTION.toml                with ERP then Vendor CP as candidate cutovers
+  src/dotmac_ticketing/          persistence-free lifecycle/vocabulary engine,
+                 explicit tenant/platform models, per-plane link helpers,
+                 manifest, and independent `tk` lineage in schema `mod_tkt`.
+                 COMPOSED by this reference assembly for catalog proof, but it
+                 has no surface or production contract consumer yet. Each real
+                 adopter installs and owns separate rows (ADR-0024).
+packages/dotmac-files/           optional dual-plane stored-byte lifecycle
+  pyproject.toml                 distribution dotmac-files; audit-complete,
+  EXTRACTION.toml                with ERP, Academy, then Vendor CP as candidate
+                                 cutovers (ADR-0022/0023); ERP E8 is a
+                                 prerequisite and none is counted yet
+  src/dotmac_files/              admission contracts, provider seam, metadata,
+                 shared persistence-free physical engine, scoped lifecycle,
+                 manifest, and independent `fi` lineage in schema `mod_files`.
+                 Tenant rows use forced RLS; platform rows are tenant-free and
+                 revoked from app_user. BUILT AND TESTED HERE, NOT COMPOSED by
+                 this reference assembly. Domains retain attachment meaning,
+                 authorization and retention; import parsing is separate.
+packages/dotmac-imports/         optional bulk-import run ledger
+  pyproject.toml                 distribution dotmac-imports; audit-complete,
+  EXTRACTION.toml                with ERP, then Sub, then CRM as candidate
+                                 cutovers (ADR-0025); ERP E8 is the same
+                                 prerequisite and none is counted yet
+  src/dotmac_imports/            run/row contract, CSV decoding, alias-based
+                 column mapping and preview, the validate/promote/apply
+                 service, manifest, and independent `im` lineage in schema
+                 `mod_imports`. Tenant plane only — the audit found no
+                 control-plane import capability in the fleet. BUILT AND
+                 TESTED HERE, NOT COMPOSED by this reference assembly. The
+                 domain owns the field vocabulary, validation and mutation;
+                 `dotmac-files` owns the bytes the run reads.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1150,6 +1226,14 @@ made concrete — every model has exactly one declared owner.
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
 | `TenantAppliedLicence` | `tenant_applied_licences` | licensing | native (WS8 reference receiver, assembly migration `a002`) — the receiver-owned durable replay record the kernel verifier deliberately does not store; one row per `(tenant_id, licence_id)` lineage, upserted on each applied version |
 | `TenantRevocationList` | `tenant_revocation_lists` | licensing | native (WS8 revocation import, assembly migration `a003`) — the last imported list version + the revoked set, one row per tenant. Persisted (not just applied) because the set is fed into every subsequent `verify_licence` offline; accepted imports must be a SUPERSET of the stored set, since a well-ordered newer list that omits an id is silent un-revocation |
+| `TenantTicket` | `mod_tkt.tickets` | `dotmac-ticketing` optional module | Tenant-plane product-neutral lifecycle record, product-first from Sub's authoritative support lifecycle after the fleet inventory separated standard status from product reason. Forced RLS; each adopter owns a separate installation and only local workflow rows (ADR-0023/0024). |
+| `TenantTicketComment` | `mod_tkt.ticket_comments` | `dotmac-ticketing` optional module | Tenant-plane comment trail owned with its local ticket; never a cross-application conversation store. |
+| `PlatformTicket` | `mod_tkt.platform_tickets` | `dotmac-ticketing` optional module | Platform-plane form of the same persistence-free lifecycle for a control-plane installation: no tenant column/RLS, platform grants, `app_user` revoked (ADR-0023). |
+| `PlatformTicketComment` | `mod_tkt.platform_ticket_comments` | `dotmac-ticketing` optional module | Platform-plane comment trail owned with its vendor-support ticket; no cross-plane or cross-application FK. |
+| `TenantStoredFile` | `mod_files.stored_files` | `dotmac-files` optional module | Tenant plane: product-first port of Sub's provider/staged lifecycle, ERP's document/image policy coverage and CRM's content-spoofing canaries; forced RLS and required `TenantScope` (ADR-0022/0023; [`files-sources.md`](inventories/files-sources.md)). ERP then Academy are the first tenant cutovers; ERP E8 still gates source-product retirement. |
+| `PlatformStoredFile` | `mod_files.platform_stored_files` | `dotmac-files` optional module | Platform plane over the same persistence-free physical engine: no tenant column or RLS, platform grants, and `app_user` revoked. Vendor CP is candidate cutover 3 through a licensing-owned exact-bundle relation; no product tenant is created and no consumer is claimed yet (ADR-0023). |
+| `ImportRun` | `mod_imports.import_runs` | `dotmac-imports` optional module | Tenant plane: product-first port of Sub's run lifecycle and one-shot dry-run→apply promotion, joined to ERP's decoding/alias/preview mechanism; forced RLS and a tenant-composite identity neither source had (ADR-0025; [`imports-sources.md`](inventories/imports-sources.md)). The input is an opaque `dotmac-files` id plus its SHA-256, not an inline payload. Validation and apply independently hash the raw bytes, and each locked call advances one resumable durable checkpoint. ERP, then Sub, then CRM are the candidate cutovers; ERP E8 still gates source-product retirement. |
+| `ImportRunRow` | `mod_imports.import_run_rows` | `dotmac-imports` optional module | One minimised outcome per input line — `ok | error | skipped`, a canonical row fingerprint, bounded typed safe error detail, and the domain applier's opaque result. Mapped row values and raw exception text are not retained. Carries NO foreign key into a domain table: Sub's shared row table welded `payment_id` into the ledger, and the reference runs the other way here (ADR-0025 § 3). |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -1185,6 +1269,9 @@ write:
 | Runtime brand stylesheet projection | `app.features.presentation.service.project_brand_stylesheet` is the sole composer: kernel-resolved brand data in, public `dotmac_ui` generator out. `web.py` only guards scope and applies response policy; templates only link the route. No stored CSS, parallel renderer, or Template Studio writer exists |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
+| Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |
+| Stored-file metadata and physical state | `dotmac_files.service.stage_file` / `request_deletion`, then the explicit target→external-action→record-result phases (`deletion_target` → `delete_object` → `finalize_purge`; `reconciliation_target` → `observe_object` → `record_presence`). DB phases filter explicit `TenantScope` and flush without commit/rollback; provider phases accept no `Session`, so no network call or download stream holds a DB transaction. The owner covers only provider/byte state. Domain attachment relations, read authorization, retention permission, document meaning, and import outcomes remain with the domain that references the opaque file UUID (ADR-0022). |
+| Import run and row outcomes | `dotmac_imports.service` — `create_dry_run`, `validate_next_chunk` (which takes no applier and therefore cannot mutate a domain), `promote` (digest-verified, uniquely constrained so a validated run applies once), `apply_next_chunk`, `mark_failed`. A chunk call locks the run, hashes and decodes the recorded bytes, resumes after the committed checkpoint, and returns without committing; `dotmac_kernel.db` remains the one transaction authority. Completed re-delivery is a no-op. Expected domain refusals are typed `RowRejected` outcomes; unexpected exceptions roll back the attempted chunk and escape. The importing domain remains the sole writer of its own rows through the `RowValidator`/`RowApplier` ports, and owns any reversal of what an import created (ADR-0025). |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
 
 ### Known dual-writer: Parties (auth register vs. parties service)

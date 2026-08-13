@@ -6,10 +6,27 @@ table, which both tables reference. Cross-lineage ordering is `depends_on` by
 rule — a `down_revision` across owners would splice two independently released
 lineages into one chain and make either un-releasable.
 
-Everything is fully qualified to `mod_tkt`. Hard rule 11 for both tables:
-`tenant_id NOT NULL`, composite uniques including `tenant_id`, RLS ENABLEd *and*
-FORCEd, a tenant-isolation policy, and the online-role grants. FORCE matters —
-without it the table owner, which migrations run as, bypasses its own policy.
+Everything is fully qualified to `mod_tkt`.
+
+## Two planes, two contracts (ADR-0023)
+
+This lineage creates FOUR tables in two planes, held to opposite contracts.
+
+**Tenant plane** (`tickets`, `ticket_comments`) — hard rule 11: `tenant_id NOT
+NULL`, composite uniques including `tenant_id`, RLS ENABLEd *and* FORCEd, a
+tenant-isolation policy, and the online-role grants. FORCE matters — without it
+the table owner, which migrations run as, bypasses its own policy.
+
+**Platform plane** (`platform_tickets`, `platform_ticket_comments`) — no
+`tenant_id`, no RLS, GRANT to `platform_api`/`app_admin` and **REVOKE ALL from
+`app_user`**. The revoke is the load-bearing half: on this plane the privilege
+boundary IS the isolation, so it is checked by the kernel's live-catalog gate as
+strictly as an RLS policy is on the tenant side. A control-plane ticket about a
+deployment or a licence delivery belongs to the vendor, not to a tenant, and
+minting a sentinel tenant to satisfy a column is the dodge ADR-0023 rejects.
+
+No foreign key crosses the two planes, and the kernel gate refuses one that
+does. They share a lifecycle, never a row.
 
 ## No CHECK constraint on `status`
 
@@ -50,11 +67,15 @@ _SCHEMA = "mod_tkt"
 
 _TICKETS = "tickets"
 _COMMENTS = "ticket_comments"
+_PLATFORM_TICKETS = "platform_tickets"
+_PLATFORM_COMMENTS = "platform_ticket_comments"
 
 
 def upgrade() -> None:
     op.execute("CREATE SCHEMA IF NOT EXISTS mod_tkt;")
-    op.execute("GRANT USAGE ON SCHEMA mod_tkt TO app_user, platform_api;")
+    # `app_admin` joins the two online roles because the platform plane below
+    # grants it DML: schema USAGE is a prerequisite for reaching any table in it.
+    op.execute("GRANT USAGE ON SCHEMA mod_tkt TO app_user, platform_api, app_admin;")
 
     op.create_table(
         _TICKETS,
@@ -199,8 +220,128 @@ def upgrade() -> None:
         "TO platform_api;"
     )
 
+    # ── Platform plane (ADR-0023) ───────────────────────────────────────────
+    # No tenant_id, no RLS, and REVOKEd from app_user. See this file's docstring
+    # for why that is a contract rather than an omission.
+    op.create_table(
+        _PLATFORM_TICKETS,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("number", sa.String(40), nullable=False),
+        sa.Column("title", sa.String(255), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("status", sa.String(32), nullable=False),
+        sa.Column("status_reason", sa.String(64), nullable=True),
+        sa.Column("priority", sa.String(16), nullable=False),
+        sa.Column("channel", sa.String(16), nullable=True),
+        sa.Column("requested_by_id", sa.Uuid(), nullable=True),
+        sa.Column("assigned_to_id", sa.Uuid(), nullable=True),
+        sa.Column("assigned_team_id", sa.Uuid(), nullable=True),
+        sa.Column("due_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("merged_into_id", sa.Uuid(), nullable=True),
+        sa.Column(
+            "tags",
+            sa.JSON().with_variant(postgresql.JSONB(), "postgresql"),
+            nullable=True,
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        # Single-column, unlike the tenant plane's composite: with no tenant
+        # column there is no cross-tenant merge to make unrepresentable.
+        sa.ForeignKeyConstraint(
+            ["merged_into_id"],
+            ["mod_tkt.platform_tickets.id"],
+            ondelete="SET NULL",
+            name="fk_platform_tickets_merged_into",
+        ),
+        # Control-plane-wide, not per tenant. There is no tenant to scope by,
+        # and the vendor genuinely runs ONE numbering series.
+        sa.UniqueConstraint("number", name="uq_platform_tickets_number"),
+        schema=_SCHEMA,
+    )
+    op.create_index(
+        "ix_platform_tickets_status", _PLATFORM_TICKETS, ["status"], schema=_SCHEMA
+    )
+    op.create_index(
+        "ix_platform_tickets_assignee",
+        _PLATFORM_TICKETS,
+        ["assigned_to_id"],
+        schema=_SCHEMA,
+    )
+
+    op.create_table(
+        _PLATFORM_COMMENTS,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("ticket_id", sa.Uuid(), nullable=False),
+        sa.Column("body", sa.Text(), nullable=False),
+        sa.Column(
+            "is_internal", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
+        sa.Column("author_id", sa.Uuid(), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["ticket_id"],
+            ["mod_tkt.platform_tickets.id"],
+            ondelete="CASCADE",
+            name="fk_platform_ticket_comments_ticket",
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_index(
+        "ix_platform_ticket_comments_ticket",
+        _PLATFORM_COMMENTS,
+        ["ticket_id"],
+        schema=_SCHEMA,
+    )
+
+    # Literal per table, same reason as the tenant grants above. The REVOKE is
+    # last so a future edit adding a grant cannot silently outrank it, and it is
+    # the half that actually isolates this plane.
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_tkt.platform_tickets "
+        "TO platform_api;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_tkt.platform_tickets "
+        "TO app_admin;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_tkt.platform_ticket_comments "
+        "TO platform_api;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_tkt.platform_ticket_comments "
+        "TO app_admin;"
+    )
+    op.execute("REVOKE ALL ON mod_tkt.platform_tickets FROM app_user;")
+    op.execute("REVOKE ALL ON mod_tkt.platform_ticket_comments FROM app_user;")
+
 
 def downgrade() -> None:
+    op.execute("DROP TABLE IF EXISTS mod_tkt.platform_ticket_comments CASCADE;")
+    op.execute("DROP TABLE IF EXISTS mod_tkt.platform_tickets CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_tkt.ticket_comments CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_tkt.tickets CASCADE;")
     # The schema itself is left in place: a product link table generated by

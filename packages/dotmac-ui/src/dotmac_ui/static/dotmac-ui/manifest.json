@@ -1,9 +1,9 @@
 {
   "assets": [
     {
-      "bytes": 29446,
+      "bytes": 30026,
       "path": "dotmac-ui/dotmac-ui-1.css",
-      "sha256": "25a471beae7b5dbb5ebf8da51d3720ffeb48a3af6b7c6401da1809ea5f440fb6"
+      "sha256": "15b9be32bdae1fad8a2da6c9bd906901e484a2ccae121713175c3a99c19d7173"
     }
   ],
   "name": "dotmac-ui",

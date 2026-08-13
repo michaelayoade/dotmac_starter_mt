@@ -12,7 +12,7 @@ import dataclasses
 
 import pytest
 from dotmac_kernel.features import FeatureManifest, load_manifests
-from dotmac_kernel.modules import ModuleManifest, ModuleRegistry
+from dotmac_kernel.modules import ModuleManifest, ModuleRegistry, ModuleRegistryError
 from dotmac_kernel.namespaces import (
     ASSEMBLY_MIGRATION_OWNER,
     HOST_MIGRATION_OWNERS,
@@ -50,6 +50,7 @@ def _module(
     prefix: str = "bl",
     branch: str | None = None,
     tables: tuple[str, ...] = (),
+    platform_tables: tuple[str, ...] = (),
 ) -> ModuleManifest:
     return ModuleManifest(
         code=code,
@@ -58,6 +59,7 @@ def _module(
         migration_prefix=prefix,
         migration_branch=branch,
         tables=tables,
+        platform_tables=platform_tables,
     )
 
 
@@ -178,13 +180,92 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # something that arrives unnoticed with a module. `application_directory`
     # (ADR-0021) is the fifth, and the first allocated for an assembly other
     # than this repository's — its consumer is the Tenant Workspace.
+    # `files` is the sixth, allocated to the optional byte-lifecycle owner in
+    # ADR-0022, and `imports` the seventh, to the bulk-import run ledger in
+    # ADR-0025. None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
         "release_catalog",
         "entitlement_allocation",
         "application_directory",
+        "files",
+        "imports",
     }
+
+
+# ── The two planes (ADR-0023) ───────────────────────────────────────────────
+
+
+def test_a_table_declared_in_both_planes_is_rejected() -> None:
+    """One table, one plane.
+
+    Declaring both would ask the live-catalog gate to hold the table to two
+    opposite isolation contracts at once — tenant-scoped WITH forced RLS and
+    control-plane WITHOUT it — and whichever branch ran second would decide,
+    silently.
+    """
+    with pytest.raises(ModuleRegistryError) as exc:
+        _module(tables=("tickets",), platform_tables=("tickets",))
+    assert "BOTH the tenant and platform planes" in str(exc.value)
+
+
+def test_declared_tables_is_the_union_and_the_platform_set_is_the_subset() -> None:
+    """`declared_tables` stays the full OWNERSHIP set the gate checks in both
+    directions; the platform set is only the classification on top of it."""
+    owner = MigrationOwner(
+        owner="billing", prefix="bl", branch_label="billing", db_schema="mod_bill"
+    )
+    registry = NamespaceRegistry.from_manifests(
+        [_module(tables=("invoices",), platform_tables=("vendor_invoices",))],
+        ledger=_ledger(owner),
+    )
+    assert registry.declared_tables("mod_bill") == frozenset(
+        {"invoices", "vendor_invoices"}
+    )
+    assert registry.declared_platform_tables("mod_bill") == frozenset(
+        {"vendor_invoices"}
+    )
+
+
+def test_a_module_with_no_platform_plane_declares_an_empty_set() -> None:
+    """Every module shipped before ADR-0023, and most after it. The default must
+    be "tenant-only", never "unclassified"."""
+    owner = MigrationOwner(
+        owner="billing", prefix="bl", branch_label="billing", db_schema="mod_bill"
+    )
+    registry = NamespaceRegistry.from_manifests(
+        [_module(tables=("invoices",))], ledger=_ledger(owner)
+    )
+    assert registry.declared_platform_tables("mod_bill") == frozenset()
+
+
+def test_the_registry_also_refuses_a_table_smuggled_into_both_planes() -> None:
+    """Defence in depth for the manifest check above.
+
+    `from_manifests` is duck-typed on purpose — it reads `tables` and
+    `platform_tables` off anything that answers `migration_owner()`, so an
+    object that is not a `ModuleManifest` never runs that validation. Claiming
+    both planes in ONE pass is what makes "one table, one plane" hold for those
+    too, rather than only for well-behaved manifests.
+    """
+
+    class _Smuggler:
+        tables = ("entries",)
+        platform_tables = ("entries",)
+
+        @staticmethod
+        def migration_owner() -> MigrationOwner:
+            return MigrationOwner(
+                owner="billing",
+                prefix="bl",
+                branch_label="billing",
+                db_schema="mod_bill",
+            )
+
+    owner = _Smuggler.migration_owner()
+    with pytest.raises(DuplicateTableOwnerError):
+        NamespaceRegistry.from_manifests([_Smuggler()], ledger=_ledger(owner))
 
 
 def test_an_unallocated_module_cannot_own_a_namespace() -> None:

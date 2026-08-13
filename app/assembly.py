@@ -50,9 +50,7 @@ from app.features.presentation.contract import BRAND_STYLESHEET_URL
 
 def _presentation_stylesheets(disabled_modules: frozenset[str]) -> tuple[str, ...]:
     """The links whose routes/assets this exact assembly actually mounts."""
-    dynamic = (
-        () if "presentation" in disabled_modules else (BRAND_STYLESHEET_URL,)
-    )
+    dynamic = () if "presentation" in disabled_modules else (BRAND_STYLESHEET_URL,)
     return (dotmac_ui.stylesheet_url(), *dynamic)
 
 

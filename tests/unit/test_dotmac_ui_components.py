@@ -25,6 +25,7 @@ from pathlib import Path
 
 import dotmac_ui
 import pytest
+from dotmac_ui.a11y import NON_TEXT_CONTRAST_MINIMUM, token_contrast
 from dotmac_ui.components import COMPONENTS, ComponentContract
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -55,7 +56,7 @@ def _render(contract: ComponentContract, **kwargs: object) -> str:
 @pytest.mark.parametrize("contract", COMPONENTS, ids=lambda c: c.macro)
 def test_components_render_on_a_clean_host(contract: ComponentContract) -> None:
     """No custom filter, no global, no request — stock Jinja only."""
-    rendered = _render(contract, message="Nothing here")
+    rendered = _render(contract)
     assert rendered.strip(), f"{contract.macro} rendered nothing"
 
 
@@ -99,6 +100,63 @@ def test_declared_parameters_match_the_macro_signature(
     assert tuple(macro.arguments) == contract.parameters
 
 
+def test_empty_state_publishes_the_proven_product_signature() -> None:
+    """ERP, Sub and CRM agree on this core even though their wrappers differ.
+
+    The stable order lets ERP's cutover adapter map its positional legacy call
+    once. Product-specific aliases, inferred illustrations and raw SVG are
+    deliberately not part of the shared contract.
+    """
+    assert dotmac_ui.EMPTY_STATE.parameters == (
+        "title",
+        "message",
+        "action_label",
+        "action_url",
+    )
+
+
+def test_empty_state_preserves_the_product_call_shape() -> None:
+    """Port the independently used logical core, after the product adapter."""
+    env = _clean_environment()
+    template = env.get_template(dotmac_ui.EMPTY_STATE.template)
+    macro = getattr(template.module, dotmac_ui.EMPTY_STATE.macro)
+
+    rendered = str(
+        macro(
+            "No Invoices",
+            "Create one to begin billing this customer.",
+            "New Invoice",
+            "/finance/ar/invoices/new",
+        )
+    )
+
+    assert 'class="dmui-empty-state__title"' in rendered
+    assert "No Invoices" in rendered
+    assert 'class="dmui-empty-state__message"' in rendered
+    assert "Create one to begin billing this customer." in rendered
+    assert 'href="/finance/ar/invoices/new"' in rendered
+    assert "New Invoice" in rendered
+
+
+def test_empty_state_icons_are_decorative_and_unfocusable() -> None:
+    rendered = _render(
+        dotmac_ui.EMPTY_STATE,
+        title="No invoices",
+        action_label="New invoice",
+        action_url="/invoices/new",
+    )
+    assert rendered.count('aria-hidden="true"') == 2
+    assert rendered.count('focusable="false"') == 2
+
+
+def test_empty_state_visual_meets_non_text_contrast() -> None:
+    for mode in ("light", "dark"):
+        ratio = token_contrast("text-muted", "surface-secondary", mode)
+        assert (
+            ratio >= NON_TEXT_CONTRAST_MINIMUM
+        ), f"empty-state visual contrast is {ratio:.2f}:1 in {mode} mode"
+
+
 def test_published_classes_are_exactly_the_contracts_union() -> None:
     expected: set[str] = set()
     for contract in COMPONENTS:
@@ -123,15 +181,26 @@ def test_component_css_resolves_entirely_through_tokens() -> None:
     assert not offenders, f"component CSS carries raw colour literals: {offenders}"
 
 
-def test_the_optional_action_is_omitted_when_no_url_is_given() -> None:
-    without = _render(dotmac_ui.EMPTY_STATE, message="No parties found")
-    assert "dmui-empty-state__action" not in without
+def test_the_optional_action_requires_both_label_and_url() -> None:
+    without_action = _render(dotmac_ui.EMPTY_STATE, title="No parties found")
+    label_only = _render(
+        dotmac_ui.EMPTY_STATE,
+        title="No parties found",
+        action_label="New Party",
+    )
+    url_only = _render(
+        dotmac_ui.EMPTY_STATE,
+        title="No parties found",
+        action_url="/admin/parties/create",
+    )
+    for rendered in (without_action, label_only, url_only):
+        assert "dmui-empty-state__action" not in rendered
 
     with_action = _render(
         dotmac_ui.EMPTY_STATE,
-        message="No parties found",
-        action_url="/admin/parties/create",
+        title="No parties found",
         action_label="New Party",
+        action_url="/admin/parties/create",
     )
     assert 'href="/admin/parties/create"' in with_action
     assert "New Party" in with_action
@@ -139,9 +208,43 @@ def test_the_optional_action_is_omitted_when_no_url_is_given() -> None:
 
 def test_rendered_output_escapes_its_arguments() -> None:
     """Autoescaping is the host's setting, but the markup must not defeat it."""
-    rendered = _render(dotmac_ui.EMPTY_STATE, message="<script>alert(1)</script>")
+    rendered = _render(
+        dotmac_ui.EMPTY_STATE,
+        title="<script>title()</script>",
+        message="<script>message()</script>",
+        action_label="<script>label()</script>",
+        action_url='/?next=" onclick="alert(1)',
+    )
     assert "<script>" not in rendered
-    assert "&lt;script&gt;" in rendered
+    assert rendered.count("&lt;script&gt;") == 3
+    assert "&#34; onclick=&#34;" in rendered
+
+
+def _assert_empty_state_has_no_product_specific_seams(source: str) -> None:
+    """The shared core cannot depend on one product's compatibility layer."""
+    markup = re.sub(r"{#.*?#}", "", source, flags=re.DOTALL)
+    forbidden = {
+        "raw SVG input": r"\|\s*safe\b",
+        "host icon helper": r"\bicon_path\s*\(",
+        "host static path": r"[\"']/static/",
+        "ERP compatibility alias": r"\b(?:cta_text|cta_href|action_text)\b",
+        "English-title illustration inference": r"\billustration\b",
+    }
+    found = [name for name, pattern in forbidden.items() if re.search(pattern, markup)]
+    assert not found, f"empty_state carries product-specific seams: {found}"
+
+
+def test_empty_state_has_no_product_specific_seams() -> None:
+    source = (dotmac_ui.template_dir() / dotmac_ui.EMPTY_STATE.template).read_text(
+        encoding="utf-8"
+    )
+    _assert_empty_state_has_no_product_specific_seams(source)
+
+
+def test_the_product_specific_seam_guard_still_bites() -> None:
+    """Sensitivity proof: a raw caller-supplied SVG seam must fail closed."""
+    with pytest.raises(AssertionError, match="raw SVG input"):
+        _assert_empty_state_has_no_product_specific_seams("{{ icon | safe }}")
 
 
 @pytest.mark.slow
