@@ -75,15 +75,6 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 LEDGER_ALLOCATION_RELEASES = {
     "dotmac-release-catalog": "0.1.0a44",
     "dotmac-entitlement-allocation": "0.1.0a45",
-    # ADR-0023 gave files two declared planes, but the capability it consumes
-    # (`platform_tables`, a53) landed BELOW its own namespace allocation (a54),
-    # so the allocation is the higher requirement and this stays the ordinary
-    # case. Ticketing is the exception only because `mod_tkt` was allocated
-    # long before the capability.
-    "dotmac-files": "0.1.0a54",
-    # ADR-0025. Tenant-plane only, so no kernel capability raises its floor
-    # above the release that allocated `mod_imports` — the ordinary case.
-    "dotmac-imports": "0.1.0a55",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -95,10 +86,20 @@ LEDGER_ALLOCATION_RELEASES = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
-    # ADR-0023: dual-plane. Its manifest passes `platform_tables`, added in a53;
-    # `mod_tkt` itself was allocated back in a39, so the capability is the
-    # higher requirement. Currently the only module in this shape.
-    "dotmac-ticketing": ("0.1.0a53", "0.1.0a39"),
+    # ADR-0006 D1 amendment: every lineage below declares `ModuleManifest
+    # .requires` and its root calls `resolve_depends_on` /
+    # `require_prerequisites`. All three arrived in a56, so a kernel below that
+    # cannot import the manifest, let alone run the migration — which is why
+    # these moved out of LEDGER_ALLOCATION_RELEASES rather than keeping their
+    # allocation floors.
+    "dotmac-application-directory": ("0.1.0a56", "0.1.0a46"),
+    "dotmac-files": ("0.1.0a56", "0.1.0a54"),
+    "dotmac-imports": ("0.1.0a56", "0.1.0a55"),
+    "dotmac-template-studio": ("0.1.0a56", "0.1.0a13"),
+    # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
+    # prerequisite contract raises it again. The floor is always the highest
+    # capability the module actually consumes, not the first one that moved it.
+    "dotmac-ticketing": ("0.1.0a56", "0.1.0a39"),
 }
 
 

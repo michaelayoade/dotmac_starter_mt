@@ -270,7 +270,7 @@ def test_the_release_floor_is_the_kernel_that_allocated_the_schema() -> None:
     manifest = tomllib.loads(
         (PACKAGE.parents[1] / "pyproject.toml").read_text(encoding="utf-8")
     )
-    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a55"
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a56"
 
 
 def test_every_exported_name_resolves() -> None:

@@ -35,7 +35,7 @@ what `dotmac_kernel.prerequisites` refuses to do.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Final
 
 import sqlalchemy as sa
@@ -260,30 +260,38 @@ def verify_tenant_scope_catalog(bind: Connection) -> None:
 
 # ── module_database_roles.v1 ────────────────────────────────────────────────
 
-#: `rolbypassrls` is checked only for `app_admin`: it is the whole point of that
-#: role (offline/migration work must see every tenant's rows), and an
-#: `app_admin` without it turns every maintenance job into a silent zero-row
-#: success. The two online roles must NOT have it, for the mirror-image reason.
-_REQUIRED_ROLES: Final[dict[str, bool]] = {
-    "app_admin": True,
-    "app_user": False,
-    "platform_api": False,
-}
+#: `app_admin` must be able to bypass RLS — offline/migration work has to see
+#: every tenant's rows, and an `app_admin` that cannot turns maintenance into
+#: silent zero-row success. The two ONLINE roles must not, for the mirror-image
+#: reason: they carry request traffic, and a request that bypasses RLS defeats
+#: every composed module's tenant isolation at once.
+_ONLINE_ROLES: Final[tuple[str, ...]] = ("app_user", "platform_api")
+_OFFLINE_ROLES: Final[tuple[str, ...]] = ("app_admin",)
+_REQUIRED_ROLES: Final[tuple[str, ...]] = (*_OFFLINE_ROLES, *_ONLINE_ROLES)
 
 
 def verify_module_database_roles(bind: Connection) -> None:
-    """Prove the three grantable roles exist, with the right RLS posture."""
+    """Prove the three grantable roles exist, with the right RLS posture.
+
+    `rolsuper` is checked as well as `rolbypassrls`, because **a superuser
+    bypasses RLS regardless of that flag.** An earlier draft read only
+    `rolbypassrls`, so `app_user SUPERUSER NOBYPASSRLS` satisfied the
+    prerequisite while silently defeating tenant isolation for every module in
+    the deployment. This mirrors the existing live-catalog invariant
+    (`tests/test_rls_catalog.py`), which already requires both false.
+    """
     name = MODULE_DATABASE_ROLES_V1.name
     if bind.dialect.name != "postgresql":
         return
 
     rows = bind.execute(
         sa.text(
-            "SELECT rolname, rolbypassrls FROM pg_roles WHERE rolname = ANY(:names)"
+            "SELECT rolname, rolbypassrls, rolsuper FROM pg_roles "
+            "WHERE rolname = ANY(:names)"
         ),
         {"names": list(_REQUIRED_ROLES)},
     ).all()
-    found = {str(row[0]): bool(row[1]) for row in rows}
+    found = {str(row[0]): (bool(row[1]), bool(row[2])) for row in rows}
 
     missing = sorted(set(_REQUIRED_ROLES) - set(found))
     if missing:
@@ -295,23 +303,69 @@ def verify_module_database_roles(bind: Connection) -> None:
             "cluster access",
         )
 
-    for role, expected_bypass in _REQUIRED_ROLES.items():
-        if found[role] is not expected_bypass:
-            posture = "BYPASSRLS" if expected_bypass else "NOBYPASSRLS"
+    for role in _ONLINE_ROLES:
+        bypasses, superuser = found[role]
+        if bypasses or superuser:
+            reason = "SUPERUSER" if superuser else "BYPASSRLS"
             _fail(
                 name,
-                f"role {role!r} must be {posture}; an online role that bypasses "
-                "RLS defeats every module's tenant isolation, and an app_admin "
-                "that does not turns maintenance into silent zero-row success",
+                f"online role {role!r} is {reason}, so it bypasses row-level "
+                "security and every composed module's tenant isolation with it. "
+                "A superuser bypasses RLS whether or not rolbypassrls is set, "
+                "which is why both are checked",
+            )
+
+    for role in _OFFLINE_ROLES:
+        bypasses, superuser = found[role]
+        if not (bypasses or superuser):
+            _fail(
+                name,
+                f"role {role!r} can neither bypass RLS nor act as superuser, so "
+                "offline and migration work would silently read zero rows",
             )
 
 
 # ── Dispatch ────────────────────────────────────────────────────────────────
 
-_VERIFIERS: Final[dict[str, Any]] = {
+#: A prerequisite's verifier. Takes the migration's bind; raises to refuse.
+Verifier = Callable[[Connection], None]
+
+
+class PrerequisiteVerifierMissingError(RuntimeError):
+    """A prerequisite is registered and bound, but nothing can prove it."""
+
+
+_VERIFIERS: dict[str, Verifier] = {
     TENANT_SCOPE_CATALOG_V1.name: verify_tenant_scope_catalog,
     MODULE_DATABASE_ROLES_V1.name: verify_module_database_roles,
 }
+
+
+def register_verifier(name: str, verifier: Verifier) -> None:
+    """Register the live check for a product-owned prerequisite.
+
+    `register_prerequisites` opens the VOCABULARY; this opens ENFORCEMENT, and
+    both halves are needed for the registry to be genuinely open. Registering a
+    spec without a verifier used to leave a product-owned prerequisite passing
+    declaration and binding, then dying on a `KeyError` mid-migration — an
+    "extension point" that only worked for the two effects the kernel shipped.
+
+    A prerequisite is a claim about the database, so a product that names one
+    must say how to prove it.
+    """
+    prerequisite(name)
+    existing = _VERIFIERS.get(name)
+    if existing is not None and existing is not verifier:
+        raise PrerequisiteVerifierMissingError(
+            f"prerequisite {name!r} already has a different verifier — one "
+            "effect has one proof, and a changed contract is a new `.vN`"
+        )
+    _VERIFIERS[name] = verifier
+
+
+def registered_verifiers() -> Mapping[str, Verifier]:
+    """Every registered verifier, for diagnostics and coverage checks."""
+    return dict(_VERIFIERS)
 
 
 def require_prerequisites(bind: Connection, names: Sequence[str]) -> None:
@@ -348,11 +402,24 @@ def require_prerequisites(bind: Connection, names: Sequence[str]) -> None:
     validate_prerequisites(names)
     for name in names:
         prerequisite(name)
-        _VERIFIERS[name](bind)
+        verifier = _VERIFIERS.get(name)
+        if verifier is None:
+            raise PrerequisiteVerifierMissingError(
+                f"prerequisite {name!r} is registered and bound but has no "
+                "verifier, so nothing can prove it against this database. "
+                "Register one with "
+                "`dotmac_kernel.migrations.verify.register_verifier(...)` — an "
+                "effect that cannot be proven must not be silently assumed."
+            )
+        verifier(bind)
 
 
 __all__ = [
     "PrerequisiteNotSatisfiedError",
+    "PrerequisiteVerifierMissingError",
+    "Verifier",
+    "register_verifier",
+    "registered_verifiers",
     "require_prerequisites",
     "verify_module_database_roles",
     "verify_tenant_scope_catalog",

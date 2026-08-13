@@ -121,15 +121,16 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
 
 
 def test_files_is_release_allowlisted_with_its_schema_allocation() -> None:
-    result = _resolve("dotmac-files", version="0.1.0a1")
+    result = _resolve("dotmac-files", version="0.1.0a2")
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
-    # `mod_files` is allocated in a54. ADR-0023's `platform_tables` landed
-    # earlier (a53), so unlike ticketing the module's own namespace row is the
-    # HIGHER requirement and this stays the ordinary floor rule.
-    assert emitted["kernel_floor"] == "0.1.0a54"
+    # `mod_files` is allocated in a54, but the floor is now a56: the lineage
+    # declares `requires` and calls `resolve_depends_on` / `require_prerequisites`
+    # (ADR-0006 D1 amendment), all added in a56, so an earlier kernel cannot
+    # import the manifest at all. Capability over allocation, as with ticketing.
+    assert emitted["kernel_floor"] == "0.1.0a56"
     assert emitted["db_schema"] == "mod_files"
-    assert emitted["tag"] == "dotmac-files-v0.1.0a1"
+    assert emitted["tag"] == "dotmac-files-v0.1.0a2"
 
 
 def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
@@ -137,20 +138,20 @@ def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
 
     A module absent from the allowlist is not merely unreleased — it is
     unreleasable, so `first_cutover` names a cutover no product can begin. The
-    kernel floor is `0.1.0a53`, and deliberately NOT the `0.1.0a39` that added
-    `TICKETING_MIGRATION_OWNER` to `MIGRATION_OWNER_LEDGER`. This module is
-    dual-plane (ADR-0023), so its manifest passes `platform_tables` — a field
-    `a49` introduced — and an earlier kernel raises `TypeError` at import,
-    before the allocation check is ever reached. The higher floor wins, which
-    makes this a module whose floor is set by a kernel CAPABILITY rather than
-    by its own namespace row.
+    kernel floor is `0.1.0a56`, and deliberately NOT the `0.1.0a39` that added
+    `TICKETING_MIGRATION_OWNER` to `MIGRATION_OWNER_LEDGER`. This module's floor
+    has been raised by a kernel CAPABILITY twice rather than by its own
+    namespace row: first `platform_tables` (ADR-0023, dual-plane), then the
+    logical prerequisite contract (ADR-0006 D1 amendment, a56) that its manifest
+    and migration root now use. The floor is always the highest capability the
+    module actually consumes.
     """
-    result = _resolve("dotmac-ticketing", version="0.1.0a1")
+    result = _resolve("dotmac-ticketing", version="0.1.0a2")
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
-    assert emitted["kernel_floor"] == "0.1.0a53"
+    assert emitted["kernel_floor"] == "0.1.0a56"
     assert emitted["db_schema"] == "mod_tkt"
-    assert emitted["tag"] == "dotmac-ticketing-v0.1.0a1"
+    assert emitted["tag"] == "dotmac-ticketing-v0.1.0a2"
 
 
 def test_only_ticketing_may_require_alembic_at_runtime() -> None:

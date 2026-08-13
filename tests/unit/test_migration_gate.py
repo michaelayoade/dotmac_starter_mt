@@ -756,6 +756,42 @@ def test_a_binding_to_a_lineage_that_never_claimed_the_effect_is_rejected(
     assert "does not declare" in _messages(report)
 
 
+def test_a_binding_to_an_unknown_owner_is_rejected_not_skipped(
+    tmp_path: Path,
+) -> None:
+    """A typo in `provider_owner` used to SKIP the `provides` check entirely, so
+    a misspelt lineage name silently disabled the guard below it. An owner that
+    cannot be checked is refused."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "0001_root", "kernal")],
+    )
+    assert not report.ok
+    assert "not an owner in this composition" in _messages(report)
+
+
+def test_a_binding_whose_revision_belongs_to_another_lineage_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Both halves individually plausible, the pair a lie — the shape a review
+    skims past. `bl_0001_invoices` is real and `kernel` is real; the revision
+    just is not the kernel's."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "bl_0001_invoices", "kernel")],
+    )
+    assert not report.ok
+    assert "actually belongs to 'billing'" in _messages(report)
+
+
 def test_a_binding_to_an_uncomposed_revision_is_rejected(tmp_path: Path) -> None:
     """A binding naming a revision this deployment never runs — the failure the
     old physical `depends_on` produced, now caught at the binding instead."""

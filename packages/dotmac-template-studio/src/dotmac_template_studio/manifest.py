@@ -40,7 +40,7 @@ from dotmac_template_studio.web import router as web_router
 
 module = ModuleManifest(
     code="template_studio",
-    version="0.1.0a1",
+    version="0.2.0a3",
     api_routers=[api_router],
     web_routers=[web_router],
     nav=[NavItem("Templates", "/admin/templates")],

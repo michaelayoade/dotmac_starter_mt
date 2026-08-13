@@ -765,9 +765,18 @@ def _check_prerequisites(
                     "supply an effect must not compose a module needing it"
                 )
                 continue
-            # 3 — bound to a lineage that never claimed the effect.
+            # 3 — bound to an owner nothing in this composition knows. An
+            # earlier draft SKIPPED this case, so a typo in `provider_owner`
+            # silently disabled the `provides` check below it.
             claimed = provides_by_owner.get(binding.provider_owner)
-            if claimed is not None and name not in claimed:
+            if claimed is None:
+                violations.append(
+                    f"module {code!r} requires {name!r}, bound to lineage "
+                    f"{binding.provider_owner!r}, which is not an owner in this "
+                    "composition — an unknown owner cannot be checked, so it is "
+                    "refused rather than skipped"
+                )
+            elif name not in claimed:
                 violations.append(
                     f"module {code!r} requires {name!r}, bound to revision "
                     f"{binding.provider_revision!r} of lineage "
@@ -781,6 +790,18 @@ def _check_prerequisites(
                     f"{binding.provider_revision!r}, which is not in any "
                     "selected version location — the binding names a revision "
                     "this deployment never runs"
+                )
+                continue
+            # 5 — the revision exists, but in a DIFFERENT lineage than the one
+            # the binding names. Both halves are then individually plausible and
+            # the pair is a lie, which is exactly what a review skims past.
+            actual = owner_of_revision.get(binding.provider_revision)
+            if actual is not None and actual.owner != binding.provider_owner:
+                violations.append(
+                    f"module {code!r} requires {name!r}, bound to revision "
+                    f"{binding.provider_revision!r} declared as lineage "
+                    f"{binding.provider_owner!r} — that revision actually "
+                    f"belongs to {actual.owner!r}"
                 )
 
     # The revision file and the manifest must agree, or one of them is stale.

@@ -61,11 +61,17 @@ which is imported by migrations only.
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Final
+
+#: Dotted `module.path:ATTRIBUTE` naming this assembly's binding sequence, for
+#: entry points that never run `env.py` (`alembic heads`, `history`, `show`).
+BINDINGS_ENV_VAR: Final[str] = "DOTMAC_MIGRATION_BINDINGS"
 
 # ── Name shape ──────────────────────────────────────────────────────────────
 
@@ -331,6 +337,38 @@ def binding_for(name: str) -> PrerequisiteBinding:
     return found
 
 
+def autoload_bindings() -> bool:
+    """Install bindings named by ``DOTMAC_MIGRATION_BINDINGS``, if set.
+
+    ``module.path:ATTRIBUTE``. Returns True when bindings were installed.
+
+    This exists because `env.py` is not the only entry point into a revision
+    map. `alembic heads`, `alembic history` and `alembic show` build the map
+    WITHOUT running `env.py`, so a migration that resolved its edge purely from
+    `install_prerequisite_bindings` made those commands crash. An environment
+    variable is the one channel available to both paths.
+    """
+    spec = os.environ.get(BINDINGS_ENV_VAR, "").strip()
+    if not spec:
+        return False
+    module_path, _, attribute = spec.partition(":")
+    if not module_path or not attribute:
+        raise PrerequisiteError(
+            f"{BINDINGS_ENV_VAR}={spec!r} must be 'module.path:ATTRIBUTE' naming "
+            "this assembly's PrerequisiteBinding sequence"
+        )
+    module = import_module(module_path)
+    try:
+        bindings = getattr(module, attribute)
+    except AttributeError:
+        raise PrerequisiteError(
+            f"{BINDINGS_ENV_VAR} names {attribute!r} in {module_path!r}, which "
+            "does not define it"
+        ) from None
+    install_prerequisite_bindings(bindings)
+    return True
+
+
 def resolve_depends_on(names: Sequence[str]) -> tuple[str, ...]:
     """Turn a lineage's logical `requires` into real Alembic `depends_on`.
 
@@ -345,9 +383,29 @@ def resolve_depends_on(names: Sequence[str]) -> tuple[str, ...]:
     This is the whole point of the indirection: the physical ordering edge still
     exists and Alembic orders exactly as it always did, but the edge is authored
     by the assembly that knows the answer rather than by the module that cannot.
-    Unbound raises here, at script load, before any DDL runs.
+
+    ## Why an unbound assembly does not raise here
+
+    Raising at import looked right and broke `alembic heads`, `alembic history`
+    and `alembic show`, none of which run `env.py` — so none of them had any
+    bindings, and merely INSPECTING the graph crashed. A revision map built for
+    inspection must not explode.
+
+    So: nothing installed at all means nobody has answered yet, which is the
+    graph-inspection case, and the edge resolves empty. Something installed but
+    not THIS prerequisite is a real assembly misconfiguration and still raises.
+
+    Ordering correctness does not rest on this function refusing. It rests on
+    `env.py` installing bindings before every `alembic upgrade`, on the composed
+    gate rejecting an unbound requirement at build time, and on
+    `require_prerequisites` proving the effects against the database before any
+    DDL. Set `DOTMAC_MIGRATION_BINDINGS` to keep the inspected graph faithful too.
     """
     validate_prerequisites(names)
+    with _lock:
+        installed = bool(_bindings)
+    if not installed and not autoload_bindings():
+        return ()
     return tuple(binding_for(name).provider_revision for name in names)
 
 
@@ -357,7 +415,9 @@ def binding_map() -> Mapping[str, str]:
 
 
 __all__ = [
+    "BINDINGS_ENV_VAR",
     "KERNEL_PREREQUISITES",
+    "autoload_bindings",
     "MODULE_DATABASE_ROLES_V1",
     "TENANT_SCOPE_CATALOG_V1",
     "DuplicateBindingError",

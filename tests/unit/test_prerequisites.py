@@ -14,6 +14,7 @@ import pytest
 from dotmac_kernel.modules import ModuleManifest, ModuleRegistryError
 from dotmac_kernel.namespaces import MigrationOwner
 from dotmac_kernel.prerequisites import (
+    BINDINGS_ENV_VAR,
     KERNEL_PREREQUISITES,
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
@@ -22,6 +23,7 @@ from dotmac_kernel.prerequisites import (
     InvalidPrerequisiteNameError,
     InvalidRevisionReferenceError,
     PrerequisiteBinding,
+    PrerequisiteError,
     PrerequisiteSpec,
     UnboundPrerequisiteError,
     UnknownPrerequisiteError,
@@ -209,6 +211,84 @@ def test_a_different_assembly_binds_the_same_effect_to_its_own_revision() -> Non
     assert resolve_depends_on((TENANT_SCOPE_CATALOG_V1.name,)) == (
         "20260813_tenant_projection",
     )
+
+
+# ── Graph inspection must not explode ───────────────────────────────────────
+
+
+def test_an_unbound_assembly_resolves_empty_rather_than_raising() -> None:
+    """`alembic heads`, `history` and `show` build the revision map WITHOUT
+    running `env.py`, so they have no bindings at all. An earlier draft raised
+    here, which made merely INSPECTING the graph crash. Nothing installed means
+    nobody has answered yet, which is the inspection case."""
+    assert resolve_depends_on((TENANT_SCOPE_CATALOG_V1.name,)) == ()
+
+
+def test_a_partially_bound_assembly_still_raises() -> None:
+    """The distinction that keeps the tolerance above from hiding a real fault:
+    SOME bindings installed means an assembly HAS answered, so a missing one is
+    a misconfiguration rather than an uninitialised map."""
+    install_prerequisite_bindings(
+        [PrerequisiteBinding(TENANT_SCOPE_CATALOG_V1.name, KERNEL_ROOT, "kernel")]
+    )
+    with pytest.raises(UnboundPrerequisiteError):
+        resolve_depends_on((MODULE_DATABASE_ROLES_V1.name,))
+
+
+def test_bindings_autoload_from_the_environment(monkeypatch) -> None:
+    """The channel that keeps the INSPECTED graph faithful too, since an env var
+    reaches both entry points and `install_prerequisite_bindings` reaches one."""
+    monkeypatch.setenv(
+        BINDINGS_ENV_VAR, "app.migration_bindings:ASSEMBLY_PREREQUISITE_BINDINGS"
+    )
+    assert resolve_depends_on((TENANT_SCOPE_CATALOG_V1.name,)) == (KERNEL_ROOT,)
+
+
+def test_a_malformed_autoload_pointer_is_refused(monkeypatch) -> None:
+    monkeypatch.setenv(BINDINGS_ENV_VAR, "app.migration_bindings")
+    with pytest.raises(PrerequisiteError, match="module.path:ATTRIBUTE"):
+        resolve_depends_on((TENANT_SCOPE_CATALOG_V1.name,))
+
+
+# ── Enforcement is open too ─────────────────────────────────────────────────
+
+
+def test_a_product_prerequisite_without_a_verifier_fails_loudly() -> None:
+    """The registry advertises itself as open. Registering a spec used to be
+    enough to pass declaration and binding, then die on a `KeyError` mid-
+    migration — an extension point that only worked for the kernel's own two
+    effects. An effect that cannot be proven must not be silently assumed."""
+    from dotmac_kernel.migrations.verify import (
+        PrerequisiteVerifierMissingError,
+        require_prerequisites,
+    )
+
+    register_prerequisites(
+        [PrerequisiteSpec("unproven_effect.v1", "a product supplies this")]
+    )
+    install_prerequisite_bindings(
+        [PrerequisiteBinding("unproven_effect.v1", "pr_0001_thing", "product")]
+    )
+    with pytest.raises(PrerequisiteVerifierMissingError, match="register_verifier"):
+        # Raises before the bind is touched, so None never reaches a query.
+        require_prerequisites(None, ("unproven_effect.v1",))  # type: ignore[arg-type]
+
+
+def test_a_product_can_register_its_own_verifier() -> None:
+    """Sensitivity proof for the check above, and the property that makes the
+    registry genuinely open rather than open-looking."""
+    from dotmac_kernel.migrations.verify import register_verifier, require_prerequisites
+
+    seen: list[object] = []
+    register_prerequisites(
+        [PrerequisiteSpec("provable_effect.v1", "a product supplies this")]
+    )
+    register_verifier("provable_effect.v1", lambda bind: seen.append(bind))
+    install_prerequisite_bindings(
+        [PrerequisiteBinding("provable_effect.v1", "pr_0001_thing", "product")]
+    )
+    require_prerequisites(None, ("provable_effect.v1",))  # type: ignore[arg-type]
+    assert seen == [None]
 
 
 # ── Declaration sites ───────────────────────────────────────────────────────

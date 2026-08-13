@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-imports"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac bulk-import run ledger, dry-run/apply promotion and column mapping"
 authors = ["DotMac"]
 readme = "README.md"
@@ -12,7 +12,7 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a55"
+dotmac-kernel = ">=0.1.0a56"
 sqlalchemy = "^2.0"
 
 [build-system]
