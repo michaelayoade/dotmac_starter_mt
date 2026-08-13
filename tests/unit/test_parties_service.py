@@ -254,7 +254,7 @@ def test_search_parties_escapes_like_wildcards(db: Session, tenant_row: Tenant) 
 
     # Search for "50%" should match only the literal "50%" party
     results = parties_service.search_parties(
-        db, q="50%", party_type=None, limit=50, offset=0
+        db, parties_service.PARTY_LIST.build_query(search="50%", filters={})
     )
     assert len(results) == 1
     assert results[0].id == p1.id
@@ -275,7 +275,9 @@ def test_count_parties_escapes_like_wildcards(db: Session, tenant_row: Tenant) -
         PersonPartyCreate(email="505@example.com", first_name="505", last_name="Name"),
     )
 
-    count = parties_service.count_parties(db, q="50%", party_type=None)
+    count = parties_service.count_parties(
+        db, parties_service.PARTY_LIST.build_query(search="50%", filters={})
+    )
     assert count == 1
 
 

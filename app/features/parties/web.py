@@ -37,15 +37,15 @@ Parties" section) — this router only validates, authorizes (via
 
 from __future__ import annotations
 
-import math
 from uuid import UUID
 
 from dotmac_kernel.deps import get_db, require_tenant
 from dotmac_kernel.exceptions import ConflictError
+from dotmac_kernel.listing import PageMeta, request_needs_canonicalization
 from dotmac_kernel.models import Party, PartyType, Tenant
 from dotmac_kernel.templating import render
 from dotmac_kernel.web_deps import require_web_auth
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -60,24 +60,11 @@ from app.features.parties.schemas import (
 
 router = APIRouter(prefix="/admin/parties", tags=["web"])
 
-PAGE_SIZE = 20
+#: The list's page size, sort and filter vocabulary now live in
+#: `parties_service.PARTY_LIST`. The old module-level `PAGE_SIZE` constant and
+#: the `_party_type_filter` parser are gone: the definition owns the page-size
+#: options, and the service owns turning a declared filter's VALUE into an enum.
 _VALID_TABS = {"person", "organization"}
-
-
-def _party_type_filter(value: str | None) -> PartyType | None:
-    """`?party_type=` query param -> `PartyType | None`.
-
-    An unrecognized value (garbled query string, stale bookmark) degrades to
-    "no filter" rather than a 422 — this is a search filter, not a payload
-    schema; being permissive here matches `list_parties`'s own optional
-    `party_type` shape.
-    """
-    if not value:
-        return None
-    try:
-        return PartyType(value)
-    except ValueError:
-        return None
 
 
 def _field_errors(exc: ValidationError) -> dict[str, str]:
@@ -138,27 +125,64 @@ def index(
     request: Request,
     q: str | None = None,
     party_type: str | None = None,
+    sort: str | None = None,
+    dir: str | None = None,
     page: int = Query(default=1, ge=1),
+    per_page: int | None = Query(default=None),
     db: Session = Depends(get_db),
     tenant: Tenant = Depends(require_tenant),
     auth: dict = Depends(require_web_auth),
-) -> HTMLResponse:
-    parsed_type = _party_type_filter(party_type)
-    offset = (page - 1) * PAGE_SIZE
-    parties = parties_service.search_parties(
-        db, q=q, party_type=parsed_type, limit=PAGE_SIZE, offset=offset
+) -> HTMLResponse | RedirectResponse:
+    """The parties list, normalized by `parties_service.PARTY_LIST`.
+
+    This route validates, authorizes and delegates: it does not decide what is
+    sortable, what the page size may be, or how a page number becomes an
+    offset. An undeclared sort field or page size raises `ValueError` from
+    `build_query`, which the error middleware renders as a 400 — a stale
+    bookmark for a column that no longer exists fails loudly instead of
+    silently falling back to a different ordering.
+
+    A page past the end used to render an empty table while the URL still
+    claimed page 99. `PageMeta` clamps it and, on a full-page load,
+    `request_needs_canonicalization` turns that into a redirect to the URL that
+    actually describes what is on screen. The HTMX branch does not redirect —
+    an `hx-get` swaps a fragment, and the client already pushed the URL.
+    """
+    list_query = parties_service.PARTY_LIST.build_query(
+        search=q,
+        filters={"party_type": party_type},
+        sort_by=sort,
+        sort_dir=dir,
+        page=page,
+        per_page=per_page,
     )
-    total = parties_service.count_parties(db, q=q, party_type=parsed_type)
-    total_pages = max(1, math.ceil(total / PAGE_SIZE))
+    total = parties_service.count_parties(db, list_query)
+    page_meta = PageMeta.from_query(list_query, total)
+    if page_meta.page != list_query.page:
+        list_query = list_query.with_page(page_meta.page)
+
+    is_htmx = bool(request.headers.get("HX-Request"))
+    if not is_htmx and request_needs_canonicalization(
+        list_query,
+        search=q,
+        filters={"party_type": party_type},
+        sort_by=sort,
+        sort_dir=dir,
+        page=page,
+        per_page=per_page,
+    ):
+        return RedirectResponse(
+            list_query.url(str(request.url.path)), status_code=status.HTTP_303_SEE_OTHER
+        )
+
     context = {
-        "parties": parties,
-        "q": q or "",
-        "party_type": party_type or "",
-        "page": page,
-        "total": total,
-        "total_pages": total_pages,
+        "parties": parties_service.search_parties(db, list_query),
+        "list_query": list_query,
+        "page_meta": page_meta,
+        "q": list_query.search or "",
+        "party_type": list_query.filter_value("party_type") or "",
     }
-    if request.headers.get("HX-Request"):
+    if is_htmx:
         return render(request, "admin/parties/_table.html", context)
     context.update({"active_nav": "parties", "page_title": "Parties"})
     return render(request, "admin/parties/index.html", context)

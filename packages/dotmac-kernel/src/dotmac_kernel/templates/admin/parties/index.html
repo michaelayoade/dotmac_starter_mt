@@ -5,7 +5,8 @@
   `organization_profile` eagerly loaded — see
   app.features.parties.service.search_parties), `q` (current search string,
   "" when unset), `party_type` (current filter value: "", "person", or
-  "organization"), `page`, `total`, `total_pages`.
+  "organization"), `list_query` and `page_meta` (the normalized list state
+  from `parties_service.PARTY_LIST` — see `dotmac_kernel.listing`).
 
   Fragment vs full page (app.features.parties.web.index): a plain browser
   GET renders this full template (extends layouts/admin.html); an htmx

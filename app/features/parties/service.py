@@ -30,7 +30,13 @@ from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import BadRequestError, ConflictError, NotFoundError
 from dotmac_kernel.idempotency import execute_once, fingerprint_of
 from dotmac_kernel.identity import normalize_email, person_display_name
-from dotmac_kernel.listing import apply_pagination, escape_like
+from dotmac_kernel.listing import (
+    ListDefinition,
+    ListFieldDefinition,
+    ListQuery,
+    apply_pagination,
+    escape_like,
+)
 from dotmac_kernel.models import (
     Party,
     PartyOrganization,
@@ -314,21 +320,69 @@ def list_parties(
     return list(db.scalars(stmt).unique().all())
 
 
-def _search_filter(
-    stmt: Select, *, q: str | None, party_type: PartyType | None
-) -> Select:
-    """Shared WHERE-clause builder for `search_parties`/`count_parties` (Task
-    4) — one place for the filter shape so the count and the page of rows it
-    paginates can never drift apart.
+#: What the admin parties list can be searched, filtered and sorted by.
+#:
+#: Declared here, in the owning service, and NOT in a registry or on the
+#: feature manifest: a registry is only justified once something must discover
+#: lists across modules, and inventing one first would add a second place for a
+#: list to be declared (`dotmac_kernel.listing`'s module docstring).
+#:
+#: `search` is a virtual capability spanning `display_name` and `email` — the
+#: definition names the CAPABILITY, `_search_filter` owns how it maps to
+#: columns.
+PARTY_LIST: ListDefinition = ListDefinition(
+    key="parties",
+    fields=(
+        ListFieldDefinition("search", "Search", searchable=True),
+        ListFieldDefinition("party_type", "Type", filterable=True),
+        ListFieldDefinition("display_name", "Name", sortable=True),
+        ListFieldDefinition("created_at", "Created", sortable=True),
+    ),
+    default_sort="created_at",
+    default_sort_dir="desc",
+    default_per_page=25,
+)
 
-    LIKE-escaping is `dotmac_kernel.listing.escape_like` (moved there so
-    `rbac.service.list_grantable_parties` can share it — see that helper's
-    docstring).
+#: `sort_by` key -> the column it orders by. An explicit map rather than
+#: `getattr(Party, key)`: the key is already validated against
+#: `PARTY_LIST.sortable_keys`, but a map keeps "sortable" a decision about the
+#: LIST rather than an accident of which attributes the model happens to expose.
+_SORT_COLUMNS = {
+    "display_name": Party.display_name,
+    "created_at": Party.created_at,
+}
+
+
+def _party_type_of(query: ListQuery) -> PartyType | None:
+    """The `party_type` filter as an enum, or None.
+
+    An unrecognized value degrades to "no filter" rather than raising: this is
+    a search filter reached from a stale bookmark or a garbled query string,
+    not a payload schema. `ListDefinition` has already rejected an undeclared
+    filter NAME; this is about an undeclared VALUE for a declared filter.
     """
+    raw = query.filter_value("party_type")
+    if not raw:
+        return None
+    try:
+        return PartyType(raw)
+    except ValueError:
+        return None
+
+
+def _search_filter(stmt: Select, query: ListQuery) -> Select:
+    """Shared WHERE-clause builder for `search_parties`/`count_parties` — one
+    place for the filter shape so the count and the page of rows it paginates
+    can never drift apart.
+
+    LIKE-escaping is `dotmac_kernel.listing.escape_like` (shared with
+    `rbac.service.list_grantable_parties` — see that helper's docstring).
+    """
+    party_type = _party_type_of(query)
     if party_type is not None:
         stmt = stmt.where(Party.party_type == party_type)
-    if q:
-        like = f"%{escape_like(q)}%"
+    if query.search:
+        like = f"%{escape_like(query.search)}%"
         stmt = stmt.where(
             or_(
                 Party.display_name.ilike(like, escape="\\"),
@@ -338,37 +392,44 @@ def _search_filter(
     return stmt
 
 
-def search_parties(
-    db: Session,
-    *,
-    q: str | None,
-    party_type: PartyType | None,
-    limit: int,
-    offset: int,
-) -> list[Party]:
-    """Free-text (display_name/email) + party_type filtered listing for the
-    admin parties screen (Task 4's index/search/filter/pagination).
+def _apply_sort(stmt: Select, query: ListQuery) -> Select:
+    """Order by the query's validated sort field and direction.
+
+    NOT `dotmac_kernel.listing.apply_ordering`: that helper predates the list
+    contract and takes no direction, so it can only sort ascending. Unifying
+    the two is a kernel change and therefore gated by ADR-0017 — until then the
+    direction-aware version lives here, over a validated key.
+    """
+    column = _SORT_COLUMNS[query.sort_by]
+    return stmt.order_by(column.desc() if query.sort_dir == "desc" else column.asc())
+
+
+def search_parties(db: Session, query: ListQuery) -> list[Party]:
+    """One page of the admin parties list, described entirely by `query`.
+
+    The query carries its own search term, filters, sort and window — the
+    caller no longer passes `limit`/`offset`, because deriving them from a page
+    number was one of the places the route and the template could disagree.
 
     Same RLS-only tenant-scoping convention as `list_parties` above — no
     explicit `tenant_id` filter; RLS enforces it, and
     `tests/test_party_isolation.py` is the canary that would catch drift.
     """
-    stmt = _search_filter(select(Party), q=q, party_type=party_type).options(
+    stmt = _search_filter(select(Party), query).options(
         joinedload(Party.person_profile), joinedload(Party.organization_profile)
     )
-    stmt = stmt.order_by(Party.created_at.desc())
-    stmt = apply_pagination(stmt, limit=limit, offset=offset)
+    stmt = _apply_sort(stmt, query)
+    stmt = apply_pagination(stmt, limit=query.per_page, offset=query.offset)
     return list(db.scalars(stmt).unique().all())
 
 
-def count_parties(db: Session, *, q: str | None, party_type: PartyType | None) -> int:
-    """Total row count for `search_parties`' filters — powers the index
-    page's pagination (page X of Y), computed with the SAME `_search_filter`
-    so the count and the page it describes can never disagree.
+def count_parties(db: Session, query: ListQuery) -> int:
+    """Total row count for `query`'s filters — the input to `PageMeta`.
+
+    Computed with the SAME `_search_filter` as `search_parties` so the count
+    and the page it describes can never disagree.
     """
-    stmt = _search_filter(
-        select(func.count()).select_from(Party), q=q, party_type=party_type
-    )
+    stmt = _search_filter(select(func.count()).select_from(Party), query)
     return db.scalar(stmt) or 0
 
 
@@ -387,6 +448,7 @@ def delete_party(db: Session, party_id: UUID) -> None:
 
 
 __all__ = [
+    "PARTY_LIST",
     "Parties",
     "count_parties",
     "create_organization_party",

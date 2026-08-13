@@ -45,25 +45,39 @@
         </tbody>
     </table>
 
-    {% if total_pages > 1 %}
+    {#
+      Pagination reads ListQuery/PageMeta and assembles NO query string of its
+      own. The previous version built one by hand (`"&q=" ~ (q | urlencode)`),
+      which silently dropped every parameter nobody remembered to concatenate —
+      sort and page size among them. `list_query.url(...)` carries the whole
+      canonical state, so a Next link cannot lose a filter.
+
+      Presentation only: `page_meta` has already clamped an out-of-range page,
+      and the route has already redirected a full-page load to the URL that
+      matches. Rendering token-native list macros from `dotmac-ui` is the next
+      slice; this keeps the existing markup and only changes where the URLs and
+      the counts come from.
+    #}
+    {% if page_meta.total_pages > 1 %}
     <div class="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700">
-        <p class="text-sm text-slate-500 dark:text-slate-400">Page {{ page }} of {{ total_pages }} ({{ total }} total)</p>
-        <div class="flex items-center gap-2">
-            {% set qs = "&q=" ~ (q | urlencode) if q else "" %}
-            {% set ts = "&party_type=" ~ (party_type | urlencode) if party_type else "" %}
-            {% if page > 1 %}
-            <button hx-get="/admin/parties?page={{ page - 1 }}{{ qs }}{{ ts }}"
+        <p class="text-sm text-slate-500 dark:text-slate-400" role="status" aria-live="polite">
+            Showing {{ page_meta.start_item }}–{{ page_meta.end_item }} of {{ page_meta.total_items }}
+            (page {{ page_meta.page }} of {{ page_meta.total_pages }})
+        </p>
+        <nav class="flex items-center gap-2" aria-label="Parties pagination">
+            {% if page_meta.has_previous %}
+            <button hx-get="{{ list_query.url('/admin/parties', page=page_meta.page - 1) }}"
                     hx-target="#parties-table"
                     hx-push-url="true"
                     class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">Previous</button>
             {% endif %}
-            {% if page < total_pages %}
-            <button hx-get="/admin/parties?page={{ page + 1 }}{{ qs }}{{ ts }}"
+            {% if page_meta.has_next %}
+            <button hx-get="{{ list_query.url('/admin/parties', page=page_meta.page + 1) }}"
                     hx-target="#parties-table"
                     hx-push-url="true"
                     class="px-3 py-1.5 rounded-lg text-sm border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">Next</button>
             {% endif %}
-        </div>
+        </nav>
     </div>
     {% endif %}
 </div>
