@@ -8,6 +8,35 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-13: Vendor pulls a product-manifest publication seam
+
+Michael directed the build-once product-manifest boundary to proceed after the
+Vendor Control Plane's Entitlement Allocation adoption reached a concrete stop:
+the control plane cannot prove that its configured capability lists came from
+the named target product release. This satisfies decision 2's narrow test — a
+real consumer is blocked today — rather than claiming that a future product may
+eventually need the facility.
+
+The exception is limited to a pure, import-safe contract derived from facilities
+the kernel already owns: `ProductAssemblySpec` and
+`CapabilityCatalogue.from_manifests`. It canonically records one product code,
+one product release version and that assembly's manifest-declared capability
+codes, with a content digest. It adds no persistence, product registry, release
+selection, network client, entitlement decision or list of Dotmac products.
+Concrete product declarations remain in each product assembly; release artifact
+identity and attestation association remain in `dotmac-release-catalog`.
+
+The product-first audit is `docs/inventories/product-manifest-sources.md`. Sub's
+`app/composition.py` is the qualifying source: it already declares the stable
+product name and builds the capability catalogue from four manifests, with
+determinism and ownership tests. ERP has only a compatibility probe and CRM has
+no kernel assembly, so neither is allowed to supply guessed product data.
+
+This amendment does not lift the broader moratorium. The Vendor allocation
+writer remains authoritative until Sub publishes the snapshot, Vendor consumes
+and verifies it, the historical preflight passes, and the legacy allocation
+path is retired in one writer cutover.
+
 ## Amendment, 2026-08-12: `webhooks` names the facility family
 
 Decision 2's gap-list entry `webhooks` covers reusable **inbound and outbound**

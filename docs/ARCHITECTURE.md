@@ -1424,6 +1424,30 @@ supported as the raw role check; both share one `_holds_any_role` query. The
 `rbac` feature's JSON routes are migrated to `require_permission`; every other
 feature still uses `require_role` and migrates one at a time.
 
+### Release-bound product manifests
+
+`ProductAssemblySpec.name` and its installed module manifests are the source of
+one canonical, publishable product fact. `ProductManifestSnapshot.from_assembly`
+validates the module registry, builds `CapabilityCatalogue` from the INSTALLED
+set, and emits canonical JSON containing only the stable product code, the
+release version supplied by the product's build, and sorted declared capability
+codes. Its `sha256:` digest is the digest of those exact bytes.
+
+The ownership split is load-bearing:
+
+- the kernel owns the pure snapshot schema, encoding, digest and parser;
+- each product assembly owns its code, release version and manifest members;
+- `dotmac-release-catalog` associates the document digest with exact artifact
+  bytes as an attestation, without interpreting the document; and
+- a consumer such as the Vendor Control Plane verifies that attestation and
+  projects it through its domain port.
+
+There is no kernel product table, list of ERP/CRM/Sub, release selector, network
+fetch or entitlement decision. `ModuleRegistry.inventory_payload` remains
+deployment diagnostics; `ProductManifestSnapshot` is deliberately narrower and
+release-portable. The product-first evidence and first retirement gate are in
+`docs/inventories/product-manifest-sources.md`.
+
 ## Module database namespaces and migration lineage (ADR-0006 D1)
 
 As-built in kernel `0.1.0a12`. The authority is `dotmac_kernel.namespaces`; the
