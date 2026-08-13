@@ -351,12 +351,14 @@ def cmd_compare_published(args: argparse.Namespace) -> None:
         return found
 
     pin = f"{entry['distribution']}=={args.version}"
+    public_index = os.environ.get("PUBLIC_INDEX_URL", "https://pypi.org/simple")
     with tempfile.TemporaryDirectory() as tmp:
         downloaded = Path(tmp) / "published"
         downloaded.mkdir()
-        # `--no-deps` because only THIS artifact is under comparison, and
-        # `--index-url` alone is correct here for the same reason: nothing else
-        # is being resolved.
+        # `--no-deps` because only THIS artifact is under comparison. The public
+        # index is still required: downloading an sdist makes pip prepare its
+        # metadata in an isolated environment, which resolves the declared build
+        # backend (Poetry Core) before the file reaches this comparison.
         for extra in (["--no-binary", ":all:"], []):
             subprocess.run(
                 [
@@ -368,6 +370,8 @@ def cmd_compare_published(args: argparse.Namespace) -> None:
                     "--no-deps",
                     "--index-url",
                     args.index,
+                    "--extra-index-url",
+                    public_index,
                     "--dest",
                     str(downloaded),
                     *extra,
