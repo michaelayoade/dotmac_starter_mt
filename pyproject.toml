@@ -143,6 +143,12 @@ exclude_dirs = [
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
+markers = [
+    # Not deselected by default — CI must run these. The marker exists so a
+    # developer chasing a fast loop can `-m 'not slow'` deliberately, rather
+    # than the suite quietly skipping the expensive proofs for everyone.
+    "slow: builds an artifact or shells out; seconds, not milliseconds",
+]
 
 [tool.importlinter]
 root_packages = [

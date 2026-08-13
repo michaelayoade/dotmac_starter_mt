@@ -9,6 +9,41 @@ called out here.
 
 ## Unreleased
 
+## 0.1.0a5 — 2026-08-13
+
+The component library opens, with one component. Additive — `UI_CONTRACT_VERSION`
+stays **1**, because publishing a new component class is additive under
+`COMPATIBILITY.md` § "Two version axes".
+
+### Added
+
+- **`dotmac_ui.components`** — the component contract surface: `template_dir()`,
+  `TEMPLATE_NAMESPACE`, `ComponentContract`, `COMPONENTS`, `component_classes()`.
+- **Jinja templates ship as package data**, and the package **still declares no
+  dependencies**. The templates are inert: `dotmac_ui` imports no Jinja, and the
+  HOST adds `template_dir()` to its own environment's search path. A consumer's
+  entire wiring is one more entry in `packaged_template_dirs`.
+- **`empty_state`** (`dotmac_ui/components/empty_state.html`) — the first
+  published component. Signature `(message, action_url, action_label)`;
+  classes `dmui-empty-state`, `__icon`, `__message`, `__action`, all styled
+  through tokens in the compiled stylesheet.
+- `PUBLISHED_COMPONENT_CLASSES` is now **derived** from `COMPONENTS` rather than
+  maintained as a second list, so the registry and the markup cannot disagree.
+
+### Notes for consumers
+
+- Templates are namespaced `dotmac_ui/…`, so adding `template_dir()` to a
+  `ChoiceLoader` **cannot** shadow your own `components/` tree whatever the layer
+  order.
+- A published component assumes **stock Jinja only** — no custom filter, global,
+  context processor, `url_for`, HTMX or Alpine. Every value arrives as a macro
+  argument.
+- Components are styled with `.dmui-*` classes, never utility classes, because
+  you do not compile this package's templates.
+- Two proofs back the above: the templates are asserted present in the built
+  **wheel**, and every component is rendered on a **bare `Environment`** with
+  none of a host's globals installed.
+
 ## 0.1.0a4 — 2026-08-11
 
 Brand overrides become a generated, validated surface. Additive.

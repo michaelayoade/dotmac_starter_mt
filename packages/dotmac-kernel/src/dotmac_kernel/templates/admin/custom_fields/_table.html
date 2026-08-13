@@ -20,7 +20,8 @@
   (see that function's docstring) the same way the values-panel already
   calls it with `visible_in="form"`/`"detail"`.
 #}
-{% from "components/table_macros.html" import table_header, empty_state, status_badge %}
+{% from "components/table_macros.html" import table_header, status_badge %}
+{% from "dotmac_ui/components/empty_state.html" import empty_state %}
 
 <div class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
     <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">

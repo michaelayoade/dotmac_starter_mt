@@ -30,9 +30,9 @@ not because it seemed nice:
    directly.
 4. **`status-<intent>-*` promoted from class scope to root scope.** Sub sets its
    status quartet inside `.status-tone-*` class bodies; a token layer that ships
-   no component classes (U1 ships none — see `contract.PUBLISHED_COMPONENT_CLASSES`)
-   must expose them as tokens so the component layer that arrives later consumes
-   them rather than reinventing them.
+   almost no component classes (see `contract.PUBLISHED_COMPONENT_CLASSES`) must
+   expose them as tokens, so the component layer consumes them rather than
+   reinventing them — which is exactly what `.dmui-empty-state` now does.
 
 **Values carry no product identity.** ADR-0006 § 3 requires the generic
 kernel-default brand layer to be *generic*: Sub's built-in defaults are the real
