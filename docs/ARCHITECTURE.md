@@ -862,10 +862,12 @@ docstring):
   form, the generic JSON editor and the settings API all fail identically — and
   a legacy stored value is inert, because `custom_css` is outside
   `_KNOWN_BRAND_KEYS` and `load_branding` therefore cannot see it. The stored
-  bytes are deliberately NOT erased: `dotmac_kernel.branding
-  .retired_brand_values` reads them back for inventory and export so a
-  legitimate intent can be mapped onto tokens before the data is deleted as a
-  separate act. A denylist was the wrong shape — it had to enumerate every
+  bytes are deliberately NOT erased, and stay readable through the EXISTING
+  authorized surface: the generic settings editor and `GET
+  /settings/branding/ui_branding` return the stored `ui_branding` dict as-is,
+  legacy keys included. So a legitimate intent can be mapped onto tokens before
+  the data is deleted as a separate act, without a bespoke export API for a
+  consumer that does not exist. A denylist was the wrong shape — it had to enumerate every
   dangerous CSS construct while an attacker needed one it had missed.
 
 **Portal-wide resolution (2b.1-T4, finding F4):** `load_branding` used to
@@ -1059,7 +1061,7 @@ source-of-truth for the modules phase 2b introduced. "ST" = `dotmac_starter`
 | Module | Purpose | Port SoT |
 |---|---|---|
 | `dotmac_kernel/templating.py` | Jinja2 environment + `render()`, `static_asset_url` cache-busting | ST (`app/templates.py::_asset_version`/`_static_asset_url`); the `brand`/branding-DB-override wiring is native to this phase |
-| `dotmac_kernel/branding.py` | `get_brand()` (static) + `load_branding()` (DB overlay) + `reject_retired_brand_keys`/`retired_brand_values` | SUB (`app/services/branding_config.py::get_brand`) for the static layer; ST (`app/services/branding.py::get_branding`) for the DB overlay, adapted from ST's single-tenant "one row, no tenant_id" model to this app's tenant-scoped resolver. ST's `sanitize_branding_css` was ported and then RETIRED 2026-08-13 with the `custom_css` field it existed for (ADR-0006 D8) |
+| `dotmac_kernel/branding.py` | `get_brand()` (static) + `load_branding()` (DB overlay) + `reject_retired_brand_keys` | SUB (`app/services/branding_config.py::get_brand`) for the static layer; ST (`app/services/branding.py::get_branding`) for the DB overlay, adapted from ST's single-tenant "one row, no tenant_id" model to this app's tenant-scoped resolver. ST's `sanitize_branding_css` was ported and then RETIRED 2026-08-13 with the `custom_css` field it existed for (ADR-0006 D8) |
 | `dotmac_kernel/web_deps.py` | `require_web_auth`, `WebAuthRedirect`, `safe_next_url`, `is_secure_request` | ST (`app/web/deps.py`), routed through this app's `authenticate_request` shared seam (native adaptation — ST had no bearer/cookie seam to share) |
 | `dotmac_kernel/identity.py` | `normalize_email`, `person_display_name` — the single-owner Party-invariant helpers | native (closes the SOT gap tracked from 2a-T6/T7; no upstream port — see "Known dual-writer: Parties" below) |
 

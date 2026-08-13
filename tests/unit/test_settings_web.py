@@ -12,6 +12,7 @@ seam.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 
 import pytest
@@ -94,6 +95,17 @@ def web_client(db: Session, tenant_row: Tenant) -> TestClient:
 
     app.dependency_overrides[get_db] = _override_get_db
     return TestClient(app, raise_server_exceptions=False)
+
+
+def _stored_ui_branding(db: Session, tenant_row: Tenant) -> dict:
+    """The stored dict as the generic settings surface returns it."""
+    from dotmac_kernel.settings_models import SettingDomain
+    from dotmac_kernel.settings_resolver import resolve_value
+
+    value = resolve_value(
+        db, SettingDomain.branding, "ui_branding", tenant_id=tenant_row.id, default={}
+    )
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _login(client: TestClient, email: str) -> str:
@@ -470,14 +482,19 @@ def test_the_branding_form_no_longer_offers_a_custom_css_field(
     assert "<style>" not in resp.text
 
 
-def test_a_branding_write_carrying_custom_css_is_refused(
+def test_the_friendly_form_cannot_carry_custom_css(
     web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    """The form drops the field, but a hand-crafted POST must still fail.
+    """The form's protection is COMPOSITION, not refusal — stated, not implied.
 
-    Removing an input is not a control: anyone can add the field back with
-    curl. The refusal lives in the `ui_branding` spec validator, so this and
-    the JSON settings editor fail identically.
+    `branding_submit` reads its declared fields and composes only those, so an
+    injected `custom_css` never reaches the write path at all. That is a
+    different mechanism from the refusal, and the earlier version of this test
+    conflated them: it accepted 200 OR 302 and asserted only that nothing was
+    stored, which was true whether or not the guard existed. It could not fail.
+
+    The refusal itself is proved at the two surfaces that DO pass raw values
+    (below) and at the owner in `test_branding.py`.
     """
     token = _login(web_client, provisioned_admin["email"])
 
@@ -495,20 +512,58 @@ def test_a_branding_write_carrying_custom_css_is_refused(
         follow_redirects=False,
     )
 
-    # The form composes only its declared fields, so an injected one is simply
-    # not carried into the write -- the tenant's branding is unaffected either
-    # way, and no CSS is stored.
-    from dotmac_kernel.branding import load_branding, retired_brand_values
-
-    assert "custom_css" not in load_branding(db, tenant_row.id)
-    assert retired_brand_values(db, tenant_row.id) == {}
-    assert resp.status_code in (200, 302)
+    assert resp.status_code == 302, resp.text
+    stored = _stored_ui_branding(db, tenant_row)
+    assert stored["name"] == "Acme Tenant", "the legitimate fields must be written"
+    assert "custom_css" not in stored
 
 
-def test_a_legacy_stored_css_value_reaches_no_rendered_response(
+def test_the_generic_settings_editor_refuses_custom_css(
     web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    """The security property, end to end: hostile bytes stored, never served."""
+    """This surface passes raw JSON straight through, so it must REFUSE."""
+    token = _login(web_client, provisioned_admin["email"])
+
+    resp = web_client.post(
+        "/admin/settings/branding/ui_branding/edit",
+        data={"value": json.dumps({"name": "Acme", "custom_css": ".evil{}"})},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code not in (302, 303), "a refused write must not redirect"
+    assert "custom_css" not in _stored_ui_branding(db, tenant_row)
+
+
+def test_the_settings_api_refuses_custom_css(
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """The third surface. All three land in `update_setting`, so one guard
+    covers them — but only if it actually executes, which is the point."""
+    token = _login(web_client, provisioned_admin["email"])
+
+    resp = web_client.put(
+        "/settings/branding/ui_branding",
+        json={"value": {"name": "Acme", "custom_css": ".evil{}"}},
+        headers={"Authorization": f"Bearer {token}"},
+        cookies={"access_token": token},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "custom_css" in resp.text
+    assert "custom_css" not in _stored_ui_branding(db, tenant_row)
+
+
+def test_a_legacy_stored_css_row_leaves_the_portal_working(
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """Inert must mean INERT: the pages still work and still brand correctly.
+
+    Asserting only that hostile bytes are absent would pass just as well if the
+    page 500'd or the tenant's branding had been blanked -- which is exactly
+    what the first version of this retirement did, by treating a legacy row as
+    an invalid setting.
+    """
     from dotmac_kernel.settings_models import SettingDomain
     from dotmac_kernel.settings_resolver import upsert_by_key
 
@@ -519,7 +574,7 @@ def test_a_legacy_stored_css_value_reaches_no_rendered_response(
         db,
         SettingDomain.branding,
         "ui_branding",
-        {"name": "Legacy Co", "custom_css": hostile},
+        {"name": "Legacy Co", "tagline": "Still branded", "custom_css": hostile},
         tenant_id=tenant_row.id,
     )
     db.commit()
@@ -527,5 +582,12 @@ def test_a_legacy_stored_css_value_reaches_no_rendered_response(
     token = _login(web_client, provisioned_admin["email"])
     for path in ("/admin/settings/branding", "/admin/settings", "/admin"):
         resp = web_client.get(path, cookies={"access_token": token})
+        assert resp.status_code == 200, f"{path} -> {resp.status_code}"
         assert "alert(1)" not in resp.text, path
         assert "</style>" not in resp.text, path
+
+    branding_page = web_client.get(
+        "/admin/settings/branding", cookies={"access_token": token}
+    )
+    assert "Legacy Co" in branding_page.text, "legitimate branding must survive"
+    assert "Still branded" in branding_page.text

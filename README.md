@@ -406,8 +406,9 @@ Then, in a browser (dev resolves `*.localhost` automatically, so no
    custom-fields values panel on the detail page — the cross-feature UI
    composition pattern, see ARCHITECTURE.md), **RBAC** (roles, role
    grants, audit log), **Settings** (per-key editor + a friendly branding
-   editor at `/admin/settings/branding` that live-previews your
-   `primary_color`/`accent_color`/`custom_css`), **Custom Fields**
+   editor at `/admin/settings/branding` for your `name`/`tagline`/`logo_url`/
+   `primary_color`/`accent_color` — tenant-supplied CSS is not accepted),
+   **Custom Fields**
    (definitions CRUD).
 5. `http://widgets.localhost:8000/admin` (a second tenant, its own
    provisioned owner login) sees none of tenant A's data — same RLS

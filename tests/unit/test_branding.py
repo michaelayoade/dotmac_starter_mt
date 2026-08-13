@@ -31,7 +31,6 @@ from dotmac_kernel.branding import (
     get_brand,
     load_branding,
     reject_retired_brand_keys,
-    retired_brand_values,
 )
 from dotmac_kernel.exceptions import BadRequestError
 from dotmac_kernel.settings_models import SettingDomain
@@ -190,6 +189,18 @@ def test_load_branding_is_scoped_per_tenant(db, tenant_row) -> None:
 _HOSTILE_CSS = ".ok{color:red}\n</style><script>alert(1)</script>"
 
 
+def _stored_override(db, tenant_row) -> dict:
+    """The stored `ui_branding` dict, exactly as the generic settings surface
+    returns it — legacy keys included. That surface IS the inventory path; the
+    branding module deliberately grows no bespoke export API for it."""
+    from dotmac_kernel.settings_resolver import resolve_value
+
+    value = resolve_value(
+        db, SettingDomain.branding, "ui_branding", tenant_id=tenant_row.id, default={}
+    )
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _store_legacy_css(db, tenant_row) -> None:
     """Plant a pre-retirement row.
 
@@ -225,11 +236,11 @@ def test_a_legacy_value_survives_for_inventory_and_export(db, tenant_row) -> Non
     """Retiring the feature must not destroy the evidence needed to migrate it."""
     _store_legacy_css(db, tenant_row)
 
-    assert retired_brand_values(db, tenant_row.id) == {"custom_css": _HOSTILE_CSS}
+    assert _stored_override(db, tenant_row)["custom_css"] == _HOSTILE_CSS
 
 
-def test_inventory_is_empty_when_nothing_legacy_is_stored(db, tenant_row) -> None:
-    assert retired_brand_values(db, tenant_row.id) == {}
+def test_no_legacy_value_means_nothing_to_inventory(db, tenant_row) -> None:
+    assert "custom_css" not in _stored_override(db, tenant_row)
 
 
 def test_a_legacy_row_does_not_break_the_rest_of_the_tenants_branding(
@@ -249,7 +260,7 @@ def test_a_legacy_row_does_not_break_the_rest_of_the_tenants_branding(
 
     assert branding["name"] == "Legacy Co", "the rest of the override must survive"
     assert "custom_css" not in branding
-    assert retired_brand_values(db, tenant_row.id) == {"custom_css": _HOSTILE_CSS}
+    assert _stored_override(db, tenant_row)["custom_css"] == _HOSTILE_CSS
 
 
 def test_a_write_naming_a_retired_key_is_refused_not_dropped() -> None:
@@ -260,6 +271,50 @@ def test_a_write_naming_a_retired_key_is_refused_not_dropped() -> None:
     reject_retired_brand_keys({"name": "Fine", "primary_color": "#112233"})
     reject_retired_brand_keys({})
     reject_retired_brand_keys("not a dict")
+
+
+def test_the_write_guard_compares_domains_by_value_not_identity(db, tenant_row) -> None:
+    """The defect this branch shipped once: `is` instead of `==`.
+
+    `SettingDomain` is an open `str` subclass (ADR-0008), and
+    `SettingDomainRegistry.require` returns a FRESH instance, so the domain the
+    service holds is EQUAL to but never IDENTICAL with the module-level
+    constant. An identity check made the refusal dead code while every test
+    still passed.
+
+    This drives `update_setting` the way a route does — through a domain STRING,
+    which is what `require` turns into that fresh instance — and additionally
+    pins the property directly so the reason is legible without reading the
+    service.
+    """
+    from app.features.settings import service as settings_service
+
+    fresh = SettingDomain("branding")
+    assert fresh == SettingDomain.branding
+    assert fresh is not SettingDomain.branding, (
+        "if this ever becomes an interned singleton the guard below still holds, "
+        "but the regression it protects against would no longer be reachable"
+    )
+
+    with pytest.raises(BadRequestError, match="no longer accepts"):
+        settings_service.update_setting(
+            db,
+            tenant_row,
+            "branding",
+            "ui_branding",
+            {"name": "Acme", "custom_css": ".evil{}"},
+        )
+
+
+def test_a_permitted_branding_write_still_succeeds(db, tenant_row) -> None:
+    """Sensitivity proof: the guard must not refuse everything."""
+    from app.features.settings import service as settings_service
+
+    settings_service.update_setting(
+        db, tenant_row, "branding", "ui_branding", {"name": "Acme", "tagline": "Hi"}
+    )
+
+    assert load_branding(db, tenant_row.id)["name"] == "Acme"
 
 
 def test_every_retired_key_is_refused(hidden_key=None) -> None:

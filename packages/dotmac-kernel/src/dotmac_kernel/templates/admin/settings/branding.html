@@ -17,8 +17,8 @@
   both the field and its regex sanitizer were removed on 2026-08-13 (ADR-0006
   D8). A legacy stored value is inert and is never rendered — not even as
   escaped text on this page — so a hostile value cannot reach any response.
-  `dotmac_kernel.branding.retired_brand_values` reads it back out of band for
-  inventory and export.
+  It stays readable for inventory through the generic settings editor, which
+  shows the stored `ui_branding` dict as-is.
 #}
 {% extends "layouts/admin.html" %}
 {% from "components/form_macros.html" import text_input, submit_button %}

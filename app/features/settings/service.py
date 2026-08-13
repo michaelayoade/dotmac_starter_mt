@@ -90,7 +90,12 @@ def update_setting(
     # This is the single write path: the generic per-key editor, the friendly
     # branding form and the JSON settings API all land here, so one check
     # covers all three.
-    if domain_enum is SettingDomain.branding and key == "ui_branding":
+    # `==`, never `is`: SettingDomain is an open `str` subclass (ADR-0008), and
+    # `SettingDomainRegistry.require` returns a FRESH SettingDomain(domain). An
+    # identity check is always False here, which made this guard dead code the
+    # first time it was written -- the refusal never executed and the test
+    # accepted either outcome, so nothing failed.
+    if domain_enum == SettingDomain.branding and key == "ui_branding":
         reject_retired_brand_keys(value)
 
     coerced = validate_spec_value(spec, value)

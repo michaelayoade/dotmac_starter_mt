@@ -325,10 +325,12 @@ import (e.g. `parties/web.py` importing `rbac.service`) is caught by
 - **Template escaping / `| safe` rule.** Jinja2 autoescapes by default;
   `| safe` opts a value OUT of escaping and must only be used on a value
   that has already been sanitized in Python, with a `sanitiz*` comment
-  within 12 lines of the `| safe` use explaining why it's safe (the one real
-  usage today: `templates/admin/settings/branding.html`'s `custom_css`
-  preview, sanitized by `dotmac_kernel.branding.sanitize_branding_css` before
-  `load_branding` ever returns it). Enforced by
+  within 12 lines of the `| safe` use explaining why it's safe. There are
+  **ZERO** usages today: the only one was `branding.html`'s `custom_css`
+  preview, retired with tenant-supplied CSS (ADR-0006 D8). The guard stays —
+  it is about the NEXT `| safe`, not the last one — backed by
+  `test_the_safe_filter_guard_still_bites`, since a check over an empty set
+  passes for the wrong reason. Enforced by
   `tests/architecture/test_web_conventions.py::test_safe_filter_only_used_with_a_sanitize_comment_nearby`.
   Every `templates/admin/**/*.html` + `templates/auth/*.html` file must also
   either `{% extends %}` a layout or be `_`-prefixed (a fragment) —

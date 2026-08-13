@@ -32,9 +32,12 @@ used to be accepted, sanitized by regex, and rendered `| safe` into a
 - a legacy stored value is inert -- `custom_css` is outside
   `_KNOWN_BRAND_KEYS`, so `load_branding` never merges it and no template can
   reach it;
-- the stored value is NOT erased. `retired_brand_values` reads it back for
-  inventory and export, so legitimate intent can be mapped onto tokens before
-  the data is deleted as a separate, deliberate act.
+- the stored value is NOT erased, and stays readable through the EXISTING
+  authorized surface: the generic settings editor and `GET
+  /settings/branding/ui_branding` return the stored `ui_branding` dict as-is,
+  legacy keys included. So legitimate intent can be mapped onto tokens before
+  the data is deleted as a separate, deliberate act, without this module
+  growing a bespoke export API for a consumer that does not exist.
 
 A denylist was the wrong shape for the problem: it had to enumerate every
 dangerous CSS construct, while an attacker needed only one it had not thought
@@ -211,9 +214,9 @@ def load_branding(db: Session, tenant_id: UUID | None) -> dict[str, Any]:
 
     A tenant cannot contribute CSS. `RETIRED_BRAND_KEYS` is outside the
     allowlist, so a legacy `custom_css` value still sitting in a stored
-    override is never merged here and no template can reach it. Reading it out
-    for inventory is `retired_brand_values`, which is deliberately a separate
-    call that returns data rather than a render context.
+    override is never merged here and no template can reach it. It remains
+    readable through the generic settings surface, which returns the stored
+    dict as-is.
     """
     merged: dict[str, Any] = dict(get_brand())
     override = resolve_value(
@@ -265,28 +268,6 @@ def reject_retired_brand_keys(value: Any) -> None:
         )
 
 
-def retired_brand_values(db: Session, tenant_id: UUID | None) -> dict[str, str]:
-    """Legacy values for retired keys, for INVENTORY and export only.
-
-    Reads the stored override directly rather than going through
-    `load_branding`, precisely because `load_branding` can no longer see these
-    keys. Nothing renders this: it exists so an operator can audit what a tenant
-    once supplied, map any legitimate intent onto tokens, and then delete the
-    data as a separate, deliberate act. Erasing it here instead would destroy
-    the evidence needed to do that mapping.
-    """
-    override = resolve_value(
-        db, SettingDomain.branding, "ui_branding", tenant_id=tenant_id, default={}
-    )
-    if not isinstance(override, dict):
-        return {}
-    return {
-        key: str(override[key])
-        for key in sorted(RETIRED_BRAND_KEYS)
-        if key in override and str(override[key]).strip()
-    }
-
-
 def get_request_branding(request: Request, db: Session) -> dict[str, Any]:
     """Resolve THIS request's effective branding exactly once, memoized on
     `request.state.branding` (Task 4 / F4 fix -- see this module's docstring
@@ -315,5 +296,4 @@ __all__ = [
     "load_branding",
     "reject_retired_brand_keys",
     "reset_brand_cache",
-    "retired_brand_values",
 ]
