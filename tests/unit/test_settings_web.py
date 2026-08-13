@@ -43,6 +43,7 @@ from app.features.auth.web import router as auth_web_router
 # Import for the side effect: registers custom_fields/max_per_entity,
 # branding/ui_branding, audit/retention_days into the resolver registry.
 from app.features.settings import spec as _settings_spec  # noqa: F401
+from app.features.settings.router import router as settings_api_router
 from app.features.settings.web import router as settings_web_router
 
 PASSWORD = "correct horse battery staple"
@@ -84,6 +85,10 @@ def web_client(db: Session, tenant_row: Tenant) -> TestClient:
     register_error_handlers(app)
     app.include_router(auth_web_router)
     app.include_router(settings_web_router)
+    # The JSON settings API is a THIRD write surface for the same setting.
+    # Mounted here because a guard that only the web routes exercise is a
+    # guard with an untested hole -- see test_the_settings_api_refuses_custom_css.
+    app.include_router(settings_api_router)
 
     @app.middleware("http")
     async def _inject_tenant(request: Request, call_next):
@@ -579,8 +584,11 @@ def test_a_legacy_stored_css_row_leaves_the_portal_working(
     )
     db.commit()
 
+    # Only the routes this fixture actually mounts. `/admin` belongs to the
+    # `web` feature and is not part of this app, so asserting on it would fail
+    # for a reason that has nothing to do with branding.
     token = _login(web_client, provisioned_admin["email"])
-    for path in ("/admin/settings/branding", "/admin/settings", "/admin"):
+    for path in ("/admin/settings/branding", "/admin/settings"):
         resp = web_client.get(path, cookies={"access_token": token})
         assert resp.status_code == 200, f"{path} -> {resp.status_code}"
         assert "alert(1)" not in resp.text, path
