@@ -283,4 +283,8 @@ def test_the_files_root_names_no_foreign_revision() -> None:
     )
     source = root.read_text(encoding="utf-8")
     assert "resolve_depends_on(REQUIRES)" in source
-    assert "0001_initial_tenant_schema" not in source
+    # Targets the DEFECT — a literal foreign revision assigned to `depends_on` —
+    # not the mere appearance of the string. The migration's docstring names
+    # `0001_initial_tenant_schema` precisely to explain why it no longer depends
+    # on it, and a test that forbade the word would forbid the explanation.
+    assert 'depends_on = ("0001_initial_tenant_schema",)' not in source

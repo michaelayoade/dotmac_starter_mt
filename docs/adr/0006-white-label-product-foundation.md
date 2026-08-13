@@ -377,17 +377,25 @@ asserts nothing about anybody else's.
 back into a real `depends_on` edge at script-load time, so Alembic orders exactly
 as before. What changes is who authors the edge.
 
-**A binding is a claim, so it is never the only control.** Three guards, none of
+**A binding is a claim, so it is never the only control.** Two guards, neither of
 which is a comment:
 
-1. the composed gate rejects an unbound requirement, a binding to a lineage that
-   does not declare the effect, a binding to an uncomposed revision, and a
-   migration requiring more than its manifest admits;
+1. the composed gate rejects a module naming a foreign revision, an unbound
+   requirement, a binding to a lineage that does not declare the effect, a
+   binding to an uncomposed revision, and a migration requiring more than its
+   manifest admits;
 2. `require_prerequisites` verifies the real catalog before any DDL, so a
    **stamped** or aliased provider fails against the database — stamping writes
-   no columns;
-3. an order canary requires the provider revision to be present in
-   `alembic_version`.
+   no columns.
+
+Ordering itself needs no third guard, and an early draft that added one was
+wrong twice over. It asserted the bound revision appeared in `alembic_version`,
+but that table records each branch's current HEAD, not applied history — so the
+check failed against every real database once a lineage advanced past its root.
+It was also redundant: `resolve_depends_on` emits a real `depends_on` edge and
+Alembic will not run a revision before the one it depends on, while a binding
+naming an uncomposed revision is already rejected statically. What only the
+database can answer is whether the EFFECTS are present, which is guard 2.
 
 A blanket `IF EXISTS`, a product-specific conditional inside a kernel migration,
 and `alembic stamp` remain forbidden and are not bindings.

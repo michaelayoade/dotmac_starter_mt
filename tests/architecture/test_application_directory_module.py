@@ -238,7 +238,9 @@ def test_the_lineage_root_is_a_root_and_orders_by_declared_effects() -> None:
         "module_database_roles.v1",
     )
     assert "depends_on = resolve_depends_on(REQUIRES)" in source
-    assert "0001_initial_tenant_schema" not in source
+    # The defect is the literal assignment, not the word: the migration's
+    # comment names that revision to explain why it is no longer depended on.
+    assert 'depends_on = ("0001_initial_tenant_schema",)' not in source
 
 
 def test_the_revision_id_fits_alembics_column() -> None:

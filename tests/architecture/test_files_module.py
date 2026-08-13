@@ -161,7 +161,9 @@ def test_migration_creates_rls_and_grants_in_the_same_revision() -> None:
     assert "depends_on = resolve_depends_on(REQUIRES)" in source
     assert '"tenant_scope_catalog.v1"' in source
     assert '"module_database_roles.v1"' in source
-    assert "0001_initial_tenant_schema" not in source
+    # The defect is the literal assignment, not the word: the docstring names
+    # that revision to explain why it is no longer depended on.
+    assert 'depends_on = ("0001_initial_tenant_schema",)' not in source
     assert "schema=_SCHEMA" in source
     assert "mod_files.stored_files ENABLE ROW LEVEL SECURITY" in source
     assert "mod_files.stored_files FORCE ROW LEVEL SECURITY" in source

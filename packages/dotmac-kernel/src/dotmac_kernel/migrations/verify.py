@@ -19,17 +19,15 @@ the ways that matter most:
   `docs/inventories/migration-collisions.md` found sixteen real instances of,
   and the one that fails quietly in the dangerous direction.
 
-So the binding is checked twice, independently:
+So the real catalog is inspected for the observable effects the
+`PrerequisiteSpec.summary` promises, before any DDL runs. A stamped or aliased
+provider fails here, because stamping writes no columns.
 
-1. **Shape** — the real catalog is inspected for the observable effects the
-   `PrerequisiteSpec.summary` promises. A stamped or aliased provider fails
-   here, because stamping writes no columns.
-2. **Order** — the provider revision must already be recorded in the live
-   version table. A binding pointing at a revision that has not run fails here,
-   before any DDL, rather than producing a half-built schema.
-
-Both raise; neither warns. A prerequisite that cannot be proven is not
+This raises; it never warns. A prerequisite that cannot be proven is not
 satisfied.
+
+Ordering is NOT checked here — see `require_prerequisites` for why the obvious
+version-table check is both wrong and redundant.
 
 Import only from migrations — this module talks to a database, which is exactly
 what `dotmac_kernel.prerequisites` refuses to do.
@@ -37,7 +35,6 @@ what `dotmac_kernel.prerequisites` refuses to do.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from typing import Any, Final
 
@@ -56,10 +53,6 @@ from dotmac_kernel.prerequisites import (
 
 class PrerequisiteNotSatisfiedError(RuntimeError):
     """A declared prerequisite is not actually present in this database."""
-
-
-class PrerequisiteOrderError(RuntimeError):
-    """A provider revision has not been applied before the lineage needing it."""
 
 
 # ── tenant_scope_catalog.v1 ─────────────────────────────────────────────────
@@ -313,7 +306,7 @@ def verify_module_database_roles(bind: Connection) -> None:
             )
 
 
-# ── Order canary + dispatch ─────────────────────────────────────────────────
+# ── Dispatch ────────────────────────────────────────────────────────────────
 
 _VERIFIERS: Final[dict[str, Any]] = {
     TENANT_SCOPE_CATALOG_V1.name: verify_tenant_scope_catalog,
@@ -321,56 +314,8 @@ _VERIFIERS: Final[dict[str, Any]] = {
 }
 
 
-#: A version table name is an IDENTIFIER, so it cannot be a bind parameter. It
-#: reaches us from the Alembic context rather than from a request, but "not
-#: currently attacker-controlled" is not a property worth relying on, so the
-#: name is validated against this before it is ever interpolated.
-_IDENTIFIER_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
-
-
-def _applied_revisions(bind: Connection, version_table: str) -> frozenset[str]:
-    if not _IDENTIFIER_RE.match(version_table):
-        raise ValueError(f"version table {version_table!r} is not a plain identifier")
-    inspector = sa.inspect(bind)
-    if not inspector.has_table(version_table, schema=HOST_SCHEMA):
-        return frozenset()
-    rows = bind.execute(
-        # Validated identifier above; not a value, so it cannot be bound.
-        sa.text(f"SELECT version_num FROM {HOST_SCHEMA}.{version_table}")  # noqa: S608
-    ).all()
-    return frozenset(str(row[0]) for row in rows)
-
-
-def assert_provider_applied(
-    bind: Connection, name: str, *, version_table: str = "alembic_version"
-) -> None:
-    """The order canary: the provider revision must already have run.
-
-    Read from the live version table rather than the script directory, because
-    the failure this catches is a binding pointing at a revision that exists on
-    disk and has not been applied here.
-    """
-    binding = binding_for(name)
-    applied = _applied_revisions(bind, version_table)
-    if binding.provider_revision not in applied:
-        raise PrerequisiteOrderError(
-            f"{name} is bound to {binding.provider_revision!r} (owner "
-            f"{binding.provider_owner!r}), which is not recorded in "
-            f"{HOST_SCHEMA}.{version_table}. The provider must be applied "
-            "before the lineage that requires it — check the binding names the "
-            "revision that actually supplies the effect, and that it is "
-            "composed into this assembly's version_locations."
-        )
-
-
-def require_prerequisites(
-    bind: Connection,
-    names: Sequence[str],
-    *,
-    version_table: str = "alembic_version",
-    check_order: bool = True,
-) -> None:
-    """Verify every declared prerequisite, or refuse to proceed.
+def require_prerequisites(bind: Connection, names: Sequence[str]) -> None:
+    """Verify every declared prerequisite against the database, or refuse.
 
     Call at the top of a requiring migration's `upgrade()`, before any DDL:
 
@@ -383,21 +328,31 @@ def require_prerequisites(
         ...
     ```
 
-    Order is checked first: "the provider never ran" is a more useful diagnosis
-    than the shape failure it would otherwise cause.
+    ## Why there is no "has the provider revision run?" check here
+
+    An earlier draft asserted the bound revision was present in
+    `alembic_version`. That was wrong on a fact about Alembic: the version table
+    records the current HEAD of each branch, not the history of applied
+    revisions. Once the kernel lineage advances past `0001_initial_tenant_schema`
+    that row is simply gone, so the check failed against every real database —
+    which is exactly how CI found it.
+
+    It was also redundant, which is the more useful half of the lesson. Ordering
+    is already guaranteed twice over: `resolve_depends_on` emits a real
+    `depends_on` edge, and Alembic will not run a revision before the one it
+    depends on; and a binding naming a revision that is not composed at all is
+    rejected statically by the gate. What the database can uniquely answer is
+    whether the EFFECTS are present — which is what the verifiers below do, and
+    which a stamped provider fails regardless of what any version table says.
     """
     validate_prerequisites(names)
     for name in names:
         prerequisite(name)
-        if check_order:
-            assert_provider_applied(bind, name, version_table=version_table)
         _VERIFIERS[name](bind)
 
 
 __all__ = [
     "PrerequisiteNotSatisfiedError",
-    "PrerequisiteOrderError",
-    "assert_provider_applied",
     "require_prerequisites",
     "verify_module_database_roles",
     "verify_tenant_scope_catalog",

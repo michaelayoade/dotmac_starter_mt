@@ -117,16 +117,18 @@ specifics) points here and must never fork these rules.
     at script load, so Alembic ordering is unchanged — but a module lineage
     may **never** name a foreign revision itself, because that edge is true
     only in the assembly that wrote it. Host owners (`kernel`, `assembly`)
-    keep literal edges. A binding is a claim, so it is checked three ways:
+    keep literal edges. A binding is a claim, so it is checked two ways:
     the composed gate (`make migration-gate`, also in `make check` and in CI
     *before* `docker-build`) rejects duplicate revisions, prefixes, branch
     labels, schema claims, table ownership, unbound requirements, bindings to
     a lineage that never declared the effect, bindings to an uncomposed
-    revision, and migration/manifest drift; `require_prerequisites` verifies
-    the real catalog before any DDL, so a STAMPED provider fails; and an
-    order canary requires the provider in `alembic_version`. `alembic stamp`,
-    a blanket `IF EXISTS`, and a product conditional inside a kernel
-    migration are not bindings and stay forbidden.
+    revision, and migration/manifest drift; and `require_prerequisites`
+    verifies the real catalog before any DDL, so a STAMPED provider fails.
+    Ordering needs no third check — Alembic enforces the resolved edge, and
+    `alembic_version` records branch HEADS, not applied history, so asserting
+    a root revision appears there is simply wrong. `alembic stamp`, a blanket
+    `IF EXISTS`, and a product conditional inside a kernel migration are not
+    bindings and stay forbidden.
     (`tests/unit/test_namespaces.py`, `tests/unit/test_migration_gate.py`,
     `tests/unit/test_prerequisites.py`,
     `tests/unit/test_live_catalog_contract.py`;
