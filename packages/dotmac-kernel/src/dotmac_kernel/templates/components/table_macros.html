@@ -83,22 +83,23 @@
 </thead>
 {% endmacro %}
 
-{% macro empty_state(message="No items found", action_url=none, action_label="Create") %}
-<div class="text-center py-12">
-    <svg class="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-    </svg>
-    <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">{{ message }}</p>
-    {% if action_url %}
-    <a href="{{ action_url }}" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 transition">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-        </svg>
-        {{ action_label }}
-    </a>
-    {% endif %}
-</div>
-{% endmacro %}
+{#
+  empty_state MOVED to the design system — 2026-08-13, the first component to
+  ship as `dotmac-ui` package data. Import it from there instead:
+
+    {% from "dotmac_ui/components/empty_state.html" import empty_state %}
+
+  Same signature (message, action_url, action_label), so call sites did not
+  change. The markup is now `.dmui-empty-state*` classes resolved from the
+  compiled stylesheet rather than the local Tailwind palette, which is what
+  lets a consumer that does NOT compile this repo's CSS render it correctly.
+  Contract: `dotmac_ui.components.EMPTY_STATE`.
+
+  Do not reintroduce a local copy — that is the second writer ADR-0006 § 5
+  exists to prevent. The one deliberate loss is the small "+" glyph the old
+  action button carried; the design system's action is text-only until an icon
+  slot is part of the published contract.
+#}
 
 {#
   action_buttons: view/edit are plain links. Delete is an hx-post button

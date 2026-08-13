@@ -1,7 +1,7 @@
 /*!
  * dotmac-ui — the DotMac shared UI design system.
  * UI contract version: 1
- * Package version:     0.1.0a4
+ * Package version:     0.1.0a5
  * Accessibility:       WCAG 2.2 Level AA
  *
  * GENERATED FILE — do not edit by hand. The source of truth is
@@ -577,7 +577,7 @@
   }
 }
 
-/* The one base rule this contract ships. WCAG 2.2 SC 2.4.11 (focus
+/* The base rule this contract ships. WCAG 2.2 SC 2.4.11 (focus
  * appearance) is a token-layer promise, so the indicator itself is
  * defined here rather than left to each consumer to re-derive.
  * Deliberately unlayered and at (0,1,0) specificity: an @layer would
@@ -586,4 +586,51 @@
 :focus-visible {
   outline: var(--dmui-focus-ring-width) solid var(--dmui-focus-ring-color);
   outline-offset: var(--dmui-focus-ring-offset);
+}
+
+/* Published components. Contracts: dotmac_ui.components.COMPONENTS */
+.dmui-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--dmui-space-sm);
+  padding: var(--dmui-space-3xl) var(--dmui-space-lg);
+  text-align: center;
+}
+
+.dmui-empty-state__icon {
+  width: var(--dmui-space-3xl);
+  height: var(--dmui-space-3xl);
+  color: var(--dmui-text-muted);
+}
+
+.dmui-empty-state__message {
+  margin: 0;
+  color: var(--dmui-text-secondary);
+  font-family: var(--dmui-font-body);
+  font-size: var(--dmui-font-size-sm);
+  line-height: var(--dmui-line-height-normal);
+}
+
+.dmui-empty-state__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dmui-space-2xs);
+  padding: var(--dmui-space-xs) var(--dmui-space-md);
+  border-radius: var(--dmui-radius-lg);
+  background: var(--dmui-action-primary-default);
+  color: var(--dmui-action-primary-on);
+  font-family: var(--dmui-font-body);
+  font-size: var(--dmui-font-size-sm);
+  font-weight: var(--dmui-font-weight-medium);
+  text-decoration: none;
+  transition: background var(--dmui-duration-fast) var(--dmui-easing-standard);
+}
+
+.dmui-empty-state__action:hover {
+  background: var(--dmui-action-primary-hover);
+}
+
+.dmui-empty-state__action:active {
+  background: var(--dmui-action-primary-pressed);
 }

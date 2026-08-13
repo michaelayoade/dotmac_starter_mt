@@ -87,6 +87,13 @@ assembly = ProductAssemblySpec(
     packaged_static_dirs=(dotmac_ui.static_dir(),),
     # An installed module's admin screens are package data outside this
     # assembly's template root — see `ProductAssemblySpec.packaged_template_dirs`.
-    packaged_template_dirs=(dotmac_template_studio.template_dir(),),
+    # The design system's component library rides the SAME anonymous slot: its
+    # templates are inert data (dotmac-ui imports no Jinja), and every one is
+    # addressed `dotmac_ui/components/...`, so it cannot shadow a module's or
+    # the kernel's own templates whatever the layer order.
+    packaged_template_dirs=(
+        dotmac_template_studio.template_dir(),
+        dotmac_ui.template_dir(),
+    ),
     stylesheets=(dotmac_ui.stylesheet_url(),),
 )

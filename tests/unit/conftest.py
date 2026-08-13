@@ -55,7 +55,7 @@ from dotmac_kernel.setting_value_types import (
     SettingValueTypeRegistry,
     install_setting_value_types,
 )
-from dotmac_kernel.templating import install_surface_globals
+from dotmac_kernel.templating import compose_templates, install_surface_globals
 
 # The in-memory engine + savepoint-isolated session are the kernel's supported
 # test kit (`dotmac_kernel.testing`, kernel-boundary Task 5) — this assembly
@@ -127,6 +127,36 @@ def _default_surface_globals():
     autouse fixture only establishes the baseline before each test runs.
     """
     install_surface_globals(_all_manifests(), disabled=set(), web_enabled=True)
+
+
+@pytest.fixture(autouse=True)
+def _reference_template_composition():
+    """Compose the template loader the way the reference assembly does.
+
+    Third instance of the same hazard as `_default_surface_globals` above, and
+    it bit for real: `compose_templates` mutates the process-static loader
+    behind `dotmac_kernel.templating.templates`, and `create_app` is the only
+    thing that calls it. A unit test that mounts routers on a bare `FastAPI()`
+    -- which most of the web tests do -- therefore rendered against
+    KERNEL-ONLY templates while production rendered against the assembly's
+    full composition.
+
+    That gap was invisible until a kernel template imported a macro from an
+    installed package (`dotmac_ui/components/empty_state.html`), at which point
+    every `/admin` page carrying an empty state 500'd with `TemplateNotFound`
+    in CI while passing every component-level test. The composition is part of
+    the app under test, so the fixtures have to establish it.
+
+    Uses `app.assembly`'s real tuple rather than a hand-listed one, so a
+    package added to the assembly is automatically visible here and this cannot
+    drift from what production loads.
+    """
+    from app.assembly import assembly
+
+    compose_templates(
+        assembly_dir=assembly.assembly_template_dir,
+        packaged_dirs=assembly.packaged_template_dirs,
+    )
 
 
 @pytest.fixture(scope="session")

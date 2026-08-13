@@ -1,6 +1,6 @@
 {
   "_comment": "Frozen hardcoded-palette debt for starter-owned templates. Two-directional ratchet: the gate fails if this rises or falls without being regenerated in the same change. Retire entries by authoring against var(--dmui-*), then run `make palette-baseline`. Do not hand-edit.",
-  "total": 981,
+  "total": 974,
   "files": {
     "packages/dotmac-kernel/src/dotmac_kernel/templates/admin/custom_fields/_table.html": {
       "bg-primary-100": 1,
@@ -434,8 +434,6 @@
       "bg-blue-900": 1,
       "bg-green-100": 1,
       "bg-green-900": 1,
-      "bg-primary-600": 1,
-      "bg-primary-700": 1,
       "bg-red-100": 1,
       "bg-red-50": 1,
       "bg-red-900": 2,
@@ -455,12 +453,11 @@
       "text-red-400": 2,
       "text-red-600": 1,
       "text-red-700": 1,
-      "text-slate-300": 3,
-      "text-slate-400": 9,
-      "text-slate-500": 6,
-      "text-slate-600": 3,
+      "text-slate-300": 2,
+      "text-slate-400": 8,
+      "text-slate-500": 5,
+      "text-slate-600": 2,
       "text-slate-700": 2,
-      "text-white": 1,
       "text-yellow-400": 1,
       "text-yellow-700": 1
     },
