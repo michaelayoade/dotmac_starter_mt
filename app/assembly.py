@@ -8,21 +8,26 @@ composes, plus the deployment-driven surface switches read from the environment.
 **`dotmac-ui` adoption (ADR-0006 U1, and the D5 consumer boundary).** The
 assembly — not the kernel — composes the shared design system, because the
 dependency direction is `assembly → module → dotmac-ui → dotmac-kernel` and the
-kernel may never reach forward to a presentation package. Two lines do it, and
-they are the whole integration:
+kernel may never reach forward to a presentation package. Three declarations
+compose it:
 
 - `packaged_static_dirs` layers `dotmac_ui`'s packaged assets into the existing
   `/static` mount (under any assembly-owned file, over the kernel's), so
   `/static/dotmac-ui/dotmac-ui-1.css` resolves from the installed package
   rather than from a vendored copy;
-- `stylesheets` puts one `<link>` in every page's `<head>`, at the URL
+- the first `stylesheets` entry puts the package `<link>` in every page's
+  `<head>`, at the URL
   `dotmac_ui.stylesheet_url()` builds, complete with its own content-derived
-  cache-busting token.
+  cache-busting token;
+- the second entry loads the assembly-owned `/branding/theme.css` projection
+  after those defaults. The `presentation` feature resolves tenant brand data
+  through the kernel and calls the public `dotmac-ui` generator; neither
+  package reaches across the boundary itself.
 
 Note what is NOT here: no Tailwind step, no build, no toolchain agreement
 (ADR-0006 D3). This assembly compiles its own CSS with Tailwind v4; the design
 system arrives already compiled, and a product on Tailwind v3 — or on no
-Tailwind at all — writes these same two lines.
+Tailwind at all — consumes the same package and adapter contract.
 
 The spec deliberately leaves `assembly_template_dir` / `assembly_static_dir`
 unset — the reference app renders the kernel's packaged templates and serves the
@@ -40,6 +45,16 @@ from dotmac_kernel.config import settings
 from dotmac_kernel.features import load_manifests
 
 from app.features import FEATURE_MODULES
+from app.features.presentation.contract import BRAND_STYLESHEET_URL
+
+
+def _presentation_stylesheets(disabled_modules: frozenset[str]) -> tuple[str, ...]:
+    """The links whose routes/assets this exact assembly actually mounts."""
+    dynamic = (
+        () if "presentation" in disabled_modules else (BRAND_STYLESHEET_URL,)
+    )
+    return (dotmac_ui.stylesheet_url(), *dynamic)
+
 
 # Template Studio owns the CHECKING of a template's placeholders; the product
 # owns the VOCABULARY (ADR-0006 § 5b, ADR-0008 — a vocabulary is a declaration
@@ -66,6 +81,8 @@ dotmac_template_studio.register_contexts(
     )
 )
 
+_DISABLED_MODULES = frozenset(settings.disabled_feature_set)
+
 assembly = ProductAssemblySpec(
     name="dotmac_starter_mt",
     # The assembly's own features, plus every INSTALLED MODULE it composes.
@@ -83,7 +100,7 @@ assembly = ProductAssemblySpec(
         dotmac_ticketing.module,
     ],
     web_enabled=settings.web_enabled,
-    disabled_modules=frozenset(settings.disabled_feature_set),
+    disabled_modules=_DISABLED_MODULES,
     packaged_static_dirs=(dotmac_ui.static_dir(),),
     # An installed module's admin screens are package data outside this
     # assembly's template root — see `ProductAssemblySpec.packaged_template_dirs`.
@@ -95,5 +112,9 @@ assembly = ProductAssemblySpec(
         dotmac_template_studio.template_dir(),
         dotmac_ui.template_dir(),
     ),
-    stylesheets=(dotmac_ui.stylesheet_url(),),
+    # Fixed cascade: product CSS (base.html), dotmac-ui defaults, then runtime
+    # brand data. The dynamic route is assembly-owned and deliberately outside
+    # Template Studio: that module authors notification content; it owns no
+    # brand precedence, token generation or stylesheet delivery.
+    stylesheets=_presentation_stylesheets(_DISABLED_MODULES),
 )

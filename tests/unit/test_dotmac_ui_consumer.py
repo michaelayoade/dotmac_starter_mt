@@ -28,7 +28,7 @@ from dotmac_kernel.templating import install_stylesheets, templates
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
-from app.assembly import assembly
+from app.assembly import _presentation_stylesheets, assembly
 from app.main import app
 
 
@@ -48,7 +48,16 @@ def _reference_stylesheets():
 
 def test_the_reference_assembly_declares_the_design_system() -> None:
     assert assembly.packaged_static_dirs == (dotmac_ui.static_dir(),)
-    assert assembly.stylesheets == (dotmac_ui.stylesheet_url(),)
+    assert assembly.stylesheets == (
+        dotmac_ui.stylesheet_url(),
+        "/branding/theme.css",
+    )
+
+
+def test_disabling_presentation_removes_its_dynamic_link_not_ui_defaults() -> None:
+    assert _presentation_stylesheets(frozenset({"presentation"})) == (
+        dotmac_ui.stylesheet_url(),
+    )
 
 
 def test_the_reference_assembly_declares_the_component_template_dir() -> None:
@@ -115,6 +124,7 @@ def test_every_page_links_the_design_system_stylesheet() -> None:
     this covers the whole HTML surface rather than one screen."""
     rendered = templates.env.get_template("base.html").render()
     assert f'<link rel="stylesheet" href="{dotmac_ui.stylesheet_url()}">' in rendered
+    assert '<link rel="stylesheet" href="/branding/theme.css">' in rendered
 
 
 def test_the_design_system_loads_after_the_assembly_stylesheet() -> None:
@@ -124,6 +134,14 @@ def test_the_design_system_loads_after_the_assembly_stylesheet() -> None:
     rendered = templates.env.get_template("base.html").render()
     assert rendered.index("/static/css/main.css") < rendered.index(
         dotmac_ui.STYLESHEET_RELPATH
+    )
+
+
+def test_runtime_brand_css_loads_after_design_system_defaults() -> None:
+    """Fixed cascade: assembly CSS, UI defaults, then resolved brand data."""
+    rendered = templates.env.get_template("base.html").render()
+    assert rendered.index(dotmac_ui.STYLESHEET_RELPATH) < rendered.index(
+        "/branding/theme.css"
     )
 
 

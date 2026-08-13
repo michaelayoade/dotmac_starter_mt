@@ -50,8 +50,15 @@ from typing import Final
 
 from dotmac_ui.a11y import check_contrast
 from dotmac_ui.color import OKLCH, hex_to_oklch, oklch_to_hex, parse_hex
-from dotmac_ui.contract import TOKEN_PREFIX
-from dotmac_ui.tokens import RAMP_STEPS, channel_variable
+from dotmac_ui.contract import DARK_THEME_SELECTORS, TOKEN_PREFIX
+from dotmac_ui.tokens import (
+    MODES,
+    RAMP_STEPS,
+    channel_variable,
+    colour_tokens,
+    reference_target,
+    token,
+)
 
 __all__ = [
     "BrandOverride",
@@ -246,12 +253,16 @@ def render_brand_css(
     """The `<style>`-able CSS for a brand, plus what the operator should know.
 
     Emits **both** published forms for every generated colour — the whole
-    colour and its `-rgb` channel form. Emitting only the first is the silent
-    failure this module exists to make impossible.
+    colour and its `-rgb` channel form — plus the channel forms of every role
+    that resolves through those ramps. The role channels matter independently:
+    `--dmui-action-primary-default` follows the overridden ramp through
+    `var()`, but its `-rgb` companion is a compiled literal unless this runtime
+    stylesheet re-projects it for light and dark mode.
 
-    The result contains only custom-property declarations inside one selector:
-    there is no place for a URL, an `@import`, a selector of the caller's
-    choosing, or anything else that made `custom_css` unsafe.
+    The result contains only generated custom-property declarations inside the
+    assembly-supplied scope and its dark-mode descendants: there is no place
+    for a tenant URL, `@import`, selector, or anything else that made
+    `custom_css` unsafe.
     """
     warnings: list[BrandWarning] = []
     palette: dict[str, str] = {}
@@ -276,8 +287,61 @@ def render_brand_css(
             f"  {channel_variable(token_name)}: {_channels(value)};",
         )
     ]
+    lines.extend(_dependent_channel_lines(palette, mode="light"))
+    blocks = [_css_block(selector, lines)]
+
+    dark_lines = _dependent_channel_lines(palette, mode="dark")
+    if dark_lines:
+        dark_scope = ",\n".join(_dark_scopes(selector))
+        blocks.append(_css_block(dark_scope, dark_lines))
+
+    return GeneratedBrand("\n".join(blocks), tuple(warnings))
+
+
+def _dependent_channel_lines(palette: dict[str, str], *, mode: str) -> list[str]:
+    """Re-point channel aliases whose reference chain ends in this palette."""
+    if mode not in MODES:
+        raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
+    lines: list[str] = []
+    palette_names = frozenset(palette)
+    for design_token in colour_tokens():
+        if design_token.name in palette_names:
+            continue
+        terminal = _palette_terminal(design_token.name, mode, palette_names)
+        if terminal is not None:
+            lines.append(
+                f"  {channel_variable(design_token.name)}: "
+                f"var({channel_variable(terminal)});"
+            )
+    return lines
+
+
+def _palette_terminal(
+    name: str, mode: str, palette_names: frozenset[str]
+) -> str | None:
+    """The generated ramp token at the end of `name`'s reference chain."""
+    seen: set[str] = set()
+    current = name
+    while current not in seen:
+        seen.add(current)
+        if current in palette_names:
+            return current
+        target = reference_target(token(current).value_for(mode))
+        if target is None:
+            return None
+        current = target
+    raise ValueError(f"token reference cycle while projecting {name!r}")
+
+
+def _dark_scopes(selector: str) -> tuple[str, ...]:
+    if selector == ":root":
+        return DARK_THEME_SELECTORS
+    return tuple(f"{dark} {selector}" for dark in DARK_THEME_SELECTORS)
+
+
+def _css_block(selector: str, lines: list[str]) -> str:
     body = "\n".join(lines)
-    return GeneratedBrand(f"{selector} {{\n{body}\n}}\n", tuple(warnings))
+    return f"{selector} {{\n{body}\n}}\n"
 
 
 def _channels(hex_colour: str) -> str:

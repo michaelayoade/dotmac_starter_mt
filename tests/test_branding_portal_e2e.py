@@ -71,6 +71,17 @@ def test_saved_branding_reflects_on_dashboard_and_own_login_but_not_other_tenant
     )
     assert branding_resp.status_code == 302, branding_resp.text
 
+    # Train 3: the same resolved brand is projected into token CSS on a public
+    # tenant-scoped route, so it is available to the pre-auth login page too.
+    css_a = a.get("/branding/theme.css")
+    assert css_a.status_code == 200
+    assert css_a.headers["content-type"].startswith("text/css")
+    assert css_a.headers["cache-control"] == "private, no-store"
+    assert css_a.headers["x-dotmac-brand-projection"] == "generated"
+    assert "#112233" in css_a.text
+    assert "--dmui-color-brand-" in css_a.text
+    assert "--dmui-color-brand-500-rgb:" in css_a.text
+
     # -----------------------------------------------------------------
     # Portal-wide (F4): the dashboard/sidebar — NOT the branding editor
     # itself — now shows the saved name. Before Task 4, `load_branding` had
@@ -102,6 +113,11 @@ def test_saved_branding_reflects_on_dashboard_and_own_login_but_not_other_tenant
     assert login_page_b.status_code == 200
     assert "Acme A Brand" not in login_page_b.text
     assert get_brand()["name"] in login_page_b.text
+
+    css_b = login_check_b.get("/branding/theme.css")
+    assert css_b.status_code == 200
+    assert "#112233" not in css_b.text
+    assert css_b.text != css_a.text
 
     # -----------------------------------------------------------------
     # Tenant B's dashboard (once it has its own admin) is likewise

@@ -40,6 +40,7 @@ where the work is tracked (`docs/superpowers/phase2-backlog.md`, the
 | Content-Security-Policy | **Met** | Computed-strict default (below); overridable via `CONTENT_SECURITY_POLICY` |
 | Rate limiting | **Met (single-process)** | Bounded LRU store, route-template keys, hash-bucketed unmatched paths (`tests/unit/test_security_baseline.py::TestBoundedRateLimitStore`). Multi-process deployments must swap the store (seam below) |
 | Output encoding / template escaping | **Met** | Jinja2 autoescape; `| safe` requires a nearby sanitize comment (`test_web_conventions.py`) and there are **zero** usages — tenant-supplied `custom_css` was retired 2026-08-13 (ADR-0006 D8), so no response carries tenant-authored CSS |
+| Runtime brand stylesheet | **Met** | Public pre-auth GET accepts a resolved tenant or the exact platform root (empty default CSS); unknown hosts fail closed; generated declarations only; `private, no-store` + `Vary: Host`; no brand inputs in logs; unit route/fallback proofs plus the Postgres two-tenant canary in `tests/test_branding_portal_e2e.py` |
 | Host-header integrity | **Met** | Tenant resolution is exact-host; `TrustedHostMiddleware` in prod (`TRUSTED_HOSTS` prod-required by `validate_settings`) |
 | Secrets hygiene | **Met** | Dev-default secrets are prod-fatal (`validate_settings`); no secret values in repo |
 
@@ -71,8 +72,19 @@ object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
   (the platform screens set `var(--dmui-*)` that way) and Alpine's `x-show`
   toggling. Recovering `style-src 'self'` needs those converted first and is a
   separate slice.
+- Runtime branding is a same-origin `<link>` to `/branding/theme.css`, not an
+  inline tenant `<style>` block. The route requires a resolved tenant scope
+  even though it is pre-auth (the login page needs it), with one explicit
+  exception: the exact platform root receives an empty response because its
+  shared layout has no tenant brand. It emits only generated custom properties
+  and sends `Cache-Control: private, no-store` plus `Vary: Host` so a shared
+  cache cannot replay one tenant's palette to another. Unknown hosts fail
+  closed. Generation failure likewise returns an empty stylesheet and leaves
+  the already-loaded dotmac-ui defaults active.
 - `img-src https:` exists because tenant branding may point `logo_url` at
-  an external image.
+  an external image. That stored field currently has no render consumer; a
+  future logo slice must replace it with a managed same-origin asset contract
+  before tightening this directive.
 
 `tests/unit/test_security_baseline.py::test_strict_csp_has_no_external_origins`
 pins the no-external-origins property.

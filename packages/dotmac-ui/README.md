@@ -1,9 +1,9 @@
 # dotmac-ui
 
 The DotMac shared UI design system: **semantic design tokens**, **compiled
-self-hosted assets**, and an **accessibility contract**. Later slices add the
-Jinja/HTMX component library, layouts, and navigation primitives that ADR-0006
-§ 2 assigns to this package.
+self-hosted assets**, an **accessibility contract**, and a deliberately small
+Jinja component library shipped as inert package data. Later adoption-led
+slices add layouts and navigation primitives that ADR-0006 § 2 assigns here.
 
 - **Public API + stability policy:** `COMPATIBILITY.md` (authoritative manifest:
   `dotmac_ui.__init__`).
@@ -40,7 +40,9 @@ no npm, and no requirement to match a Tailwind major — ERP's v3.4 and the
 starter's v4 consume the identical file. See COMPATIBILITY.md § "The
 compiled-asset boundary" for the worked ERP-on-v3 path.
 
-The reference assembly's entire integration is two lines in `app/assembly.py`.
+The reference assembly's package integration is declared in `app/assembly.py`:
+its static and template roots, compiled stylesheet, and the assembly-owned
+runtime brand projection that loads after the package defaults.
 
 ## Developing it
 

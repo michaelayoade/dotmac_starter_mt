@@ -156,7 +156,7 @@ selectors, and the asset paths above.
 `BrandProfile` overrides at runtime (U2), and a value change is a PATCH. Do not
 pin a colour; pin the role.
 
-Component classes are stable **only where a contract declares them**. As of
+Component classes are stable **only where a contract declares them**. Since
 0.1.0a5 `PUBLISHED_COMPONENT_CLASSES` is derived from
 `dotmac_ui.components.COMPONENTS` and covers exactly the components listed under
 "The component boundary" below; every other `.dmui-*` name remains reserved and
@@ -240,9 +240,16 @@ adopted by any consumer (`dotmac_sub` uses 5,872 opacity modifiers, `dotmac_erp`
 derived channel forms. Both are covered by this package's compatibility promise.
 
 **Two mechanics worth knowing.** Colour *ramps* are mode-independent — a step is
-the same colour in light and dark; what changes is which step a ROLE points at,
-so a runtime brand override re-declares the ramp once and every role follows.
-And *breakpoint* tokens are declared values only: CSS custom properties cannot be
+the same colour in light and dark; what changes is which step a ROLE points at.
+`render_brand_css()` therefore re-declares each generated ramp once and, since
+0.1.0a6, re-points the channel form of every dependent semantic role in both
+modes. Whole role variables already follow the ramp through `var()`; their
+channel companions otherwise retain the compiled package value and make an
+opacity utility disagree with its solid counterpart. Unrelated role channels
+are not restated, so brand projection cannot overwrite a trusted theme outside
+the allowed brand and accent ramps.
+
+*Breakpoint* tokens are declared values only: CSS custom properties cannot be
 read inside a media query's condition, so a consumer mirrors them in its own
 `@media`/container queries rather than referencing them there.
 

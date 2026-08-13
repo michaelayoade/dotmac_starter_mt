@@ -192,8 +192,10 @@ Then, in order:
    email, app URL) is `brand.json` (repo root) + `BRAND_*` env var
    overrides — see `.env.example`. Per-tenant branding overrides on top of
    that live in the `settings/branding/ui_branding` setting, editable at
-   `/admin/settings/branding`. Both layers are consumed by the admin portal
-   (see "Admin portal" below).
+   `/admin/settings/branding`. Both layers are consumed by the admin portal;
+   resolved colours are served as generated token CSS from the tenant-scoped
+   `/branding/theme.css` route, never as tenant-authored raw CSS (see "Admin
+   portal" below).
 
 To run the app locally, see **Quickstart (dev)** below. To run the
 integration test suite, use `make test-db-up` to start a disposable
@@ -530,6 +532,12 @@ Every route above (except `/health`) carries a `require_*` guard —
 enforced by `tests/architecture/test_route_guards.py`.
 
 ### Admin portal routes (`/admin/*`)
+
+The public pre-auth `GET /branding/theme.css` route belongs to the stateless
+`presentation` feature. Tenant hosts receive the same brand token overrides on
+the login and authenticated surfaces with `private, no-store`; the exact
+platform host receives package defaults and unknown hosts fail closed. It is
+not owned by Template Studio.
 
 | Prefix | Feature | Notes |
 |---|---|---|
