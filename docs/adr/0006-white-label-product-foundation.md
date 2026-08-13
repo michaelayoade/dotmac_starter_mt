@@ -345,6 +345,65 @@ prefixes, branch labels, schema claims, or table ownership before an image can
 be built. The post-migration live-catalog gate applies the kernel RLS/grant
 contract across every registered module schema.
 
+##### D1 amendment — 2026-08-13: cross-lineage ordering is LOGICAL
+
+The clause above ("cross-lineage ordering uses `depends_on`") is amended. It
+assumed a module could name the revision it needs. A module cannot, because the
+answer differs per assembly, and a physical edge is therefore a claim about a
+deployment the module has never seen.
+
+**The blocked adopter, which is evidence rather than hypothesis.** Kernel
+revision `0001_initial_tenant_schema` creates `public.tenants` unconditionally
+as its first table. ERP hosts that same table in its own lineage
+(`20260813_tenant_projection`, merged to ERP `main` as `c5f933d9`), so kernel
+`0001` can never run there — its lineage rehearsal is pinned permanently at that
+collision, and no product-side disposition of `people`, `roles` or
+`audit_events` can move it. `dotmac-files` declared
+`depends_on = ("0001_initial_tenant_schema",)`, which made stored bytes
+un-installable in ERP unless ERP first converged its entire identity, RBAC and
+audit estate onto the kernel's. That is a large amount of coupling to buy a
+foreign-key target, and none of it is required by what files actually needs.
+
+**Amended rule.** A module lineage declares the logical database EFFECTS it
+requires (`ModuleManifest.requires`, `dotmac_kernel.prerequisites`); the
+answering lineage declares what it supplies (`MigrationOwner.provides`); and each
+assembly binds requirement to provider revision in checked-in, typed
+`PrerequisiteBinding`s installed from its Alembic `env.py`. A module lineage may
+**not** name a foreign revision directly. Host owners (`kernel`, `assembly`) keep
+literal edges: they are the deployment, so naming one of their own revisions
+asserts nothing about anybody else's.
+
+**Ordering is preserved, not weakened.** `resolve_depends_on` turns the binding
+back into a real `depends_on` edge at script-load time, so Alembic orders exactly
+as before. What changes is who authors the edge.
+
+**A binding is a claim, so it is never the only control.** Three guards, none of
+which is a comment:
+
+1. the composed gate rejects an unbound requirement, a binding to a lineage that
+   does not declare the effect, a binding to an uncomposed revision, and a
+   migration requiring more than its manifest admits;
+2. `require_prerequisites` verifies the real catalog before any DDL, so a
+   **stamped** or aliased provider fails against the database — stamping writes
+   no columns;
+3. an order canary requires the provider revision to be present in
+   `alembic_version`.
+
+A blanket `IF EXISTS`, a product-specific conditional inside a kernel migration,
+and `alembic stamp` remain forbidden and are not bindings.
+
+**Vocabulary is a registry, never an enum** (ADR-0008). The kernel ships
+`tenant_scope_catalog.v1` and `module_database_roles.v1` because those are the
+two effects a real blocked adopter needed; a product names its own without a
+kernel change. A changed contract is a new `.vN`, never a redefinition — every
+existing binding was accepted against the old one.
+
+**Status under ADR-0017.** This is a blocked-adopter exception, not a
+supply-pushed facility: it was built because ERP is blocked today, the
+verification logic is EXTRACTED from ERP's proven `20260813_tenant_projection`
+rather than invented (hard rule 22, product-first), and it removes an adoption
+blocker instead of adding surface awaiting adopters.
+
 #### D2 — kernel WS8 is the sole target licence protocol
 
 The signed, versioned WS8 licence, applied-state, keyring, and revocation

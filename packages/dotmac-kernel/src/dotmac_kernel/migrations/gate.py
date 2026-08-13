@@ -70,6 +70,7 @@ from dotmac_kernel.namespaces import (
     module_schema,
     qualified,
 )
+from dotmac_kernel.prerequisites import PrerequisiteBinding, installed_bindings
 
 # `op.*` calls that create or alter a table and therefore MUST name the schema
 # explicitly in a module lineage. Anything here without `schema=` resolves
@@ -116,6 +117,15 @@ class RevisionRecord:
     # A qualified write into another module is still a cross-owner write.
     targeted_ops: tuple[tuple[str, str], ...] = ()
     raw_sql: tuple[str, ...] = ()
+    # True when `depends_on` is `resolve_depends_on(...)` rather than a literal
+    # tuple — the revision names the EFFECTS it needs and lets the assembly bind
+    # them to a provider. Recorded rather than inferred from an empty
+    # `depends_on`, because "declares nothing" and "declares logically" are
+    # opposite states and only one of them is allowed to name no revision.
+    resolves_prerequisites: bool = False
+    # Prerequisite names passed to `resolve_depends_on`, when statically
+    # readable. Empty when the call takes a name the gate cannot resolve.
+    declared_prerequisites: tuple[str, ...] = ()
 
     @property
     def is_root(self) -> bool:
@@ -408,6 +418,7 @@ def scan_revision_file(path: Path, location: Path) -> RevisionRecord | None:
     if not isinstance(revision, str) or not revision:
         return None
     creates, unqualified, targeted, raw_sql = _scan_ddl(tree, expressions)
+    resolves, declared = _read_prerequisite_call(expressions)
     return RevisionRecord(
         path=path,
         location=location,
@@ -419,7 +430,31 @@ def scan_revision_file(path: Path, location: Path) -> RevisionRecord | None:
         unqualified_ops=tuple(unqualified),
         targeted_ops=tuple(targeted),
         raw_sql=tuple(raw_sql),
+        resolves_prerequisites=resolves,
+        declared_prerequisites=declared,
     )
+
+
+def _read_prerequisite_call(
+    expressions: Mapping[str, ast.AST],
+) -> tuple[bool, tuple[str, ...]]:
+    """Is `depends_on` a `resolve_depends_on(...)` call, and over what?
+
+    Read from the AST rather than by importing the module: the gate runs against
+    a composed set of files that may not be installed, and importing a migration
+    to learn its identity would execute it.
+    """
+    node = expressions.get("depends_on")
+    if not isinstance(node, ast.Call):
+        return False, ()
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+    if name != "resolve_depends_on":
+        return False, ()
+    if not node.args:
+        return True, ()
+    declared = _literal(node.args[0], expressions)
+    return True, _as_tuple(declared)
 
 
 def scan_location(location: Path) -> tuple[RevisionRecord, ...]:
@@ -466,15 +501,23 @@ def run_gate(
     locations: Sequence[Path],
     *,
     registry: NamespaceRegistry | None = None,
+    bindings: Sequence[PrerequisiteBinding] | None = None,
 ) -> GateReport:
     """Compose `locations` under the namespaces `manifests` declare and report
     every violation found.
+
+    `bindings` is this assembly's prerequisite answer set; it defaults to
+    whatever `install_prerequisite_bindings` installed, so a caller that already
+    configured its Alembic environment need not pass it twice.
 
     Never raises for a composition problem — a gate that raises on the first
     fault makes an operator fix one thing per CI run. It raises only for an
     unreadable input (a missing directory), which is a caller bug.
     """
     violations: list[str] = []
+    manifests = tuple(manifests)
+    if bindings is None:
+        bindings = installed_bindings()
     if registry is None:
         try:
             registry = NamespaceRegistry.from_manifests(manifests)
@@ -508,6 +551,9 @@ def run_gate(
     _check_table_ownership(records, owner_of_location, registry, violations)
     _check_search_path_independence(records, owner_of_location, violations)
     _check_stateful_modules_have_a_lineage(owner_of_location, registry, violations)
+    _check_prerequisites(
+        manifests, records, owner_of_location, registry, bindings, violations
+    )
 
     attribution: dict[str, Mapping[str, str | None]] = {}
     for record in records:
@@ -651,6 +697,115 @@ def _check_lineage_edges(
                     f"{record.revision}: `depends_on` {dependency!r} is not in "
                     "any selected version location"
                 )
+
+
+def _check_prerequisites(
+    manifests: Sequence[AnyManifest],
+    records: Sequence[RevisionRecord],
+    owner_of_location: Mapping[Path, MigrationOwner],
+    registry: NamespaceRegistry,
+    bindings: Sequence[PrerequisiteBinding],
+    violations: list[str],
+) -> None:
+    """A module names the EFFECT it needs; the assembly names the revision.
+
+    Four ways this can be wrong, all of them static:
+
+    1. a module revision hard-codes a foreign revision in `depends_on` — true in
+       the assembly that wrote it and false in every other one;
+    2. the assembly composes a module requiring an effect it never bound;
+    3. the binding points at a lineage that never claimed to supply the effect;
+    4. the binding points at a revision that is not composed here at all.
+
+    The live verifier catches a binding that is wrong about the DATABASE. These
+    catch a binding that is wrong on its face, before anything runs.
+    """
+    known = {record.revision for record in records}
+    owner_of_revision = {
+        record.revision: owner_of_location.get(record.location) for record in records
+    }
+    bound = {binding.prerequisite: binding for binding in bindings}
+    provides_by_owner = {
+        owner.owner: set(owner.provides) for owner in registry.owners()
+    }
+
+    # 1 — a module lineage may not name a foreign revision.
+    for record in records:
+        owner = owner_of_location.get(record.location)
+        if owner is None or owner.db_schema is None:
+            # Host owners (`kernel`, `assembly`) keep literal edges: they ARE
+            # the assembly, so naming a revision of theirs is not a claim about
+            # somebody else's deployment.
+            continue
+        for dependency in record.depends_on:
+            dependency_owner = owner_of_revision.get(dependency)
+            if dependency_owner is not None and dependency_owner.owner != owner.owner:
+                violations.append(
+                    f"{record.revision} ({owner.owner}): `depends_on` names "
+                    f"{dependency!r} from lineage {dependency_owner.owner!r} "
+                    "directly. An installable module cannot know which revision "
+                    "supplies an effect in an assembly it has never seen — "
+                    "declare the effect in `requires` and let the assembly bind "
+                    "it (ADR-0006 D1, logical prerequisites)"
+                )
+
+    for manifest in manifests:
+        required = tuple(getattr(manifest, "requires", ()))
+        if not required:
+            continue
+        code = getattr(manifest, "code", "<unknown>")
+        for name in required:
+            binding = bound.get(name)
+            # 2 — composed but unbound.
+            if binding is None:
+                violations.append(
+                    f"module {code!r} requires {name!r} but this assembly binds "
+                    "no provider for it — add a PrerequisiteBinding naming the "
+                    "revision that supplies the effect. An assembly that cannot "
+                    "supply an effect must not compose a module needing it"
+                )
+                continue
+            # 3 — bound to a lineage that never claimed the effect.
+            claimed = provides_by_owner.get(binding.provider_owner)
+            if claimed is not None and name not in claimed:
+                violations.append(
+                    f"module {code!r} requires {name!r}, bound to revision "
+                    f"{binding.provider_revision!r} of lineage "
+                    f"{binding.provider_owner!r} — but that lineage does not "
+                    f"declare {name!r} in `provides`"
+                )
+            # 4 — bound to a revision nothing composes.
+            if binding.provider_revision not in known:
+                violations.append(
+                    f"module {code!r} requires {name!r}, bound to revision "
+                    f"{binding.provider_revision!r}, which is not in any "
+                    "selected version location — the binding names a revision "
+                    "this deployment never runs"
+                )
+
+    # The revision file and the manifest must agree, or one of them is stale.
+    requires_by_prefix = {
+        getattr(manifest, "migration_prefix", None): tuple(
+            getattr(manifest, "requires", ())
+        )
+        for manifest in manifests
+    }
+    for record in records:
+        owner = owner_of_location.get(record.location)
+        if owner is None or not record.resolves_prerequisites:
+            continue
+        declared = requires_by_prefix.get(owner.prefix)
+        if declared is None or not record.declared_prerequisites:
+            continue
+        if set(record.declared_prerequisites) - set(declared):
+            violations.append(
+                f"{record.revision} ({owner.owner}): resolves prerequisites "
+                f"{sorted(set(record.declared_prerequisites) - set(declared))} "
+                "that the module manifest does not declare in `requires` — the "
+                "manifest is what an assembly reads when deciding whether it "
+                "can install this module, so a migration may not need more "
+                "than the manifest admits"
+            )
 
 
 def _check_table_ownership(

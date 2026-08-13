@@ -27,6 +27,7 @@ from dotmac_kernel.migrations.gate import (
 )
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.namespaces import (
+    ASSEMBLY_MIGRATION_OWNER,
     HOST_MIGRATION_OWNERS,
     DuplicateMigrationPrefixError,
     DuplicateSchemaError,
@@ -34,6 +35,7 @@ from dotmac_kernel.namespaces import (
     NamespaceRegistry,
     module_schema,
 )
+from dotmac_kernel.prerequisites import PrerequisiteBinding
 
 from app.assembly import assembly
 
@@ -390,7 +392,18 @@ def test_rejects_a_cross_lineage_down_revision(tmp_path: Path) -> None:
     assert "cross-lineage ordering uses `depends_on`" in _messages(report)
 
 
-def test_accepts_a_cross_lineage_depends_on(tmp_path: Path) -> None:
+def test_rejects_a_module_naming_a_foreign_revision_directly(tmp_path: Path) -> None:
+    """AMENDED (was `test_accepts_a_cross_lineage_depends_on`).
+
+    A literal cross-lineage `depends_on` used to be the sanctioned way for a
+    module to order after another lineage. It is not, because it is a claim
+    about an assembly the module has never seen: `dotmac-files` naming
+    `0001_initial_tenant_schema` was true in the Starter and false in ERP, which
+    hosts the tenant catalogue in its own lineage and can never run kernel 0001.
+
+    A module declares the EFFECT (`ModuleManifest.requires`) and the assembly
+    binds it. Host owners keep literal edges — see the companion test below.
+    """
     billing = tmp_path / "billing"
     other = tmp_path / "other"
     _write(
@@ -402,7 +415,32 @@ def test_accepts_a_cross_lineage_depends_on(tmp_path: Path) -> None:
     )
     _billing_root(billing, depends_on="0001_root")
     report = _gate(billing, other)
-    assert report.ok, report.render()
+    assert not report.ok
+    assert "declare the effect in `requires`" in _messages(report)
+
+
+def test_a_host_owner_may_still_name_a_revision_directly(tmp_path: Path) -> None:
+    """Sensitivity proof for the rule above: it must fire on MODULE lineages
+    only. The kernel and the assembly ARE the deployment, so naming one of their
+    own revisions asserts nothing about anybody else's."""
+    kernel = tmp_path / "kernel"
+    _write(
+        kernel,
+        "0001_root",
+        revision="0001_root",
+        down_revision=None,
+        branch_labels=("kernel",),
+    )
+    _write(
+        kernel,
+        "0002_next",
+        revision="0002_next",
+        down_revision="0001_root",
+        branch_labels=None,
+        depends_on="0001_root",
+    )
+    report = _gate(kernel)
+    assert "declare the effect in `requires`" not in _messages(report)
 
 
 def test_rejects_a_revision_id_over_the_alembic_column_length(
@@ -617,3 +655,195 @@ def test_a_missing_version_location_is_a_violation(tmp_path: Path) -> None:
     report = _gate(tmp_path / "does-not-exist")
     assert not report.ok
     assert "does not exist" in _messages(report)
+
+
+# ── Logical prerequisites ───────────────────────────────────────────────────
+#
+# The static half of the contract. These catch a binding that is wrong on its
+# face; `dotmac_kernel.migrations.verify` catches one that is wrong about the
+# database. Both are needed — a declaration is exactly the thing that can lie.
+
+TENANT_SCOPE = "tenant_scope_catalog.v1"
+
+REQUIRING_MANIFEST = ModuleManifest(
+    code="billing",
+    version="1.0.0",
+    short_code="bill",
+    migration_prefix="bl",
+    migration_branch="billing",
+    tables=("invoices",),
+    requires=(TENANT_SCOPE,),
+)
+
+PROVIDING_KERNEL = MigrationOwner(
+    owner="kernel",
+    prefix="k",
+    branch_label="kernel",
+    db_schema=None,
+    legacy_revision_pattern=r"^\d{4}_[a-z0-9_]+$",
+    provides=(TENANT_SCOPE,),
+)
+
+SILENT_KERNEL = MigrationOwner(
+    owner="kernel",
+    prefix="k",
+    branch_label="kernel",
+    db_schema=None,
+    legacy_revision_pattern=r"^\d{4}_[a-z0-9_]+$",
+)
+
+
+def _requiring_gate(*locations: Path, bindings=(), owners=(PROVIDING_KERNEL,)):
+    ledger = (*owners, ASSEMBLY_MIGRATION_OWNER, BILLING_OWNER)
+    return run_gate(
+        [REQUIRING_MANIFEST],
+        list(locations),
+        registry=NamespaceRegistry.from_manifests([REQUIRING_MANIFEST], ledger=ledger),
+        bindings=list(bindings),
+    )
+
+
+def _kernel_root(location: Path) -> None:
+    _write(
+        location,
+        "0001_root",
+        revision="0001_root",
+        down_revision=None,
+        branch_labels=("kernel",),
+    )
+
+
+def test_composing_a_module_whose_requirement_is_unbound_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """An assembly that cannot supply an effect must not compose a module that
+    needs one. Vendor CP has no product tenant at all, and this is what stops it
+    silently installing a tenant-scoped module."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    report = _requiring_gate(billing, kernel)
+    assert not report.ok
+    assert "binds no provider" in _messages(report)
+
+
+def test_a_bound_requirement_composes(tmp_path: Path) -> None:
+    """Sensitivity proof: the unbound check must pass once bound, or it is
+    asserting something other than boundness."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "0001_root", "kernel")],
+    )
+    assert report.ok, report.render()
+
+
+def test_a_binding_to_a_lineage_that_never_claimed_the_effect_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """The wishful binding: pointing at a real, composed revision of a lineage
+    that does not supply the effect at all."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "0001_root", "kernel")],
+        owners=(SILENT_KERNEL,),
+    )
+    assert not report.ok
+    assert "does not declare" in _messages(report)
+
+
+def test_a_binding_to_an_uncomposed_revision_is_rejected(tmp_path: Path) -> None:
+    """A binding naming a revision this deployment never runs — the failure the
+    old physical `depends_on` produced, now caught at the binding instead."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "0099_absent", "kernel")],
+    )
+    assert not report.ok
+    assert "never runs" in _messages(report)
+
+
+def test_a_migration_may_not_require_more_than_its_manifest_admits(
+    tmp_path: Path,
+) -> None:
+    """The manifest is what an assembly reads when deciding whether it can
+    install a module. A migration quietly needing a second effect would pass
+    that check and then fail at `alembic upgrade`, half-migrated."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    path = billing / "bl_0001_invoices.py"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "depends_on = None",
+            "REQUIRES = ('tenant_scope_catalog.v1', 'module_database_roles.v1')\n"
+            "depends_on = resolve_depends_on(REQUIRES)",
+        ),
+        encoding="utf-8",
+    )
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "0001_root", "kernel")],
+    )
+    assert not report.ok
+    assert "module_database_roles.v1" in _messages(report)
+    assert "does not declare in `requires`" in _messages(report)
+
+
+def test_the_drift_check_is_quiet_when_migration_and_manifest_agree(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity proof for the drift check."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    path = billing / "bl_0001_invoices.py"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "depends_on = None",
+            "REQUIRES = ('tenant_scope_catalog.v1',)\n"
+            "depends_on = resolve_depends_on(REQUIRES)",
+        ),
+        encoding="utf-8",
+    )
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "0001_root", "kernel")],
+    )
+    assert report.ok, report.render()
+
+
+def test_the_scanner_reads_a_resolved_depends_on_without_importing_it(
+    tmp_path: Path,
+) -> None:
+    """Static read matters: importing a migration to learn its identity would
+    execute it, and the gate runs over files that may not be installed."""
+    billing = tmp_path / "billing"
+    _billing_root(billing)
+    path = billing / "bl_0001_invoices.py"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "depends_on = None",
+            "REQUIRES = ('tenant_scope_catalog.v1',)\n"
+            "depends_on = resolve_depends_on(REQUIRES)",
+        ),
+        encoding="utf-8",
+    )
+    record = scan_revision_file(path, billing)
+    assert record is not None
+    assert record.resolves_prerequisites
+    assert record.declared_prerequisites == (TENANT_SCOPE,)
+    assert record.depends_on == ()

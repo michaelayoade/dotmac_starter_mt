@@ -428,8 +428,13 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
 14. Each stateful module has one immutable `mod_<short_code>` schema and one
     registered migration lineage; `public` is reserved for the kernel and host
     assembly. Module SQL is fully schema-qualified, and the composed static and
-    live-catalog gates enforce revision, namespace, and table ownership
-    (`test_namespaces.py`, `test_migration_gate.py`,
+    live-catalog gates enforce revision, namespace, and table ownership.
+    Cross-lineage ordering is LOGICAL: a module declares the database effects
+    it needs (`requires`), the supplier declares `provides`, and the ASSEMBLY
+    binds effect→revision (`app/migration_bindings.py`) — a module never names
+    a foreign revision, and a binding is proven against the live catalog, not
+    trusted (ADR-0006 D1 amendment; `test_namespaces.py`,
+    `test_migration_gate.py`, `test_prerequisites.py`,
     `test_live_catalog_contract.py`, `test_module_schema_catalog.py`).
 15. Cross-repository engineering governance is pinned by exact commit and the
     product workflow must execute that same accepted revision

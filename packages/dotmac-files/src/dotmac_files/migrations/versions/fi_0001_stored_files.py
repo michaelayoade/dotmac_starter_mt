@@ -1,5 +1,29 @@
 """Create the explicit tenant and platform stored-file planes (ADR-0023).
 
+## What this lineage needs, and what it deliberately does not
+
+Stored bytes need somewhere to hang a tenant foreign key and someone to grant
+to. Nothing more. This revision therefore declares two logical prerequisites
+rather than a physical edge to a foreign revision:
+
+- `tenant_scope_catalog.v1` — the FK target `public.tenants.id` below, and the
+  `public.app_current_tenant_id()` the RLS policy evaluates;
+- `module_database_roles.v1` — `app_user`, `platform_api` and `app_admin`, which
+  the schema and table grants below name.
+
+It previously read `depends_on = ("0001_initial_tenant_schema",)`. That edge was
+true in the Starter and false everywhere else: ERP hosts `public.tenants` in its
+own lineage, so kernel `0001` — which creates that table unconditionally as its
+first statement — can never run there. Naming the revision made stored bytes
+un-installable in ERP unless ERP first converged its entire identity, RBAC and
+audit estate onto the kernel's, which is a large amount of coupling to buy a
+foreign-key target.
+
+The assembly answers *who supplies these effects* (`install_prerequisite_bindings`
+in its `env.py`), `resolve_depends_on` turns that answer back into a real
+Alembic edge, and `require_prerequisites` proves the effects against the live
+catalog before any DDL runs. See `dotmac_kernel.prerequisites`.
+
 Revision ID: fi_0001_stored_files
 Revises: (lineage root)
 Create Date: 2026-08-13
@@ -8,13 +32,28 @@ Create Date: 2026-08-13
 from __future__ import annotations
 
 import sqlalchemy as sa
+from dotmac_kernel.migrations.verify import require_prerequisites
+from dotmac_kernel.prerequisites import resolve_depends_on
 
 from alembic import op
 
 revision = "fi_0001_stored_files"
 down_revision = None
 branch_labels = ("files",)
-depends_on = ("0001_initial_tenant_schema",)
+
+# Written as literals, not as `TENANT_SCOPE_CATALOG_V1.name`, for the same
+# reason this migration hard-codes every other constant it uses: a migration is
+# a snapshot of an accepted decision, and importing a mutable runtime value
+# would let a later edit silently change what an already-applied revision meant.
+# It also keeps the composed gate able to READ this list statically and diff it
+# against `dotmac_files.manifest`, which is the check that stops the migration
+# and the manifest drifting apart.
+REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")
+
+# Resolved from this assembly's installed bindings at script load, so Alembic
+# still orders on a concrete revision id. An assembly that composes this module
+# without binding both prerequisites fails here, before any DDL.
+depends_on = resolve_depends_on(REQUIRES)
 
 _SCHEMA = "mod_files"
 _TABLE = "stored_files"
@@ -22,6 +61,8 @@ _PLATFORM_TABLE = "platform_stored_files"
 
 
 def upgrade() -> None:
+    # Before any DDL: the binding is a claim, so check it against the database.
+    require_prerequisites(op.get_bind(), REQUIRES)
     op.execute("CREATE SCHEMA IF NOT EXISTS mod_files;")
     op.execute("GRANT USAGE ON SCHEMA mod_files TO app_user, platform_api, app_admin;")
     op.create_table(
