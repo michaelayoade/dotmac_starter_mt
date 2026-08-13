@@ -9,6 +9,24 @@ called out here.
 
 ## Unreleased
 
+## 0.1.0a7 — 2026-08-13
+
+One additive token; `UI_CONTRACT_VERSION` stays **1**.
+
+### Added
+
+- `surface-overlay`, the opaque semantic colour behind a translucent scrim.
+  The first real consumer is the reference assembly's mobile admin-navigation
+  overlay. A button, status or raw neutral-ramp token would assign the wrong
+  role; preserving `bg-black/50` would leave the shared shell outside runtime
+  theme/brand governance.
+
+### Reference adoption
+
+- The starter's document canvas, tenant login, authenticated shell, sidebar,
+  topbar and toast/status surfaces now consume semantic token roles without
+  per-element light/dark colour branches.
+
 ## 0.1.0a6 — 2026-08-13
 
 Runtime brand projection is now complete for colour-channel consumers. Patch

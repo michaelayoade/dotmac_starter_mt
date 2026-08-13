@@ -1,11 +1,12 @@
 """Starter-owned templates must migrate off the hardcoded palette, never onto it.
 
-`dotmac-ui` publishes 190 role-named tokens, and `app/assembly.py` links the
+`dotmac-ui` publishes role-named tokens, and `app/assembly.py` links the
 compiled stylesheet on every page — but the admin portal's own templates are
 still authored against literal Tailwind palette utilities (`bg-slate-700`,
 `text-primary-600`) resolved from the copied green ramp in
-`static/css/src/main.css`.  The platform templates are the counter-example: they
-already author against `var(--dmui-*)` and carry zero palette debt.
+`static/css/src/main.css`. The platform templates and the first admin-shell
+slice are the counter-examples: they author against `var(--dmui-*)` and carry
+zero palette debt.
 
 This gate does NOT migrate anything.  It freezes the existing debt exactly, so
 that the portal can be moved onto tokens one component slice at a time while it
@@ -59,6 +60,15 @@ TEMPLATE_ROOT_GLOB: Final[str] = "packages/*/src/*/templates"
 #: Roots that are already token-native and must never acquire palette debt.
 #: Anchored on real evidence: both regions measure zero today.
 TOKEN_NATIVE_PREFIXES: Final[tuple[str, ...]] = (
+    # Train 4's first coherent admin surface: the document canvas, tenant
+    # login, and the authenticated shell they share.  Exact files rather than
+    # the whole components/ or layouts/ trees: the neighbouring macros/pages
+    # remain measured debt and must retire in their own slices.
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/base.html",
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/auth/login.html",
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/layouts/admin.html",
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/components/sidebar.html",
+    "packages/dotmac-kernel/src/dotmac_kernel/templates/components/topbar.html",
     "packages/dotmac-kernel/src/dotmac_kernel/templates/platform/",
     "packages/dotmac-kernel/src/dotmac_kernel/templates/layouts/platform.html",
     "packages/dotmac-template-studio/src/dotmac_template_studio/templates/",
@@ -291,7 +301,7 @@ def test_the_baseline_total_agrees_with_its_own_entries() -> None:
 
 
 def test_token_native_regions_carry_no_palette_debt() -> None:
-    """The platform portal and Template Studio are already on `var(--dmui-*)`.
+    """Pinned token-native surfaces must remain on `var(--dmui-*)`.
 
     Checked against the LIVE scan, not the baseline, so a regenerated baseline
     cannot legalise a regression here.
@@ -351,11 +361,11 @@ def test_sensitivity_a_dmui_replacement_passes() -> None:
     assert scan_text(clean) == Counter()
 
 
-def test_sensitivity_a_token_native_template_would_be_caught_if_it_regressed() -> None:
+def test_sensitivity_a_token_native_shell_would_be_caught_if_it_regressed() -> None:
     """Proves the zero-region assertion above is load-bearing, not vacuous."""
     template = (
         PROJECT_ROOT
-        / "packages/dotmac-kernel/src/dotmac_kernel/templates/platform/flags.html"
+        / "packages/dotmac-kernel/src/dotmac_kernel/templates/auth/login.html"
     )
     original = template.read_text(encoding="utf-8")
     assert scan_text(original) == Counter(), "fixture drifted: it must start clean"

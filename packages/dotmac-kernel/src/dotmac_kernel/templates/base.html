@@ -32,7 +32,7 @@
 
     {% block head %}{% endblock %}
 </head>
-<body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 antialiased">
+<body class="min-h-screen bg-[var(--dmui-surface-background)] text-[var(--dmui-text-primary)] antialiased">
     <!-- HTMX + Alpine. `components.js` registers Alpine.data()/Alpine.store()
          components on the `alpine:init` event, so it must load BEFORE the
          (deferred) alpine.min.js core so its listener is attached in time. -->
@@ -71,12 +71,12 @@
                  x-transition:leave-start="translate-y-0 opacity-100"
                  x-transition:leave-end="translate-y-2 opacity-0"
                  :class="{
-                     'bg-green-600': isSuccess(toast),
-                     'bg-red-600': isError(toast),
-                     'bg-yellow-500': isWarning(toast),
-                     'bg-blue-600': isInfo(toast)
+                     'bg-[var(--dmui-status-positive-surface)] border-[var(--dmui-status-positive-border)] text-[var(--dmui-status-positive-foreground)]': isSuccess(toast),
+                     'bg-[var(--dmui-status-negative-surface)] border-[var(--dmui-status-negative-border)] text-[var(--dmui-status-negative-foreground)]': isError(toast),
+                     'bg-[var(--dmui-status-warning-surface)] border-[var(--dmui-status-warning-border)] text-[var(--dmui-status-warning-foreground)]': isWarning(toast),
+                     'bg-[var(--dmui-status-info-surface)] border-[var(--dmui-status-info-border)] text-[var(--dmui-status-info-foreground)]': isInfo(toast)
                  }"
-                 class="px-4 py-3 rounded-lg shadow-lg text-white text-sm font-medium pointer-events-auto flex items-center gap-2 max-w-sm">
+                 class="px-4 py-3 rounded-lg border shadow-lg text-sm font-medium pointer-events-auto flex items-center gap-2 max-w-sm">
                 <span x-text="toast.message"></span>
                 <button x-on:click="removeToast(toast.id)" aria-label="Dismiss notification" class="ml-2 hover:opacity-75">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

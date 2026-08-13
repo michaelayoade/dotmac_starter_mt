@@ -300,7 +300,7 @@ packages/dotmac-ui/              the design-system package (distribution
   pyproject.toml                 dotmac-ui, import dotmac_ui, editable path dep,
   src/dotmac_ui/                 ZERO runtime dependencies)
                  contract (UI_CONTRACT_VERSION + namespaces + theme selectors),
-                 tokens (190 role-named semantic design tokens),
+                 tokens (191 role-named semantic design tokens),
                  assets (packaged static dir, stylesheet path/URL, digests),
                  a11y (WCAG 2.2 AA contrast contract + checker),
                  build (INTERNAL — the deterministic asset generator),
@@ -778,6 +778,15 @@ class is derived from its typed component contract. ADR-0006 § 5 still forbids
 adding a component because markup merely looks similar, and a guard fails the
 build if a selector appears without a declaration. Full contract:
 `packages/dotmac-ui/COMPATIBILITY.md`.
+
+The first product-facing cutover is the shared document canvas, tenant login,
+admin layout, sidebar, topbar and toast/status layer. Those five templates use
+the same semantic variables in both modes; `.dark` changes the token values,
+not a parallel set of element classes, and `/branding/theme.css` moves their
+primary actions through the same variables. The two-directional palette debt
+therefore falls from 970 to 851. The remaining 851 occurrences are still
+frozen per file and token; neighbouring forms, tables and pages retire in later
+coherent slices rather than being hidden by this shell migration.
 
 ### Auth flow: cookie + bearer share one seam
 

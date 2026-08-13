@@ -23,19 +23,19 @@
 {% block title %}Sign In · {{ brand.name if brand and brand.name else "Admin" }}{% endblock %}
 
 {% block content %}
-<div class="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 px-4">
+<div class="min-h-screen flex items-center justify-center bg-[var(--dmui-surface-background)] px-4">
     <div class="w-full max-w-md">
-        <div id="login-card" class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 border border-slate-200 dark:border-slate-700">
+        <div id="login-card" class="bg-[var(--dmui-surface-elevated)] rounded-2xl shadow-xl p-8 border border-[var(--dmui-border-default)]">
             <div class="text-center mb-8">
-                <div class="h-12 w-12 mx-auto mb-4 rounded-xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white font-bold text-lg">
+                <div class="h-12 w-12 mx-auto mb-4 rounded-xl bg-[var(--dmui-action-primary-default)] flex items-center justify-center text-[var(--dmui-action-primary-on)] font-bold text-lg">
                     {{ brand.mark if brand and brand.mark else "A" }}
                 </div>
-                <h1 class="text-2xl font-bold text-slate-900 dark:text-white font-display">{{ brand.name if brand and brand.name else "Admin" }}</h1>
-                <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Sign in to your account</p>
+                <h1 class="text-2xl font-bold text-[var(--dmui-text-primary)] font-display">{{ brand.name if brand and brand.name else "Admin" }}</h1>
+                <p class="text-sm text-[var(--dmui-text-muted)] mt-1">Sign in to your account</p>
             </div>
 
             {% if error %}
-            <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm" role="alert">
+            <div class="mb-4 p-3 rounded-lg bg-[var(--dmui-status-negative-surface)] text-[var(--dmui-status-negative-foreground)] text-sm" role="alert">
                 {{ error }}
             </div>
             {% endif %}
@@ -47,17 +47,17 @@
                   class="space-y-4">
                 <input type="hidden" name="next" value="{{ next_url if next_url else '/admin' }}" />
                 <div>
-                    <label for="username" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email</label>
+                    <label for="username" class="block text-sm font-medium text-[var(--dmui-text-secondary)] mb-1">Email</label>
                     <input type="text" id="username" name="username" required autofocus autocomplete="username"
-                           class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500" />
+                           class="w-full px-3 py-2 rounded-lg border border-[var(--dmui-border-strong)] bg-[var(--dmui-surface-primary)] text-[var(--dmui-text-primary)] focus:ring-2 focus:ring-[var(--dmui-focus-ring-color)] focus:border-[var(--dmui-border-focus)]" />
                 </div>
                 <div>
-                    <label for="password" class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
+                    <label for="password" class="block text-sm font-medium text-[var(--dmui-text-secondary)] mb-1">Password</label>
                     <input type="password" id="password" name="password" required autocomplete="current-password"
-                           class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-primary-500" />
+                           class="w-full px-3 py-2 rounded-lg border border-[var(--dmui-border-strong)] bg-[var(--dmui-surface-primary)] text-[var(--dmui-text-primary)] focus:ring-2 focus:ring-[var(--dmui-focus-ring-color)] focus:border-[var(--dmui-border-focus)]" />
                 </div>
                 <button type="submit"
-                        class="w-full py-2.5 px-4 rounded-lg bg-gradient-to-r from-primary-600 to-primary-500 text-white font-medium shadow-lg shadow-primary-500/25 btn-hover text-sm">
+                        class="w-full py-2.5 px-4 rounded-lg bg-[var(--dmui-action-primary-default)] hover:bg-[var(--dmui-action-primary-hover)] text-[var(--dmui-action-primary-on)] font-medium shadow-lg btn-hover text-sm">
                     Sign In
                 </button>
             </form>

@@ -14,8 +14,8 @@ inventories' own recommendation is to start from it rather than invent a scheme
 `surface-{primary,secondary,tertiary}`, `text-{primary,secondary,tertiary}`,
 `border-{default,subtle}`, `semantic-{positive,info,warning,negative,neutral}`
 with 50-950 ramp steps, and the `status-{surface,border,foreground,indicator}`
-quartet. Four things are ADDED, each because the inventory named it as a gap,
-not because it seemed nice:
+quartet. Five things are ADDED, each because inventory or a real cutover named
+it as a gap, not because it seemed nice:
 
 1. **Interaction/intent tokens** (`action-<intent>-{default,hover,pressed,
    disabled,on}`). Sub has none — "There are **no** interaction/intent tokens
@@ -33,6 +33,10 @@ not because it seemed nice:
    almost no component classes (see `contract.PUBLISHED_COMPONENT_CLASSES`) must
    expose them as tokens, so the component layer consumes them rather than
    reinventing them — which is exactly what `.dmui-empty-state` now does.
+5. **`surface-overlay`.** The reference assembly's first shell cutover needed a
+   mobile-navigation scrim. No existing surface, action or status role means
+   "separate a temporary layer from the page", so keeping `bg-black/50` or
+   borrowing another role would preserve the same drift under a new spelling.
 
 **Values carry no product identity.** ADR-0006 § 3 requires the generic
 kernel-default brand layer to be *generic*: Sub's built-in defaults are the real
@@ -453,6 +457,14 @@ def _build_tokens() -> tuple[DesignToken, ...]:
         "with a shadow token; in dark mode it lightens rather than shadows, "
         "because a shadow is invisible on a dark canvas.",
         dark="var(--dmui-color-semantic-neutral-800)",
+    )
+    add(
+        "surface-overlay",
+        "surface",
+        "var(--dmui-color-semantic-neutral-950)",
+        "The opaque colour behind a translucent scrim that separates a "
+        "modal or mobile navigation layer from page content. Apply opacity "
+        "at the scrim element; it is not a content surface.",
     )
 
     # ── text ────────────────────────────────────────────────────────────────

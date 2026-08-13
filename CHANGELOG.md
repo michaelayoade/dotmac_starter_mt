@@ -14,6 +14,13 @@
   Template Studio remains limited to notification authoring, versioning,
   publication, preview and safe rendering.
 
+### Changed
+
+- The tenant login and authenticated admin shell now author colour exclusively
+  against `dotmac-ui` semantic roles. Light/dark mode and runtime tenant brand
+  changes flow through the token cascade without parallel `dark:` palette
+  branches. The hardcoded-palette ratchet falls from 970 to 851.
+
 ## 0.9.0 — 2026-07-30
 
 Kernel-boundary program: this repo is now the reference **assembly** consuming a

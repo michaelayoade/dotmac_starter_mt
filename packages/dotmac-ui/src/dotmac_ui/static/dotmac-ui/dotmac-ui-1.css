@@ -1,7 +1,7 @@
 /*!
  * dotmac-ui — the DotMac shared UI design system.
  * UI contract version: 1
- * Package version:     0.1.0a6
+ * Package version:     0.1.0a7
  * Accessibility:       WCAG 2.2 Level AA
  *
  * GENERATED FILE — do not edit by hand. The source of truth is
@@ -98,6 +98,7 @@
   --dmui-surface-secondary: var(--dmui-color-semantic-neutral-100);
   --dmui-surface-tertiary: var(--dmui-color-semantic-neutral-200);
   --dmui-surface-elevated: #ffffff;
+  --dmui-surface-overlay: var(--dmui-color-semantic-neutral-950);
 
   /* text */
   --dmui-text-primary: var(--dmui-color-semantic-neutral-900);
@@ -312,6 +313,7 @@
   --dmui-surface-secondary-rgb: 241 245 249;
   --dmui-surface-tertiary-rgb: 226 232 240;
   --dmui-surface-elevated-rgb: 255 255 255;
+  --dmui-surface-overlay-rgb: 2 6 23;
   --dmui-text-primary-rgb: 15 23 42;
   --dmui-text-secondary-rgb: 51 65 85;
   --dmui-text-tertiary-rgb: 71 85 105;
@@ -513,6 +515,7 @@
   --dmui-surface-secondary-rgb: 30 41 59;
   --dmui-surface-tertiary-rgb: 51 65 85;
   --dmui-surface-elevated-rgb: 30 41 59;
+  --dmui-surface-overlay-rgb: 2 6 23;
   --dmui-text-primary-rgb: 248 250 252;
   --dmui-text-secondary-rgb: 226 232 240;
   --dmui-text-tertiary-rgb: 203 213 225;

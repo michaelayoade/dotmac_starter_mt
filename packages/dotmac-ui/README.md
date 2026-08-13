@@ -15,7 +15,7 @@ slices add layouts and navigation primitives that ADR-0006 § 2 assigns here.
 
 ## What it is, in one paragraph
 
-A vocabulary of 190 role-named CSS custom properties (`--dmui-surface-primary`,
+A vocabulary of 191 role-named CSS custom properties (`--dmui-surface-primary`,
 `--dmui-action-destructive-hover`, `--dmui-status-warning-foreground`), compiled
 into one plain stylesheet that any product can link. Each colour also publishes a
 channel form (`--dmui-color-brand-500-rgb: 59 130 246`) so opacity modifiers like

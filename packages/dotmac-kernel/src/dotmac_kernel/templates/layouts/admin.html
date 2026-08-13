@@ -20,7 +20,7 @@
 {% block title %}{{ page_title }} · {{ brand.name if brand and brand.name else "Admin" }}{% endblock %}
 
 {% block content %}
-<div class="flex min-h-screen bg-slate-50 dark:bg-slate-900">
+<div class="flex min-h-screen bg-[var(--dmui-surface-background)]">
     {% include "components/sidebar.html" %}
 
     <div class="flex-1 flex flex-col lg:ml-64">
@@ -28,12 +28,12 @@
 
         <main class="flex-1 p-6">
             {% if success_message %}
-            <div class="mb-4 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-sm">
+            <div class="mb-4 p-3 rounded-lg bg-[var(--dmui-status-positive-surface)] text-[var(--dmui-status-positive-foreground)] text-sm">
                 {{ success_message }}
             </div>
             {% endif %}
             {% if error_message %}
-            <div class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm">
+            <div class="mb-4 p-3 rounded-lg bg-[var(--dmui-status-negative-surface)] text-[var(--dmui-status-negative-foreground)] text-sm">
                 {{ error_message }}
             </div>
             {% endif %}
@@ -48,7 +48,7 @@
      x-show="open"
      x-cloak
      class="lg:hidden fixed inset-0 z-50">
-    <div x-on:click="close()" class="absolute inset-0 bg-black/50"></div>
+    <div x-on:click="close()" class="absolute inset-0 bg-[var(--dmui-surface-overlay)] opacity-50"></div>
     <div class="relative w-64 h-full">
         {% include "components/sidebar.html" %}
     </div>

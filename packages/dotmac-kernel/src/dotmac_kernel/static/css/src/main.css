@@ -161,7 +161,7 @@ h1, h2, h3, .font-display {
 .btn-hover { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
 .btn-hover:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px -2px rgba(6, 182, 212, 0.25);
+  box-shadow: 0 4px 12px -2px rgb(var(--dmui-action-primary-default-rgb) / 0.25);
 }
 .btn-hover:active:not(:disabled) { transform: translateY(0); }
 
