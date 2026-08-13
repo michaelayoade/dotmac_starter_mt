@@ -312,15 +312,23 @@ specifics) points here and must never fork these rules.
     plugins. Outbound synchronization leaves through a durable outbox after the
     local transaction. Configuration binds a transport capability, never the
     business owner. The independently deployed Dotmac Integrator is the sole
-    EXTERNAL connector control plane: products carry no provider clients,
+    EXTERNAL connector control plane, but deployment is not code location:
+    Starter's stateful `dotmac-integration` module owns the registry,
+    installations, bindings, secret references, inbox/outbox, retries,
+    checkpoints, health, repair and its `mod_*` lineage; the separate
+    `dotmac_integrator` repository is a thin assembly that pins kernel, that
+    module and connector distributions and runs them. It never implements a
+    second engine. Products do not each compose the module, and they carry no
+    provider clients,
     provider credentials, provider webhook verification, connector schedules,
     checkpoints or delivery retry engines. Products expose typed domain ports;
     Integrator owns transport evidence and never writes product domain tables.
     External systems are independently released connector PLUGINS discovered
-    from package metadata through one versioned SPI; the Integrator core has no
-    provider enum/import list/conditional. Plugins declare versioned
+    from package metadata through one versioned SPI; the `dotmac-integration`
+    module and thin assembly have no provider enum/import list/conditional.
+    Plugins declare versioned
     capabilities and config schemas, translate wire formats and perform I/O,
-    while the core exclusively owns bindings, secret materialization,
+    while the Starter module exclusively owns bindings, secret materialization,
     inbox/outbox, idempotency, retry, checkpoints, health and repair evidence.
     One installation has exactly one active plugin per capability; duplicate or
     incompatible bindings fail closed.
