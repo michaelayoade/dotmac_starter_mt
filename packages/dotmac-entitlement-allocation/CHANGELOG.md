@@ -1,5 +1,12 @@
 # Changelog — dotmac-entitlement-allocation
 
+## 0.1.0a2 — 2026-08-13
+
+Expose the installed Alembic lineage through the stable top-level
+`versions_dir()` contract. A separate consuming repository can now compose the
+module without deriving a private path from `__file__` or assuming a source
+checkout layout. Domain behavior and schema are unchanged.
+
 ## 0.1.0a1 — 2026-08-12
 
 First release. An immutable projection of what an activated contract version

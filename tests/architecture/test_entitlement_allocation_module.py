@@ -22,7 +22,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from dotmac_entitlement_allocation import models, ports
+from dotmac_entitlement_allocation import models, ports, versions_dir
 from dotmac_entitlement_allocation.manifest import module
 from dotmac_kernel.namespaces import (
     ENTITLEMENT_ALLOCATION_MIGRATION_OWNER,
@@ -38,6 +38,13 @@ LINEAGE = MODULE_ROOT / "migrations" / "versions" / "ea_0001_allocations.py"
 
 def _migration_source() -> str:
     return LINEAGE.read_text(encoding="utf-8")
+
+
+def test_the_public_migration_locator_resolves_the_installed_lineage() -> None:
+    location = versions_dir()
+    assert location.is_dir()
+    assert location == MODULE_ROOT / "migrations" / "versions"
+    assert (location / "ea_0001_allocations.py").is_file()
 
 
 # ── D1: the ledger allocation ────────────────────────────────────────────────

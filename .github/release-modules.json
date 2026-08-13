@@ -46,6 +46,7 @@
         "required": [
           "dotmac_entitlement_allocation/py.typed",
           "dotmac_entitlement_allocation/manifest.py",
+          "dotmac_entitlement_allocation/migrations/__init__.py",
           "dotmac_entitlement_allocation/migrations/versions/ea_0001_allocations.py"
         ],
         "forbidden_prefixes": ["app/", "tests/", "alembic/", "scripts/"],
