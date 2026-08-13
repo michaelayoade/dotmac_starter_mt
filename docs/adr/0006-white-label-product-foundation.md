@@ -898,6 +898,94 @@ The ratchet holds in both directions: a package may not sit in a state weaker
 than its evidence supports (one consumer forces `adopted`, two force
 `reuse-proven`), and may not claim a state stronger than its consumers prove.
 
+### Decision amendment — 2026-08-13 (the presentation system is adoption-led, and may never need a theme package)
+
+**The presentation system is completed by a sequence of adoption-led releases,
+not by a "design-system completion" project.** Each release earns its place by
+being consumed, and the programme is ordered by the value and safety of what it
+retires — not by the order § 1's vocabulary happens to list things in.
+
+This amends § 1. Naming four concepts was correct; it is NOT a commitment to
+build a package per concept. **A complete presentation system may legitimately
+ship no structural theme package at all**, if tokens and brand data cover every
+real deployment. `ThemeManifest` is therefore not a deliverable. Its trigger is
+two deployments needing the same structural presentation difference that tokens
+cannot express; until that exists, building it manufactures an authority nobody
+asked for — the same failure ADR-0017 names on the kernel side.
+
+#### Composition, and where each authority sits
+
+```text
+product / kernel resolver
+        │ resolved brand data
+        ▼
+assembly adapter → dotmac_ui.BrandOverride → same-origin brand CSS
+                                             │
+dotmac-ui defaults → trusted theme defaults → brand overrides
+
+product templates → published dotmac-ui component contracts
+```
+
+- **`dotmac-ui`** owns presentation behaviour: tokens, component markup and CSS,
+  and the accessibility contract.
+- **Product or kernel services** own brand RESOLUTION. `dotmac-ui` generates CSS
+  from resolved data; it never reads a database and never decides precedence.
+- **Themes** supply trusted, deployment-static presentation.
+- **Brands** supply runtime data.
+- **Assemblies** compose all four, and are the only layer permitted to know
+  about more than one of them — which is what keeps the dependency direction of
+  § 2 acyclic while brand data flows the other way.
+
+The cascade order is fixed: `dotmac-ui` defaults, then trusted theme defaults,
+then resolved brand overrides. A product compatibility mapping may occupy the
+theme layer temporarily; it may not become a permanent fourth authority.
+
+#### The release trains, and the gate each must pass
+
+| Train | Outcome | Gate |
+|---|---|---|
+| 0 | Recover existing work | Fresh branches from current `origin/main` |
+| 1 | First released component | `empty_state` consumed by ERP **and** Academy |
+| 2 | Safe branding | `custom_css` rejected and never rendered |
+| 3 | Real runtime branding | Same-origin generated token stylesheet |
+| 4 | Palette convergence | Debt falls through coherent surface slices |
+| 5 | Component expansion | Two consumers and local-copy retirement per component |
+| 6 | Theme contract | Only after proven non-token structural demand |
+| 7 | List surface | Only after ADR-0017 permits the kernel contract |
+
+Trains are ordered by value and risk, not by dependency alone. Train 2 precedes
+Train 3 deliberately: retiring tenant-supplied raw CSS is a **security
+correction to an existing branding surface**, not a new facility, so it is not
+gated by ADR-0017 and must not wait behind the feature that replaces it.
+
+Train 1's gate is deliberately two EXTERNAL products. Starter consumption is
+reference proof and cannot close § 5's gate, because the starter owns the
+package.
+
+**Those two products are ERP and Academy, not Sub.** Sub's adoption sits behind
+ADR-0017's lineage gate, so making the first component contingent on it would
+couple a presentation release to a migration-authority problem it has nothing to
+do with. ERP is the better first consumer precisely because it has adopted no
+kernel: `dotmac-ui` is dependency-free, so ERP proves the component contract
+stands on its own rather than riding on kernel adoption. Academy is already a
+merged token consumer, so its component cutover tests the increment rather than
+a first integration. Sub follows once its own gate opens.
+
+#### Completion criteria
+
+The presentation system is complete when: no tenant can supply executable CSS,
+Jinja or JavaScript; DotMac and neutral brands run from identical source;
+light/dark and the critical facets pass WCAG 2.2 AA; no brand stylesheet or
+asset can leak across tenants; every shared component has two RELEASED product
+consumers and its superseded local owners deleted; every theme that exists is
+installed, exact-pinned, digest-addressed and compatibility-checked; wheels
+prove their assets and templates and render on a clean host; and the control
+plane manages desired brand and theme state through product APIs, never by
+writing to a product database.
+
+Note what is absent: "the component library is finished" and "a theme package
+exists" are not criteria. Neither is a measure of the system working.
+
 ## Consequences
 
 - F1–P1 have fixed vocabulary. "Module", "theme", "brand", and "facet" mean one
