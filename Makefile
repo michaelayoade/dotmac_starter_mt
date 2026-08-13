@@ -43,6 +43,8 @@ fleet-matrix: ## Re-measure the ERP/CRM/Sub duplication baseline (needs the flee
 	poetry run python scripts/fleet_decomposition_sweep.py --fleet-root $(FLEET_ROOT) --check
 fleet-facts: ## Re-measure fact-level ownership coverage across ERP/CRM/Sub (same prerequisites)
 	poetry run python scripts/fleet_fact_registry.py --fleet-root $(FLEET_ROOT) --check
+palette-baseline: ## Regenerate the hardcoded-palette debt baseline (commit the diff in the same change)
+	poetry run python scripts/palette_debt_baseline.py
 check: lint lint-imports type-check security migration-gate ui-check ## Lint + types + security + migration composition + design-system asset freshness
 	poetry run ruff format --check .
 
@@ -110,5 +112,5 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	css-build css-watch ui-build ui-check docker-build docker-dev bump-version \
-	deploy
+	css-build css-watch ui-build ui-check palette-baseline docker-build docker-dev \
+	bump-version deploy

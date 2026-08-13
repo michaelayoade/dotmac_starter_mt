@@ -231,6 +231,20 @@ specifics) points here and must never fork these rules.
     detector still fires. (ADR-0018; `dotmac_erp` reference implementation:
     `scripts/check_session_context.py` + `session_context_legacy.txt`)
 
+26. **Starter-owned templates author colour against `var(--dmui-*)`, never a
+    literal palette.** A hardcoded Tailwind palette utility (`bg-slate-700`,
+    `text-primary-600`, `text-white`) or a raw hex/`rgb()` literal in any
+    template under `packages/*/src/*/templates` is frozen debt: the existing
+    981 occurrences across 34 files are recorded per-file and per-token in
+    `tests/architecture/palette_debt_baseline.json`, and the ratchet fails when
+    that inventory rises OR falls. A slice that genuinely retires palette usage
+    lowers the baseline in the SAME change (`make palette-baseline`) so the
+    reduction is reviewable as a diff. `platform/**`, `layouts/platform.html`
+    and Template Studio are already token-native and are asserted at zero
+    against the live scan, so a regenerated baseline cannot legalise a
+    regression there. (Rule 25's ratchet shape applied to the design system;
+    `test_palette_ratchet.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
