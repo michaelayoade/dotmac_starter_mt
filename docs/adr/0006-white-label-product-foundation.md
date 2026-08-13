@@ -898,12 +898,13 @@ The ratchet holds in both directions: a package may not sit in a state weaker
 than its evidence supports (one consumer forces `adopted`, two force
 `reuse-proven`), and may not claim a state stronger than its consumers prove.
 
-### Decision amendment — 2026-08-13 (the presentation system is adoption-led, and may never need a theme package)
+### Decision amendment — 2026-08-13 (the presentation system is adoption-led, and may need no theme package)
 
 **The presentation system is completed by a sequence of adoption-led releases,
 not by a "design-system completion" project.** Each release earns its place by
-being consumed, and the programme is ordered by the value and safety of what it
-retires — not by the order § 1's vocabulary happens to list things in.
+being consumed. This amendment states the authorities and the standing rules;
+the delivery sequence is an implementation plan, not an architecture decision,
+and lives in `docs/superpowers/plans/2026-08-13-presentation-system-programme.md`.
 
 This amends § 1. Naming four concepts was correct; it is NOT a commitment to
 build a package per concept. **A complete presentation system may legitimately
@@ -940,36 +941,32 @@ The cascade order is fixed: `dotmac-ui` defaults, then trusted theme defaults,
 then resolved brand overrides. A product compatibility mapping may occupy the
 theme layer temporarily; it may not become a permanent fourth authority.
 
-#### The release trains, and the gate each must pass
+#### Tenant-supplied CSS is retired, and its removal is not gated
 
-| Train | Outcome | Gate |
-|---|---|---|
-| 0 | Recover existing work | Fresh branches from current `origin/main` |
-| 1 | First released component | `empty_state` consumed by ERP **and** Academy |
-| 2 | Safe branding | `custom_css` rejected and never rendered |
-| 3 | Real runtime branding | Same-origin generated token stylesheet |
-| 4 | Palette convergence | Debt falls through coherent surface slices |
-| 5 | Component expansion | Two consumers and local-copy retirement per component |
-| 6 | Theme contract | Only after proven non-token structural demand |
-| 7 | List surface | Only after ADR-0017 permits the kernel contract |
+**No tenant may supply CSS, Jinja or JavaScript.** Brand customisation is an
+allowlisted token set (D8). A regex denylist is the wrong shape for the problem:
+it must enumerate every dangerous construct, while an attacker needs one it
+missed.
 
-Trains are ordered by value and risk, not by dependency alone. Train 2 precedes
-Train 3 deliberately: retiring tenant-supplied raw CSS is a **security
-correction to an existing branding surface**, not a new facility, so it is not
-gated by ADR-0017 and must not wait behind the feature that replaces it.
+Retiring such a surface is a **security correction to an existing surface, not a
+new facility**, so ADR-0017 does not gate it, and it does not wait for the
+feature that replaces it. Retirement is a WRITE-time rule: a value already
+stored is data a newer reader ignores, not an invalid setting, and treating it
+as invalid would silently degrade the whole record it sits in.
 
-Train 1's gate is deliberately two EXTERNAL products. Starter consumption is
-reference proof and cannot close § 5's gate, because the starter owns the
-package.
+#### Evidence, not permission
 
-**Those two products are ERP and Academy, not Sub.** Sub's adoption sits behind
-ADR-0017's lineage gate, so making the first component contingent on it would
-couple a presentation release to a migration-authority problem it has nothing to
-do with. ERP is the better first consumer precisely because it has adopted no
-kernel: `dotmac-ui` is dependency-free, so ERP proves the component contract
-stands on its own rather than riding on kernel adoption. Academy is already a
-merged token consumer, so its component cutover tests the increment rather than
-a first integration. Sub follows once its own gate opens.
+Component reuse is evidenced on the ladder this ADR's 2026-08-12 amendment
+already defines (`audit-complete` → `adopted` → `reuse-proven`), and evidence is
+tracked **per contract slice**. A package may be `reuse-proven` for one contract
+— its tokens and compiled assets — while a second contract it also publishes,
+such as the component library, has no consumer at all. A dossier that reports
+one state for a package publishing two contracts overstates the weaker one.
+
+Consumption by the assembly that OWNS a package is reference proof and never
+closes § 5's gate for it. The independent consumers are products, and which
+products they are is a sequencing question for the implementation plan, not a
+decision this ADR should pin.
 
 #### Completion criteria
 
