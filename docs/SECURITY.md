@@ -39,7 +39,7 @@ where the work is tracked (`docs/superpowers/phase2-backlog.md`, the
 | Security response headers | **Met** | `SecurityHeadersMiddleware` (outermost): nosniff, DENY, referrer-policy, permissions-policy, HSTS-on-TLS, CSP; `tests/unit/test_security_baseline.py::TestSecurityHeaders`. Known limit: the last-resort unhandled-exception 500 (ServerErrorMiddleware) bypasses user middleware and carries no headers |
 | Content-Security-Policy | **Met** | Computed-strict default (below); overridable via `CONTENT_SECURITY_POLICY` |
 | Rate limiting | **Met (single-process)** | Bounded LRU store, route-template keys, hash-bucketed unmatched paths (`tests/unit/test_security_baseline.py::TestBoundedRateLimitStore`). Multi-process deployments must swap the store (seam below) |
-| Output encoding / template escaping | **Met** | Jinja2 autoescape; `| safe` requires a nearby sanitize comment (`test_web_conventions.py`); tenant `custom_css` sanitized by `dotmac_kernel.branding.sanitize_branding_css` |
+| Output encoding / template escaping | **Met** | Jinja2 autoescape; `| safe` requires a nearby sanitize comment (`test_web_conventions.py`) and there are **zero** usages — tenant-supplied `custom_css` was retired 2026-08-13 (ADR-0006 D8), so no response carries tenant-authored CSS |
 | Host-header integrity | **Met** | Tenant resolution is exact-host; `TrustedHostMiddleware` in prod (`TRUSTED_HOSTS` prod-required by `validate_settings`) |
 | Secrets hygiene | **Met** | Dev-default secrets are prod-fatal (`validate_settings`); no secret values in repo |
 
@@ -65,8 +65,12 @@ object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 - Fonts are **vendored** (`static/fonts/`, latin subsets) per the
   cross-Dotmac no-CDN standard — no `fonts.googleapis.com`/
   `fonts.gstatic.com` origins anywhere.
-- `style-src 'unsafe-inline'` covers the sanitized per-tenant `custom_css`
-  preview and Alpine's `x-show` style toggling.
+- `style-src 'unsafe-inline'` is **not** for tenant CSS: `custom_css` was
+  retired 2026-08-13 (ADR-0006 D8) and no tenant-authored `<style>` block is
+  emitted anywhere. It remains for first-party inline `style="..."` attributes
+  (the platform screens set `var(--dmui-*)` that way) and Alpine's `x-show`
+  toggling. Recovering `style-src 'self'` needs those converted first and is a
+  separate slice.
 - `img-src https:` exists because tenant branding may point `logo_url` at
   an external image.
 

@@ -6,6 +6,36 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a47 — 2026-08-13
+
+**BREAKING.** Removes a published symbol.
+
+### Removed
+- **`dotmac_kernel.branding.sanitize_branding_css`.** It existed to scrub
+  tenant-supplied `custom_css` before that value was rendered `| safe` into a
+  `<style>` block. Both the field and the sanitizer are retired (ADR-0006 D8): a
+  denylist is the wrong shape for CSS, because it must enumerate every dangerous
+  construct while an attacker needs one it missed. There is no replacement and
+  none is wanted — brand colour is expressed through the allowlisted token
+  fields.
+
+  A consumer still importing it should delete the call: any value it would have
+  sanitized is no longer accepted, and any value already stored is inert.
+
+### Added
+- `RETIRED_BRAND_KEYS` and `reject_retired_brand_keys(value)`. The latter is a
+  WRITE-time rule, called from a product's single settings write path. It is
+  deliberately **not** a `SettingSpec.validator`: a validator also runs on the
+  READ path, so rejecting a legacy row there would resolve the whole
+  `ui_branding` value to its default and silently blank the tenant's name,
+  tagline and colours.
+
+### Changed
+- `load_branding` no longer merges `custom_css`; the key left
+  `_KNOWN_BRAND_KEYS`, so a legacy stored value is inert and unreachable from
+  any template. The stored bytes are NOT erased and stay readable through the
+  generic settings surface for inventory.
+
 ## 0.1.0a46 — 2026-08-12
 
 Allocates `mod_appdir` to `dotmac-application-directory` (ADR-0021).

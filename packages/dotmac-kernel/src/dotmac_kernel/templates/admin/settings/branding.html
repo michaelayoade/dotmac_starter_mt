@@ -9,11 +9,19 @@
   app.core.branding.load_branding(db, tenant.id): static brand.json/env
   defaults with this tenant's ui_branding override layered on top),
   `errors` (`{"_form": message}` on failure), `form` (`{"name", "tagline",
-  "logo_url", "primary_color", "accent_color", "custom_css"}` — the values
-  to repopulate the form with).
+  "logo_url", "primary_color", "accent_color"}` — the values to repopulate
+  the form with).
+
+  There is deliberately NO `| safe` anywhere in this file. The one that used
+  to live here rendered tenant-supplied `custom_css` into a `<style>` block;
+  both the field and its regex sanitizer were removed on 2026-08-13 (ADR-0006
+  D8). A legacy stored value is inert and is never rendered — not even as
+  escaped text on this page — so a hostile value cannot reach any response.
+  It stays readable for inventory through the generic settings editor, which
+  shows the stored `ui_branding` dict as-is.
 #}
 {% extends "layouts/admin.html" %}
-{% from "components/form_macros.html" import text_input, textarea, submit_button %}
+{% from "components/form_macros.html" import text_input, submit_button %}
 
 {% block admin_content %}
 <div class="max-w-3xl">
@@ -38,7 +46,6 @@
                     {{ text_input("primary_color", "Primary color", value=form.get("primary_color", ""), placeholder=brand.primary_color) }}
                     {{ text_input("accent_color", "Accent color", value=form.get("accent_color", ""), placeholder=brand.accent_color) }}
                 </div>
-                {{ textarea("custom_css", "Custom CSS", value=form.get("custom_css", ""), rows=8, help_text="Scoped raw CSS. @import, javascript:, expression(), behavior:, and angle brackets are stripped before it's ever rendered.") }}
                 {{ submit_button(label="Save Branding", cancel_url="/admin/settings") }}
             </form>
         </div>
@@ -53,20 +60,10 @@
                     <p class="text-xs text-slate-500 dark:text-slate-400">{{ brand.tagline }}</p>
                 </div>
             </div>
-            {% if brand.custom_css %}
-            <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2">Custom CSS preview</p>
-            <pre class="text-xs text-slate-600 dark:text-slate-300 whitespace-pre-wrap bg-slate-50 dark:bg-slate-900 rounded-lg p-3">{{ brand.custom_css }}</pre>
-            {#
-              SANITIZER: `brand.custom_css` above was already run through
-              app.core.branding.sanitize_branding_css inside load_branding
-              (this route never sees the raw stored value) — the `<style>`
-              block below is the ONE `| safe` in this app's templates, and
-              only for this already-scrubbed value. Do not add `| safe`
-              anywhere else without threading it through that same sanitizer
-              first.
-            #}
-            <style>{{ brand.custom_css | safe }}</style>
-            {% endif %}
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+                Brand colours are applied from the token set above. Custom CSS is
+                no longer accepted.
+            </p>
         </div>
     </div>
 </div>

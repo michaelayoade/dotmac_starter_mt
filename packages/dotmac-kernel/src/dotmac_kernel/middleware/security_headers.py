@@ -22,9 +22,13 @@ see docs/SECURITY.md "Content-Security-Policy rationale" for the audit):
   'unsafe-eval' is required by the standard Alpine.js build, which compiles
   `x-data`/`x-show` expressions with `new Function`.
 - `style-src 'self' 'unsafe-inline'`: Tailwind + vendored fonts.css are
-  local; 'unsafe-inline' covers the sanitized per-tenant `custom_css`
-  preview block (`dotmac_kernel.branding.sanitize_branding_css` runs BEFORE it
-  ever renders) and Alpine's style toggling (`x-show` sets inline styles).
+  local. 'unsafe-inline' is NOT for tenant CSS -- tenant-supplied `custom_css`
+  was retired on 2026-08-13 (ADR-0006 D8) and no response carries a
+  tenant-authored `<style>` block any more. What still needs it is the inline
+  `style="..."` ATTRIBUTES in first-party templates (the platform screens set
+  `var(--dmui-*)` that way). Removing it is a separate slice that has to
+  convert those attributes first; until then, claiming a tighter policy in this
+  comment than the header actually sends would be the more dangerous error.
 - `font-src 'self'`: fonts are VENDORED (static/fonts/, no-CDN standard) —
   no fonts.googleapis.com / fonts.gstatic.com origins.
 - `img-src 'self' data: https:`: tenants may set an external https

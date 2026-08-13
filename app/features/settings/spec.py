@@ -87,7 +87,8 @@ SPECS: list[SettingSpec] = [
         label="UI branding overrides (logo, colors, etc.)",
         description=(
             "Per-tenant overrides applied over the deployment brand. Edit these "
-            "on the Branding screen, which previews and sanitizes them."
+            "on the Branding screen. Colours come from the allowlisted token "
+            "fields; tenant-supplied CSS is not accepted."
         ),
     ),
     SettingSpec(

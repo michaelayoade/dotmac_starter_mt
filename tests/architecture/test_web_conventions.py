@@ -19,12 +19,14 @@ behavior (nothing here talks to the DB or the app):
    pattern they moved away from) — this check strips comments before
    scanning so those don't false-positive.
 3. `| safe` may appear ONLY when a comment on the same line or one of the
-   preceding lines mentions "sanitiz" (sanitize/sanitizer/sanitized) —
-   `templates/admin/settings/branding.html`'s `custom_css` preview is the
-   one branding usage that passes (its value is already run through
-   `dotmac_kernel.branding.sanitize_branding_css` before the template ever sees
-   it); anything else must fail until it's threaded through a real
-   sanitizer the same way.
+   preceding lines mentions "sanitiz" (sanitize/sanitizer/sanitized).
+   **There are ZERO usages today.** The one that existed — the `custom_css`
+   preview in `templates/admin/settings/branding.html` — went away with
+   tenant-supplied CSS on 2026-08-13 (ADR-0006 D8). A guard over an empty set
+   passes for the wrong reason, so `test_the_safe_filter_guard_still_bites`
+   is the sensitivity proof that it would still fire (ADR-0018: a detector
+   with no proof it fires is indistinguishable from a blind one). Keep the
+   guard: the rule is about the NEXT `| safe`, not the last one.
 4. Every `app/features/<name>/web.py` imports only `dotmac_kernel.*` and its OWN
    feature's `app.features.<name>.*` — belt-and-suspenders alongside the
    import-linter "Features are independent of each other" contract
@@ -223,6 +225,32 @@ def test_safe_filter_only_used_with_a_sanitize_comment_nearby() -> None:
         "either thread the value through a real sanitizer and document it, "
         "or drop `| safe`:\n" + "\n".join(violations)
     )
+
+
+def test_the_safe_filter_guard_still_bites() -> None:
+    """Sensitivity proof for a guard whose real-world match set is now empty.
+
+    Retiring `custom_css` removed the only `| safe` in the tree. Without this,
+    `test_safe_filter_only_used_with_a_sanitize_comment_nearby` would pass on
+    zero templates forever and nobody would notice it had stopped meaning
+    anything — the exact failure mode ADR-0018 names.
+    """
+    undocumented = "<style>{{ brand.custom_css | safe }}</style>"
+    documented = "{# sanitized upstream #}\n<style>{{ x | safe }}</style>"
+
+    def _flags(text: str) -> bool:
+        lines = _strip_comments(text).splitlines()
+        original = text.splitlines()
+        for lineno, line in enumerate(lines, start=1):
+            if not _SAFE_FILTER.search(line):
+                continue
+            window = "\n".join(original[max(0, lineno - _NEARBY_LINES) : lineno])
+            if not _SANITIZE_MENTION.search(window):
+                return True
+        return False
+
+    assert _flags(undocumented), "the guard missed an undocumented `| safe`"
+    assert not _flags(documented), "the guard false-positived on a documented one"
 
 
 # ---------------------------------------------------------------------------

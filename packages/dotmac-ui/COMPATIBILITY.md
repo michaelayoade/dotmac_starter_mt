@@ -346,14 +346,16 @@ claim about that.
 
 **What is NOT claimed.** AA's relaxed 3:1 allowance for *large* text is used
 nowhere: the type scale is a token, so the package cannot know what size a role
-renders at, and assuming "large" would assume away the failure. Everything else
-in AA — focus order, name/role/value, error identification, target size, dragging
-alternatives — is a property of **markup**, and this release publishes none;
-tests asserting them would be theatre. They become checkable when the component
-library lands, and each component's contract must state which criteria it
-carries. Contrast of a consumer's own colours, of text over imagery, and of any
-tenant-supplied `custom_css` is out of scope — ADR-0006 D8 is retiring that
-input, not measuring it.
+renders at, and assuming "large" would assume away the failure. Other AA
+criteria — focus order, name/role/value, error identification, target size,
+dragging alternatives — depend on **markup and composition**. This release
+publishes `empty_state`; its narrow markup guarantees live with that component's
+contract and tests, not in the token contrast checker. Each future component
+must likewise state and prove the criteria it carries. Contrast of a consumer's
+own colours and of text over imagery is outside the contract. Tenant-supplied
+`custom_css` is outside the contract entirely — ADR-0006 D8 and the reference
+kernel's 0.1.0a47 release retired that input rather than pretending it could be
+measured or sanitized safely.
 
 `check_contrast()` is public API for exactly this reason: a product that
 re-declares brand ramps at runtime (U2) runs the same requirement set against its

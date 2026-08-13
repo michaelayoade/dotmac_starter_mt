@@ -36,7 +36,7 @@ for most types anyway).
 JSON-typed spec (`branding/ui_branding`) — a raw JSON textarea would work
 (and the generic edit route above still functions for it), but this page
 exposes the actual sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/
-`accent_color`/`custom_css`) as normal form inputs and composes them back
+`accent_color`) as normal form inputs and composes them back
 into the `ui_branding` dict on submit, still through the SAME
 `service.update_setting` write path (SoT: one service, one write path, two
 edit UIs). It renders the CURRENT effective branding via
@@ -45,13 +45,15 @@ caller of that function (previously zero callers, per
 `docs/ARCHITECTURE.md`'s no-orphan-settings note) — and passes the result as
 this render's own `brand` context key, shadowing the process-global static
 `brand` template global for this response only (see
-`dotmac_kernel.templating`'s module docstring for that split). The `custom_css`
-preview block is the ONE place in this app's templates that uses `| safe`:
-`load_branding` already ran the stored value through
-`dotmac_kernel.branding.sanitize_branding_css` before this route ever sees it, so
-by the time `branding.html` renders `brand.custom_css`, it is guaranteed
-scrubbed of `@import`/`javascript:`/`expression()`/`behavior:`/angle-bracket
-breakouts — see that template's inline comment at the `| safe` usage.
+`dotmac_kernel.templating`'s module docstring for that split).
+
+This page accepts NO tenant CSS. `custom_css` and its regex sanitizer were
+removed on 2026-08-13 (ADR-0006 D8), and with them the only `| safe` in this
+app's templates. A write naming a retired key is refused by the shared
+`settings_service.update_setting` write owner rather than dropped. The generic
+JSON editor and settings API pass their raw values to that owner; this friendly
+adapter preserves the presence of any injected retired form key so the owner
+can refuse it. The route is not a second enforcement point.
 """
 
 from __future__ import annotations
@@ -59,7 +61,7 @@ from __future__ import annotations
 import json
 
 from dotmac_kernel.audit import write_audit_event
-from dotmac_kernel.branding import load_branding
+from dotmac_kernel.branding import RETIRED_BRAND_KEYS, load_branding
 from dotmac_kernel.deps import get_db, require_tenant
 from dotmac_kernel.exceptions import BadRequestError, NotFoundError
 from dotmac_kernel.models import Tenant
@@ -244,7 +246,6 @@ def _branding_form(current: dict[str, object]) -> dict[str, str]:
         "logo_url": str(current.get("logo_url", "") or ""),
         "primary_color": str(current.get("primary_color", "") or ""),
         "accent_color": str(current.get("accent_color", "") or ""),
-        "custom_css": str(current.get("custom_css", "") or ""),
     }
 
 
@@ -296,8 +297,14 @@ async def branding_submit(
         "logo_url": str(form_data.get("logo_url", "")).strip(),
         "primary_color": str(form_data.get("primary_color", "")).strip(),
         "accent_color": str(form_data.get("accent_color", "")).strip(),
-        "custom_css": str(form_data.get("custom_css", "")),
     }
+    # Keep retired input visible to the one write owner. Silently dropping an
+    # injected field would tell an API/form caller its CSS was accepted even
+    # though it can never render. This adapter does not decide the policy: it
+    # forwards the retired key and `update_setting` owns the refusal.
+    for retired_key in RETIRED_BRAND_KEYS:
+        if retired_key in form_data:
+            raw[retired_key] = str(form_data.get(retired_key, ""))
 
     try:
         settings_service.update_setting(db, tenant, "branding", "ui_branding", raw)

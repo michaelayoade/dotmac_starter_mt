@@ -98,7 +98,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.assembly` | `ProductAssemblySpec`, `ProductSecurityPolicy`, `StartupCheck`, `StartupHook` |
 | `dotmac_kernel.audit` | `ACTOR_TYPES`, `AuditEvent`, `MissingAuditActorError`, `UnknownAuditActorTypeError`, `resolve_audit_actor`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
-| `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `sanitize_branding_css` |
+| `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `RETIRED_BRAND_KEYS`, `reject_retired_brand_keys` (`sanitize_branding_css` was REMOVED in 0.1.0a47 — see CHANGELOG) |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
 | `dotmac_kernel.channel_policy` | `CHANNEL_POLICY_KEY`, `ChannelPolicyError`, `make_spec`, `resolve_channels`, `validate_policy_document` |
 | `dotmac_kernel.config` | `Settings`, `settings`, `validate_settings` |

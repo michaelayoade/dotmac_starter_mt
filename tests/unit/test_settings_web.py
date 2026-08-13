@@ -12,6 +12,7 @@ seam.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 
 import pytest
@@ -42,6 +43,7 @@ from app.features.auth.web import router as auth_web_router
 # Import for the side effect: registers custom_fields/max_per_entity,
 # branding/ui_branding, audit/retention_days into the resolver registry.
 from app.features.settings import spec as _settings_spec  # noqa: F401
+from app.features.settings.router import router as settings_api_router
 from app.features.settings.web import router as settings_web_router
 
 PASSWORD = "correct horse battery staple"
@@ -83,6 +85,10 @@ def web_client(db: Session, tenant_row: Tenant) -> TestClient:
     register_error_handlers(app)
     app.include_router(auth_web_router)
     app.include_router(settings_web_router)
+    # The JSON settings API is a THIRD write surface for the same setting.
+    # Mounted here because a guard that only the web routes exercise is a
+    # guard with an untested hole -- see test_the_settings_api_refuses_custom_css.
+    app.include_router(settings_api_router)
 
     @app.middleware("http")
     async def _inject_tenant(request: Request, call_next):
@@ -94,6 +100,17 @@ def web_client(db: Session, tenant_row: Tenant) -> TestClient:
 
     app.dependency_overrides[get_db] = _override_get_db
     return TestClient(app, raise_server_exceptions=False)
+
+
+def _stored_ui_branding(db: Session, tenant_row: Tenant) -> dict:
+    """The stored dict as the generic settings surface returns it."""
+    from dotmac_kernel.settings_models import SettingDomain
+    from dotmac_kernel.settings_resolver import resolve_value
+
+    value = resolve_value(
+        db, SettingDomain.branding, "ui_branding", tenant_id=tenant_row.id, default={}
+    )
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _login(client: TestClient, email: str) -> str:
@@ -443,7 +460,6 @@ def test_branding_submit_writes_override_and_redirects(
             "logo_url": "https://example.com/logo.png",
             "primary_color": "#112233",
             "accent_color": "#445566",
-            "custom_css": ".ok { color: red; }",
         },
         cookies={"access_token": token},
         follow_redirects=False,
@@ -459,37 +475,135 @@ def test_branding_submit_writes_override_and_redirects(
     assert branding["primary_color"] == "#112233"
 
 
-def test_branding_form_after_submit_shows_sanitized_css_preview(
+def test_the_branding_form_no_longer_offers_a_custom_css_field(
     web_client: TestClient, provisioned_admin: dict
 ) -> None:
-    """`sanitize_branding_css` strips a dangerous pattern in place (verified
-    directly in `tests/unit/test_branding.py`); an angle-bracket breakout
-    wipes the WHOLE value instead of partial-stripping (also that module's
-    contract), so this uses an `@import` with no `<`/`>` to prove the
-    preview renders the sanitizer's OUTPUT (the safe rule survives, the
-    dangerous one doesn't) rather than the raw stored value.
-    """
     token = _login(web_client, provisioned_admin["email"])
-    web_client.post(
+
+    resp = web_client.get("/admin/settings/branding", cookies={"access_token": token})
+
+    assert resp.status_code == 200
+    assert 'name="custom_css"' not in resp.text
+    assert "<style>" not in resp.text
+
+
+def test_the_friendly_branding_form_refuses_custom_css(
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """An injected retired field reaches the owner and aborts the whole write."""
+    token = _login(web_client, provisioned_admin["email"])
+    original = {
+        "name": "Before",
+        "tagline": "Still here",
+        "primary_color": "#112233",
+    }
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        original,
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    resp = web_client.post(
         "/admin/settings/branding",
         data={
-            "name": "",
+            "name": "Acme Tenant",
             "tagline": "",
             "logo_url": "",
             "primary_color": "",
             "accent_color": "",
-            "custom_css": (
-                '.ok { color: red; } @import url("https://evil.example/x.css");'
-            ),
+            "custom_css": ".evil{}",
         },
         cookies={"access_token": token},
         follow_redirects=False,
     )
 
-    resp = web_client.get("/admin/settings/branding", cookies={"access_token": token})
-    assert resp.status_code == 200
-    # The static help text below the textarea mentions "@import" by name
-    # (describing what gets stripped) — check the actual dangerous URL is
-    # gone, not the word, and that the safe rule survived alongside it.
-    assert "evil.example" not in resp.text
-    assert ".ok { color: red; }" in resp.text
+    assert resp.status_code == 200, resp.text
+    assert "custom_css" in resp.text
+    assert "no longer accepts" in resp.text
+    assert "location" not in resp.headers
+    assert "hx-redirect" not in resp.headers
+    assert _stored_ui_branding(db, tenant_row) == original
+
+    events = db.query(AuditEvent).filter(AuditEvent.action == "settings.update").all()
+    assert not any(e.details.get("key") == "ui_branding" for e in events)
+
+
+def test_the_generic_settings_editor_refuses_custom_css(
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """This surface passes raw JSON straight through, so it must REFUSE."""
+    token = _login(web_client, provisioned_admin["email"])
+
+    resp = web_client.post(
+        "/admin/settings/branding/ui_branding/edit",
+        data={"value": json.dumps({"name": "Acme", "custom_css": ".evil{}"})},
+        cookies={"access_token": token},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code not in (302, 303), "a refused write must not redirect"
+    assert "custom_css" not in _stored_ui_branding(db, tenant_row)
+
+
+def test_the_settings_api_refuses_custom_css(
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """The third surface. All three land in `update_setting`, so one guard
+    covers them — but only if it actually executes, which is the point."""
+    token = _login(web_client, provisioned_admin["email"])
+
+    resp = web_client.put(
+        "/settings/branding/ui_branding",
+        json={"value": {"name": "Acme", "custom_css": ".evil{}"}},
+        headers={"Authorization": f"Bearer {token}"},
+        cookies={"access_token": token},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "custom_css" in resp.text
+    assert "custom_css" not in _stored_ui_branding(db, tenant_row)
+
+
+def test_a_legacy_stored_css_row_leaves_the_portal_working(
+    web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
+) -> None:
+    """Inert must mean INERT: the pages still work and still brand correctly.
+
+    Asserting only that hostile bytes are absent would pass just as well if the
+    page 500'd or the tenant's branding had been blanked -- which is exactly
+    what the first version of this retirement did, by treating a legacy row as
+    an invalid setting.
+    """
+    from dotmac_kernel.settings_models import SettingDomain
+    from dotmac_kernel.settings_resolver import upsert_by_key
+
+    # The low-level resolver writer, not a request path: every request-facing
+    # write goes through `update_setting`, which refuses this key.
+    hostile = "</style><script>alert(1)</script>"
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        {"name": "Legacy Co", "tagline": "Still branded", "custom_css": hostile},
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
+
+    # Only the routes this fixture actually mounts. `/admin` belongs to the
+    # `web` feature and is not part of this app, so asserting on it would fail
+    # for a reason that has nothing to do with branding.
+    token = _login(web_client, provisioned_admin["email"])
+    for path in ("/admin/settings/branding", "/admin/settings"):
+        resp = web_client.get(path, cookies={"access_token": token})
+        assert resp.status_code == 200, f"{path} -> {resp.status_code}"
+        assert "alert(1)" not in resp.text, path
+        assert "</style>" not in resp.text, path
+
+    branding_page = web_client.get(
+        "/admin/settings/branding", cookies={"access_token": token}
+    )
+    assert "Legacy Co" in branding_page.text, "legitimate branding must survive"
+    assert "Still branded" in branding_page.text
