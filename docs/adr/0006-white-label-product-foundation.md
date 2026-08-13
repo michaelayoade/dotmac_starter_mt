@@ -898,6 +898,91 @@ The ratchet holds in both directions: a package may not sit in a state weaker
 than its evidence supports (one consumer forces `adopted`, two force
 `reuse-proven`), and may not claim a state stronger than its consumers prove.
 
+### Decision amendment — 2026-08-13 (the presentation system is adoption-led, and may need no theme package)
+
+**The presentation system is completed by a sequence of adoption-led releases,
+not by a "design-system completion" project.** Each release earns its place by
+being consumed. This amendment states the authorities and the standing rules;
+the delivery sequence is an implementation plan, not an architecture decision,
+and lives in `docs/superpowers/plans/2026-08-13-presentation-system-programme.md`.
+
+This amends § 1. Naming four concepts was correct; it is NOT a commitment to
+build a package per concept. **A complete presentation system may legitimately
+ship no structural theme package at all**, if tokens and brand data cover every
+real deployment. `ThemeManifest` is therefore not a deliverable. Its trigger is
+two deployments needing the same structural presentation difference that tokens
+cannot express; until that exists, building it manufactures an authority nobody
+asked for — the same failure ADR-0017 names on the kernel side.
+
+#### Composition, and where each authority sits
+
+```text
+product / kernel resolver
+        │ resolved brand data
+        ▼
+assembly adapter → dotmac_ui.BrandOverride → same-origin brand CSS
+                                             │
+dotmac-ui defaults → trusted theme defaults → brand overrides
+
+product templates → published dotmac-ui component contracts
+```
+
+- **`dotmac-ui`** owns presentation behaviour: tokens, component markup and CSS,
+  and the accessibility contract.
+- **Product or kernel services** own brand RESOLUTION. `dotmac-ui` generates CSS
+  from resolved data; it never reads a database and never decides precedence.
+- **Themes** supply trusted, deployment-static presentation.
+- **Brands** supply runtime data.
+- **Assemblies** compose all four, and are the only layer permitted to know
+  about more than one of them — which is what keeps the dependency direction of
+  § 2 acyclic while brand data flows the other way.
+
+The cascade order is fixed: `dotmac-ui` defaults, then trusted theme defaults,
+then resolved brand overrides. A product compatibility mapping may occupy the
+theme layer temporarily; it may not become a permanent fourth authority.
+
+#### Tenant-supplied CSS is retired, and its removal is not gated
+
+**No tenant may supply CSS, Jinja or JavaScript.** Brand customisation is an
+allowlisted token set (D8). A regex denylist is the wrong shape for the problem:
+it must enumerate every dangerous construct, while an attacker needs one it
+missed.
+
+Retiring such a surface is a **security correction to an existing surface, not a
+new facility**, so ADR-0017 does not gate it, and it does not wait for the
+feature that replaces it. Retirement is a WRITE-time rule: a value already
+stored is data a newer reader ignores, not an invalid setting, and treating it
+as invalid would silently degrade the whole record it sits in.
+
+#### Evidence, not permission
+
+Component reuse is evidenced on the ladder this ADR's 2026-08-12 amendment
+already defines (`audit-complete` → `adopted` → `reuse-proven`), and evidence is
+tracked **per contract slice**. A package may be `reuse-proven` for one contract
+— its tokens and compiled assets — while a second contract it also publishes,
+such as the component library, has no consumer at all. A dossier that reports
+one state for a package publishing two contracts overstates the weaker one.
+
+Consumption by the assembly that OWNS a package is reference proof and never
+closes § 5's gate for it. The independent consumers are products, and which
+products they are is a sequencing question for the implementation plan, not a
+decision this ADR should pin.
+
+#### Completion criteria
+
+The presentation system is complete when: no tenant can supply executable CSS,
+Jinja or JavaScript; DotMac and neutral brands run from identical source;
+light/dark and the critical facets pass WCAG 2.2 AA; no brand stylesheet or
+asset can leak across tenants; every shared component has two RELEASED product
+consumers and its superseded local owners deleted; every theme that exists is
+installed, exact-pinned, digest-addressed and compatibility-checked; wheels
+prove their assets and templates and render on a clean host; and the control
+plane manages desired brand and theme state through product APIs, never by
+writing to a product database.
+
+Note what is absent: "the component library is finished" and "a theme package
+exists" are not criteria. Neither is a measure of the system working.
+
 ## Consequences
 
 - F1–P1 have fixed vocabulary. "Module", "theme", "brand", and "facet" mean one
