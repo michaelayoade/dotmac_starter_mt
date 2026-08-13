@@ -566,8 +566,26 @@ type = "directory"
 url = "packages/dotmac-imports"
 
 [[package]]
+name = "dotmac-integration"
+version = "0.1.0a1"
+description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a56"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-integration"
+
+[[package]]
 name = "dotmac-kernel"
-version = "0.1.0a57"
+version = "0.1.0a58"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2627,4 +2645,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "bfc470b7849a42415d0d65c171d1d913dcc0e855c44b18fa86cc4b92e8487098"
+content-hash = "5d76ad011dd490b74efce0266af09fd750d92b49211e9a5ebc981c5b23e2c8e3"

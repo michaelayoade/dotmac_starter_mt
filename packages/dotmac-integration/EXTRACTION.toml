@@ -36,7 +36,12 @@ contract = "The generic machinery of running a connector: installations, immutab
 # start. This is a port of an existing shape, not a re-scoping.
 planes = "platform-only"
 
-source_repositories = ["dotmac_sub"]
+# ERP and CRM are listed because the product-first rule required inventorying
+# them, NOT because either supplied an implementation. Neither references any of
+# Sub's seven integration tables; what they have is their own direct connector
+# surface, already frozen and counted in external-connector-sources.md (ERP 21,
+# CRM 33 `http_client` files). CRM's is deletion rather than migration.
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_crm"]
 source_paths = [
   # The seven tables — the mature part, and the reason this is product-first
   # rather than a design exercise. Leasing, idempotency keys, payload digests,
@@ -95,11 +100,43 @@ first_cutover = "A read-only or ingress-only Meta/WhatsApp messaging capability,
 
 shadow_and_drift = "Cutover is shadow-first: the Integrator receives the provider traffic while the product still receives only the provider-neutral capability message, and receipts, payload fingerprints, checkpoints and product outcomes are compared until there is ZERO unexplained drift. Only then is one binding activated, and only then are the provider webhook, credentials, client, task, retry and checkpoint removed from the product — lowering the external-connector ratchet baseline in the SAME change, so the retirement is reviewable as a diff rather than asserted."
 
-# Two defects the port must not carry forward silently, and must not fix
-# silently either. Both are decisions.
+# Binding multiplicity — RESOLVED 2026-08-13, and the earlier reading here was
+# wrong. This entry records the correction because a dossier that quietly drops
+# a misreading teaches nobody why it was wrong.
+#
+# THE RULE: "Each installation may bind a capability once. Multiple
+# installations may implement it, but every dispatch must identify or resolve
+# exactly one enabled binding; absent, stale, or ambiguous routing fails
+# closed."
+#
+# An earlier revision recorded Sub's (installation_id, capability_id) unique
+# constraint as a DEFECT against ADR-0024 §7. It is not. §7 says "each
+# (installation, capability) has exactly one active connector binding" — the
+# tuple, never a global per-capability constraint — and Sub enforces exactly
+# that tuple. Two distinct concepts were being conflated:
+#
+#   ENABLED   an installation is capable and permitted to implement a
+#             capability. MANY installations may be enabled for one capability.
+#   SELECTED  the single binding chosen for one concrete dispatch. Zero or
+#             multiple matches fail closed.
+#
+# Sub already separates them: `require_enabled_capability_binding` filters
+# enabled bindings, narrows by an optional connector_key, and where several
+# remain requires exactly one `policy_json.default is True` — raising "multiple
+# enabled bindings; exactly one must be default" otherwise. Routing never reads
+# `scope_json`; its only observed consumer displays configured ERP domains.
+#
+# So the module preserves the tuple constraint, does NOT constrain capability_id
+# alone, and does NOT put raw scope_json in any uniqueness constraint. JSON
+# equality cannot detect overlapping scopes, so if scoped routing ever gains a
+# real consumer it needs a separate typed route/assignment contract with
+# canonical keys and overlap rules — not a constraint bolted onto a JSON column.
+binding_multiplicity = "Unique on (installation_id, capability_id). Many installations may implement one capability; dispatch resolves exactly one enabled binding or fails closed."
+
 open_questions = [
-  "Duplicate capability ownership is not refused today: the binding unique constraint is (installation_id, capability_id), so two DIFFERENT installations can each enable the same capability. ADR-0024 §7 requires exactly one active binding per capability with duplicates refused at activation. Sub carries scope_json, so scoped co-ownership may have been intended — this needs a ruling before the constraint changes.",
-  "No SPI version range is stored. connector_version and manifest_digest exist, but nothing records the SPI range a connector was built against, so 'an incompatible SPI version refuses activation' cannot be enforced. The first slice adds it.",
+  "No SPI version range is stored. connector_version and manifest_digest exist, but nothing records the SPI range a connector was built against, so 'an incompatible SPI version refuses activation' cannot be enforced. The first slice adds it, checked at discovery, startup AND activation.",
 ]
+
+local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
 
 next_action = "Slice 1 is installation + immutable configuration revision + capability binding, with plugin manifest and package-metadata discovery, secret REFERENCES only, and refusal of duplicate plugins, incompatible SPI versions and undeclared capabilities — plus a shared fake-plugin conformance kit so the SPI is testable with no real provider and no network I/O. Slice 2 extracts the execution machinery from Sub: inbox receipts and deduplication, outbox and delivery attempts, central idempotency, retry classification and backoff, polling checkpoints, then health, audit and repair. Each mechanism gets ONE owner in the module; a plugin may never maintain a parallel ledger. Publish, then create the dotmac_integrator assembly, then the first real connector, then shadow-cut one capability."

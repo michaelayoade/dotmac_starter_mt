@@ -1,0 +1,268 @@
+"""The control-plane tables, bound to `mod_intg` (ADR-0006 D1, ADR-0023).
+
+## Platform plane only — and why that is a port, not a re-scoping
+
+Every table here is PLATFORM-plane: no `tenant_id`, no RLS, granted to the
+platform roles and REVOKEd from `app_user`. A connector installation, its
+configuration revisions and its capability bindings are control-plane facts
+about the fleet's integrations. No product queries them — products receive
+provider-neutral capability messages over their own ports — and none of these
+rows belongs to a tenant of a product data plane.
+
+The source agrees. Not one of `dotmac_sub`'s seven integration tables carries a
+`tenant_id`: Sub runs one operator tenant and built this control-plane-scoped
+from the start. So the manifest declares `platform_tables` with an EMPTY tenant
+`tables` tuple — the first module in the fleet to do so — and that is a
+faithful port rather than a decision imposed on the source.
+
+## Binding multiplicity: enabled is not selected
+
+`(installation_id, capability_id)` is unique — an installation binds a
+capability once. **`capability_id` alone is deliberately NOT unique**: many
+installations may implement one capability, which is what ADR-0024 § 7's
+"each `(installation, capability)`" actually says.
+
+Choosing between them is a DISPATCH concern, not a schema one. See
+`dotmac_integration.selection`: exactly one enabled binding is resolved per
+dispatch, and absent, stale or ambiguous routing fails closed.
+
+`scope_json` appears on the binding for parity with the source, where its only
+consumer displays configured domains. It is **not** in any uniqueness
+constraint and must not be: JSON equality cannot detect overlapping scopes, so
+a constraint over it would claim a guarantee it cannot make. Scoped routing, if
+it ever gains a real consumer, needs a typed route contract with canonical keys
+and overlap rules.
+
+## Configuration revisions are immutable
+
+A revision is inserted, never updated. `config_digest` is what makes that
+checkable rather than asserted, and `current_config_revision_id` on the
+installation is the only mutable pointer — so "what was this connector
+configured with on the 3rd?" is answerable, which is the question an incident
+asks.
+
+`secret_refs` holds REFERENCES only. See `dotmac_integration.secrets` for the
+refusal that keeps it that way.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import UUID
+
+import sqlalchemy as sa
+from dotmac_kernel.models import Base, TimestampMixin, uuid_pk
+from dotmac_kernel.namespaces import module_schema, schema_table_args
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import Mapped, mapped_column
+
+#: The module's immutable namespace, from the ledger allocation.
+SCHEMA = module_schema("intg")
+
+_JSON = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
+
+#: An installation's lifecycle. `quarantined` is distinct from `disabled`: an
+#: operator disabled the first, the platform stopped trusting the second.
+INSTALLATION_STATES: tuple[str, ...] = (
+    "draft",
+    "validating",
+    "enabled",
+    "disabled",
+    "quarantined",
+    "retired",
+)
+BINDING_STATES: tuple[str, ...] = ("disabled", "enabled")
+
+
+class ConnectorInstallation(Base, TimestampMixin):
+    """One configured instance of an installed connector distribution."""
+
+    __tablename__ = "connector_installations"
+    __table_args__ = (
+        UniqueConstraint(
+            "connector_key", "name", name="uq_connector_installations_key_name"
+        ),
+        CheckConstraint(
+            "state IN ('draft', 'validating', 'enabled', 'disabled', "
+            "'quarantined', 'retired')",
+            name="ck_connector_installations_state",
+        ),
+        CheckConstraint(
+            "environment IN ('production', 'sandbox', 'test')",
+            name="ck_connector_installations_environment",
+        ),
+        Index("ix_connector_installations_key_state", "connector_key", "state"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    #: Matches a discovered `ConnectorManifest.connector_key`. Not an FK —
+    #: connectors are independently released distributions, not rows.
+    connector_key: Mapped[str] = mapped_column(String(120), nullable=False)
+    connector_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: The SPI range the installed distribution declared, STORED rather than
+    #: only compared. This is what lets a later module upgrade refuse a
+    #: previously activated binding — the case that actually bites, where the
+    #: plugin did not change but the host did.
+    spi_range: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    environment: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="production"
+    )
+    state: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="draft"
+    )
+    state_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: The only mutable pointer into the immutable revision history.
+    current_config_revision_id: Mapped[UUID | None] = mapped_column(
+        Uuid(), nullable=True
+    )
+
+    validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    enabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    retired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: Actor identifiers, deliberately not FKs: this module is composed by a
+    #: control-plane assembly whose identity model it must not presume.
+    created_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+
+class ConnectorConfigRevision(Base):
+    """An immutable configuration revision. Inserted, never updated."""
+
+    __tablename__ = "connector_config_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "installation_id", "revision", name="uq_connector_config_revisions_number"
+        ),
+        CheckConstraint(
+            "validation_status IN ('pending', 'valid', 'invalid')",
+            name="ck_connector_config_revisions_validation",
+        ),
+        CheckConstraint("revision >= 1", name="ck_connector_config_revisions_revision"),
+        Index(
+            "ix_connector_config_revisions_installation",
+            "installation_id",
+            "revision",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    installation_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey(f"{SCHEMA}.connector_installations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    config_json: Mapped[dict] = mapped_column(_JSON, nullable=False)
+    #: Secret REFERENCES only — never values. `dotmac_integration.secrets`
+    #: refuses anything that looks like material rather than a pointer.
+    secret_refs: Mapped[dict] = mapped_column(_JSON, nullable=False)
+    #: Over config + refs. Immutability is checkable rather than asserted.
+    config_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    validation_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="pending"
+    )
+    validation_errors: Mapped[list | None] = mapped_column(_JSON, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
+
+
+class CapabilityBinding(Base, TimestampMixin):
+    """This installation implements this capability.
+
+    ENABLED, not SELECTED. Being enabled means capable and permitted; it does
+    not mean chosen. Many installations may be enabled for one capability, and
+    picking one is `dotmac_integration.selection`'s job.
+    """
+
+    __tablename__ = "capability_bindings"
+    __table_args__ = (
+        # The ADR-0024 § 7 tuple: an installation binds a capability ONCE.
+        UniqueConstraint(
+            "installation_id",
+            "capability_id",
+            name="uq_capability_bindings_installation_capability",
+        ),
+        CheckConstraint(
+            "state IN ('disabled', 'enabled')", name="ck_capability_bindings_state"
+        ),
+        # Supports the selection query; deliberately NOT unique — see the module
+        # docstring.
+        Index("ix_capability_bindings_capability_state", "capability_id", "state"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    installation_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey(f"{SCHEMA}.connector_installations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    #: A capability CONTRACT id, e.g. `ticket.observation.v1`. Must be declared
+    #: by the installation's connector manifest — see `activation`.
+    capability_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="disabled"
+    )
+
+    #: Parity with the source, where its only consumer DISPLAYS configured
+    #: domains. Never in a uniqueness constraint and never read by routing.
+    scope_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    #: Selection policy. `{"default": true}` marks the binding chosen when a
+    #: dispatch does not name one and several are enabled.
+    policy_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+
+    enabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+
+#: This module owns no tenant-plane table. Declared as an explicit empty tuple
+#: rather than omitted, so "tenant-plane: none" is a statement in the manifest
+#: rather than an absence a reader has to infer (ADR-0023).
+TENANT_TABLES: tuple[str, ...] = ()
+PLATFORM_TABLES: tuple[str, ...] = (
+    "connector_installations",
+    "connector_config_revisions",
+    "capability_bindings",
+)
+
+__all__ = [
+    "BINDING_STATES",
+    "INSTALLATION_STATES",
+    "PLATFORM_TABLES",
+    "SCHEMA",
+    "TENANT_TABLES",
+    "CapabilityBinding",
+    "ConnectorConfigRevision",
+    "ConnectorInstallation",
+]

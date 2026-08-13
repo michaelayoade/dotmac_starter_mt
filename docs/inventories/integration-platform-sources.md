@@ -74,20 +74,40 @@ This is the boundary that matters: a capability *handler* decides what a message
 or payment **means** to Sub. ADR-0024 keeps that with the product and moves only
 the machinery that carried it.
 
-## Two gaps the port must close
+## Binding multiplicity — enabled is not selected
 
-Recorded because a port that carries these forward inherits a defect, and a port
-that silently fixes them hides a decision.
+An earlier revision of this file recorded Sub's `(installation_id,
+capability_id)` constraint as a defect against ADR-0024 § 7. **That was a
+misreading and is corrected here**, because a document that quietly drops an
+error teaches nobody why it was wrong.
 
-1. **Duplicate capability ownership is not refused.** The binding unique
-   constraint is `(installation_id, capability_id)`, so two *different*
-   installations can each enable the same capability. ADR-0024 § 7 requires
-   "exactly one active connector binding" per capability with duplicates refused
-   at activation. Sub has `scope_json`, so scoped co-ownership may have been
-   intended — **this needs a decision, not a silent constraint change.**
-2. **No SPI version range is stored.** `connector_version` and `manifest_digest`
-   exist, but nothing records the SPI range a connector was built against, so
-   "incompatible SPI version refuses activation" cannot be enforced yet.
+§ 7 says "each `(installation, capability)` has exactly one active connector
+binding" — the *tuple*, never a global per-capability constraint. Sub enforces
+exactly that tuple. Two distinct concepts were being conflated:
+
+| | meaning | multiplicity |
+|---|---|---|
+| **enabled** | this installation is capable and permitted to implement the capability | **many** installations may be enabled for one capability |
+| **selected** | the binding chosen for one concrete dispatch | **exactly one**; zero or several fail closed |
+
+Sub already separates them. `require_enabled_capability_binding` filters enabled
+bindings, narrows by an optional `connector_key`, and where several remain
+requires exactly one `policy_json.default is True` — raising *"multiple enabled
+bindings; exactly one must be default"* otherwise. **Routing never reads
+`scope_json`**; its only observed consumer displays configured ERP domains
+(`erp_admin.py`).
+
+So the module preserves the tuple constraint, does not constrain `capability_id`
+alone, and puts no raw `scope_json` in any uniqueness constraint — JSON equality
+cannot detect overlapping scopes. If scoped routing ever gains a real consumer
+it needs a separate typed route contract with canonical keys and overlap rules.
+
+## The one real gap
+
+**No SPI version range is stored.** `connector_version` and `manifest_digest`
+exist, but nothing records the SPI range a connector was built against, so
+"an incompatible SPI version refuses activation" cannot be enforced. Slice 1
+adds it, checked at discovery, startup **and** activation.
 
 ## Parity evidence available to port
 
