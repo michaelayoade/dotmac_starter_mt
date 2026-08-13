@@ -335,6 +335,8 @@ app/                             the reference assembly
                    + /admin/roles, /admin/role-grants, /admin/audit web screens
     settings/      tenant settings admin API (spec declarations, seed, router)
                    + /admin/settings web screens (generic editor + branding editor)
+    presentation/  stateless assembly adapter: resolved kernel brand data ->
+                   dotmac-ui token CSS at GET /branding/theme.css
     custom_fields/ field definitions CRUD + values on a registered entity's
                    custom_fields JSONB column (zero migrations per field)
                    + /admin/custom-fields web screens, incl. the
@@ -739,15 +741,17 @@ are not variants of each other and must not be conflated:
 | Owner | this assembly (kernel package data) | the `dotmac-ui` package |
 | Built by | Tailwind v4 CLI, via npm | pure Python, `make ui-build` |
 | In git | **no** — gitignored, rebuilt | **yes** — it IS the published contract |
-| Contains | compiled utility classes | 190 role-named CSS custom properties + one `:focus-visible` rule |
+| Contains | compiled utility classes | role-named CSS custom properties, one `:focus-visible` rule, and published component CSS |
 | Consumer needs | the v4 toolchain | nothing at all |
 
 It loads **after** `main.css`, so its tokens and its focus-indicator rule win on
-equal specificity. The whole wiring is two fields in `app/assembly.py`:
+equal specificity. The package wiring is two fields in `app/assembly.py`:
 `packaged_static_dirs=(dotmac_ui.static_dir(),)` layers the package's assets into
 the existing `/static` mount (under any assembly file, over the kernel's), and
-`stylesheets=(dotmac_ui.stylesheet_url(),)` puts the `<link>` in `base.html` via
-the `extra_stylesheets` Jinja global. Both are ignored when `WEB_ENABLED=false`.
+the first `stylesheets` entry puts the package `<link>` in `base.html` via the
+`extra_stylesheets` Jinja global. The assembly-owned runtime brand URL is the
+second entry, so the cascade is product CSS -> dotmac-ui defaults -> resolved
+brand overrides. All entries are ignored when `WEB_ENABLED=false`.
 
 **The kernel does not know what fills those slots.** They are anonymous
 `ProductAssemblySpec` fields (kernel 0.1.0a13) — the dependency direction
@@ -768,10 +772,11 @@ Tokens are named by ROLE (`--dmui-surface-primary`,
 `--dmui-action-destructive-hover`), never by value; the `--dmui-` prefix exists
 because Tailwind v4's `@theme` emits unprefixed `--color-*`/`--font-*` into the
 same `:root`. Dark values are emitted under both `.dark` (what this portal's
-Alpine store already toggles) and `[data-dmui-theme="dark"]`. **No component
-classes are published yet** — ADR-0006 § 5 forbids extracting markup on the
-grounds that it looks similar, and a guard fails the build if a `.dmui-*`
-selector appears without being declared. Full contract:
+Alpine store already toggles) and `[data-dmui-theme="dark"]`. The published
+component slice currently contains `empty_state`; every emitted `.dmui-*`
+class is derived from its typed component contract. ADR-0006 § 5 still forbids
+adding a component because markup merely looks similar, and a guard fails the
+build if a selector appears without a declaration. Full contract:
 `packages/dotmac-ui/COMPATIBILITY.md`.
 
 ### Auth flow: cookie + bearer share one seam
@@ -925,6 +930,44 @@ and the JSON `PUT /settings/{domain}/{key}` API all call — one write path,
 three presentation surfaces (generic web editor, friendly branding editor,
 JSON API), each ending in the same audit event
 (`settings.update`, domain/key only, never the value).
+
+### Runtime brand projection: assembly adapter, generated CSS
+
+`GET /branding/theme.css` is the Train-3 presentation seam. The stateless
+`app.features.presentation` feature owns it because this is assembly
+composition, not a kernel facility and not notification content:
+
+1. `dotmac_kernel.branding.load_branding` resolves deployment and tenant data;
+2. `app.features.presentation.service.project_brand_stylesheet` constructs the
+   public `dotmac_ui.BrandOverride` value;
+3. `dotmac_ui.render_brand_css` generates both whole-colour and `-rgb` channel
+   variables for the brand and accent ramps, then re-points every dependent
+   semantic role channel in light and dark mode so opacity utilities cannot
+   retain the package palette while solid fills use the tenant palette;
+4. the thin web adapter returns `text/css` with `Cache-Control: private,
+   no-store` and non-sensitive `X-Dotmac-Brand-Projection` attribution.
+
+The route is intentionally pre-auth so the tenant login page can load it.
+`require_brand_scope` accepts a resolved tenant or the exact platform root;
+unknown hosts fail closed. The platform scope receives an empty stylesheet
+because the platform pages share `base.html` but have no tenant brand. It is
+linked after dotmac-ui's compiled defaults, so that empty response leaves the
+package palette in force rather than inventing a second default. Every response
+is `private, no-store` and `Vary: Host`. Resolver/generator exceptions and
+contrast warnings return the same empty fallback at 200; logs contain only the
+error type or warning count, never colour inputs or a rendered brand payload.
+The route emits no raw tenant CSS, URL, selector input, inline `<style>`, or
+cross-origin allowance.
+
+`logo_url` is not emitted by this CSS route and still has no render consumer.
+A future logo slice must establish the managed, same-origin asset contract
+before making that stored field visible; accepting an arbitrary external image
+URL here would conflate token projection with asset authority.
+
+Template Studio is a downstream content authoring/rendering module. It may
+eventually receive a resolved brand as typed render context, but it does not own
+brand precedence, token generation, stylesheet delivery, theme selection,
+consent, channel choice, delivery, or document generation.
 
 ### Display settings: tenant timezone + date/datetime formats
 
@@ -1129,7 +1172,8 @@ write:
 | Communication delivery receipts | `dotmac_kernel.delivery.record_receipt` — the only constructor/writer; it preserves each provider status transition, deduplicates repeated callbacks, and delegates suppressing consequences to the consent owner |
 | Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
 | Notification channel-policy setting | Same canonical `DomainSetting` writers as above; `dotmac_kernel.channel_policy.resolve_channels` is the typed reader and the legacy per-event shadow setting is not supported |
-| `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, the merge/sanitize layer documented in "Branding pipeline" above |
+| `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, whose resolved colour fields are projected by `app.features.presentation.service.project_brand_stylesheet` through `dotmac_ui.render_brand_css`. Template Studio is not an owner or writer |
+| Runtime brand stylesheet projection | `app.features.presentation.service.project_brand_stylesheet` is the sole composer: kernel-resolved brand data in, public `dotmac_ui` generator out. `web.py` only guards scope and applies response policy; templates only link the route. No stored CSS, parallel renderer, or Template Studio writer exists |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |

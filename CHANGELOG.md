@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Runtime brand projection at `GET /branding/theme.css`: the assembly resolves
+  tenant branding through the kernel, generates complete brand/accent ramps and
+  their semantic role channels with `dotmac-ui`, and links the result after
+  package defaults. The public pre-auth route remains tenant-guarded, sends
+  `Cache-Control: private, no-store`, and falls back to the generic package
+  palette without logging brand inputs.
+- A stateless `presentation` feature owns that assembly adapter explicitly;
+  Template Studio remains limited to notification authoring, versioning,
+  publication, preview and safe rendering.
+
 ## 0.9.0 — 2026-07-30
 
 Kernel-boundary program: this repo is now the reference **assembly** consuming a

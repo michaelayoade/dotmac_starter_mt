@@ -352,10 +352,11 @@ def render_tailwind_preset(package_version: str) -> str:
     variable references, not values — one stylesheet swap re-themes it, and dark
     mode needs no `dark:` variant on any element.
 
-    KNOWN LIMITATION: opacity modifiers (`bg-brand-500/50`) do not work on these
-    colours. Tailwind needs channel components to synthesise alpha, and the
-    tokens hold complete colours. Fixing it means publishing channel-form tokens
-    from the token layer, which is a token change and not a preset change.
+    Colour utilities use the published channel variables, so opacity modifiers
+    (`bg-brand-500/50`) compile to ``rgb(var(--dmui-...-rgb) / 0.5)``. Runtime
+    brand projection therefore updates both ramp channels and every semantic
+    role channel that resolves through them; a whole-colour override alone would
+    split solid and translucent uses across two palettes.
     """
     preset = {
         "darkMode": ["selector", DARK_THEME_SELECTORS[-1]],

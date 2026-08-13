@@ -9,6 +9,23 @@ called out here.
 
 ## Unreleased
 
+## 0.1.0a6 — 2026-08-13
+
+Runtime brand projection is now complete for colour-channel consumers. Patch
+behavior fix; `UI_CONTRACT_VERSION` stays **1**.
+
+### Fixed
+
+- `render_brand_css()` now re-projects the `-rgb` variables of every semantic
+  role that resolves through the generated brand/accent ramps, in both light
+  and dark mode. Previously solid roles followed the override through their
+  whole-colour `var()` reference while opacity utilities used the compiled
+  package channels, splitting one control across the tenant and placeholder
+  palettes.
+- Unrelated semantic/status channel variables are not restated, so a runtime
+  brand cannot overwrite trusted theme decisions outside the two allowed
+  ramps.
+
 ## 0.1.0a5 — 2026-08-13
 
 The component library opens, with one component. Additive — `UI_CONTRACT_VERSION`

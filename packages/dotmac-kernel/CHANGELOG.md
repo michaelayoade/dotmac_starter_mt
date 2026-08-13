@@ -6,6 +6,17 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a51 — 2026-08-13
+
+No Python API change.
+
+### Changed
+
+- The packaged branding editor now describes its live contract accurately:
+  tenants may override token colours, but cannot submit custom CSS. The stale
+  introduction survived the `custom_css` retirement even though the field,
+  sanitizer and render path were already gone in 0.1.0a47.
+
 ## 0.1.0a50 — 2026-08-13
 
 Publishes the demand-pulled product-manifest contract that unblocks the Vendor

@@ -1,9 +1,9 @@
 """What a brand override must guarantee before it can replace `custom_css`.
 
-`dotmac_kernel.branding` still accepts raw CSS, regex-sanitized and rendered
-`| safe` into a `<style>` block — the capability ADR-0006 D8 retired. Replacing
-it means the generated surface has to be at least as expressive for legitimate
-use and strictly narrower for everything else, which is what these pin.
+`dotmac_kernel.branding` formerly accepted raw CSS, regex-sanitized and rendered
+`| safe` into a `<style>` block — the capability ADR-0006 D8 retired. The
+generated surface must be at least as expressive for legitimate colour use and
+strictly narrower for everything else, which is what these pin.
 """
 
 from __future__ import annotations
@@ -67,6 +67,42 @@ def test_the_two_forms_always_agree() -> None:
         assert channels[name] == expected
 
 
+def test_dependent_role_channels_follow_the_brand_in_both_modes() -> None:
+    """The defect Train 3 found: aliases had compiled placeholder channels.
+
+    Whole role variables already follow the ramp through `var()`. Their channel
+    forms are literals in the compiled asset, though, and dark mode can point a
+    role at a different step. The generated layer must therefore re-project
+    both aliases after the package CSS.
+    """
+    css = brand.render_brand_css(brand.BrandOverride("#112233", "#445566")).css
+
+    light, dark = css.split("\n.dark,\n", 1)
+    assert (
+        "--dmui-action-primary-default-rgb: "
+        "var(--dmui-color-brand-600-rgb);"
+    ) in light
+    assert (
+        "--dmui-action-accent-default-rgb: "
+        "var(--dmui-color-accent-700-rgb);"
+    ) in light
+    assert (
+        "--dmui-action-primary-default-rgb: "
+        "var(--dmui-color-brand-400-rgb);"
+    ) in dark
+    assert (
+        "--dmui-action-accent-default-rgb: "
+        "var(--dmui-color-accent-400-rgb);"
+    ) in dark
+
+
+def test_brand_channel_projection_does_not_overwrite_unrelated_theme_roles() -> None:
+    css = brand.render_brand_css(brand.BrandOverride("#112233")).css
+
+    assert "--dmui-action-destructive-default-rgb:" not in css
+    assert "--dmui-status-negative-foreground-rgb:" not in css
+
+
 def test_every_generated_step_is_renderable_srgb() -> None:
     """OKLCH can name colours sRGB cannot show; the clamp must catch all of them."""
     for seed in ("#00ff00", "#ff00ff", "#0000ff", "#006340"):
@@ -98,8 +134,15 @@ def test_generated_css_carries_nothing_but_declarations() -> None:
         "<",
     ):
         assert forbidden not in css
-    body = css[css.index("{") + 1 : css.rindex("}")]
-    for line in filter(None, (line.strip() for line in body.splitlines())):
+    structural_lines = {
+        ":root {",
+        ".dark,",
+        '[data-dmui-theme="dark"] {',
+        "}",
+    }
+    for line in filter(None, (line.strip() for line in css.splitlines())):
+        if line in structural_lines:
+            continue
         assert re.fullmatch(r"--dmui-[a-z0-9-]+: [^;{}]+;", line), line
 
 
