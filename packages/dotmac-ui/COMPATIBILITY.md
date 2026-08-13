@@ -71,8 +71,10 @@ beyond reading its own package data.
 **A consumer never runs this package through a compiler.** `dotmac-ui` may build
 its own assets however it likes — today with a deterministic pure-Python
 generator, tomorrow possibly with Tailwind v4 for the component layer — but what
-it *publishes* is compiled CSS plus the Python contracts above. Consequences that
-consumers can rely on:
+it *publishes* is compiled CSS, **inert Jinja templates**, and the Python
+contracts above. The templates change nothing about this boundary: they are DATA,
+not source to preprocess, and the host's own Jinja renders them (see "The
+component boundary" below). Consequences that consumers can rely on:
 
 - **No Tailwind requirement, and no major-version agreement.** `dotmac_erp` is on
   Tailwind v3.4 with a JS config; `dotmac_sub` and `dotmac_starter_mt` are on v4
@@ -97,10 +99,12 @@ consumers can rely on:
 
 ### Published assets
 
-| Path (relative to `static_dir()`) | What |
+| Path | What |
 |---|---|
-| `dotmac-ui/dotmac-ui-1.css` | the compiled stylesheet for UI contract 1 |
-| `dotmac-ui/manifest.json` | contract version, package version, token count, and each asset's full sha256 + byte size |
+| `static_dir()/dotmac-ui/dotmac-ui-1.css` | the compiled stylesheet for UI contract 1 |
+| `static_dir()/dotmac-ui/manifest.json` | contract version, package version, token count, and each asset's full sha256 + byte size |
+| `static_dir()/dotmac-ui/tailwind-preset.js` | the generated preset, for consumers that compile their own utilities |
+| `template_dir()/dotmac_ui/components/*.html` | the published component templates — inert package data, rendered by the HOST's Jinja |
 
 `manifest.json` exists for consumers that integrate **outside Python** — a JS
 build step, an nginx asset pipeline, an air-gapped bundle verifier. Nothing in
