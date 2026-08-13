@@ -90,7 +90,13 @@ def _state_for(consumer_count: int) -> str:
 # state — `adopted` for most, since leaving debt is what a real cutover proves.
 PRE_RULE_DEBT = {
     "dotmac-kernel": "historical-pre-rule",
-    "dotmac-ui": "historical-pre-rule",
+    # "dotmac-ui" was deleted here on 2026-08-13: it reached `reuse-proven` once
+    # dotmac_sub and dotmac_academy_app both landed the released 0.1.0a3 on their
+    # default branches, joining the reference assembly as the third contract
+    # consumer of the TOKEN contract.  The row's removal is the ratchet shrinking
+    # as designed -- re-adding it would re-grant a retired exemption.  Note the
+    # scope: the evidence covers tokens and compiled assets, NOT the component
+    # library, which has no consumer yet.
     "dotmac-template-studio": "audit-required",
 }
 
