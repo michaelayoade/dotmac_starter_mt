@@ -106,7 +106,7 @@ from dotmac_ui.tokens import (
 #: `test_declared_version_matches_pyproject` — `importlib.metadata` is not used
 #: because the package must be importable straight from a source checkout (an
 #: air-gapped or vendored consumer) where no distribution is installed.
-__version__: Final[str] = "0.1.0a6"
+__version__: Final[str] = "0.1.0a7"
 
 #: Public submodules. `from dotmac_ui.<module> import X` is supported for any
 #: `X` in that module's `__all__`.

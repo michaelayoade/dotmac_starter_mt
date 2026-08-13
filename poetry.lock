@@ -531,7 +531,7 @@ url = "packages/dotmac-entitlement-allocation"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a51"
+version = "0.1.0a52"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -615,7 +615,7 @@ url = "packages/dotmac-ticketing"
 
 [[package]]
 name = "dotmac-ui"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "DotMac shared UI design system — semantic design tokens and compiled, self-hosted, CSP-compatible assets (ADR-0006 U1)"
 optional = false
 python-versions = ">=3.11,<3.14"

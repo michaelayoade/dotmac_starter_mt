@@ -235,15 +235,15 @@ specifics) points here and must never fork these rules.
     literal palette.** A hardcoded Tailwind palette utility (`bg-slate-700`,
     `text-primary-600`, `text-white`) or a raw hex/`rgb()` literal in any
     template under `packages/*/src/*/templates` is frozen debt: the existing
-    981 occurrences across 34 files are recorded per-file and per-token in
+    851 occurrences across 29 files are recorded per-file and per-token in
     `tests/architecture/palette_debt_baseline.json`, and the ratchet fails when
     that inventory rises OR falls. A slice that genuinely retires palette usage
     lowers the baseline in the SAME change (`make palette-baseline`) so the
-    reduction is reviewable as a diff. `platform/**`, `layouts/platform.html`
-    and Template Studio are already token-native and are asserted at zero
-    against the live scan, so a regenerated baseline cannot legalise a
-    regression there. (Rule 25's ratchet shape applied to the design system;
-    `test_palette_ratchet.py`)
+    reduction is reviewable as a diff. The document canvas, tenant login,
+    authenticated admin shell, `platform/**`, `layouts/platform.html` and
+    Template Studio are token-native and are asserted at zero against the live
+    scan, so a regenerated baseline cannot legalise a regression there. (Rule
+    25's ratchet shape applied to the design system; `test_palette_ratchet.py`)
 
 ## Everything by config — no hardcoding
 

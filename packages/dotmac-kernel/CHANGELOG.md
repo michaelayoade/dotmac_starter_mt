@@ -6,6 +6,17 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a52 — 2026-08-13
+
+No Python API or template-context change.
+
+### Changed
+
+- The packaged tenant login, admin layout, sidebar, topbar and base toast
+  surface now author colour against `dotmac-ui` semantic custom properties.
+  Products linking the design system receive light/dark and runtime-brand
+  changes through one cascade rather than hardcoded Tailwind palette branches.
+
 ## 0.1.0a51 — 2026-08-13
 
 No Python API change.

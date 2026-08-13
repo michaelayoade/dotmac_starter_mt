@@ -16,6 +16,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_tokens.py",
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_a11y.py",
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_consumer.py",
+  "dotmac_starter_mt:tests/unit/test_admin_shell_tokens.py",
   "dotmac_sub:tests/architecture/test_dotmac_ui_adoption.py",
 ]
 # INDEPENDENT consumers only. The starter is the assembly that owns this
@@ -56,6 +57,7 @@ source_paths = [
 preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_tokens.py",
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_a11y.py",
+  "dotmac_starter_mt:tests/unit/test_admin_shell_tokens.py",
   "dotmac_sub:tests/architecture/test_dotmac_ui_adoption.py",
 ]
 contract_consumers = ["dotmac_sub", "dotmac_academy_app"]

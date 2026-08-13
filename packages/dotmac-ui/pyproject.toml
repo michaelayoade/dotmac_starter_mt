@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-ui"
-version = "0.1.0a6"
+version = "0.1.0a7"
 description = "DotMac shared UI design system — semantic design tokens and compiled, self-hosted, CSP-compatible assets (ADR-0006 U1)"
 authors = ["DotMac"]
 readme = "README.md"

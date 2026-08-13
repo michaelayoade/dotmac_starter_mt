@@ -1,14 +1,14 @@
 {
   "assets": [
     {
-      "bytes": 29304,
+      "bytes": 29446,
       "path": "dotmac-ui/dotmac-ui-1.css",
-      "sha256": "5c29b66f7ae1611b4215b9fe55f6432c82c516ae492391c88a0be6dfbb62e922"
+      "sha256": "25a471beae7b5dbb5ebf8da51d3720ffeb48a3af6b7c6401da1809ea5f440fb6"
     }
   ],
   "name": "dotmac-ui",
-  "token_count": 190,
+  "token_count": 191,
   "token_prefix": "--dmui-",
   "ui_contract_version": 1,
-  "version": "0.1.0a6"
+  "version": "0.1.0a7"
 }

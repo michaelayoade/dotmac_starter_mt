@@ -191,7 +191,8 @@ of the role words used here.
 deliberately **not** adopted; `test_no_token_is_named_by_value` makes that a
 build failure rather than a review habit.
 
-**Four additions**, each answering a gap the inventories named — not taste:
+**Five additions**, each answering a measured inventory or real cutover gap —
+not taste:
 
 1. **`action-<intent>-{default,hover,pressed,disabled,on}`.** Sub has *no*
    interaction/intent tokens at all, which is why every hover state in the fleet
@@ -205,6 +206,10 @@ build failure rather than a review habit.
    classes; a package that publishes no component classes must expose them as
    tokens so the later component layer consumes them rather than reinventing
    them.
+5. **`surface-overlay`.** The reference assembly's mobile admin-navigation
+   scrim was the first real consumer. It is deliberately an opaque role whose
+   consuming scrim supplies opacity; action, status and neutral-ramp tokens do
+   not mean "separate a temporary layer from page content".
 
 **The `--dmui-` prefix is load-bearing, not decoration.** Tailwind v4's `@theme`
 emits `--color-*`, `--font-*`, and `--spacing-*` into the consumer's own `:root`,
@@ -214,9 +219,9 @@ stylesheet loaded last would win.
 
 ### Categories
 
-190 tokens in 13 categories: `color` (77 — brand, accent, and five semantic ramps
+191 tokens in 13 categories: `color` (77 — brand, accent, and five semantic ramps
 at 11 steps each), `typography` (22), `action` (20), `status` (20), `space` (9),
-`radius` (7), `motion` (7), `breakpoint` (6), `surface` (5), `text` (5), `shadow`
+`radius` (7), `motion` (7), `breakpoint` (6), `surface` (6), `text` (5), `shadow`
 (5), `border` (4), `focus` (3).
 
 ### The channel form
@@ -236,7 +241,7 @@ adopted by any consumer (`dotmac_sub` uses 5,872 opacity modifiers, `dotmac_erp`
 4,372). Plain CSS can use the channel form the same way:
 `rgba(var(--dmui-surface-primary-rgb) / 0.6)`.
 
-`variable_names()` returns **321** names: the 190 declared tokens plus the 131
+`variable_names()` returns **323** names: the 191 declared tokens plus the 132
 derived channel forms. Both are covered by this package's compatibility promise.
 
 **Two mechanics worth knowing.** Colour *ramps* are mode-independent — a step is
