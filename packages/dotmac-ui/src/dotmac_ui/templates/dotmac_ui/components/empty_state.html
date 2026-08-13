@@ -1,0 +1,35 @@
+{#
+  dotmac-ui component: empty_state
+  Contract: dotmac_ui.components.EMPTY_STATE (signature, classes, stability).
+
+  The "nothing to show here" panel for a list, table body, or card. Styling is
+  entirely `.dmui-empty-state*` from the compiled stylesheet — no utility
+  classes, because a consumer does not run this package through Tailwind and
+  utilities would render unstyled from site-packages.
+
+  Stock Jinja only: no custom filter, no global, no `url_for`. Everything it
+  renders arrives as an argument, which is what lets it render on a bare
+  Environment (see test_components_render_on_a_clean_host).
+
+  Usage:
+    {% from "dotmac_ui/components/empty_state.html" import empty_state %}
+    {{ empty_state(message="No parties found",
+                   action_url="/admin/parties/create",
+                   action_label="New Party") }}
+
+  In a table, the caller owns the row and the colspan:
+    <tr><td colspan="4">{{ empty_state(message="No parties found") }}</td></tr>
+#}
+{% macro empty_state(message="No items found", action_url=none, action_label="Create") %}
+<div class="dmui-empty-state">
+    <svg class="dmui-empty-state__icon" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+    </svg>
+    <p class="dmui-empty-state__message">{{ message }}</p>
+    {% if action_url %}
+    <a class="dmui-empty-state__action" href="{{ action_url }}">{{ action_label }}</a>
+    {% endif %}
+</div>
+{% endmacro %}

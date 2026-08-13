@@ -167,7 +167,7 @@ def _reduced_motion_block() -> str:
 def _base_block() -> str:
     return "\n".join(
         (
-            "/* The one base rule this contract ships. WCAG 2.2 SC 2.4.11 (focus",
+            "/* The base rule this contract ships. WCAG 2.2 SC 2.4.11 (focus",
             " * appearance) is a token-layer promise, so the indicator itself is",
             " * defined here rather than left to each consumer to re-derive.",
             " * Deliberately unlayered and at (0,1,0) specificity: an @layer would",
@@ -182,6 +182,74 @@ def _base_block() -> str:
     )
 
 
+def _components_block() -> str:
+    """Styling for the published Jinja components (`dotmac_ui.components`).
+
+    Every declaration resolves through a token, so a consumer that overrides the
+    `--dmui-*` ramps re-themes the components for free and never has to restyle
+    this markup. Selectors are single-class (0,1,0) and unlayered for the same
+    reason as the focus rule above: an `@layer` would lose to every unlayered
+    rule in the host stylesheet.
+
+    A class emitted here that is not in `PUBLISHED_COMPONENT_CLASSES` fails
+    `test_no_component_class_is_published_without_its_contract`, so the
+    stylesheet cannot grow a component the contract has not declared.
+    """
+    return "\n".join(
+        (
+            "/* Published components. Contracts: dotmac_ui.components.COMPONENTS */",
+            ".dmui-empty-state {",
+            f"{_INDENT}display: flex;",
+            f"{_INDENT}flex-direction: column;",
+            f"{_INDENT}align-items: center;",
+            f"{_INDENT}gap: var({TOKEN_PREFIX}space-sm);",
+            f"{_INDENT}padding: var({TOKEN_PREFIX}space-3xl) "
+            f"var({TOKEN_PREFIX}space-lg);",
+            f"{_INDENT}text-align: center;",
+            "}",
+            "",
+            ".dmui-empty-state__icon {",
+            f"{_INDENT}width: var({TOKEN_PREFIX}space-3xl);",
+            f"{_INDENT}height: var({TOKEN_PREFIX}space-3xl);",
+            f"{_INDENT}color: var({TOKEN_PREFIX}text-muted);",
+            "}",
+            "",
+            ".dmui-empty-state__message {",
+            f"{_INDENT}margin: 0;",
+            f"{_INDENT}color: var({TOKEN_PREFIX}text-secondary);",
+            f"{_INDENT}font-family: var({TOKEN_PREFIX}font-body);",
+            f"{_INDENT}font-size: var({TOKEN_PREFIX}font-size-sm);",
+            f"{_INDENT}line-height: var({TOKEN_PREFIX}line-height-normal);",
+            "}",
+            "",
+            ".dmui-empty-state__action {",
+            f"{_INDENT}display: inline-flex;",
+            f"{_INDENT}align-items: center;",
+            f"{_INDENT}gap: var({TOKEN_PREFIX}space-2xs);",
+            f"{_INDENT}padding: var({TOKEN_PREFIX}space-xs) "
+            f"var({TOKEN_PREFIX}space-md);",
+            f"{_INDENT}border-radius: var({TOKEN_PREFIX}radius-lg);",
+            f"{_INDENT}background: var({TOKEN_PREFIX}action-primary-default);",
+            f"{_INDENT}color: var({TOKEN_PREFIX}action-primary-on);",
+            f"{_INDENT}font-family: var({TOKEN_PREFIX}font-body);",
+            f"{_INDENT}font-size: var({TOKEN_PREFIX}font-size-sm);",
+            f"{_INDENT}font-weight: var({TOKEN_PREFIX}font-weight-medium);",
+            f"{_INDENT}text-decoration: none;",
+            f"{_INDENT}transition: background var({TOKEN_PREFIX}duration-fast) "
+            f"var({TOKEN_PREFIX}easing-standard);",
+            "}",
+            "",
+            ".dmui-empty-state__action:hover {",
+            f"{_INDENT}background: var({TOKEN_PREFIX}action-primary-hover);",
+            "}",
+            "",
+            ".dmui-empty-state__action:active {",
+            f"{_INDENT}background: var({TOKEN_PREFIX}action-primary-pressed);",
+            "}",
+        )
+    )
+
+
 def render_stylesheet(package_version: str) -> str:
     """The complete compiled stylesheet. Deterministic."""
     sections = (
@@ -190,6 +258,7 @@ def render_stylesheet(package_version: str) -> str:
         _dark_block(),
         _reduced_motion_block(),
         _base_block(),
+        _components_block(),
     )
     return "\n\n".join(sections) + "\n"
 

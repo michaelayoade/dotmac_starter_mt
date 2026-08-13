@@ -10,8 +10,9 @@ without a deprecation cycle. The prose companion is `COMPATIBILITY.md`;
 assembly imports only what is declared here.
 
 **What this package is** (ADR-0006 § 2): semantic design tokens, packaged static
-assets, accessibility contracts, and — in later slices — a Jinja/HTMX component
-library, layouts, and navigation primitives.
+assets, accessibility contracts, and the Jinja/HTMX component library — shipped
+as INERT package data, so the package still imports no templating engine. See
+`dotmac_ui.components`. Layouts and navigation primitives are later slices.
 
 **What it is not, and cannot become.** It has no business logic, reads no
 database, mounts no route, and imports no module, no assembly, and (at 0.1.0a1)
@@ -59,6 +60,14 @@ from dotmac_ui.brand import (
     render_brand_css,
 )
 from dotmac_ui.color import OKLCH, ClampedColor, hex_to_oklch, oklch_to_hex
+from dotmac_ui.components import (
+    COMPONENTS,
+    EMPTY_STATE,
+    TEMPLATE_NAMESPACE,
+    ComponentContract,
+    component_classes,
+    template_dir,
+)
 from dotmac_ui.contract import (
     ACCESSIBILITY_TARGET,
     CLASS_PREFIX,
@@ -97,7 +106,7 @@ from dotmac_ui.tokens import (
 #: `test_declared_version_matches_pyproject` — `importlib.metadata` is not used
 #: because the package must be importable straight from a source checkout (an
 #: air-gapped or vendored consumer) where no distribution is installed.
-__version__: Final[str] = "0.1.0a4"
+__version__: Final[str] = "0.1.0a5"
 
 #: Public submodules. `from dotmac_ui.<module> import X` is supported for any
 #: `X` in that module's `__all__`.
@@ -105,6 +114,7 @@ SUPPORTED_MODULES: Final[frozenset[str]] = frozenset(
     {
         "dotmac_ui.a11y",
         "dotmac_ui.assets",
+        "dotmac_ui.components",
         "dotmac_ui.contract",
         "dotmac_ui.theme",
         "dotmac_ui.tokens",
@@ -130,10 +140,12 @@ __all__ = [
     "ACTION_STATES",
     "CATEGORIES",
     "CLASS_PREFIX",
+    "COMPONENTS",
     "CONTRAST_REQUIREMENTS",
     "DARK_THEME_SELECTORS",
     "DATA_ATTRIBUTE_PREFIX",
     "DEFAULT_THEME",
+    "EMPTY_STATE",
     "INTERNAL_MODULES",
     "MANIFEST_RELPATH",
     "MODES",
@@ -144,6 +156,7 @@ __all__ = [
     "SUPPORTED_MODULES",
     "SUPPORTED_UI_CONTRACT_VERSIONS",
     "TAILWIND_PRESET_RELPATH",
+    "TEMPLATE_NAMESPACE",
     "TEXT_CONTRAST_MINIMUM",
     "THEME_ATTRIBUTE",
     "THEME_STORAGE_KEY",
@@ -151,6 +164,7 @@ __all__ = [
     "TOKENS",
     "TOKEN_PREFIX",
     "UI_CONTRACT_VERSION",
+    "ComponentContract",
     "ContrastFailure",
     "ContrastRequirement",
     "DesignToken",
@@ -159,6 +173,7 @@ __all__ = [
     "asset_manifest",
     "bootstrap_script",
     "check_contrast",
+    "component_classes",
     "contrast_ratio",
     "css_variable",
     "resolve_color",
@@ -167,6 +182,7 @@ __all__ = [
     "stylesheet_path",
     "stylesheet_url",
     "tailwind_preset_path",
+    "template_dir",
     "token",
     "token_contrast",
     "token_names",

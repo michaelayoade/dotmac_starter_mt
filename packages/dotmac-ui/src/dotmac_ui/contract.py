@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from dotmac_ui.components import component_classes
+
 #: The UI contract generation this package publishes. INDEPENDENT of the
 #: kernel's module contract version — see this module's docstring.
 UI_CONTRACT_VERSION: Final[int] = 1
@@ -49,19 +51,23 @@ SUPPORTED_UI_CONTRACT_VERSIONS: Final[frozenset[int]] = frozenset({1})
 #: came from").
 TOKEN_PREFIX: Final[str] = "--dmui-"
 
-#: Reserved namespace for published component classes. Empty at 0.1.0a1 — U1
-#: ships the token foundation, not the component library, and ADR-0006 § 5
-#: forbids harvesting markup that merely looks similar. A class only becomes
-#: public by being added to `PUBLISHED_COMPONENT_CLASSES` together with its
-#: contract in COMPATIBILITY.md.
+#: Namespace for published component classes. ADR-0006 § 5 still forbids
+#: harvesting markup that merely looks similar: a class only becomes public by
+#: being added to `PUBLISHED_COMPONENT_CLASSES`, backed by a
+#: `dotmac_ui.components.ComponentContract`, and documented in
+#: COMPATIBILITY.md.
 CLASS_PREFIX: Final[str] = "dmui-"
 
 #: Reserved namespace for published data attributes (state hooks that survive
 #: a class-name refactor, e.g. `data-dmui-state="loading"`).
 DATA_ATTRIBUTE_PREFIX: Final[str] = "data-dmui-"
 
-#: The published component classes. DELIBERATELY EMPTY at 0.1.0a1.
-PUBLISHED_COMPONENT_CLASSES: Final[frozenset[str]] = frozenset()
+#: The published component classes. DERIVED from the component contracts rather
+#: than listed again here: a hand-maintained second list is a place for the
+#: registry and the markup to disagree, and the stylesheet guard
+#: (`test_no_component_class_is_published_without_its_contract`) would then be
+#: checking the copy instead of the contract.
+PUBLISHED_COMPONENT_CLASSES: Final[frozenset[str]] = component_classes()
 
 #: The attribute a host document sets to force a colour mode.
 THEME_ATTRIBUTE: Final[str] = "data-dmui-theme"

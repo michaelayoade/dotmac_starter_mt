@@ -60,6 +60,7 @@ deprecation cycle**.
 | `dotmac_ui.theme` | `bootstrap_script`, `set_theme_script`, `THEME_STORAGE_KEY`, `THEME_VALUES`, `DEFAULT_THEME` (pre-paint theme selection; returns source, not a `<script>` tag, so the host owns the CSP nonce) |
 | `dotmac_ui.assets` | `static_dir`, `stylesheet_path`, `stylesheet_url`, `manifest_path`, `asset_manifest`, `asset_digest`, `STYLESHEET_RELPATH`, `MANIFEST_RELPATH`, `ASSET_NAMESPACE`, `DIGEST_LENGTH` |
 | `dotmac_ui.a11y` | `ACCESSIBILITY_TARGET`, `TEXT_CONTRAST_MINIMUM`, `NON_TEXT_CONTRAST_MINIMUM`, `ContrastRequirement`, `ContrastFailure`, `CONTRAST_REQUIREMENTS`, `check_contrast`, `token_contrast`, `contrast_ratio`, `relative_luminance` |
+| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `COMPONENTS`, `EMPTY_STATE`, `component_classes` |
 
 The whole of that surface is also re-exported at the top level, and there is no
 DB-touching subset to keep out of it: `import dotmac_ui` has no side effect
@@ -151,12 +152,15 @@ selectors, and the asset paths above.
 `BrandProfile` overrides at runtime (U2), and a value change is a PATCH. Do not
 pin a colour; pin the role.
 
-Also **not stable, because it does not exist yet**: component classes. U1 ships
-the token foundation only. `PUBLISHED_COMPONENT_CLASSES` is empty and
-`test_no_component_class_is_published_without_its_contract` fails the build if a
-`.dmui-*` selector appears in the stylesheet without being declared there. This
-is ADR-0006 § 5 in force: a component is extracted only with two independent
-consumers of the same CONTRACT, a named owner, and a migration path — never
+Component classes are stable **only where a contract declares them**. As of
+0.1.0a5 `PUBLISHED_COMPONENT_CLASSES` is derived from
+`dotmac_ui.components.COMPONENTS` and covers exactly the components listed under
+"The component boundary" below; every other `.dmui-*` name remains reserved and
+unpublished, and `test_no_component_class_is_published_without_its_contract`
+fails the build if a `.dmui-*` selector appears in the stylesheet without being
+declared there. This is ADR-0006 § 5 still in force: a component is extracted
+only with two independent consumers of the same CONTRACT, a named owner, and a
+migration path — never
 because two templates look alike.
 
 ### Where the vocabulary came from
@@ -233,6 +237,65 @@ so a runtime brand override re-declares the ramp once and every role follows.
 And *breakpoint* tokens are declared values only: CSS custom properties cannot be
 read inside a media query's condition, so a consumer mirrors them in its own
 `@media`/container queries rather than referencing them there.
+
+## The component boundary — inert templates, host-supplied Jinja
+
+ADR-0006 § 2 assigns the Jinja/HTMX component library to this package, and § 5
+still governs what may enter it. This section is the contract that governs
+*shipping* one; it does not relax the gate for *choosing* one.
+
+**The package stays dependency-free.** Templates ship as **inert package data**.
+`dotmac_ui` does not import Jinja and does not declare it as a dependency — it
+resolves a directory, and the HOST supplies the environment. That is what keeps
+ERP (no kernel, Tailwind v3) and an air-gapped consumer able to adopt components
+on the same terms they adopt tokens.
+
+**Namespaced paths.** `template_dir()` returns a directory whose only child is
+`dotmac_ui/`, so every published template is addressed
+`dotmac_ui/components/<name>.html`. A flat `components/<name>.html` would
+collide with a consumer's own `components/` tree inside one `ChoiceLoader` and
+the winner would depend on layer order — a silent, order-dependent override.
+`TEMPLATE_NAMESPACE` is part of the contract; a template outside it is not
+published.
+
+**Declared signatures.** Each component is a `ComponentContract` in
+`dotmac_ui.components.COMPONENTS`, naming its template, its macro, its accepted
+`parameters` in positional order, and every `.dmui-*` class its markup emits.
+The parameter tuple is the signature: **removing a parameter, reordering the
+positional ones, or changing what one means is a breaking change** and bumps
+`UI_CONTRACT_VERSION`, exactly like removing a token. Adding a keyword parameter
+with a default is additive and does not.
+
+**What a component may assume: stock Jinja and nothing else.** No custom filter,
+no global, no context processor, no `url_for`, no request. Every value a
+component renders arrives as a macro argument. HTMX and Alpine are **not**
+assumed either — published markup is static, and a consumer adds `hx-*` from the
+outside. A component that needed a filter would silently render differently, or
+fail, on a host that spells that filter another way.
+
+**Styling is `.dmui-*` classes only, never utilities.** A consumer does not run
+this package through Tailwind, so a template carrying `bg-slate-700` renders
+unstyled anywhere the consumer's content globs do not reach into site-packages —
+which is every correctly configured consumer. Component classes are declared in
+`PUBLISHED_COMPONENT_CLASSES`, which is **derived** from the contracts rather
+than listed separately, and every class the compiled stylesheet defines must
+appear there (`test_no_component_class_is_published_without_its_contract`).
+
+**Proofs, not promises.** Two tests hold the boundary: one asserts the templates
+are present in the built **wheel** (package data that is not packaged is a
+source-checkout-only feature that breaks on install), and one renders every
+component on a **clean host** — a bare `jinja2.Environment` over `template_dir()`
+with none of the kernel's globals or filters installed.
+
+### Published components (UI contract 1)
+
+| Template | Macro | Parameters | Classes |
+|---|---|---|---|
+| `dotmac_ui/components/empty_state.html` | `empty_state` | `message`, `action_url`, `action_label` | `dmui-empty-state`, `dmui-empty-state__icon`, `dmui-empty-state__message`, `dmui-empty-state__action` |
+
+`empty_state` renders the "nothing to show here" panel for a list, table body or
+card. In a table the **caller** owns the row and the `colspan`; the component
+owns only the panel. `action_url` is optional — omit it and no action renders.
 
 ## Accessibility contract
 
