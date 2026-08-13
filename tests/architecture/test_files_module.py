@@ -158,12 +158,23 @@ def test_migration_creates_rls_and_grants_in_the_same_revision() -> None:
     # foreign revision — that edge was true in the Starter and false in ERP,
     # which hosts `public.tenants` itself and can never run kernel 0001. The
     # module names the EFFECTS; the assembly binds them.
-    assert "depends_on = resolve_depends_on(REQUIRES)" in source
-    assert '"tenant_scope_catalog.v1"' in source
-    assert '"module_database_roles.v1"' in source
-    # The defect is the literal assignment, not the word: the docstring names
-    # that revision to explain why it is no longer depended on.
-    assert 'depends_on = ("0001_initial_tenant_schema",)' not in source
+    # Asserted on the AST, not the text: the docstring QUOTES the old
+    # `depends_on = ("0001_initial_tenant_schema",)` to explain why it is gone,
+    # so a substring check matches the explanation too. The shape of the
+    # assignment is the thing that matters, and only a parse can see it.
+    assigned = {
+        target.id: node.value
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert isinstance(assigned["depends_on"], ast.Call)
+    assert getattr(assigned["depends_on"].func, "id", None) == "resolve_depends_on"
+    assert ast.literal_eval(assigned["REQUIRES"]) == (
+        "tenant_scope_catalog.v1",
+        "module_database_roles.v1",
+    )
     assert "schema=_SCHEMA" in source
     assert "mod_files.stored_files ENABLE ROW LEVEL SECURITY" in source
     assert "mod_files.stored_files FORCE ROW LEVEL SECURITY" in source

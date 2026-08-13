@@ -270,7 +270,15 @@ def test_files_requires_a_tenant_target_and_roles_and_nothing_else() -> None:
 
 def test_the_files_root_names_no_foreign_revision() -> None:
     """`depends_on` must be resolved from bindings, never hard-coded — the exact
-    defect that made `dotmac-files` un-installable in ERP."""
+    defect that made `dotmac-files` un-installable in ERP.
+
+    Asserted on the AST rather than the text. Two earlier spellings of this test
+    failed for the same reason: the migration's docstring QUOTES the old
+    `depends_on = ("0001_initial_tenant_schema",)` in order to explain why it is
+    gone, so any substring check also matches the explanation. What actually
+    matters is the shape of the assignment, and only a parse can see that.
+    """
+    import ast
     from pathlib import Path
 
     import dotmac_files
@@ -281,10 +289,20 @@ def test_the_files_root_names_no_foreign_revision() -> None:
         / "versions"
         / "fi_0001_stored_files.py"
     )
-    source = root.read_text(encoding="utf-8")
-    assert "resolve_depends_on(REQUIRES)" in source
-    # Targets the DEFECT — a literal foreign revision assigned to `depends_on` —
-    # not the mere appearance of the string. The migration's docstring names
-    # `0001_initial_tenant_schema` precisely to explain why it no longer depends
-    # on it, and a test that forbade the word would forbid the explanation.
-    assert 'depends_on = ("0001_initial_tenant_schema",)' not in source
+    tree = ast.parse(root.read_text(encoding="utf-8"))
+    assigned = {
+        target.id: node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    depends_on = assigned["depends_on"]
+    assert isinstance(
+        depends_on, ast.Call
+    ), "`depends_on` must be resolved from the assembly's bindings, not a literal"
+    assert getattr(depends_on.func, "id", None) == "resolve_depends_on"
+    assert ast.literal_eval(assigned["REQUIRES"]) == (
+        "tenant_scope_catalog.v1",
+        "module_database_roles.v1",
+    )

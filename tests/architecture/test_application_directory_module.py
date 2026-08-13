@@ -237,10 +237,11 @@ def test_the_lineage_root_is_a_root_and_orders_by_declared_effects() -> None:
         "tenant_scope_catalog.v1",
         "module_database_roles.v1",
     )
-    assert "depends_on = resolve_depends_on(REQUIRES)" in source
-    # The defect is the literal assignment, not the word: the migration's
-    # comment names that revision to explain why it is no longer depended on.
-    assert 'depends_on = ("0001_initial_tenant_schema",)' not in source
+    # Asserted on the AST, not the text: the migration's comment names the old
+    # revision to explain why it is no longer depended on, so a substring check
+    # would match the explanation. The shape of the assignment is what matters.
+    assert isinstance(assigned["depends_on"], ast.Call)
+    assert getattr(assigned["depends_on"].func, "id", None) == "resolve_depends_on"
 
 
 def test_the_revision_id_fits_alembics_column() -> None:
