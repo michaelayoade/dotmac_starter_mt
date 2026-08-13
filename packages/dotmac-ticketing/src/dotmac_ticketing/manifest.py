@@ -40,6 +40,10 @@ deliberately absent from this release.
 from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.prerequisites import (
+    MODULE_DATABASE_ROLES_V1,
+    TENANT_SCOPE_CATALOG_V1,
+)
 
 module = ModuleManifest(
     code="ticketing",
@@ -67,6 +71,10 @@ module = ModuleManifest(
     # `ticketing.use`, the read/work/administer permission split, and the five
     # audit actions all land in the release that ships the routers — with the
     # guards that reference them in the same change.
+    # Needs a tenant catalogue for its foreign keys and roles to grant to —
+    # never the kernel's identity/RBAC/audit estate. The assembly binds these
+    # effects to the revisions that supply them (ADR-0006 D1 amendment).
+    requires=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
 )
 
 __all__ = ["module"]

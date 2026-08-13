@@ -30,6 +30,10 @@ from dotmac_kernel.features import NavItem
 from dotmac_kernel.flags import FeatureFlagSpec
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.permissions import PermissionSpec
+from dotmac_kernel.prerequisites import (
+    MODULE_DATABASE_ROLES_V1,
+    TENANT_SCOPE_CATALOG_V1,
+)
 
 from dotmac_template_studio.router import router as api_router
 from dotmac_template_studio.web import router as web_router
@@ -127,6 +131,10 @@ module = ModuleManifest(
     # module's surface. Its DATA survives disablement — ADR-0003 is explicit
     # that disabling a module preserves its data.
     core=False,
+    # Needs a tenant catalogue for its foreign keys and roles to grant to —
+    # never the kernel's identity/RBAC/audit estate. The assembly binds these
+    # effects to the revisions that supply them (ADR-0006 D1 amendment).
+    requires=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
 )
 
 __all__ = ["module"]

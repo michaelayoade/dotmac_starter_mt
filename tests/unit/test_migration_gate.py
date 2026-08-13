@@ -27,7 +27,6 @@ from dotmac_kernel.migrations.gate import (
 )
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.namespaces import (
-    ASSEMBLY_MIGRATION_OWNER,
     HOST_MIGRATION_OWNERS,
     DuplicateMigrationPrefixError,
     DuplicateSchemaError,
@@ -38,6 +37,7 @@ from dotmac_kernel.namespaces import (
 from dotmac_kernel.prerequisites import PrerequisiteBinding
 
 from app.assembly import assembly
+from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -126,7 +126,9 @@ def test_the_real_repo_composes() -> None:
     modules, so a module's branch label would be unattributable and the gate
     would be checking something other than what ships."""
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
-    report = run_gate(assembly.modules, locations)
+    report = run_gate(
+        assembly.modules, locations, bindings=ASSEMBLY_PREREQUISITE_BINDINGS
+    )
     assert report.ok, report.render()
     # Non-vacuity: a gate that walked an empty set would pass silently. Bump
     # this deliberately when a lineage gains a revision.
@@ -139,7 +141,9 @@ def test_every_real_revision_is_attributed_to_exactly_one_owner() -> None:
     """D1 item 5: `alembic_version` stays the truth, and every row in it is
     explainable through manifest-to-branch attribution."""
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
-    report = run_gate(assembly.modules, locations)
+    report = run_gate(
+        assembly.modules, locations, bindings=ASSEMBLY_PREREQUISITE_BINDINGS
+    )
     assert report.attribution["0001_initial_tenant_schema"]["owner"] == "kernel"
     assert report.attribution["a001_adopt_cfd"]["owner"] == "assembly"
     assert report.attribution["ts_0001_templates"]["owner"] == "template_studio"
@@ -675,26 +679,18 @@ REQUIRING_MANIFEST = ModuleManifest(
     requires=(TENANT_SCOPE,),
 )
 
-PROVIDING_KERNEL = MigrationOwner(
-    owner="kernel",
-    prefix="k",
-    branch_label="kernel",
-    db_schema=None,
-    legacy_revision_pattern=r"^\d{4}_[a-z0-9_]+$",
-    provides=(TENANT_SCOPE,),
-)
 
-SILENT_KERNEL = MigrationOwner(
-    owner="kernel",
-    prefix="k",
-    branch_label="kernel",
-    db_schema=None,
-    legacy_revision_pattern=r"^\d{4}_[a-z0-9_]+$",
-)
+def _requiring_gate(*locations: Path, bindings=()):
+    """Uses the REAL host owners.
 
-
-def _requiring_gate(*locations: Path, bindings=(), owners=(PROVIDING_KERNEL,)):
-    ledger = (*owners, ASSEMBLY_MIGRATION_OWNER, BILLING_OWNER)
+    An earlier draft fabricated a `kernel` owner to control its `provides`;
+    `NamespaceRegistry` rejected it, correctly — a host owner that contradicts
+    the shipped ledger is exactly the drift the registry exists to catch. The
+    "lineage that never claimed the effect" case is therefore expressed with a
+    MODULE owner (`billing`, which declares no `provides`), which is also the
+    more realistic mistake.
+    """
+    ledger = (*HOST_MIGRATION_OWNERS, BILLING_OWNER)
     return run_gate(
         [REQUIRING_MANIFEST],
         list(locations),
@@ -745,15 +741,16 @@ def test_a_binding_to_a_lineage_that_never_claimed_the_effect_is_rejected(
     tmp_path: Path,
 ) -> None:
     """The wishful binding: pointing at a real, composed revision of a lineage
-    that does not supply the effect at all."""
+    that does not supply the effect at all. Here `billing` owns a real lineage
+    and declares no `provides`, so binding a tenant catalogue to it is a claim
+    nobody made."""
     billing, kernel = tmp_path / "billing", tmp_path / "kernel"
     _kernel_root(kernel)
     _billing_root(billing)
     report = _requiring_gate(
         billing,
         kernel,
-        bindings=[PrerequisiteBinding(TENANT_SCOPE, "0001_root", "kernel")],
-        owners=(SILENT_KERNEL,),
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "bl_0001_invoices", "billing")],
     )
     assert not report.ok
     assert "does not declare" in _messages(report)

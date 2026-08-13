@@ -50,6 +50,8 @@ Create Date: 2026-08-11
 from __future__ import annotations
 
 import sqlalchemy as sa
+from dotmac_kernel.migrations.verify import require_prerequisites
+from dotmac_kernel.prerequisites import resolve_depends_on
 from sqlalchemy.dialects import postgresql
 
 from alembic import op
@@ -57,7 +59,18 @@ from alembic import op
 revision = "tk_0001_tickets"
 down_revision = None
 branch_labels = ("ticketing",)
-depends_on = ("0001_initial_tenant_schema",)
+# This lineage needs a tenant catalogue to point its foreign keys at and roles to
+# grant to — NOT the kernel's identity, RBAC or audit estate. Naming those
+# EFFECTS instead of kernel revision `0001_initial_tenant_schema` is what lets
+# this module install into an assembly that supplies them from its own lineage;
+# ERP hosts `public.tenants` itself and can never run kernel 0001 (ADR-0006 D1
+# amendment). Literals, not imported constants, so the composed gate can read
+# them statically and diff them against the manifest.
+REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")
+
+# Resolved from this assembly's installed bindings, so Alembic still orders on a
+# concrete revision id.
+depends_on = resolve_depends_on(REQUIRES)
 
 # A literal, not `module_schema("tkt")`. A migration is a frozen historical
 # artifact and must keep building the same schema even if a future kernel
@@ -72,6 +85,9 @@ _PLATFORM_COMMENTS = "platform_ticket_comments"
 
 
 def upgrade() -> None:
+    # A binding is a claim about the database, so it is checked against the
+    # database before any DDL runs.
+    require_prerequisites(op.get_bind(), REQUIRES)
     op.execute("CREATE SCHEMA IF NOT EXISTS mod_tkt;")
     # `app_admin` joins the two online roles because the platform plane below
     # grants it DML: schema USAGE is a prerequisite for reaching any table in it.

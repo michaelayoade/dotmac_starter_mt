@@ -39,6 +39,10 @@ launcher screens live in `dotmac_workspace` and this module stays a domain.
 from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.prerequisites import (
+    MODULE_DATABASE_ROLES_V1,
+    TENANT_SCOPE_CATALOG_V1,
+)
 
 module = ModuleManifest(
     code="application_directory",
@@ -49,6 +53,10 @@ module = ModuleManifest(
     migration_prefix="ad",
     migration_branch="application_directory",
     tables=("application_bindings",),
+    # Needs a tenant catalogue for its foreign keys and roles to grant to —
+    # never the kernel's identity/RBAC/audit estate. The assembly binds these
+    # effects to the revisions that supply them (ADR-0006 D1 amendment).
+    requires=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
 )
 
 __all__ = ["module"]

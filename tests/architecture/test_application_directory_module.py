@@ -209,11 +209,20 @@ def _migration_source() -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_the_lineage_root_is_a_root_and_orders_by_depends_on() -> None:
-    """Cross-lineage ordering is `depends_on`, never `down_revision` — a
-    `down_revision` across owners splices two independently released lineages
-    into one chain and makes either un-releasable."""
-    tree = ast.parse(_migration_source())
+def test_the_lineage_root_is_a_root_and_orders_by_declared_effects() -> None:
+    """`down_revision` never crosses owners — that would splice two
+    independently released lineages into one chain and make either
+    un-releasable.
+
+    AMENDED (ADR-0006 D1 amendment): this used to assert
+    `depends_on == ("0001_initial_tenant_schema",)`. A module may not name a
+    foreign revision, because that edge is true only in an assembly that runs
+    the named lineage — ERP hosts `public.tenants` itself and can never run
+    kernel 0001. The module declares the EFFECTS it needs and the assembly binds
+    them to revisions it actually runs.
+    """
+    source = _migration_source()
+    tree = ast.parse(source)
     assigned = {
         target.id: node.value
         for node in tree.body
@@ -224,7 +233,12 @@ def test_the_lineage_root_is_a_root_and_orders_by_depends_on() -> None:
     assert ast.literal_eval(assigned["revision"]) == "ad_0001_application_bindings"
     assert ast.literal_eval(assigned["down_revision"]) is None
     assert ast.literal_eval(assigned["branch_labels"]) == ("application_directory",)
-    assert ast.literal_eval(assigned["depends_on"]) == ("0001_initial_tenant_schema",)
+    assert ast.literal_eval(assigned["REQUIRES"]) == (
+        "tenant_scope_catalog.v1",
+        "module_database_roles.v1",
+    )
+    assert "depends_on = resolve_depends_on(REQUIRES)" in source
+    assert "0001_initial_tenant_schema" not in source
 
 
 def test_the_revision_id_fits_alembics_column() -> None:
@@ -337,6 +351,8 @@ def test_the_lineage_passes_the_composed_migration_gate() -> None:
     """
     from dotmac_kernel.migrations.gate import run_gate
 
+    from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
     report = run_gate(
         [module],
         [
@@ -344,6 +360,7 @@ def test_the_lineage_passes_the_composed_migration_gate() -> None:
             REPO_ROOT / "alembic/versions",
             MIGRATIONS,
         ],
+        bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
     )
     assert report.ok, f"composed gate violations: {report.violations}"
 

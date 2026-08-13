@@ -8,6 +8,8 @@ Create Date: 2026-08-13
 from __future__ import annotations
 
 import sqlalchemy as sa
+from dotmac_kernel.migrations.verify import require_prerequisites
+from dotmac_kernel.prerequisites import resolve_depends_on
 from sqlalchemy.dialects import postgresql
 
 from alembic import op
@@ -15,7 +17,18 @@ from alembic import op
 revision = "im_0001_import_runs"
 down_revision = None
 branch_labels = ("imports",)
-depends_on = ("0001_initial_tenant_schema",)
+# This lineage needs a tenant catalogue to point its foreign keys at and roles to
+# grant to — NOT the kernel's identity, RBAC or audit estate. Naming those
+# EFFECTS instead of kernel revision `0001_initial_tenant_schema` is what lets
+# this module install into an assembly that supplies them from its own lineage;
+# ERP hosts `public.tenants` itself and can never run kernel 0001 (ADR-0006 D1
+# amendment). Literals, not imported constants, so the composed gate can read
+# them statically and diff them against the manifest.
+REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")
+
+# Resolved from this assembly's installed bindings, so Alembic still orders on a
+# concrete revision id.
+depends_on = resolve_depends_on(REQUIRES)
 
 _SCHEMA = "mod_imports"
 _RUNS = "import_runs"
@@ -23,6 +36,9 @@ _ROWS = "import_run_rows"
 
 
 def upgrade() -> None:
+    # A binding is a claim about the database, so it is checked against the
+    # database before any DDL runs.
+    require_prerequisites(op.get_bind(), REQUIRES)
     op.execute("CREATE SCHEMA IF NOT EXISTS mod_imports;")
     op.execute(
         "GRANT USAGE ON SCHEMA mod_imports TO app_user, platform_api, app_admin;"
