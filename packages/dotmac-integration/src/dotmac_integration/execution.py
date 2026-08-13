@@ -270,6 +270,14 @@ def claim_delivery(
                 DeliveryAttempt.leased_until.is_(None),
                 DeliveryAttempt.leased_until < moment,
             ),
+            # BACKOFF. Without this the public dispatch seam claims a delivery
+            # the engine deliberately scheduled for later, and a failing
+            # provider is hammered instead of backed off — the retry curve
+            # exists and nothing honours it.
+            or_(
+                DeliveryAttempt.next_attempt_at.is_(None),
+                DeliveryAttempt.next_attempt_at <= moment,
+            ),
         )
         .values(
             state="in_flight",

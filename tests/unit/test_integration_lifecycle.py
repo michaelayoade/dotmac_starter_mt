@@ -363,9 +363,14 @@ def test_invoke_cannot_be_given_a_database_session() -> None:
     assert "db" not in parameters and "session" not in parameters
 
 
-def test_a_raising_plugin_becomes_retryable_not_an_exception(db: Session) -> None:
-    """A connector that throws has told us nothing about whether the effect
-    landed; treating that as terminal would discard work that merely timed out.
+def test_a_raising_plugin_requires_reconciliation(db: Session) -> None:
+    """A throw tells us nothing about whether the effect LANDED.
+
+    Corrected in review: this used to classify as RETRYABLE, which re-sends an
+    effect the provider may already have applied. Only an explicit connector
+    outcome may ask for a retry. Fully covered in
+    `test_integration_dispatch_safety.py`; kept here because the delivery suite
+    this file ports exercises the same path.
     """
     broken = fake_registry(
         plugins=[fake_plugin(raises=RuntimeError("provider exploded"))]
@@ -383,11 +388,12 @@ def test_a_raising_plugin_becomes_retryable_not_an_exception(db: Session) -> Non
     prepared = prepare(db, delivery, registry=broken)
     outcome = invoke(prepared, registry=broken, resolve_secrets=lambda r: {})
 
-    assert outcome.status is OutcomeStatus.RETRYABLE
+    assert outcome.status is OutcomeStatus.RECONCILIATION_REQUIRED
     assert outcome.error_code == "connector_raised"
 
     settle(db, delivery, outcome, prepared=prepared)
-    assert delivery.state == "retryable"
+    assert delivery.state == "reconciliation_required"
+    assert delivery.next_attempt_at is None
 
 
 def test_settle_refuses_to_overwrite_another_workers_outcome(
@@ -410,7 +416,7 @@ def test_settle_refuses_to_overwrite_another_workers_outcome(
     delivery.attempt_count += 1
     db.flush()
 
-    with pytest.raises(LostClaim, match="another took over"):
+    with pytest.raises(LostClaim, match="no longer holds the claim"):
         settle(db, delivery, Outcome(status=OutcomeStatus.SUCCEEDED), prepared=prepared)
 
 

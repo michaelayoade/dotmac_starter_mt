@@ -43,12 +43,12 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
-from dotmac_integration.execution import claim_delivery, record_delivery_outcome
+from dotmac_integration.execution import claim_delivery
 from dotmac_integration.models import (
     CapabilityBinding,
     ConnectorConfigRevision,
@@ -56,11 +56,17 @@ from dotmac_integration.models import (
     DeliveryAttempt,
 )
 from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
-from dotmac_integration.retry import Outcome, OutcomeStatus
-from dotmac_integration.spi import DispatchRequest
+from dotmac_integration.retry import (
+    Outcome,
+    OutcomeStatus,
+    next_state,
+    retry_delay_seconds,
+)
+from dotmac_integration.spi import DispatchRequest, accepts_manifest_digest
 
 __all__ = [
     "DispatchError",
+    "DispatchUnavailable",
     "LostClaim",
     "PreparedDispatch",
     "invoke",
@@ -76,6 +82,21 @@ SecretResolver = Callable[[Mapping[str, str]], Mapping[str, str]]
 
 class DispatchError(RuntimeError):
     """A dispatch could not be prepared."""
+
+
+class DispatchUnavailable(DispatchError):
+    """The CONFIGURATION cannot serve this dispatch — alert and stop.
+
+    Deliberately distinct from `prepare` returning `None`:
+
+        None                  the database did not grant this worker a claim.
+                              Normal under contention; the caller moves on.
+        DispatchUnavailable   a disabled installation, a missing binding or
+                              plugin, or a manifest pin the installed connector
+                              no longer honours. Nothing will fix itself, and a
+                              caller that treated this as contention would idle
+                              silently on a misconfiguration.
+    """
 
 
 class LostClaim(RuntimeError):
@@ -110,37 +131,73 @@ def prepare(
     policy: ExecutionPolicy = DEFAULT_POLICY,
     now: datetime | None = None,
 ) -> PreparedDispatch | None:
-    """Claim the delivery and read everything the call will need.
+    """Validate first, THEN claim. Returns `None` only when the claim was lost.
 
-    Returns `None` when the claim was lost — the caller moves on rather than
-    treating a contended row as an error.
+    Order matters and this is the whole reason the function is shaped this way.
+    Claiming before validating leaves a misconfigured delivery `in_flight` with
+    a live lease when preflight raises: nothing retries it until the lease
+    expires, and the queue reports busy rather than broken — the worst of both.
+
+    So everything that can refuse runs against unclaimed state, and the claim is
+    the last thing that happens.
     """
-    if not claim_delivery(db, delivery, policy=policy, now=now):
-        return None
-
     binding = (
         db.get(CapabilityBinding, delivery.capability_binding_id)
         if delivery.capability_binding_id
         else None
     )
     if binding is None:
-        raise DispatchError(
+        raise DispatchUnavailable(
             f"delivery {delivery.id} names no capability binding; there is "
             "nothing to route it to"
         )
-    installation = db.get(ConnectorInstallation, binding.installation_id)
-    if installation is None or installation.state != "enabled":
-        raise DispatchError(f"installation for binding {binding.id} is not enabled")
+    if binding.state != "enabled":
+        raise DispatchUnavailable(
+            f"binding {binding.id} is {binding.state!r}, not enabled"
+        )
 
-    # The plugin must still be installed and compatible — checked here rather
-    # than trusted from activation, which may have been months ago.
-    registry.require_compatible(installation.connector_key)
+    installation = db.get(ConnectorInstallation, binding.installation_id)
+    if installation is None:
+        raise DispatchUnavailable(f"binding {binding.id} has no installation")
+    if installation.state != "enabled":
+        raise DispatchUnavailable(
+            f"installation {installation.name!r} is {installation.state!r}, "
+            "not enabled"
+        )
+
+    # The plugin must still be installed and SPI-compatible — checked here
+    # rather than trusted from activation, which may have been months ago.
+    try:
+        registry.require_compatible(installation.connector_key)
+        plugin = registry.plugin(installation.connector_key)
+    except Exception as exc:
+        raise DispatchUnavailable(
+            f"connector {installation.connector_key!r} is not usable in this "
+            f"runtime: {exc}"
+        ) from exc
+
+    # And it must still honour the manifest pin this installation was adopted
+    # against. A connector that superseded the pin without keeping it in its
+    # historical window no longer implements the payload shape the installation
+    # was configured for, so the call must not reach a provider.
+    if not accepts_manifest_digest(plugin, installation.manifest_digest):
+        raise DispatchUnavailable(
+            f"installation {installation.name!r} is pinned to manifest "
+            f"{installation.manifest_digest[:12]}, which connector "
+            f"{installation.connector_key!r} v{plugin.manifest.version} no "
+            "longer honours. Adopt the current manifest before dispatching"
+        )
 
     revision = (
         db.get(ConnectorConfigRevision, installation.current_config_revision_id)
         if installation.current_config_revision_id
         else None
     )
+
+    # LAST: nothing below can refuse, so nothing can strand a claimed row.
+    if not claim_delivery(db, delivery, policy=policy, now=now):
+        return None
+
     return PreparedDispatch(
         delivery_id=delivery.id,
         installation_id=installation.id,
@@ -170,10 +227,12 @@ def invoke(
     to. A plugin that wants a database has to be given one by someone breaking
     this contract visibly.
 
-    A raising plugin becomes a RETRYABLE outcome rather than an exception: a
-    connector that throws has told us nothing about whether the effect landed,
-    and treating that as terminal would discard work that may simply have timed
-    out.
+    A raising plugin becomes RECONCILIATION_REQUIRED, NOT retryable. A throw
+    tells us nothing about whether the effect LANDED — a socket closed mid-write
+    may have been fully applied at the provider — so retrying risks doing it
+    twice and dead-lettering hides it. Only an explicit connector outcome may
+    request a retry, because the connector is the only party that knows the
+    effect did not happen.
     """
     plugin = registry.plugin(prepared.connector_key)
     handler = plugin.handler_for(prepared.capability_id)
@@ -191,13 +250,15 @@ def invoke(
         outcome = handler(request)
     except Exception as exc:
         return Outcome(
-            status=OutcomeStatus.RETRYABLE,
+            status=OutcomeStatus.RECONCILIATION_REQUIRED,
             error_code="connector_raised",
             error_detail=f"{type(exc).__name__}: {exc}",
         )
     if not isinstance(outcome, Outcome):
         return Outcome(
-            status=OutcomeStatus.RETRYABLE,
+            # Same reasoning: a handler that returned the wrong type may still
+            # have performed the call before returning it.
+            status=OutcomeStatus.RECONCILIATION_REQUIRED,
             error_code="connector_contract",
             error_detail=(f"handler returned {type(outcome).__name__}, not an Outcome"),
         )
@@ -213,34 +274,63 @@ def settle(
     policy: ExecutionPolicy = DEFAULT_POLICY,
     now: datetime | None = None,
 ) -> DeliveryAttempt:
-    """Record the outcome, but ONLY while this worker still holds the claim.
+    """Record the outcome in ONE conditional UPDATE guarded by the claim.
 
-    A worker whose lease expired during a slow provider call must not overwrite
-    the result of the worker that took over. `LostClaim` says so out loud
-    instead of clobbering, so the caller can log a real event rather than
-    silently producing two outcomes for one attempt.
+    Read-then-write leaves a window: a takeover can happen between reading the
+    row and writing the result, and the loser silently overwrites the winner's
+    outcome — two outcomes for one attempt, with no way to tell which ran.
+
+    So the guard IS the write. `state`, `attempt_count` and the lease are all in
+    the WHERE clause, and `rowcount != 1` means this worker no longer holds the
+    claim. The database decides, which also removes the naive/aware timestamp
+    comparison the previous read-then-compare version needed.
     """
+    from sqlalchemy import update
+
     moment = now or datetime.now(UTC)
+    next_state_value = next_state(
+        outcome, attempt_count=prepared.attempt_number, policy=policy
+    )
+    values: dict[str, Any] = {
+        "state": next_state_value,
+        "leased_until": None,
+        "error_code": outcome.error_code,
+        "error_detail": outcome.error_detail,
+    }
+    if next_state_value == "delivered":
+        values.update(
+            delivered_at=moment,
+            next_attempt_at=None,
+            error_code=None,
+            error_detail=None,
+        )
+    elif next_state_value == "retryable":
+        values["next_attempt_at"] = moment + timedelta(
+            seconds=retry_delay_seconds(prepared.attempt_number, outcome, policy=policy)
+        )
+    else:
+        # dead_letter / reconciliation_required: nothing is due, and leaving a
+        # schedule would make a dispatcher pick it up forever.
+        values["next_attempt_at"] = None
+
+    result = db.execute(
+        update(DeliveryAttempt)
+        .where(
+            DeliveryAttempt.id == delivery.id,
+            DeliveryAttempt.state == "in_flight",
+            # The attempt number this worker claimed. A takeover increments it.
+            DeliveryAttempt.attempt_count == prepared.attempt_number,
+            DeliveryAttempt.leased_until.is_not(None),
+            DeliveryAttempt.leased_until >= moment,
+        )
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        raise LostClaim(
+            f"delivery {delivery.id}: this worker no longer holds the claim it "
+            f"took at attempt {prepared.attempt_number} — the lease expired or "
+            "another worker took over. Refusing to overwrite its outcome"
+        )
     db.refresh(delivery)
-
-    if delivery.attempt_count != prepared.attempt_number:
-        raise LostClaim(
-            f"delivery {delivery.id} is on attempt {delivery.attempt_count}, "
-            f"not {prepared.attempt_number}: this worker's lease expired and "
-            "another took over. Refusing to overwrite its outcome"
-        )
-    # Some drivers (SQLite) hand back a NAIVE timestamp for a timestamptz
-    # column. Comparing it directly raises, which would turn a healthy settle
-    # into a crash on one backend and not another.
-    leased_until = delivery.leased_until
-    if leased_until is not None and leased_until.tzinfo is None:
-        leased_until = leased_until.replace(tzinfo=UTC)
-    if leased_until is not None and leased_until < moment:
-        raise LostClaim(
-            f"delivery {delivery.id} lease expired at {delivery.leased_until}; "
-            "another worker may already be attempting it"
-        )
-
-    record_delivery_outcome(delivery, outcome, policy=policy, now=moment)
-    db.flush()
     return delivery

@@ -349,3 +349,111 @@ def test_only_one_session_can_advance_a_checkpoint(
     second.dispose()
 
     assert (won, lost) == (1, 0)
+
+
+def test_only_one_session_can_settle_a_delivery(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The settlement race, proved with two real sessions.
+
+    The reviewed implementation read the row, compared in Python, then wrote —
+    leaving a window in which a takeover lands between the read and the write
+    and the loser overwrites the winner's outcome. Two outcomes for one attempt,
+    with nothing recording which actually ran.
+
+    Both sessions here issue the guarded UPDATE for the SAME claimed attempt.
+    Exactly one must report a row; the loser must change nothing.
+    """
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    delivery_id = uuid.uuid4()
+    with setup.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn)
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.delivery_attempts ("
+                "id, installation_id, capability_binding_id, event_type, "
+                "idempotency_key, payload_digest, state, attempt_count, "
+                "leased_until) VALUES ("
+                ":id, :inst, :binding, 'e', 'settle-race', :digest, 'in_flight', "
+                "1, now() + interval '300 seconds')"
+            ),
+            {
+                "id": delivery_id,
+                "inst": installation_id,
+                "binding": binding_id,
+                "digest": "e" * 64,
+            },
+        )
+    setup.dispose()
+
+    # The guard settle() issues: state, attempt number and a live lease.
+    settle_sql = text(
+        "UPDATE mod_intg.delivery_attempts SET state = :state, "
+        "leased_until = NULL, delivered_at = now() "
+        "WHERE id = :id AND state = 'in_flight' AND attempt_count = 1 "
+        "AND leased_until IS NOT NULL AND leased_until >= now()"
+    )
+    first, second = create_engine(admin_url), create_engine(admin_url)
+    with first.begin() as a:
+        won = a.execute(settle_sql, {"id": delivery_id, "state": "delivered"}).rowcount
+    with second.begin() as b:
+        lost = b.execute(
+            settle_sql, {"id": delivery_id, "state": "dead_letter"}
+        ).rowcount
+    first.dispose()
+    second.dispose()
+
+    assert (won, lost) == (1, 0)
+
+    check = create_engine(admin_url)
+    with check.connect() as conn:
+        state = conn.execute(
+            text("SELECT state FROM mod_intg.delivery_attempts WHERE id = :id"),
+            {"id": delivery_id},
+        ).scalar_one()
+    check.dispose()
+    assert state == "delivered", "the loser overwrote the winner's outcome"
+
+
+def test_a_delivery_scheduled_for_the_future_is_not_claimable(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """Backoff, enforced by the claim predicate against a real clock.
+
+    Without the `next_attempt_at` guard the public dispatch seam claims work the
+    engine deliberately deferred, and a failing provider is hammered instead of
+    backed off.
+    """
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    delivery_id = uuid.uuid4()
+    with setup.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn)
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.delivery_attempts ("
+                "id, installation_id, capability_binding_id, event_type, "
+                "idempotency_key, payload_digest, state, next_attempt_at) VALUES ("
+                ":id, :inst, :binding, 'e', 'backoff', :digest, 'retryable', "
+                "now() + interval '1 hour')"
+            ),
+            {
+                "id": delivery_id,
+                "inst": installation_id,
+                "binding": binding_id,
+                "digest": "f" * 64,
+            },
+        )
+
+        claim = text(
+            "UPDATE mod_intg.delivery_attempts SET state='in_flight', "
+            "attempt_count = attempt_count + 1, "
+            "leased_until = now() + interval '300 seconds' "
+            "WHERE id = :id AND state NOT IN "
+            "('delivered','dead_letter','reconciliation_required') "
+            "AND (leased_until IS NULL OR leased_until < now()) "
+            "AND (next_attempt_at IS NULL OR next_attempt_at <= now())"
+        )
+        assert conn.execute(claim, {"id": delivery_id}).rowcount == 0
+    setup.dispose()

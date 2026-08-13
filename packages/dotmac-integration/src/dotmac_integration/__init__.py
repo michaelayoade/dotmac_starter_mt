@@ -74,6 +74,7 @@ from dotmac_integration.discovery import (
 )
 from dotmac_integration.dispatch import (
     DispatchError,
+    DispatchUnavailable,
     LostClaim,
     PreparedDispatch,
     invoke,
@@ -169,6 +170,7 @@ from dotmac_integration.spi import (
 __version__ = "0.1.0a1"
 
 __all__ = [
+    "DispatchUnavailable",
     "settle",
     "set_binding_enabled",
     "retire",
