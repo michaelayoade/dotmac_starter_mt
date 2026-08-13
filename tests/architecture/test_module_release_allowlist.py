@@ -19,6 +19,8 @@ Three layers, and all three are tested here because each fails differently:
 
 from __future__ import annotations
 
+import argparse
+import importlib.util
 import json
 import subprocess
 import sys
@@ -32,6 +34,15 @@ ALLOWLIST_PATH = PROJECT_ROOT / ".github" / "release-modules.json"
 WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-module.yml"
 KERNEL_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-kernel.yml"
 SCRIPT = PROJECT_ROOT / "scripts" / "release_module.py"
+
+
+def _release_module_script():
+    spec = importlib.util.spec_from_file_location("release_module", SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _executable(path: Path) -> str:
@@ -218,6 +229,51 @@ def test_publish_re_asserts_the_allowlist_after_approval() -> None:
     past the gate while the run sits pending approval."""
     publish = _executable(WORKFLOW).split("publish:", 1)[1].split("verify:", 1)[0]
     assert "release_module.py resolve" in publish
+
+
+def test_recovery_download_can_resolve_an_sdist_build_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Comparing an sdist still makes pip prepare its build metadata.
+
+    The package itself must come from the private index, but its build backend
+    comes from the public dependency index. Omitting the latter made recovery
+    fail on ``poetry-core`` before it compared a single byte.
+    """
+    module = _release_module_script()
+    built = tmp_path / "built"
+    built.mkdir()
+    wheel = built / "dotmac_release_catalog-0.1.0a1-py3-none-any.whl"
+    sdist = built / "dotmac_release_catalog-0.1.0a1.tar.gz"
+    wheel.write_bytes(b"wheel bytes")
+    sdist.write_bytes(b"sdist bytes")
+
+    private_index = "https://private.example/simple"
+    public_index = "https://public.example/simple"
+    monkeypatch.setenv("PUBLIC_INDEX_URL", public_index)
+
+    commands: list[list[str]] = []
+
+    def fake_download(command: list[str], *, check: bool) -> None:
+        assert check is True
+        assert command[command.index("--index-url") + 1] == private_index
+        assert command[command.index("--extra-index-url") + 1] == public_index
+        destination = Path(command[command.index("--dest") + 1])
+        source = sdist if "--no-binary" in command else wheel
+        (destination / source.name).write_bytes(source.read_bytes())
+        commands.append(command)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_download)
+    module.cmd_compare_published(
+        argparse.Namespace(
+            distribution="dotmac-release-catalog",
+            version="0.1.0a1",
+            index=private_index,
+            dist=str(built),
+        )
+    )
+
+    assert len(commands) == 2
 
 
 def test_one_module_per_run() -> None:
