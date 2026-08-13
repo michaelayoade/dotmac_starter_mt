@@ -140,9 +140,10 @@ class Allocation(Base, TimestampMixin):
     sealed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     entries: Mapped[list[AllocationEntry]] = relationship(
+        lambda: AllocationEntry,
         back_populates="allocation",
         cascade="all, delete-orphan",
-        order_by="AllocationEntry.capability_code",
+        order_by=lambda: AllocationEntry.capability_code,
     )
 
 
@@ -172,7 +173,10 @@ class AllocationEntry(Base, TimestampMixin):
     capability_code: Mapped[str] = mapped_column(String(120), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-    allocation: Mapped[Allocation] = relationship(back_populates="entries")
+    allocation: Mapped[Allocation] = relationship(
+        lambda: Allocation,
+        back_populates="entries",
+    )
 
 
 __all__ = [
