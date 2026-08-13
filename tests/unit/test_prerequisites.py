@@ -291,6 +291,66 @@ def test_a_product_can_register_its_own_verifier() -> None:
     assert seen == [None]
 
 
+# ── Role posture: every attribute combination ───────────────────────────────
+
+#: The one acceptable observation: `(rolbypassrls, rolsuper)` per role. Kernel
+#: `0001` creates exactly this — `app_admin LOGIN BYPASSRLS`, the other two
+#: plain `LOGIN`.
+GOOD_ROLES = {
+    "app_admin": (True, False),
+    "app_user": (False, False),
+    "platform_api": (False, False),
+}
+
+
+def test_the_kernels_own_role_creation_satisfies_the_contract() -> None:
+    """Non-vacuity: a contract nothing can satisfy would fail every install."""
+    from dotmac_kernel.migrations.verify import role_violations
+
+    assert role_violations(GOOD_ROLES) == []
+
+
+@pytest.mark.parametrize("role", ["app_admin", "app_user", "platform_api"])
+@pytest.mark.parametrize("bypassrls", [True, False])
+@pytest.mark.parametrize("superuser", [True, False])
+def test_every_role_attribute_combination_is_decided(
+    role: str, bypassrls: bool, superuser: bool
+) -> None:
+    """All 4 combinations across 3 roles, so no posture is merely unconsidered.
+
+    `app_admin` is the one that changed: an earlier draft accepted BYPASSRLS OR
+    SUPERUSER, which certified a cluster-wide identity to satisfy a requirement
+    only ever about reading past RLS. The contract says `LOGIN BYPASSRLS`, so
+    that is what is required — bypass true, superuser false.
+    """
+    from dotmac_kernel.migrations.verify import role_violations
+
+    observed = {**GOOD_ROLES, role: (bypassrls, superuser)}
+    problems = role_violations(observed)
+    acceptable = GOOD_ROLES[role] == (bypassrls, superuser)
+    assert (problems == []) is acceptable, (
+        f"{role} with bypassrls={bypassrls} superuser={superuser} should "
+        f"{'pass' if acceptable else 'fail'}; got {problems}"
+    )
+
+
+def test_a_superuser_app_admin_is_refused_naming_the_reason() -> None:
+    """Called out separately because it is the finding, not just a row in a
+    matrix: a superuser satisfies "can read past RLS" and brings DDL on every
+    database, role creation and COPY PROGRAM with it."""
+    from dotmac_kernel.migrations.verify import role_violations
+
+    problems = role_violations({**GOOD_ROLES, "app_admin": (True, True)})
+    assert any("rolsuper=False" in p and "cluster-wide" in p for p in problems)
+
+
+def test_a_missing_role_is_reported_rather_than_skipped() -> None:
+    from dotmac_kernel.migrations.verify import role_violations
+
+    observed = {k: v for k, v in GOOD_ROLES.items() if k != "platform_api"}
+    assert any("do not exist" in p for p in role_violations(observed))
+
+
 # ── Declaration sites ───────────────────────────────────────────────────────
 
 

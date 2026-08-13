@@ -260,14 +260,66 @@ def verify_tenant_scope_catalog(bind: Connection) -> None:
 
 # ── module_database_roles.v1 ────────────────────────────────────────────────
 
-#: `app_admin` must be able to bypass RLS — offline/migration work has to see
-#: every tenant's rows, and an `app_admin` that cannot turns maintenance into
-#: silent zero-row success. The two ONLINE roles must not, for the mirror-image
-#: reason: they carry request traffic, and a request that bypasses RLS defeats
-#: every composed module's tenant isolation at once.
-_ONLINE_ROLES: Final[tuple[str, ...]] = ("app_user", "platform_api")
-_OFFLINE_ROLES: Final[tuple[str, ...]] = ("app_admin",)
-_REQUIRED_ROLES: Final[tuple[str, ...]] = (*_OFFLINE_ROLES, *_ONLINE_ROLES)
+#: The exact attribute pair each role must have: `(rolbypassrls, rolsuper)`.
+#:
+#: `app_admin` bypasses RLS because offline/migration work has to see every
+#: tenant's rows, and one that cannot turns maintenance into silent zero-row
+#: success. It is NOT a superuser: kernel `0001` creates it `LOGIN BYPASSRLS`,
+#: and accepting a superuser here would certify a cluster-wide identity — DDL on
+#: any database, role creation, `COPY PROGRAM` — to satisfy a requirement that
+#: is only ever about reading past RLS.
+#:
+#: The two ONLINE roles must have neither. They carry request traffic, and a
+#: request that bypasses RLS defeats every composed module's tenant isolation at
+#: once. Superuser is checked as well as the flag because **a superuser bypasses
+#: RLS regardless of `rolbypassrls`** — reading only the flag would certify
+#: `app_user SUPERUSER NOBYPASSRLS` as isolated.
+_ROLE_CONTRACT: Final[dict[str, tuple[bool, bool]]] = {
+    "app_admin": (True, False),
+    "app_user": (False, False),
+    "platform_api": (False, False),
+}
+_REQUIRED_ROLES: Final[tuple[str, ...]] = tuple(_ROLE_CONTRACT)
+
+
+def role_violations(observed: Mapping[str, tuple[bool, bool]]) -> list[str]:
+    """Decide role posture from observed `(rolbypassrls, rolsuper)` pairs.
+
+    Split out from the query — like `migrations.catalog`'s builder/decision
+    split — so every attribute combination is exercisable without a database.
+    """
+    problems: list[str] = []
+    missing = sorted(set(_ROLE_CONTRACT) - set(observed))
+    if missing:
+        problems.append(
+            f"database role(s) {missing} do not exist. A module never creates a "
+            "role — creating one needs privileges a module migration must not "
+            "assume, and a module that invents roles is a second authority over "
+            "cluster access"
+        )
+    for role, (want_bypass, want_super) in _ROLE_CONTRACT.items():
+        if role not in observed:
+            continue
+        bypasses, superuser = observed[role]
+        if superuser is not want_super:
+            problems.append(
+                f"role {role!r} must have rolsuper={want_super}. A superuser "
+                "bypasses row-level security whether or not rolbypassrls is set, "
+                "and carries cluster-wide authority no module needs"
+                if want_super is False
+                else f"role {role!r} must have rolsuper={want_super}"
+            )
+        if bypasses is not want_bypass:
+            problems.append(
+                f"role {role!r} must have rolbypassrls={want_bypass}: "
+                + (
+                    "offline and migration work would otherwise read zero rows"
+                    if want_bypass
+                    else "an online role that bypasses RLS defeats every "
+                    "composed module's tenant isolation"
+                )
+            )
+    return problems
 
 
 def verify_module_database_roles(bind: Connection) -> None:
@@ -291,38 +343,11 @@ def verify_module_database_roles(bind: Connection) -> None:
         ),
         {"names": list(_REQUIRED_ROLES)},
     ).all()
-    found = {str(row[0]): (bool(row[1]), bool(row[2])) for row in rows}
+    observed = {str(row[0]): (bool(row[1]), bool(row[2])) for row in rows}
 
-    missing = sorted(set(_REQUIRED_ROLES) - set(found))
-    if missing:
-        _fail(
-            name,
-            f"database role(s) {missing} do not exist. A module never creates a "
-            "role — creating one needs privileges a module migration must not "
-            "assume, and a module that invents roles is a second authority over "
-            "cluster access",
-        )
-
-    for role in _ONLINE_ROLES:
-        bypasses, superuser = found[role]
-        if bypasses or superuser:
-            reason = "SUPERUSER" if superuser else "BYPASSRLS"
-            _fail(
-                name,
-                f"online role {role!r} is {reason}, so it bypasses row-level "
-                "security and every composed module's tenant isolation with it. "
-                "A superuser bypasses RLS whether or not rolbypassrls is set, "
-                "which is why both are checked",
-            )
-
-    for role in _OFFLINE_ROLES:
-        bypasses, superuser = found[role]
-        if not (bypasses or superuser):
-            _fail(
-                name,
-                f"role {role!r} can neither bypass RLS nor act as superuser, so "
-                "offline and migration work would silently read zero rows",
-            )
+    problems = role_violations(observed)
+    if problems:
+        _fail(name, "; ".join(problems))
 
 
 # ── Dispatch ────────────────────────────────────────────────────────────────
@@ -421,6 +446,7 @@ __all__ = [
     "register_verifier",
     "registered_verifiers",
     "require_prerequisites",
+    "role_violations",
     "verify_module_database_roles",
     "verify_tenant_scope_catalog",
 ]
