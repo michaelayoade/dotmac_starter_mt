@@ -62,6 +62,13 @@ TOKEN_NATIVE_PREFIXES: Final[tuple[str, ...]] = (
     "packages/dotmac-kernel/src/dotmac_kernel/templates/platform/",
     "packages/dotmac-kernel/src/dotmac_kernel/templates/layouts/platform.html",
     "packages/dotmac-template-studio/src/dotmac_template_studio/templates/",
+    # `dotmac-ui`'s published components. Zero is not merely their current
+    # state, it is their CONTRACT: a consumer does not compile this package's
+    # templates, so a utility class would render unstyled from site-packages.
+    # `test_component_markup_uses_only_published_classes` says the same thing
+    # from the component's side; this says it from the palette's, so neither
+    # rule can be satisfied by weakening the other.
+    "packages/dotmac-ui/src/dotmac_ui/templates/",
 )
 
 #: Tailwind's default palette names plus this repo's two theme ramps.  A
@@ -244,6 +251,10 @@ def test_template_roots_are_discovered_and_pinned() -> None:
     assert discovered == {
         "packages/dotmac-kernel/src/dotmac_kernel/templates",
         "packages/dotmac-template-studio/src/dotmac_template_studio/templates",
+        # The design system's own component templates. Added deliberately when
+        # `empty_state` shipped -- this assertion firing on that change is the
+        # gate working, not an obstacle to route around.
+        "packages/dotmac-ui/src/dotmac_ui/templates",
     }, (
         "template roots changed; a new package's templates must be brought under "
         f"the palette ratchet deliberately, not silently: {sorted(discovered)}"
