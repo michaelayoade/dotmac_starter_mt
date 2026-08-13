@@ -15,7 +15,8 @@ order ADR-0006 § 1 happens to list concepts in.
 | # | Outcome | Gate |
 |---|---|---|
 | 0 | Recover existing work | Fresh branches from current `origin/main` |
-| 1 | First released component | `empty_state` consumed by two independent products |
+| 1 | First component **candidate** released | `empty_state` published as an audit-complete candidate — no reuse claim |
+| 1b | Component slice **reuse-proven** | that candidate adopted by two independent products, local copies retired |
 | 2 | Safe branding | `custom_css` rejected and never rendered |
 | 3 | Real runtime branding | Same-origin generated token stylesheet |
 | 4 | Palette convergence | Debt falls through coherent surface slices |
@@ -45,8 +46,27 @@ Sequencing is therefore about readiness, not permission:
 - **`dotmac_crm`** — carries a byte-identical local `empty_state`, so it is a
   natural retirement target once it has a UI composition boundary.
 
-Any two independent products close ADR-0006 § 5 for a component. Consumption by
-the starter is reference proof and never counts.
+Any two independent products move a component slice to `reuse-proven`.
+Consumption by the starter is reference proof, recorded separately in the
+dossier, and never counts.
+
+### Breaking the circularity
+
+An earlier draft of this plan gated the *release* on two consumers, which cannot
+happen: a product cannot adopt a component that has never been published. The
+two states are distinct and the dossier now types them per slice:
+
+- **Candidate (`audit-complete`)** — published so a product CAN adopt it. It
+  carries no reuse claim, its `contract_consumers` list is empty, and the
+  package headline drops to match, because a package is only as proven as its
+  least-proven published contract. Publishing a candidate is permitted by the
+  ownership map, not by consumer count.
+- **Reuse-proven** — two independent products are on the released contract and
+  their local copies are deleted.
+
+Shipping the candidate is therefore not "extraction on thin evidence": it is the
+only move that makes the evidence obtainable, and the dossier states plainly
+that the evidence is not yet there.
 
 ## Train 5 — candidate rulings
 

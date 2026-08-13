@@ -162,10 +162,14 @@ Component classes are stable **only where a contract declares them**. As of
 "The component boundary" below; every other `.dmui-*` name remains reserved and
 unpublished, and `test_no_component_class_is_published_without_its_contract`
 fails the build if a `.dmui-*` selector appears in the stylesheet without being
-declared there. This is ADR-0006 § 5 still in force: a component is extracted
-only with two independent consumers of the same CONTRACT, a named owner, and a
-migration path — never
-because two templates look alike.
+declared there. This is ADR-0006 § 5 still in force, and the amended ADR is precise about what
+two consumers do: **two independent consumers of the same CONTRACT establish
+`reuse-proven`; they do not grant placement permission.** Placement is decided
+by the ownership map (§ 2) and the named owner — a component belongs here
+because presentation is this package's job, not because two products happened
+to want it. Evidence and permission are separate questions, and conflating them
+is what produces both a component nobody can adopt (waiting for consumers it
+cannot get) and a component extracted because two templates look alike.
 
 ### Where the vocabulary came from
 

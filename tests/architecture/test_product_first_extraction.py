@@ -142,8 +142,9 @@ def _validate_dossier(
 ) -> None:
     problems: list[str] = []
 
-    if dossier.get("schema_version") != 1:
-        problems.append("schema_version must be 1")
+    schema_version = dossier.get("schema_version")
+    if schema_version not in (1, 2):
+        problems.append("schema_version must be 1 or 2")
 
     for field in sorted(REQUIRED_TEXT_FIELDS):
         value = dossier.get(field)
@@ -225,6 +226,101 @@ def _validate_dossier(
     consumers = dossier.get("contract_consumers")
     consumer_count = len(set(consumers)) if isinstance(consumers, list) else 0
 
+    # ── Contract slices (schema 2) ──────────────────────────────────────────
+    # A package may publish more than one CONTRACT, and their evidence differs.
+    # `dotmac-ui` publishes semantic tokens (three consumers) and a Jinja
+    # component library (none).  A single package-level state cannot describe
+    # that: report the stronger and the weaker contract is overstated; report
+    # the weaker and the stronger is understated.  Schema 2 makes each slice a
+    # typed row with its own status, sources, tests, consumers and retirement
+    # gate, and the package headline becomes DERIVED rather than asserted.
+    slices = dossier.get("slices")
+    if schema_version == 2:
+        if not isinstance(slices, list) or not slices:
+            problems.append("schema_version 2 requires a non-empty [[slices]] list")
+            slices = []
+    elif slices is not None:
+        problems.append("slices require schema_version 2")
+        slices = []
+    else:
+        slices = []
+
+    slice_states: list[str] = []
+    slice_consumers: set[str] = set()
+    seen_names: set[str] = set()
+    for index, entry in enumerate(slices):
+        label = f"slice[{index}]"
+        if not isinstance(entry, dict):
+            problems.append(f"{label} must be a table")
+            continue
+        name = entry.get("name")
+        label = f"slice {name!r}" if isinstance(name, str) else label
+        for field in ("name", "contract", "status", "local_copy_retirement"):
+            value = entry.get(field)
+            if not isinstance(value, str) or not value.strip():
+                problems.append(f"{label}: {field} must be a non-empty string")
+        for field in ("source_paths", "preserved_tests"):
+            value = entry.get(field)
+            if not isinstance(value, list) or not value:
+                problems.append(f"{label}: {field} must be a non-empty string list")
+        if isinstance(name, str):
+            if name in seen_names:
+                problems.append(f"duplicate slice name {name!r}")
+            seen_names.add(name)
+
+        entry_consumers = entry.get("contract_consumers")
+        if not isinstance(entry_consumers, list) or not all(
+            isinstance(c, str) for c in entry_consumers
+        ):
+            problems.append(f"{label}: contract_consumers must be a string list")
+            entry_consumers = []
+        # Reference consumers are recorded SEPARATELY and never count: the
+        # assembly that owns a package proves the wiring works, not that anyone
+        # independent chose it (ADR-0006 § 5).
+        reference = entry.get("reference_consumers", [])
+        if not isinstance(reference, list) or not all(
+            isinstance(c, str) for c in reference
+        ):
+            problems.append(f"{label}: reference_consumers must be a string list")
+            reference = []
+        overlap = set(entry_consumers) & set(reference)
+        if overlap:
+            problems.append(
+                f"{label}: {sorted(overlap)} counted as both an independent and a "
+                "reference consumer — reference proof is not adoption"
+            )
+
+        entry_status = entry.get("status")
+        required = _state_for(len(set(entry_consumers)))
+        if entry_status in EVIDENCE_STATES and entry_status != required:
+            problems.append(
+                f"{label}: status is {entry_status} with "
+                f"{len(set(entry_consumers))} independent consumer(s); that "
+                f"evidence level is exactly {required}"
+            )
+        elif entry_status not in EVIDENCE_STATES and isinstance(entry_status, str):
+            problems.append(f"{label}: status must be one of {list(EVIDENCE_STATES)}")
+        if isinstance(entry_status, str):
+            slice_states.append(entry_status)
+        slice_consumers |= set(entry_consumers)
+
+    if slices and not problems:
+        # The headline is the WEAKEST slice.  A package is only as proven as its
+        # least-proven published contract, and deriving it means the summary can
+        # never drift from the rows beneath it.
+        weakest = min(slice_states, key=EVIDENCE_STATES.index)
+        if status != weakest:
+            problems.append(
+                f"status is {status}, but the weakest contract slice is "
+                f"{weakest} — a package is only as proven as its least-proven "
+                "published contract"
+            )
+        if isinstance(consumers, list) and set(consumers) != slice_consumers:
+            problems.append(
+                "contract_consumers must be exactly the union of the slices' "
+                f"independent consumers: {sorted(slice_consumers)}"
+            )
+
     if status in EVIDENCE_STATES:
         if source_mode not in AUDITED_SOURCE_MODES:
             problems.append(
@@ -242,7 +338,7 @@ def _validate_dossier(
         # still says "nothing has adopted it" is a false statement about the
         # fleet rather than a missing one.
         required = _state_for(consumer_count)
-        if status != required:
+        if not slices and status != required:
             problems.append(
                 f"status is {status} with {consumer_count} contract consumer(s); "
                 f"that evidence level is exactly {required}"
@@ -428,3 +524,75 @@ def test_one_candidate_consumer_is_accepted() -> None:
         directory_name="dotmac-ticketing",
         distribution_name="dotmac-ticketing",
     )
+
+
+# ---------------------------------------------------------------------------
+# Sensitivity proofs for the schema-2 slice rules (ADR-0018: a gate with no
+# proof it fires is indistinguishable from a blind one).
+# ---------------------------------------------------------------------------
+
+
+def _ui_dossier() -> dict[str, Any]:
+    return _load_toml(PACKAGES_DIR / "dotmac-ui/EXTRACTION.toml")
+
+
+def _validate_ui(dossier: dict[str, Any]) -> None:
+    _validate_dossier(
+        dossier, directory_name="dotmac-ui", distribution_name="dotmac-ui"
+    )
+
+
+def test_the_headline_cannot_claim_more_than_its_weakest_slice() -> None:
+    """The whole point of slices: a strong contract must not carry a weak one."""
+    dossier = _ui_dossier()
+    dossier["status"] = "reuse-proven"
+
+    with pytest.raises(ExtractionDossierError, match="weakest contract slice"):
+        _validate_ui(dossier)
+
+
+def test_a_reference_consumer_cannot_be_counted_as_adoption() -> None:
+    """Consumption by the owning assembly proves wiring, not independent choice."""
+    dossier = _ui_dossier()
+    components = next(s for s in dossier["slices"] if s["name"] == "components")
+    components["contract_consumers"] = ["dotmac_starter_mt"]
+
+    with pytest.raises(ExtractionDossierError) as excinfo:
+        _validate_ui(dossier)
+    assert "reference proof is not adoption" in str(excinfo.value)
+
+
+def test_a_slice_cannot_claim_more_than_its_consumers_prove() -> None:
+    dossier = _ui_dossier()
+    components = next(s for s in dossier["slices"] if s["name"] == "components")
+    components["status"] = "reuse-proven"
+
+    with pytest.raises(ExtractionDossierError, match="evidence level is exactly"):
+        _validate_ui(dossier)
+
+
+def test_the_package_consumer_list_must_match_the_slices() -> None:
+    """The summary is derived; it cannot drift from the rows beneath it."""
+    dossier = _ui_dossier()
+    dossier["contract_consumers"] = ["dotmac_sub", "dotmac_academy_app", "dotmac_erp"]
+
+    with pytest.raises(ExtractionDossierError, match="union of the slices"):
+        _validate_ui(dossier)
+
+
+def test_schema_2_requires_slices_and_schema_1_forbids_them() -> None:
+    missing = _ui_dossier()
+    del missing["slices"]
+    with pytest.raises(ExtractionDossierError, match=r"requires a non-empty"):
+        _validate_ui(missing)
+
+    downgraded = _ui_dossier()
+    downgraded["schema_version"] = 1
+    with pytest.raises(ExtractionDossierError, match="require schema_version 2"):
+        _validate_ui(downgraded)
+
+
+def test_the_current_ui_dossier_passes_unmodified() -> None:
+    """Sensitivity in the other direction: the rules above must not reject the
+    real dossier, or every proof here would pass for the wrong reason."""
+    _validate_ui(_ui_dossier())
