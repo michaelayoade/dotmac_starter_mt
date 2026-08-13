@@ -4,6 +4,17 @@ All notable changes to the `dotmac-release-catalog` distribution. Pre-1.0 the
 surface is still settling; the top-level `dotmac_release_catalog` namespace is
 the stable one.
 
+## 0.1.0a3 — 2026-08-13
+
+Adds `AttestationKind.PRODUCT_MANIFEST`, the explicit claim that an exact
+product release declares the product code and capability vocabulary in a
+canonical `dotmac_kernel.ProductManifestSnapshot` document.
+
+This is not provenance: provenance explains how bytes were built, while the
+product manifest explains what product/capabilities those bytes declare. The
+database already stores attestation kinds as unconstrained text, so this is a
+closed Python vocabulary release with no migration or kernel-floor change.
+
 ## 0.1.0a2 — 2026-08-13
 
 Adds the public `versions_dir()` locator required by a separately installed

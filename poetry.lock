@@ -558,7 +558,7 @@ url = "packages/dotmac-kernel"
 
 [[package]]
 name = "dotmac-release-catalog"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
 optional = false
 python-versions = ">=3.11,<3.14"

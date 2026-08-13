@@ -154,13 +154,17 @@ class TestVocabularies:
             "offline_bundle",
         }
 
-    def test_attestation_kinds_answer_three_distinct_questions(self) -> None:
-        """Inside / built-how / vouched-by. Merging any two into "provenance"
-        is what lets an artifact look attested when nothing signed it."""
+    def test_attestation_kinds_answer_four_distinct_questions(self) -> None:
+        """Inside / built-how / vouched-by / product-declares.
+
+        Merging any two into "provenance" is what lets an artifact look
+        attested for a claim no document actually makes.
+        """
         assert {k.value for k in ATTESTATION_KINDS} == {
             "sbom",
             "provenance",
             "signature",
+            "product_manifest",
         }
 
     def test_members_are_plain_strings_for_a_text_column(self) -> None:
