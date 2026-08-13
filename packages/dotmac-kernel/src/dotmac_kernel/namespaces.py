@@ -475,6 +475,16 @@ APPLICATION_DIRECTORY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 # dump for the same reason `files` is, and the distinct `im` prefix keeps its
 # independently released lineage inside the revision-id budget.
 #
+# Tenant plane only. The audit behind ADR-0025 found no control-plane import
+# capability anywhere in the fleet, so the manifest declares no
+# `platform_tables` — an allocation records physical identity, and a plane no
+# product uses would be declared, not discovered.
+IMPORTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="imports",
+    prefix="im",
+    branch_label="imports",
+    db_schema=module_schema("imports"),
+)
 
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
@@ -483,6 +493,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     RELEASE_CATALOG_MIGRATION_OWNER,
     ENTITLEMENT_ALLOCATION_MIGRATION_OWNER,
     APPLICATION_DIRECTORY_MIGRATION_OWNER,
+    IMPORTS_MIGRATION_OWNER,
 )
 
 
@@ -744,6 +755,7 @@ __all__ = [
     "ASSEMBLY_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
+    "IMPORTS_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",

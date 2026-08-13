@@ -6,6 +6,24 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a55 — 2026-08-13
+
+Allocates one namespace. No behaviour changes, and nothing existing moves.
+
+### Added
+
+- `IMPORTS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_imports`,
+  migration prefix `im`, branch label `imports`. This is the seventh allocated
+  installable module and the record that makes `dotmac-imports 0.1.0a1`
+  registrable — `NamespaceRegistry.from_manifests` raises
+  `UnallocatedNamespaceError` against any earlier kernel, so the module's floor
+  is this release (ADR-0025).
+
+An allocation is not a facility. This release adds no kernel primitive and
+nothing consumes the row but the module it names, which is why it is compatible
+with ADR-0017's moratorium where new kernel behaviour would not be — the same
+reasoning ADR-0021 § 7 recorded for `mod_appdir`.
+
 ## 0.1.0a53 — 2026-08-13
 
 Teaches the module contract that a capability can have TWO persistence planes

@@ -35,6 +35,7 @@ on:
         options:
           - dotmac-release-catalog
           - dotmac-entitlement-allocation
+          - dotmac-imports
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

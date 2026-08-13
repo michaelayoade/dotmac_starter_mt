@@ -75,6 +75,9 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 LEDGER_ALLOCATION_RELEASES = {
     "dotmac-release-catalog": "0.1.0a44",
     "dotmac-entitlement-allocation": "0.1.0a45",
+    # ADR-0025. Tenant-plane only, so no kernel capability raises its floor
+    # above the release that allocated mod_imports — the ordinary case.
+    "dotmac-imports": "0.1.0a55",
 }
 
 

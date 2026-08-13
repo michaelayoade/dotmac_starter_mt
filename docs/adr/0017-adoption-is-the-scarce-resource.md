@@ -8,6 +8,34 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+
+
+## Amendment, 2026-08-13: owner-directed exception for `dotmac-imports`
+
+The paragraph above required a separate `dotmac-imports` dossier and decision
+before any import work. Both were produced on 2026-08-13:
+[`imports-sources.md`](../inventories/imports-sources.md) is the four-product
+audit (ERP, Sub, Academy, Vendor CP, plus CRM), and
+[ADR-0025](0025-imports-own-the-run-not-what-a-row-means.md) is the decision.
+Michael then explicitly directed implementation of `dotmac-imports`, lifting
+decision 2's moratorium for that named module only.
+
+The audit did not find a product blocked today — ERP and Sub each have a
+working half. Therefore neither the dossier, the duplicate implementations nor
+the proposed consumers satisfy this ADR's demand-pulled exception: that still
+requires an independently blocked product. The source evidence explains the
+module's product-first implementation; Michael's named direction is the
+exception authority. It creates no general route around the moratorium for a
+future dossier or extraction candidate.
+
+No claim of adoption is made. The dossier remains `audit-complete` until a real
+cutover retires a source owner, and ERP's E8 decision remains the module's gate
+— the same one `dotmac-files` waits on.
+
+**Export is untouched by this.** It remains under the moratorium with no
+dossier: ERP's package is named `import_export` and contains no exporter, and
+the fleet's only CSV formula-injection defence lives in Academy on the export
+side. The audit recorded that exposure and did not adopt it.
 ## Amendment, 2026-08-13: Vendor pulls a product-manifest publication seam
 
 Michael directed the build-once product-manifest boundary to proceed after the
