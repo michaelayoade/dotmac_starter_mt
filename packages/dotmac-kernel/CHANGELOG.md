@@ -6,6 +6,31 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a50 — 2026-08-13
+
+Publishes the demand-pulled product-manifest contract that unblocks the Vendor
+Control Plane's Entitlement Allocation adoption (ADR-0017 amendment,
+2026-08-13).
+
+### Added
+
+- `ProductManifestSnapshot.from_assembly`: validates the assembly's installed
+  module set, builds the one kernel-owned capability catalogue, and emits the
+  stable product code, caller-supplied product release version and canonical
+  sorted capability codes.
+- Canonical UTF-8 JSON bytes and a standard `sha256:` document digest suitable
+  for a `dotmac-release-catalog` attestation. Parsing refuses alternate JSON
+  spellings, unknown fields, unordered/duplicate codes and digest mismatch
+  rather than repairing an unverified document.
+- `require_capability`, the narrow verified-snapshot read used by a
+  product-qualified catalogue adapter.
+
+This is a pure import-safe contract. It adds no product registry, persistence,
+network client, release selector or product declarations; those remain in each
+product assembly. `a47` is the released branding retirement; `a48` and `a49`
+are assigned to the active files/dual-plane module train, so this branch takes
+`a50`.
+
 ## 0.1.0a47 — 2026-08-13
 
 **BREAKING.** Removes a published symbol.

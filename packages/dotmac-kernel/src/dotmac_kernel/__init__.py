@@ -167,6 +167,12 @@ from dotmac_kernel.permissions import (
     active_permissions,
     install_permissions,
 )
+from dotmac_kernel.product_manifest import (
+    PRODUCT_MANIFEST_SCHEMA,
+    ProductManifestDigestMismatchError,
+    ProductManifestError,
+    ProductManifestSnapshot,
+)
 from dotmac_kernel.profiles import (
     DeploymentProfileRegistry,
     DeploymentProfileSpec,
@@ -189,7 +195,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a47"
+__version__ = "0.1.0a50"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -246,6 +252,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.namespaces",
         "dotmac_kernel.permissions",
         "dotmac_kernel.platform_auth",
+        "dotmac_kernel.product_manifest",
         "dotmac_kernel.profiles",
         "dotmac_kernel.providers",
         "dotmac_kernel.providers.provisioning",
@@ -380,6 +387,11 @@ __all__ = [
     "install_capabilities",
     "DuplicateCapabilityError",
     "UndeclaredCapabilityError",
+    # release-bound product manifest
+    "PRODUCT_MANIFEST_SCHEMA",
+    "ProductManifestDigestMismatchError",
+    "ProductManifestError",
+    "ProductManifestSnapshot",
     # permission catalogue (module control-plane step 3)
     "PermissionSpec",
     "PermissionCatalogue",
