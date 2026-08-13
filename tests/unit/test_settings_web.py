@@ -487,21 +487,24 @@ def test_the_branding_form_no_longer_offers_a_custom_css_field(
     assert "<style>" not in resp.text
 
 
-def test_the_friendly_form_cannot_carry_custom_css(
+def test_the_friendly_branding_form_refuses_custom_css(
     web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
-    """The form's protection is COMPOSITION, not refusal — stated, not implied.
-
-    `branding_submit` reads its declared fields and composes only those, so an
-    injected `custom_css` never reaches the write path at all. That is a
-    different mechanism from the refusal, and the earlier version of this test
-    conflated them: it accepted 200 OR 302 and asserted only that nothing was
-    stored, which was true whether or not the guard existed. It could not fail.
-
-    The refusal itself is proved at the two surfaces that DO pass raw values
-    (below) and at the owner in `test_branding.py`.
-    """
+    """An injected retired field reaches the owner and aborts the whole write."""
     token = _login(web_client, provisioned_admin["email"])
+    original = {
+        "name": "Before",
+        "tagline": "Still here",
+        "primary_color": "#112233",
+    }
+    upsert_by_key(
+        db,
+        SettingDomain.branding,
+        "ui_branding",
+        original,
+        tenant_id=tenant_row.id,
+    )
+    db.commit()
 
     resp = web_client.post(
         "/admin/settings/branding",
@@ -517,10 +520,15 @@ def test_the_friendly_form_cannot_carry_custom_css(
         follow_redirects=False,
     )
 
-    assert resp.status_code == 302, resp.text
-    stored = _stored_ui_branding(db, tenant_row)
-    assert stored["name"] == "Acme Tenant", "the legitimate fields must be written"
-    assert "custom_css" not in stored
+    assert resp.status_code == 200, resp.text
+    assert "custom_css" in resp.text
+    assert "no longer accepts" in resp.text
+    assert "location" not in resp.headers
+    assert "hx-redirect" not in resp.headers
+    assert _stored_ui_branding(db, tenant_row) == original
+
+    events = db.query(AuditEvent).filter(AuditEvent.action == "settings.update").all()
+    assert not any(e.details.get("key") == "ui_branding" for e in events)
 
 
 def test_the_generic_settings_editor_refuses_custom_css(

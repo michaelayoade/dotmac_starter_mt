@@ -858,9 +858,11 @@ docstring):
   **A tenant cannot contribute CSS (2026-08-13, ADR-0006 D8).** `custom_css`
   was accepted, regex-sanitized on read, and rendered `| safe` into a `<style>`
   block. The field and `sanitize_branding_css` are both gone. A write naming a
-  retired key is REFUSED by the `ui_branding` spec validator — so the branding
-  form, the generic JSON editor and the settings API all fail identically — and
-  a legacy stored value is inert, because `custom_css` is outside
+  retired key is REFUSED by the shared `settings_service.update_setting`
+  write owner. The generic JSON editor and settings API pass their raw values
+  to it; the friendly form preserves any injected retired key when it composes
+  the declared fields so the same owner can refuse it. A legacy stored value is
+  inert, because `custom_css` is outside
   `_KNOWN_BRAND_KEYS` and `load_branding` therefore cannot see it. The stored
   bytes are deliberately NOT erased, and stay readable through the EXISTING
   authorized surface: the generic settings editor and `GET
@@ -915,7 +917,8 @@ one rather than the last one.
 
 Write path: `POST /admin/settings/branding` composes the submitted
 sub-fields (`name`/`tagline`/`logo_url`/`primary_color`/`accent_color`) back
-into the `ui_branding` dict and calls the SAME
+into the `ui_branding` dict, preserving the presence of any injected retired
+key solely so it cannot be silently dropped, and calls the SAME
 `settings_service.update_setting(db, tenant, "branding", "ui_branding",
 raw)` the generic per-key editor (`POST /admin/settings/{domain}/{key}/edit`)
 and the JSON `PUT /settings/{domain}/{key}` API all call — one write path,

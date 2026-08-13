@@ -49,10 +49,11 @@ this render's own `brand` context key, shadowing the process-global static
 
 This page accepts NO tenant CSS. `custom_css` and its regex sanitizer were
 removed on 2026-08-13 (ADR-0006 D8), and with them the only `| safe` in this
-app's templates. A write naming a retired key is refused by the `ui_branding`
-spec validator rather than dropped, so the generic JSON editor and the settings
-API refuse it identically — this route is not the enforcement point and must
-not become one.
+app's templates. A write naming a retired key is refused by the shared
+`settings_service.update_setting` write owner rather than dropped. The generic
+JSON editor and settings API pass their raw values to that owner; this friendly
+adapter preserves the presence of any injected retired form key so the owner
+can refuse it. The route is not a second enforcement point.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ from __future__ import annotations
 import json
 
 from dotmac_kernel.audit import write_audit_event
-from dotmac_kernel.branding import load_branding
+from dotmac_kernel.branding import RETIRED_BRAND_KEYS, load_branding
 from dotmac_kernel.deps import get_db, require_tenant
 from dotmac_kernel.exceptions import BadRequestError, NotFoundError
 from dotmac_kernel.models import Tenant
@@ -297,6 +298,13 @@ async def branding_submit(
         "primary_color": str(form_data.get("primary_color", "")).strip(),
         "accent_color": str(form_data.get("accent_color", "")).strip(),
     }
+    # Keep retired input visible to the one write owner. Silently dropping an
+    # injected field would tell an API/form caller its CSS was accepted even
+    # though it can never render. This adapter does not decide the policy: it
+    # forwards the retired key and `update_setting` owns the refusal.
+    for retired_key in RETIRED_BRAND_KEYS:
+        if retired_key in form_data:
+            raw[retired_key] = str(form_data.get(retired_key, ""))
 
     try:
         settings_service.update_setting(db, tenant, "branding", "ui_branding", raw)

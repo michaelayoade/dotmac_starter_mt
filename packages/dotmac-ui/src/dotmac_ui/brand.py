@@ -2,11 +2,12 @@
 
 ## What this replaces
 
-`dotmac_kernel.branding` accepts a `custom_css` field, sanitizes it with a
-regex, and renders it `| safe` into a `<style>` block. ADR-0006 **D8 retired
-that capability**: raw CSS can hide or rewrite legal text, overlay same-origin
-controls, create lockouts, and exfiltrate through attribute selectors, and a
-keyword sanitizer cannot make it safe. This module is the replacement D8 names
+`dotmac_kernel.branding` formerly accepted a `custom_css` field, sanitized it
+with a regex, and rendered it `| safe` into a `<style>` block. ADR-0006 **D8
+retired that capability**, and kernel 0.1.0a47 removed it: raw CSS can hide or
+rewrite legal text, overlay same-origin controls, create lockouts, and
+exfiltrate through attribute selectors, and a keyword sanitizer cannot make it
+safe. This module is the replacement D8 names
 — *"an allowlisted, validated token/asset/theme surface expanded into generated
 CSS by the owning branding service"*.
 

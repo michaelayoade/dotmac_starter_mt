@@ -9,12 +9,13 @@ accessible tokens, and this package makes no claim about that.
 
 **What is machine-checked here, and why it is the right first thing.** Colour
 contrast is the one AA criterion that is fully decidable from the token layer
-alone: given two tokens and a mode, the ratio is arithmetic. Everything else in
-AA (focus order, name/role/value, error identification, target size, dragging
-alternatives) is a property of *markup*, and this release publishes no markup —
-so a test asserting it would be theatre. `CONTRAST_REQUIREMENTS` below is
-therefore not a sample: it is every colour PAIR the token vocabulary claims will
-be used together, in both modes, and
+alone: given two tokens and a mode, the ratio is arithmetic. Other AA criteria
+(focus order, name/role/value, error identification, target size, dragging
+alternatives) depend on markup and composition. This release publishes the
+`empty_state` macro; its narrow markup guarantees live with its component
+contract and tests, not in this token checker. `CONTRAST_REQUIREMENTS` below is
+therefore not a sample: it is every colour PAIR the token vocabulary claims
+will be used together, in both modes, and
 `tests/unit/test_dotmac_ui_a11y.py::test_every_contrast_requirement_is_met`
 fails the build on any that drops below its minimum.
 
@@ -30,9 +31,10 @@ The thresholds are the WCAG 2.2 ones, applied per pair:
 **What is NOT claimed.** Large-text's relaxed 3:1 allowance is deliberately not
 used anywhere: the type scale is a token, so the package cannot know which size
 a role will render at, and assuming "large" would be assuming away the failure.
-Contrast of a consumer's own colours, of text over imagery, and of any
-`custom_css` a product still accepts is out of scope — ADR-0006 D8 is retiring
-that input, not measuring it.
+Contrast of a consumer's own colours and of text over imagery is out of scope.
+Tenant-supplied `custom_css` is outside the contract entirely; ADR-0006 D8 and
+kernel 0.1.0a47 retired that input rather than pretending it could be measured
+or sanitized safely.
 
 **Reduced motion** is the second machine-checked commitment: every duration
 token collapses to 1ms under `prefers-reduced-motion: reduce` (SC 2.3.3), which
