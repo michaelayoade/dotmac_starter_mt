@@ -97,6 +97,20 @@ def test_the_lineage_is_a_root_with_no_false_dependency() -> None:
     assert assigned["depends_on"].value is None
 
 
+def test_installed_consumer_locates_lineage_through_public_surface() -> None:
+    """A cross-repository assembly cannot hard-code this source checkout's path.
+
+    The package owns its internal layout, so it must expose the installed
+    lineage location rather than require every consumer to reconstruct it from
+    ``__file__`` or reach into an undocumented submodule.
+    """
+    import dotmac_release_catalog as package
+
+    assert "versions_dir" in package.__all__
+    assert package.versions_dir() == MIGRATIONS
+    assert (package.versions_dir() / "rl_0001_release_artifacts.py").is_file()
+
+
 def test_the_revision_id_fits_the_alembic_version_column() -> None:
     """Over-long revision ids do not fail at authoring time — they fail at
     `alembic upgrade`, against a real database."""

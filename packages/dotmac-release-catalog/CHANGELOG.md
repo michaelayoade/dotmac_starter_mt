@@ -4,6 +4,12 @@ All notable changes to the `dotmac-release-catalog` distribution. Pre-1.0 the
 surface is still settling; the top-level `dotmac_release_catalog` namespace is
 the stable one.
 
+## 0.1.0a2 — 2026-08-13
+
+Adds the public `versions_dir()` locator required by a separately installed
+consumer to compose the Release Catalog Alembic lineage without guessing the
+package's internal path. No schema, model, or kernel-floor change.
+
 ## 0.1.0a1 — 2026-08-12
 
 First release. Immutable, digest-addressed published artifacts and the
