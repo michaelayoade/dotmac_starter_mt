@@ -53,8 +53,8 @@ Three consequences that earlier revisions of this file got wrong:
    copy into Sub settles *who decides*; it does not settle *where the code
    lives*. Sub then consumes the Starter module like any other assembly.
 
-So every row below resolves to kernel, a Starter module, or a contract. The
-duplication counts choose the order.
+So every row below resolves to kernel, a Starter module, or a contract. The duplication counts choose the order.
+
 
 ## How the duplication is measured
 
@@ -171,7 +171,7 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | scheduling-runtime | 9 | 1 | 6 | 0 | 1 | 0 | kernel |
 | integration-external | 6 | 10 | 27 | 0 | 4 | 0 | kernel primitives + module ← Sub |
 | branding-templates | 1 | 0 | 1 | 0 | 0 | 0 | dotmac-ui + template studio |
-| ticketing-sla | 6 | 17 | 22 | 0 | 10 | 6 | module ← Sub (package exists, adopter unnamed) |
+| ticketing-sla | 6 | 17 | 22 | 0 | 10 | 6 | `dotmac-ticketing`; ERP cutover 1, Vendor CP cutover 2 |
 | projects-tasks | 10 | 11 | 11 | 0 | 10 | 0 | consolidate CRM → Sub; module source **unassigned** |
 | notifications-comms | 7 | 18 | 21 | 0 | 11 | 5 | kernel (consent + outbox) + module ← Sub |
 | engagement-inbox | 0 | 28 | 29 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
@@ -210,13 +210,13 @@ with no adjudicated source. They are marked, not resolved.
 
 ### Dispositions
 
-Every row resolves to kernel, a Starter module, or a contract. Nothing stays in
-a monolith as its permanent home.
+Every row resolves to kernel, a Starter module, or a contract. Nothing stays in a monolith as its permanent home.
 
 | Disposition | Means |
 |---|---|
 | `kernel` | A universal application invariant. Target `dotmac-kernel`; every product's local implementation retires on lineage adoption. |
 | `module ← <product>` | A coherent business domain that becomes an independently versioned Starter `dotmac-<domain>`, sourced product-first from the named qualifying implementation and its tests. **Measured duplication sets the wave, not the eligibility** — a domain with one implementation is still modularized; the second consumer proves reuse afterwards. |
+| `` `dotmac-<domain>` `` | The same destination once the module EXISTS and its adopter is named. The arrow form states an intended source; the backticked distribution name states a settled target, so a row may move to it only after the package is real. |
 | `consolidate → <product>, then module` | Duplicated operational state. Authority consolidates to the named owner first — an **intermediate** step that settles who decides, not where the code lives — after which that owner consumes the Starter module like any other assembly. |
 | `contract` | An annotation, not a location: two legitimate owners whose state must agree. Needs a versioned contract, drift detection and reconciliation regardless of which modules the two sides end up in. Never a merged module. |
 | `unassigned` | The target layer is settled but the qualifying *source* is not, or no owner has been adjudicated. Blocked on that decision before extraction, not before sequencing. |
@@ -264,7 +264,7 @@ families and the ratchet applies.
 
 | Capability | Owner today (writers) | Competing implementations | Consumers | DB / migration owner | Authority overlap | Target layer | Retirement condition |
 |---|---|---|---|---|---|---|---|
-| ticketing-sla | Sub `support_ticket*` + SLA services; CRM `tickets`, `ticket_*`; ERP `app/models/support/ticket.py` | **3**, 10 exact + 6 aliased collisions | admin portals, field app, CRM agent inbox, NCC complaints return | 3 lineages; package would own `mod_tkt` | Vocabularies provably cannot merge; the product-neutral core plus per-product lifecycle classes can ([`ticket-sources.md`](ticket-sources.md)) | `dotmac-ticketing` module | **Blocked on naming the first adopter** — no product runs a non-kernel module lineage today. CRM's cutover must land into the shared module, not into Sub's local one, or it retires one owner instead of two. |
+| ticketing-sla | Sub `support_ticket*` + SLA services; CRM `tickets`, `ticket_*`; ERP `app/models/support/ticket.py` | **3**, 10 exact + 6 aliased collisions | admin portals, field app, CRM agent inbox, NCC complaints return | Each adopter runs its own `mod_tkt` lineage and owns its own rows; applications synchronize observations through API/webhook (ADR-0024) | Vocabularies provably cannot merge; the product-neutral core plus per-product reasons can ([`ticket-sources.md`](ticket-sources.md)). Ownership follows the local workflow: Sub customer/service, ERP internal back-office, vendor CP vendor support. | `dotmac-ticketing` module | **Adopter named 2026-08-13: ERP is cutover 1, vendor CP cutover 2** (ADR-0017 ticketing amendment; ADR-0023 made the module dual-plane so the vendor CP can use it). Still blocked on ERP's E8 Organization→Tenant gate. ERP must classify local versus remotely owned rows before migration; CRM/ERPNext/Sub syncs become observations/projections and cannot assign the local lifecycle. No product runs a non-kernel module lineage yet. |
 | projects-tasks | ERP `pm/`; CRM `projects.py`; Sub `installation_projects`, `project_*` | **3**, 10 exact collisions incl. the only three-way non-platform table `project_template_task_dependency` | ERP delivery, CRM buildout, Sub installation | 3 lineages | CRM's copy is settled (consolidate → Sub); ERP↔Sub is not. Project *templates* and task DAGs look identical; project *subjects* (a buildout, an install, an internal delivery) do not | unassigned pending audit | Needs the same audit ticketing got: one contract for template/task/dependency, product-owned subject linkage. Do not start before ticketing has an adopter. See [Contested](#contested--genuinely-unassigned). |
 | notifications-comms | Sub `notification*`, `comms_*`; CRM `notification.py`, `comms.py`, campaigns; ERP `notification.py` | 3, 11 exact + 5 aliased | every surface | 3 lineages | Consent/suppression exists only in Sub; delivery/outbox is the kernel outbox built twice ([`consent-suppression-sources.md`](consent-suppression-sources.md), [`delivery-outbox-sources.md`](delivery-outbox-sources.md)) | consent + outbox → kernel; template rendering → template studio; channel policy → settings; campaigns → module | Four open dossiers, **consent before delivery**. A campaign module that ships before the consent owner will send to suppressed recipients. |
 

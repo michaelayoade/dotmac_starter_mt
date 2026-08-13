@@ -8,6 +8,128 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-13: owner-directed exception for `dotmac-ticketing`, and ERP goes first
+
+Michael directed the `dotmac-ticketing` optional module into adoption, with two
+adopters in a fixed order: **ERP is cutover 1, the vendor control plane is
+cutover 2.** This lifts decision 2's moratorium for that module only, on the
+same terms as the `dotmac-files` amendment below.
+
+### Amendment, 2026-08-13: adopters share the module, not ticket authority
+
+Michael's fleet-wide composition rule is now explicit in ADR-0024: applications
+are independent and integrate only by synchronizing data through versioned
+APIs/webhooks. `dotmac-ticketing` is therefore installed separately in each
+adopter. They share a package contract, not a database or ticket rows.
+
+The ERP cutover applies only to internal back-office/project/employee-support
+work for which ERP is the local decision owner. ERP's current table also carries
+ERPNext/CRM-synchronized records; those must first be classified and remain
+typed observations or rebuildable projections while their source application
+owns them. A sync adapter may not assign the ERP installation's authoritative
+ticket status. If a remote request creates ERP work, ERP creates a separate
+local ticket with explicit provenance and owns that lifecycle from then on.
+
+Sub remains authoritative for operational customer, subscriber and service
+tickets. The vendor control plane owns only its vendor-support tickets. A change
+to those boundaries needs its own accepted authority-migration decision; a
+configuration flag or provider mapping cannot change the owner.
+
+This narrows “ERP retires its local ticket owner”: it retires the legacy
+`TicketStatus` decision path for classified ERP-owned tickets and removes every
+sync-side direct status write. It does not import remote authority into
+`mod_tkt`. The effective kernel floor is `0.1.0a53` after ADR-0023, so both
+adopters must pin that floor or later even where earlier text records `a39`.
+
+### Academy is explicitly NOT an adopter
+
+Academy was considered and dropped. It has **no ticket capability of any kind** —
+zero source references — so composing the module there would not retire a local
+owner and would not exercise a contract against an existing implementation. It
+would be a new product capability wearing the word "adoption", which is exactly
+the substitution decision 1 exists to prevent: adoption is measured by contracts
+consumed *in place of* a product's own writer, not by installations counted.
+Academy also pins `dotmac-kernel 0.1.0a32`, below the `0.1.0a39` allocation
+floor in effect when this section was written; ADR-0023 later raised the
+effective floor to `0.1.0a53`, as the amendment above records.
+
+Building tickets in Academy may still be a good product decision later. It is
+not evidence for this module, and it must not be recorded as a contract consumer
+if it happens.
+
+### ERP first inverts this ADR's own ordering, knowingly
+
+Decision 4 argues Sub goes first and rejects "ERP first" for the pilot, and
+`packages/dotmac-ticketing/EXTRACTION.toml` independently selected the vendor
+control plane as `first_cutover` because it is greenfield on tickets — no rows to
+migrate, no writer to retire, so the module lineage reaches production with no
+cutover risk. Michael's direction overrides both, and the dossier has been
+rewritten to match rather than left contradicting the decision.
+
+What that choice buys and costs is recorded here so it is not rediscovered:
+
+- **Buys.** ERP is where the duplication actually hurts: 125 files reference a
+  ticket today, across a support module with its own status enum, categories,
+  teams, comments and attachments. Proving the contract against the hardest real
+  implementation first means the vendor control plane's greenfield surface is
+  built on a vocabulary that has already survived contact with a live product,
+  instead of one that ERP later has to bend.
+- **Costs.** The programme now inherits ERP's E8 gate. `mod_tkt`'s tables are
+  tenant-scoped with RLS, so running the lineage in ERP requires the
+  Organization-to-Tenant decision, one transaction authority, and a composed
+  migration gate — the same prerequisites the `dotmac-files` amendment made hard
+  for ERP. **E8 is a hard prerequisite, not a parallel track.** If E8 does not
+  move, ERP does not move — and the honest response is to say so and re-order to
+  the vendor control plane, which ADR-0023 unblocked (see below), rather than to
+  wait quietly.
+- **Risk accepted.** A contract defect is discovered on ERP's support estate
+  rather than on an empty table. Decision 4's "discover the contract defects on
+  the simpler shape first" is being traded away deliberately.
+
+### ERP-first is also forced, not only chosen
+
+Measured while writing this amendment, and it removes the fallback: **the vendor
+control plane cannot adopt `0.1.0a1` as shipped.** `mod_tkt.tickets` and
+`mod_tkt.ticket_comments` require `tenant_id NOT NULL` with forced RLS, and
+`link_subject()` always emits a tenant column, a composite `(tenant_id,
+ticket_id)` FK and a tenant RLS policy. The vendor control plane is a
+platform-only assembly — `get_platform_db` at 15 sites, zero tenant-session or
+`require_tenant` uses, platform catalog tables carrying no `tenant_id`. Its
+session cannot truthfully operate a tenant-scoped table.
+
+So the greenfield-first argument this amendment overrode was already unavailable
+on other grounds. Installing the lineage there, or inventing a tenant row to
+satisfy the constraint, would be an installation rather than an adoption.
+
+**Resolved the same day.** Michael directed the module to grow an explicit
+platform persistence plane rather than defer, and ADR-0023 makes "one behaviour,
+explicit tenant/platform persistence planes" the fleet-wide standard for modules
+that genuinely operate in both security contexts. `0.1.0a1` was amended in place
+before release — it had no consumers, so the rename cost nothing then and would
+have been a breaking change for two products later.
+
+Cutover 2 is therefore unblocked at the contract level, which also restores the
+re-ordering option this section said did not exist: if E8 stalls, promoting the
+vendor control plane is now real rather than a dead end.
+
+Nullable `tenant_id`, a sentinel tenant, and a polymorphic scope column remain
+rejected — and are now refused by the kernel's live-catalog gate rather than by
+review.
+
+### What this amendment does not do
+
+It does not declare the lineage-adoption exit gate met, does not lift the
+moratorium for any other gap-list facility, and does not turn either candidate
+into a contract consumer. The dossier stays `audit-complete` until ERP retires
+its local ticket owner. Routing policy, category taxonomies, work-order handoff
+and the agent workqueue stay product-owned and are not absorbed by the module.
+
+`dotmac-ticketing` was also unreleasable when this was directed — absent from
+`.github/release-modules.json`, so no product could pin it and `first_cutover`
+named a cutover nobody could begin. That entry lands with this amendment.
+
+
+
 ## Amendment, 2026-08-13: Vendor pulls a product-manifest publication seam
 
 Michael directed the build-once product-manifest boundary to proceed after the

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,15 @@ from dotmac_ticketing.manifest import module
 
 MODULE_ROOT = Path(inspect.getfile(lifecycle)).parent
 MIGRATIONS = MODULE_ROOT / "migrations" / "versions"
+MIGRATION_SQL = (MIGRATIONS / "tk_0001_tickets.py").read_text(encoding="utf-8")
+
+#: The migration's SQL with Python's adjacent-string-literal concatenation
+#: undone and whitespace collapsed, so an assertion can name a statement the way
+#: PostgreSQL receives it rather than the way `ruff format` happened to wrap it.
+MIGRATION_STATEMENTS = re.sub(r"\s+", " ", re.sub(r'"\s*\n\s*"', "", MIGRATION_SQL))
+
+_TENANT_MODELS = (models.TenantTicket, models.TenantTicketComment)
+_PLATFORM_MODELS = (models.PlatformTicket, models.PlatformTicketComment)
 
 
 # ── The closed vocabulary ────────────────────────────────────────────────────
@@ -145,11 +155,22 @@ def test_the_manifest_declares_only_tables_this_module_creates() -> None:
     creates — wrong in the direction that hides a real problem.
     """
     assert set(module.tables) == {"tickets", "ticket_comments"}
+    assert set(module.platform_tables) == {
+        "platform_tickets",
+        "platform_ticket_comments",
+    }
+
+
+def test_the_manifest_planes_match_the_models_that_implement_them() -> None:
+    """The declaration is what the kernel gate enforces, so a manifest that
+    drifts from the models silently audits the wrong tables."""
+    assert set(module.tables) == set(models.TENANT_TABLES)
+    assert set(module.platform_tables) == set(models.PLATFORM_TABLES)
 
 
 def test_models_are_bound_to_the_allocated_schema() -> None:
     assert models.SCHEMA == module_schema("tkt")
-    for model in (models.Ticket, models.TicketComment):
+    for model in _TENANT_MODELS + _PLATFORM_MODELS:
         assert model.__table__.schema == models.SCHEMA
 
 
@@ -164,13 +185,15 @@ def test_no_subject_column_leaked_onto_the_shared_ticket(forbidden: str) -> None
     """Subjects are product-owned link tables, never columns here.
 
     A ticket has many subjects — Sub's has six, ERP's five — so a column per
-    product would be both wrong and unbounded.
+    product would be both wrong and unbounded. Checked on BOTH planes: the
+    platform plane is the one a vendor is most tempted to give a `deployment_id`.
     """
-    assert forbidden not in models.Ticket.__table__.columns
+    for model in _TENANT_MODELS + _PLATFORM_MODELS:
+        assert forbidden not in model.__table__.columns, model.__name__
 
 
-def test_every_shared_table_is_tenant_scoped() -> None:
-    for model in (models.Ticket, models.TicketComment):
+def test_every_tenant_plane_table_is_tenant_scoped() -> None:
+    for model in _TENANT_MODELS:
         tenant_id = model.__table__.columns.get("tenant_id")
         assert tenant_id is not None, f"{model.__name__} has no tenant_id"
         assert not tenant_id.nullable, f"{model.__name__}.tenant_id must be NOT NULL"
@@ -180,13 +203,126 @@ def test_comments_reference_their_ticket_compositely() -> None:
     """A bare ticket_id FK would let a comment cross tenants when an id leaks."""
     composite = [
         fk
-        for fk in models.TicketComment.__table__.foreign_key_constraints
+        for fk in models.TenantTicketComment.__table__.foreign_key_constraints
         if {"tenant_id", "ticket_id"} == {c.name for c in fk.columns}
     ]
     assert composite, (
         "ticket_comments must reference tickets on (tenant_id, ticket_id), not "
         "on ticket_id alone"
     )
+
+
+# ── The two planes cannot cross (ADR-0023) ───────────────────────────────────
+
+
+def test_no_platform_plane_table_carries_a_tenant_column() -> None:
+    """The whole point of the plane. A `tenant_id` here would assert that a
+    control-plane fact belongs to one tenant of the data plane, which is false —
+    and a nullable one, or a sentinel tenant, is the dodge ADR-0023 rejects."""
+    for model in _PLATFORM_MODELS:
+        assert "tenant_id" not in model.__table__.columns, (
+            f"{model.__name__} carries a tenant_id — it is declared a PLATFORM "
+            "table and the kernel's live-catalog gate will reject it"
+        )
+
+
+def test_platform_ticket_numbers_are_unique_control_plane_wide() -> None:
+    """Not per tenant, because there is no tenant. The vendor runs one series."""
+    uniques = {
+        tuple(sorted(c.name for c in constraint.columns))
+        for constraint in models.PlatformTicket.__table__.constraints
+        if constraint.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("number",) in uniques
+
+
+def test_no_foreign_key_crosses_the_two_planes() -> None:
+    """They share a lifecycle, never a row.
+
+    An FK is the one crossing the database itself would enforce and therefore
+    permit — a tenant-scoped delete cascading into control-plane data, or a
+    platform row whose visibility depends on a tenant predicate it has no column
+    to satisfy. The kernel gate refuses this live; this catches it at the model
+    layer, where it is cheaper to see.
+    """
+    tenant_tables = set(models.TENANT_TABLES)
+    platform_tables = set(models.PLATFORM_TABLES)
+    for model in _TENANT_MODELS + _PLATFORM_MODELS:
+        own_plane = (
+            platform_tables if model.__tablename__ in platform_tables else tenant_tables
+        )
+        for fk in model.__table__.foreign_key_constraints:
+            for element in fk.elements:
+                target = element.column.table
+                if target.schema != models.SCHEMA:
+                    continue  # a kernel table (e.g. public.tenants) — not a plane
+                assert target.name in own_plane, (
+                    f"{model.__tablename__}.{fk.name} references "
+                    f"{target.name}, crossing the tenant/platform plane boundary"
+                )
+
+
+def test_the_planes_do_not_share_a_mapped_ancestor() -> None:
+    """Column reuse is a mixin, never a shared mapped base.
+
+    A common mapped ancestor would make a polymorphic query span both planes,
+    which turns the separation back into a naming convention.
+    """
+    from dotmac_kernel.models import Base
+
+    for tenant_model in _TENANT_MODELS:
+        for platform_model in _PLATFORM_MODELS:
+            shared = set(tenant_model.__mro__) & set(platform_model.__mro__)
+            mapped = {
+                cls for cls in shared if cls is not Base and hasattr(cls, "__table__")
+            }
+            assert not mapped, (
+                f"{tenant_model.__name__} and {platform_model.__name__} share "
+                f"mapped ancestor(s) {sorted(c.__name__ for c in mapped)}"
+            )
+
+
+def test_the_shared_engine_imports_no_persistence() -> None:
+    """One behaviour, two planes: the lifecycle and vocabulary must stay pure.
+
+    If either imported `models`, the "shared engine" claim would be false — the
+    plane would have leaked into the layer whose whole job is to not know about
+    it, and a product could not reuse the transition guards on the other plane.
+    """
+    from dotmac_ticketing import vocabulary
+
+    for shared in (lifecycle, vocabulary):
+        source = Path(inspect.getfile(shared)).read_text(encoding="utf-8")
+        assert "dotmac_ticketing.models" not in source, (
+            f"{shared.__name__} imports persistence — the lifecycle engine is "
+            "shared by both planes and must not know which one it is on"
+        )
+
+
+def test_the_migration_grants_the_platform_plane_and_revokes_the_tenant_role() -> None:
+    """On the platform plane the REVOKE *is* the isolation.
+
+    An un-revoked platform table is exactly as exposed as a tenant table with no
+    RLS policy, and reads just as safe — so this is the platform-side equivalent
+    of the FORCE-RLS assertion above, not a nice-to-have.
+    """
+    for table in models.PLATFORM_TABLES:
+        assert f"REVOKE ALL ON mod_tkt.{table} FROM app_user;" in MIGRATION_STATEMENTS
+        for role in ("platform_api", "app_admin"):
+            assert (
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON mod_tkt.{table} "
+                f"TO {role};" in MIGRATION_STATEMENTS
+            ), f"{table} is not granted to {role}"
+
+
+def test_the_migration_puts_no_rls_on_the_platform_plane() -> None:
+    """A policy there could only deny everything or nothing — it has no tenant
+    column to test — so its presence would mean the plane was misunderstood."""
+    for table in models.PLATFORM_TABLES:
+        assert f"ALTER TABLE mod_tkt.{table} ENABLE ROW LEVEL SECURITY" not in (
+            MIGRATION_SQL
+        )
+        assert f"{table}_tenant_isolation" not in MIGRATION_SQL
 
 
 # ── The migration ────────────────────────────────────────────────────────────
@@ -237,10 +373,13 @@ def test_the_migration_never_relies_on_search_path() -> None:
 # ── The linking helper ───────────────────────────────────────────────────────
 
 
-def test_link_subject_requires_an_explicit_on_delete_for_the_subject() -> None:
+_LINK_HELPERS = (linking.link_tenant_subject, linking.link_platform_subject)
+
+
+@pytest.mark.parametrize("helper", _LINK_HELPERS, ids=lambda h: h.__name__)
+def test_link_helpers_require_an_explicit_on_delete_for_the_subject(helper) -> None:
     """Cascade-vs-restrict is product policy; a default would decide it silently."""
-    signature = inspect.signature(linking.link_subject)
-    subject = signature.parameters["on_delete_subject"]
+    subject = inspect.signature(helper).parameters["on_delete_subject"]
     assert subject.default is inspect.Parameter.empty
     assert subject.kind is inspect.Parameter.KEYWORD_ONLY
 
@@ -249,11 +388,97 @@ def test_link_subject_targets_the_allocated_schema() -> None:
     assert linking.MODULE_SCHEMA == module_schema("tkt")
 
 
-def test_link_subject_rejects_a_name_whose_generated_index_would_overflow() -> None:
+@pytest.mark.parametrize("helper", _LINK_HELPERS, ids=lambda h: h.__name__)
+def test_link_helpers_reject_a_name_whose_generated_index_would_overflow(
+    helper,
+) -> None:
     """PostgreSQL truncates identifiers at 63 chars, and truncation collides."""
     with pytest.raises(ValueError, match="too long|1..63"):
-        linking.link_subject(
+        helper(
             table_name="a" * 60,
             subject_table="subscribers",
             on_delete_subject="RESTRICT",
         )
+
+
+def test_the_platform_link_helper_refuses_a_table_nobody_could_reach() -> None:
+    """`platform_roles=()` emits the REVOKE and no GRANT.
+
+    That table is fully isolated and fully useless — it passes every
+    prohibition in the platform contract and fails at the first control-plane
+    request. Refused at authoring time, since a migration is the worst place to
+    discover it.
+    """
+    with pytest.raises(ValueError, match="at least one role"):
+        linking.link_platform_subject(
+            table_name="vcp_ticket_account",
+            subject_table="vendor_accounts",
+            on_delete_subject="RESTRICT",
+            platform_roles=(),
+        )
+
+
+def test_there_is_no_single_link_helper_with_a_plane_flag() -> None:
+    """SENSITIVITY PROOF for the two-helper design.
+
+    A `link_subject(..., platform=False)` would have a default, and whichever
+    value that default took is the plane a caller gets by forgetting to think —
+    on one side a missing RLS policy, on the other a control-plane table the
+    product data plane can read. The plane must be named, and the name is the
+    function.
+    """
+    assert not hasattr(linking, "link_subject")
+    for helper in _LINK_HELPERS:
+        parameters = inspect.signature(helper).parameters
+        assert "platform" not in parameters, helper.__name__
+        assert "plane" not in parameters, helper.__name__
+
+
+def test_the_tenant_link_helper_emits_isolation_and_the_platform_one_a_revoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What each helper actually writes into a product's migration.
+
+    The signatures above prove the API shape; this drives both helpers against a
+    recording `op` and asserts the DDL, because "the helper adds the RLS policy"
+    is the single strongest reason the helper exists at all.
+    """
+
+    def _record(helper) -> tuple[list[str], str]:
+        """Drive one helper against a recording `op`, return (columns, sql)."""
+        executed: list[str] = []
+        columns: list[str] = []
+        monkeypatch.setattr(
+            linking.op,
+            "create_table",
+            lambda name, *args, **kwargs: columns.extend(
+                a.name for a in args if hasattr(a, "name")
+            ),
+        )
+        monkeypatch.setattr(linking.op, "create_index", lambda *a, **k: None)
+        monkeypatch.setattr(linking.op, "execute", executed.append)
+        helper(
+            table_name="vcp_ticket_account",
+            subject_table="vendor_accounts",
+            on_delete_subject="RESTRICT",
+        )
+        return columns, " ".join(executed)
+
+    for helper, expect_tenant in (
+        (linking.link_tenant_subject, True),
+        (linking.link_platform_subject, False),
+    ):
+        columns, sql = _record(helper)
+
+        if expect_tenant:
+            assert "tenant_id" in columns
+            assert "FORCE ROW LEVEL SECURITY" in sql
+            assert "app_current_tenant_id()" in sql
+            assert "REVOKE" not in sql
+        else:
+            assert "tenant_id" not in columns, (
+                "the platform link helper emitted a tenant column — it has no "
+                "tenant context to populate it from"
+            )
+            assert "ROW LEVEL SECURITY" not in sql
+            assert "REVOKE ALL ON public.vcp_ticket_account FROM app_user" in sql

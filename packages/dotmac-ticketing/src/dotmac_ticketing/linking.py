@@ -1,4 +1,19 @@
-"""`link_subject` — product-owned link tables, generated so nobody hand-writes one.
+"""Product-owned ticket↔subject link tables, generated so nobody hand-writes one.
+
+## Two helpers, because there are two planes (ADR-0023)
+
+``link_tenant_subject`` emits a tenant-scoped link table: a ``tenant_id``
+column, a COMPOSITE ``(tenant_id, ticket_id)`` reference, FORCEd RLS and the
+tenant isolation policy. ``link_platform_subject`` emits a control-plane one: no
+tenant column, no RLS, a single-column reference to ``platform_tickets``, and
+``REVOKE ALL`` from the tenant application role.
+
+They are two functions rather than one with a ``platform=True`` flag on purpose.
+The flag version has a default, and whichever value the default takes is the
+plane a caller gets by forgetting to think — which on one side is a missing RLS
+policy and on the other is a table the product data plane can read. A caller
+must name the plane, and the name is the function.
+
 
 ## What a ticket's subject is, and why it is not one column
 
@@ -74,18 +89,28 @@ from dotmac_kernel.namespaces import module_schema
 
 from alembic import op
 
-__all__ = ["MODULE_SCHEMA", "TICKETS_TABLE", "drop_subject_link", "link_subject"]
+__all__ = [
+    "MODULE_SCHEMA",
+    "PLATFORM_TICKETS_TABLE",
+    "TICKETS_TABLE",
+    "drop_subject_link",
+    "link_platform_subject",
+    "link_tenant_subject",
+]
 
 #: Resolved from the ledger allocation, never spelled as a literal.
 MODULE_SCHEMA: Final[str] = module_schema("tkt")
+#: The tenant plane's ticket table.
 TICKETS_TABLE: Final[str] = "tickets"
+#: The platform plane's ticket table (ADR-0023).
+PLATFORM_TICKETS_TABLE: Final[str] = "platform_tickets"
 
 OnDelete = Literal["CASCADE", "RESTRICT", "SET NULL"]
 
 _IDENT_MAX = 63  # PostgreSQL identifier limit; a truncated constraint name collides.
 
 
-def link_subject(
+def link_tenant_subject(
     *,
     table_name: str,
     subject_table: str,
@@ -97,11 +122,14 @@ def link_subject(
     schema: str = "public",
     app_role: str = "app_user",
 ) -> None:
-    """Emit a product-owned ticket↔subject link table into the CALLER's migration.
+    """Emit a TENANT-plane ticket↔subject link table into the CALLER's migration.
 
     Call it from inside a product's own Alembic ``upgrade()``. Every argument
     that encodes a policy decision is keyword-only and, where it matters,
     without a default.
+
+    For a control-plane ticket, use :func:`link_platform_subject` instead — the
+    tenant column and RLS policy this emits have nothing to bind to there.
 
     :param table_name: the link table, in the product's namespace
         (e.g. ``sub_ticket_subscriber``). Prefix it with the product's own
@@ -184,8 +212,113 @@ def link_subject(
     _enable_rls(table_name=table_name, schema=schema, app_role=app_role)
 
 
+def link_platform_subject(
+    *,
+    table_name: str,
+    subject_table: str,
+    subject_column: str = "subject_id",
+    subject_schema: str = "public",
+    subject_pk: str = "id",
+    on_delete_subject: OnDelete,
+    on_delete_ticket: OnDelete = "CASCADE",
+    schema: str = "public",
+    app_role: str = "app_user",
+    platform_roles: tuple[str, ...] = ("platform_api", "app_admin"),
+) -> None:
+    """Emit a PLATFORM-plane ticket↔subject link table into the CALLER's migration.
+
+    The control-plane counterpart of :func:`link_tenant_subject`. This is what a
+    vendor control plane calls to link a ticket to a vendor account, a licence
+    delivery, a deployment or a support grant.
+
+    Three differences, each following from the plane rather than from taste:
+
+    * **No ``tenant_id`` column**, so the reference into ``platform_tickets`` is
+      the plain single-column one. There is no cross-tenant leak to defend
+      against because there are no tenants on this plane.
+    * **No RLS.** A policy would have no tenant column to test, so it could only
+      deny everything or nothing. The kernel's live-catalog gate rejects a
+      platform table that carries one.
+    * **``REVOKE ALL`` from the tenant application role**, and GRANT to the
+      platform roles. On this plane the revoke IS the isolation, which is why it
+      is emitted here rather than left to the product to remember.
+
+    :param on_delete_subject: **required**, exactly as on the tenant side.
+    :param app_role: the tenant application role to revoke. Named so a
+        deployment that renamed it still gets the revoke, not so it can be
+        skipped.
+    :param platform_roles: the control-plane roles that may use the table.
+    """
+    _check_identifier(table_name)
+    _check_identifier(subject_table)
+    _check_identifier(subject_column)
+    _check_identifier(app_role)
+    # An empty tuple would emit the REVOKE and no GRANT, producing a table
+    # nobody can reach: fully isolated and fully useless. Refused here rather
+    # than discovered at the first control-plane request, and the kernel's
+    # live-catalog gate independently rejects the same shape.
+    if not platform_roles:
+        raise ValueError(
+            "platform_roles must name at least one role — a platform link "
+            "table with no grant is revoked from everyone and unusable"
+        )
+    for role in platform_roles:
+        _check_identifier(role)
+
+    op.create_table(
+        table_name,
+        sa.Column(
+            "ticket_id",
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            nullable=False,
+        ),
+        sa.Column(
+            subject_column,
+            sa.dialects.postgresql.UUID(as_uuid=True),
+            nullable=False,
+        ),
+        sa.Column(
+            "linked_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.PrimaryKeyConstraint("ticket_id", name=f"pk_{table_name}"),
+        sa.ForeignKeyConstraint(
+            ["ticket_id"],
+            [f"{MODULE_SCHEMA}.{PLATFORM_TICKETS_TABLE}.id"],
+            name=f"fk_{table_name}_ticket",
+            ondelete=on_delete_ticket,
+        ),
+        sa.ForeignKeyConstraint(
+            [subject_column],
+            [f"{subject_schema}.{subject_table}.{subject_pk}"],
+            name=f"fk_{table_name}_subject",
+            ondelete=on_delete_subject,
+        ),
+        schema=schema,
+    )
+    op.create_index(
+        f"ix_{table_name}_{subject_column}",
+        table_name,
+        [subject_column],
+        schema=schema,
+    )
+    _platform_grants(
+        table_name=table_name,
+        schema=schema,
+        app_role=app_role,
+        platform_roles=platform_roles,
+    )
+
+
 def drop_subject_link(*, table_name: str, schema: str = "public") -> None:
-    """The matching ``downgrade()``. Policies and indexes go with the table."""
+    """The matching ``downgrade()`` for BOTH helpers.
+
+    Plane-agnostic on purpose: policies, indexes and grants all go with the
+    table, so dropping it is the same act either way and a second function would
+    only be a second thing to get wrong.
+    """
     _check_identifier(table_name)
     op.drop_table(table_name, schema=schema)
 
@@ -218,6 +351,27 @@ def _enable_rls(*, table_name: str, schema: str, app_role: str) -> None:
         "WITH CHECK (tenant_id = public.app_current_tenant_id())"
     )
     op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {qualified} TO {app_role}")
+
+
+def _platform_grants(
+    *,
+    table_name: str,
+    schema: str,
+    app_role: str,
+    platform_roles: tuple[str, ...],
+) -> None:
+    """GRANT to the control-plane roles, then REVOKE ALL from the tenant role.
+
+    The revoke is the load-bearing half and it is emitted LAST, so a future edit
+    that adds another grant above it cannot silently outrank it. `app_user` is
+    the product data plane's role: a control-plane link table it can read is a
+    control-plane fact leaking into a tenant request, which is precisely the
+    crossing ADR-0023 forbids.
+    """
+    qualified = f"{schema}.{table_name}"
+    for role in platform_roles:
+        op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {qualified} TO {role}")
+    op.execute(f"REVOKE ALL ON {qualified} FROM {app_role}")
 
 
 def _check_identifier(name: str) -> None:
