@@ -60,6 +60,20 @@ from dotmac_integration.discovery import (
     DuplicateConnectorError,
     discover,
 )
+from dotmac_integration.execution import (
+    CheckpointConflict,
+    ExecutionError,
+    ProviderEventIdentityCollision,
+    advance_checkpoint,
+    claim_delivery,
+    claim_receipt,
+    enqueue_delivery,
+    payload_digest,
+    receive_verified,
+    record_delivery_outcome,
+    record_receipt_outcome,
+)
+from dotmac_integration.idempotency import run_effect_once, scope_for
 from dotmac_integration.manifest import module
 from dotmac_integration.models import (
     PLATFORM_TABLES,
@@ -68,6 +82,16 @@ from dotmac_integration.models import (
     CapabilityBinding,
     ConnectorConfigRevision,
     ConnectorInstallation,
+    DeliveryAttempt,
+    InboxReceipt,
+    PollingCheckpoint,
+)
+from dotmac_integration.retry import (
+    DEFAULT_MAX_ATTEMPTS,
+    Outcome,
+    OutcomeStatus,
+    next_state,
+    retry_delay_seconds,
 )
 from dotmac_integration.secrets import (
     SECRET_REFERENCE_SCHEMES,
@@ -94,6 +118,27 @@ from dotmac_integration.spi import (
 __version__ = "0.1.0a1"
 
 __all__ = [
+    "scope_for",
+    "run_effect_once",
+    "retry_delay_seconds",
+    "record_receipt_outcome",
+    "record_delivery_outcome",
+    "receive_verified",
+    "payload_digest",
+    "next_state",
+    "enqueue_delivery",
+    "claim_receipt",
+    "claim_delivery",
+    "advance_checkpoint",
+    "ProviderEventIdentityCollision",
+    "PollingCheckpoint",
+    "OutcomeStatus",
+    "Outcome",
+    "InboxReceipt",
+    "ExecutionError",
+    "DeliveryAttempt",
+    "DEFAULT_MAX_ATTEMPTS",
+    "CheckpointConflict",
     "CURRENT_SPI_VERSION",
     "ENTRY_POINT_GROUP",
     "PLATFORM_TABLES",

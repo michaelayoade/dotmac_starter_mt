@@ -254,6 +254,9 @@ PLATFORM_TABLES: tuple[str, ...] = (
     "connector_installations",
     "connector_config_revisions",
     "capability_bindings",
+    "inbox_receipts",
+    "delivery_attempts",
+    "polling_checkpoints",
 )
 
 __all__ = [
@@ -265,4 +268,181 @@ __all__ = [
     "CapabilityBinding",
     "ConnectorConfigRevision",
     "ConnectorInstallation",
+    "DeliveryAttempt",
+    "InboxReceipt",
+    "PollingCheckpoint",
 ]
+
+
+# ── Execution machinery (slice 2) ───────────────────────────────────────────
+
+
+class InboxReceipt(Base):
+    """A verified inbound provider event, recorded once.
+
+    `(installation_id, provider_event_id)` is the DEDUPLICATION key, and it is a
+    database constraint rather than a service check because two webhook workers
+    racing the same redelivery is the normal case, not the edge case.
+
+    `payload_digest` makes the stronger statement: the same event id arriving
+    with DIFFERENT content is a provider identity collision, and the service
+    raises rather than silently treating it as a duplicate. Deduping it would
+    discard real content on the assumption the provider is well-behaved.
+    """
+
+    __tablename__ = "inbox_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "installation_id",
+            "provider_event_id",
+            name="uq_inbox_receipts_installation_event",
+        ),
+        CheckConstraint(
+            "state IN ('verified', 'processing', 'processed', 'retryable', "
+            "'reconciliation_required', 'dead_letter')",
+            name="ck_inbox_receipts_state",
+        ),
+        Index("ix_inbox_receipts_state_received", "state", "received_at"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    installation_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey(f"{SCHEMA}.connector_installations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    capability_binding_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    provider_event_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    headers_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+
+    state: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="verified"
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    #: What the receipt CAUSED, recorded so a replay can be compared against it
+    #: rather than guessed at.
+    consequence_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    #: A CONNECTOR's vocabulary. Stored, never branched on — see `retry`.
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class DeliveryAttempt(Base):
+    """One outbound delivery and its retry state — the outbox.
+
+    `idempotency_key` is unique per installation: the same logical effect
+    enqueued twice is one row, which is what makes "at most once" a property of
+    the QUEUE rather than a hope about callers.
+
+    Execution at-most-once is NOT owned here. `dotmac_integration.execution`
+    adapts `dotmac_kernel.idempotency.execute_once_platform`, because ADR-0014
+    gives that exactly one owner in the fleet and a second ledger beside it is
+    the failure that ADR records.
+    """
+
+    __tablename__ = "delivery_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "installation_id",
+            "idempotency_key",
+            name="uq_delivery_attempts_installation_key",
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'in_flight', 'delivered', 'retryable', "
+            "'reconciliation_required', 'dead_letter')",
+            name="ck_delivery_attempts_state",
+        ),
+        CheckConstraint("attempt_count >= 0", name="ck_delivery_attempts_attempts"),
+        # The dispatcher's query: what is due, oldest first.
+        Index("ix_delivery_attempts_state_next", "state", "next_attempt_at"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    installation_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey(f"{SCHEMA}.connector_installations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    capability_binding_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+
+    event_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(240), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+
+    state: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="pending"
+    )
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: A worker's claim. Without it two dispatchers deliver the same row twice,
+    #: which no downstream idempotency can fully repair once a provider has
+    #: seen both.
+    leased_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class PollingCheckpoint(Base):
+    """Where a polling job got to, with an OPTIMISTIC LOCK.
+
+    `version` is the whole point. Two workers advancing one cursor without it
+    silently lose events: the slower write wins and the window between the two
+    cursors is never polled again. A conditional update on `version` turns that
+    into a refusal the caller can retry.
+    """
+
+    __tablename__ = "polling_checkpoints"
+    __table_args__ = (
+        UniqueConstraint(
+            "capability_binding_id",
+            "job_key",
+            name="uq_polling_checkpoints_binding_job",
+        ),
+        CheckConstraint("version >= 1", name="ck_polling_checkpoints_version"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    capability_binding_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey(f"{SCHEMA}.capability_bindings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    #: Which poll this is. A binding may run several (backfill vs live tail).
+    job_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    cursor_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    advanced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
