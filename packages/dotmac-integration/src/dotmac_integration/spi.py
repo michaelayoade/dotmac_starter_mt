@@ -38,10 +38,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Final
+from enum import Enum
+from typing import Final, Protocol, runtime_checkable
 
 __all__ = [
     "CURRENT_SPI_VERSION",
+    "CapabilityHandler",
+    "ConnectorMode",
+    "ConnectorPlugin",
+    "Diagnostic",
+    "DispatchRequest",
+    "accepts_manifest_digest",
     "CapabilityDeclaration",
     "ConnectorManifest",
     "SpiRange",
@@ -197,6 +204,26 @@ class ConnectorManifest:
             seen.add(capability.capability_id)
 
     @property
+    def digest(self) -> str:
+        """Stable identity of this manifest's CONTRACT.
+
+        Over the fields a consumer can depend on — key, version, SPI range and
+        the capability set. Deliberately not over the whole object: a docstring
+        change must not invalidate every installation pinned to it.
+        """
+        import hashlib
+
+        material = "|".join(
+            (
+                self.connector_key,
+                self.version,
+                str(self.spi_range),
+                ",".join(sorted(self.capability_ids)),
+            )
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+    @property
     def capability_ids(self) -> frozenset[str]:
         return frozenset(c.capability_id for c in self.capabilities)
 
@@ -214,3 +241,99 @@ class ConnectorManifest:
             f"connector {self.connector_key!r} does not declare capability "
             f"{capability_id!r}; it declares {sorted(self.capability_ids)}"
         )
+
+
+# ── The executable contract ─────────────────────────────────────────────────
+
+
+class ConnectorMode(str, Enum):
+    """How a connector moves data. Declared, so the runtime knows which workers
+    to start rather than discovering it by calling and failing."""
+
+    INGRESS = "ingress"
+    POLL = "poll"
+    DELIVERY = "delivery"
+
+
+@dataclass(frozen=True, slots=True)
+class Diagnostic:
+    """One finding from validation. `ok=False` blocks enablement."""
+
+    ok: bool
+    code: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchRequest:
+    """What a handler is given. Deliberately NOT a database session.
+
+    A handler receives resolved configuration and MATERIALIZED secrets, never a
+    connection — the invoke phase runs outside the database transaction, and
+    handing over a session would invite a plugin to hold one across provider
+    I/O.
+    """
+
+    capability_id: str
+    event_type: str
+    payload: dict
+    config: dict
+    #: Materialized at the boundary, never persisted. See `dispatch.invoke`.
+    secrets: dict
+    idempotency_key: str
+
+
+@runtime_checkable
+class CapabilityHandler(Protocol):
+    """What a plugin returns for one capability.
+
+    Returns an `Outcome`-shaped result. It classifies; it does not decide what
+    happens next — retry, dead-letter and reconciliation belong to the engine,
+    which is why a handler cannot reschedule itself.
+    """
+
+    def __call__(self, request: DispatchRequest) -> object: ...
+
+
+@runtime_checkable
+class ConnectorPlugin(Protocol):
+    """One entry point per connector key resolves to one of these.
+
+    A plugin object rather than a bare manifest, because the module has to DO
+    something with a connector: start the right workers, validate a connection
+    before enabling it, and call a handler. Metadata alone cannot run anything.
+
+    `historical_manifests` is the adoption window, and it lives INSIDE the one
+    distribution on purpose. Shipping an old manifest as a second distribution
+    would claim the same `connector_key` twice, which discovery refuses — so
+    the pins a still-installed older revision was adopted against travel with
+    the connector that supersedes them.
+    """
+
+    @property
+    def manifest(self) -> ConnectorManifest: ...
+
+    @property
+    def historical_manifests(self) -> tuple[ConnectorManifest, ...]: ...
+
+    @property
+    def modes(self) -> frozenset[ConnectorMode]: ...
+
+    def handler_for(self, capability_id: str) -> CapabilityHandler: ...
+
+    def validate_connection(
+        self, *, config: dict, secrets: dict
+    ) -> tuple[Diagnostic, ...]: ...
+
+
+def accepts_manifest_digest(plugin: ConnectorPlugin, digest: str) -> bool:
+    """Is an installation pinned to `digest` still adoptable by this plugin?
+
+    Current manifest first, then the historical window. An installation whose
+    digest matches neither has been superseded by a connector that no longer
+    claims to honour it — which must block adoption rather than proceed and
+    hope the shapes still line up.
+    """
+    if plugin.manifest.digest == digest:
+        return True
+    return any(m.digest == digest for m in plugin.historical_manifests)

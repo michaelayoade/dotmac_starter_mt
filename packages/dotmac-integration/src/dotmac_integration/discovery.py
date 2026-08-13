@@ -20,12 +20,13 @@ registry rather than silently offering the rest. A registry that quietly drops
 a connector is worse than one that will not start — the operator configured
 that connector for a reason and would be told, by silence, that it is running.
 
-## Loading is separate from discovering
+## Loading is separate from RUNNING
 
-:func:`discover` returns manifests. It does not import connector call paths or
-construct handlers, so a manifest can be inspected — and refused — without
-executing plugin code. That ordering is the point: a connector that fails its
-SPI check must never have run in this process.
+:func:`discover` resolves each entry point to a :class:`ConnectorPlugin` and
+reads its manifest. It does not build handlers, materialize secrets or contact a
+provider, so a connector can be inspected — and refused — before any of its call
+paths execute. That ordering is the point: a connector that fails its SPI check
+must never have reached a provider from this process.
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ from typing import Final
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     ConnectorManifest,
+    ConnectorPlugin,
     InvalidManifestError,
     SpiVersion,
 )
@@ -61,34 +63,48 @@ class DuplicateConnectorError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class ConnectorRegistry:
-    """The validated set of installed connectors.
+    """The validated set of installed connector PLUGINS.
+
+    Plugins, not bare manifests: the module has to DO something with a connector
+    — start the right workers, validate a connection, call a handler — and
+    metadata alone cannot run anything.
 
     Construction is validation, like `NamespaceRegistry`: a registry that exists
     is one whose members have distinct keys and admit the running SPI.
     """
 
-    manifests: tuple[ConnectorManifest, ...]
+    plugins: tuple[ConnectorPlugin, ...]
 
     def __post_init__(self) -> None:
         seen: dict[str, str] = {}
-        for manifest in self.manifests:
+        for plugin in self.plugins:
+            manifest = plugin.manifest
             previous = seen.get(manifest.connector_key)
             if previous is not None:
                 raise DuplicateConnectorError(
                     f"connector key {manifest.connector_key!r} is claimed by "
                     f"both {previous} and {manifest.version} — one key, one "
-                    "distribution"
+                    "distribution. A historical manifest belongs INSIDE the "
+                    "distribution that supersedes it, not beside it"
                 )
             seen[manifest.connector_key] = manifest.version
 
-    def get(self, connector_key: str) -> ConnectorManifest:
-        for manifest in self.manifests:
-            if manifest.connector_key == connector_key:
-                return manifest
+    @property
+    def manifests(self) -> tuple[ConnectorManifest, ...]:
+        return tuple(plugin.manifest for plugin in self.plugins)
+
+    def plugin(self, connector_key: str) -> ConnectorPlugin:
+        for plugin in self.plugins:
+            if plugin.manifest.connector_key == connector_key:
+                return plugin
         raise InvalidManifestError(
             f"no installed connector declares key {connector_key!r}; installed: "
-            f"{sorted(m.connector_key for m in self.manifests)}"
+            f"{sorted(p.manifest.connector_key for p in self.plugins)}"
         )
+
+    def get(self, connector_key: str) -> ConnectorManifest:
+        """The plugin's CURRENT manifest."""
+        return self.plugin(connector_key).manifest
 
     def require_compatible(
         self, connector_key: str, *, spi_version: SpiVersion = CURRENT_SPI_VERSION
@@ -105,19 +121,31 @@ class ConnectorRegistry:
 
     @property
     def keys(self) -> frozenset[str]:
-        return frozenset(m.connector_key for m in self.manifests)
+        return frozenset(p.manifest.connector_key for p in self.plugins)
 
 
-def _load(point: EntryPoint) -> ConnectorManifest:
-    manifest = point.load()
-    if callable(manifest):
-        manifest = manifest()
-    if not isinstance(manifest, ConnectorManifest):
+def _load(point: EntryPoint) -> ConnectorPlugin:
+    """Resolve ONE entry point to a plugin.
+
+    A factory is accepted so a distribution can defer building its plugin, but
+    the result must satisfy `ConnectorPlugin` — resolving to a bare manifest is
+    refused, because a registry of metadata cannot run a connector.
+    """
+    plugin = point.load()
+    if callable(plugin) and not isinstance(plugin, ConnectorPlugin):
+        plugin = plugin()
+    if isinstance(plugin, ConnectorManifest):
         raise InvalidManifestError(
-            f"entry point {point.name!r} resolved to {type(manifest).__name__}, "
-            "not a ConnectorManifest"
+            f"entry point {point.name!r} resolved to a ConnectorManifest. The "
+            "SPI expects a ConnectorPlugin: the module must be able to call a "
+            "handler, not only read metadata"
         )
-    return manifest
+    if not isinstance(plugin, ConnectorPlugin):
+        raise InvalidManifestError(
+            f"entry point {point.name!r} resolved to {type(plugin).__name__}, "
+            "which does not satisfy the ConnectorPlugin protocol"
+        )
+    return plugin
 
 
 def discover(
@@ -133,12 +161,12 @@ def discover(
     found = list(
         points if points is not None else entry_points(group=ENTRY_POINT_GROUP)
     )
-    manifests: list[ConnectorManifest] = []
+    plugins: list[ConnectorPlugin] = []
     for point in found:
-        manifest = _load(point)
+        plugin = _load(point)
         # Refuse here as well as at activation: an incompatible connector should
         # be visible at boot, when someone is watching, rather than at the first
         # dispatch, when nobody is.
-        manifest.spi_range.require(spi_version)
-        manifests.append(manifest)
-    return ConnectorRegistry(tuple(manifests))
+        plugin.manifest.spi_range.require(spi_version)
+        plugins.append(plugin)
+    return ConnectorRegistry(tuple(plugins))

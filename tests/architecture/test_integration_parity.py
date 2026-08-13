@@ -141,6 +141,46 @@ def test_the_secret_value_suites_are_excluded_for_a_contract_reason() -> None:
         validate_config_revision({}, {"token": "a-literal-secret"})
 
 
+def test_every_ported_suite_names_local_evidence() -> None:
+    """The difference between ACCOUNTING and PORTING.
+
+    Without this the dossier proves only that each source suite has a verdict.
+    `ported_to` names the local file and case that carries the behaviour, and
+    this asserts both exist — so a promise cannot outlive its evidence.
+    """
+    ported_to = _dossier()["parity"]["ported_to"]
+    porting = {
+        suite for suite, disposition in _parity().items() if disposition in _PORTING
+    }
+    assert (
+        set(ported_to) == porting
+    ), "every suite marked as porting needs local evidence, and only those"
+
+    for suite, target in ported_to.items():
+        path, _, case = target.partition("::")
+        local = PROJECT_ROOT / path
+        assert local.is_file(), f"{suite} -> {path} does not exist"
+        assert case, f"{suite} names a file but no test case"
+        assert f"def {case}(" in local.read_text(
+            encoding="utf-8"
+        ), f"{suite} -> {target} names a case that does not exist"
+
+
+def test_the_ported_evidence_actually_runs(pytestconfig) -> None:
+    """Specificity: a named case that is skipped or xfailed is not evidence.
+
+    Cheap structural check — the case must not be decorated as skipped, which
+    is how a "ported" test quietly stops proving anything.
+    """
+    for target in _dossier()["parity"]["ported_to"].values():
+        path, _, case = target.partition("::")
+        source = (PROJECT_ROOT / path).read_text(encoding="utf-8")
+        index = source.index(f"def {case}(")
+        preamble = source[max(0, index - 200) : index]
+        assert "@pytest.mark.skip" not in preamble, target
+        assert "@pytest.mark.xfail" not in preamble, target
+
+
 def test_the_fresh_invariant_tests_supplement_rather_than_replace_parity() -> None:
     """They are hardening, and the dossier says so.
 

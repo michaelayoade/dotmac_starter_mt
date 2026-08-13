@@ -128,13 +128,16 @@ shadow_and_drift = "Cutover is shadow-first: the Integrator receives the provide
 # canonical keys and overlap rules — not a constraint bolted onto a JSON column.
 binding_multiplicity = "Unique on (installation_id, capability_id). Many installations may implement one capability; dispatch resolves exactly one enabled binding or fails closed."
 
-open_questions = [
-  "No SPI version range is stored. connector_version and manifest_digest exist, but nothing records the SPI range a connector was built against, so 'an incompatible SPI version refuses activation' cannot be enforced. The first slice adds it, checked at discovery, startup AND activation.",
-]
+# CLOSED 2026-08-13: the SPI range is now STORED on the installation
+# (`connector_installations.spi_range`) as well as compared, and checked at
+# discovery, startup and activation. Storing it is what lets a later MODULE
+# upgrade refuse a previously activated binding — the case that bites, where
+# the plugin did not change but the host did.
+open_questions = []
 
 local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
 
-next_action = "Slice 1 is installation + immutable configuration revision + capability binding, with plugin manifest and package-metadata discovery, secret REFERENCES only, and refusal of duplicate plugins, incompatible SPI versions and undeclared capabilities — plus a shared fake-plugin conformance kit so the SPI is testable with no real provider and no network I/O. Slice 2 extracts the execution machinery from Sub: inbox receipts and deduplication, outbox and delivery attempts, central idempotency, retry classification and backoff, polling checkpoints, then health, audit and repair. Each mechanism gets ONE owner in the module; a plugin may never maintain a parallel ledger. Publish, then create the dotmac_integrator assembly, then the first real connector, then shadow-cut one capability."
+next_action = "Slices 1-2 and step 4.5 are complete: installation/config/binding, the executable plugin SPI with package-metadata discovery, the lifecycle owner, the three-phase dispatch seam, inbox/outbox/retry/checkpoints, health/audit/repair, the seven platform tables, machine-checkable parity dispositions with ported_to evidence, and a Postgres composition proof with live concurrency canaries. REMAINING before release eligibility: nothing in the module itself — the next changes are (1) add dotmac-integration to release-modules.json and the release workflow choice with kernel floor 0.1.0a56 and a wheel inspection requiring both migrations and the full public surface; (2) publish kernel 0.1.0a56, then dotmac-integration 0.1.0a1, then verify the published registry composition; (3) create the dotmac_integrator thin assembly, which only pins, composes, configures and exposes health/operations; (4) build the first real connector — a read-only or ingress-only Meta/WhatsApp messaging capability, NOT payments, CRM or ERPNext; (5) shadow-cut one capability and lower the external-connector ratchet baseline in the same change."
 
 # PARITY DISPOSITIONS — one per source suite, and the reason.
 #
@@ -156,6 +159,16 @@ next_action = "Slice 1 is installation + immutable configuration revision + capa
 "tests/test_connector_auth_config_encryption.py" = "exclude-superseded"
 "tests/test_connector_header_masking.py" = "exclude-superseded"
 "tests/test_external_connector_end_to_end.py" = "move-to-assembly"
+
+# WHERE each ported suite's behaviour now lives. Without this the parity table
+# proves ACCOUNTING — that every suite has a verdict — but not PORTING. A test
+# asserts each file and named case exists, so a promise cannot outlive its
+# evidence.
+[parity.ported_to]
+"tests/test_integration_installations.py" = "tests/unit/test_integration_lifecycle.py::test_a_draft_pins_the_connector_installed_right_now"
+"tests/test_integration_manifest_adoption.py" = "tests/unit/test_integration_lifecycle.py::test_adoption_is_idempotent"
+"tests/test_integration_delivery.py" = "tests/unit/test_integration_lifecycle.py::test_a_dispatch_reaches_the_plugin_with_materialized_secrets"
+"tests/test_integration_installation_api.py" = "tests/unit/test_integration_lifecycle.py::test_the_service_surface_the_routes_would_call_is_complete"
 
 [parity.reasons]
 "port" = "Generic engine behaviour with no product coupling. Ported as-is with the code it proves."

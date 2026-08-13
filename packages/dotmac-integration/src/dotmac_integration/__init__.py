@@ -72,6 +72,14 @@ from dotmac_integration.discovery import (
     DuplicateConnectorError,
     discover,
 )
+from dotmac_integration.dispatch import (
+    DispatchError,
+    LostClaim,
+    PreparedDispatch,
+    invoke,
+    prepare,
+    settle,
+)
 from dotmac_integration.execution import (
     CheckpointConflict,
     ExecutionError,
@@ -86,6 +94,20 @@ from dotmac_integration.execution import (
     record_receipt_outcome,
 )
 from dotmac_integration.idempotency import run_effect_once, scope_for
+from dotmac_integration.lifecycle import (
+    AdoptionPreview,
+    LifecycleError,
+    add_binding,
+    adopt_manifest,
+    create_draft,
+    disable,
+    enable,
+    preview_adoption,
+    put_config_revision,
+    quarantine,
+    retire,
+    set_binding_enabled,
+)
 from dotmac_integration.manifest import module
 from dotmac_integration.models import (
     PLATFORM_TABLES,
@@ -131,16 +153,46 @@ from dotmac_integration.selection import (
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     CapabilityDeclaration,
+    CapabilityHandler,
     ConnectorManifest,
+    ConnectorMode,
+    ConnectorPlugin,
+    Diagnostic,
+    DispatchRequest,
     InvalidManifestError,
     SpiIncompatibleError,
     SpiRange,
     SpiVersion,
+    accepts_manifest_digest,
 )
 
 __version__ = "0.1.0a1"
 
 __all__ = [
+    "settle",
+    "set_binding_enabled",
+    "retire",
+    "quarantine",
+    "put_config_revision",
+    "preview_adoption",
+    "prepare",
+    "invoke",
+    "enable",
+    "disable",
+    "create_draft",
+    "adopt_manifest",
+    "add_binding",
+    "accepts_manifest_digest",
+    "PreparedDispatch",
+    "LostClaim",
+    "LifecycleError",
+    "DispatchRequest",
+    "DispatchError",
+    "Diagnostic",
+    "ConnectorPlugin",
+    "ConnectorMode",
+    "CapabilityHandler",
+    "AdoptionPreview",
     "replay_receipt",
     "replay_delivery",
     "release_expired_leases",

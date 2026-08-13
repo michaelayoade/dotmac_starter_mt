@@ -26,18 +26,26 @@ from dataclasses import dataclass, field
 from importlib.metadata import EntryPoint
 
 from dotmac_integration.discovery import ConnectorRegistry, discover
+from dotmac_integration.retry import Outcome, OutcomeStatus
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     CapabilityDeclaration,
     ConnectorManifest,
+    ConnectorMode,
+    ConnectorPlugin,
+    Diagnostic,
+    DispatchRequest,
     SpiRange,
 )
 
 __all__ = [
     "FAKE_CAPABILITY",
     "ConformanceFailure",
+    "FakePlugin",
     "assert_connector_conforms",
+    "assert_plugin_conforms",
     "fake_manifest",
+    "fake_plugin",
     "fake_registry",
 ]
 
@@ -70,6 +78,75 @@ def fake_manifest(
 
 
 @dataclass(frozen=True, slots=True)
+class FakePlugin:
+    """A connector that answers from a dict — no provider, no network.
+
+    The whole installation/configuration/binding/dispatch slice must be provable
+    without a provider, and a kit that needed credentials would make every
+    author's first encounter with the SPI a secrets problem.
+
+    `outcome` is settable so a test can drive retry, reconciliation and terminal
+    paths without inventing a failing provider.
+    """
+
+    manifest_: ConnectorManifest = field(default_factory=lambda: fake_manifest())
+    historical: tuple[ConnectorManifest, ...] = ()
+    modes_: frozenset[ConnectorMode] = frozenset(
+        {ConnectorMode.INGRESS, ConnectorMode.DELIVERY}
+    )
+    outcome: Outcome = field(
+        default_factory=lambda: Outcome(status=OutcomeStatus.SUCCEEDED)
+    )
+    #: Every request the fake was asked to handle, so a test can assert what
+    #: crossed the boundary — in particular that secrets arrived materialized
+    #: and that no database session did.
+    seen: list[DispatchRequest] = field(default_factory=list)
+    healthy: bool = True
+    #: Make the handler raise, so the engine's "a raising plugin is retryable"
+    #: path is testable without inventing a broken provider. A knob rather than
+    #: something a test monkeypatches on: this object is frozen precisely so a
+    #: test cannot reshape the contract it is meant to be checking.
+    raises: BaseException | None = None
+
+    @property
+    def manifest(self) -> ConnectorManifest:
+        return self.manifest_
+
+    @property
+    def historical_manifests(self) -> tuple[ConnectorManifest, ...]:
+        return self.historical
+
+    @property
+    def modes(self) -> frozenset[ConnectorMode]:
+        return self.modes_
+
+    def handler_for(self, capability_id: str):
+        self.manifest_.require_declares(capability_id)
+
+        def _handle(request: DispatchRequest) -> Outcome:
+            self.seen.append(request)
+            if self.raises is not None:
+                raise self.raises
+            return self.outcome
+
+        return _handle
+
+    def validate_connection(
+        self, *, config: dict, secrets: dict
+    ) -> tuple[Diagnostic, ...]:
+        if self.healthy:
+            return (Diagnostic(ok=True, code="reachable"),)
+        return (
+            Diagnostic(ok=False, code="unreachable", detail="fake is set unhealthy"),
+        )
+
+
+def fake_plugin(**kwargs: object) -> FakePlugin:
+    """A conforming plugin, with every knob a negative test needs."""
+    return FakePlugin(**kwargs)  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True, slots=True)
 class _StaticEntryPoint:
     """An `EntryPoint`-shaped stand-in that loads without importing anything.
 
@@ -78,14 +155,16 @@ class _StaticEntryPoint:
     """
 
     name: str
-    manifest: ConnectorManifest = field(default_factory=fake_manifest)
+    plugin: ConnectorPlugin = field(default_factory=fake_plugin)
 
-    def load(self) -> ConnectorManifest:
-        return self.manifest
+    def load(self) -> ConnectorPlugin:
+        return self.plugin
 
 
 def fake_registry(
     manifests: Iterable[ConnectorManifest] | None = None,
+    *,
+    plugins: Iterable[ConnectorPlugin] | None = None,
 ) -> ConnectorRegistry:
     """Run real discovery over fake entry points.
 
@@ -94,10 +173,15 @@ def fake_registry(
     does. A kit that bypassed them would certify connectors against a contract
     nothing enforces.
     """
-    chosen = list(manifests) if manifests is not None else [fake_manifest()]
+    if plugins is not None:
+        chosen = list(plugins)
+    elif manifests is not None:
+        chosen = [FakePlugin(manifest_=m) for m in manifests]
+    else:
+        chosen = [fake_plugin()]
     points: list[EntryPoint] = [
-        _StaticEntryPoint(name=m.connector_key, manifest=m)  # type: ignore[list-item]
-        for m in chosen
+        _StaticEntryPoint(name=p.manifest.connector_key, plugin=p)  # type: ignore[list-item]
+        for p in chosen
     ]
     return discover(points=points)
 
@@ -145,3 +229,58 @@ def assert_connector_conforms(manifest: ConnectorManifest) -> None:
         # `require_declares` is what activation calls; a connector whose own
         # declarations do not satisfy it could never be bound.
         resolved.require_declares(capability.capability_id)
+
+
+def assert_plugin_conforms(plugin: ConnectorPlugin) -> None:
+    """The EXECUTABLE half of the contract suite.
+
+    `assert_connector_conforms` checks the metadata; this checks that the plugin
+    can actually be used — a distribution that declares a capability it cannot
+    hand back a handler for passes every metadata check and fails at the first
+    dispatch.
+    """
+    assert_connector_conforms(plugin.manifest)
+
+    if not plugin.modes:
+        raise ConformanceFailure(
+            f"connector {plugin.manifest.connector_key!r} declares no modes, so "
+            "the runtime cannot know which workers to start for it"
+        )
+
+    for capability in plugin.manifest.capabilities:
+        try:
+            handler = plugin.handler_for(capability.capability_id)
+        except Exception as exc:
+            raise ConformanceFailure(
+                f"connector {plugin.manifest.connector_key!r} declares "
+                f"{capability.capability_id!r} but returns no handler: {exc}"
+            ) from exc
+        if not callable(handler):
+            raise ConformanceFailure(
+                f"handler for {capability.capability_id!r} is not callable"
+            )
+
+    # An undeclared capability must be refused, not silently handled.
+    try:
+        plugin.handler_for("conformance.undeclared.v1")
+    except Exception:  # noqa: S110 - the refusal IS the expected path
+        pass
+    else:
+        raise ConformanceFailure(
+            f"connector {plugin.manifest.connector_key!r} returned a handler for "
+            "a capability it never declared"
+        )
+
+    diagnostics = plugin.validate_connection(config={}, secrets={})
+    if not isinstance(diagnostics, tuple):
+        raise ConformanceFailure("validate_connection must return a tuple")
+
+    # Historical manifests must keep the same key, or the adoption window would
+    # smuggle a second connector in under one entry point.
+    for historical in plugin.historical_manifests:
+        if historical.connector_key != plugin.manifest.connector_key:
+            raise ConformanceFailure(
+                f"historical manifest {historical.connector_key!r} does not "
+                f"match {plugin.manifest.connector_key!r} — the adoption window "
+                "is for one connector's own past, not another connector"
+            )
