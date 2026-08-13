@@ -30,8 +30,9 @@ product's error string in the engine is how the engine stops being shared.
 
 ## Backoff
 
-`60 · 2^(attempt-1)` seconds, capped at 8 hours — Sub's formula, kept because it
-is in production. A provider-supplied `retry_after_seconds` always wins: a
+`base · 2^(attempt-1)` seconds, capped — Sub's formula, with its production
+numbers now living in :class:`dotmac_integration.policy.ExecutionPolicy` rather
+than hardcoded here. A provider-supplied `retry_after_seconds` always wins: a
 provider that tells you when to come back knows better than an exponential
 curve, and ignoring it is how rate limits become outages.
 """
@@ -40,26 +41,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Final
 
-__all__ = [
-    "DEFAULT_MAX_ATTEMPTS",
-    "MAX_BACKOFF_SECONDS",
-    "Outcome",
-    "OutcomeStatus",
-    "next_state",
-    "retry_delay_seconds",
-]
+from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
 
-#: Cap. Beyond this a queue is not retrying, it is hoarding.
-MAX_BACKOFF_SECONDS: Final[int] = 8 * 60 * 60
-_BASE_DELAY_SECONDS: Final[int] = 60
+__all__ = ["Outcome", "OutcomeStatus", "next_state", "retry_delay_seconds"]
 
-#: Sub's default, kept. Clamped to [1, 20] at the call site so a mis-typed
-#: configuration cannot create either an un-retried delivery or an immortal one.
-DEFAULT_MAX_ATTEMPTS: Final[int] = 10
-_MIN_ATTEMPTS: Final[int] = 1
-_MAX_ATTEMPTS: Final[int] = 20
+# The numbers live in `ExecutionPolicy`, not here. They are deployment
+# decisions — a webhook fan-out and a nightly bulk poll do not want the same
+# backoff — and this module is the classification, not the configuration.
 
 
 class OutcomeStatus(str, Enum):
@@ -89,7 +78,12 @@ class Outcome:
         return self.status is not OutcomeStatus.RETRYABLE
 
 
-def retry_delay_seconds(attempt_count: int, outcome: Outcome | None = None) -> int:
+def retry_delay_seconds(
+    attempt_count: int,
+    outcome: Outcome | None = None,
+    *,
+    policy: ExecutionPolicy = DEFAULT_POLICY,
+) -> int:
     """Seconds until the next attempt.
 
     :param attempt_count: attempts made SO FAR, so the first retry waits the
@@ -98,23 +92,24 @@ def retry_delay_seconds(attempt_count: int, outcome: Outcome | None = None) -> i
     if outcome is not None and outcome.retry_after_seconds is not None:
         # Trusted, but not unboundedly: a provider sending `retry_after: 10y`
         # would otherwise park the delivery past any operator's attention.
-        return max(0, min(int(outcome.retry_after_seconds), MAX_BACKOFF_SECONDS))
+        return max(0, min(int(outcome.retry_after_seconds), policy.max_backoff_seconds))
     exponent = max(attempt_count - 1, 0)
     # Guard the shift itself: 2 ** 10_000 is computed before min() sees it.
     if exponent > 32:
-        return MAX_BACKOFF_SECONDS
-    return min(MAX_BACKOFF_SECONDS, _BASE_DELAY_SECONDS * (2**exponent))
+        return policy.max_backoff_seconds
+    return min(policy.max_backoff_seconds, policy.base_delay_seconds * (2**exponent))
 
 
 def next_state(
-    outcome: Outcome, *, attempt_count: int, max_attempts: int = DEFAULT_MAX_ATTEMPTS
+    outcome: Outcome,
+    *,
+    attempt_count: int,
+    policy: ExecutionPolicy = DEFAULT_POLICY,
 ) -> str:
     """The delivery state this outcome produces.
 
-    Attempt exhaustion turns RETRYABLE into `dead_letter`. That is the only
-    place the engine overrides a connector's classification, and it is why the
-    cap is clamped rather than trusted: `max_attempts: 0` from a bad config
-    would otherwise dead-letter everything on its first attempt.
+    Attempt exhaustion turns RETRYABLE into `dead_letter` — the only place the
+    engine overrides a connector's classification.
     """
     if outcome.status is OutcomeStatus.SUCCEEDED:
         return "delivered"
@@ -122,5 +117,6 @@ def next_state(
         return "reconciliation_required"
     if outcome.status is OutcomeStatus.TERMINAL:
         return "dead_letter"
-    cap = max(_MIN_ATTEMPTS, min(int(max_attempts), _MAX_ATTEMPTS))
-    return "dead_letter" if attempt_count >= cap else "retryable"
+    # The policy validated its own bounds at construction, so no clamping is
+    # needed here — a nonsense cap was refused where it was configured.
+    return "dead_letter" if attempt_count >= policy.max_attempts else "retryable"

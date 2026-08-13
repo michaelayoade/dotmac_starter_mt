@@ -43,14 +43,30 @@ module = ModuleManifest(
     migration_branch="integration",
     tables=TENANT_TABLES,
     platform_tables=PLATFORM_TABLES,
-    # ── No capabilities, permissions or audit actions YET ───────────────────
-    # Every such declaration exists to gate or annotate a ROUTE, and this slice
-    # ships none. A declared code with no consumer is dead vocabulary that reads
-    # as a working gate — the failure ADR-0008's registries exist to prevent —
-    # and CI enforces the point rather than leaving it to judgement.
+    # ── Declared audit actions ──────────────────────────────────────────────
+    # The FIXED set this module writes, declared rather than left as string
+    # literals scattered through `operations`. ADR-0008's rule applied to an
+    # audit vocabulary: a code with no declaration cannot be reviewed or
+    # deprecated, and `write_audit_event` refusing an undeclared action is what
+    # makes the declaration load-bearing rather than documentation.
     #
-    # They land with the operations surface, in the same change as the guards
-    # that reference them.
+    # Every one of these has a real caller in `dotmac_integration.operations`;
+    # a declared action with no writer is dead vocabulary that reads as a
+    # working trail.
+    audit_actions=(
+        "integration.delivery.replayed",
+        "integration.receipt.replayed",
+        "integration.leases.released",
+    ),
+    # ── No capabilities or permissions YET ──────────────────────────────────
+    # Both exist to gate a ROUTE, and this slice ships none. A declared code
+    # with no consumer is dead vocabulary that reads as a working gate — the
+    # failure ADR-0008's registries exist to prevent. They land with the
+    # operations HTTP surface, which belongs to the `dotmac_integrator`
+    # assembly, in the same change as the guards that reference them.
+    #
+    # Audit actions are different and ARE declared above: they are written by
+    # this module's own repair commands, which exist now.
 )
 
 __all__ = ["module"]

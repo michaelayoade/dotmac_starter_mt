@@ -15,8 +15,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from dotmac_integration import (
+    CapabilityBinding,
     ConnectorInstallation,
     DeliveryAttempt,
+    ExecutionPolicy,
     HealthReport,
     InboxReceipt,
     NotRepairable,
@@ -69,6 +71,7 @@ def db() -> Session:
     )
     for model in (
         ConnectorInstallation,
+        CapabilityBinding,
         InboxReceipt,
         DeliveryAttempt,
         PollingCheckpoint,
@@ -87,6 +90,19 @@ def installation(db: Session) -> ConnectorInstallation:
         spi_range=">=1.0,<2.0",
         manifest_digest="d" * 64,
         name="primary",
+        state="enabled",
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
+@pytest.fixture()
+def binding(db: Session, installation: ConnectorInstallation) -> CapabilityBinding:
+    record = CapabilityBinding(
+        id=uuid.uuid4(),
+        installation_id=installation.id,
+        capability_id="conformance.echo.v1",
         state="enabled",
     )
     db.add(record)
@@ -115,7 +131,7 @@ def test_an_expired_lease_shows_as_stuck(
         idempotency_key="k",
         payload={},
     )
-    claim_delivery(delivery, lease_seconds=60)
+    claim_delivery(db, delivery, policy=ExecutionPolicy(lease_seconds=60))
     db.flush()
 
     later = datetime.now(UTC) + timedelta(seconds=600)
@@ -156,7 +172,7 @@ def test_dead_letters_and_reconciliation_are_counted_separately(
             idempotency_key=key,
             payload={},
         )
-        claim_delivery(delivery)
+        claim_delivery(db, delivery)
         record_delivery_outcome(delivery, Outcome(status=status))
     db.flush()
 
@@ -166,11 +182,12 @@ def test_dead_letters_and_reconciliation_are_counted_separately(
 
 
 def test_an_unprocessed_receipt_is_visible(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt",
         event_type="e",
         payload={},
@@ -311,11 +328,15 @@ def test_a_delivered_effect_is_never_replayable(
 
 
 def test_a_receipt_replay_returns_it_to_verified(
-    db: Session, installation: ConnectorInstallation, audit: _AuditSpy
+    db: Session,
+    installation: ConnectorInstallation,
+    binding: CapabilityBinding,
+    audit: _AuditSpy,
 ) -> None:
     receipt, _ = receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt",
         event_type="e",
         payload={},
@@ -331,11 +352,15 @@ def test_a_receipt_replay_returns_it_to_verified(
 
 
 def test_a_processed_receipt_is_not_replayable(
-    db: Session, installation: ConnectorInstallation, audit: _AuditSpy
+    db: Session,
+    installation: ConnectorInstallation,
+    binding: CapabilityBinding,
+    audit: _AuditSpy,
 ) -> None:
     receipt, _ = receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt",
         event_type="e",
         payload={},
@@ -358,7 +383,7 @@ def test_releasing_leases_does_not_reset_the_attempt_budget(
         idempotency_key="k",
         payload={},
     )
-    claim_delivery(delivery, lease_seconds=60)
+    claim_delivery(db, delivery, policy=ExecutionPolicy(lease_seconds=60))
     db.flush()
 
     later = datetime.now(UTC) + timedelta(seconds=600)
@@ -381,7 +406,7 @@ def test_releasing_leases_is_idempotent(
         idempotency_key="k",
         payload={},
     )
-    claim_delivery(delivery, lease_seconds=60)
+    claim_delivery(db, delivery, policy=ExecutionPolicy(lease_seconds=60))
     db.flush()
     later = datetime.now(UTC) + timedelta(seconds=600)
 
@@ -399,13 +424,32 @@ def test_a_live_lease_is_left_alone(
         idempotency_key="k",
         payload={},
     )
-    claim_delivery(delivery, lease_seconds=600)
+    claim_delivery(db, delivery, policy=ExecutionPolicy(lease_seconds=600))
     db.flush()
     assert release_expired_leases(db) == 0
     assert delivery.state == "in_flight"
 
 
 # ── Audit is the kernel's ledger ────────────────────────────────────────────
+
+
+def test_every_written_action_is_declared_on_the_manifest() -> None:
+    """The vocabulary is reviewable in one place.
+
+    Actions are composed from a prefix at the call site, so a prefix change
+    could silently orphan every declaration while every test still passed.
+    This pins the composed names to the manifest.
+    """
+    from dotmac_integration import module
+    from dotmac_integration.operations import AUDIT_ACTION_PREFIX
+
+    declared = set(module.audit_actions)
+    assert declared == {
+        f"{AUDIT_ACTION_PREFIX}.delivery.replayed",
+        f"{AUDIT_ACTION_PREFIX}.receipt.replayed",
+        f"{AUDIT_ACTION_PREFIX}.leases.released",
+    }
+    assert all(a.startswith(f"{AUDIT_ACTION_PREFIX}.") for a in declared)
 
 
 def test_the_module_owns_no_second_audit_ledger() -> None:

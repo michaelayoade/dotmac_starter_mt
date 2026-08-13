@@ -61,16 +61,11 @@ source_paths = [
   "dotmac_sub:app/services/integrations/external_runner.py",
 ]
 preserved_tests = [
-  # Ported WITH the code they prove, slice by slice — never in one batch.
+  # The four that port. Carried WITH the code they prove, slice by slice.
   "dotmac_sub:tests/test_integration_installations.py",
-  "dotmac_sub:tests/test_integration_installation_api.py",
-  "dotmac_sub:tests/test_integration_delivery.py",
-  "dotmac_sub:tests/test_integration_capability_sync.py",
   "dotmac_sub:tests/test_integration_manifest_adoption.py",
-  "dotmac_sub:tests/test_connector_services.py",
-  "dotmac_sub:tests/test_connector_auth_config_encryption.py",
-  "dotmac_sub:tests/test_connector_header_masking.py",
-  "dotmac_sub:tests/test_external_connector_end_to_end.py",
+  "dotmac_sub:tests/test_integration_delivery.py",
+  "dotmac_sub:tests/test_integration_installation_api.py",
 ]
 
 # NOT ported, and named so nobody ports them by reflex:
@@ -140,3 +135,33 @@ open_questions = [
 local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
 
 next_action = "Slice 1 is installation + immutable configuration revision + capability binding, with plugin manifest and package-metadata discovery, secret REFERENCES only, and refusal of duplicate plugins, incompatible SPI versions and undeclared capabilities — plus a shared fake-plugin conformance kit so the SPI is testable with no real provider and no network I/O. Slice 2 extracts the execution machinery from Sub: inbox receipts and deduplication, outbox and delivery attempts, central idempotency, retry classification and backoff, polling checkpoints, then health, audit and repair. Each mechanism gets ONE owner in the module; a plugin may never maintain a parallel ledger. Publish, then create the dotmac_integrator assembly, then the first real connector, then shadow-cut one capability."
+
+# PARITY DISPOSITIONS — one per source suite, and the reason.
+#
+# Mechanically copying all nine would port Sub's PRODUCT decisions along with
+# the engine, and would carry a legacy secret-value surface this contract
+# deliberately replaced. So each suite gets an explicit disposition, and
+# `tests/architecture/test_integration_parity.py` fails if a suite named here
+# has none — a suite cannot be quietly dropped.
+#
+# The fresh invariant tests in tests/unit/test_integration_*.py SUPPLEMENT
+# these; they do not replace them.
+[parity]
+"tests/test_integration_installations.py" = "port"
+"tests/test_integration_manifest_adoption.py" = "port"
+"tests/test_integration_delivery.py" = "port-with-fake-plugin"
+"tests/test_integration_installation_api.py" = "port-service-only"
+"tests/test_integration_capability_sync.py" = "keep-in-sub"
+"tests/test_connector_services.py" = "exclude-retiring"
+"tests/test_connector_auth_config_encryption.py" = "exclude-superseded"
+"tests/test_connector_header_masking.py" = "exclude-superseded"
+"tests/test_external_connector_end_to_end.py" = "move-to-assembly"
+
+[parity.reasons]
+"port" = "Generic engine behaviour with no product coupling. Ported as-is with the code it proves."
+"port-with-fake-plugin" = "Generic, but exercises a connector. Ported against the shipped fake-plugin conformance kit so it needs no provider and no network."
+"port-service-only" = "The SERVICE behaviour ports; the HTTP surface does not. Routes belong to the dotmac_integrator assembly, which owns its own transport tests."
+"keep-in-sub" = "A product business adapter, not engine machinery. Capability sync decides what a payload MEANS to Sub, which ADR-0024 keeps with the product."
+"exclude-retiring" = "Covers the legacy ConnectorConfig surface, which is being retired rather than ported. Porting it would preserve the architecture being removed."
+"exclude-superseded" = "Covers storing and masking secret VALUES. The new contract stores REFERENCES only, so the behaviour under test cannot occur — a ported test would assert a property the design forbids."
+"move-to-assembly" = "Container/runtime end-to-end verification. Belongs to the dotmac_integrator deployment, not to the module."

@@ -52,7 +52,7 @@ def upgrade() -> None:
         _INBOX,
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("installation_id", sa.Uuid(), nullable=False),
-        sa.Column("capability_binding_id", sa.Uuid(), nullable=True),
+        sa.Column("capability_binding_id", sa.Uuid(), nullable=False),
         sa.Column("provider_event_id", sa.String(240), nullable=False),
         sa.Column("event_type", sa.String(160), nullable=False),
         sa.Column("payload_digest", sa.String(64), nullable=False),
@@ -76,10 +76,19 @@ def upgrade() -> None:
             ondelete="CASCADE",
             name="fk_inbox_receipts_installation",
         ),
+        sa.ForeignKeyConstraint(
+            ["capability_binding_id"],
+            ["mod_intg.capability_bindings.id"],
+            ondelete="CASCADE",
+            name="fk_inbox_receipts_binding",
+        ),
+        # BINDING-scoped, as in the source: the binding determines which
+        # capability handles the event, so two bindings observing one upstream
+        # event are two receipts with two consequences.
         sa.UniqueConstraint(
-            "installation_id",
+            "capability_binding_id",
             "provider_event_id",
-            name="uq_inbox_receipts_installation_event",
+            name="uq_inbox_receipts_binding_event",
         ),
         sa.CheckConstraint(
             "state IN ('verified', 'processing', 'processed', 'retryable', "

@@ -30,9 +30,21 @@ connector SPI and package-metadata discovery — with three refusals:
 Plus secret REFERENCES only, and a dispatch seam that resolves exactly one
 enabled binding or fails closed.
 
-No inbox, no outbox, no retries, no checkpoints yet — that is slice 2, extracted
-from `dotmac_sub` with the tests that prove it. Each of those mechanisms gets
-exactly one owner here; a plugin may never maintain a parallel ledger.
+## And the execution machinery (slice 2)
+
+Inbox receipts with binding-scoped deduplication, an outbox with atomic
+leasing, retry classification and backoff, versioned polling checkpoints, and
+health/audit/repair. Each mechanism has exactly ONE owner, and a plugin may
+never maintain a parallel ledger.
+
+Two of those owners are the KERNEL, not this module: at-most-once execution is
+`dotmac_kernel.idempotency` (ADR-0014, hard rule 21) and the platform audit
+trail is `dotmac_kernel.audit`. Both are adapted here, never reimplemented.
+
+Operational numbers — retry cap, lease duration, staleness threshold — arrive
+through :class:`dotmac_integration.policy.ExecutionPolicy` rather than as
+hardcoded defaults: a webhook fan-out and a nightly bulk poll do not want the
+same backoff.
 
 ## enabled is not selected
 
@@ -83,6 +95,7 @@ from dotmac_integration.models import (
     ConnectorConfigRevision,
     ConnectorInstallation,
     DeliveryAttempt,
+    EventSubscription,
     InboxReceipt,
     PollingCheckpoint,
 )
@@ -96,8 +109,8 @@ from dotmac_integration.operations import (
     replay_delivery,
     replay_receipt,
 )
+from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
 from dotmac_integration.retry import (
-    DEFAULT_MAX_ATTEMPTS,
     Outcome,
     OutcomeStatus,
     next_state,
@@ -155,7 +168,9 @@ __all__ = [
     "InboxReceipt",
     "ExecutionError",
     "DeliveryAttempt",
-    "DEFAULT_MAX_ATTEMPTS",
+    "EventSubscription",
+    "DEFAULT_POLICY",
+    "ExecutionPolicy",
     "CheckpointConflict",
     "CURRENT_SPI_VERSION",
     "ENTRY_POINT_GROUP",

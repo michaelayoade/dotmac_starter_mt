@@ -49,12 +49,8 @@ from dotmac_integration.models import (
     InboxReceipt,
     PollingCheckpoint,
 )
-from dotmac_integration.retry import (
-    DEFAULT_MAX_ATTEMPTS,
-    Outcome,
-    next_state,
-    retry_delay_seconds,
-)
+from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
+from dotmac_integration.retry import Outcome, next_state, retry_delay_seconds
 
 __all__ = [
     "CheckpointConflict",
@@ -105,10 +101,10 @@ def receive_verified(
     db: Any,
     *,
     installation_id: UUID,
+    capability_binding_id: UUID,
     provider_event_id: str,
     event_type: str,
     payload: Any,
-    capability_binding_id: UUID | None = None,
     headers: dict | None = None,
 ) -> tuple[InboxReceipt, bool]:
     """Record a verified inbound event. Returns `(receipt, is_new)`.
@@ -126,7 +122,10 @@ def receive_verified(
 
     existing = db.execute(
         select(InboxReceipt).where(
-            InboxReceipt.installation_id == installation_id,
+            # BINDING-scoped, as in the source: the binding is what determines
+            # which capability handles the event, so two bindings observing one
+            # upstream event are two receipts with two consequences.
+            InboxReceipt.capability_binding_id == capability_binding_id,
             InboxReceipt.provider_event_id == event_id,
         )
     ).scalar_one_or_none()
@@ -181,11 +180,9 @@ def record_receipt_outcome(
     outcome: Outcome,
     *,
     consequence: dict | None = None,
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    policy: ExecutionPolicy = DEFAULT_POLICY,
 ) -> InboxReceipt:
-    state = next_state(
-        outcome, attempt_count=receipt.attempt_count, max_attempts=max_attempts
-    )
+    state = next_state(outcome, attempt_count=receipt.attempt_count, policy=policy)
     receipt.state = "processed" if state == "delivered" else state
     receipt.error_code = outcome.error_code
     receipt.error_detail = outcome.error_detail
@@ -244,22 +241,50 @@ def enqueue_delivery(
 
 
 def claim_delivery(
-    delivery: DeliveryAttempt, *, lease_seconds: int = 300, now: datetime | None = None
+    db: Any,
+    delivery: DeliveryAttempt,
+    *,
+    policy: ExecutionPolicy = DEFAULT_POLICY,
+    now: datetime | None = None,
 ) -> bool:
     """Lease a delivery for one attempt. False when another worker holds it.
 
-    The lease is what stops two dispatchers calling a provider with the same
-    payload — a duplicate no downstream idempotency can fully repair once the
-    provider has seen both.
+    A CONDITIONAL UPDATE, not an in-memory mutation. Two dispatchers reading the
+    same row, both seeing an expired lease and both assigning `state` in Python
+    would each believe they had the claim — the check and the write must be one
+    statement for the lease to mean anything.
+
+    `rowcount == 1` is the claim: the database decided, and the loser sees 0.
     """
+    from sqlalchemy import or_, update
+
     moment = now or datetime.now(UTC)
-    if delivery.state in {"delivered", "dead_letter", "reconciliation_required"}:
+    result = db.execute(
+        update(DeliveryAttempt)
+        .where(
+            DeliveryAttempt.id == delivery.id,
+            DeliveryAttempt.state.not_in(
+                ("delivered", "dead_letter", "reconciliation_required")
+            ),
+            or_(
+                DeliveryAttempt.leased_until.is_(None),
+                DeliveryAttempt.leased_until < moment,
+            ),
+        )
+        .values(
+            state="in_flight",
+            attempt_count=DeliveryAttempt.attempt_count + 1,
+            leased_until=moment + timedelta(seconds=policy.lease_seconds),
+        )
+        # The DATABASE evaluates the predicate, not the session. Letting
+        # SQLAlchemy re-evaluate it in Python to synchronise loaded objects
+        # would defeat the point of an atomic claim — and it is what decides
+        # the race, so it must be decided in one place.
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
         return False
-    if delivery.leased_until is not None and delivery.leased_until > moment:
-        return False
-    delivery.state = "in_flight"
-    delivery.attempt_count += 1
-    delivery.leased_until = moment + timedelta(seconds=max(1, lease_seconds))
+    db.refresh(delivery)
     return True
 
 
@@ -267,14 +292,14 @@ def record_delivery_outcome(
     delivery: DeliveryAttempt,
     outcome: Outcome,
     *,
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    policy: ExecutionPolicy = DEFAULT_POLICY,
     now: datetime | None = None,
 ) -> DeliveryAttempt:
     """Apply an attempt's result, releasing the lease either way."""
     moment = now or datetime.now(UTC)
     delivery.leased_until = None
     delivery.state = next_state(
-        outcome, attempt_count=delivery.attempt_count, max_attempts=max_attempts
+        outcome, attempt_count=delivery.attempt_count, policy=policy
     )
     delivery.error_code = outcome.error_code
     delivery.error_detail = outcome.error_detail
@@ -285,7 +310,7 @@ def record_delivery_outcome(
         delivery.error_code = None
         delivery.error_detail = None
     elif delivery.state == "retryable":
-        delay = retry_delay_seconds(delivery.attempt_count, outcome)
+        delay = retry_delay_seconds(delivery.attempt_count, outcome, policy=policy)
         delivery.next_attempt_at = moment + timedelta(seconds=delay)
     else:
         # dead_letter / reconciliation_required: nothing is due, and leaving a
@@ -307,18 +332,27 @@ def advance_checkpoint(
 ) -> PollingCheckpoint:
     """Move a polling cursor, refusing a stale write.
 
-    The optimistic `version` is the whole mechanism. Without it the slower of
-    two writers wins and the window between the two cursors is never polled
-    again — a silent gap, which is worse than a refusal the caller can retry.
+    A CONDITIONAL UPDATE on `version`, not a Python comparison. Comparing in
+    memory and then writing leaves a window in which both workers passed the
+    check, and the slower write wins — losing the range between the two cursors
+    permanently, with nothing to show it happened.
     """
-    if checkpoint.version != expected_version:
-        raise CheckpointConflict(
-            f"checkpoint {checkpoint.job_key!r} is at version "
-            f"{checkpoint.version}, not {expected_version}; another worker "
-            "advanced it. Re-read and retry rather than overwriting"
+    from sqlalchemy import update
+
+    moment = now or datetime.now(UTC)
+    result = db.execute(
+        update(PollingCheckpoint)
+        .where(
+            PollingCheckpoint.id == checkpoint.id,
+            PollingCheckpoint.version == expected_version,
         )
-    checkpoint.cursor_json = cursor
-    checkpoint.version = expected_version + 1
-    checkpoint.advanced_at = now or datetime.now(UTC)
-    db.flush()
+        .values(cursor_json=cursor, version=expected_version + 1, advanced_at=moment)
+    )
+    if result.rowcount != 1:
+        raise CheckpointConflict(
+            f"checkpoint {checkpoint.job_key!r} is not at version "
+            f"{expected_version}; another worker advanced it. Re-read and retry "
+            "rather than overwriting"
+        )
+    db.refresh(checkpoint)
     return checkpoint

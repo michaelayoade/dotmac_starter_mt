@@ -71,6 +71,12 @@ class NotRepairable(RuntimeError):
 
 #: Every audit action this module writes. A prefix, so integration operations
 #: are greppable in one platform ledger beside every other platform action.
+#:
+#: The composed names are DECLARED on the module manifest (`audit_actions`), so
+#: the vocabulary is reviewable in one place rather than inferred from string
+#: concatenation scattered through this file. `test_integration_operations.py`
+#: asserts the two agree — a prefix change that silently orphaned every
+#: declaration would otherwise pass.
 AUDIT_ACTION_PREFIX = "integration"
 
 

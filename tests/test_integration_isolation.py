@@ -1,0 +1,351 @@
+"""`mod_intg` composed and audited against a REAL Postgres, in a scratch database.
+
+Why a scratch database rather than the reference assembly: `dotmac-integration`
+is composed by the separate `dotmac_integrator` deployment, NOT by this
+repository's runtime (ADR-0024 §§ 6-7). Adding it to `app/assembly.py` or the
+shipped `alembic.ini` merely to get CI coverage would contradict the deployment
+boundary the module exists to establish — every starter deployment would grow a
+`mod_intg` schema it never uses.
+
+So this follows the optional-module pattern `test_files_isolation.py` and
+`test_imports_isolation.py` already use: create a throwaway database, compose
+the kernel lineage plus the `ig` lineage in a temporary Alembic configuration,
+migrate as `app_admin`, and audit.
+
+**Without this file a normal CI push exercises neither `ig_0001` nor
+`ig_0002`**, because neither lineage is part of the Starter composition. The
+migrations would first run in production.
+
+## What is proved here that a unit test cannot
+
+* the two lineages actually compose and apply, in order;
+* the live schema holds EXACTLY the tables the manifest declares — read from
+  `module.platform_tables`, never a second hand-written list that can drift;
+* the full platform-plane catalog contract: no `tenant_id`, no RLS, and
+  `app_user` REVOKEd across all seven privileges and their column-level forms;
+* the concurrency claims are real. The unit tests drive them through SQLite,
+  which cannot demonstrate that two sessions racing one row produce one winner.
+"""
+
+from __future__ import annotations
+
+import os
+import uuid
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from sqlalchemy import create_engine, text
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+KERNEL_VERSIONS = (
+    REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
+)
+INTEGRATION_VERSIONS = (
+    REPO_ROOT / "packages/dotmac-integration/src/dotmac_integration/migrations/versions"
+)
+
+
+def _superuser_url() -> str:
+    url = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL not set — the composition proof needs Postgres")
+    return url
+
+
+def _url_for(base: str, name: str, user: str | None = None) -> str:
+    from sqlalchemy.engine import make_url
+
+    url = make_url(base).set(database=name)
+    if user:
+        url = url.set(username=user, password=user)
+    return url.render_as_string(hide_password=False)
+
+
+@pytest.fixture(scope="module")
+def migrated_scratch() -> Iterator[tuple[str, str]]:
+    """A throwaway database holding kernel + `ig`, migrated as `app_admin`."""
+    superuser = _superuser_url()
+    name = f"intg_compose_{uuid.uuid4().hex[:12]}"
+    server = create_engine(superuser, isolation_level="AUTOCOMMIT")
+    with server.connect() as conn:
+        conn.execute(text(f'CREATE DATABASE "{name}"'))
+
+    setup = create_engine(_url_for(superuser, name), isolation_level="AUTOCOMMIT")
+    with setup.connect() as conn:
+        conn.execute(text("ALTER SCHEMA public OWNER TO app_admin"))
+        conn.execute(text(f'GRANT CREATE ON DATABASE "{name}" TO app_admin'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO app_user'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO platform_api'))
+        conn.execute(text("GRANT USAGE ON SCHEMA public TO app_user"))
+    setup.dispose()
+
+    admin_url = _url_for(superuser, name, user="app_admin")
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        # A TEMPORARY composition. The shipped alembic.ini is untouched, because
+        # this repository does not deploy the Integrator.
+        cfg = Config(str(REPO_ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        cfg.set_main_option(
+            "version_locations", f"{KERNEL_VERSIONS} {INTEGRATION_VERSIONS}"
+        )
+        os.environ["MIGRATION_DATABASE_URL"] = admin_url
+        command.upgrade(cfg, "heads")
+        yield admin_url, _url_for(superuser, name, user="app_user")
+    finally:
+        with server.connect() as conn:
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :n AND pid <> pg_backend_pid()"
+                ),
+                {"n": name},
+            )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        server.dispose()
+
+
+# ── Composition ─────────────────────────────────────────────────────────────
+
+
+def test_the_live_schema_holds_exactly_what_the_manifest_declares(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """Read from `module.platform_tables`, never a second list.
+
+    A hand-written expected set in this file would be a duplicate of the
+    manifest that drifts from it — and it would pass while the manifest and the
+    database disagreed, which is the one thing this test exists to catch.
+    """
+    from dotmac_integration import module
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        live = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = 'mod_intg'")
+            )
+        }
+    engine.dispose()
+
+    assert live == set(module.platform_tables)
+    assert module.tables == (), "this module owns no tenant-plane table"
+
+
+def test_the_platform_plane_catalog_contract_holds(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The kernel's own audit, run over the real schema.
+
+    `audit_live_schemas` is what enforces ADR-0023's platform contract: no
+    tenant column, no RLS, and `app_user` holding nothing. Running the module's
+    registry through it is the whole point of composing a real database.
+    """
+    from dotmac_integration import module
+    from dotmac_kernel.migrations.catalog import audit_live_schemas, audited_schemas
+    from dotmac_kernel.namespaces import NamespaceRegistry
+
+    registry = NamespaceRegistry.from_manifests([module])
+    assert "mod_intg" in audited_schemas(registry)
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        violations = audit_live_schemas(conn, registry)
+    engine.dispose()
+
+    assert not violations, "platform-plane violations:\n" + "\n".join(violations)
+
+
+@pytest.mark.parametrize(
+    "privilege",
+    ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+)
+def test_app_user_holds_nothing_on_any_table(
+    migrated_scratch: tuple[str, str], privilege: str
+) -> None:
+    """On this plane the REVOKE is the isolation, so it is checked directly and
+    across ALL SEVEN privileges — a DML-only check would pass a table
+    `app_user` could still TRUNCATE."""
+    from dotmac_integration import module
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        for table in module.platform_tables:
+            held = conn.execute(
+                text(
+                    "SELECT has_table_privilege('app_user', "
+                    "  format('mod_intg.%I', CAST(:t AS text)), "
+                    "  CAST(:p AS text))"
+                ),
+                {"t": table, "p": privilege},
+            ).scalar_one()
+            assert not held, f"app_user holds {privilege} on mod_intg.{table}"
+    engine.dispose()
+
+
+# ── Live concurrency canaries ───────────────────────────────────────────────
+#
+# SQLite cannot demonstrate that two sessions racing one row produce exactly one
+# winner. These do, against the mechanism that actually ships.
+
+
+def _installation_and_binding(conn) -> tuple[uuid.UUID, uuid.UUID]:  # type: ignore[no-untyped-def]
+    installation_id, binding_id = uuid.uuid4(), uuid.uuid4()
+    conn.execute(
+        text(
+            "INSERT INTO mod_intg.connector_installations ("
+            "id, connector_key, connector_version, spi_range, manifest_digest, "
+            "name, environment, state) VALUES ("
+            ":id, 'fake', '1.0.0', '>=1.0,<2.0', :digest, 'primary', "
+            "'production', 'enabled')"
+        ),
+        {"id": installation_id, "digest": "d" * 64},
+    )
+    conn.execute(
+        text(
+            "INSERT INTO mod_intg.capability_bindings ("
+            "id, installation_id, capability_id, state) VALUES ("
+            ":id, :installation, 'conformance.echo.v1', 'enabled')"
+        ),
+        {"id": binding_id, "installation": installation_id},
+    )
+    return installation_id, binding_id
+
+
+def test_inbox_deduplication_is_enforced_by_the_database(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """Two workers racing one redelivery is the NORMAL case, not the edge case,
+    so the constraint must be in the database rather than in a service."""
+    from sqlalchemy.exc import IntegrityError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.begin() as conn:
+        _, binding_id = _installation_and_binding(conn)
+        installation_id = conn.execute(
+            text(
+                "SELECT installation_id FROM mod_intg.capability_bindings WHERE id=:b"
+            ),
+            {"b": binding_id},
+        ).scalar_one()
+
+        insert = text(
+            "INSERT INTO mod_intg.inbox_receipts ("
+            "id, installation_id, capability_binding_id, provider_event_id, "
+            "event_type, payload_digest, state) VALUES ("
+            ":id, :inst, :binding, 'evt_1', 'e', :digest, 'verified')"
+        )
+        conn.execute(
+            insert,
+            {
+                "id": uuid.uuid4(),
+                "inst": installation_id,
+                "binding": binding_id,
+                "digest": "a" * 64,
+            },
+        )
+        with pytest.raises(IntegrityError):
+            conn.execute(
+                insert,
+                {
+                    "id": uuid.uuid4(),
+                    "inst": installation_id,
+                    "binding": binding_id,
+                    "digest": "a" * 64,
+                },
+            )
+    engine.dispose()
+
+
+def test_only_one_session_can_claim_a_delivery(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The lease, proved as a race rather than asserted.
+
+    Two sessions issue the same conditional UPDATE; exactly one must report a
+    row. If both did, two dispatchers would call the provider with one payload.
+    """
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    delivery_id = uuid.uuid4()
+    with setup.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn)
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.delivery_attempts ("
+                "id, installation_id, capability_binding_id, event_type, "
+                "idempotency_key, payload_digest, state) VALUES ("
+                ":id, :inst, :binding, 'e', 'k1', :digest, 'pending')"
+            ),
+            {
+                "id": delivery_id,
+                "inst": installation_id,
+                "binding": binding_id,
+                "digest": "c" * 64,
+            },
+        )
+    setup.dispose()
+
+    claim = text(
+        "UPDATE mod_intg.delivery_attempts SET state='in_flight', "
+        "attempt_count = attempt_count + 1, "
+        "leased_until = now() + interval '300 seconds' "
+        "WHERE id = :id AND state NOT IN "
+        "('delivered','dead_letter','reconciliation_required') "
+        "AND (leased_until IS NULL OR leased_until < now())"
+    )
+    first, second = create_engine(admin_url), create_engine(admin_url)
+    with first.begin() as a:
+        won = a.execute(claim, {"id": delivery_id}).rowcount
+    with second.begin() as b:
+        lost = b.execute(claim, {"id": delivery_id}).rowcount
+    first.dispose()
+    second.dispose()
+
+    assert (won, lost) == (1, 0)
+
+
+def test_only_one_session_can_advance_a_checkpoint(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The optimistic version, proved as a race.
+
+    Without it the slower writer wins and the window between the two cursors is
+    never polled again — a silent gap, not a visible failure.
+    """
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    checkpoint_id = uuid.uuid4()
+    with setup.begin() as conn:
+        _, binding_id = _installation_and_binding(conn)
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.polling_checkpoints ("
+                "id, capability_binding_id, job_key, version) VALUES ("
+                ":id, :binding, 'live_tail', 1)"
+            ),
+            {"id": checkpoint_id, "binding": binding_id},
+        )
+    setup.dispose()
+
+    advance = text(
+        "UPDATE mod_intg.polling_checkpoints SET version = version + 1, "
+        "advanced_at = now() WHERE id = :id AND version = 1"
+    )
+    first, second = create_engine(admin_url), create_engine(admin_url)
+    with first.begin() as a:
+        won = a.execute(advance, {"id": checkpoint_id}).rowcount
+    with second.begin() as b:
+        lost = b.execute(advance, {"id": checkpoint_id}).rowcount
+    first.dispose()
+    second.dispose()
+
+    assert (won, lost) == (1, 0)

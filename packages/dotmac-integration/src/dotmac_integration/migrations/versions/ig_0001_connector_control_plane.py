@@ -62,6 +62,7 @@ _SCHEMA = "mod_intg"
 _INSTALLATIONS = "connector_installations"
 _REVISIONS = "connector_config_revisions"
 _BINDINGS = "capability_bindings"
+_SUBSCRIPTIONS = "event_subscriptions"
 
 _JSON = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
@@ -154,6 +155,14 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "installation_id", "revision", name="uq_connector_config_revisions_number"
         ),
+        # Re-submitting an IDENTICAL configuration must not mint a new revision,
+        # or every reconcile inflates the history and "when did this last
+        # change?" stops being answerable.
+        sa.UniqueConstraint(
+            "installation_id",
+            "config_digest",
+            name="uq_connector_config_revisions_digest",
+        ),
         sa.CheckConstraint(
             "validation_status IN ('pending', 'valid', 'invalid')",
             name="ck_connector_config_revisions_validation",
@@ -168,6 +177,20 @@ def upgrade() -> None:
         _REVISIONS,
         ["installation_id", "revision"],
         schema=_SCHEMA,
+    )
+
+    # Added after both tables exist: the installation points at its current
+    # revision and the revision points back at its installation, so one of the
+    # two FKs must be created separately. Without it a deleted revision leaves
+    # an installation pointing at nothing.
+    op.create_foreign_key(
+        "fk_connector_installations_current_revision",
+        _INSTALLATIONS,
+        _REVISIONS,
+        ["current_config_revision_id"],
+        ["id"],
+        source_schema=_SCHEMA,
+        referent_schema=_SCHEMA,
     )
 
     op.create_table(
@@ -220,6 +243,51 @@ def upgrade() -> None:
         schema=_SCHEMA,
     )
 
+    op.create_table(
+        _SUBSCRIPTIONS,
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("capability_binding_id", sa.Uuid(), nullable=False),
+        sa.Column("event_type", sa.String(160), nullable=False),
+        sa.Column("state", sa.String(24), nullable=False, server_default="disabled"),
+        sa.Column("filter_json", _JSON, nullable=True),
+        sa.Column("payload_policy_json", _JSON, nullable=True),
+        sa.Column("created_by", sa.String(160), nullable=True),
+        sa.Column("updated_by", sa.String(160), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["capability_binding_id"],
+            ["mod_intg.capability_bindings.id"],
+            ondelete="CASCADE",
+            name="fk_event_subscriptions_binding",
+        ),
+        sa.UniqueConstraint(
+            "capability_binding_id",
+            "event_type",
+            name="uq_event_subscriptions_binding_event",
+        ),
+        sa.CheckConstraint(
+            "state IN ('disabled', 'enabled')", name="ck_event_subscriptions_state"
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_index(
+        "ix_event_subscriptions_event_state",
+        _SUBSCRIPTIONS,
+        ["event_type", "state"],
+        schema=_SCHEMA,
+    )
+
     # Literal per table, never looped: the composed gate reads this file
     # statically without importing it, so a statement built from a loop variable
     # is uninspectable and fails closed — correctly.
@@ -250,12 +318,22 @@ def upgrade() -> None:
         "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_intg.capability_bindings "
         "TO app_admin;"
     )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_intg.event_subscriptions "
+        "TO platform_api;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_intg.event_subscriptions "
+        "TO app_admin;"
+    )
     op.execute("REVOKE ALL ON mod_intg.connector_installations FROM app_user;")
+    op.execute("REVOKE ALL ON mod_intg.event_subscriptions FROM app_user;")
     op.execute("REVOKE ALL ON mod_intg.connector_config_revisions FROM app_user;")
     op.execute("REVOKE ALL ON mod_intg.capability_bindings FROM app_user;")
 
 
 def downgrade() -> None:
+    op.execute("DROP TABLE IF EXISTS mod_intg.event_subscriptions CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_intg.capability_bindings CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_intg.connector_config_revisions CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_intg.connector_installations CASCADE;")

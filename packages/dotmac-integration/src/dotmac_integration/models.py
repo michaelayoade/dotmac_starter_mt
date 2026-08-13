@@ -127,9 +127,18 @@ class ConnectorInstallation(Base, TimestampMixin):
     )
     state_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    #: The only mutable pointer into the immutable revision history.
+    #: The only mutable pointer into the immutable revision history. A REAL
+    #: foreign key, `use_alter` because the two tables reference each other:
+    #: without it a deleted revision leaves an installation pointing at nothing
+    #: and "what is this connector configured with?" has no answer.
     current_config_revision_id: Mapped[UUID | None] = mapped_column(
-        Uuid(), nullable=True
+        Uuid(),
+        ForeignKey(
+            f"{SCHEMA}.connector_config_revisions.id",
+            name="fk_connector_installations_current_revision",
+            use_alter=True,
+        ),
+        nullable=True,
     )
 
     validated_at: Mapped[datetime | None] = mapped_column(
@@ -154,6 +163,14 @@ class ConnectorConfigRevision(Base):
     __table_args__ = (
         UniqueConstraint(
             "installation_id", "revision", name="uq_connector_config_revisions_number"
+        ),
+        # Restored from the source. Re-submitting an IDENTICAL configuration
+        # must not mint a new revision — otherwise every reconcile inflates the
+        # history and "when did this last change?" stops being answerable.
+        UniqueConstraint(
+            "installation_id",
+            "config_digest",
+            name="uq_connector_config_revisions_digest",
         ),
         CheckConstraint(
             "validation_status IN ('pending', 'valid', 'invalid')",
@@ -254,6 +271,7 @@ PLATFORM_TABLES: tuple[str, ...] = (
     "connector_installations",
     "connector_config_revisions",
     "capability_bindings",
+    "event_subscriptions",
     "inbox_receipts",
     "delivery_attempts",
     "polling_checkpoints",
@@ -269,9 +287,59 @@ __all__ = [
     "ConnectorConfigRevision",
     "ConnectorInstallation",
     "DeliveryAttempt",
+    "EventSubscription",
     "InboxReceipt",
     "PollingCheckpoint",
 ]
+
+
+class EventSubscription(Base, TimestampMixin):
+    """Which event types a binding wants delivered.
+
+    The seventh table, and the one the first port dropped. Without it the outbox
+    has no declaration of WHAT to deliver: every enqueue would be an implicit
+    subscription decided by whatever called it, and turning a noisy event type
+    off would mean changing code rather than configuration.
+
+    `(capability_binding_id, event_type)` is unique — a binding subscribes to an
+    event type once. `filter_json` narrows within a type; `payload_policy_json`
+    says how much of the payload may cross the boundary, which is where a
+    product limits what an external system is told.
+    """
+
+    __tablename__ = "event_subscriptions"
+    __table_args__ = (
+        UniqueConstraint(
+            "capability_binding_id",
+            "event_type",
+            name="uq_event_subscriptions_binding_event",
+        ),
+        CheckConstraint(
+            "state IN ('disabled', 'enabled')", name="ck_event_subscriptions_state"
+        ),
+        Index("ix_event_subscriptions_event_state", "event_type", "state"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    capability_binding_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey(f"{SCHEMA}.capability_bindings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="disabled"
+    )
+    #: Narrows within an event type. Structural filtering only — a filter that
+    #: encoded a business rule would put product policy in the control plane.
+    filter_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    #: How much of the payload may leave. This is where a product limits what an
+    #: external system is told about its domain.
+    payload_policy_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+
+    created_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
 
 # ── Execution machinery (slice 2) ───────────────────────────────────────────
@@ -292,10 +360,14 @@ class InboxReceipt(Base):
 
     __tablename__ = "inbox_receipts"
     __table_args__ = (
+        # BINDING-scoped, as in the source. The binding is what determines
+        # which capability handles an event, so two bindings legitimately
+        # observing one upstream event are two receipts with two consequences —
+        # deduplicating them at the installation would silently drop one.
         UniqueConstraint(
-            "installation_id",
+            "capability_binding_id",
             "provider_event_id",
-            name="uq_inbox_receipts_installation_event",
+            name="uq_inbox_receipts_binding_event",
         ),
         CheckConstraint(
             "state IN ('verified', 'processing', 'processed', 'retryable', "
@@ -312,7 +384,14 @@ class InboxReceipt(Base):
         ForeignKey(f"{SCHEMA}.connector_installations.id", ondelete="CASCADE"),
         nullable=False,
     )
-    capability_binding_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    #: NOT NULL, as in the source: an inbound event that is not routed to a
+    #: capability has nothing that could process it, and admitting one would
+    #: create a receipt no consequence can ever be attached to.
+    capability_binding_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey(f"{SCHEMA}.capability_bindings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     provider_event_id: Mapped[str] = mapped_column(String(240), nullable=False)
     event_type: Mapped[str] = mapped_column(String(160), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)

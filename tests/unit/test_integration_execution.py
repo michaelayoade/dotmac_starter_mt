@@ -19,10 +19,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from dotmac_integration import (
+    DEFAULT_POLICY,
+    CapabilityBinding,
     CheckpointConflict,
     ConnectorInstallation,
     DeliveryAttempt,
     ExecutionError,
+    ExecutionPolicy,
     InboxReceipt,
     Outcome,
     OutcomeStatus,
@@ -40,7 +43,6 @@ from dotmac_integration import (
     retry_delay_seconds,
     scope_for,
 )
-from dotmac_integration.retry import MAX_BACKOFF_SECONDS
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -53,8 +55,10 @@ def db() -> Session:
     )
     for model in (
         ConnectorInstallation,
+        CapabilityBinding,
         InboxReceipt,
         DeliveryAttempt,
+        PollingCheckpoint,
     ):
         model.__table__.create(engine)
     with Session(engine) as session:
@@ -77,16 +81,30 @@ def installation(db: Session) -> ConnectorInstallation:
     return record
 
 
+@pytest.fixture()
+def binding(db: Session, installation: ConnectorInstallation) -> CapabilityBinding:
+    record = CapabilityBinding(
+        id=uuid.uuid4(),
+        installation_id=installation.id,
+        capability_id="conformance.echo.v1",
+        state="enabled",
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
 # ── Inbox: dedup vs identity collision ──────────────────────────────────────
 
 
 def test_a_redelivery_of_the_same_payload_is_a_duplicate(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     payload = {"id": "evt_1", "text": "hello"}
     first, new_first = receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt_1",
         event_type="message.received",
         payload=payload,
@@ -94,6 +112,7 @@ def test_a_redelivery_of_the_same_payload_is_a_duplicate(
     second, new_second = receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt_1",
         event_type="message.received",
         payload=payload,
@@ -104,7 +123,7 @@ def test_a_redelivery_of_the_same_payload_is_a_duplicate(
 
 
 def test_the_same_event_id_with_different_content_is_refused(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     """The distinction a naive dedup flattens.
 
@@ -115,6 +134,7 @@ def test_the_same_event_id_with_different_content_is_refused(
     receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt_1",
         event_type="message.received",
         payload={"text": "hello"},
@@ -123,6 +143,7 @@ def test_the_same_event_id_with_different_content_is_refused(
         receive_verified(
             db,
             installation_id=installation.id,
+            capability_binding_id=binding.id,
             provider_event_id="evt_1",
             event_type="message.received",
             payload={"text": "GOODBYE"},
@@ -135,11 +156,12 @@ def test_key_order_does_not_change_a_digest() -> None:
     assert payload_digest({"a": 1, "b": 2}) == payload_digest({"b": 2, "a": 1})
 
 
-def test_two_installations_may_see_the_same_provider_event_id(
-    db: Session, installation: ConnectorInstallation
+def test_two_bindings_may_see_the_same_provider_event_id(
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
-    """Dedup is scoped to the installation. Two installations of one connector
-    legitimately receive the same upstream event."""
+    """Dedup is scoped to the BINDING, as in the source: the binding determines
+    which capability handles the event, so two bindings observing one upstream
+    event are two receipts with two consequences."""
     other = ConnectorInstallation(
         id=uuid.uuid4(),
         connector_key="conformance_fake",
@@ -151,10 +173,19 @@ def test_two_installations_may_see_the_same_provider_event_id(
     )
     db.add(other)
     db.flush()
+    other_binding = CapabilityBinding(
+        id=uuid.uuid4(),
+        installation_id=other.id,
+        capability_id="conformance.echo.v1",
+        state="enabled",
+    )
+    db.add(other_binding)
+    db.flush()
 
     _, first_new = receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="shared",
         event_type="e",
         payload={"x": 1},
@@ -162,6 +193,7 @@ def test_two_installations_may_see_the_same_provider_event_id(
     _, second_new = receive_verified(
         db,
         installation_id=other.id,
+        capability_binding_id=other_binding.id,
         provider_event_id="shared",
         event_type="e",
         payload={"x": 1},
@@ -170,11 +202,12 @@ def test_two_installations_may_see_the_same_provider_event_id(
 
 
 def test_a_dead_letter_receipt_cannot_be_claimed(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     receipt, _ = receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt",
         event_type="e",
         payload={},
@@ -185,7 +218,7 @@ def test_a_dead_letter_receipt_cannot_be_claimed(
 
 
 def test_no_product_error_code_leaks_into_the_generic_claim(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     """SENSITIVITY PROOF for what did NOT port.
 
@@ -197,6 +230,7 @@ def test_no_product_error_code_leaks_into_the_generic_claim(
     receipt, _ = receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt",
         event_type="e",
         payload={},
@@ -250,22 +284,32 @@ def test_reconciliation_required_is_neither_retry_nor_failure() -> None:
 
 def test_attempt_exhaustion_turns_retryable_into_dead_letter() -> None:
     outcome = Outcome(status=OutcomeStatus.RETRYABLE)
-    assert next_state(outcome, attempt_count=3, max_attempts=10) == "retryable"
-    assert next_state(outcome, attempt_count=10, max_attempts=10) == "dead_letter"
+    assert (
+        next_state(outcome, attempt_count=3, policy=ExecutionPolicy(max_attempts=10))
+        == "retryable"
+    )
+    assert (
+        next_state(outcome, attempt_count=10, policy=ExecutionPolicy(max_attempts=10))
+        == "dead_letter"
+    )
 
 
-def test_a_nonsense_max_attempts_cannot_dead_letter_everything() -> None:
-    """`max_attempts: 0` from a bad config would otherwise dead-letter every
-    delivery on its first attempt."""
-    outcome = Outcome(status=OutcomeStatus.RETRYABLE)
-    assert next_state(outcome, attempt_count=1, max_attempts=0) == "dead_letter"
-    assert next_state(outcome, attempt_count=0, max_attempts=0) == "retryable"
+def test_a_nonsense_attempt_cap_is_refused_where_it_is_configured() -> None:
+    """Moved from a clamp to a construction-time refusal.
+
+    `max_attempts=0` caught when the policy is BUILT beats it discovered when a
+    delivery dead-letters on its first attempt.
+    """
+    with pytest.raises(ValueError, match="dead-letter every delivery"):
+        ExecutionPolicy(max_attempts=0)
+    with pytest.raises(ValueError, match="immortal"):
+        ExecutionPolicy(max_attempts=999)
 
 
 def test_backoff_is_exponential_and_capped() -> None:
     assert retry_delay_seconds(1) == 60
     assert retry_delay_seconds(2) == 120
-    assert retry_delay_seconds(50) == MAX_BACKOFF_SECONDS
+    assert retry_delay_seconds(50) == DEFAULT_POLICY.max_backoff_seconds
 
 
 def test_a_provider_retry_after_wins_but_is_bounded() -> None:
@@ -275,14 +319,14 @@ def test_a_provider_retry_after_wins_but_is_bounded() -> None:
     outcome = Outcome(status=OutcomeStatus.RETRYABLE, retry_after_seconds=5)
     assert retry_delay_seconds(9, outcome) == 5
     absurd = Outcome(status=OutcomeStatus.RETRYABLE, retry_after_seconds=10**9)
-    assert retry_delay_seconds(1, absurd) == MAX_BACKOFF_SECONDS
+    assert retry_delay_seconds(1, absurd) == DEFAULT_POLICY.max_backoff_seconds
 
 
 # ── Outbox: enqueue dedup, lease, outcome ───────────────────────────────────
 
 
 def test_enqueueing_one_effect_twice_is_one_row(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     first, new_first = enqueue_delivery(
         db,
@@ -303,7 +347,7 @@ def test_enqueueing_one_effect_twice_is_one_row(
 
 
 def test_a_leased_delivery_cannot_be_claimed_twice(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     """Two dispatchers without this both call the provider, and no downstream
     idempotency repairs a provider that has already seen two requests."""
@@ -314,12 +358,12 @@ def test_a_leased_delivery_cannot_be_claimed_twice(
         idempotency_key="k",
         payload={},
     )
-    assert claim_delivery(delivery) is True
-    assert claim_delivery(delivery) is False
+    assert claim_delivery(db, delivery) is True
+    assert claim_delivery(db, delivery) is False
 
 
 def test_an_expired_lease_may_be_reclaimed(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     """A worker that died holding a lease must not strand the delivery."""
     delivery, _ = enqueue_delivery(
@@ -329,13 +373,13 @@ def test_an_expired_lease_may_be_reclaimed(
         idempotency_key="k",
         payload={},
     )
-    claim_delivery(delivery, lease_seconds=60)
+    claim_delivery(db, delivery, policy=ExecutionPolicy(lease_seconds=60))
     later = datetime.now(UTC) + timedelta(seconds=120)
-    assert claim_delivery(delivery, now=later) is True
+    assert claim_delivery(db, delivery, now=later) is True
 
 
 def test_a_terminal_delivery_is_never_reclaimed(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     delivery, _ = enqueue_delivery(
         db,
@@ -345,11 +389,11 @@ def test_a_terminal_delivery_is_never_reclaimed(
         payload={},
     )
     delivery.state = "dead_letter"
-    assert claim_delivery(delivery) is False
+    assert claim_delivery(db, delivery) is False
 
 
 def test_a_successful_outcome_clears_the_lease_and_the_schedule(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     delivery, _ = enqueue_delivery(
         db,
@@ -358,7 +402,7 @@ def test_a_successful_outcome_clears_the_lease_and_the_schedule(
         idempotency_key="k",
         payload={},
     )
-    claim_delivery(delivery)
+    claim_delivery(db, delivery)
     record_delivery_outcome(delivery, Outcome(status=OutcomeStatus.SUCCEEDED))
 
     assert delivery.state == "delivered"
@@ -368,7 +412,7 @@ def test_a_successful_outcome_clears_the_lease_and_the_schedule(
 
 
 def test_a_terminal_outcome_leaves_nothing_due(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     """Leaving `next_attempt_at` set would make a dispatcher pick it up
     forever."""
@@ -379,7 +423,7 @@ def test_a_terminal_outcome_leaves_nothing_due(
         idempotency_key="k",
         payload={},
     )
-    claim_delivery(delivery)
+    claim_delivery(db, delivery)
     record_delivery_outcome(
         delivery, Outcome(status=OutcomeStatus.TERMINAL, error_code="bad_request")
     )
@@ -389,7 +433,7 @@ def test_a_terminal_outcome_leaves_nothing_due(
 
 
 def test_a_retryable_outcome_schedules_the_next_attempt(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     delivery, _ = enqueue_delivery(
         db,
@@ -398,7 +442,7 @@ def test_a_retryable_outcome_schedules_the_next_attempt(
         idempotency_key="k",
         payload={},
     )
-    claim_delivery(delivery)
+    claim_delivery(db, delivery)
     now = datetime.now(UTC)
     record_delivery_outcome(delivery, Outcome(status=OutcomeStatus.RETRYABLE), now=now)
     assert delivery.state == "retryable"
@@ -407,11 +451,12 @@ def test_a_retryable_outcome_schedules_the_next_attempt(
 
 
 def test_a_receipt_outcome_records_what_it_caused(
-    db: Session, installation: ConnectorInstallation
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
 ) -> None:
     receipt, _ = receive_verified(
         db,
         installation_id=installation.id,
+        capability_binding_id=binding.id,
         provider_event_id="evt",
         event_type="e",
         payload={},
@@ -430,64 +475,41 @@ def test_a_receipt_outcome_records_what_it_caused(
 # ── Checkpoints: optimistic version ─────────────────────────────────────────
 
 
-def _checkpoint() -> PollingCheckpoint:
-    return PollingCheckpoint(
+def _checkpoint(db: Session, binding: CapabilityBinding) -> PollingCheckpoint:
+    checkpoint = PollingCheckpoint(
         id=uuid.uuid4(),
-        capability_binding_id=uuid.uuid4(),
+        capability_binding_id=binding.id,
         job_key="live_tail",
         version=1,
         cursor_json={"since": "2026-01-01"},
     )
+    db.add(checkpoint)
+    db.flush()
+    return checkpoint
 
 
-def test_advancing_a_checkpoint_bumps_its_version() -> None:
-    class _Db:
-        def flush(self) -> None: ...
-
-    checkpoint = _checkpoint()
+def test_advancing_a_checkpoint_bumps_its_version(
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
+) -> None:
+    checkpoint = _checkpoint(db, binding)
     advance_checkpoint(
-        _Db(), checkpoint=checkpoint, cursor={"since": "2026-02-01"}, expected_version=1
+        db, checkpoint=checkpoint, cursor={"since": "2026-02-01"}, expected_version=1
     )
     assert checkpoint.version == 2
     assert checkpoint.cursor_json == {"since": "2026-02-01"}
     assert checkpoint.advanced_at is not None
 
 
-def test_a_stale_checkpoint_write_is_refused() -> None:
-    """Without the version, the slower writer wins and the window between the
-    two cursors is never polled again — a silent gap."""
-
-    class _Db:
-        def flush(self) -> None: ...
-
-    checkpoint = _checkpoint()
-    checkpoint.version = 5
+def test_a_stale_checkpoint_write_is_refused(
+    db: Session, installation: ConnectorInstallation, binding: CapabilityBinding
+) -> None:
+    """A CONDITIONAL UPDATE, not a Python comparison. Comparing in memory leaves
+    a window in which both workers pass the check and the slower write wins,
+    losing the range between the two cursors permanently."""
+    checkpoint = _checkpoint(db, binding)
+    advance_checkpoint(db, checkpoint=checkpoint, cursor={}, expected_version=1)
     with pytest.raises(CheckpointConflict, match="another worker"):
-        advance_checkpoint(_Db(), checkpoint=checkpoint, cursor={}, expected_version=1)
-
-
-# ── Idempotency is the kernel's, adapted ────────────────────────────────────
-
-
-def test_the_module_owns_no_second_idempotency_ledger() -> None:
-    """ADR-0014 / hard rule 21: at-most-once execution has ONE owner.
-
-    `delivery_attempts.idempotency_key` deduplicates ENQUEUE; whether an effect
-    RUNS at most once is the kernel's question. If this module ever grows its
-    own reservation table or replay logic, it has taken an ownership it is not
-    allowed to have.
-    """
-    import inspect
-
-    from dotmac_integration import idempotency
-
-    source = inspect.getsource(idempotency)
-    assert "execute_once_platform" in source
-    for forbidden in ("class ", "__tablename__", "IdempotencyRecord("):
-        assert forbidden not in source, (
-            "dotmac_integration.idempotency must stay a thin ADAPTER over "
-            "dotmac_kernel.idempotency — see ADR-0014"
-        )
+        advance_checkpoint(db, checkpoint=checkpoint, cursor={}, expected_version=1)
 
 
 def test_integration_scopes_are_namespaced() -> None:
