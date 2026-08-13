@@ -31,10 +31,12 @@ UI_SRC ?= packages/dotmac-ui/src/dotmac_ui
 MODULE_SRC ?= packages/dotmac-template-studio/src/dotmac_template_studio
 TICKETING_SRC ?= packages/dotmac-ticketing/src/dotmac_ticketing
 APPDIR_SRC ?= packages/dotmac-application-directory/src/dotmac_application_directory
+FILES_SRC ?= packages/dotmac-files/src/dotmac_files
+IMPORTS_SRC ?= packages/dotmac-imports/src/dotmac_imports
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
@@ -45,6 +47,8 @@ fleet-facts: ## Re-measure fact-level ownership coverage across ERP/CRM/Sub (sam
 	poetry run python scripts/fleet_fact_registry.py --fleet-root $(FLEET_ROOT) --check
 palette-baseline: ## Regenerate the hardcoded-palette debt baseline (commit the diff in the same change)
 	poetry run python scripts/palette_debt_baseline.py
+connector-baseline: ## Regenerate the external-connector baseline after a verified Integrator cutover (commit the diff in the same change)
+	poetry run python scripts/external_connector_sweep.py --write-baseline
 check: lint lint-imports type-check security migration-gate ui-check ## Lint + types + security + migration composition + design-system asset freshness
 	poetry run ruff format --check .
 
@@ -112,5 +116,6 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	css-build css-watch ui-build ui-check palette-baseline docker-build docker-dev \
+	css-build css-watch ui-build ui-check palette-baseline connector-baseline \
+	docker-build docker-dev \
 	bump-version deploy

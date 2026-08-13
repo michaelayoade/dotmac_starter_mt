@@ -53,8 +53,15 @@ Three consequences that earlier revisions of this file got wrong:
    copy into Sub settles *who decides*; it does not settle *where the code
    lives*. Sub then consumes the Starter module like any other assembly.
 
-So every row below resolves to kernel, a Starter module, or a contract. The
-duplication counts choose the order.
+So every row below resolves to kernel, a Starter module, an independent Dotmac
+component, or a contract. The duplication counts choose the order.
+
+The fourth of those is narrow and closed: `integration-external` resolves to the
+independently deployed **Dotmac Integrator** (ADR-0024 § 6) because external
+connector control is not a library a product installs — it owns installations,
+credentials, inbox/outbox and retries on its own runtime, and products reach it
+over versioned APIs. See [Dispositions](#dispositions) for why the component
+must be NAMED rather than the category accepted.
 
 ## How the duplication is measured
 
@@ -169,7 +176,7 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | audit-events | 6 | 2 | 7 | 0 | 2 | 0 | kernel |
 | settings | 6 | 7 | 9 | 0 | 4 | 1 | kernel (cutover in flight) |
 | scheduling-runtime | 9 | 1 | 6 | 0 | 1 | 0 | kernel |
-| integration-external | 6 | 10 | 27 | 0 | 4 | 0 | kernel primitives + module ← Sub |
+| integration-external | 6 | 10 | 27 | 0 | 4 | 0 | independent Integrator + connector plugins ← Sub |
 | branding-templates | 1 | 0 | 1 | 0 | 0 | 0 | dotmac-ui + template studio |
 | ticketing-sla | 6 | 17 | 22 | 0 | 10 | 6 | module ← Sub (package exists, adopter unnamed) |
 | projects-tasks | 10 | 11 | 11 | 0 | 10 | 0 | consolidate CRM → Sub; module source **unassigned** |
@@ -210,13 +217,14 @@ with no adjudicated source. They are marked, not resolved.
 
 ### Dispositions
 
-Every row resolves to kernel, a Starter module, or a contract. Nothing stays in
-a monolith as its permanent home.
+Every row resolves to kernel, a Starter module, an independent Dotmac
+component, or a contract. Nothing stays in a monolith as its permanent home.
 
 | Disposition | Means |
 |---|---|
 | `kernel` | A universal application invariant. Target `dotmac-kernel`; every product's local implementation retires on lineage adoption. |
 | `module ← <product>` | A coherent business domain that becomes an independently versioned Starter `dotmac-<domain>`, sourced product-first from the named qualifying implementation and its tests. **Measured duplication sets the wave, not the eligibility** — a domain with one implementation is still modularized; the second consumer proves reuse afterwards. |
+| `independent <Component>` | A capability that is not a library a product installs but a **separately deployed Dotmac application** with its own repository, release and runtime, which products reach over versioned APIs/webhooks (ADR-0024). Today the closed set is **`independent Integrator`** — the sole external-connector control plane. This disposition is deliberately a CLOSED, named set: "independent" as an open category would let any domain be parked outside the fleet's layering by inventing a name for it, so adding a second component is a reviewed diff here and in `_DESTINATIONS`, exactly like a `MIGRATION_OWNER_LEDGER` row. |
 | `consolidate → <product>, then module` | Duplicated operational state. Authority consolidates to the named owner first — an **intermediate** step that settles who decides, not where the code lives — after which that owner consumes the Starter module like any other assembly. |
 | `contract` | An annotation, not a location: two legitimate owners whose state must agree. Needs a versioned contract, drift detection and reconciliation regardless of which modules the two sides end up in. Never a merged module. |
 | `unassigned` | The target layer is settled but the qualifying *source* is not, or no owner has been adjudicated. Blocked on that decision before extraction, not before sequencing. |
@@ -258,7 +266,7 @@ families and the ratchet applies.
 | audit-events | kernel `audit.write_audit_event`; 3 local `audit_events` | 3 | as above | none | `dotmac-kernel` | Local `write_audit_*` helpers deleted; ADR-0008 declaration registry is the only vocabulary. |
 | settings | kernel `settings_resolver` (`0.1.0a40`); ERP + Sub `app/models/domain_settings.py` native enums | 3 stores + native `SettingDomain` enums | kernel `0014`/`0021` vs product enums | ERP's 21-member and Sub's 28-member enums are the live non-conformance | `dotmac-kernel` | Task #22: `ALTER TYPE`-avoiding migration to the kernel shape, Governance repin, then `0.1.0a40` adoption. Tracked in [`module-extraction-sources.md`](module-extraction-sources.md). |
 | scheduling-runtime | kernel `idempotency` (ADR-0014), `messaging`; ERP `saga_*`, `event_outbox`, `scheduled_tasks`; Sub `system_jobs`, `durable_timer`, `task_executions` | 3 at-most-once mechanisms + 2 outboxes | product lineages | ADR-0014 gives at-most-once ONE owner; today it holds no product row | `dotmac-kernel` | A product runs a real workload through `dotmac_kernel.idempotency` and retires its local reservation table. |
-| integration-external | Sub `services/integration_*`, `connector.py`; CRM `services/connector.py`, `integration_http.py`; ERP `services/sync/` | 3 connector/webhook/retry stacks | product lineages | none on the primitives; the *payloads* are domain-owned | kernel primitives (webhook delivery, retry, dead-letter) + product adapters | Connector transport moves behind a kernel facility; per-integration mapping stays in the product that owns the domain. |
+| integration-external | Sub `services/integration_*`, `connector.py`; CRM `services/connector.py`, `integration_http.py`; ERP `services/sync/` | 3 connector/webhook/retry stacks | independent Integrator lineage after product-first extraction from Sub | none on the transport primitives; each product remains authority for its domain payload and consequence | independent Dotmac Integrator core + package-discovered connector plugins + provider-neutral product ports (ADR-0024) | Add a no-new-direct-connector ratchet; extract Sub's installation/binding/inbox/outbox/retry/checkpoint mechanisms; cut over one capability with shadow receipts; then delete the matching provider client, route, task, credential and mapping from every product. Integrator core contains no provider catalogue. |
 
 ### Shared-module candidates
 
