@@ -1,0 +1,105 @@
+schema_version = 1
+package = "dotmac-integration"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "External connector control plane"
+# ADR-0024 §§ 6-7. "Independently deployed" is a RUNTIME boundary, not a
+# code-location exception to Starter's layering — an earlier reading put this
+# capability outside the module system entirely and had to be corrected. There
+# are two first-party artifacts and this dossier covers only the first:
+#
+#   dotmac-integration  THIS module. The reusable engine and its mod_intg
+#                       schema. Independently versioned, composed by an
+#                       assembly, imports no product.
+#   dotmac_integrator   a thin assembly repository that pins the kernel, this
+#                       module and connector distributions, composes them and
+#                       supplies deployment configuration. It implements no
+#                       second registry, retry engine or persistence model.
+#
+# Products do NOT each compose this module: that would duplicate credential
+# ownership, provider-account rate limiting, backoff and idempotency, which is
+# the entire reason the runtime is separate. The same shape
+# dotmac_vendor_control_plane already uses for dotmac-release-catalog.
+contract = "The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state."
+
+# PLATFORM-PLANE ONLY (ADR-0023). Declared, not discovered: a connector
+# installation, its config revisions and its delivery evidence are control-plane
+# facts about the fleet's integrations. No product queries these tables — they
+# receive provider-neutral capability messages over their own ports — and none
+# of these rows belongs to a tenant of a product data plane. The manifest will
+# therefore carry `platform_tables` with an EMPTY tenant `tables` tuple, the
+# first module in the fleet to do so.
+#
+# The source agrees: not one of Sub's seven tables carries a tenant_id, because
+# Sub runs one operator tenant and built this control-plane-scoped from the
+# start. This is a port of an existing shape, not a re-scoping.
+planes = "platform-only"
+
+source_repositories = ["dotmac_sub"]
+source_paths = [
+  # The seven tables — the mature part, and the reason this is product-first
+  # rather than a design exercise. Leasing, idempotency keys, payload digests,
+  # immutable revisions and optimistic-locked checkpoints already exist here.
+  "dotmac_sub:app/models/integration_platform.py",
+  # The generic engine.
+  "dotmac_sub:app/services/integrations/installations.py",
+  "dotmac_sub:app/services/integrations/manifest.py",
+  "dotmac_sub:app/services/integrations/registry.py",
+  "dotmac_sub:app/services/integrations/inbox.py",
+  "dotmac_sub:app/services/integrations/delivery.py",
+  "dotmac_sub:app/services/integrations/runtime.py",
+  "dotmac_sub:app/services/integrations/runtime_execution.py",
+  "dotmac_sub:app/services/integrations/runner_protocol.py",
+  "dotmac_sub:app/services/integrations/egress_gateway.py",
+  "dotmac_sub:app/services/integrations/egress_policy.py",
+  "dotmac_sub:app/services/integrations/external_runner.py",
+]
+preserved_tests = [
+  # Ported WITH the code they prove, slice by slice — never in one batch.
+  "dotmac_sub:tests/test_integration_installations.py",
+  "dotmac_sub:tests/test_integration_installation_api.py",
+  "dotmac_sub:tests/test_integration_delivery.py",
+  "dotmac_sub:tests/test_integration_capability_sync.py",
+  "dotmac_sub:tests/test_integration_manifest_adoption.py",
+  "dotmac_sub:tests/test_connector_services.py",
+  "dotmac_sub:tests/test_connector_auth_config_encryption.py",
+  "dotmac_sub:tests/test_connector_header_masking.py",
+  "dotmac_sub:tests/test_external_connector_end_to_end.py",
+]
+
+# NOT ported, and named so nobody ports them by reflex:
+#
+#   connectors/*            provider plugins — independently released
+#                           distributions, discovered by package metadata. The
+#                           module core carries no provider enum, import list or
+#                           `if provider == ...` branch.
+#   connectors/dotmac_crm   CRM and ERPNext are RETIRING. Recreating them as
+#   connectors/dotmac_erp   plugins would preserve an architecture being removed.
+#   *_capability.py         Sub business policy: what a message or payment MEANS
+#                           to Sub. Stays with the product that owns the domain.
+#   podman_transport.py     Sub deployment infrastructure.
+not_ported = ["connectors/*", "*_capability.py", "crm_ticket_readiness.py", "backoffice_contracts.py", "podman_transport.py"]
+
+contract_consumers = []
+# The thin assembly is the module's authoritative runtime. Sub is listed because
+# it is the SOURCE that must retire its engine, not because it composes the
+# module — it will keep only its capability handlers.
+candidate_consumers = ["dotmac_integrator", "dotmac_sub"]
+inventory_evidence = [
+  "docs/inventories/integration-platform-sources.md",
+  "docs/inventories/external-connector-sources.md",
+]
+
+first_cutover = "A read-only or ingress-only Meta/WhatsApp messaging capability, by Michael's 2026-08-13 direction, and deliberately NOT payments, CRM or ERPNext. It is long-lived rather than retiring, and it exercises exactly the mechanisms that are hard to get right — webhook authentication, inbound deduplication, shared provider rate limits and polling checkpoints — while leaving every message and conversation decision with the receiving product. Payments would put a money decision behind an unproven delivery ledger on its first run; CRM and ERPNext are being retired and must not be rebuilt as plugins to preserve an old architecture."
+
+shadow_and_drift = "Cutover is shadow-first: the Integrator receives the provider traffic while the product still receives only the provider-neutral capability message, and receipts, payload fingerprints, checkpoints and product outcomes are compared until there is ZERO unexplained drift. Only then is one binding activated, and only then are the provider webhook, credentials, client, task, retry and checkpoint removed from the product — lowering the external-connector ratchet baseline in the SAME change, so the retirement is reviewable as a diff rather than asserted."
+
+# Two defects the port must not carry forward silently, and must not fix
+# silently either. Both are decisions.
+open_questions = [
+  "Duplicate capability ownership is not refused today: the binding unique constraint is (installation_id, capability_id), so two DIFFERENT installations can each enable the same capability. ADR-0024 §7 requires exactly one active binding per capability with duplicates refused at activation. Sub carries scope_json, so scoped co-ownership may have been intended — this needs a ruling before the constraint changes.",
+  "No SPI version range is stored. connector_version and manifest_digest exist, but nothing records the SPI range a connector was built against, so 'an incompatible SPI version refuses activation' cannot be enforced. The first slice adds it.",
+]
+
+next_action = "Slice 1 is installation + immutable configuration revision + capability binding, with plugin manifest and package-metadata discovery, secret REFERENCES only, and refusal of duplicate plugins, incompatible SPI versions and undeclared capabilities — plus a shared fake-plugin conformance kit so the SPI is testable with no real provider and no network I/O. Slice 2 extracts the execution machinery from Sub: inbox receipts and deduplication, outbox and delivery attempts, central idempotency, retry classification and backoff, polling checkpoints, then health, audit and repair. Each mechanism gets ONE owner in the module; a plugin may never maintain a parallel ledger. Publish, then create the dotmac_integrator assembly, then the first real connector, then shadow-cut one capability."
