@@ -509,17 +509,28 @@ def test_a_legacy_stored_css_value_reaches_no_rendered_response(
     web_client: TestClient, provisioned_admin: dict, db: Session, tenant_row: Tenant
 ) -> None:
     """The security property, end to end: hostile bytes stored, never served."""
-    from dotmac_kernel.settings_models import SettingDomain
+    from dotmac_kernel.settings_models import DomainSetting, SettingDomain
     from dotmac_kernel.settings_resolver import upsert_by_key
+    from sqlalchemy import select
 
+    # A valid row through the supported writer, then the stored JSON mutated
+    # underneath it: every write path now refuses the key, so a row predating
+    # the refusal is the only way one can exist.
     hostile = "</style><script>alert(1)</script>"
     upsert_by_key(
         db,
         SettingDomain.branding,
         "ui_branding",
-        {"name": "Legacy Co", "custom_css": hostile},
+        {"name": "Legacy Co"},
         tenant_id=tenant_row.id,
     )
+    row = db.scalars(
+        select(DomainSetting).where(
+            DomainSetting.tenant_id == tenant_row.id,
+            DomainSetting.key == "ui_branding",
+        )
+    ).one()
+    row.value_json = {"name": "Legacy Co", "custom_css": hostile}
     db.commit()
 
     token = _login(web_client, provisioned_admin["email"])

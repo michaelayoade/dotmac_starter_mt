@@ -191,21 +191,34 @@ _HOSTILE_CSS = ".ok{color:red}\n</style><script>alert(1)</script>"
 
 
 def _store_legacy_css(db, tenant_row) -> None:
-    """Plant a pre-retirement value the way a real deployment would carry it.
+    """Plant a pre-retirement row the only way one can now exist: below the API.
 
-    Written through the resolver directly, NOT the settings service, because
-    the service now refuses it — which is the point: only rows that predate the
-    refusal can exist.
+    Writes a VALID row through the supported writer, then mutates the stored
+    JSON underneath it. EVERY write path refuses the key — including
+    `settings_resolver.upsert_by_key`, which runs the spec validator too, which
+    is wider coverage than the write-side tests claim on their own. So after
+    this change the only `custom_css` rows in any database are ones that
+    predate it, and this is the closest honest simulation of one.
     """
+    from dotmac_kernel.settings_models import DomainSetting
     from dotmac_kernel.settings_resolver import upsert_by_key
+    from sqlalchemy import select
 
     upsert_by_key(
         db,
         SettingDomain.branding,
         "ui_branding",
-        {"name": "Legacy Co", "custom_css": _HOSTILE_CSS},
+        {"name": "Legacy Co"},
         tenant_id=tenant_row.id,
     )
+    row = db.scalars(
+        select(DomainSetting).where(
+            DomainSetting.tenant_id == tenant_row.id,
+            DomainSetting.key == "ui_branding",
+        )
+    ).one()
+    row.value_json = {"name": "Legacy Co", "custom_css": _HOSTILE_CSS}
+    db.flush()
 
 
 def test_a_legacy_custom_css_value_is_never_merged_into_branding(db, tenant_row):
@@ -273,10 +286,15 @@ def test_known_brand_keys_matches_the_branding_editor_form_fields() -> None:
     """Pin the allowlist to the exact fields `app.features.settings.web`'s
     `_branding_form`/`branding_submit` expose -- if the editor ever grows a
     field, this test forces a conscious allowlist update in the same task.
+
+    `custom_css` left this set on 2026-08-13 (ADR-0006 D8). The two sets are
+    asserted DISJOINT as well, so a retired key can never be quietly re-added
+    to the allowlist while still claiming to be refused.
     """
     assert branding_module._KNOWN_BRAND_KEYS == frozenset(
-        {"name", "tagline", "logo_url", "primary_color", "accent_color", "custom_css"}
+        {"name", "tagline", "logo_url", "primary_color", "accent_color"}
     )
+    assert not (branding_module._KNOWN_BRAND_KEYS & RETIRED_BRAND_KEYS)
 
 
 # ---------------------------------------------------------------------------
