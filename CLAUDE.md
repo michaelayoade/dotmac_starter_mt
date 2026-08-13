@@ -467,10 +467,16 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     backlog is a two-directional ratchet that fails when the count rises OR
     falls without being lowered; "grandfathered" stays distinct from
     "reviewed and correct"; and the detector carries a sensitivity proof
-    (ADR-0018).
-
-Process: a new feature starts with its package, manifest, registry entry,
-import-linter contract, and cross-tenant isolation test.
+    (ADR-0018). — `AGENTS.md` numbers this **25**; the entries above have
+    drifted from it and `AGENTS.md` wins.
+24. A dual-plane module has ONE behaviour and TWO declared persistence planes:
+    `tables` (tenant — `tenant_id NOT NULL`, FORCEd RLS) and `platform_tables`
+    (control plane — no tenant column, no RLS, REVOKEd from the tenant app
+    role across every table and column privilege, which IS the isolation there;
+    reachable by the online platform role through schema `USAGE` plus row DML).
+    Declared, never inferred from a missing `tenant_id`; no FK crosses the
+    planes; nullable `tenant_id`, sentinel tenants and polymorphic scope columns
+    are refused by the gate (ADR-0023; `AGENTS.md` rule **27**).
 
 ## SOT-complete criteria
 

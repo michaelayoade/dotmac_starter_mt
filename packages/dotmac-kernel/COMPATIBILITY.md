@@ -137,7 +137,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.middleware.tenant` | `TenantResolverMiddleware` |
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
-| `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE` (the post-migration live-catalog contract — see the same section) |
+| `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE`, `DEFAULT_PLATFORM_ROLE`, `TABLE_PRIVILEGES` (the post-migration live-catalog contract, both planes — see the same section) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
@@ -176,7 +176,8 @@ it never grants entitlement and it never deploys anything.
   `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
   `permissions`, `audit_actions`, `feature_flags`, `setting_domains`,
   `short_code`, `migration_prefix`,
-  `migration_branch`, `tables`, `core`, `enabled_by_default`, `seed`. `code`
+  `migration_branch`, `tables`, `platform_tables`, `core`, `enabled_by_default`,
+  `seed`. `code`
   is the stable identifier every other authority references (a dependency edge,
   a profile's required/forbidden set, a capability owner). `version` is the module's own release version;
   `contract_version` is the kernel manifest generation it was built against —
@@ -281,7 +282,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a46`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a54`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -292,6 +293,8 @@ retired prefix is never reused.
 | `release_catalog` | `mod_rel` | `rl` | `release_catalog` |
 | `entitlement_allocation` | `mod_ealloc` | `ea` | `entitlement_allocation` |
 | `application_directory` | `mod_appdir` | `ad` | `application_directory` |
+| `files` | `mod_files` | `fi` | `files` |
+| `imports` | `mod_imports` | `im` | `imports` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
@@ -325,6 +328,29 @@ It is deliberately split into parameterised SQL builders (`catalog_queries()`;
 `:schema` is always a bind parameter) and a pure decision function
 (`audit_snapshot(SchemaSnapshot)`), so the contract is exercisable from
 synthetic snapshots without Postgres.
+
+**Two planes, two contracts (ADR-0023, since `0.1.0a53`).** The rules above are
+the TENANT contract, and they are what a module schema gets by default. A module
+that genuinely operates in both security contexts declares its control-plane
+tables in `ModuleManifest.platform_tables`, surfaced by
+`NamespaceRegistry.declared_platform_tables(schema)`; `declared_tables(schema)`
+remains the full ownership set across BOTH planes. A declared platform table
+must have no `tenant_id`, no RLS at all (not even ENABLEd-with-no-policy, which
+denies every row while reading as protected), and no privilege held by the
+tenant application role across **all seven** table privileges or their
+column-level forms — on that plane the REVOKE is the isolation, so it is checked
+as strictly as a policy is on the other side. It must also be reachable by
+`DEFAULT_PLATFORM_ROLE`: the role needs schema `USAGE` and at least one of
+`SELECT`, `INSERT`, `UPDATE` or `DELETE` on each platform table. Holding only
+`REFERENCES`, `TRIGGER` or `TRUNCATE` does not make an ordinary row-access path
+usable; declared-and-unusable is a violation too. No foreign key **whose source
+table is in the audited schema** may cross the two planes —
+a product-owned link table in another schema is outside this gate's reach and is
+unmonitored rather than exempt. The classification is declared, never inferred
+from a missing
+`tenant_id`: a tenant table that merely forgot its column would otherwise
+reclassify itself and lose isolation silently. **Additive** — a module declaring
+no `platform_tables` is audited exactly as before.
 
 **Two grandfathered lineages.** `kernel` and `assembly` predate D1; their
 revision ids are already recorded in live `alembic_version` rows, so

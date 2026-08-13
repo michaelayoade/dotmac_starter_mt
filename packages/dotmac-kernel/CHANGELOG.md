@@ -6,6 +6,57 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a53 — 2026-08-13
+
+Teaches the module contract that a capability can have TWO persistence planes
+(ADR-0023). Demand-pulled: `dotmac-ticketing`'s vendor-control-plane adoption is
+blocked today because a platform-only assembly cannot operate tenant-scoped
+tables, and before this the live-catalog gate required RLS on every table in a
+module schema — so a dual-plane module could not compose at all.
+
+### Added
+
+- `ModuleManifest.platform_tables` — the control-plane tables a module owns in
+  its schema, held to the PLATFORM contract instead of the tenant one. Declared,
+  never inferred from a missing `tenant_id`: a tenant table that merely forgot
+  its column would otherwise reclassify itself and lose isolation silently.
+- `NamespaceRegistry.declared_platform_tables(schema)`. `declared_tables` stays
+  the full ownership set (both planes) that the gate checks in both directions.
+- `dotmac_kernel.migrations.catalog` now audits platform tables against their
+  own contract:
+  - no `tenant_id`;
+  - **no RLS at all** — not merely no policy. ENABLEd-with-no-policy is the
+    worse failure and the one that reads as protected: it denies every row to
+    the control plane rather than erroring;
+  - **REVOKEd from the tenant application role** across **all seven** table
+    privileges (SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER) *and*
+    their column-level forms via `has_any_column_privilege`. A DML-only check
+    passed a table `app_user` could still TRUNCATE, or read through a
+    column-level grant;
+  - **reachable by `DEFAULT_PLATFORM_ROLE`** (`platform_api`) — the role needs
+    schema `USAGE` and at least one row DML privilege on every platform table;
+    `REFERENCES`, `TRIGGER` or `TRUNCATE` alone does not make a request path
+    usable. A declared plane nobody can reach is a violation, not a safe one.
+- The gate additionally refuses a foreign key crossing the two planes **whose
+  source table is in the audited schema**. A product-owned link table in
+  another schema is outside `FOREIGN_KEYS_SQL`'s reach and is therefore
+  unmonitored rather than exempt; per-plane link helpers are what cover it.
+- `ROLE_TABLE_PRIVILEGES_SQL`, `TABLE_PRIVILEGES`, `DEFAULT_PLATFORM_ROLE`, and
+  `TableFacts.app_role_privileges` / `.platform_role_privileges` /
+  `SchemaSnapshot.platform_role_has_usage` / `.platform_tables` to carry the
+  new facts.
+
+### Rejected, and enforced as rejected
+
+Nullable `tenant_id`, a sentinel tenant, and a polymorphic scope column. A table
+declared in both planes is refused at manifest construction and again in the
+registry.
+
+### Compatibility
+
+Additive. A module that declares no `platform_tables` — every module shipped
+before this — is audited exactly as it was, and there is a test pinning that.
+
 ## 0.1.0a52 — 2026-08-13
 
 No Python API or template-context change.

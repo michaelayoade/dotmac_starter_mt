@@ -245,6 +245,38 @@ specifics) points here and must never fork these rules.
     scan, so a regenerated baseline cannot legalise a regression there. (Rule
     25's ratchet shape applied to the design system; `test_palette_ratchet.py`)
 
+27. **A dual-plane module has ONE behaviour and TWO DECLARED persistence
+    planes.** A capability that genuinely operates in both security contexts —
+    a tenant data plane and the control plane — ships one lifecycle, vocabulary
+    and transition engine, and two storage planes declared separately on its
+    manifest: `tables` (tenant: `tenant_id NOT NULL`, RLS ENABLEd *and* FORCEd,
+    composite uniques) and `platform_tables` (control plane: no tenant column,
+    no RLS at all — not even ENABLEd-with-no-policy, which denies every row to
+    the control plane while reading as protected — GRANTed to the platform roles
+    and **REVOKEd from the tenant app role** across ALL SEVEN table privileges
+    and their column-level forms; on that plane the revoke IS the isolation, and
+    it is checked as strictly as a policy is on the other side). A platform
+    table must also be REACHABLE by the online platform role: that role needs
+    schema `USAGE` plus at least one row DML privilege (`SELECT`, `INSERT`,
+    `UPDATE`, `DELETE`); `REFERENCES`, `TRIGGER` or `TRUNCATE` alone does not
+    make a request path usable. Declared-and-unusable is a violation too. The
+    plane is DECLARED, never inferred from a missing `tenant_id`, or a table
+    that merely forgot the
+    column would reclassify itself and lose isolation silently; a table may
+    appear in exactly one plane. **No foreign key crosses the planes** — they
+    share a lifecycle, never a row. The gate enforces that for FKs whose SOURCE
+    is in the module schema; a product-owned link table in `public` is
+    UNMONITORED rather than exempt, which is why a dual-plane module ships one
+    link helper PER PLANE and each refuses an unusable configuration. Nullable
+    `tenant_id`, sentinel/fake tenants and polymorphic scope columns are
+    rejected and refused by the gate. Two
+    planes require a real named assembly on each side TODAY; most modules are
+    tenant-only and must stay that way. (ADR-0023;
+    `tests/unit/test_live_catalog_contract.py`,
+    `tests/unit/test_namespaces.py`,
+    `tests/architecture/test_ticketing_module.py`)
+
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
