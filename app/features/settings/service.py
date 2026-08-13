@@ -9,6 +9,7 @@ split.
 
 from __future__ import annotations
 
+from dotmac_kernel.branding import reject_retired_brand_keys
 from dotmac_kernel.exceptions import NotFoundError
 from dotmac_kernel.models import Tenant
 from dotmac_kernel.setting_domains import (
@@ -78,6 +79,19 @@ def update_setting(
         spec = get_spec(domain_enum, key)
     except KeyError:
         raise NotFoundError(f"Unknown setting: {domain}/{key}") from None
+
+    # Retired branding keys are refused HERE, not through `SettingSpec.validator`.
+    # A validator runs on the READ path too (`_check_against_spec`), so treating
+    # a legacy row as invalid would resolve the whole `ui_branding` value to its
+    # default and silently blank the tenant's name, tagline and colours. A
+    # stored legacy value is valid data that the reader ignores -- not an
+    # invalid setting. Retirement is a WRITE-time rule.
+    #
+    # This is the single write path: the generic per-key editor, the friendly
+    # branding form and the JSON settings API all land here, so one check
+    # covers all three.
+    if domain_enum is SettingDomain.branding and key == "ui_branding":
+        reject_retired_brand_keys(value)
 
     coerced = validate_spec_value(spec, value)
     upsert_by_key(db, domain_enum, key, coerced, tenant_id=tenant.id)

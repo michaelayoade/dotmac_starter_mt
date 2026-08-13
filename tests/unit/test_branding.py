@@ -191,34 +191,23 @@ _HOSTILE_CSS = ".ok{color:red}\n</style><script>alert(1)</script>"
 
 
 def _store_legacy_css(db, tenant_row) -> None:
-    """Plant a pre-retirement row the only way one can now exist: below the API.
+    """Plant a pre-retirement row.
 
-    Writes a VALID row through the supported writer, then mutates the stored
-    JSON underneath it. EVERY write path refuses the key — including
-    `settings_resolver.upsert_by_key`, which runs the spec validator too, which
-    is wider coverage than the write-side tests claim on their own. So after
-    this change the only `custom_css` rows in any database are ones that
-    predate it, and this is the closest honest simulation of one.
+    `upsert_by_key` is the low-level resolver writer used by seeds and
+    fixtures; it is NOT reachable from a request. Every request-facing write
+    goes through `settings_service.update_setting`, which is where the refusal
+    lives, so this plants the row a pre-retirement deployment would have left
+    behind without pretending the refusal can be bypassed from outside.
     """
-    from dotmac_kernel.settings_models import DomainSetting
     from dotmac_kernel.settings_resolver import upsert_by_key
-    from sqlalchemy import select
 
     upsert_by_key(
         db,
         SettingDomain.branding,
         "ui_branding",
-        {"name": "Legacy Co"},
+        {"name": "Legacy Co", "custom_css": _HOSTILE_CSS},
         tenant_id=tenant_row.id,
     )
-    row = db.scalars(
-        select(DomainSetting).where(
-            DomainSetting.tenant_id == tenant_row.id,
-            DomainSetting.key == "ui_branding",
-        )
-    ).one()
-    row.value_json = {"name": "Legacy Co", "custom_css": _HOSTILE_CSS}
-    db.flush()
 
 
 def test_a_legacy_custom_css_value_is_never_merged_into_branding(db, tenant_row):
@@ -241,6 +230,26 @@ def test_a_legacy_value_survives_for_inventory_and_export(db, tenant_row) -> Non
 
 def test_inventory_is_empty_when_nothing_legacy_is_stored(db, tenant_row) -> None:
     assert retired_brand_values(db, tenant_row.id) == {}
+
+
+def test_a_legacy_row_does_not_break_the_rest_of_the_tenants_branding(
+    db, tenant_row
+) -> None:
+    """The regression CI caught: retirement must not degrade a whole setting.
+
+    Enforcing this through `SettingSpec.validator` looked right and was wrong —
+    a validator runs on the READ path too, so a legacy row made the entire
+    `ui_branding` value fail validation and resolve to its default, silently
+    blanking the tenant's name, tagline and colours. A stored legacy value is
+    valid data the reader ignores, not an invalid setting.
+    """
+    _store_legacy_css(db, tenant_row)
+
+    branding = load_branding(db, tenant_row.id)
+
+    assert branding["name"] == "Legacy Co", "the rest of the override must survive"
+    assert "custom_css" not in branding
+    assert retired_brand_values(db, tenant_row.id) == {"custom_css": _HOSTILE_CSS}
 
 
 def test_a_write_naming_a_retired_key_is_refused_not_dropped() -> None:

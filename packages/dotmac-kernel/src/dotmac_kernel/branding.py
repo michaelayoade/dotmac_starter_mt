@@ -25,9 +25,10 @@ docstring for how each is wired into template context):
 used to be accepted, sanitized by regex, and rendered `| safe` into a
 `<style>` block. Both the field and `sanitize_branding_css` are gone:
 
-- a WRITE naming a retired key is REFUSED (`reject_retired_brand_keys`, wired
-  into the `ui_branding` spec validator so the form, the generic JSON settings
-  editor, and the API all fail the same way);
+- a WRITE naming a retired key is REFUSED (`reject_retired_brand_keys`, called
+  from the ONE write path -- `settings.service.update_setting` -- which the
+  branding form, the generic JSON settings editor and the settings API all
+  land in, so one check covers all three);
 - a legacy stored value is inert -- `custom_css` is outside
   `_KNOWN_BRAND_KEYS`, so `load_branding` never merges it and no template can
   reach it;
@@ -238,10 +239,16 @@ def load_branding(db: Session, tenant_id: UUID | None) -> dict[str, Any]:
 def reject_retired_brand_keys(value: Any) -> None:
     """Raise if a branding override names a key this contract has retired.
 
-    Called by the `ui_branding` spec validator, so it fires on EVERY write path
-    -- the branding form, the generic JSON settings editor, and the settings
-    API alike. Putting it in the editor instead would leave the API open, which
-    is the shape of gap that makes a "removed" feature reachable.
+    Called from `settings.service.update_setting` -- the ONE write path the
+    branding form, the generic JSON settings editor and the settings API all
+    land in. Putting it in the editor instead would leave the other two open,
+    which is the shape of gap that makes a "removed" feature reachable.
+
+    Deliberately NOT a `SettingSpec.validator`: a validator runs on the READ
+    path too, so a legacy row would make the whole `ui_branding` value fail
+    validation and resolve to its default, silently blanking the tenant's name,
+    tagline and colours. A stored legacy value is valid data the reader
+    ignores, not an invalid setting -- retirement is a WRITE-time rule.
 
     Refusing rather than dropping is the point: a silently ignored field trains
     an operator to believe their CSS is live.

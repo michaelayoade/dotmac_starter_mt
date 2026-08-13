@@ -18,7 +18,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from dotmac_kernel.branding import reject_retired_brand_keys
 from dotmac_kernel.settings_models import SettingDomain, SettingValueType
 from dotmac_kernel.settings_resolver import SettingSpec, register_specs
 
@@ -91,12 +90,6 @@ SPECS: list[SettingSpec] = [
             "on the Branding screen. Colours come from the allowlisted token "
             "fields; tenant-supplied CSS is not accepted."
         ),
-        # Refuse retired keys on EVERY write path. Validating here rather than
-        # in the branding form is deliberate: the form is one of three ways a
-        # value reaches this setting, and the other two (the generic JSON
-        # settings editor and the settings API) would otherwise still accept
-        # `custom_css`.
-        validator=reject_retired_brand_keys,
     ),
     SettingSpec(
         domain=SettingDomain.display,
