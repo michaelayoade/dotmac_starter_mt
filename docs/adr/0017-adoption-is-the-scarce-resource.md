@@ -8,6 +8,31 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+
+## Amendment, 2026-08-13: owner-directed exception for `dotmac-files`
+
+Michael explicitly directed the product-first `dotmac-files` optional module to
+proceed after the ERP/Sub/CRM inventory separated physical stored-file lifecycle
+from domain attachments and import processing (ADR-0022). This lifts decision
+2's moratorium for that module only.
+
+It does not declare the lineage-adoption exit gate met, does not add object
+storage to the kernel, and does not count a candidate as a contract consumer.
+Michael's later 2026-08-13 direction selects ERP and Academy as this module's
+first two adopters, then adds Vendor Control Plane as candidate cutover 3 on
+ADR-0023's explicit platform plane. ERP is cutover 1 because it is a qualifying
+source product; Academy is cutover 2 and supplies the independent avatar slice.
+Vendor CP must use `PlatformScope()` and a real durable artifact relation; it
+must not manufacture a product tenant merely to claim adoption. ERP's E8
+Organization-to-Tenant/composed-lineage gate remains a hard prerequisite, so
+this file-specific sequence does not bypass the broader decision that Sub goes
+first for kernel persistence. The dossier stays `audit-complete` until a real
+cutover retires the source owner. Import/export remains under the moratorium:
+PDF and spreadsheet signature validation is file admission, while semantic
+parsing, mapping, dry-run/apply and domain mutation require a separate
+`dotmac-imports` dossier and decision.
+
+
 ## Amendment, 2026-08-13: Vendor pulls a product-manifest publication seam
 
 Michael directed the build-once product-manifest boundary to proceed after the

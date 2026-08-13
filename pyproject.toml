@@ -48,6 +48,10 @@ dotmac-entitlement-allocation = { path = "packages/dotmac-entitlement-allocation
 # into every starter deployment. Its Postgres proof runs against a scratch
 # database in `tests/test_application_directory_isolation.py` instead.
 dotmac-application-directory = { path = "packages/dotmac-application-directory", develop = true }
+# Optional stored-object lifecycle. Like application-directory, this repository
+# builds and proves the package but deliberately does not compose its schema in
+# the reference assembly; the first product adopter owns that cutover.
+dotmac-files = { path = "packages/dotmac-files", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -115,6 +119,7 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = [
     "dotmac_entitlement_allocation.*",
+    "dotmac_files.*",
     "dotmac_release_catalog.*",
 ]
 disallow_untyped_defs = true
@@ -160,6 +165,7 @@ root_packages = [
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
     "dotmac_application_directory",
+    "dotmac_files",
 ]
 
 [[tool.importlinter.contracts]]
@@ -213,6 +219,7 @@ source_modules = [
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
     "dotmac_application_directory",
+    "dotmac_files",
 ]
 forbidden_modules = ["app"]
 
@@ -248,6 +255,7 @@ modules = [
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
     "dotmac_application_directory",
+    "dotmac_files",
 ]
 
 [[tool.importlinter.contracts]]

@@ -467,6 +467,16 @@ APPLICATION_DIRECTORY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("appdir"),
 )
 
+# `dotmac-files` — the SIXTH allocated installable module. Stored bytes are a
+# reusable optional capability, not a universal kernel primitive. `files` is
+# intentionally plain in catalog dumps, while the distinct `fi` prefix keeps
+# its independently released Alembic lineage inside the revision-id budget.
+FILES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="files",
+    prefix="fi",
+    branch_label="files",
+    db_schema=module_schema("files"),
+)
 
 # `dotmac-imports` — the SEVENTH allocated installable module. The durable
 # record of a bulk import is a reusable optional capability (ADR-0025), not a
@@ -483,6 +493,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     RELEASE_CATALOG_MIGRATION_OWNER,
     ENTITLEMENT_ALLOCATION_MIGRATION_OWNER,
     APPLICATION_DIRECTORY_MIGRATION_OWNER,
+    FILES_MIGRATION_OWNER,
 )
 
 
@@ -742,6 +753,7 @@ class NamespaceRegistry:
 __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
+    "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "KERNEL_MIGRATION_OWNER",

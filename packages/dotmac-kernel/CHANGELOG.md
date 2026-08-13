@@ -6,6 +6,20 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a54 — 2026-08-13
+
+Allocates `mod_files` to the optional `dotmac-files` module (ADR-0022).
+
+### Added
+
+- `FILES_MIGRATION_OWNER` in `dotmac_kernel.namespaces`, with schema
+  `mod_files`, revision prefix `fi`, and branch label `files` in
+  `MIGRATION_OWNER_LEDGER`.
+
+This is a namespace allocation, not an object-storage kernel facility. The
+provider, validation, metadata and reconciliation behaviour lives in the
+optional module. `0.1.0a47` remains allocated to the in-flight monetary
+coverage work; this change does not reuse it.
 ## 0.1.0a53 — 2026-08-13
 
 Teaches the module contract that a capability can have TWO persistence planes

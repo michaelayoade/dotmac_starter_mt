@@ -75,6 +75,11 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 LEDGER_ALLOCATION_RELEASES = {
     "dotmac-release-catalog": "0.1.0a44",
     "dotmac-entitlement-allocation": "0.1.0a45",
+    # ADR-0022/ADR-0023. Files declares both planes, but the capability it
+    # consumes (`platform_tables`, a53) landed BELOW its own namespace
+    # allocation, so the allocation is the higher requirement and this is
+    # the ordinary case rather than a capability-raised floor.
+    "dotmac-files": "0.1.0a54",
 }
 
 

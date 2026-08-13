@@ -32,6 +32,9 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ALLOWLIST_PATH = PROJECT_ROOT / ".github" / "release-modules.json"
 WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-module.yml"
+RECOVERY_WORKFLOW = (
+    PROJECT_ROOT / ".github" / "workflows" / "recover-module-release.yml"
+)
 KERNEL_WORKFLOW = PROJECT_ROOT / ".github" / "workflows" / "release-kernel.yml"
 SCRIPT = PROJECT_ROOT / "scripts" / "release_module.py"
 
@@ -88,7 +91,13 @@ def test_an_unallowlisted_package_cannot_be_resolved() -> None:
     for impostor in (
         "dotmac-kernel",  # real, but released by its OWN workflow
         "dotmac-ui",  # same
-        "dotmac-ticketing",  # a real module, deliberately not yet listed
+        # Real packages in `packages/`, deliberately not listed and with no
+        # release workflow of their own. `dotmac-ticketing` used to stand here
+        # and was promoted into the allowlist by the ERP-first ticket adoption
+        # programme, so the proof needs a still-unlisted stand-in or it degrades
+        # into "the gate refuses names that do not exist".
+        "dotmac-template-studio",
+        "dotmac-application-directory",
         "packages/dotmac-release-catalog",  # a path, not a distribution
         "../../etc/passwd",  # a traversal attempt
         "",  # empty
@@ -109,6 +118,20 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
         )
         assert emitted["package_dir"].startswith("packages/")
         assert emitted["tag"].startswith(emitted["tag_prefix"])
+
+
+def test_files_is_release_allowlisted_with_its_schema_allocation() -> None:
+    result = _resolve("dotmac-files", version="0.1.0a1")
+    assert result.returncode == 0, result.stderr
+    emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
+    # `mod_files` is allocated in a54. ADR-0023's `platform_tables` landed
+    # earlier (a53), so unlike ticketing the module's own namespace row is the
+    # HIGHER requirement and this stays the ordinary floor rule.
+    assert emitted["kernel_floor"] == "0.1.0a54"
+    assert emitted["db_schema"] == "mod_files"
+    assert emitted["tag"] == "dotmac-files-v0.1.0a1"
+
+
 
 
 def test_a_mismatched_version_is_refused_rather_than_inferred() -> None:
@@ -184,6 +207,17 @@ def test_the_workflow_choice_options_match_the_allowlist() -> None:
     """Drift here would offer a maintainer a module the gate then refuses — or,
     worse, quietly stop offering one that is still publishable."""
     source = WORKFLOW.read_text(encoding="utf-8")
+    options_block = source.split("options:", 1)[1].split("version:", 1)[0]
+    offered = {
+        line.strip().removeprefix("- ")
+        for line in options_block.splitlines()
+        if line.strip().startswith("- ")
+    }
+    assert offered == set(_allowlist())
+
+
+def test_the_recovery_workflow_choice_options_match_the_allowlist() -> None:
+    source = RECOVERY_WORKFLOW.read_text(encoding="utf-8")
     options_block = source.split("options:", 1)[1].split("version:", 1)[0]
     offered = {
         line.strip().removeprefix("- ")
