@@ -34,7 +34,7 @@ from dotmac_kernel.modules import ModuleManifest
 
 module = ModuleManifest(
     code="entitlement_allocation",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="ealloc",
     migration_prefix="ea",

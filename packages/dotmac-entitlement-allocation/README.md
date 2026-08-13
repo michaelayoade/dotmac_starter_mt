@@ -79,3 +79,10 @@ authority.
 ## Where it may be installed
 
 Vendor and OEM control-plane assemblies only.
+
+## Composition
+
+A consuming control-plane assembly adds the public `versions_dir()` result to
+its Alembic `version_locations` and composes `module` in its assembly spec. The
+locator resolves the installed wheel's lineage; consumers never derive a path
+from `__file__` or import the `migrations` package directly.

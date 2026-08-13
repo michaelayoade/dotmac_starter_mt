@@ -53,6 +53,7 @@ not: import from here.
 from __future__ import annotations
 
 from dotmac_entitlement_allocation.manifest import module
+from dotmac_entitlement_allocation.migrations import versions_dir
 from dotmac_entitlement_allocation.models import (
     SCHEMA,
     STAGED,
@@ -82,7 +83,7 @@ from dotmac_entitlement_allocation.service import (
     stage_allocation,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "AUDIT_ACTION_STAGED",
@@ -109,4 +110,5 @@ __all__ = [
     "module",
     "snapshot_fingerprint",
     "stage_allocation",
+    "versions_dir",
 ]
