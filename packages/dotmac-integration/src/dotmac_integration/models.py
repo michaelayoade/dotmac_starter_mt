@@ -194,17 +194,17 @@ class ConnectorConfigRevision(Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
 
-    config_json: Mapped[dict] = mapped_column(_JSON, nullable=False)
+    config_json: Mapped[dict[str, object]] = mapped_column(_JSON, nullable=False)
     #: Secret REFERENCES only — never values. `dotmac_integration.secret_refs`
     #: refuses anything that looks like material rather than a pointer.
-    secret_refs: Mapped[dict] = mapped_column(_JSON, nullable=False)
+    secret_refs: Mapped[dict[str, object]] = mapped_column(_JSON, nullable=False)
     #: Over config + refs. Immutability is checkable rather than asserted.
     config_digest: Mapped[str] = mapped_column(String(64), nullable=False)
 
     validation_status: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="pending"
     )
-    validation_errors: Mapped[list | None] = mapped_column(_JSON, nullable=True)
+    validation_errors: Mapped[list[object] | None] = mapped_column(_JSON, nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False
@@ -251,10 +251,10 @@ class CapabilityBinding(Base, TimestampMixin):
 
     #: Parity with the source, where its only consumer DISPLAYS configured
     #: domains. Never in a uniqueness constraint and never read by routing.
-    scope_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    scope_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
     #: Selection policy. `{"default": true}` marks the binding chosen when a
     #: dispatch does not name one and several are enabled.
-    policy_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    policy_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
 
     enabled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -333,10 +333,12 @@ class EventSubscription(Base, TimestampMixin):
     )
     #: Narrows within an event type. Structural filtering only — a filter that
     #: encoded a business rule would put product policy in the control plane.
-    filter_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    filter_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
     #: How much of the payload may leave. This is where a product limits what an
     #: external system is told about its domain.
-    payload_policy_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    payload_policy_json: Mapped[dict[str, object] | None] = mapped_column(
+        _JSON, nullable=True
+    )
 
     created_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
@@ -395,8 +397,8 @@ class InboxReceipt(Base):
     provider_event_id: Mapped[str] = mapped_column(String(240), nullable=False)
     event_type: Mapped[str] = mapped_column(String(160), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
-    headers_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    payload_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
+    headers_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
 
     state: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default="verified"
@@ -406,7 +408,9 @@ class InboxReceipt(Base):
     )
     #: What the receipt CAUSED, recorded so a replay can be compared against it
     #: rather than guessed at.
-    consequence_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    consequence_json: Mapped[dict[str, object] | None] = mapped_column(
+        _JSON, nullable=True
+    )
     #: A CONNECTOR's vocabulary. Stored, never branched on — see `retry`.
     error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -461,7 +465,7 @@ class DeliveryAttempt(Base):
     event_type: Mapped[str] = mapped_column(String(160), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(240), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    payload_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    payload_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
 
     state: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default="pending"
@@ -518,7 +522,7 @@ class PollingCheckpoint(Base):
     #: Which poll this is. A binding may run several (backfill vs live tail).
     job_key: Mapped[str] = mapped_column(String(160), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
-    cursor_json: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    cursor_json: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
     advanced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

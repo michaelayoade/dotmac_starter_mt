@@ -108,8 +108,8 @@ def put_config_revision(
     db: Any,
     installation: ConnectorInstallation,
     *,
-    config: dict,
-    secret_refs: dict | None = None,
+    config: dict[str, object],
+    secret_refs: dict[str, object] | None = None,
     schema_version: str = "1",
     actor: str | None = None,
 ) -> tuple[ConnectorConfigRevision, bool]:
@@ -174,8 +174,8 @@ def add_binding(
     *,
     registry: ConnectorRegistry,
     capability_id: str,
-    scope: dict | None = None,
-    policy: dict | None = None,
+    scope: dict[str, object] | None = None,
+    policy: dict[str, object] | None = None,
     actor: str | None = None,
 ) -> CapabilityBinding:
     """Declare that this installation implements a capability.
@@ -230,7 +230,7 @@ def enable(
     installation: ConnectorInstallation,
     *,
     registry: ConnectorRegistry,
-    secrets: dict | None = None,
+    secrets: dict[str, object] | None = None,
     actor: str | None = None,
 ) -> ConnectorInstallation:
     """Enable an installation, gated on a LIVE connection check.

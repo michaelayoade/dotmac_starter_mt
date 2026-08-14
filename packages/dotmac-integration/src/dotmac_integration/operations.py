@@ -87,7 +87,7 @@ def record_operation(
     entity_type: str,
     entity_id: str | None = None,
     actor_admin_id: UUID | None = None,
-    details: dict | None = None,
+    details: dict[str, object] | None = None,
 ) -> Any:
     """Write one platform audit event for an integration operation.
 

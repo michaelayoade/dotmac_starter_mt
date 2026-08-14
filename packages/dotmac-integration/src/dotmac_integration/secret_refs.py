@@ -81,10 +81,10 @@ def _is_reference(value: object) -> bool:
     if not isinstance(value, str):
         return False
     match = _REFERENCE_RE.fullmatch(value.strip())
-    return bool(match) and match.group(1) in SECRET_REFERENCE_SCHEMES
+    return match is not None and match.group(1) in SECRET_REFERENCE_SCHEMES
 
 
-def validate_secret_refs(secret_refs: dict) -> None:
+def validate_secret_refs(secret_refs: dict[str, object]) -> None:
     """Every value in `secret_refs` must be a recognised reference."""
     for name, value in (secret_refs or {}).items():
         if not _is_reference(value):
@@ -110,7 +110,9 @@ def _walk(node: object, path: str = "") -> list[tuple[str, str]]:
     return found
 
 
-def validate_config_revision(config_json: dict, secret_refs: dict) -> None:
+def validate_config_revision(
+    config_json: dict[str, object], secret_refs: dict[str, object]
+) -> None:
     """Refuse a revision that carries secret material anywhere in it.
 
     Walks `config_json` recursively: a nested `{"auth": {"api_key": "sk_live_…"}}`

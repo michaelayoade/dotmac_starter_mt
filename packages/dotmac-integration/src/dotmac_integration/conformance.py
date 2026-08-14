@@ -23,13 +23,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from importlib.metadata import EntryPoint
+from typing import Any
 
 from dotmac_integration.discovery import ConnectorRegistry, discover
 from dotmac_integration.retry import Outcome, OutcomeStatus
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     CapabilityDeclaration,
+    CapabilityHandler,
     ConnectorManifest,
     ConnectorMode,
     ConnectorPlugin,
@@ -120,7 +121,7 @@ class FakePlugin:
     def modes(self) -> frozenset[ConnectorMode]:
         return self.modes_
 
-    def handler_for(self, capability_id: str):
+    def handler_for(self, capability_id: str) -> CapabilityHandler:
         self.manifest_.require_declares(capability_id)
 
         def _handle(request: DispatchRequest) -> Outcome:
@@ -132,7 +133,7 @@ class FakePlugin:
         return _handle
 
     def validate_connection(
-        self, *, config: dict, secrets: dict
+        self, *, config: dict[str, object], secrets: dict[str, object]
     ) -> tuple[Diagnostic, ...]:
         if self.healthy:
             return (Diagnostic(ok=True, code="reachable"),)
@@ -179,9 +180,13 @@ def fake_registry(
         chosen = [FakePlugin(manifest_=m) for m in manifests]
     else:
         chosen = [fake_plugin()]
-    points: list[EntryPoint] = [
-        _StaticEntryPoint(name=p.manifest.connector_key, plugin=p)  # type: ignore[list-item]
-        for p in chosen
+    # Structurally EntryPoint-shaped, deliberately not an EntryPoint: `discover`
+    # takes injected points so the kit never has to install a distribution to
+    # test discovery. Typed as the protocol's structural shape rather than
+    # silenced — the previous `# type: ignore[list-item]` named an error code
+    # mypy no longer raises here, which is its own kind of stale.
+    points: list[Any] = [
+        _StaticEntryPoint(name=p.manifest.connector_key, plugin=p) for p in chosen
     ]
     return discover(points=points)
 
@@ -260,12 +265,18 @@ def assert_plugin_conforms(plugin: ConnectorPlugin) -> None:
                 f"handler for {capability.capability_id!r} is not callable"
             )
 
-    # An undeclared capability must be refused, not silently handled.
+    # An undeclared capability must be refused, not silently handled. Written as
+    # a flag rather than `except ...: pass` so the intent is a positive
+    # assertion: bandit reads try/except/pass as a swallowed error (B110), and
+    # the suppression that was here named ruff's equivalent code rather than
+    # bandit's — aimed at the wrong tool, which is how it stayed unnoticed
+    # while the package sat outside `make security`.
+    refused = False
     try:
         plugin.handler_for("conformance.undeclared.v1")
-    except Exception:  # noqa: S110 - the refusal IS the expected path
-        pass
-    else:
+    except Exception:
+        refused = True
+    if not refused:
         raise ConformanceFailure(
             f"connector {plugin.manifest.connector_key!r} returned a handler for "
             "a capability it never declared"

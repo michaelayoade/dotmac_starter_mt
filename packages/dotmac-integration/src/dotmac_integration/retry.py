@@ -96,8 +96,10 @@ def retry_delay_seconds(
     exponent = max(attempt_count - 1, 0)
     # Guard the shift itself: 2 ** 10_000 is computed before min() sees it.
     if exponent > 32:
-        return policy.max_backoff_seconds
-    return min(policy.max_backoff_seconds, policy.base_delay_seconds * (2**exponent))
+        return int(policy.max_backoff_seconds)
+    return int(
+        min(policy.max_backoff_seconds, policy.base_delay_seconds * (2**exponent))
+    )
 
 
 def next_state(

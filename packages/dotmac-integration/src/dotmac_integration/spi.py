@@ -160,7 +160,7 @@ class CapabilityDeclaration:
     """
 
     capability_id: str
-    config_schema: dict = field(default_factory=dict)
+    config_schema: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not _CAPABILITY_RE.fullmatch(self.capability_id):
@@ -276,10 +276,10 @@ class DispatchRequest:
 
     capability_id: str
     event_type: str
-    payload: dict
-    config: dict
+    payload: dict[str, object]
+    config: dict[str, object]
     #: Materialized at the boundary, never persisted. See `dispatch.invoke`.
-    secrets: dict
+    secrets: dict[str, object]
     idempotency_key: str
 
 
@@ -322,7 +322,7 @@ class ConnectorPlugin(Protocol):
     def handler_for(self, capability_id: str) -> CapabilityHandler: ...
 
     def validate_connection(
-        self, *, config: dict, secrets: dict
+        self, *, config: dict[str, object], secrets: dict[str, object]
     ) -> tuple[Diagnostic, ...]: ...
 
 

@@ -105,7 +105,7 @@ def receive_verified(
     provider_event_id: str,
     event_type: str,
     payload: Any,
-    headers: dict | None = None,
+    headers: dict[str, object] | None = None,
 ) -> tuple[InboxReceipt, bool]:
     """Record a verified inbound event. Returns `(receipt, is_new)`.
 
@@ -179,7 +179,7 @@ def record_receipt_outcome(
     receipt: InboxReceipt,
     outcome: Outcome,
     *,
-    consequence: dict | None = None,
+    consequence: dict[str, object] | None = None,
     policy: ExecutionPolicy = DEFAULT_POLICY,
 ) -> InboxReceipt:
     state = next_state(outcome, attempt_count=receipt.attempt_count, policy=policy)
@@ -334,7 +334,7 @@ def advance_checkpoint(
     db: Any,
     *,
     checkpoint: PollingCheckpoint,
-    cursor: dict,
+    cursor: dict[str, object],
     expected_version: int,
     now: datetime | None = None,
 ) -> PollingCheckpoint:

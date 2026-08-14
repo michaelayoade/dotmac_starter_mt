@@ -21,18 +21,24 @@ them is how a queue ends up believing it delivered something it never attempted.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING
 
 # NOT imported at module level, deliberately. `dotmac_kernel.idempotency` pulls
 # in `dotmac_kernel.db`, which constructs an Engine from settings AT IMPORT — so
 # a top-level import here would make `dotmac_integration` unimportable without a
 # DATABASE_URL, and break the clean-environment import check every module
 # release runs. Deferred to call time, where a Session already exists anyway.
+#
+# The TYPE-ONLY imports below are safe for the same reason they are useful: they
+# exist for the checker and are never evaluated at runtime, so the signature can
+# name the kernel's real contract without importing an Engine to do it.
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from dotmac_kernel.idempotency import IdempotentOutcome, Operation
+    from sqlalchemy.orm import Session
 
 __all__ = ["INTEGRATION_SCOPE_PREFIX", "run_effect_once", "scope_for"]
-
-T = TypeVar("T")
 
 #: Every scope this module reserves in the shared ledger. A prefix rather than a
 #: single scope so `integration.delivery` and `integration.inbox` are
@@ -57,19 +63,34 @@ def scope_for(mechanism: str) -> str:
 
 
 def run_effect_once(
-    db: Any,
+    db: Session,
     *,
     mechanism: str,
     key: str,
-    operation: Callable[[], T],
-    payload: Any = None,
-) -> Any:
+    operation: Operation,
+    operation_name: str | None = None,
+    fingerprint: str | None = None,
+    correlation_id: str | None = None,
+    expires_at: datetime | None = None,
+) -> IdempotentOutcome:
     """Run `operation` at most once per `(scope, key)`, platform-scoped.
 
     A direct adaptation of `dotmac_kernel.idempotency.execute_once_platform` —
     no local reservation table, no second fingerprint column, no parallel
     replay logic. If this function ever grows those, the module has acquired an
     at-most-once ledger it is not allowed to own.
+
+    "Direct adaptation" is now literal: every parameter below is the kernel's,
+    and the only thing this adds is `mechanism` → `scope`. It previously took a
+    `payload` the kernel has no parameter for, and an `operation` taking no
+    arguments where the kernel calls `operation(db)` — so the function raised
+    `TypeError` on its first call and could never have run. It had no caller and
+    no test, which is why nothing noticed; `make type-check` never covered this
+    package (see the Makefile change in the same commit).
+
+    `fingerprint` is the kernel's own column and the closest thing to what the
+    old `payload` argument appeared to intend — ADR-0014 § "the fingerprint is
+    its own column". It is passed through rather than reinvented.
     """
     from dotmac_kernel.idempotency import execute_once_platform
 
@@ -78,5 +99,8 @@ def run_effect_once(
         scope=scope_for(mechanism),
         key=key,
         operation=operation,
-        payload=payload,
+        operation_name=operation_name,
+        fingerprint=fingerprint,
+        correlation_id=correlation_id,
+        expires_at=expires_at,
     )
