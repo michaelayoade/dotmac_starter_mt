@@ -16,7 +16,22 @@ jobs:
         # duplicate revision / prefix / branch label / schema claim / table
         # ownership BEFORE `docker-build` produces an image, so it sits in this
         # cheap static matrix rather than anywhere near a database.
-        target: [lint, lint-imports, type-check, security, migration-gate]
+        #
+        # This list must equal `make check`'s prerequisites exactly, and
+        # `tests/architecture/test_ci_runs_canonical_check.py` fails the build
+        # when it does not. It silently drifted once already: `ui-check` and the
+        # formatting check were in `check` and in nobody's CI job, so committed
+        # design-system assets and formatting were unenforced on every PR.
+        target:
+          [
+            lint,
+            lint-imports,
+            type-check,
+            security,
+            migration-gate,
+            ui-check,
+            format-check,
+          ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
