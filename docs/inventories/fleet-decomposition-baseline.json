@@ -12,6 +12,14 @@
       "dotmac_sub": 3,
       "dotmac_vendor_control_plane": 0
     },
+    "approvals": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 3,
+      "dotmac_sub": 0,
+      "dotmac_vendor_control_plane": 2
+    },
     "assets-fleet": {
       "aliased": 0,
       "collisions": 0,
@@ -65,7 +73,7 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 7,
-      "dotmac_sub": 1,
+      "dotmac_sub": 2,
       "dotmac_vendor_control_plane": 0
     },
     "engagement-inbox": {
@@ -104,7 +112,7 @@
       "aliased": 0,
       "collisions": 1,
       "dotmac_crm": 0,
-      "dotmac_erp": 80,
+      "dotmac_erp": 82,
       "dotmac_sub": 7,
       "dotmac_vendor_control_plane": 0
     },
@@ -116,6 +124,14 @@
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 4
     },
+    "forms-data-capture": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 7,
+      "dotmac_sub": 0,
+      "dotmac_vendor_control_plane": 0
+    },
     "geospatial-qualification": {
       "aliased": 0,
       "collisions": 5,
@@ -123,14 +139,6 @@
       "dotmac_erp": 2,
       "dotmac_sub": 11,
       "dotmac_vendor_control_plane": 0
-    },
-    "governance-workflow": {
-      "aliased": 0,
-      "collisions": 0,
-      "dotmac_crm": 0,
-      "dotmac_erp": 20,
-      "dotmac_sub": 2,
-      "dotmac_vendor_control_plane": 2
     },
     "identity-access": {
       "aliased": 0,
@@ -177,7 +185,7 @@
       "collisions": 11,
       "dotmac_crm": 18,
       "dotmac_erp": 7,
-      "dotmac_sub": 21,
+      "dotmac_sub": 22,
       "dotmac_vendor_control_plane": 0
     },
     "outside-plant": {
@@ -200,7 +208,7 @@
       "aliased": 0,
       "collisions": 0,
       "dotmac_crm": 0,
-      "dotmac_erp": 97,
+      "dotmac_erp": 101,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 0
     },
@@ -250,6 +258,22 @@
       "dotmac_crm": 17,
       "dotmac_erp": 6,
       "dotmac_sub": 22,
+      "dotmac_vendor_control_plane": 0
+    },
+    "work-items": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 1,
+      "dotmac_sub": 0,
+      "dotmac_vendor_control_plane": 0
+    },
+    "workflow-automation": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 3,
+      "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 0
     }
   },

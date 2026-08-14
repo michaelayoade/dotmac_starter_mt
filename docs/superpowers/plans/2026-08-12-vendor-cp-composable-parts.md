@@ -112,16 +112,19 @@ invariant is that no mutating consumer of health exists. Across a package
 boundary that is a dependency direction anyone can check; inside one package it
 is a convention.
 
-## Tier B — exists only in the vendor CP, in no monolith
+## Tier B — vendor-side sources, with the A1 approvals correction
 
-The vendor CP is the qualifying product-first source and the only implementation,
-so these carry no shadow phase, no drift window and no second writer to retire.
+Except for approvals, the vendor CP is the qualifying product-first source and
+the only implementation, so those rows carry no shadow phase, no drift window
+and no second writer to retire. A1 proved approvals is shared with ERP: ERP is
+the recommended lifecycle source and Vendor supplies mandatory platform-plane
+and content-binding deltas.
 
 | Local feature | LOC | Tables | Candidate destination |
 |---|---:|---:|---|
 | `licensing` (issuance, signing, delivery, revocation, deployment credentials, applied-state admission) | 4,996 | 10 | **`dotmac-licence-issuance`** — a separate distribution from the kernel's licence *verifier*, because issuance holds a signing key that must never be installable into a product data plane. Package boundaries keep that true without relying on review |
 | `contracts` | 972 | 2 | **`dotmac-commercial-contracts`** — vendor↔operator agreements (**A2a**) |
-| `approvals` (versioned policy + content-bound approvals) | 493 | 2 | **`dotmac-approvals`** — boundary likely, source unaudited (**A1**) |
+| `approvals` (versioned policy + content-bound approvals) | 493 | 2 | **`dotmac-approvals`** — module ← ERP + mandatory Vendor deltas; accepted by ADR-0026 and authorised by ADR-0017's 2026-08-14 exception; unwritten, and the namespace lands with the module (**A1**) |
 | `allocations` | 404 | 2 | **`dotmac-entitlement-allocation`** |
 | `offers` (immutable priced offer versions) | 395 | 1 | **detached pending audit** (**A2b**) |
 | `accounts` | 332 | 1 | **not** kernel `Party` (**A3**) |
@@ -140,14 +143,18 @@ contracts detail, and if it is not its own part the fleet module re-implements i
 Four, with the rulings of 2026-08-12 applied. None blocks Wave 0 or the audits.
 All must be settled before the part they name creates a table.
 
-### A1 — `dotmac-approvals` source: boundary retained, source unaudited
+### A1 — audit complete; source recommendation awaits acceptance
 
-The module boundary is the likely right one. The *source* is not selected: the
-vendor CP's 493 LOC (versioned policy, content-bound) against ERP's 20-table
-`governance-workflow`. Hard rule 24 requires inventorying ERP before writing
-shared behaviour, so this is a source audit, not a preference. The vendor's
-content-binding property is the one the fleet work needs specifically, and the
-audit may find ERP lacks it — but that is a finding to produce, not to assume.
+The audit is
+[`../../inventories/approvals-workflow-source-audit.md`](../../inventories/approvals-workflow-source-audit.md).
+The 20 ERP rows plus Sub's two and Vendor's two decompose into eight owners; a
+generic `governance-workflow` module is rejected. The five approval rows form a
+coherent `dotmac-approvals` candidate. Recommended source: ERP's production
+tenant lifecycle, with Vendor CP's immutable policy version, content binding,
+fail-closed evaluation, idempotency and distinct-actor behavior as mandatory
+port deltas. The target is explicit tenant/platform planes and never mutates an
+approved subject. This remains a candidate until Michael accepts or amends it
+in an ADR; no package or namespace is allocated by the audit.
 
 ### A2 — split in two
 
@@ -204,7 +211,7 @@ of the reasons the count is not frozen.
 | # | Work | Why it is not gated |
 |---|---|---|
 | **W0** | Repin the vendor CP off `dotmac-kernel==0.1.0a9` (the kernel is at `0.1.0a41`) and rewrite its `docs/ARCHITECTURE.md` "still design-only" list. `messaging.{outbox,inbox,envelope}`, `money`, `capabilities`, `entitlements`, `profiles` and `idempotency` all shipped in the intervening 32 alphas; several things it believes are blocked are not | Adopting already-released surface is the opposite of a new facility. ADR-0017 explicitly permits improvements to adopted surface |
-| **W1** | **A1 audit** — ERP `governance-workflow` against the vendor's content-bound approvals | Hard rule 24 requires it before any shared behaviour is written |
+| **W1** | **A1 audit complete** — exact dispositions and source recommendation checked in; decision acceptance remains | Evidence gate is closed; an ADR decision still precedes any package, namespace or shared behavior |
 | **W2** | **A2b audit** — the reusable offer-catalogue core and its boundary; Sub and vendor CP as inputs | Same |
 | **W3** | **A3 redesign** — commercial account against Party/PartyRole per ADR-0019 §5b, as a design note, not tables | ADR-0019 §6 blocks the packaging, not the modelling |
 | **W4** | `EXTRACTION.toml` dossiers for the Tier B units, following `packages/dotmac-ticketing/EXTRACTION.toml` | A dossier records the source decision; it is not the extraction |
@@ -224,8 +231,9 @@ is already standing when it lands:
 
 Tier B extractions interleave with these rather than forming a wave of their own:
 each is cheap, independent, and unblocks nothing else. Order by independence —
-approvals (pending A1), entitlement allocation, commercial contracts, then
-licence issuance last, being the largest and most migration-heavy.
+after A1 acceptance, Vendor is the first approvals adopter; entitlement
+allocation and commercial contracts remain independent; licence issuance stays
+last, being the largest and most migration-heavy.
 
 ## Gates
 

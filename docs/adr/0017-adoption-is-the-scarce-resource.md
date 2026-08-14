@@ -8,6 +8,66 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-14: owner-directed exception for `dotmac-approvals`
+
+[ADR-0026](0026-approvals-decide-approval-never-the-transition.md) accepted the
+approval boundary and the source ruling, and created nothing — no package, no
+namespace, no lineage. Michael then explicitly directed implementation, lifting
+decision 2's moratorium for that named module only.
+
+The evidence is the A1 source audit
+([`approvals-workflow-source-audit.md`](../inventories/approvals-workflow-source-audit.md),
+row ledger [`approval-workflow-dispositions.toml`](../inventories/approval-workflow-dispositions.toml)),
+which compared ERP's and Vendor CP's implementations table by table and writer
+by writer before any shared code was proposed.
+
+**This is a named owner direction, not a demand pull.** The audit found no
+independently blocked product: ERP runs the larger tenant lifecycle and Vendor CP
+runs the stronger safety identity, and each works today. So neither the evidence,
+the duplicated capability, nor the two named candidate consumers satisfies this
+ADR's demand-pulled exception — that still requires a product that cannot
+proceed. The source evidence explains what the module should BE; Michael's
+direction is the authority for building it. It creates no general route around
+the moratorium for the next dossier or extraction candidate, exactly as the
+`dotmac-files` and `dotmac-imports` amendments below record for theirs.
+
+What is closest to a pull, and is worth stating precisely because it is not
+sufficient on its own: the vendor control plane needs content-bound approval for
+fleet plans, and it is cutover 1 for that reason plus two structural ones — its
+plane has no `tenant_id` prerequisite, so it does not wait on ERP's E8 decision,
+and its local implementation is two tables and one service rather than three
+tables plus a routing service. ERP is cutover 2, after E8.
+
+**The exception authorises the module, and the module carries its own
+allocation.** Nothing is reserved in advance: the change that writes
+`dotmac-approvals` allocates `mod_approvals` against the then-current kernel
+alpha and opens its `EXTRACTION.toml` in the same diff. Reserving a namespace
+earlier would have meant renumbering it at every rebase while the alpha train is
+contended, and holding a manifest-less ledger row honest with a package-specific
+gate. ADR-0026 § 8 records that reasoning; if "allocated but unbuilt" is ever
+worth having as a state, it needs a generic ledger mechanism and a generic gate
+rather than a one-off.
+
+**What this amendment does not do.** It does not declare the lineage-adoption
+exit gate met, does not lift the moratorium for any other gap-list facility, and
+does not turn either candidate into a contract consumer — the dossier will open
+at `audit-complete` and stay there until a real cutover retires a source owner.
+It does not adjudicate `dotmac-automation` or `dotmac-forms`, each of which still
+needs its own product-first audit and decision. And it does not make the module
+publishable: `.github/release-modules.json` gains no entry until the live
+Postgres migration and catalog gate has passed, which is the same
+absence-is-the-safety-mechanism posture `dotmac-ticketing` sat in below.
+
+Implementation order follows ADR-0026 § 7/7a/7b: port ERP's request and decision
+lifecycle as typed services that mutate and flush — leaving its threshold and FX
+routing in ERP, which selects the exact policy revision and passes it in — add
+Vendor CP's six deltas as named port deltas carrying their own source tests,
+prove the canaries ADR-0026 § 5 requires, then shadow, compare, switch and
+delete per adopter, with no permanent compatibility projection. Vendor CP's
+comparison covers only the six safety properties it actually implements; its
+request lifecycle is proven by ERP parity and new module tests, because there is
+no old lifecycle there to compare against.
+
 ## Amendment, 2026-08-13: owner-directed exception for `dotmac-ticketing`, and ERP goes first
 
 Michael directed the `dotmac-ticketing` optional module into adoption, with two

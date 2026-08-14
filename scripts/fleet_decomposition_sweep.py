@@ -106,7 +106,7 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         "notifications-comms",
         r"^(notification|notifications$|comms_|communication|"
         r"campaign|crm_campaign|survey|email_|sms_|push_|"
-        r"alert_notification|portal_messages|message_template|"
+        r"admin_alerts$|alert_notification|portal_messages|message_template|"
         r"module_email_routing|.*_notifications$|.*_notification_.*)",
     ),
     (
@@ -168,6 +168,7 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         r"revenue_recognition|performance_obligation|payee|pfa_directory|"
         r"remita_|card_transaction|corporate_card|cash_|ownership_interest|"
         r"transaction_rule|numbering_sequence|price_list|analysis_cube|"
+        r"control_evidence$|disclosure_checklist$|"
         r"saved_analysis|balance_refresh)",
     ),
     (
@@ -177,7 +178,8 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         r"training|discipl|grievance|exit_interview|holiday|hr_document|"
         r"loan_|succession_|position|designation|department|competency|"
         r"kra$|performance_(contract|improvement|review)|appraisal|"
-        r"clearance_item|staging_(employee|department|designation|"
+        r"case_(action|document|response|witness)$|clearance_item|"
+        r"staging_(employee|department|designation|"
         r"employment))",
     ),
     (
@@ -219,15 +221,16 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         r"monthly_review|institutional_|pms_|performance$|coach_|"
         r".*_snapshots?$|.*_aggregates$)",
     ),
-    (
-        "governance-workflow",
-        r"^(approval_|workflow|form|case_|control_evidence|"
-        r"disclosure|checklist|admin_alerts|admin_whats_new|"
-        r"bulk_actions)",
-    ),
+    # A1 audit (2026-08-14): the old `governance-workflow` catch-all merged
+    # eight owners on prefixes alone. These are deliberately narrow families;
+    # approval, automation, forms and human work items do not share authority.
+    ("approvals", r"^approval_"),
+    ("workflow-automation", r"^workflow_(rule|execution)"),
+    ("work-items", r"^workflow_task$"),
+    ("forms-data-capture", r"^form($|_)"),
     (
         "content-help",
-        r"^(help_|attachment|stored_files|avatar|public_media|"
+        r"^(admin_whats_new|help_|attachment|stored_files|avatar|public_media|"
         r".*_attachments?$|.*_comments?$)",
     ),
     ("branding-templates", r"^(brand|template_|document_template|.*_templates$)"),
