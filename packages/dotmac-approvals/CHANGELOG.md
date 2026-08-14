@@ -1,9 +1,10 @@
 # Changelog — dotmac-approvals
 
 All notable changes to the `dotmac-approvals` distribution. This package follows
-[Semantic Versioning](https://semver.org). Nothing has been published: the
-package is absent from `.github/release-modules.json` until its live Postgres
-migration and catalog gate has passed.
+[Semantic Versioning](https://semver.org). Nothing has been published yet; the
+`.github/release-modules.json` entry landed once the live Postgres migration and
+catalog gate passed, which is what makes a release possible rather than one that
+has happened.
 
 ## 0.1.0a1 — 2026-08-14
 

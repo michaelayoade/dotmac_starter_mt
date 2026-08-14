@@ -343,15 +343,35 @@ def test_the_public_api_names_its_plane_and_carries_no_plane_flag() -> None:
 # ── Release posture ─────────────────────────────────────────────────────────
 
 
-def test_the_package_is_not_release_eligible_until_the_live_gate_passes() -> None:
-    """Absence from the closed allowlist is the safety mechanism (ADR-0026 § 8).
-    The entry lands with the live Postgres proof, never ahead of it."""
+def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
+    """The entry landed WITH the live Postgres proof, not ahead of it.
+
+    Absence from the closed allowlist was the safety mechanism while
+    `tests/test_approvals_isolation.py` had not run against a real database
+    (ADR-0026 § 8). It has now, in the same change, so the entry exists — and
+    what it asserts has to match the allocation, or a release would publish a
+    wheel claiming a schema and a kernel floor the module does not have.
+    """
     import json
 
     allowlist = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]
-    assert "dotmac-approvals" not in allowlist
+    entry = allowlist["dotmac-approvals"]
+    assert entry["db_schema"] == module.db_schema
+    assert entry["import_name"] == "dotmac_approvals"
+    assert entry["tag_prefix"] == "dotmac-approvals-v"
+    assert entry["kernel_floor"] == "0.1.0a59"
+    # The lineage is a REQUIRED wheel content: this repository does not compose
+    # the module, so a wheel that shipped the manifest and dropped the migration
+    # would fail first in an adopter's deployment rather than here.
+    assert (
+        "dotmac_approvals/migrations/versions/ap_0001_approvals.py"
+        in entry["wheel_contents"]["required"]
+    )
+    # Only dotmac-ticketing may import Alembic at runtime; this module emits no
+    # DDL into a consumer's migration.
+    assert "alembic" not in entry["wheel_contents"]["allowed_requires"]
 
 
 def test_the_dossier_claims_no_adoption_yet() -> None:
