@@ -134,8 +134,106 @@ def test_the_live_schema_holds_exactly_what_the_manifest_declares(
         }
     engine.dispose()
 
+    # NOT vacuous: an empty manifest and an empty schema would satisfy the
+    # equality above while proving nothing ran. The count is asserted against
+    # the declaration's own length, so adding a table does not edit this test,
+    # but a manifest that declares NOTHING fails it.
+    assert live, "mod_intg holds no table — the ig lineage did not apply"
+    assert len(module.platform_tables) == len(set(module.platform_tables)) >= 7
     assert live == set(module.platform_tables)
     assert module.tables == (), "this module owns no tenant-plane table"
+
+
+def test_the_module_registers_and_claims_only_its_own_schema(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """Registration is the first thing a kernel below the floor breaks.
+
+    `from_manifests` raises `UnallocatedNamespaceError` without the ledger row,
+    so this fails loudly on a kernel predating the allocation rather than
+    surfacing as a confusing migration error later.
+    """
+    from dotmac_integration import module
+    from dotmac_kernel.migrations.catalog import audited_schemas
+    from dotmac_kernel.namespaces import NamespaceRegistry
+
+    registry = NamespaceRegistry.from_manifests([module])
+    assert set(audited_schemas(registry)) == {"mod_intg"}
+    assert module.platform_tables, "a platform-only module with no platform table"
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        # The platform runtime role must REACH the plane: a table grant is
+        # ineffective without schema USAGE, so a plane nobody can read is broken
+        # even when every prohibition passes.
+        ("platform_api", True),
+        # And the tenant role must not. Kernel 0.1.0a57 stopped REQUIRING this
+        # USAGE on a platform-only schema; nothing in the kernel forbids it, so
+        # the module's own migration is what must not grant it — which makes
+        # this an assertion the module owns, not one the kernel makes for it.
+        ("app_user", False),
+    ],
+)
+def test_schema_usage_follows_reachability(
+    migrated_scratch: tuple[str, str], role: str, expected: bool
+) -> None:
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        held = conn.execute(
+            text("SELECT has_schema_privilege(CAST(:r AS text), 'mod_intg', 'USAGE')"),
+            {"r": role},
+        ).scalar_one()
+    engine.dispose()
+    assert held is expected, (
+        f"{role} {'lacks' if expected else 'holds'} USAGE on mod_intg — "
+        "USAGE belongs to the role that must reach the plane, and only to it"
+    )
+
+
+def test_the_audit_actually_bites_on_this_schema(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The sensitivity proof for the clean audit above (ADR-0018).
+
+    `audit_live_schemas` returning no violations is only evidence if it CAN
+    return one here. A detector that silently skipped `mod_intg` — a bad schema
+    filter, a plane misread as tenant-only, an exception swallowed — would look
+    exactly like a passing contract.
+
+    So a violation is manufactured against the live schema and the audit is made
+    to report it. Rolled back inside the transaction it was granted in, because
+    the scratch database is module-scoped and shared with the canaries below.
+    """
+    from dotmac_integration import module
+    from dotmac_kernel.migrations.catalog import audit_live_schemas
+    from dotmac_kernel.namespaces import NamespaceRegistry
+
+    registry = NamespaceRegistry.from_manifests([module])
+    victim = sorted(module.platform_tables)[0]
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        transaction = conn.begin()
+        try:
+            conn.execute(text(f'GRANT SELECT ON mod_intg."{victim}" TO app_user'))
+            violations = audit_live_schemas(conn, registry)
+        finally:
+            transaction.rollback()
+
+        assert violations, (
+            "app_user was granted SELECT on a platform table and the audit "
+            "reported nothing — the clean run above proves nothing"
+        )
+        assert any(victim in v for v in violations)
+
+        # and the rollback restored the contract, so the shared database is not
+        # left poisoned for every test that runs after this one
+        assert not audit_live_schemas(conn, registry)
+    engine.dispose()
 
 
 def test_the_platform_plane_catalog_contract_holds(
