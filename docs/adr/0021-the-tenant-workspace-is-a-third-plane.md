@@ -306,6 +306,12 @@ subscriptions, inbox/delivery state and checkpoints
 source for a future `dotmac-integrations` module once its production adoption is
 verified.
 
+**Decision amendment — 2026-08-13 (ADR-0024).** The earlier plural package name
+above is superseded: the reusable stateful engine is Starter's
+`dotmac-integration` module. Its one authoritative installation is composed by
+the independently deployed, thin `dotmac_integrator` assembly; Workspace and
+other products call that runtime and do not each install the module.
+
 ## Consequences
 
 - The customer-facing cross-application question finally has an owner, and the

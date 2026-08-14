@@ -519,10 +519,29 @@ IMPORTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("imports"),
 )
 
+# `dotmac-integration` — the EIGHTH allocated installable module, and the first
+# allocated PLATFORM-PLANE ONLY: its manifest declares `platform_tables` and an
+# empty tenant `tables` tuple (ADR-0023, ADR-0024 §§ 6-7). A connector
+# installation, its configuration revisions, its capability bindings and its
+# delivery evidence are control-plane facts about the fleet's integrations; no
+# product queries them, and none of them belongs to a tenant of a product data
+# plane.
+#
+# `intg` rather than `integration`: the schema prefix is read in catalog dumps
+# and log lines, and `mod_integration` spends characters a reader does not need.
+# `ig` leaves 20 characters of the revision-id budget for a readable slug.
+INTEGRATION_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="integration",
+    prefix="ig",
+    branch_label="integration",
+    db_schema=module_schema("intg"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
     TICKETING_MIGRATION_OWNER,
+    INTEGRATION_MIGRATION_OWNER,
     RELEASE_CATALOG_MIGRATION_OWNER,
     ENTITLEMENT_ALLOCATION_MIGRATION_OWNER,
     APPLICATION_DIRECTORY_MIGRATION_OWNER,
@@ -791,6 +810,7 @@ __all__ = [
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
+    "INTEGRATION_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",

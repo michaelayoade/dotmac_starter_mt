@@ -6,6 +6,27 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a58 — 2026-08-14
+
+Allocates `mod_intg` to `dotmac-integration`, the connector control-plane module
+(ADR-0024 §§ 6-7).
+
+### Added
+
+- `INTEGRATION_MIGRATION_OWNER` in `dotmac_kernel.namespaces` — schema
+  `mod_intg`, revision prefix `ig`, branch label `integration`.
+
+The first allocation for a module that is PLATFORM-PLANE ONLY: it declares
+`platform_tables` with an empty tenant `tables` tuple (ADR-0023). A connector
+installation and its delivery evidence are control-plane facts; no product
+queries them and none belongs to a tenant. Renumbered off a56, which the
+upstream train had already published for logical cross-lineage ordering.
+
+A ledger row adds no behaviour — it is the checked-in allocation record that
+makes "globally unique" enforceable across repositories, and nothing consumes it
+but the module it names.
+
+
 ## 0.1.0a57 — 2026-08-14
 
 Corrects the live-catalog gate for a PLATFORM-ONLY module schema (ADR-0023).

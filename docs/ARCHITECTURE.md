@@ -25,20 +25,24 @@ shares a contract and implementation, never a cross-application database.
 Modules import neither the assembly nor sibling modules; the assembly connects
 published contracts and owns product relations.
 
-Shared execution paths have no product/provider switch. Provider connectors are
-installed into the Integrator through ADR-0024's versioned plugin SPI, while
-products expose provider-neutral capability ports. Endpoints and credentials are
-configuration, but business authority is an accepted ownership contract, not a
-configurable default. Outbound synchronization is delivered after commit
-through a durable outbox so a local transaction never depends on another
-application's uptime.
+Shared execution paths have no product/provider switch. The reusable engine is
+Starter's stateful `dotmac-integration` module; the independently deployed
+`dotmac_integrator` repository is a thin assembly that pins kernel, that module
+and connector packages and runs them. Provider connectors are installed into
+that runtime through ADR-0024's versioned plugin SPI, while products expose
+provider-neutral capability ports. Products do not each compose the engine
+module. Endpoints and credentials are configuration, but business authority is
+an accepted ownership contract, not a configurable default. Outbound
+synchronization is delivered after commit through a durable outbox so a local
+transaction never depends on another application's uptime.
 
 Connector distributions register by package metadata and declare versioned
-capabilities; the Integrator core contains no provider catalogue. The core owns
-installations, immutable configuration revisions, one active binding per
+capabilities; `dotmac-integration` contains no provider catalogue. The module
+owns installations, immutable configuration revisions, one active binding per
 installation/capability, secret materialization, inbox/outbox, retry,
-checkpoints, health and repair evidence. Plugins own only provider wire
-translation and I/O. Products therefore add no provider client or conditional
+checkpoints, health, repair evidence and its own `mod_*` lineage. Plugins own
+only provider wire translation and I/O. The thin assembly adds no competing
+engine or persistence. Products therefore add no provider client or conditional
 when an external system changes.
 
 For ticketing this means separate local installations: Sub owns operational

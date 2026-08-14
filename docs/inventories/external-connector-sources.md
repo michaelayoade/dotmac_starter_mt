@@ -14,18 +14,20 @@ countable and stop it growing — not an extraction plan.
 
 ## The layering this measures the distance to
 
-| Layer | Owns |
-|---|---|
-| Product | Provider-neutral APIs, business decisions, local records |
-| Integrator core | Installations, bindings, secrets, inbox/outbox, retries, checkpoints, audit and repair |
-| Connector plugin | Provider authentication, wire translation and I/O only |
-| HTTP client library | Transport policy only; no registry or orchestration |
+| Artifact | Owns | Location |
+|---|---|---|
+| Product | Provider-neutral APIs, business decisions, local records | Each independent product assembly |
+| Reusable engine | Registry, installations, bindings, secret references, inbox/outbox, retries, checkpoints, audit and repair | Starter's stateful `dotmac-integration` module, with its own `mod_*` schema and lineage |
+| Deployment | Pins kernel, `dotmac-integration` and connector packages; runs the engine | Thin `dotmac_integrator` assembly repository and independent runtime |
+| Connector plugin | Provider authentication, wire translation and I/O only | Independently released plugin distribution |
+| HTTP client library | Transport policy only; no registry or orchestration | `dotmac-integration-client` distribution |
 
 Plugins are discovered through package metadata, target a versioned SPI, declare
 typed configuration and capabilities, and fail closed on incompatible or
-duplicate bindings. **The Integrator core contains no provider enum and no
-conditional tree** — the ADR-0008 rule that governs every other Dotmac
-vocabulary, applied here.
+duplicate bindings. **The `dotmac-integration` module contains no provider enum
+and no conditional tree** — the ADR-0008 rule that governs every other Dotmac
+vocabulary, applied here. Independent deployment describes the thin assembly's
+runtime boundary; it does not move reusable engine code outside Starter.
 
 ## The measurement
 
@@ -51,8 +53,8 @@ actually deletes.
 - **Sub's `ConnectorType` enum is exactly what must NOT be ported.**
   `app/models/connector.py` declares `webhook|http|email|whatsapp|smtp|stripe|
   twilio|facebook|instagram|custom`. That is the provider enum ADR-0024 forbids
-  in the Integrator core. The mechanism (installations, bindings, checkpoints,
-  retries) ports; the catalogue becomes plugin package metadata. A port that
+  in the `dotmac-integration` module. The mechanism (installations, bindings,
+  checkpoints, retries) ports; the catalogue becomes plugin package metadata. A port that
   brings the enum has rebuilt the thing the ADR rejects.
 - **The vendor control plane is already at the target shape** — zero in every
   category. It is the proof the layering is reachable, and the ratchet asserts
@@ -104,13 +106,16 @@ repository it cannot see as zero would report the duplication as solved.
 
 1. **This document** — inventory and ratchets. *Done for the six categories
    above.*
-2. Create the independent `dotmac_integrator` repository.
-3. Extract the mature generic control-plane behaviour and parity tests
-   product-first from Sub — **without** its `ConnectorType` enum.
-4. Implement the SPI, package discovery and a shared fake-connector conformance
-   kit.
+2. Extract the mature generic control-plane behaviour and parity tests
+   product-first from Sub into Starter's stateful `dotmac-integration` module —
+   **without** its `ConnectorType` enum.
+3. Implement the module's SPI, package discovery and shared fake-connector
+   conformance kit.
+4. Create the thin `dotmac_integrator` assembly repository. It pins kernel, the
+   exact module release and connector distributions; it does not own a second
+   engine implementation.
 5. Shadow the first genuinely required, non-retiring external capability through
-   the Integrator.
+   that deployment.
 6. Delete each product connector after verified cutover, lowering this baseline
    in the same change. Do not recreate ERPNext or CRM plugins if those systems
    are being retired.

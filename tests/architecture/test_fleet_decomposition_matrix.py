@@ -52,10 +52,6 @@ REQUIRED_DISPOSITIONS = (
     "consolidate →",
     "contract",
     "unassigned",
-    # ADR-0024 § 6: a separately deployed Dotmac application, not a module a
-    # product installs. Listed so the matrix cannot use the disposition in a row
-    # without defining it.
-    "independent <component>",
 )
 
 # The rule the matrix exists to state, and the one earlier revisions got wrong.
@@ -133,17 +129,12 @@ def _disposition_cells(source: str) -> list[str]:
     )
 
 
-# The CLOSED set of places a capability may end up. Each entry is matched in a
-# declared form rather than by keyword, because the defect this guard exists to
-# catch was literally the cell `contract, not a module` — which contains the
-# word "module" and means the opposite.
-#
-# `independent integrator` is NAMED rather than matched as `independent \w+` on
-# purpose. An open "independent <anything>" category would let any domain be
-# parked outside the fleet's layering by inventing a name for it, which is the
-# monolith-parking this test exists to prevent, one indirection later. Adding a
-# second independent component is therefore a reviewed diff here and in the
-# matrix's Dispositions table — the same treatment a namespace allocation gets.
+# The CLOSED set of code destinations. Runtime/deployment names deliberately do
+# not appear: an independently deployed thin assembly still composes reusable
+# code from one of these layers. Each entry is matched in a declared form rather
+# than by keyword, because the defect this guard exists to catch was literally
+# the cell `contract, not a module` — which contains the word "module" and means
+# the opposite.
 _DESTINATIONS = (
     r"\bkernel\b",
     r"module ←",
@@ -151,8 +142,6 @@ _DESTINATIONS = (
     r"\bdotmac-ui\b",
     # A settled module, named as its distribution once the package is real.
     r"`dotmac-[a-z-]+`",
-    # The sole independently deployed Dotmac component (ADR-0024 § 6).
-    r"\bindependent (dotmac )?integrator\b",
 )
 
 
@@ -181,6 +170,10 @@ def test_destination_detector_rejects_transitions_and_metadata() -> None:
     assert not _has_destination("retire-to-Sub")
     assert not _has_destination("consolidate → Sub")
     assert not _has_destination("contract with ERP")
+    # A deployment topology is not a code destination. The Integrator engine
+    # still has to resolve to a Starter module composed by that deployment.
+    assert not _has_destination("independent Integrator")
+    assert not _has_destination("independent Dotmac Integrator core")
 
     assert _has_destination("module ← ERP")
     assert _has_destination("consolidate → Sub, then module ← Sub")
@@ -189,22 +182,21 @@ def test_destination_detector_rejects_transitions_and_metadata() -> None:
     assert _has_destination("dotmac-ui + template studio")
 
 
-def test_an_independent_component_is_a_destination_only_when_it_is_NAMED() -> None:
-    """The escape hatch this closed set exists to keep shut.
+def test_integrator_deployment_does_not_create_a_code_destination() -> None:
+    """The engine is a Starter module; the independent repo only runs it."""
+    source = MATRIX.read_text()
+    match = re.search(
+        r"^\|\s*integration-external\s*\|(?:\s*\d+\s*\|){6}([^|]*)\|\s*$",
+        source,
+        re.MULTILINE,
+    )
+    assert match is not None
+    assert match.group(1).strip() == "module ← Sub"
 
-    "Independent <something>" is a real destination — ADR-0024 § 6 makes the
-    Integrator a separately deployed application rather than a module a product
-    installs. But accepting the CATEGORY would let any domain be parked outside
-    the fleet's layering by inventing a name for it, which is monolith-parking
-    with an extra step. Only the adjudicated component matches.
-    """
-    assert _has_destination("independent Integrator + connector plugins ← Sub")
-    assert _has_destination("independent Dotmac Integrator core")
-
-    assert not _has_destination("independent service")
-    assert not _has_destination("independent product")
-    assert not _has_destination("independent ERP subsystem")
-    assert not _has_destination("stays independent in Sub")
+    normalized = " ".join(source.split())
+    assert "`dotmac-integration` module" in normalized
+    assert "thin `dotmac_integrator` assembly" in normalized
+    assert "independent <Component>" not in source
 
 
 def test_a_settled_module_may_be_named_as_its_distribution() -> None:

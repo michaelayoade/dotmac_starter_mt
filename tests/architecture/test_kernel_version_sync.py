@@ -75,6 +75,14 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 LEDGER_ALLOCATION_RELEASES = {
     "dotmac-release-catalog": "0.1.0a44",
     "dotmac-entitlement-allocation": "0.1.0a45",
+    # Listed here though the module is not release-registered yet: this map
+    # gates the FLOOR, not publication. An unenforced floor is how the same
+    # allocation drifted across a56 twice before landing on a58.
+    #
+    # Ledger-allocated rather than capability-raised even though it consumes
+    # `platform_tables` (a53) and `requires` (a56): the floor is the higher of
+    # the two, and its own allocation is the higher.
+    "dotmac-integration": "0.1.0a58",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

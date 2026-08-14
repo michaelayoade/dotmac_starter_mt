@@ -1,0 +1,180 @@
+schema_version = 1
+package = "dotmac-integration"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "External connector control plane"
+# ADR-0024 §§ 6-7. "Independently deployed" is a RUNTIME boundary, not a
+# code-location exception to Starter's layering — an earlier reading put this
+# capability outside the module system entirely and had to be corrected. There
+# are two first-party artifacts and this dossier covers only the first:
+#
+#   dotmac-integration  THIS module. The reusable engine and its mod_intg
+#                       schema. Independently versioned, composed by an
+#                       assembly, imports no product.
+#   dotmac_integrator   a thin assembly repository that pins the kernel, this
+#                       module and connector distributions, composes them and
+#                       supplies deployment configuration. It implements no
+#                       second registry, retry engine or persistence model.
+#
+# Products do NOT each compose this module: that would duplicate credential
+# ownership, provider-account rate limiting, backoff and idempotency, which is
+# the entire reason the runtime is separate. The same shape
+# dotmac_vendor_control_plane already uses for dotmac-release-catalog.
+contract = "The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state."
+
+# PLATFORM-PLANE ONLY (ADR-0023). Declared, not discovered: a connector
+# installation, its config revisions and its delivery evidence are control-plane
+# facts about the fleet's integrations. No product queries these tables — they
+# receive provider-neutral capability messages over their own ports — and none
+# of these rows belongs to a tenant of a product data plane. The manifest will
+# therefore carry `platform_tables` with an EMPTY tenant `tables` tuple, the
+# first module in the fleet to do so.
+#
+# The source agrees: not one of Sub's seven tables carries a tenant_id, because
+# Sub runs one operator tenant and built this control-plane-scoped from the
+# start. This is a port of an existing shape, not a re-scoping.
+planes = "platform-only"
+
+# ERP and CRM are listed because the product-first rule required inventorying
+# them, NOT because either supplied an implementation. Neither references any of
+# Sub's seven integration tables; what they have is their own direct connector
+# surface, already frozen and counted in external-connector-sources.md (ERP 21,
+# CRM 33 `http_client` files). CRM's is deletion rather than migration.
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_crm"]
+source_paths = [
+  # The seven tables — the mature part, and the reason this is product-first
+  # rather than a design exercise. Leasing, idempotency keys, payload digests,
+  # immutable revisions and optimistic-locked checkpoints already exist here.
+  "dotmac_sub:app/models/integration_platform.py",
+  # The generic engine.
+  "dotmac_sub:app/services/integrations/installations.py",
+  "dotmac_sub:app/services/integrations/manifest.py",
+  "dotmac_sub:app/services/integrations/registry.py",
+  "dotmac_sub:app/services/integrations/inbox.py",
+  "dotmac_sub:app/services/integrations/delivery.py",
+  "dotmac_sub:app/services/integrations/runtime.py",
+  "dotmac_sub:app/services/integrations/runtime_execution.py",
+  "dotmac_sub:app/services/integrations/runner_protocol.py",
+  "dotmac_sub:app/services/integrations/egress_gateway.py",
+  "dotmac_sub:app/services/integrations/egress_policy.py",
+  "dotmac_sub:app/services/integrations/external_runner.py",
+]
+preserved_tests = [
+  # The four that port. Carried WITH the code they prove, slice by slice.
+  "dotmac_sub:tests/test_integration_installations.py",
+  "dotmac_sub:tests/test_integration_manifest_adoption.py",
+  "dotmac_sub:tests/test_integration_delivery.py",
+  "dotmac_sub:tests/test_integration_installation_api.py",
+]
+
+# NOT ported, and named so nobody ports them by reflex:
+#
+#   connectors/*            provider plugins — independently released
+#                           distributions, discovered by package metadata. The
+#                           module core carries no provider enum, import list or
+#                           `if provider == ...` branch.
+#   connectors/dotmac_crm   CRM and ERPNext are RETIRING. Recreating them as
+#   connectors/dotmac_erp   plugins would preserve an architecture being removed.
+#   *_capability.py         Sub business policy: what a message or payment MEANS
+#                           to Sub. Stays with the product that owns the domain.
+#   podman_transport.py     Sub deployment infrastructure.
+not_ported = ["connectors/*", "*_capability.py", "crm_ticket_readiness.py", "backoffice_contracts.py", "podman_transport.py"]
+
+contract_consumers = []
+# The thin assembly is the module's authoritative runtime. Sub is listed because
+# it is the SOURCE that must retire its engine, not because it composes the
+# module — it will keep only its capability handlers.
+candidate_consumers = ["dotmac_integrator", "dotmac_sub"]
+inventory_evidence = [
+  "docs/inventories/integration-platform-sources.md",
+  "docs/inventories/external-connector-sources.md",
+]
+
+first_cutover = "A read-only or ingress-only Meta/WhatsApp messaging capability, by Michael's 2026-08-13 direction, and deliberately NOT payments, CRM or ERPNext. It is long-lived rather than retiring, and it exercises exactly the mechanisms that are hard to get right — webhook authentication, inbound deduplication, shared provider rate limits and polling checkpoints — while leaving every message and conversation decision with the receiving product. Payments would put a money decision behind an unproven delivery ledger on its first run; CRM and ERPNext are being retired and must not be rebuilt as plugins to preserve an old architecture."
+
+shadow_and_drift = "Cutover is shadow-first: the Integrator receives the provider traffic while the product still receives only the provider-neutral capability message, and receipts, payload fingerprints, checkpoints and product outcomes are compared until there is ZERO unexplained drift. Only then is one binding activated, and only then are the provider webhook, credentials, client, task, retry and checkpoint removed from the product — lowering the external-connector ratchet baseline in the SAME change, so the retirement is reviewable as a diff rather than asserted."
+
+# Binding multiplicity — RESOLVED 2026-08-13, and the earlier reading here was
+# wrong. This entry records the correction because a dossier that quietly drops
+# a misreading teaches nobody why it was wrong.
+#
+# THE RULE: "Each installation may bind a capability once. Multiple
+# installations may implement it, but every dispatch must identify or resolve
+# exactly one enabled binding; absent, stale, or ambiguous routing fails
+# closed."
+#
+# An earlier revision recorded Sub's (installation_id, capability_id) unique
+# constraint as a DEFECT against ADR-0024 §7. It is not. §7 says "each
+# (installation, capability) has exactly one active connector binding" — the
+# tuple, never a global per-capability constraint — and Sub enforces exactly
+# that tuple. Two distinct concepts were being conflated:
+#
+#   ENABLED   an installation is capable and permitted to implement a
+#             capability. MANY installations may be enabled for one capability.
+#   SELECTED  the single binding chosen for one concrete dispatch. Zero or
+#             multiple matches fail closed.
+#
+# Sub already separates them: `require_enabled_capability_binding` filters
+# enabled bindings, narrows by an optional connector_key, and where several
+# remain requires exactly one `policy_json.default is True` — raising "multiple
+# enabled bindings; exactly one must be default" otherwise. Routing never reads
+# `scope_json`; its only observed consumer displays configured ERP domains.
+#
+# So the module preserves the tuple constraint, does NOT constrain capability_id
+# alone, and does NOT put raw scope_json in any uniqueness constraint. JSON
+# equality cannot detect overlapping scopes, so if scoped routing ever gains a
+# real consumer it needs a separate typed route/assignment contract with
+# canonical keys and overlap rules — not a constraint bolted onto a JSON column.
+binding_multiplicity = "Unique on (installation_id, capability_id). Many installations may implement one capability; dispatch resolves exactly one enabled binding or fails closed."
+
+# CLOSED 2026-08-13: the SPI range is now STORED on the installation
+# (`connector_installations.spi_range`) as well as compared, and checked at
+# discovery, startup and activation. Storing it is what lets a later MODULE
+# upgrade refuse a previously activated binding — the case that bites, where
+# the plugin did not change but the host did.
+open_questions = []
+
+local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
+
+next_action = "Slices 1-2 and step 4.5 are complete: installation/config/binding, the executable plugin SPI with package-metadata discovery, the lifecycle owner, the three-phase dispatch seam, inbox/outbox/retry/checkpoints, health/audit/repair, the seven platform tables, machine-checkable parity dispositions with ported_to evidence, and a Postgres composition proof with live concurrency canaries. REMAINING before release eligibility: nothing in the module itself — the next changes are (1) add dotmac-integration to release-modules.json and the release workflow choice with kernel floor 0.1.0a58 and a wheel inspection requiring both migrations and the full public surface; (2) publish kernel 0.1.0a58, then dotmac-integration 0.1.0a1, then verify the published registry composition; (3) create the dotmac_integrator thin assembly, which only pins, composes, configures and exposes health/operations; (4) build the first real connector — a read-only or ingress-only Meta/WhatsApp messaging capability, NOT payments, CRM or ERPNext; (5) shadow-cut one capability and lower the external-connector ratchet baseline in the same change."
+
+# PARITY DISPOSITIONS — one per source suite, and the reason.
+#
+# Mechanically copying all nine would port Sub's PRODUCT decisions along with
+# the engine, and would carry a legacy secret-value surface this contract
+# deliberately replaced. So each suite gets an explicit disposition, and
+# `tests/architecture/test_integration_parity.py` fails if a suite named here
+# has none — a suite cannot be quietly dropped.
+#
+# The fresh invariant tests in tests/unit/test_integration_*.py SUPPLEMENT
+# these; they do not replace them.
+[parity]
+"tests/test_integration_installations.py" = "port"
+"tests/test_integration_manifest_adoption.py" = "port"
+"tests/test_integration_delivery.py" = "port-with-fake-plugin"
+"tests/test_integration_installation_api.py" = "port-service-only"
+"tests/test_integration_capability_sync.py" = "keep-in-sub"
+"tests/test_connector_services.py" = "exclude-retiring"
+"tests/test_connector_auth_config_encryption.py" = "exclude-superseded"
+"tests/test_connector_header_masking.py" = "exclude-superseded"
+"tests/test_external_connector_end_to_end.py" = "move-to-assembly"
+
+# WHERE each ported suite's behaviour now lives. Without this the parity table
+# proves ACCOUNTING — that every suite has a verdict — but not PORTING. A test
+# asserts each file and named case exists, so a promise cannot outlive its
+# evidence.
+[parity.ported_to]
+"tests/test_integration_installations.py" = "tests/unit/test_integration_lifecycle.py::test_a_draft_pins_the_connector_installed_right_now"
+"tests/test_integration_manifest_adoption.py" = "tests/unit/test_integration_lifecycle.py::test_adoption_is_idempotent"
+"tests/test_integration_delivery.py" = "tests/unit/test_integration_lifecycle.py::test_a_dispatch_reaches_the_plugin_with_materialized_secrets"
+"tests/test_integration_installation_api.py" = "tests/unit/test_integration_lifecycle.py::test_the_service_surface_the_routes_would_call_is_complete"
+
+[parity.reasons]
+"port" = "Generic engine behaviour with no product coupling. Ported as-is with the code it proves."
+"port-with-fake-plugin" = "Generic, but exercises a connector. Ported against the shipped fake-plugin conformance kit so it needs no provider and no network."
+"port-service-only" = "The SERVICE behaviour ports; the HTTP surface does not. Routes belong to the dotmac_integrator assembly, which owns its own transport tests."
+"keep-in-sub" = "A product business adapter, not engine machinery. Capability sync decides what a payload MEANS to Sub, which ADR-0024 keeps with the product."
+"exclude-retiring" = "Covers the legacy ConnectorConfig surface, which is being retired rather than ported. Porting it would preserve the architecture being removed."
+"exclude-superseded" = "Covers storing and masking secret VALUES. The new contract stores REFERENCES only, so the behaviour under test cannot occur — a ported test would assert a property the design forbids."
+"move-to-assembly" = "Container/runtime end-to-end verification. Belongs to the dotmac_integrator deployment, not to the module."

@@ -134,21 +134,34 @@ provider clients, provider credentials, provider webhook verification,
 connector scheduling, checkpoints and delivery retries from its application
 runtime. Those responsibilities belong to the independently deployed Dotmac
 Integrator. Product applications expose versioned, capability-specific domain
-ports and receive typed, authenticated observations or commands from the
-Integrator; they do not know which provider implementation produced them.
+ports and receive typed, authenticated observations or commands from that
+runtime; they do not know which provider implementation produced them.
 
-The Integrator owns connector definitions and installations, immutable
-configuration revisions, capability bindings, secret references, ingress
-receipts, outbound delivery, retries, checkpoints, run/record outcomes and
-repair evidence. It never owns product business state and never imports a
-product ORM model or writes a product database. A product domain owner remains
-the only writer of local decisions.
+"Independently deployed" is a runtime boundary, not a code-location exception
+to Starter's layering. The Integrator has two first-party artifacts:
+
+- `dotmac-integration` is the independently versioned, stateful Starter module.
+  It owns the reusable registry, connector definitions and installations,
+  immutable configuration revisions, capability bindings, secret references,
+  ingress receipts, outbound delivery, retries, checkpoints, run/record
+  outcomes, repair evidence, and its own `mod_*` schema and migration lineage.
+- `dotmac_integrator` is a thin assembly repository and deployment. It pins
+  `dotmac-kernel`, the exact `dotmac-integration` release and connector plugin
+  distributions, composes them, and supplies deployment configuration. It does
+  not implement a second registry, retry engine or persistence model.
+
+Products do not each compose `dotmac-integration`; doing so would duplicate
+credential ownership, provider-account rate limiting, backoff and idempotency.
+The thin Integrator assembly is the module's authoritative runtime and products
+reach it over their provider-neutral ports. Neither artifact owns product
+business state, imports a product ORM model or writes a product database. A
+product domain owner remains the only writer of local decisions.
 
 `dotmac-integration-client` is reusable HTTP transport policy—retry,
 idempotency, request correlation and circuit breaking. It is not the control
 plane, connector registry, configuration store or a second domain owner. The
 production-used integration platform in `dotmac_sub` is the mandatory
-product-first source for the Integrator control-plane extraction; provider
+product-first source for the `dotmac-integration` module extraction; provider
 branches are removed from the source products as each capability cuts over.
 
 A receiving product stores a remote projection only when a named local reader
@@ -160,10 +173,12 @@ operational domain schema.
 
 ### 7. External systems integrate through a reusable connector-plugin SPI
 
-The Integrator loads independently released connector distributions through a
-single versioned SPI. The control plane contains no fixed provider enum, import
-list or `if provider == ...` branch. A connector distribution registers itself
-through package metadata and publishes a manifest containing:
+The `dotmac-integration` module supplies a single versioned SPI and generic
+package-metadata discovery; the `dotmac_integrator` runtime loads independently
+released connector distributions through it. The module core and thin assembly
+contain no fixed provider enum, import list or `if provider == ...` branch. A
+connector distribution registers itself through package metadata and publishes
+a manifest containing:
 
 - a stable connector code and SPI version range;
 - the capability contract versions it implements, such as
@@ -173,9 +188,10 @@ through package metadata and publishes a manifest containing:
 - its supported ingress, polling and delivery modes; and
 - factory entry points for only those declared capability handlers.
 
-The Integrator owns the generic plugin registry, installation/configuration
-revisions, capability bindings, secret materialization boundary, inbox/outbox,
-idempotency, retries, checkpoints, health, audit evidence and repair commands.
+The `dotmac-integration` module owns the generic plugin registry,
+installation/configuration revisions, capability bindings, secret
+materialization boundary, inbox/outbox, idempotency, retries, checkpoints,
+health, audit evidence and repair commands.
 Each `(installation, capability)` has exactly one active connector binding;
 duplicate ownership or an incompatible SPI/capability version refuses startup
 or activation. Connector plugins translate provider wire formats and perform
@@ -187,9 +203,10 @@ Products publish provider-neutral capability ports. Adding or replacing an
 external system therefore installs/configures a connector plugin and binds its
 capabilities; it does not release ERP, Sub, the kernel, or a business module.
 Connector plugins may be deployed in isolated workers, but their registration,
-configuration and delivery evidence remain in the one Integrator control
-plane. `dotmac-integration-client` may implement reusable HTTP transport inside
-that SPI; it does not become the plugin registry or orchestration owner.
+configuration and delivery evidence remain in the one Integrator module
+installation composed by `dotmac_integrator`. `dotmac-integration-client` may
+implement reusable HTTP transport inside that SPI; it does not become the
+plugin registry or orchestration owner.
 
 This decision concerns external **application/data integration**. A typed
 resource driver used locally by one owning application—such as an object-store
@@ -204,6 +221,9 @@ as a hardcoded conditional in shared execution paths.
   are independent of each other` enforce the package direction.
 - `ModuleManifest` plus the composed migration gate enforce one namespace and
   lineage per installed stateful module.
+- The fleet-decomposition destination guard requires `integration-external` to
+  resolve to a Starter module. A deployment or assembly name cannot satisfy
+  that code-location invariant.
 - ADR-0010's adapter checks keep API and webhook entry points out of the
   decision layer.
 - ADR-0014's idempotency ledger and the product-owned inbox/outbox are the
@@ -250,9 +270,17 @@ code installed into an application, not a cross-application datastore.
 hardcoded integration catalogue and require a module release whenever a product
 adds an application.
 
-**Provider branches in the Integrator core.** Moving the same conditional tree
-to another repository is relocation, not reuse. Package-metadata discovery plus
-capability binding keeps the core open without hardcoding installed providers.
+**Provider branches in the Integrator module or assembly.** Moving the same
+conditional tree to another repository is relocation, not reuse.
+Package-metadata discovery plus capability binding keeps both artifacts open
+without hardcoding installed providers.
+
+**Integrator engine code owned by the thin assembly repository.** Independent
+deployment does not create a fourth reusable-code destination. It would bypass
+Starter's module extraction, release, lineage and conformance machinery and
+repeat the implementation/deployment conflation already solved by the vendor
+control plane. The assembly pins and runs the engine; the Starter module owns
+it.
 
 **Last-write-wins status synchronization.** It hides ownership conflicts and
 makes ordering or retry determine business state.
