@@ -8,6 +8,116 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-14: the lineage gate splits by plane, and two facilities get owners
+
+Decided after the commercial-module evidence batch, whose P11 dashboard is
+[`../inventories/p11-adoption-status.md`](../inventories/p11-adoption-status.md).
+
+### The reference adopter splits in two
+
+This ADR named Sub the first adopter of kernel persistence. The measurement
+found that Sub composes **no** kernel lineage at all — `alembic.ini` carries no
+`version_locations`, there is no `migration_bindings.py`, and Sub's own rehearsal
+gate expects failure at revision `0001`, which applies atomically, so there is no
+partial-credit path. Meanwhile the **vendor control plane already composes four
+lineages** programmatically, making it the fleet's only real multi-lineage
+composition; it fails this gate on one clause only — "in production".
+
+So the gate splits by plane:
+
+- **Vendor CP is the platform-lineage reference adopter.**
+- **Sub remains the tenant-plane / RLS reference adopter**, and its S7 work
+  continues on its own track.
+
+This is the ADR's own "a stop rule needs a start rule" applied to itself: the
+freed capacity goes to the constraint, and the constraint turned out not to be
+where this ADR assumed.
+
+**P11 is still UNMET.** It closes only when Vendor CP runs the composed lineages
+in a real, explicitly named production deployment. Before that: correct `mod_rel`
+and `mod_ealloc` to declare their platform tables properly, release them, repin
+Vendor from `a45` to the accepted kernel floor, and prove live privilege and
+catalog behaviour. The floor gap is load-bearing and was uncosted — module floors
+are `a56+` while Vendor pins `a45` and Sub pins `a50`, so **neither cutover-1
+product can compose a module lineage at its present pin**.
+
+### Two facilities get named owners
+
+Both were fully specified by the batch and owned by nobody, which is the state
+this ADR exists to prevent.
+
+- **P3 durable timers → `dotmac_kernel.durable_timers`**, extracted
+  product-first from Sub. Sub's facility (`runtime_durable_timers.py` +
+  `models/durable_timer.py` + its tests) is complete and tested, and neither
+  production collections path uses it. A sweep is not a substitute: it rescans,
+  it cannot be cancelled by identity, and it turns ordering into business state.
+- **P4 document numbering → a new stateful, dual-plane `dotmac-numbering`
+  module**, extracted product-first from ERP. **This is an extraction, not
+  greenfield.** `dotmac_erp:app/services/finance/common/numbering.py:456` is
+  production-used and tested; what is missing is PostgreSQL concurrency,
+  rollback, replay and invoice-specific proof, which the extraction writes fresh.
+
+Naming an owner is not an implementation start. Both remain behind the gate
+above; what changes is that each now has a named owner and a source ruling, so
+the work is no longer unassignable when the gate opens.
+
+## Amendment, 2026-08-14: owner-directed exception for the identity seams and `dotmac-auth-oidc`
+
+Michael directed the tenant-workspace login programme — the kernel permission
+seam, the kernel external-identity binding contract, and an OIDC relying-party
+distribution — lifting decision 2's moratorium for those named units only.
+
+The evidence is the 2026-08-14 source audit
+([`external-identity-sources.md`](../inventories/external-identity-sources.md)),
+which swept all six repositories for two capabilities that are routinely
+confused — the OIDC protocol client, and the local binding from a verified
+external subject to a local identity — before any shared code was proposed.
+
+**Two of the three are demand-pulled; one is owner-directed. The difference
+matters and is recorded rather than blurred.**
+
+- **The kernel permission seam IS a demand pull**, and the only clean one in
+  this programme. `dotmac_workspace` recorded it as blocker B1 in its own
+  repository, in writing, before this change existed: it authenticates with its
+  own `dmws_session` cookie, neither existing kernel seam fits, and its
+  documented conclusion was *"the fix is not to hand-roll the role query here."*
+  A product was stopped, said so, and named the seam it needed. That is exactly
+  the exception this ADR's decision 2 already permits.
+- **The external-identity binding contract is directed**, though it is close to
+  a pull. Workspace's B2 (nothing issues `dmws_session`, `/login` does not exist)
+  is a real block, but a login could be built on passwords alone; the binding
+  table is needed for FEDERATED login specifically, which is the programme's
+  goal rather than a current outage.
+- **`dotmac-auth-oidc` is directed, and is the furthest from a pull.** No
+  product is blocked on it: ERP has an implementation, and every other product
+  has no OIDC requirement in flight. It creates no general route around the
+  moratorium for the next dossier, exactly as the `dotmac-approvals`,
+  `dotmac-files` and `dotmac-imports` amendments record for theirs.
+
+**The OIDC package is additionally an exception to the extraction rule itself,
+and this is the part to read twice.** Hard rule 24 makes a qualifying
+production-used, tested implementation the mandatory source. The audit found
+ERP's — the fleet's only OIDC client — qualifies on neither count: it has never
+been deployed (`OIDC_ENABLED=false`, one commit, its contract doc written as a
+future cutover gate), and its two security-critical functions are monkeypatched
+out of every one of its tests, so signature verification and the algorithm
+allowlist have zero real coverage. Rule 24's own escape applies — *"a greenfield
+shared implementation requires checked-in evidence that no qualifying product
+implementation exists"* — and § D4 of the audit is that evidence.
+
+So the package ships `source_mode = "greenfield-after-inventory"`. That is a
+weaker provenance than any module accepted under this ADR so far, and the
+consequence is recorded in its dossier: `contract_consumers = []`, no entry in
+`.github/release-modules.json`, and no claim of production readiness. A passing
+test suite is not a pilot.
+
+**What this amendment does not do.** It does not authorise
+`dotmac-application-access`, which ADR-0021 §5 defers until a generic
+signed-document mechanism exists; it does not authorise that mechanism's
+extraction from `licensing`, which ADR-0021 §8 sequences after the lineage gate;
+and it does not resolve the ADR-0021/ADR-0026 conflict over who owns access
+approval. Each remains its own decision.
+
 ## Amendment, 2026-08-14: owner-directed exception for `dotmac-approvals`
 
 [ADR-0026](0026-approvals-decide-approval-never-the-transition.md) accepted the

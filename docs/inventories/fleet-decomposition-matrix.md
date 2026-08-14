@@ -178,7 +178,7 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | projects-tasks | 10 | 11 | 11 | 0 | 10 | 0 | consolidate CRM → Sub; module source **unassigned** |
 | notifications-comms | 7 | 18 | 22 | 0 | 11 | 5 | kernel (consent + outbox) + module ← Sub |
 | engagement-inbox | 0 | 28 | 29 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
-| sales-agreements | 7 | 13 | 24 | 2 | 8 | 2 | consolidate CRM → Sub, then module ← Sub; vendor rows **unassigned** (A2) |
+| sales-agreements | 7 | 13 | 24 | 2 | 8 | 2 | consolidate CRM → Sub, then module ← Sub; vendor rows are a distinct module ← vendor CP (A2(a), ruled 2026-08-12) |
 | commercial-offers | 0 | 0 | 2 | 1 | 1 | 0 | module source **unassigned** (Sub or vendor CP) — A2 |
 | billing-revenue | 12 | 3 | 74 | 0 | 2 | 0 | module ← Sub + contract with ERP |
 | outside-plant | 0 | 33 | 94 | 0 | 30 | 0 | consolidate → Sub, then module ← Sub |
@@ -354,13 +354,37 @@ allocates `mod_approvals` against the then-current kernel alpha and opens its
 dossier in the same diff; the release-allowlist entry lands later still, after
 the live Postgres gate passes.
 
+### A2 audit complete — subscription source and order accepted 2026-08-14
+
+The source audit compared the Vendor and Sub implementations by tables,
+writers, decisions, and tests rather than treating the shared `offer_versions`
+name as a contract. It preserves the 2026-08-12 split:
+
+- Vendor↔operator legal commercial contracts remain a distinct owner for
+  proposal, approval, activation evidence, suspension, and termination.
+- `dotmac-subscriptions` owns stable offers, immutable offer/price and
+  subscription-contract versions, cadence, proration, and recurring charge
+  occurrences on explicit tenant and platform planes.
+
+Vendor's capability membership and Sub's ISP service/access, region, usage,
+SLA, policy and RADIUS semantics stay in product-owned link tables. Sub supplies
+the qualifying contract/cadence/proration/recurrence implementation; Vendor
+supplies exact-money immutable publishing as a mandatory port delta. Vendor CP
+adopts the platform plane first, then Sub adopts the tenant plane through
+shadow-and-cutover. Full evidence:
+[`subscriptions-sources.md`](subscriptions-sources.md); decision:
+[ADR-0020 A4](../adr/0020-billing-owns-operational-receivables.md).
+
+The decision creates no package or namespace and does not lift ADR-0017 P11.
+The focused execution plan is
+[`2026-08-14-subscriptions-vendor-sub-adoption.md`](../superpowers/plans/2026-08-14-subscriptions-vendor-sub-adoption.md).
+
 ### Contested — genuinely unassigned
 
 | Capability | The collision | Why it is not yet assignable |
 |---|---|---|
 | projects-tasks, ERP ↔ Sub (ERP 10 / Sub 11) | `project_templates`, `project_template_tasks`, `project_template_task_dependency` — the only non-platform table in all three products — plus `project_tasks`, `project_comments`, `project_task_assignees` | CRM's copy retires under the decisions above, but ERP's delivery projects and Sub's installation projects are two legitimate owners with an identical template/task/dependency mechanism. Whether that mechanism is a shared module or two independent implementations of a common shape has never been adjudicated. Needs the audit `dotmac-ticketing` got. |
-| billing-revenue, ERP ↔ Sub (ERP 12 / Sub 74, plus finance-ledger's `bank_accounts`) | Only 2 exact collisions — the duplication is *semantic*, not structural: Sub owns subscriber billing, ERP owns the ledger, and the ERP↔Sub sync reconciles them | Explicitly **not** a module. The known money-correctness defects in that sync are contract and reconciliation bugs; merging the two into a shared package converts a fixable contract into an unfixable one. Deliverable is a versioned contract with drift detection and repair. |
-| **A2** — sales-agreements + commercial-offers, Sub ↔ Vendor CP (Sub 24+2 / Vendor 2+1) | Exactly one exact collision, `offer_versions`. Sub's contracts are `billing_contracts`; the vendor's are `contracts` | A vendor↔operator commercial agreement that gates entitlement allocation is plausibly not an ISP customer quote/order, in which case these are two modules sharing kernel value objects (money, term, line items) with a contract between them. But `offer_versions` is the *same shape built twice* — an immutable priced offer version — and that is the half that most looks like one module. Unadjudicated in both directions. |
+| billing-revenue, ERP ↔ Sub (ERP 12 / Sub 74, plus finance-ledger's `bank_accounts`) | Only 2 exact collisions — the duplication is *semantic*, not structural: Sub owns subscriber billing, ERP owns the ledger, and the ERP↔Sub sync reconciles them | The ERP↔Sub **pair** is explicitly **not** one module. The known money-correctness defects in that sync are contract and reconciliation bugs; merging the two into a shared package converts a fixable contract into an unfixable one. Deliverable is a versioned contract with drift detection and repair. This is compatible with [ADR-0020](../adr/0020-billing-owns-operational-receivables.md), which extracts `dotmac-billing` from **Sub's** operational receivables and leaves ERP's general ledger where it is — the row that stays a contract is ERP↔Sub, not Sub↔module. |
 | **A3** — party-identity, kernel ↔ Vendor CP (Vendor 1) | `vendor_accounts` | Classified into `party-identity` because that is what it is, which makes the question visible rather than settling it: either kernel `Party` grows a platform scope and this table retires into it, or it stays a module. Vendor ADR-0002 chose platform-scoped deliberately; check whether kernel `Party` can express that before deciding. |
 
 ### Single-owner domains — modules, sequenced later
