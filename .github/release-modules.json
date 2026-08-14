@@ -208,6 +208,63 @@
           "python"
         ]
       }
+    },
+    "dotmac-integration": {
+      "$comment": [
+        "The connector control plane (ADR-0024 \u00a7\u00a7 6-7). Listed so the",
+        "independently deployed `dotmac_integrator` assembly can PIN it \u2014 until",
+        "this entry existed the module was unpublishable, and an assembly that",
+        "cannot pin a module cannot compose it.",
+        "",
+        "kernel_floor is a58, its OWN ledger allocation, not a capability raise.",
+        "It consumes `platform_tables` (a53) and the logical prerequisite",
+        "contract (a56), but the floor is the highest of everything the module",
+        "needs and its allocation is the highest \u2014 so pinning the allocation",
+        "picks up the a57 catalog correction transitively rather than needing a",
+        "second rule. That correction exists BECAUSE of this module: it is the",
+        "first platform-plane-only one, and a platform-only schema was demanding",
+        "tenant-role USAGE it must never hold.",
+        "",
+        "Both migrations are required wheel contents, deliberately. This",
+        "repository does not compose the module \u2014 `app/assembly.py` omits it and",
+        "`alembic.ini` carries no `ig` lineage, because the Starter is a target",
+        "application and composing it would create `mod_intg` in every starter",
+        "deployment. A wheel that shipped the manifest but dropped a migration",
+        "would therefore fail first in the Integrator's deployment, not here.",
+        "",
+        "No `alembic` in allowed_requires: unlike dotmac-ticketing this module",
+        "ships no link helper that emits DDL into a consuming product's",
+        "migration, so Alembic is a dev tool here and importing it at runtime",
+        "would be a packaging slip."
+      ],
+      "package_dir": "packages/dotmac-integration",
+      "import_name": "dotmac_integration",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a58",
+      "db_schema": "mod_intg",
+      "tag_prefix": "dotmac-integration-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_integration/py.typed",
+          "dotmac_integration/manifest.py",
+          "dotmac_integration/spi.py",
+          "dotmac_integration/discovery.py",
+          "dotmac_integration/migrations/__init__.py",
+          "dotmac_integration/migrations/versions/ig_0001_connector_control_plane.py",
+          "dotmac_integration/migrations/versions/ig_0002_execution.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

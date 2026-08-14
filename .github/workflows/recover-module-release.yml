@@ -38,6 +38,7 @@ on:
           - dotmac-files
           - dotmac-ticketing
           - dotmac-imports
+          - dotmac-integration
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

@@ -50,6 +50,7 @@ on:
           - dotmac-files
           - dotmac-ticketing
           - dotmac-imports
+          - dotmac-integration
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
