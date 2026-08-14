@@ -39,7 +39,7 @@ from typing import Any
 
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
-from dotmac_kernel.prerequisites import resolve_depends_on
+from dotmac_kernel.prerequisites import all_bound, resolve_depends_on
 
 from alembic import op
 
@@ -50,9 +50,22 @@ branch_labels = ("approvals",)
 # Literals, not imported constants: a migration is a snapshot of an accepted
 # decision, and the composed gate reads this list statically to diff it against
 # `dotmac_approvals.manifest`.
-REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")
+# Split by PLANE (ADR-0027), not merged into one list. The platform plane needs
+# roles to grant to and nothing else; the tenant plane additionally needs a
+# tenant catalogue to point a foreign key at and an RLS predicate to evaluate.
+#
+# That split is what makes this module installable in the vendor control plane,
+# which has no tenant catalogue and never will — it is not a product data plane.
+# Under one merged list the lineage demanded a tenant scope in order to create
+# ANY table, so a platform-only assembly could not install it at all.
+PLATFORM_REQUIRES = ("module_database_roles.v1",)
+TENANT_REQUIRES = ("tenant_scope_catalog.v1",)
+REQUIRES = PLATFORM_REQUIRES + TENANT_REQUIRES
 
-depends_on = resolve_depends_on(REQUIRES)
+# A bound optional prerequisite still contributes a real ordering edge: where
+# the tenant plane IS built, it must still run after whatever supplies the
+# catalogue. Where it is not, the edge is simply absent.
+depends_on = resolve_depends_on(PLATFORM_REQUIRES, optional=TENANT_REQUIRES)
 
 _SCHEMA = "mod_approvals"
 
@@ -130,13 +143,27 @@ def _tenant_fk(name: str) -> sa.ForeignKeyConstraint:
 
 def upgrade() -> None:
     # Before any DDL: the binding is a claim, so check it against the database.
-    require_prerequisites(op.get_bind(), REQUIRES)
-    op.execute("CREATE SCHEMA IF NOT EXISTS mod_approvals;")
-    op.execute(
-        "GRANT USAGE ON SCHEMA mod_approvals TO app_user, platform_api, app_admin;"
-    )
+    require_prerequisites(op.get_bind(), PLATFORM_REQUIRES)
 
-    # ── Tenant plane ────────────────────────────────────────────────────────
+    tenant_plane = all_bound(TENANT_REQUIRES)
+    if tenant_plane:
+        require_prerequisites(op.get_bind(), TENANT_REQUIRES)
+
+    op.execute("CREATE SCHEMA IF NOT EXISTS mod_approvals;")
+    op.execute("GRANT USAGE ON SCHEMA mod_approvals TO platform_api, app_admin;")
+    if tenant_plane:
+        # Only when there is something here for the tenant role to reach. A
+        # platform-only schema must not demand tenant-role USAGE (kernel
+        # 0.1.0a57).
+        op.execute("GRANT USAGE ON SCHEMA mod_approvals TO app_user;")
+
+    _upgrade_platform_plane()
+    if tenant_plane:
+        _upgrade_tenant_plane()
+
+
+def _upgrade_tenant_plane() -> None:
+    """Built only where the assembly bound `tenant_scope_catalog.v1`."""
     op.create_table(
         "approval_policies",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -245,7 +272,9 @@ def upgrade() -> None:
             f"ON mod_approvals.{table} TO platform_api;"
         )
 
-    # ── Platform plane ──────────────────────────────────────────────────────
+
+def _upgrade_platform_plane() -> None:
+    """Always built: the control plane is the one both assemblies can operate."""
     op.create_table(
         "platform_approval_policies",
         sa.Column("id", sa.Uuid(), primary_key=True),

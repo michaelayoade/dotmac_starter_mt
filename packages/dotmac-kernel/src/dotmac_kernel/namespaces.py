@@ -85,6 +85,7 @@ from typing import TYPE_CHECKING, Final
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
+    all_bound,
     validate_prerequisites,
 )
 
@@ -587,7 +588,12 @@ class NamespaceRegistry:
     subclass — fail closed, never a half-namespaced database.
     """
 
-    __slots__ = ("_owners", "_tables_by_schema", "_platform_tables_by_schema")
+    __slots__ = (
+        "_owners",
+        "_tables_by_schema",
+        "_platform_tables_by_schema",
+        "_tenant_requires_by_schema",
+    )
 
     def __init__(
         self,
@@ -595,6 +601,7 @@ class NamespaceRegistry:
         *,
         tables_by_owner: Mapping[str, Sequence[str]] | None = None,
         platform_tables_by_owner: Mapping[str, Sequence[str]] | None = None,
+        tenant_requires_by_owner: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         declared = tuple(owners)
         self._check_unique(declared, "owner", lambda o: o.owner, NamespaceError)
@@ -639,6 +646,19 @@ class NamespaceRegistry:
         self._platform_tables_by_schema: dict[str, frozenset[str]] = self._claim_tables(
             declared, platform_declared
         )
+        # ADR-0027: what this schema's TENANT plane needs, so a gate can ask
+        # whether the plane is installable in THIS assembly rather than
+        # assuming every declared table exists everywhere.
+        # A host owner has no module schema, so it is skipped rather than
+        # keyed by None — written as a loop because the narrowing that makes
+        # that safe has to be visible to a reader and to the type checker.
+        schema_of = {o.owner: o.db_schema for o in declared}
+        self._tenant_requires_by_schema: dict[str, tuple[str, ...]] = {}
+        for owner, names in (tenant_requires_by_owner or {}).items():
+            schema = schema_of.get(owner)
+            if schema is None or not names:
+                continue
+            self._tenant_requires_by_schema[schema] = tuple(names)
 
     # ── Construction from manifests ─────────────────────────────────────────
 
@@ -674,6 +694,7 @@ class NamespaceRegistry:
         owners: list[MigrationOwner] = list(host_owners)
         tables_by_owner: dict[str, Sequence[str]] = {}
         platform_by_owner: dict[str, Sequence[str]] = {}
+        tenant_requires_by_owner: dict[str, Sequence[str]] = {}
         for manifest in manifests:
             # Duck-typed on purpose: a plain `FeatureManifest` has no D1
             # declaration at all and is simply stateless here, so this module
@@ -716,10 +737,14 @@ class NamespaceRegistry:
             platform_by_owner[allocated.owner] = tuple(
                 getattr(manifest, "platform_tables", ())
             )
+            tenant_requires_by_owner[allocated.owner] = tuple(
+                getattr(manifest, "tenant_requires", ())
+            )
         return cls(
             owners,
             tables_by_owner=tables_by_owner,
             platform_tables_by_owner=platform_by_owner,
+            tenant_requires_by_owner=tenant_requires_by_owner,
         )
 
     # ── Validation helpers ──────────────────────────────────────────────────
@@ -820,6 +845,46 @@ class NamespaceRegistry:
         `declared_tables(schema)`; everything not in it is tenant-scoped.
         """
         return self._platform_tables_by_schema.get(schema, frozenset())
+
+    def tenant_plane_requires(self, schema: str) -> tuple[str, ...]:
+        """The prerequisites this schema's TENANT plane needs (ADR-0027).
+
+        Empty for every ordinary module: a tenant-only module's needs are simply
+        `requires`, and a plane that is always built is not conditional.
+        """
+        return self._tenant_requires_by_schema.get(schema, ())
+
+    def tenant_plane_installed(self, schema: str) -> bool:
+        """Will this assembly have built the schema's tenant plane?
+
+        The plane is conditional exactly when it declares prerequisites of its
+        own, and it is installed exactly when this assembly bound them. A module
+        with no `tenant_requires` is unconditional and always answers True — the
+        default has to be "everything the manifest declares exists", or a
+        genuinely missing table would stop being reported the moment this
+        method existed.
+        """
+        needed = self.tenant_plane_requires(schema)
+        if not needed:
+            return True
+        return all_bound(needed)
+
+    def expected_tables(self, schema: str) -> frozenset[str]:
+        """The tables that should ACTUALLY exist here, not merely be declared.
+
+        Identical to `declared_tables` everywhere except a dual-plane schema
+        whose tenant prerequisites this assembly did not bind — there the tenant
+        tables were deliberately never created, and reporting them missing would
+        turn a correct platform-only install into a gate failure.
+
+        Deliberately a SEPARATE reader from `declared_tables`, which stays the
+        full ownership claim that table-ownership and static checks need: who
+        owns a name does not change per assembly, only what got built does.
+        """
+        declared = self.declared_tables(schema)
+        if self.tenant_plane_installed(schema):
+            return declared
+        return declared & self.declared_platform_tables(schema)
 
     def table_owner(self, schema: str, table: str) -> str | None:
         for owner in self._owners:

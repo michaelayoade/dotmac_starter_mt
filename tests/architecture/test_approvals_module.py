@@ -81,12 +81,14 @@ def test_the_migration_declares_the_same_prerequisites_as_the_manifest() -> None
     """Migration and manifest drifting apart is how an assembly discovers a
     missing prerequisite at deploy time instead of at compose time."""
     source = MIGRATION.read_text(encoding="utf-8")
-    declared = 'REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")'
-    assert declared in source
-    assert set(module.requires) == {
-        "tenant_scope_catalog.v1",
-        "module_database_roles.v1",
-    }
+    assert 'PLATFORM_REQUIRES = ("module_database_roles.v1",)' in source
+    assert 'TENANT_REQUIRES = ("tenant_scope_catalog.v1",)' in source
+    # Split by PLANE (ADR-0027): roles to create anything, a tenant catalogue
+    # only for the tenant plane. That split is what makes the module installable
+    # in the vendor control plane, which has neither a tenant catalogue nor any
+    # prospect of one.
+    assert set(module.requires) == {"module_database_roles.v1"}
+    assert set(module.tenant_requires) == {"tenant_scope_catalog.v1"}
 
 
 def test_the_module_requires_no_identity_or_rbac_estate() -> None:
@@ -96,7 +98,7 @@ def test_the_module_requires_no_identity_or_rbac_estate() -> None:
     catalogue would be a regression, not an addition."""
     assert all(
         "identity" not in requirement and "rbac" not in requirement
-        for requirement in module.requires
+        for requirement in (*module.requires, *module.tenant_requires)
     )
 
 
@@ -391,7 +393,7 @@ def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     assert entry["db_schema"] == module.db_schema
     assert entry["import_name"] == "dotmac_approvals"
     assert entry["tag_prefix"] == "dotmac-approvals-v"
-    assert entry["kernel_floor"] == "0.1.0a59"
+    assert entry["kernel_floor"] == "0.1.0a60"
     # The lineage is a REQUIRED wheel content: this repository does not compose
     # the module, so a wheel that shipped the manifest and dropped the migration
     # would fail first in an adopter's deployment rather than here.

@@ -766,12 +766,20 @@ def _check_prerequisites(
 
     for manifest in manifests:
         required = tuple(getattr(manifest, "requires", ()))
-        if not required:
+        # ADR-0027: a tenant plane's own prerequisites are OPTIONAL to bind. An
+        # assembly that binds none of them installs the platform plane alone,
+        # which is the whole point — but anything it DOES bind is still checked
+        # exactly as strictly, because a half-truthful binding is worse than an
+        # absent one.
+        optional = tuple(getattr(manifest, "tenant_requires", ()))
+        checked = required + tuple(name for name in optional if name in bound)
+        if not checked:
             continue
         code = getattr(manifest, "code", "<unknown>")
-        for name in required:
+        for name in checked:
             binding = bound.get(name)
-            # 2 — composed but unbound.
+            # 2 — composed but unbound. Only reachable for a MANDATORY
+            # requirement: an unbound optional one was filtered out above.
             if binding is None:
                 violations.append(
                     f"module {code!r} requires {name!r} but this assembly binds "
@@ -824,8 +832,9 @@ def _check_prerequisites(
 
     # The revision file and the manifest must agree, or one of them is stale.
     requires_by_prefix = {
-        getattr(manifest, "migration_prefix", None): tuple(
-            getattr(manifest, "requires", ())
+        getattr(manifest, "migration_prefix", None): (
+            tuple(getattr(manifest, "requires", ()))
+            + tuple(getattr(manifest, "tenant_requires", ()))
         )
         for manifest in manifests
     }
