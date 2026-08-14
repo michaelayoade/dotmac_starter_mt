@@ -35,7 +35,7 @@ from dotmac_integration.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="integration",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="intg",

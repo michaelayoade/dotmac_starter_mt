@@ -38,7 +38,7 @@ from dotmac_kernel.modules import ModuleManifest
 
 module = ModuleManifest(
     code="release_catalog",
-    version="0.1.0a2",
+    version="0.1.0a3",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="rel",

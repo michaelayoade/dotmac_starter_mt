@@ -167,7 +167,7 @@ from dotmac_integration.spi import (
     accepts_manifest_digest,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "DispatchUnavailable",

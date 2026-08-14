@@ -47,7 +47,7 @@ from dotmac_imports.tabular import (
     preview,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "DEFAULT_CHUNK_SIZE",
