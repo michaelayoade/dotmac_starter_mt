@@ -235,7 +235,13 @@
         "No `alembic` in allowed_requires: unlike dotmac-ticketing this module",
         "ships no link helper that emits DDL into a consuming product's",
         "migration, so Alembic is a dev tool here and importing it at runtime",
-        "would be a packaging slip."
+        "would be a packaging slip.",
+        "",
+        "`secret_refs.py` is a required wheel content because it is the ADR-0024 \u00a7 7",
+        "enforcement point \u2014 a wheel that shipped the models but dropped the refusal",
+        "would accept secret VALUES into an immutable config revision and never",
+        "complain. It was named `secrets.py` until the release wheel-content policy",
+        "correctly refused it; renamed rather than exempted."
       ],
       "package_dir": "packages/dotmac-integration",
       "import_name": "dotmac_integration",
@@ -249,6 +255,7 @@
           "dotmac_integration/manifest.py",
           "dotmac_integration/spi.py",
           "dotmac_integration/discovery.py",
+          "dotmac_integration/secret_refs.py",
           "dotmac_integration/migrations/__init__.py",
           "dotmac_integration/migrations/versions/ig_0001_connector_control_plane.py",
           "dotmac_integration/migrations/versions/ig_0002_execution.py"

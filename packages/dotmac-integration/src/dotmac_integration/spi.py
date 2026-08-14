@@ -156,7 +156,7 @@ class CapabilityDeclaration:
 
     `config_schema` is a JSON-schema fragment describing the capability's
     configuration. It may name secret REFERENCES; it may never carry a secret
-    value — see `dotmac_integration.secrets`.
+    value — see `dotmac_integration.secret_refs`.
     """
 
     capability_id: str

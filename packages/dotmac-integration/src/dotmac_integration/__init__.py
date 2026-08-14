@@ -139,7 +139,7 @@ from dotmac_integration.retry import (
     next_state,
     retry_delay_seconds,
 )
-from dotmac_integration.secrets import (
+from dotmac_integration.secret_refs import (
     SECRET_REFERENCE_SCHEMES,
     SecretValueError,
     validate_config_revision,
