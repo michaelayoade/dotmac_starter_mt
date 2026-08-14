@@ -880,3 +880,46 @@ def test_the_scanner_reads_a_resolved_depends_on_without_importing_it(
     assert record.resolves_prerequisites
     assert record.declared_prerequisites == (TENANT_SCOPE,)
     assert record.depends_on == ()
+
+
+def test_a_host_owner_may_provide_without_a_central_declaration(
+    tmp_path: Path,
+) -> None:
+    """ERP binds `provider_owner="assembly"`, and the shipped
+    `ASSEMBLY_MIGRATION_OWNER` declares `provides=()`.
+
+    That is not an omission to fix by adding a declaration: the ledger row is
+    SHARED by every deployment, while what an assembly supplies is per-deployment.
+    ERP's assembly lineage hosts the tenant catalogue; the vendor control plane's
+    does not. A central `provides` would assert both, and the false half would
+    tell a tenant-scoped module that a platform-only deployment can host it.
+
+    Regression: the strict check rejected ERP's real bindings, and nothing
+    noticed because the ERP test exercised binding RESOLUTION rather than the
+    composed gate.
+    """
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "0001_root", "assembly")],
+    )
+    assert "does not declare" not in _messages(report)
+
+
+def test_a_module_owner_still_needs_its_declaration(tmp_path: Path) -> None:
+    """Sensitivity proof for the exemption above: it must apply to HOST owners
+    only. A module's ledger row is fleet-wide and immutable, so `provides` there
+    is a real claim and stays checked."""
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    report = _requiring_gate(
+        billing,
+        kernel,
+        bindings=[PrerequisiteBinding(TENANT_SCOPE, "bl_0001_invoices", "billing")],
+    )
+    assert not report.ok
+    assert "does not declare" in _messages(report)
