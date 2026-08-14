@@ -106,7 +106,7 @@
       "package_dir": "packages/dotmac-ticketing",
       "import_name": "dotmac_ticketing",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a56",
+      "kernel_floor": "0.1.0a60",
       "db_schema": "mod_tkt",
       "tag_prefix": "dotmac-ticketing-v",
       "wheel_contents": {

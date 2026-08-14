@@ -111,7 +111,10 @@ CAPABILITY_RAISED_FLOORS = {
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
     # prerequisite contract raises it again. The floor is always the highest
     # capability the module actually consumes, not the first one that moved it.
-    "dotmac-ticketing": ("0.1.0a56", "0.1.0a39"),
+    # ADR-0027 raises it again: the manifest now passes `tenant_requires`,
+    # added in a60. The floor is always the highest capability the module
+    # actually consumes, not the first one that moved it.
+    "dotmac-ticketing": ("0.1.0a60", "0.1.0a39"),
     # ADR-0027: the manifest passes `tenant_requires`, added in a60. An earlier
     # kernel raises TypeError at import, before the allocation check is reached,
     # so the capability outranks its own a59 allocation.
