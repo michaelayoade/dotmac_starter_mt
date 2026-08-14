@@ -205,7 +205,7 @@ def test_one_tenant_cannot_read_or_write_another_tenants_rows(
     try:
         with engine.connect() as conn:
             conn.execute(
-                text("SELECT set_config('app.current_tenant_id', :t, false)"),
+                text("SELECT set_config('app.current_tenant', :t, false)"),
                 {"t": str(tenant_a)},
             )
             visible = (

@@ -125,11 +125,18 @@ def test_no_foreign_key_crosses_the_planes_or_leaves_the_module() -> None:
             target = key.column.table
             allowed_schema = target.schema in (None, "public", "mod_approvals")
             assert allowed_schema, f"{table.name} points outside the module: {target}"
-            if target.schema == "public":
+            if target.schema != "mod_approvals":
+                # The kernel maps `tenants` with schema=None, so identify the
+                # host reference by NAME rather than by schema — checking the
+                # schema alone would let a future FK to any unqualified host
+                # table pass as "the tenant scope".
                 assert target.name == "tenants", (
-                    f"{table.name} references public.{target.name}; the only "
+                    f"{table.name} references host table {target.name}; the only "
                     "permitted host reference is the tenant scope"
                 )
+                assert (
+                    table in tenant_tables
+                ), f"platform table {table.name} references the tenant scope"
                 continue
             if table in platform_tables:
                 assert target.name in platform_names, (
