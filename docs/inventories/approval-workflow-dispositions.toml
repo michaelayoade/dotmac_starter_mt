@@ -1,0 +1,287 @@
+schema_version = 1
+audit_id = "A1"
+as_of = "2026-08-14"
+# Accepted 2026-08-14. The ADR takes the source ruling (`module ← ERP` plus
+# Vendor CP's six mandatory port deltas) with THREE corrections recorded in
+# `approvals-workflow-source-audit.md` § "Corrections adopted on review":
+# threshold/FX routing stays in ERP and is not in the shared contract; an
+# individual `policy_code` is operator-owned data, not manifest-declared
+# vocabulary; and Vendor CP's cutover is a capability gain as well as a
+# relocation, so only the six safety properties it implements can be
+# shadow-compared.
+#
+# The ADR creates NOTHING — no package, no namespace allocation, no lineage, no
+# release row; the module change allocates its own namespace and opens its
+# dossier in the same diff. Implementation itself is authorised by ADR-0017's
+# 2026-08-14 owner-directed exception and is unwritten.
+decision_status = "accepted"
+adr = "docs/adr/0026-approvals-decide-approval-never-the-transition.md"
+starter_revision = "042532d2c80ee7a56b14b71269d15459288312c2"
+erp_revision = "0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf"
+sub_revision = "2193d04f50aadb394cfb9f82026447f4c9a25a42"
+vendor_revision = "89848017d6b87e82dd4d6ffd0b2c9eaed5f9fee8"
+headline = "The measured governance-workflow family decomposes into eight owners; only the approval subset is ready for a shared extraction dossier."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "approval_workflow"
+model = "dotmac_erp:app/models/finance/audit/approval_workflow.py"
+writer = "dotmac_erp:app/services/finance/platform/approval_workflow.py"
+tests = ["dotmac_erp:tests/ifrs/platform/test_approval_workflow_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-approvals"
+disposition = "extract-source"
+reason = "Production tenant-plane source for ordered approval levels, per-level quorum, role/user eligibility and segregation of duties; mutable policy rows and untyped JSON levels must not be copied unchanged. This table ALSO holds threshold selection with FX conversion, which ADR-0026 § 7a rules out of the shared contract: routing stays finance's, and ERP selects the exact policy revision and passes it in."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "approval_request"
+model = "dotmac_erp:app/models/finance/audit/approval_request.py"
+writer = "dotmac_erp:app/services/finance/platform/approval_workflow.py"
+tests = ["dotmac_erp:tests/ifrs/platform/test_approval_workflow_service.py", "dotmac_erp:tests/ifrs/fa/test_fa_gl_reconciliation_package_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-approvals"
+disposition = "extract-source"
+reason = "Production tenant-plane request lifecycle and a real fixed-asset consumer prove pending, approved, rejected and cancelled behavior; the shared owner must add content identity and leave the downstream domain transition to the subject owner."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "approval_decision"
+model = "dotmac_erp:app/models/finance/audit/approval_decision.py"
+writer = "dotmac_erp:app/services/finance/platform/approval_workflow.py"
+tests = ["dotmac_erp:tests/ifrs/platform/test_approval_workflow_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-approvals"
+disposition = "extract-source"
+reason = "Production tenant-plane source for immutable actor decisions, approval/rejection, level progression, comments, delegation provenance and MFA evidence."
+
+[[tables]]
+repository = "dotmac_vendor_control_plane"
+table = "approval_policies"
+model = "dotmac_vendor_control_plane:src/vendor_cp/approvals/models.py"
+writer = "dotmac_vendor_control_plane:src/vendor_cp/approvals/service.py"
+tests = ["dotmac_vendor_control_plane:tests/unit/test_approvals.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-approvals"
+disposition = "required-port-delta"
+reason = "Platform-plane implementation proves immutable policy versions and fail-closed missing-policy evaluation; both are mandatory deltas over ERP's mutable workflow row."
+
+[[tables]]
+repository = "dotmac_vendor_control_plane"
+table = "approval_records"
+model = "dotmac_vendor_control_plane:src/vendor_cp/approvals/models.py"
+writer = "dotmac_vendor_control_plane:src/vendor_cp/approvals/service.py"
+tests = ["dotmac_vendor_control_plane:tests/unit/test_approvals.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-approvals"
+disposition = "required-port-delta"
+reason = "Platform-plane implementation proves content-digest binding, idempotent recording, distinct-actor quorum and self-approval exclusion; changing content must invalidate an earlier decision."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "workflow_rule"
+model = "dotmac_erp:app/models/finance/automation/workflow_rule.py"
+writer = "dotmac_erp:app/services/finance/automation/workflow.py"
+tests = ["dotmac_erp:tests/services/test_workflow_engine.py", "dotmac_erp:tests/e2e/test_automation.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-automation"
+disposition = "separate-audit-required"
+reason = "A trigger-condition-action rules engine is automation, not approval; its hardcoded entity/action enums, direct notifications, field mutation and webhook transport require a separate product-first boundary audit."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "workflow_execution"
+model = "dotmac_erp:app/models/finance/automation/workflow_execution.py"
+writer = "dotmac_erp:app/services/finance/automation/workflow.py"
+tests = ["dotmac_erp:tests/services/test_workflow_engine.py", "dotmac_erp:tests/e2e/test_automation.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-automation"
+disposition = "separate-audit-required"
+reason = "Execution history belongs with declarative automation; retry and delivery mechanics must delegate to kernel and integration owners rather than becoming a second runtime."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "workflow_rule_version"
+model = "dotmac_erp:app/models/finance/automation/workflow_rule_version.py"
+writer = "dotmac_erp:app/services/finance/automation/workflow.py"
+tests = ["dotmac_erp:tests/services/test_workflow_engine.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-automation"
+disposition = "separate-audit-required"
+reason = "Rule revision history is a proven automation property and must not be merged into human approval policy history merely because both are versioned."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "form"
+model = "dotmac_erp:app/models/forms/form.py"
+writer = "dotmac_erp:app/services/forms/form_engine.py"
+tests = ["dotmac_erp:tests/integration/services/test_careers_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-forms"
+disposition = "separate-audit-required"
+reason = "Top-level configurable form identity is a data-capture capability; the only proven consumer is recruitment and its product seam must be separated before extraction."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "form_version"
+model = "dotmac_erp:app/models/forms/form.py"
+writer = "dotmac_erp:app/services/forms/form_engine.py"
+tests = ["dotmac_erp:tests/integration/services/test_careers_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-forms"
+disposition = "separate-audit-required"
+reason = "Published form-definition revisions are data-capture state, not workflow or approval policy."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "form_section"
+model = "dotmac_erp:app/models/forms/form.py"
+writer = "dotmac_erp:app/services/forms/form_engine.py"
+tests = ["dotmac_erp:tests/integration/services/test_careers_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-forms"
+disposition = "separate-audit-required"
+reason = "Form layout structure belongs to the versioned form definition."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "form_field"
+model = "dotmac_erp:app/models/forms/form.py"
+writer = "dotmac_erp:app/services/forms/form_engine.py"
+tests = ["dotmac_erp:tests/integration/services/test_careers_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-forms"
+disposition = "separate-audit-required"
+reason = "Typed questions, validation and visibility are form-definition concerns; recruitment-specific system mappings require a typed product port."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "form_field_option"
+model = "dotmac_erp:app/models/forms/form.py"
+writer = "dotmac_erp:app/services/forms/form_engine.py"
+tests = ["dotmac_erp:tests/integration/services/test_careers_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-forms"
+disposition = "separate-audit-required"
+reason = "Choice options are children of a form field and carry no business-process authority."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "form_submission"
+model = "dotmac_erp:app/models/forms/form.py"
+writer = "dotmac_erp:app/services/forms/form_engine.py"
+tests = ["dotmac_erp:tests/integration/services/test_careers_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-forms"
+disposition = "separate-audit-required"
+reason = "A submission is captured evidence against an immutable form version; the subject domain decides every consequence."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "form_answer"
+model = "dotmac_erp:app/models/forms/form.py"
+writer = "dotmac_erp:app/services/forms/form_engine.py"
+tests = ["dotmac_erp:tests/integration/services/test_careers_service.py"]
+evidence_state = "behavior-tested"
+target = "dotmac-forms"
+disposition = "separate-audit-required"
+reason = "Snapshot-backed answers belong with form submissions, not a workflow engine."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "case_action"
+model = "dotmac_erp:app/models/people/discipline/case_action.py"
+writer = "dotmac_erp:app/services/people/discipline/discipline_service.py"
+tests = ["dotmac_erp:tests/people/discipline/test_discipline_service.py", "dotmac_erp:tests/test_api_discipline.py"]
+evidence_state = "behavior-tested"
+target = "people-payroll"
+disposition = "domain-owned"
+reason = "A disciplinary consequence belongs to the employee-discipline owner; sharing its case_ prefix cannot transfer employment authority to a generic workflow module."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "case_document"
+model = "dotmac_erp:app/models/people/discipline/case_document.py"
+writer = "dotmac_erp:app/services/people/discipline/attachment_service.py"
+tests = ["dotmac_erp:tests/people/discipline/test_discipline_service.py", "dotmac_erp:tests/test_api_discipline.py"]
+evidence_state = "behavior-tested"
+target = "people-payroll"
+disposition = "domain-owned"
+reason = "Disciplinary evidence is owned by the discipline case and remains within people/payroll."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "case_response"
+model = "dotmac_erp:app/models/people/discipline/case_response.py"
+writer = "dotmac_erp:app/services/people/discipline/discipline_service.py"
+tests = ["dotmac_erp:tests/people/discipline/test_discipline_service.py", "dotmac_erp:tests/test_api_discipline.py"]
+evidence_state = "behavior-tested"
+target = "people-payroll"
+disposition = "domain-owned"
+reason = "An employee response is official disciplinary-case state, not generic workflow state."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "case_witness"
+model = "dotmac_erp:app/models/people/discipline/case_witness.py"
+writer = "dotmac_erp:app/services/people/discipline/discipline_service.py"
+tests = ["dotmac_erp:tests/people/discipline/test_discipline_service.py", "dotmac_erp:tests/test_api_discipline.py"]
+evidence_state = "behavior-tested"
+target = "people-payroll"
+disposition = "domain-owned"
+reason = "Witness identity and statements are disciplinary-case facts and stay with the people domain."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "control_evidence"
+model = "dotmac_erp:app/models/finance/tax/control_evidence.py"
+writer = "none — no production writer or focused test found"
+tests = []
+evidence_state = "untested"
+target = "finance-ledger"
+disposition = "retire-orphan"
+reason = "The row is tax-control evidence by schema and foreign keys, not workflow; zero production writers means there is no behavior to extract and the ERP orphan should be retired unless a finance owner adopts it first."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "disclosure_checklist"
+model = "dotmac_erp:app/models/finance/rpt/disclosure_checklist.py"
+writer = "dotmac_erp:app/services/finance/rpt/disclosure_checklist.py"
+tests = []
+evidence_state = "untested"
+target = "finance-ledger"
+disposition = "domain-owned"
+reason = "IFRS disclosure completeness and review are financial-reporting decisions; the active service has no focused behavioral suite, so it is not a source for generic workflow behavior."
+
+[[tables]]
+repository = "dotmac_erp"
+table = "workflow_task"
+model = "dotmac_erp:app/models/workflow_task.py"
+writer = "dotmac_erp:app/services/workflow_task_service.py"
+tests = ["dotmac_erp:tests/test_web_pages_crud_smoke.py"]
+evidence_state = "incidental-only"
+target = "none"
+disposition = "retire-orphan"
+reason = "The service lists and changes existing rows but no production producer creates one and no focused behavior test exists; zero-producer code is not a reusable work-items source."
+
+[[tables]]
+repository = "dotmac_sub"
+table = "admin_alerts"
+model = "dotmac_sub:app/models/admin_alert.py"
+writer = "dotmac_sub:app/services/admin_alerts.py"
+tests = ["dotmac_sub:tests/test_admin_alerts.py"]
+evidence_state = "behavior-tested"
+target = "notifications-comms"
+disposition = "reclassify-existing-family"
+reason = "A deduplicated operational alert feeding admin notifications is communication/observability state, not approval or workflow state."
+
+[[tables]]
+repository = "dotmac_sub"
+table = "admin_whats_new_items"
+model = "dotmac_sub:app/models/admin_whats_new.py"
+writer = "dotmac_sub:app/services/admin_whats_new.py"
+tests = ["dotmac_sub:tests/test_admin_whats_new.py"]
+evidence_state = "behavior-tested"
+target = "content-help"
+disposition = "reclassify-existing-family"
+reason = "Time-bounded dashboard release-note content belongs with help/content, not business-process orchestration."

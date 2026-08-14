@@ -1,6 +1,6 @@
 # Fleet decomposition matrix — ERP, CRM, Sub, Vendor CP
 
-**As of:** 2026-08-12
+**As of:** 2026-08-14 classification amendment over the frozen 2026-08-12 source snapshot
 **ERP:** `0f4b1698` (`origin/main`) · **CRM:** `c64b5aa0` (`main`) · **Sub:** `9f6f9f36` (`feat/kernel-pin-a40`) · **Vendor CP:** `eb667fa` (`main`) · **Starter:** `10bd4a6`
 **Measured by:** `scripts/fleet_decomposition_sweep.py`
 **Frozen baseline:** [`fleet-decomposition-baseline.json`](fleet-decomposition-baseline.json)
@@ -176,7 +176,7 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | branding-templates | 1 | 0 | 1 | 0 | 0 | 0 | dotmac-ui + template studio |
 | ticketing-sla | 6 | 17 | 22 | 0 | 10 | 6 | `dotmac-ticketing`; ERP cutover 1, Vendor CP cutover 2 |
 | projects-tasks | 10 | 11 | 11 | 0 | 10 | 0 | consolidate CRM → Sub; module source **unassigned** |
-| notifications-comms | 7 | 18 | 21 | 0 | 11 | 5 | kernel (consent + outbox) + module ← Sub |
+| notifications-comms | 7 | 18 | 22 | 0 | 11 | 5 | kernel (consent + outbox) + module ← Sub |
 | engagement-inbox | 0 | 28 | 29 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
 | sales-agreements | 7 | 13 | 24 | 2 | 8 | 2 | consolidate CRM → Sub, then module ← Sub; vendor rows **unassigned** (A2) |
 | commercial-offers | 0 | 0 | 2 | 1 | 1 | 0 | module source **unassigned** (Sub or vendor CP) — A2 |
@@ -186,20 +186,23 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | geospatial-qualification | 2 | 6 | 11 | 0 | 5 | 0 | consolidate → Sub, then module ← Sub |
 | subscriber-service | 2 | 9 | 74 | 0 | 3 | 0 | consolidate → Sub, then module ← Sub |
 | network-operations | 3 | 2 | 72 | 0 | 1 | 0 | module ← Sub |
-| finance-ledger | 80 | 0 | 7 | 0 | 1 | 0 | module ← ERP + contract with Sub |
-| people-payroll | 97 | 0 | 0 | 0 | 0 | 0 | module ← ERP |
+| finance-ledger | 82 | 0 | 7 | 0 | 1 | 0 | module ← ERP + contract with Sub |
+| people-payroll | 101 | 0 | 0 | 0 | 0 | 0 | module ← ERP |
 | inventory-procurement | 39 | 3 | 4 | 0 | 0 | 0 | module ← ERP; CRM/Sub copies consolidate → ERP |
 | assets-fleet | 23 | 0 | 0 | 0 | 0 | 0 | module ← ERP |
 | expenses | 14 | 5 | 0 | 0 | 0 | 0 | module ← ERP; CRM copies consolidate → ERP |
-| governance-workflow | 20 | 0 | 2 | 2 | 0 | 0 | module source **unassigned** (ERP or vendor CP) — A1 |
+| approvals | 3 | 0 | 0 | 2 | 0 | 0 | module ← ERP + mandatory Vendor CP deltas — accepted, ADR-0026 |
+| workflow-automation | 3 | 0 | 0 | 0 | 0 | 0 | module ← ERP; separate audit required |
+| forms-data-capture | 7 | 0 | 0 | 0 | 0 | 0 | module ← ERP; separate audit required |
+| work-items | 1 | 0 | 0 | 0 | 0 | 0 | module source **unassigned**; ERP orphan retires |
 | licensing-issuance | 0 | 0 | 0 | 10 | 0 | 0 | module ← vendor CP |
 | entitlement-allocation | 0 | 0 | 0 | 2 | 0 | 0 | module ← vendor CP |
 | fleet-deployment | 0 | 0 | 0 | 4 | 0 | 0 | module ← vendor CP (partial — see gaps) |
 | analytics-reporting | 16 | 2 | 3 | 0 | 2 | 0 | module source **unassigned** (ERP or Sub) |
-| content-help | 7 | 0 | 1 | 0 | 0 | 0 | module ← ERP |
+| content-help | 7 | 0 | 2 | 0 | 0 | 0 | module ← ERP |
 
-Four families are new with this measurement, and one existing family lost rows
-to them. `commercial-offers` took Sub's `offer_versions` and
+Four families were new in the 2026-08-12 measurement, and one existing family
+lost rows to them. `commercial-offers` took Sub's `offer_versions` and
 `offer_version_prices` out of `subscriber-service` (76 → 74). **That is a
 reclassification, not a retirement** — no Sub table was deleted. It was made a
 family of its own because leaving the vendor's `offer_versions` inside a
@@ -208,8 +211,14 @@ favour, and because family classification is deliberately repo-blind: the same
 property that made the collision visible is the one that must not be bent to
 hide it.
 
-`governance-workflow` and `sales-agreements` now hold rows from two repositories
-with no adjudicated source. They are marked, not resolved.
+The 2026-08-14 A1 audit found that `governance-workflow` was a prefix bucket,
+not a capability: its 24 rows resolve to eight owners. The exact dispositions
+are frozen in
+[`approval-workflow-dispositions.toml`](approval-workflow-dispositions.toml)
+and explained in
+[`approvals-workflow-source-audit.md`](approvals-workflow-source-audit.md).
+`sales-agreements` still holds rows from two repositories with no adjudicated
+source; it remains marked rather than resolved.
 
 ### Dispositions
 
@@ -310,21 +319,57 @@ Each row still needs the standard transfer dossier — old owner, new owner,
 shadow phase, cutover gate, fallback retirement, and a boundary test that fails
 if a retired writer comes back.
 
+### A1 audit complete — source ruling accepted 2026-08-14
+
+The source audit decomposed the former `governance-workflow` bucket before
+selecting an implementation. Only five rows share one approval contract:
+ERP's `approval_workflow`, `approval_request` and `approval_decision`, plus
+Vendor CP's `approval_policies` and `approval_records`.
+
+The accepted source is **module ← ERP**, because ERP supplies the
+production-used tenant request lifecycle, ordered levels, threshold routing,
+eligibility and segregation-of-duties behavior. Vendor CP's immutable policy
+versions, content digest binding, fail-closed evaluation, idempotency,
+distinct-actor quorum and self-approval exclusion are mandatory port deltas.
+The target is an explicit dual-plane `dotmac-approvals` module; it never mutates
+the approved subject. Full evidence:
+[`approvals-workflow-source-audit.md`](approvals-workflow-source-audit.md).
+
+[ADR-0026](../adr/0026-approvals-decide-approval-never-the-transition.md) accepts
+that ruling with three corrections recorded in the audit: threshold/FX routing
+stays in ERP and is not part of the shared contract; an individual `policy_code`
+is operator-owned data, not manifest-declared vocabulary; and Vendor CP's
+adoption is a capability gain as well as a relocation, so only the six safety
+properties it implements can be shadow-compared. Cutover order is Vendor CP
+first, ERP after its E8 gate.
+
+**Implementation is authorised and unwritten.** ADR-0026 § 8 left ADR-0017's
+moratorium standing — the audit found no independently blocked product — and
+ADR-0017's 2026-08-14 amendment then recorded the owner-directed exception for
+this named module. A named direction, not a demand pull: it opens nothing for
+any other candidate.
+
+The ADR creates no package, namespace or release row. The module change
+allocates `mod_approvals` against the then-current kernel alpha and opens its
+dossier in the same diff; the release-allowlist entry lands later still, after
+the live Postgres gate passes.
+
 ### Contested — genuinely unassigned
 
 | Capability | The collision | Why it is not yet assignable |
 |---|---|---|
 | projects-tasks, ERP ↔ Sub (ERP 10 / Sub 11) | `project_templates`, `project_template_tasks`, `project_template_task_dependency` — the only non-platform table in all three products — plus `project_tasks`, `project_comments`, `project_task_assignees` | CRM's copy retires under the decisions above, but ERP's delivery projects and Sub's installation projects are two legitimate owners with an identical template/task/dependency mechanism. Whether that mechanism is a shared module or two independent implementations of a common shape has never been adjudicated. Needs the audit `dotmac-ticketing` got. |
 | billing-revenue, ERP ↔ Sub (ERP 12 / Sub 74, plus finance-ledger's `bank_accounts`) | Only 2 exact collisions — the duplication is *semantic*, not structural: Sub owns subscriber billing, ERP owns the ledger, and the ERP↔Sub sync reconciles them | Explicitly **not** a module. The known money-correctness defects in that sync are contract and reconciliation bugs; merging the two into a shared package converts a fixable contract into an unfixable one. Deliverable is a versioned contract with drift detection and repair. |
-| **A1** — governance-workflow, ERP ↔ Vendor CP (ERP 20 / Vendor 2) | `approval_policies`, `approval_records` against ERP's `approval_*`/`workflow*` block. No name collides; the shapes are what overlap | The vendor's version is 493 LOC with a property the fleet-deployment work needs specifically — an approval **bound to its content**, which dies when its input changes, so a `plan_hash` cannot be approved and then quietly re-planned. ERP's is larger and production-proven. Hard rule 22 requires inventorying ERP before writing shared behaviour, so this is a source audit, not a preference. |
 | **A2** — sales-agreements + commercial-offers, Sub ↔ Vendor CP (Sub 24+2 / Vendor 2+1) | Exactly one exact collision, `offer_versions`. Sub's contracts are `billing_contracts`; the vendor's are `contracts` | A vendor↔operator commercial agreement that gates entitlement allocation is plausibly not an ISP customer quote/order, in which case these are two modules sharing kernel value objects (money, term, line items) with a contract between them. But `offer_versions` is the *same shape built twice* — an immutable priced offer version — and that is the half that most looks like one module. Unadjudicated in both directions. |
 | **A3** — party-identity, kernel ↔ Vendor CP (Vendor 1) | `vendor_accounts` | Classified into `party-identity` because that is what it is, which makes the question visible rather than settling it: either kernel `Party` grows a platform scope and this table retires into it, or it stays a module. Vendor ADR-0002 chose platform-scoped deliberately; check whether kernel `Party` can express that before deciding. |
 
 ### Single-owner domains — modules, sequenced later
 
-ERP's back office — people-payroll (97), inventory-procurement (39),
-assets-fleet (23), governance-workflow (20), expenses (14) — has **zero measured
-duplication with CRM or Sub**.
+ERP's back office — people-payroll (101), inventory-procurement (39),
+assets-fleet (23), expenses (14), forms-data-capture (7) and
+workflow-automation (3) — has **zero measured duplication with CRM or Sub**.
+The last two are separate candidates, not a revived generic workflow family;
+each needs its own audit.
 
 That is a statement about *when*, not *whether*. Each of these is a coherent
 domain and becomes a Starter `dotmac-<domain>` module sourced from ERP. Zero
@@ -341,7 +386,7 @@ tables plus its 3 `inventory_*` tables, and Sub's 4
 `vendor_material_release*`/`vendor_advances` tables, duplicate ERP-authoritative
 expense and procurement facts.
 
-finance-ledger is the one row that looks single-owner and is not. ERP holds 80
+finance-ledger is the one row that looks single-owner and is not. ERP holds 82
 tables; Sub holds 7 — `bank_accounts` (the only ERP↔Sub non-platform collision),
 `bank_reconciliation_runs`/`_items`, `ledger_entries`, `tax_rates`, and the
 withholding-tax pair. That is the ERP↔Sub billing contract seam showing up as
@@ -362,7 +407,7 @@ constraint that adoption — not scope — is the scarce resource.
 | **2** | `dotmac-ticketing` cutover — name the adopter, adopt in Sub, then land CRM's ticket retirement into the module. | The package and its source audit already exist; the only open gate is an adopter. The **first proof that a non-kernel module lineage runs in production**, which every later module wave depends on. |
 | **3** | Consent → delivery/outbox → channel policy → campaigns, in that order. | Consent is a kernel owner and a legal boundary; shipping delivery first ships a suppression bypass. |
 | **4** | Sub-sourced modules: network-operations, subscriber-service, outside-plant, field-workforce, engagement-inbox, sales-agreements, billing. | The domains consolidated in wave 1, now extracted product-first from Sub and consumed back by Sub as an assembly. Depends on wave 2's lineage proof. |
-| **5** | ERP-sourced modules: finance-ledger, people-payroll, inventory-procurement, assets-fleet, expenses, governance-workflow, content-help. | Zero duplication, so nobody is paying for a second implementation today — that sequences it late, and does not exempt it. ERP's kernel/UI adoption must land first. |
+| **5** | ERP-sourced modules: finance-ledger, people-payroll, inventory-procurement, assets-fleet, expenses, content-help; separately audit forms-data-capture and workflow-automation. | Zero duplication, so nobody is paying for a second implementation today — that sequences it late, and does not exempt it. ERP's kernel/UI adoption must land first. A1 proved the two workflow-named candidates cannot be bundled. |
 | **6** | Source adjudication for projects-tasks (ERP vs Sub) and analytics-reporting, then extraction. | Target layer settled, qualifying source unsettled. Needs the audit `dotmac-ticketing` got. |
 
 Running beside those, on the vendor track — sequenced independently because it
@@ -372,7 +417,7 @@ blocks on none of the CRM↔Sub consolidation and shares no table with it:
 |---|---|---|
 | **V0** | Repin the vendor CP off `dotmac-kernel==0.1.0a9` (the kernel is at `0.1.0a41`) and rewrite its architecture doc's "blocked on" list — outbox/inbox, money, capabilities, entitlements, profiles and idempotency all shipped in the intervening 32 alphas. | Everything below is planned against a picture that is a month stale. |
 | **V1** | Kernel primitives for the gaps that are protocols, not domains: resumable run engine, update authority, support-access enforcement, health envelope. | Uncontested — no repository holds a competing table. The run engine also gives ADR-0014's at-most-once owner its first real workload, which wave 0 above has been waiting for. |
-| **V2** | Extract the vendor CP's existing domain code to Starter modules: licensing-issuance (10 tables), entitlement-allocation (2), commercial contracts (2), approvals (2), pending A1/A2. | The only implementation of each, so no shadow phase, no drift window, no writer to retire. Cheapest extractions available anywhere in the programme, and they prove the module-lineage machinery on a repo with no production migration risk — the same argument that made the vendor CP `dotmac-ticketing`'s first adopter. |
+| **V2** | Extract the vendor CP's existing domain code to Starter modules: licensing-issuance (10 tables), entitlement-allocation (2), commercial contracts (2); after A1 acceptance, make Vendor CP the first `dotmac-approvals` adopter. | The first three are the only implementation of each. Approvals is different: ERP is the source and Vendor contributes mandatory platform/content-binding deltas, then retires its two local tables after shadow comparison. This still proves module-lineage machinery without pretending Vendor owns the whole contract. |
 | **V3** | Build the release catalogue, fleet desired state, support-access workflow and fleet health as Starter modules. | Greenfield with no source to port. Built in Starter from the start so they are never an extraction later. |
 
 Running in parallel, on the contract track: the ERP↔Sub billing contract repair
