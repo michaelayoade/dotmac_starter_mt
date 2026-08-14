@@ -49,8 +49,9 @@ palette-baseline: ## Regenerate the hardcoded-palette debt baseline (commit the 
 	poetry run python scripts/palette_debt_baseline.py
 connector-baseline: ## Regenerate the external-connector baseline after a verified Integrator cutover (commit the diff in the same change)
 	poetry run python scripts/external_connector_sweep.py --write-baseline
-check: lint lint-imports type-check security migration-gate ui-check ## Lint + types + security + migration composition + design-system asset freshness
+format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
+check: lint lint-imports type-check security migration-gate ui-check format-check ## Lint + types + security + migration composition + design-system asset freshness
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests
