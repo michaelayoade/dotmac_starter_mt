@@ -6,6 +6,25 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a59 — 2026-08-14
+
+Allocates one namespace. No behaviour changes, and nothing existing moves.
+
+### Added
+
+- `APPROVALS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_approvals`, migration prefix `ap`, branch label `approvals`. The ninth
+  allocated installable module, and the record that makes `dotmac-approvals
+  0.1.0a1` registrable — `NamespaceRegistry.from_manifests` raises
+  `UnallocatedNamespaceError` against any earlier kernel, so the module's floor
+  is this release (ADR-0026).
+
+An allocation is not a facility. This release adds no kernel primitive and
+nothing consumes the row but the module it names — the same reasoning ADR-0021
+§ 7 recorded for `mod_appdir`. Unlike the reservation ADR-0026 § 8 describes as
+withdrawn, this row arrives in the same change as the manifest, migration and
+dossier that use it.
+
 ## 0.1.0a58 — 2026-08-14
 
 Allocates `mod_intg` to `dotmac-integration`, the connector control-plane module

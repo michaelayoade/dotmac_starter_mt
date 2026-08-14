@@ -537,6 +537,30 @@ INTEGRATION_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("intg"),
 )
 
+# `dotmac-approvals` — the NINTH allocated installable module, and the first
+# allocated for a capability that exists in BOTH planes in production today:
+# ERP approves back-office subjects for a tenant, and the vendor control plane
+# approves fleet-plan subjects with no tenant at all (ADR-0026 § 5). Both plane
+# tuples are therefore populated, which is the case ADR-0023 was written for.
+#
+# `approvals` is plain in a catalog dump for the same reason `files` and
+# `imports` are — a reader of `mod_approvals.approval_requests` needs no
+# glossary. The distinct `ap` prefix keeps its independently released lineage
+# inside the revision-id budget; `a` alone is the host assembly's.
+#
+# The row lands in the same change as the module's manifest, migration and
+# dossier, as the allocation rule above requires — and deliberately so: an
+# earlier revision of ADR-0026 reserved this namespace ahead of the code and was
+# withdrawn on review, because a reservation is renumbered at every rebase while
+# the alpha train is contended, and a ledger row with no manifest behind it is a
+# state this module has no general way to express (ADR-0026 § 8).
+APPROVALS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="approvals",
+    prefix="ap",
+    branch_label="approvals",
+    db_schema=module_schema("approvals"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -547,6 +571,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     APPLICATION_DIRECTORY_MIGRATION_OWNER,
     FILES_MIGRATION_OWNER,
     IMPORTS_MIGRATION_OWNER,
+    APPROVALS_MIGRATION_OWNER,
 )
 
 
@@ -805,6 +830,7 @@ class NamespaceRegistry:
 
 __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
+    "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
