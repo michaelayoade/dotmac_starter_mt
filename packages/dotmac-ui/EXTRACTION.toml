@@ -1,7 +1,7 @@
 schema_version = 2
 package = "dotmac-ui"
 classification = "presentation-foundation"
-status = "audit-complete"
+status = "reuse-proven"
 source_mode = "product-first"
 owner = "Dotmac design system"
 contract = "Two published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) inert Jinja component templates with their declared contracts and token-native CSS. The headline status is the weaker of the two."
@@ -21,15 +21,16 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_consumer.py",
   "dotmac_starter_mt:tests/unit/test_admin_shell_tokens.py",
   "dotmac_sub:tests/architecture/test_dotmac_ui_adoption.py",
+  "dotmac_erp:tests/architecture/test_dotmac_ui_adoption.py",
   "dotmac_erp:tests/test_template_macros.py",
 ]
 # INDEPENDENT consumers only. The starter is the assembly that owns this
 # package: its consumption proves the wiring works, not that anyone independent
 # chose the contract, so it is recorded as reference proof and never counted
 # (ADR-0006 section 5).
-contract_consumers = ["dotmac_sub", "dotmac_academy_app"]
+contract_consumers = ["dotmac_sub", "dotmac_academy_app", "dotmac_erp"]
 reference_consumers = ["dotmac_starter_mt"]
-candidate_consumers = ["dotmac_erp", "dotmac_crm"]
+candidate_consumers = ["dotmac_crm"]
 inventory_evidence = [
   "docs/inventories/starter-surfaces.md",
   "docs/inventories/sub-surfaces.md",
@@ -37,10 +38,10 @@ inventory_evidence = [
   "docs/inventories/branding-settings.md",
   "docs/inventories/ui-surface-inventory.md",
 ]
-first_cutover = "Per slice. tokens: done, and twice over -- dotmac_sub and dotmac_academy_app are both merged external consumers on their default branches, each pinning the released 0.1.0a3 and serving the packaged asset through an assembly-owned app/ui.py rather than a copied stylesheet, verified 2026-08-13 against each default branch. components: NOT done -- the candidate now preserves the ERP/Sub/CRM core contract, but no external product has pinned it; the starter is reference proof rather than a cutover."
-shadow_and_drift = "Per slice. tokens: consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface; dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py. components: the package ports ERP's direct title/message/action behaviour and Sub/CRM's identical include-context shape; clean-host, installed-wheel, registry-installed, escaping, token-native and product-seam sensitivity proofs guard the shared core. Each cutover product must add its own render/adoption proof before deleting its local copy."
-local_copy_retirement = "Per slice. tokens: dotmac_erp still builds its own live src/css tree; dotmac_sub's sanctioned green role-token overrides are a deliberate outcome rather than debt. components: ERP's rich macro remains the first compatibility source, while Sub and CRM retain byte-identical local templates. ERP cuts over first through a thin local adapter for legacy aliases, then removes that adapter as callers adopt the canonical four fields; Sub and CRM delete their local templates when they pin the released candidate."
-next_action = "Release the corrected empty_state as an audit-complete COMPONENT candidate, then cut over ERP first through a thin compatibility adapter because it is the qualifying tested product-first source. Cut Sub over second and delete its byte-identical template; that supplies two independent consumers and permits the component slice to become reuse-proven. CRM follows as the third retirement target. The tokens slice needs nothing further. See docs/superpowers/plans/2026-08-13-presentation-system-programme.md."
+first_cutover = "Per slice. tokens: done -- dotmac_sub and dotmac_academy_app are merged external consumers on their default branches, serving the packaged asset through assembly-owned composition rather than copied stylesheets. components: done twice over -- dotmac_erp main at 462b6fa and dotmac_sub main at 73c35f4 both pin released 0.1.0a7, resolve the package-owned empty_state template through their real Jinja loaders, and exercise it through product-owned adoption tests. The starter remains reference proof rather than an independent cutover."
+shadow_and_drift = "Per slice. tokens: consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface; dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py. components: clean-host, installed-wheel, registry-installed, escaping, token-native and product-seam sensitivity proofs guard the shared core; ERP and Sub each pin the release, assert the declared empty_state contract, resolve it through the product loader, and reject a vendored package template. Their local compatibility adapters contain no component markup, so the package remains the one renderer."
+local_copy_retirement = "Per slice. tokens: dotmac_erp still builds its own live src/css tree; dotmac_sub's sanctioned green role-token overrides are a deliberate outcome rather than debt. components: ERP replaced its former empty_state body with a thin legacy-call-shape adapter over the package macro, and Sub replaced its byte-identical renderer with a thin include-context adapter; neither retains a second markup owner. The starter's table macro copy is already retired. CRM's local template remains an optional future cleanup and is not required for the ERP + Sub reuse proof."
+next_action = "The active dotmac-ui foundation programme is complete: both tokens and components are reuse-proven. Keep the 851 hardcoded-palette baseline as a two-directional maintenance ratchet; add components only when two live consumers share semantics and local owners can be retired; create a theme package only on proven non-token structural demand. CRM is an eligible but unscheduled candidate. The list surface remains behind ADR-0017. See docs/superpowers/plans/2026-08-13-presentation-system-programme.md."
 
 # ── Contract slices (schema 2) ──────────────────────────────────────────────
 # This package publishes TWO contracts whose evidence differs. A single
@@ -72,7 +73,7 @@ local_copy_retirement = "dotmac_erp still builds its own live src/css tree, the 
 [[slices]]
 name = "components"
 contract = "Inert Jinja component templates plus their ComponentContract declarations and token-native CSS"
-status = "audit-complete"
+status = "reuse-proven"
 source_paths = [
   "dotmac_erp:templates/components/macros.html",
   "dotmac_sub:templates/components/data/empty_state.html",
@@ -83,13 +84,16 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_components.py",
   "dotmac_starter_mt:tests/unit/test_dotmac_ui_consumer.py",
   "dotmac_starter_mt:tests/architecture/test_ui_release_contract.py",
+  "dotmac_erp:tests/architecture/test_dotmac_ui_adoption.py",
+  "dotmac_sub:tests/architecture/test_dotmac_ui_adoption.py",
 ]
-# ZERO independent consumers. The starter is recorded below as reference proof
-# and deliberately does not count: consumption by the assembly that OWNS the
-# package proves the wiring, not that anyone independent chose the contract.
-contract_consumers = []
+# Two independent default-branch consumers establish reuse. The starter is
+# recorded separately as reference proof and deliberately does not count:
+# consumption by the assembly that OWNS the package proves the wiring, not that
+# anyone independent chose the contract.
+contract_consumers = ["dotmac_erp", "dotmac_sub"]
 reference_consumers = ["dotmac_starter_mt"]
-# Named per slice, not inherited from the package: an audit-complete slice
-# whose candidates were declared for a DIFFERENT contract has named nobody.
-candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac_crm"]
-local_copy_retirement = "ERP is the first cutover because its production macro and direct macro test are the qualifying product-first source; keep only a thin local adapter for its legacy aliases during caller migration, then delete it. Sub is second and CRM third; each deletes its byte-identical local template only after pinning the released candidate and passing a product-owned render/adoption test. The starter's local macro in table_macros.html is already retired."
+# Candidates are future demand, not products already counted above. CRM is
+# technically eligible but unscheduled; Academy has no local renderer to retire.
+candidate_consumers = ["dotmac_crm", "dotmac_academy_app"]
+local_copy_retirement = "ERP's production macro supplied the product-first semantics; its former renderer is now a thin argument adapter over the package macro, protected by direct macro and architecture tests. Sub's byte-identical renderer is now a thin include-context adapter, protected by its architecture test and six live callers. Neither adapter owns markup. The starter's table macro copy is retired; CRM's copy is optional future cleanup, not part of the active programme."
