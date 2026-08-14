@@ -95,8 +95,9 @@ PRE_RULE_DEBT = {
     # default branches, joining the reference assembly as the third contract
     # consumer of the TOKEN contract.  The row's removal is the ratchet shrinking
     # as designed -- re-adding it would re-grant a retired exemption.  Note the
-    # scope: the evidence covers tokens and compiled assets, NOT the component
-    # library, which has no consumer yet.
+    # scope at deletion time: the evidence covered tokens and compiled assets.
+    # The component slice later reached reuse-proven independently through ERP
+    # and Sub; that strengthens the dossier and does not revive this exemption.
     "dotmac-template-studio": "audit-required",
 }
 
@@ -267,12 +268,12 @@ def _validate_dossier(
 
     # ── Contract slices (schema 2) ──────────────────────────────────────────
     # A package may publish more than one CONTRACT, and their evidence differs.
-    # `dotmac-ui` publishes semantic tokens (three consumers) and a Jinja
-    # component library (none).  A single package-level state cannot describe
-    # that: report the stronger and the weaker contract is overstated; report
-    # the weaker and the stronger is understated.  Schema 2 makes each slice a
-    # typed row with its own status, sources, tests, consumers and retirement
-    # gate, and the package headline becomes DERIVED rather than asserted.
+    # `dotmac-ui` publishes semantic tokens and a Jinja component library. The
+    # two slices reached reuse on different dates and may diverge again as new
+    # contracts are published. A single package-level assertion cannot preserve
+    # that evidence history. Schema 2 gives each slice its own status, sources,
+    # tests, consumers and retirement gate, while the package headline remains
+    # DERIVED rather than asserted.
     slices = dossier.get("slices")
     if schema_version == 2:
         if not isinstance(slices, list) or not slices:
@@ -653,6 +654,9 @@ def _validate_ui(dossier: dict[str, Any]) -> None:
 def test_the_headline_cannot_claim_more_than_its_weakest_slice() -> None:
     """The whole point of slices: a strong contract must not carry a weak one."""
     dossier = _ui_dossier()
+    components = next(s for s in dossier["slices"] if s["name"] == "components")
+    components["contract_consumers"] = ["dotmac_erp"]
+    components["status"] = "adopted"
     dossier["status"] = "reuse-proven"
 
     with pytest.raises(ExtractionDossierError, match="weakest contract slice"):
@@ -673,6 +677,7 @@ def test_a_reference_consumer_cannot_be_counted_as_adoption() -> None:
 def test_a_slice_cannot_claim_more_than_its_consumers_prove() -> None:
     dossier = _ui_dossier()
     components = next(s for s in dossier["slices"] if s["name"] == "components")
+    components["contract_consumers"] = ["dotmac_erp"]
     components["status"] = "reuse-proven"
 
     with pytest.raises(ExtractionDossierError, match="evidence level is exactly"):
@@ -682,7 +687,7 @@ def test_a_slice_cannot_claim_more_than_its_consumers_prove() -> None:
 def test_the_package_consumer_list_must_match_the_slices() -> None:
     """The summary is derived; it cannot drift from the rows beneath it."""
     dossier = _ui_dossier()
-    dossier["contract_consumers"] = ["dotmac_sub", "dotmac_academy_app", "dotmac_erp"]
+    dossier["contract_consumers"] = ["dotmac_sub", "dotmac_academy_app"]
 
     with pytest.raises(ExtractionDossierError, match="union of the slices"):
         _validate_ui(dossier)
@@ -754,7 +759,7 @@ def test_one_concrete_candidate_is_enough_for_a_slice() -> None:
     """
     dossier = _ui_dossier()
     components = next(s for s in dossier["slices"] if s["name"] == "components")
-    components["candidate_consumers"] = ["dotmac_erp"]
+    components["candidate_consumers"] = ["dotmac_crm"]
 
     _validate_ui(dossier)
 
