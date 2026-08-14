@@ -121,7 +121,51 @@ _TASK_HINTS = ("celery", "shared_task", "scheduled_task", "periodic_task", "cron
 _TASK_SUBJECT_HINTS = ("sync", "connector", "integration", "webhook", "poll", "fetch")
 
 #: Durable cursor/watermark state for an external feed.
-_CHECKPOINT_CLASS_HINTS = ("checkpoint", "cursor", "syncstate", "synccursor")
+#:
+#: Split in two because the words are not equally specific. `checkpoint` /
+#: `syncstate` / `synccursor` already NAME durable progress over a stream, so
+#: they stand alone. Bare `cursor` does not: it is the ordinary word for a
+#: pagination cursor, a DBAPI cursor, and — the miscount that motivated this
+#: split — a round-robin ROTATION pointer over an internal roster
+#: (`InboxTeamRoundRobinCursor`, dotmac_sub `app/models/team_inbox.py`), which
+#: has no feed, no watermark and no external system anywhere near it. A bare
+#: `*Cursor` therefore has to also name the feed it tracks.
+_FEED_CHECKPOINT_CLASS_HINTS = ("checkpoint", "syncstate", "synccursor")
+_AMBIGUOUS_CHECKPOINT_CLASS_HINTS = ("cursor",)
+_CHECKPOINT_CLASS_HINTS = (
+    _FEED_CHECKPOINT_CLASS_HINTS + _AMBIGUOUS_CHECKPOINT_CLASS_HINTS
+)
+
+#: `meta_` is a provider prefix in a SETTINGS name but an ordinary programming
+#: prefix in a CLASS name (`MetadataCursor`), so it does not qualify a cursor.
+_NOT_A_CLASS_NAME_PROVIDER = frozenset({"meta_"})
+
+#: What turns an ambiguous `*Cursor` into a connector checkpoint: the name says
+#: which external feed it is a position in. Provider names count too, so a
+#: `StripeCursor` needs no generic word to qualify.
+_EXTERNAL_FEED_HINTS = (
+    "sync",
+    "external",
+    "integration",
+    "connector",
+    "feed",
+    "ingest",
+    "import",
+    "poll",
+    "replicat",
+    "upstream",
+    "remote",
+    "mirror",
+    "provider",
+    "webhook",
+    "erp",
+    *(
+        provider.rstrip("_")
+        for provider in _PROVIDER_TOKENS
+        if provider not in _NOT_A_CLASS_NAME_PROVIDER
+    ),
+)
+
 _CHECKPOINT_COLUMN_HINTS = ("last_synced_at", "sync_cursor", "last_cursor", "watermark")
 
 CATEGORIES = (
@@ -228,10 +272,27 @@ def _schedules_a_connector(tree: ast.AST, source: str) -> bool:
     return False
 
 
+def _is_checkpoint_class_name(class_name: str) -> bool:
+    """Does this class name denote a position in an EXTERNAL feed?
+
+    The class-name rule is the SECONDARY net: a class that actually declares a
+    watermark column is caught by `_CHECKPOINT_COLUMN_HINTS` below whatever it
+    is called. This rule exists only for feed state whose column is named
+    something else — which is why narrowing bare `*Cursor` costs no recall on
+    anything that stores a watermark.
+    """
+    lowered = class_name.lower()
+    if any(hint in lowered for hint in _FEED_CHECKPOINT_CLASS_HINTS):
+        return True
+    if any(hint in lowered for hint in _AMBIGUOUS_CHECKPOINT_CLASS_HINTS):
+        return any(hint in lowered for hint in _EXTERNAL_FEED_HINTS)
+    return False
+
+
 def _holds_a_checkpoint(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            if any(hint in node.name.lower() for hint in _CHECKPOINT_CLASS_HINTS):
+            if _is_checkpoint_class_name(node.name):
                 return True
         name: str | None = None
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):

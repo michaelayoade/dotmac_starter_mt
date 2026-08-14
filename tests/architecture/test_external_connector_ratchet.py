@@ -156,6 +156,94 @@ def test_a_generic_api_key_is_not_counted_as_a_provider_credential() -> None:
     assert sweep._holds_provider_credential(ast.parse(provider_key))
 
 
+def test_a_rotation_cursor_is_not_a_sync_checkpoint() -> None:
+    """SPECIFICITY, and a real miscount rather than a hypothetical one.
+
+    `InboxTeamRoundRobinCursor` (dotmac_sub `app/models/team_inbox.py`, landed
+    2026-08-13 with conversational AI intake) is durable per-team ROTATION state
+    for assigning inbox conversations to staff: `service_team_id`,
+    `last_assigned_person_id`, `rotation_count`. No feed, no watermark, no
+    external system. It matched only because "cursor" is a substring of its
+    name, and it drove `dotmac_sub.sync_checkpoint` to 9 against a baseline of
+    8 — reporting a new direct connector surface where none had landed.
+
+    A ratchet that fires on internal state is a ratchet that gets switched off,
+    so a bare `*Cursor` now has to name the feed it is a position in.
+    """
+    import ast
+
+    sweep = _sweep()
+    rotation = (
+        "class InboxTeamRoundRobinCursor:\n"
+        "    service_team_id: int = 0\n"
+        "    last_assigned_person_id: int = 0\n"
+        "    rotation_count: int = 0\n"
+    )
+    assert not sweep._holds_a_checkpoint(ast.parse(rotation))
+    assert not sweep._is_checkpoint_class_name("InboxTeamRoundRobinCursor")
+    # The same overload elsewhere: pagination and DBAPI cursors.
+    assert not sweep._is_checkpoint_class_name("PageCursor")
+    assert not sweep._is_checkpoint_class_name("ResultCursor")
+
+
+def test_narrowing_the_cursor_rule_did_not_blind_the_checkpoint_detector() -> None:
+    """ANTI-BLINDING — the other half of ADR-0018, and the half a precision fix
+    usually skips. Each assertion below is a surface that MUST still be counted.
+
+    Three independent nets keep recall: a self-qualifying feed word, an
+    external-feed qualifier on an ambiguous `*Cursor`, and — the important one —
+    the watermark COLUMN rule, which is untouched and catches any class that
+    actually stores a feed position no matter what the class is called.
+    """
+    import ast
+
+    sweep = _sweep()
+
+    # 1. Self-qualifying names: `checkpoint`/`syncstate` stand alone. These are
+    #    the live surfaces in Sub and ERP; losing them would drop the baseline.
+    assert sweep._is_checkpoint_class_name("IntegrationCheckpoint")
+    assert sweep._is_checkpoint_class_name("EventHandlerCheckpoint")
+    assert sweep._is_checkpoint_class_name("QuoteSyncState")
+
+    # 2. An ambiguous `*Cursor` that names its feed — generically or by provider.
+    assert sweep._is_checkpoint_class_name("ErpDomainSyncCursor")
+    assert sweep._is_checkpoint_class_name("StripeCursor")
+    assert sweep._is_checkpoint_class_name("WebhookIngestCursor")
+
+    # 3. The column net is independent of the name. A cursor class the name
+    #    rule now rejects is STILL counted the moment it stores a watermark —
+    #    which is what makes narrowing the name rule cost no real recall.
+    rejected_name_with_watermark = (
+        "class RoundRobinCursor:\n    last_synced_at: str = ''\n"
+    )
+    assert not sweep._is_checkpoint_class_name("RoundRobinCursor")
+    assert sweep._holds_a_checkpoint(ast.parse(rejected_name_with_watermark))
+
+
+def test_the_sync_checkpoint_detector_still_bites(tmp_path: pathlib.Path) -> None:
+    """A narrowed rule that matched NOTHING would also satisfy every assertion
+    above about what it REJECTS. This drives `_classify` — the path `measure()`
+    actually uses — over a file on disk and requires the category to come back,
+    so it cannot quietly become dead code (and the frozen total is non-zero).
+    """
+    sweep = _sweep()
+    counted = tmp_path / "erp_sync_cursor.py"
+    counted.write_text(
+        "class ErpSyncCursor:\n"
+        "    __tablename__ = 'erp_sync_cursor'\n"
+        "    last_event_id: str = ''\n",
+        encoding="utf-8",
+    )
+    ignored = tmp_path / "round_robin.py"
+    ignored.write_text(
+        "class TeamRoundRobinCursor:\n    rotation_count: int = 0\n", encoding="utf-8"
+    )
+
+    assert "sync_checkpoint" in sweep._classify(counted)
+    assert "sync_checkpoint" not in sweep._classify(ignored)
+    assert _baseline()["totals"]["sync_checkpoint"] > 0
+
+
 def test_a_retry_loop_without_a_connector_is_not_delivery_machinery() -> None:
     """`max_retries` around a local database write is not delivery retry, and
     counting it would make the category mean nothing."""
