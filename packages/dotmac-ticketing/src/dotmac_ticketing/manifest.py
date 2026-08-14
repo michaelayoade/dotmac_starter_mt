@@ -47,7 +47,7 @@ from dotmac_kernel.prerequisites import (
 
 module = ModuleManifest(
     code="ticketing",
-    version="0.1.0a2",
+    version="0.1.0a3",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="tkt",
@@ -71,10 +71,14 @@ module = ModuleManifest(
     # `ticketing.use`, the read/work/administer permission split, and the five
     # audit actions all land in the release that ships the routers — with the
     # guards that reference them in the same change.
-    # Needs a tenant catalogue for its foreign keys and roles to grant to —
-    # never the kernel's identity/RBAC/audit estate. The assembly binds these
-    # effects to the revisions that supply them (ADR-0006 D1 amendment).
-    requires=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
+    # Split by PLANE (ADR-0027): roles to create anything, a tenant catalogue
+    # only for the tenant plane. An assembly with no tenant scope — the vendor
+    # control plane — installs the platform plane and skips the rest, rather
+    # than being unable to install the module at all. Never the kernel's
+    # identity/RBAC/audit estate either way; the assembly binds these effects to
+    # the revisions that supply them (ADR-0006 D1 amendment).
+    requires=(MODULE_DATABASE_ROLES_V1.name,),
+    tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
 )
 
 __all__ = ["module"]

@@ -1,5 +1,29 @@
 # Changelog — dotmac-ticketing
 
+## 0.1.0a3 — 2026-08-14
+
+Makes the module installable in a platform-only assembly (ADR-0027).
+
+`0.1.0a2` declared what the lineage needs instead of naming a foreign revision,
+which unblocked ERP. It did not help the vendor control plane: one flat
+`requires` list containing `tenant_scope_catalog.v1` meant `upgrade()` demanded a
+tenant catalogue before creating ANY table — and a control plane has none,
+permanently and by design. So the module that ADR-0023 made dual-plane could not
+be installed by the control plane it was dual FOR.
+
+### Changed
+
+- The manifest declares `module_database_roles.v1` as `requires` and
+  `tenant_scope_catalog.v1` as `tenant_requires`.
+- `tk_0001_tickets` builds the platform plane unconditionally and the tenant
+  plane only where the assembly bound a tenant catalogue, and grants schema
+  USAGE to `app_user` only where there is something there for it to reach.
+- Kernel floor is `>=0.1.0a60`, the release that added per-plane prerequisites.
+
+No behaviour changes, and nothing about a built plane changes: a tenant table
+still carries `tenant_id NOT NULL`, composite identity and FORCEd RLS; a
+platform table is still REVOKEd from `app_user`.
+
 ## 0.1.0a2 — 2026-08-13
 
 Declares the database EFFECTS this lineage needs instead of naming a foreign

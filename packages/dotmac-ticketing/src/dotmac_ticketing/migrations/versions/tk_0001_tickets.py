@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
-from dotmac_kernel.prerequisites import resolve_depends_on
+from dotmac_kernel.prerequisites import all_bound, resolve_depends_on
 from sqlalchemy.dialects import postgresql
 
 from alembic import op
@@ -66,11 +66,21 @@ branch_labels = ("ticketing",)
 # ERP hosts `public.tenants` itself and can never run kernel 0001 (ADR-0006 D1
 # amendment). Literals, not imported constants, so the composed gate can read
 # them statically and diff them against the manifest.
-REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")
+# Split by PLANE (ADR-0027). The platform plane needs roles to grant to; the
+# tenant plane additionally needs a catalogue for its foreign keys and an RLS
+# predicate to evaluate. Merged into one list, this lineage demanded a tenant
+# scope in order to create ANY table — which made the module un-installable in
+# the vendor control plane, an assembly that has no tenant catalogue and never
+# will.
+PLATFORM_REQUIRES = ("module_database_roles.v1",)
+TENANT_REQUIRES = ("tenant_scope_catalog.v1",)
+REQUIRES = PLATFORM_REQUIRES + TENANT_REQUIRES
 
 # Resolved from this assembly's installed bindings, so Alembic still orders on a
 # concrete revision id.
-depends_on = resolve_depends_on(REQUIRES)
+# A bound optional prerequisite still contributes a real ordering edge; an
+# unbound one contributes nothing, because the plane needing it is not built.
+depends_on = resolve_depends_on(PLATFORM_REQUIRES, optional=TENANT_REQUIRES)
 
 # A literal, not `module_schema("tkt")`. A migration is a frozen historical
 # artifact and must keep building the same schema even if a future kernel
@@ -87,12 +97,28 @@ _PLATFORM_COMMENTS = "platform_ticket_comments"
 def upgrade() -> None:
     # A binding is a claim about the database, so it is checked against the
     # database before any DDL runs.
-    require_prerequisites(op.get_bind(), REQUIRES)
-    op.execute("CREATE SCHEMA IF NOT EXISTS mod_tkt;")
-    # `app_admin` joins the two online roles because the platform plane below
-    # grants it DML: schema USAGE is a prerequisite for reaching any table in it.
-    op.execute("GRANT USAGE ON SCHEMA mod_tkt TO app_user, platform_api, app_admin;")
+    require_prerequisites(op.get_bind(), PLATFORM_REQUIRES)
 
+    tenant_plane = all_bound(TENANT_REQUIRES)
+    if tenant_plane:
+        require_prerequisites(op.get_bind(), TENANT_REQUIRES)
+
+    op.execute("CREATE SCHEMA IF NOT EXISTS mod_tkt;")
+    # `app_admin` joins `platform_api` because the platform plane below grants it
+    # DML: schema USAGE is a prerequisite for reaching any table in it.
+    op.execute("GRANT USAGE ON SCHEMA mod_tkt TO platform_api, app_admin;")
+    if tenant_plane:
+        # Only where there is something for the tenant role to reach — a
+        # platform-only schema must not demand tenant-role USAGE (kernel a57).
+        op.execute("GRANT USAGE ON SCHEMA mod_tkt TO app_user;")
+
+    _upgrade_platform_plane()
+    if tenant_plane:
+        _upgrade_tenant_plane()
+
+
+def _upgrade_tenant_plane() -> None:
+    """Built only where the assembly bound `tenant_scope_catalog.v1`."""
     op.create_table(
         _TICKETS,
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -236,9 +262,13 @@ def upgrade() -> None:
         "TO platform_api;"
     )
 
-    # ── Platform plane (ADR-0023) ───────────────────────────────────────────
-    # No tenant_id, no RLS, and REVOKEd from app_user. See this file's docstring
-    # for why that is a contract rather than an omission.
+
+def _upgrade_platform_plane() -> None:
+    """Always built (ADR-0023/ADR-0027).
+
+    No tenant_id, no RLS, and REVOKEd from app_user. See this file's docstring
+    for why that is a contract rather than an omission.
+    """
     op.create_table(
         _PLATFORM_TICKETS,
         sa.Column("id", sa.Uuid(), primary_key=True),
