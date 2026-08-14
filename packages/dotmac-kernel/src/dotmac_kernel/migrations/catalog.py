@@ -729,7 +729,12 @@ def audit_live_schemas(
         snapshot = fetch_snapshot(
             conn,
             schema,
-            declared_tables=registry.declared_tables(schema),
+            # EXPECTED here, not merely declared (ADR-0027). A dual-plane module
+            # whose tenant prerequisites this assembly never bound built its
+            # platform plane and nothing else, deliberately — reporting its
+            # tenant tables "missing" would fail a correct platform-only
+            # install. Everywhere else the two sets are identical.
+            declared_tables=registry.expected_tables(schema),
             platform_tables=registry.declared_platform_tables(schema),
             app_role=app_role,
             platform_role=platform_role,

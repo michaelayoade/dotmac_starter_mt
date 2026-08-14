@@ -369,7 +369,45 @@ def autoload_bindings() -> bool:
     return True
 
 
-def resolve_depends_on(names: Sequence[str]) -> tuple[str, ...]:
+def is_bound(name: str) -> bool:
+    """Has this assembly bound a provider for `name`?
+
+    The question a DUAL-PLANE lineage asks before building its tenant plane
+    (ADR-0027). A platform-only assembly — the vendor control plane — has no
+    tenant catalogue and never will: it is not a product data plane. Under the
+    all-or-nothing model it therefore could not install a dual-plane module at
+    all, because the single lineage created tenant tables with foreign keys to
+    `public.tenants` and RLS policies calling `public.app_current_tenant_id()`,
+    neither of which exists there.
+
+    Answering False is what lets that assembly install the plane it can operate
+    and skip the one it cannot. It is deliberately NOT a way to make a
+    requirement optional in general: a prerequisite listed in `requires` is
+    still mandatory and still fails closed. Only a plane's OWN prerequisites,
+    declared in `tenant_requires`, are read through this.
+
+    Never raises for an unbound prerequisite — that is the answer, not an error.
+    An unknown NAME still raises: asking about a prerequisite nobody registered
+    is a typo, and returning False for it would silently skip a plane.
+    """
+    prerequisite(name)
+    with _lock:
+        installed = bool(_bindings)
+    if not installed and not autoload_bindings():
+        return False
+    with _lock:
+        return name in _bindings
+
+
+def all_bound(names: Iterable[str]) -> bool:
+    """True when every name is bound. Empty means True — a plane with no
+    prerequisites of its own is always installable."""
+    return all(is_bound(name) for name in names)
+
+
+def resolve_depends_on(
+    names: Sequence[str], *, optional: Sequence[str] = ()
+) -> tuple[str, ...]:
     """Turn a lineage's logical `requires` into real Alembic `depends_on`.
 
     Called at module scope by a requiring migration:
@@ -400,13 +438,36 @@ def resolve_depends_on(names: Sequence[str]) -> tuple[str, ...]:
     gate rejecting an unbound requirement at build time, and on
     `require_prerequisites` proving the effects against the database before any
     DDL. Set `DOTMAC_MIGRATION_BINDINGS` to keep the inspected graph faithful too.
+
+    ## `optional`
+
+    A dual-plane lineage passes its tenant plane's prerequisites here
+    (ADR-0027). An optional name that IS bound contributes a real ordering edge,
+    exactly like a required one — the tenant plane must still be created after
+    whatever supplies the tenant catalogue. An optional name that is NOT bound
+    contributes nothing, because the plane needing it will not be built.
+
+    Optional is a property of the PLANE, never a way to soften a requirement:
+    anything in `names` is still mandatory and still fails closed.
     """
     validate_prerequisites(names)
+    validate_prerequisites(optional)
+    overlap = set(names) & set(optional)
+    if overlap:
+        raise DuplicatePrerequisiteError(
+            f"{sorted(overlap)} declared both required and optional — a "
+            "prerequisite is one or the other, and 'both' reads as required "
+            "while behaving as optional"
+        )
     with _lock:
         installed = bool(_bindings)
     if not installed and not autoload_bindings():
         return ()
-    return tuple(binding_for(name).provider_revision for name in names)
+    edges = [binding_for(name).provider_revision for name in names]
+    edges.extend(
+        binding_for(name).provider_revision for name in optional if is_bound(name)
+    )
+    return tuple(edges)
 
 
 def binding_map() -> Mapping[str, str]:
@@ -417,6 +478,7 @@ def binding_map() -> Mapping[str, str]:
 __all__ = [
     "BINDINGS_ENV_VAR",
     "KERNEL_PREREQUISITES",
+    "all_bound",
     "autoload_bindings",
     "MODULE_DATABASE_ROLES_V1",
     "TENANT_SCOPE_CATALOG_V1",
@@ -433,6 +495,7 @@ __all__ = [
     "binding_map",
     "install_prerequisite_bindings",
     "installed_bindings",
+    "is_bound",
     "prerequisite",
     "register_prerequisites",
     "registered_prerequisites",

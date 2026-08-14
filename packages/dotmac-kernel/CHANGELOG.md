@@ -6,6 +6,44 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a60 — 2026-08-14
+
+Lets a dual-plane module install into an assembly that can operate only one of
+its planes (ADR-0027). Demand-pulled: `dotmac-approvals` could not be adopted by
+the vendor control plane at all, because one lineage with one flat `requires`
+list demanded a tenant catalogue in order to create ANY table — and a control
+plane has none, permanently and by design.
+
+### Added
+
+- `ModuleManifest.tenant_requires` — effects only the TENANT plane needs,
+  declared beside the mandatory `requires`. A name in both lists is an error: it
+  reads as mandatory and behaves as optional.
+- `prerequisites.is_bound` / `all_bound` — "did this assembly bind a provider?",
+  the question a dual-plane lineage asks before building its tenant plane. Never
+  raises for an unbound prerequisite; still raises for an unregistered name,
+  because returning False for a typo would silently skip a plane.
+- `resolve_depends_on(names, *, optional=…)` — a bound optional prerequisite
+  contributes a real ordering edge exactly like a required one; an unbound one
+  contributes nothing.
+- `NamespaceRegistry.expected_tables` / `tenant_plane_requires` /
+  `tenant_plane_installed` — what should ACTUALLY exist here, as opposed to what
+  the manifest declares.
+
+### Changed
+
+- The composed static gate requires bindings for `requires` only, and tolerates
+  their absence for `tenant_requires` — while checking any tenant binding that
+  IS present exactly as strictly as before.
+- The live-catalog gate audits `expected_tables` rather than `declared_tables`.
+  The two differ only for a dual-plane schema whose tenant prerequisites are
+  unbound. `declared_tables` is unchanged and remains the full ownership claim:
+  who owns a table name does not vary per assembly, only what got built does.
+
+Nothing about a BUILT plane changes. A tenant table still carries
+`tenant_id NOT NULL`, composite identity and FORCEd RLS; a platform table is
+still REVOKEd from the tenant role.
+
 ## 0.1.0a59 — 2026-08-14
 
 Allocates one namespace. No behaviour changes, and nothing existing moves.

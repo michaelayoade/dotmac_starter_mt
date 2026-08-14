@@ -6,6 +6,25 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 catalog gate passed, which is what makes a release possible rather than one that
 has happened.
 
+## 0.1.0a2 — 2026-08-14
+
+Makes the module installable in a platform-only assembly (ADR-0027). Found while
+starting ADR-0026's cutover 1: the vendor control plane has no tenant catalogue
+and never will, so the previous lineage — which demanded `tenant_scope_catalog.v1`
+to create any table at all — could not install there.
+
+### Changed
+
+- The manifest declares `module_database_roles.v1` as `requires` and
+  `tenant_scope_catalog.v1` as `tenant_requires`, so the tenant plane is
+  conditional on the assembly binding a tenant catalogue.
+- `ap_0001_approvals` builds the platform plane unconditionally and the tenant
+  plane only where that binding exists, and grants schema USAGE to `app_user`
+  only when there is something there for the tenant role to reach.
+- Kernel floor is `>=0.1.0a60`, the release that added per-plane prerequisites.
+
+No behaviour changes. A built tenant plane is identical to `0.1.0a1`'s.
+
 ## 0.1.0a1 — 2026-08-14
 
 The first slice: the contract, both persistence planes, and the parity tests.

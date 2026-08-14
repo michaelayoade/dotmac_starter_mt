@@ -205,6 +205,19 @@ class ModuleManifest:
     # that supplies it, so the same module composes into a Starter that runs the
     # kernel lineage and into ERP, which structurally cannot.
     requires: Sequence[str] = field(default_factory=tuple)
+    # Effects only the TENANT plane needs (ADR-0027). Declared separately from
+    # `requires` because a dual-plane module is installable in an assembly that
+    # can operate only one of its planes: the vendor control plane has no tenant
+    # catalogue and never will — it is not a product data plane — so a lineage
+    # that unconditionally created tenant tables with `public.tenants` foreign
+    # keys and RLS predicates could not run there at all.
+    #
+    # An assembly that binds these gets both planes. One that does not gets the
+    # platform plane only, and the live-catalog gate expects exactly that rather
+    # than reporting the tenant tables missing. Anything genuinely needed by
+    # BOTH planes belongs in `requires`, where it stays mandatory and fails
+    # closed; this list is not a way to soften a requirement.
+    tenant_requires: Sequence[str] = field(default_factory=tuple)
     core: bool = True
     enabled_by_default: bool = True
     seed: Callable[[], None] | None = None
@@ -231,10 +244,26 @@ class ModuleManifest:
             "platform_tables",
             "feature_flags",
             "requires",
+            "tenant_requires",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
         validate_prerequisites(self.requires)
-        if self.requires and self.migration_prefix is None:
+        validate_prerequisites(self.tenant_requires)
+        overlap = set(self.requires) & set(self.tenant_requires)
+        if overlap:
+            raise ModuleRegistryError(
+                f"module {self.code!r} declares {sorted(overlap)} as both always "
+                "required and tenant-plane only — a prerequisite is one or the "
+                "other, and listing it in both reads as mandatory while behaving "
+                "as optional"
+            )
+        if self.tenant_requires and not self.tables:
+            raise ModuleRegistryError(
+                f"module {self.code!r} declares `tenant_requires` but owns no "
+                "tenant tables — the list names what the TENANT PLANE needs, so "
+                "a module without one has nothing to condition on"
+            )
+        if (self.requires or self.tenant_requires) and self.migration_prefix is None:
             raise ModuleRegistryError(
                 f"module {self.code!r} declares migration prerequisites but owns "
                 "no lineage — `requires` orders migrations, so a module with no "

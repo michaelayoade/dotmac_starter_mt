@@ -28,12 +28,16 @@ module = ModuleManifest(
     migration_branch="approvals",
     tables=TENANT_TABLES,
     platform_tables=PLATFORM_TABLES,
-    # An approval needs a tenant to hang a foreign key on and roles to grant to.
-    # Nothing else — deliberately not an identity or RBAC estate: role
+    # Split by PLANE (ADR-0027). Roles are needed to create anything at all;
+    # a tenant catalogue is needed only by the tenant plane, so an assembly
+    # that has none — the vendor control plane — installs the platform plane
+    # and skips the rest instead of being unable to install the module.
+    #
+    # Deliberately NOT an identity or RBAC prerequisite either way: role
     # membership arrives on the `Actor` value at the call site, so this module
-    # installs beside a product whose RBAC lives somewhere the kernel has never
-    # seen.
-    requires=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
+    # installs beside a product whose RBAC the kernel has never seen.
+    requires=(MODULE_DATABASE_ROLES_V1.name,),
+    tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
 )
 
 __all__ = ["module"]

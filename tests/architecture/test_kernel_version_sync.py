@@ -83,10 +83,10 @@ LEDGER_ALLOCATION_RELEASES = {
     # `platform_tables` (a53) and `requires` (a56): the floor is the higher of
     # the two, and its own allocation is the higher.
     "dotmac-integration": "0.1.0a58",
-    # ADR-0026. Same shape as integration above: it consumes `platform_tables`
-    # (a53) and `requires` (a56), but its own allocation is a59 and the floor is
-    # always the higher of the two.
-    "dotmac-approvals": "0.1.0a59",
+    # ADR-0026 allocated `mod_approvals` in a59; ADR-0027's per-plane
+    # prerequisites in a60 are a CAPABILITY the manifest now consumes
+    # (`tenant_requires`), and the floor is always the higher of the two — so
+    # this row moves to CAPABILITY_RAISED_FLOORS below rather than staying here.
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -112,6 +112,10 @@ CAPABILITY_RAISED_FLOORS = {
     # prerequisite contract raises it again. The floor is always the highest
     # capability the module actually consumes, not the first one that moved it.
     "dotmac-ticketing": ("0.1.0a56", "0.1.0a39"),
+    # ADR-0027: the manifest passes `tenant_requires`, added in a60. An earlier
+    # kernel raises TypeError at import, before the allocation check is reached,
+    # so the capability outranks its own a59 allocation.
+    "dotmac-approvals": ("0.1.0a60", "0.1.0a59"),
 }
 
 
