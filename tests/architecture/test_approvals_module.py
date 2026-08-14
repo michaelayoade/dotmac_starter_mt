@@ -343,6 +343,36 @@ def test_the_public_api_names_its_plane_and_carries_no_plane_flag() -> None:
 # ── Release posture ─────────────────────────────────────────────────────────
 
 
+def test_the_package_exposes_the_manifest_attribute_the_allowlist_names() -> None:
+    """The release verifier resolves `<import_name>.<manifest_attr>` on the
+    INSTALLED wheel, so the package root must actually export it.
+
+    This is the check the release job made for me the hard way: the first
+    dispatch of `dotmac-approvals 0.1.0a1` failed at "Release wheel smoke" with
+    `module 'dotmac_approvals' has no attribute 'module'`, because `__init__`
+    re-exported the contracts and not the manifest. Nothing published — the
+    build fails closed before publish — but the feedback arrived a merge and a
+    dispatch later than it needed to.
+
+    Asserted against the ALLOWLIST rather than a literal, so the two cannot
+    drift: renaming the attribute in one place now fails here.
+    """
+    import json
+
+    import dotmac_approvals
+
+    entry = json.loads(
+        (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
+    )["modules"]["dotmac-approvals"]
+    attribute = entry["manifest_attr"]
+    assert hasattr(dotmac_approvals, attribute), (
+        f"the allowlist resolves dotmac_approvals.{attribute} on the installed "
+        f"wheel, but the package root does not export {attribute!r}"
+    )
+    assert getattr(dotmac_approvals, attribute) is module
+    assert attribute in dotmac_approvals.__all__
+
+
 def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     """The entry landed WITH the live Postgres proof, not ahead of it.
 
