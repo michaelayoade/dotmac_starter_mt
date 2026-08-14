@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-approvals"
+version = "0.1.0a1"
+description = "DotMac dual-plane approval policy revisions, content-bound requests and decisions"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_approvals", from = "src" }]
+include = [
+    { path = "src/dotmac_approvals/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_approvals/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a59"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
