@@ -21,7 +21,7 @@ the SPI a secrets problem.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,6 +29,7 @@ from dotmac_integration.discovery import ConnectorRegistry, discover
 from dotmac_integration.retry import Outcome, OutcomeStatus
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
+    MODE_PROTOCOLS,
     CapabilityDeclaration,
     CapabilityHandler,
     ConnectorManifest,
@@ -36,6 +37,7 @@ from dotmac_integration.spi import (
     ConnectorPlugin,
     Diagnostic,
     DispatchRequest,
+    InboundEvent,
     SpiRange,
 )
 
@@ -108,6 +110,14 @@ class FakePlugin:
     #: something a test monkeypatches on: this object is frozen precisely so a
     #: test cannot reshape the contract it is meant to be checking.
     raises: BaseException | None = None
+    #: What `normalize` returns. A TUPLE by default and empty by default, so a
+    #: test must opt into events rather than inherit one it did not think about.
+    inbound: tuple[InboundEvent, ...] = ()
+    #: Drive the rejected-signature path without owning a signing secret.
+    signature_valid: bool = True
+    #: Every raw body `verify` was handed, so a test can assert the EXACT bytes
+    #: crossed the boundary — a re-serialization would invalidate a real HMAC.
+    verified: list[bytes] = field(default_factory=list)
 
     @property
     def manifest(self) -> ConnectorManifest:
@@ -131,6 +141,42 @@ class FakePlugin:
             return self.outcome
 
         return _handle
+
+    def ingress_handler_for(self, capability_id: str):
+        """An ingress handler that needs no provider and no credentials.
+
+        `verify` answers from the `signature_valid` knob rather than computing an
+        HMAC: the kit exists to let an author drive the ENGINE's paths — accepted,
+        rejected, batch rollback — without owning a signing secret. A real
+        connector's verification is its own business and is tested against its
+        own vectors.
+        """
+        self.manifest_.require_declares(capability_id)
+        fake = self
+
+        class _Ingress:
+            def challenge(
+                self, params: Mapping[str, str], *, config: dict, secrets: dict
+            ) -> str | None:
+                return params.get("hub.challenge")
+
+            def verify(
+                self,
+                raw_body: bytes,
+                headers: Mapping[str, str],
+                *,
+                config: dict,
+                secrets: dict,
+            ) -> bool:
+                fake.verified.append(raw_body)
+                return fake.signature_valid
+
+            def normalize(
+                self, raw_body: bytes, headers: Mapping[str, str], *, config: dict
+            ) -> tuple[InboundEvent, ...]:
+                return fake.inbound
+
+        return _Ingress()
 
     def validate_connection(
         self, *, config: dict[str, object], secrets: dict[str, object]
@@ -252,35 +298,62 @@ def assert_plugin_conforms(plugin: ConnectorPlugin) -> None:
             "the runtime cannot know which workers to start for it"
         )
 
-    for capability in plugin.manifest.capabilities:
-        try:
-            handler = plugin.handler_for(capability.capability_id)
-        except Exception as exc:
+    key = plugin.manifest.connector_key
+
+    # ── The mode implication, BOTH ways ─────────────────────────────────────
+    #
+    # One direction alone is not enough. A plugin declaring DELIVERY without
+    # `handler_for` fails at the first dispatch; one implementing `handler_for`
+    # without declaring DELIVERY never gets its workers started. Both are
+    # unusable, both used to pass, and only checking both catches both.
+    for mode, contract in MODE_PROTOCOLS.items():
+        declares = mode in plugin.modes
+        implements = isinstance(plugin, contract.protocol)
+        if declares and not implements:
             raise ConformanceFailure(
-                f"connector {plugin.manifest.connector_key!r} declares "
-                f"{capability.capability_id!r} but returns no handler: {exc}"
-            ) from exc
-        if not callable(handler):
+                f"connector {key!r} declares mode {mode.value!r} but does not "
+                f"implement {contract.protocol.__name__} "
+                f"(missing {contract.factory!r})"
+            )
+        if implements and not declares:
             raise ConformanceFailure(
-                f"handler for {capability.capability_id!r} is not callable"
+                f"connector {key!r} implements {contract.factory!r} but does not "
+                f"declare mode {mode.value!r}, so the runtime will never start "
+                "the workers that would call it"
             )
 
-    # An undeclared capability must be refused, not silently handled. Written as
-    # a flag rather than `except ...: pass` so the intent is a positive
-    # assertion: bandit reads try/except/pass as a swallowed error (B110), and
-    # the suppression that was here named ruff's equivalent code rather than
-    # bandit's — aimed at the wrong tool, which is how it stayed unnoticed
-    # while the package sat outside `make security`.
-    refused = False
-    try:
-        plugin.handler_for("conformance.undeclared.v1")
-    except Exception:
-        refused = True
-    if not refused:
-        raise ConformanceFailure(
-            f"connector {plugin.manifest.connector_key!r} returned a handler for "
-            "a capability it never declared"
-        )
+    # ── Each declared mode's factory, over every declared capability ────────
+    for mode in sorted(plugin.modes, key=lambda m: m.value):
+        factory = getattr(plugin, MODE_PROTOCOLS[mode].factory)
+        for capability in plugin.manifest.capabilities:
+            try:
+                handler = factory(capability.capability_id)
+            except Exception as exc:
+                raise ConformanceFailure(
+                    f"connector {key!r} declares {capability.capability_id!r} "
+                    f"for mode {mode.value!r} but returns no handler: {exc}"
+                ) from exc
+            if handler is None:
+                raise ConformanceFailure(
+                    f"{mode.value} handler for {capability.capability_id!r} is None"
+                )
+
+        # An undeclared capability must be refused, not silently handled. The
+        # check is now per MODE — an ingress-only connector has no `handler_for`
+        # to probe — but it keeps the positive-assertion form rather than
+        # `except ...: pass`: bandit reads try/except/pass as a swallowed error
+        # (B110), and the suppression that used to sit here named ruff's
+        # equivalent code instead of bandit's, aimed at the wrong tool.
+        refused = False
+        try:
+            factory("conformance.undeclared.v1")
+        except Exception:
+            refused = True
+        if not refused:
+            raise ConformanceFailure(
+                f"connector {key!r} returned a {mode.value} handler for a "
+                "capability it never declared"
+            )
 
     diagnostics = plugin.validate_connection(config={}, secrets={})
     if not isinstance(diagnostics, tuple):

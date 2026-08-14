@@ -37,11 +37,22 @@ change, the host did.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Final, Protocol, runtime_checkable
 
 __all__ = [
+    "InboundEvent",
+    "IngressHandler",
+    "PollHandler",
+    "DeliveryPlugin",
+    "IngressPlugin",
+    "PollPlugin",
+    "MODE_PROTOCOLS",
+    "ModeContract",
+    "ModeNotDeclaredError",
+    "require_mode",
     "CURRENT_SPI_VERSION",
     "CapabilityHandler",
     "ConnectorMode",
@@ -105,7 +116,12 @@ class SpiVersion:
 
 #: The SPI this module implements. A connector declaring a range that excludes
 #: it is refused — at discovery, at startup and at activation.
-CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 0)
+# 1.1, not 2.0. The change is ADDITIVE: the base protocol lost `handler_for`,
+# but a delivery connector implementing all five original members still
+# satisfies both `ConnectorPlugin` and `DeliveryPlugin`, so every plugin that
+# worked against 1.0 still resolves. What is new is that ingress and poll became
+# expressible, and that declaring a mode is now checked.
+CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,9 +311,77 @@ class CapabilityHandler(Protocol):
     def __call__(self, request: DispatchRequest) -> object: ...
 
 
+@dataclass(frozen=True, slots=True)
+class InboundEvent:
+    """One normalized provider fact, ready for `receive_verified`.
+
+    Exactly the triple that function records, and nothing else — an ingress
+    handler classifies and shapes; it does not decide what happens next.
+    """
+
+    provider_event_id: str
+    event_type: str
+    payload: dict
+
+
+@runtime_checkable
+class IngressHandler(Protocol):
+    """What an INGRESS plugin returns for one capability.
+
+    Three separable jobs, kept separate because they have different inputs and
+    different failure meanings:
+
+    * `challenge` answers the provider's subscription handshake. Returning
+      `None` means "not a handshake for me" — the caller then treats the request
+      as a delivery rather than guessing from the HTTP verb.
+    * `verify` decides authenticity from the RAW bytes. It receives the body
+      exactly as received, because every provider worth verifying signs the
+      bytes and not a re-serialization of them.
+    * `normalize` shapes verified bytes into events. It is never called on an
+      unverified body.
+
+    `config` reaches `normalize` because the qualifying source needs it: Sub's
+    `normalize_inbound_webhook` selects its shape from the provider variant,
+    which is configuration. `secrets` deliberately does NOT — normalization that
+    needs a secret is doing verification in the wrong place.
+    """
+
+    def challenge(
+        self, params: Mapping[str, str], *, config: dict, secrets: dict
+    ) -> str | None: ...
+
+    def verify(
+        self,
+        raw_body: bytes,
+        headers: Mapping[str, str],
+        *,
+        config: dict,
+        secrets: dict,
+    ) -> bool: ...
+
+    def normalize(
+        self, raw_body: bytes, headers: Mapping[str, str], *, config: dict
+    ) -> tuple[InboundEvent, ...]: ...
+
+
+@runtime_checkable
+class PollHandler(Protocol):
+    """What a POLL plugin returns for one capability.
+
+    Takes the cursor the module persisted and returns the events found plus the
+    cursor to persist next. The handler never writes the cursor itself — the
+    module owns the checkpoint, so a handler cannot advance past events it
+    failed to return.
+    """
+
+    def poll(
+        self, cursor: str | None, *, config: dict, secrets: dict
+    ) -> tuple[tuple[InboundEvent, ...], str | None]: ...
+
+
 @runtime_checkable
 class ConnectorPlugin(Protocol):
-    """One entry point per connector key resolves to one of these.
+    """The BASE contract: identity, metadata, and connection validation.
 
     A plugin object rather than a bare manifest, because the module has to DO
     something with a connector: start the right workers, validate a connection
@@ -308,6 +392,20 @@ class ConnectorPlugin(Protocol):
     would claim the same `connector_key` twice, which discovery refuses — so
     the pins a still-installed older revision was adopted against travel with
     the connector that supersedes them.
+
+    ## Why `handler_for` is NOT here
+
+    It was, and `modes` was decorative as a result. `handler_for` moves DELIVERY
+    data; an ingress-only connector has no meaningful implementation of it, and
+    a base protocol demanding one forces every connector to either lie or raise.
+    Worse, dispatch called it without asking whether the plugin declared
+    `DELIVERY` at all — so pointing a binding at an ingress connector produced a
+    confusing handler error instead of a refusal.
+
+    Each mode now has its own executable protocol, and `conformance` asserts the
+    implication in BOTH directions: declaring a mode requires satisfying its
+    protocol, and satisfying one requires declaring the mode. A declaration that
+    nothing verifies is how `modes` became decorative in the first place.
     """
 
     @property
@@ -319,11 +417,82 @@ class ConnectorPlugin(Protocol):
     @property
     def modes(self) -> frozenset[ConnectorMode]: ...
 
-    def handler_for(self, capability_id: str) -> CapabilityHandler: ...
-
     def validate_connection(
         self, *, config: dict[str, object], secrets: dict[str, object]
     ) -> tuple[Diagnostic, ...]: ...
+
+
+@runtime_checkable
+class DeliveryPlugin(ConnectorPlugin, Protocol):
+    """MODE: DELIVERY. Sends to the provider."""
+
+    def handler_for(self, capability_id: str) -> CapabilityHandler: ...
+
+
+@runtime_checkable
+class IngressPlugin(ConnectorPlugin, Protocol):
+    """MODE: INGRESS. Receives provider-initiated traffic."""
+
+    def ingress_handler_for(self, capability_id: str) -> IngressHandler: ...
+
+
+@runtime_checkable
+class PollPlugin(ConnectorPlugin, Protocol):
+    """MODE: POLL. Asks the provider on a schedule."""
+
+    def poll_handler_for(self, capability_id: str) -> PollHandler: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ModeContract:
+    """What a declared mode obliges a plugin to provide."""
+
+    protocol: type
+    #: The factory a conforming plugin must expose for this mode. Named here so
+    #: `conformance` has ONE place to look rather than a branch per mode — a
+    #: branch is how a new mode gets added with no checks behind it.
+    factory: str
+
+
+#: One entry per mode, so a new mode cannot be added without deciding what makes
+#: it runnable — precisely the omission that left `POLL` a label with no
+#: machinery behind it.
+MODE_PROTOCOLS: Final[dict[ConnectorMode, ModeContract]] = {
+    ConnectorMode.DELIVERY: ModeContract(DeliveryPlugin, "handler_for"),
+    ConnectorMode.INGRESS: ModeContract(IngressPlugin, "ingress_handler_for"),
+    ConnectorMode.POLL: ModeContract(PollPlugin, "poll_handler_for"),
+}
+
+
+class ModeNotDeclaredError(RuntimeError):
+    """A plugin was asked to do something it does not declare.
+
+    Raised BEFORE the plugin is called, so the operator sees "this connector
+    does not deliver" rather than an AttributeError from inside a handler
+    lookup.
+    """
+
+
+def require_mode(plugin: ConnectorPlugin, mode: ConnectorMode) -> None:
+    """Refuse a plugin that does not declare AND implement `mode`.
+
+    Both halves matter. A plugin that declares `DELIVERY` without
+    `handler_for` fails at call time; one that implements `handler_for` without
+    declaring `DELIVERY` never gets its workers started. Neither is usable, and
+    neither was detected before.
+    """
+    contract = MODE_PROTOCOLS[mode]
+    key = plugin.manifest.connector_key
+    if mode not in plugin.modes:
+        raise ModeNotDeclaredError(
+            f"connector {key!r} does not declare mode {mode.value!r}; it "
+            f"declares {sorted(m.value for m in plugin.modes)}"
+        )
+    if not isinstance(plugin, contract.protocol):
+        raise ModeNotDeclaredError(
+            f"connector {key!r} declares mode {mode.value!r} but does not "
+            f"implement {contract.protocol.__name__}"
+        )
 
 
 def accepts_manifest_digest(plugin: ConnectorPlugin, digest: str) -> bool:

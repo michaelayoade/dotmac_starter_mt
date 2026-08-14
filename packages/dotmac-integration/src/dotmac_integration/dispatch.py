@@ -62,7 +62,12 @@ from dotmac_integration.retry import (
     next_state,
     retry_delay_seconds,
 )
-from dotmac_integration.spi import DispatchRequest, accepts_manifest_digest
+from dotmac_integration.spi import (
+    ConnectorMode,
+    DispatchRequest,
+    accepts_manifest_digest,
+    require_mode,
+)
 
 __all__ = [
     "DispatchError",
@@ -235,6 +240,11 @@ def invoke(
     effect did not happen.
     """
     plugin = registry.plugin(prepared.connector_key)
+    # BEFORE the lookup, not after. `handler_for` lives on `DeliveryPlugin`, so
+    # an ingress-only connector behind a binding used to fail with an
+    # AttributeError from inside the lookup — which reads as a broken plugin
+    # rather than as a binding pointed at a connector that cannot deliver.
+    require_mode(plugin, ConnectorMode.DELIVERY)
     handler = plugin.handler_for(prepared.capability_id)
 
     request = DispatchRequest(
