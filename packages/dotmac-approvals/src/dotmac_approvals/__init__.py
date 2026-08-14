@@ -48,6 +48,7 @@ from dotmac_approvals.contracts import (
     SoDRule,
     SoDViolation,
 )
+from dotmac_approvals.manifest import module
 
 __version__ = "0.1.0a1"
 
@@ -75,4 +76,5 @@ __all__ = [
     "SoDRule",
     "SoDViolation",
     "__version__",
+    "module",
 ]
