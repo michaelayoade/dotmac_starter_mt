@@ -1,12 +1,8 @@
-"""A plane declares its own prerequisites (ADR-0027).
+"""An assembly selects module planes explicitly; bindings only name providers.
 
-The property under test is narrow and load-bearing: a dual-plane module must be
-installable in an assembly that can operate only ONE of its planes, without
-weakening anything about the plane that does get built.
-
-Every test here is in-memory. The live half — that a platform-only install
-actually produces a schema with only platform tables, and that the gate accepts
-it — is `tests/test_approvals_isolation.py`.
+These are the load-bearing ADR-0028 canaries.  Vendor CP physically composes the
+kernel tenant catalogue while semantically installing only platform approvals,
+so provider availability must never be used as the plane selector.
 """
 
 from __future__ import annotations
@@ -14,192 +10,194 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import pytest
+from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.modules import ModuleManifest, ModuleRegistryError
 from dotmac_kernel.namespaces import APPROVALS_MIGRATION_OWNER, NamespaceRegistry
+from dotmac_kernel.planes import (
+    MODULE_PLANES_ENV_VAR,
+    ModulePlane,
+    ModulePlaneSelection,
+    ModulePlaneSelectionError,
+    install_module_plane_selections,
+    selected_module_planes,
+)
 from dotmac_kernel.prerequisites import (
-    DuplicatePrerequisiteError,
     PrerequisiteBinding,
-    UnknownPrerequisiteError,
-    all_bound,
+    UnboundPrerequisiteError,
     install_prerequisite_bindings,
-    is_bound,
     resolve_depends_on,
 )
 
 ROLES = "module_database_roles.v1"
 TENANT = "tenant_scope_catalog.v1"
+MODULE = "approvals"
+SUPPORTED = (
+    (ModulePlane.TENANT,),
+    (ModulePlane.PLATFORM,),
+    (ModulePlane.TENANT, ModulePlane.PLATFORM),
+)
+GRAPH_SELECTIONS = (
+    ModulePlaneSelection(module=MODULE, planes=(ModulePlane.PLATFORM,)),
+)
 
 
 @pytest.fixture(autouse=True)
-def _no_leaked_bindings() -> Iterator[None]:
-    """Bindings are process-global; a leak would make these tests order-dependent."""
+def _no_leaked_composition() -> Iterator[None]:
     install_prerequisite_bindings(())
+    install_module_plane_selections(())
     yield
     install_prerequisite_bindings(())
+    install_module_plane_selections(())
 
 
-def _binding(name: str, revision: str, owner: str) -> PrerequisiteBinding:
+def _binding(name: str, revision: str) -> PrerequisiteBinding:
     return PrerequisiteBinding(
-        prerequisite=name, provider_revision=revision, provider_owner=owner
+        prerequisite=name,
+        provider_revision=revision,
+        provider_owner="kernel",
     )
+
+
+def _selection(*planes: ModulePlane, module: str = MODULE) -> ModulePlaneSelection:
+    return ModulePlaneSelection(module=module, planes=planes)
 
 
 def _manifest(**overrides: object) -> ModuleManifest:
     defaults: dict[str, object] = {
-        "code": "approvals",
-        "version": "0.1.0a2",
+        "code": MODULE,
+        "version": "0.1.0a3",
         "core": False,
-        "short_code": "approvals",
+        "short_code": MODULE,
         "migration_prefix": "ap",
-        "migration_branch": "approvals",
+        "migration_branch": MODULE,
         "tables": ("approval_requests",),
         "platform_tables": ("platform_approval_requests",),
         "requires": (ROLES,),
         "tenant_requires": (TENANT,),
+        "supported_plane_sets": SUPPORTED,
     }
     defaults.update(overrides)
     return ModuleManifest(**defaults)  # type: ignore[arg-type]
 
 
-# ── The binding is the switch ───────────────────────────────────────────────
-
-
-def test_an_unbound_prerequisite_answers_false_rather_than_raising() -> None:
-    """That is the answer, not an error — it is how a platform-only assembly
-    says "I have no tenant catalogue"."""
-    install_prerequisite_bindings([_binding(ROLES, "0001_initial", "kernel")])
-    assert is_bound(ROLES)
-    assert not is_bound(TENANT)
-
-
-def test_an_unregistered_name_still_raises() -> None:
-    """Returning False for a typo would silently skip a plane."""
-    install_prerequisite_bindings([_binding(ROLES, "0001_initial", "kernel")])
-    with pytest.raises(UnknownPrerequisiteError):
-        is_bound("tenant_scope_catalogue.v1")  # British spelling: a real typo
-
-
-def test_all_bound_is_true_for_an_empty_list() -> None:
-    """A plane with no prerequisites of its own is always installable."""
-    assert all_bound(())
-
-
-# ── Ordering survives optionality ───────────────────────────────────────────
-
-
-def test_a_bound_optional_prerequisite_still_orders() -> None:
-    """Where the tenant plane IS built it must run after the catalogue."""
+def test_provider_availability_does_not_select_the_tenant_plane() -> None:
+    """The Vendor case: kernel 0001 supplies BOTH effects, but the assembly's
+    explicit platform-only selection must omit the tenant edge."""
     install_prerequisite_bindings(
-        [
-            _binding(ROLES, "0001_initial", "kernel"),
-            _binding(TENANT, "0002_tenants", "kernel"),
-        ]
+        [_binding(ROLES, "0001_initial"), _binding(TENANT, "0001_initial")]
     )
-    assert resolve_depends_on((ROLES,), optional=(TENANT,)) == (
+    install_module_plane_selections([_selection(ModulePlane.PLATFORM)])
+
+    assert resolve_depends_on((ROLES,), module=MODULE, tenant=(TENANT,)) == (
         "0001_initial",
-        "0002_tenants",
     )
 
 
-def test_an_unbound_optional_prerequisite_contributes_no_edge() -> None:
-    install_prerequisite_bindings([_binding(ROLES, "0001_initial", "kernel")])
-    assert resolve_depends_on((ROLES,), optional=(TENANT,)) == ("0001_initial",)
+def test_graph_commands_can_autoload_the_explicit_plane_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Graph inspection skips ``env.py`` but still sees installation intent.
+
+    The environment carries a module/attribute pointer, never a copied or
+    stringly encoded selection, so graph and upgrade entrypoints read the same
+    typed assembly declaration.
+    """
+    monkeypatch.setenv(
+        MODULE_PLANES_ENV_VAR,
+        f"{__name__}:GRAPH_SELECTIONS",
+    )
+    assert selected_module_planes(MODULE) == {ModulePlane.PLATFORM}
 
 
-def test_a_required_prerequisite_still_fails_closed_when_unbound() -> None:
-    """`optional` must not soften anything in `names`."""
-    install_prerequisite_bindings([_binding(TENANT, "0002_tenants", "kernel")])
-    with pytest.raises(Exception, match="binds no provider"):
-        resolve_depends_on((ROLES,), optional=(TENANT,))
+def test_a_selected_plane_still_fails_closed_on_an_unbound_requirement() -> None:
+    install_prerequisite_bindings([_binding(ROLES, "0001_initial")])
+    install_module_plane_selections([_selection(ModulePlane.TENANT)])
+
+    with pytest.raises(UnboundPrerequisiteError, match=TENANT):
+        resolve_depends_on((ROLES,), module=MODULE, tenant=(TENANT,))
 
 
-def test_a_name_cannot_be_both_required_and_optional() -> None:
-    """It would read as mandatory and behave as optional."""
-    install_prerequisite_bindings([_binding(ROLES, "0001_initial", "kernel")])
-    with pytest.raises(DuplicatePrerequisiteError, match="one or the other"):
-        resolve_depends_on((ROLES,), optional=(ROLES,))
+def test_a_composed_selectable_module_cannot_omit_its_selection() -> None:
+    with pytest.raises(
+        ModulePlaneSelectionError, match="approvals.*no plane selection"
+    ):
+        ProductAssemblySpec(name="vendor", modules=[_manifest()])
 
 
-# ── The manifest refuses incoherent declarations ────────────────────────────
+def test_an_explicit_supported_selection_is_accepted() -> None:
+    selection = _selection(ModulePlane.PLATFORM)
+    spec = ProductAssemblySpec(
+        name="vendor", modules=[_manifest()], module_planes=[selection]
+    )
+    assert spec.module_planes == (selection,)
 
 
-def test_a_manifest_may_not_declare_one_name_in_both_lists() -> None:
-    with pytest.raises(ModuleRegistryError, match="one or the other"):
+def test_an_unknown_module_selection_is_refused() -> None:
+    with pytest.raises(ModulePlaneSelectionError, match="unknown module"):
+        ProductAssemblySpec(
+            name="vendor",
+            modules=[_manifest()],
+            module_planes=[_selection(ModulePlane.PLATFORM, module="ghost")],
+        )
+
+
+def test_an_unsupported_selection_is_refused() -> None:
+    manifest = _manifest(
+        supported_plane_sets=(
+            (ModulePlane.PLATFORM,),
+            (ModulePlane.TENANT, ModulePlane.PLATFORM),
+        )
+    )
+    with pytest.raises(ModulePlaneSelectionError, match="does not support"):
+        ProductAssemblySpec(
+            name="vendor",
+            modules=[manifest],
+            module_planes=[_selection(ModulePlane.TENANT)],
+        )
+
+
+def test_an_atomic_dual_plane_module_needs_no_selector() -> None:
+    manifest = _manifest(supported_plane_sets=())
+    spec = ProductAssemblySpec(name="starter", modules=[manifest])
+    assert spec.module_planes == ()
+
+
+def test_plane_specific_requirements_need_the_matching_declared_plane() -> None:
+    with pytest.raises(ModuleRegistryError, match="tenant_requires.*tenant tables"):
+        _manifest(tables=())
+    with pytest.raises(ModuleRegistryError, match="platform_requires.*platform tables"):
+        _manifest(platform_tables=(), tenant_requires=(), platform_requires=(TENANT,))
+
+
+def test_requirements_cannot_appear_in_two_contract_lists() -> None:
+    with pytest.raises(ModuleRegistryError, match="more than one prerequisite list"):
         _manifest(requires=(ROLES, TENANT), tenant_requires=(TENANT,))
 
 
-def test_tenant_requires_needs_a_tenant_plane_to_condition() -> None:
-    with pytest.raises(ModuleRegistryError, match="owns no tenant tables"):
-        _manifest(tables=(), tenant_requires=(TENANT,))
-
-
-def test_an_ordinary_tenant_only_module_declares_no_tenant_requires() -> None:
-    """The new field is for dual-plane modules. A plane that is always built is
-    not conditional, and its needs are simply `requires`."""
-    manifest = _manifest(
-        platform_tables=(), requires=(ROLES, TENANT), tenant_requires=()
+def test_expected_tables_follow_selection_not_available_bindings() -> None:
+    """A live gate must expect only the selected plane even when the database
+    contains a truthful provider for the unselected plane."""
+    selection = _selection(ModulePlane.PLATFORM)
+    install_prerequisite_bindings(
+        [_binding(ROLES, "0001_initial"), _binding(TENANT, "0001_initial")]
     )
-    assert manifest.tenant_requires == ()
-
-
-# ── What the live gate will expect ──────────────────────────────────────────
-
-
-def test_the_tenant_plane_is_expected_only_where_its_prerequisite_is_bound() -> None:
-    """`expected_tables` is what a platform-only install is audited against."""
-    registry = NamespaceRegistry.from_manifests([_manifest()])
+    registry = NamespaceRegistry.from_manifests(
+        [_manifest()], module_planes=[selection]
+    )
     schema = APPROVALS_MIGRATION_OWNER.db_schema
     assert schema is not None
 
-    install_prerequisite_bindings([_binding(ROLES, "0001_initial", "kernel")])
-    assert not registry.tenant_plane_installed(schema)
     assert registry.expected_tables(schema) == {"platform_approval_requests"}
-
-    install_prerequisite_bindings(
-        [
-            _binding(ROLES, "0001_initial", "kernel"),
-            _binding(TENANT, "0002_tenants", "kernel"),
-        ]
-    )
-    assert registry.tenant_plane_installed(schema)
-    assert registry.expected_tables(schema) == {
+    assert registry.declared_tables(schema) == {
         "approval_requests",
         "platform_approval_requests",
     }
 
 
-def test_declared_tables_never_varies_by_assembly() -> None:
-    """Ownership is not per-assembly; only what got BUILT is.
-
-    Keeping the two readers separate is what stops "expected" eroding into
-    "whatever we found" — the ownership claim the static gate checks has to stay
-    the full one.
-    """
-    registry = NamespaceRegistry.from_manifests([_manifest()])
-    schema = APPROVALS_MIGRATION_OWNER.db_schema
-    assert schema is not None
-
-    install_prerequisite_bindings([_binding(ROLES, "0001_initial", "kernel")])
-    declared_platform_only = registry.declared_tables(schema)
-    install_prerequisite_bindings(
-        [
-            _binding(ROLES, "0001_initial", "kernel"),
-            _binding(TENANT, "0002_tenants", "kernel"),
-        ]
+def test_atomic_modules_still_expect_every_declared_table() -> None:
+    registry = NamespaceRegistry.from_manifests(
+        [_manifest(supported_plane_sets=())], module_planes=[]
     )
-    assert registry.declared_tables(schema) == declared_platform_only
-    assert declared_platform_only == {
-        "approval_requests",
-        "platform_approval_requests",
-    }
-
-
-def test_a_module_with_no_tenant_requires_expects_everything_it_declares() -> None:
-    """The default has to be "everything declared exists", or a genuinely
-    missing table would stop being reported the moment this mechanism existed."""
-    registry = NamespaceRegistry.from_manifests([_manifest(tenant_requires=())])
     schema = APPROVALS_MIGRATION_OWNER.db_schema
     assert schema is not None
-    install_prerequisite_bindings(())
-    assert registry.tenant_plane_installed(schema)
     assert registry.expected_tables(schema) == registry.declared_tables(schema)

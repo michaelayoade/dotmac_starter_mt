@@ -1,0 +1,129 @@
+# ADR-0028: An assembly declares each installed module plane
+
+**Status:** Accepted
+**Date:** 2026-08-14
+**Decision owner:** Michael
+**Scope:** FLEET-WIDE for independently installable module planes.
+**Supersedes:** ADR-0027's binding-as-selector mechanism.
+**Relates to:** ADR-0006 D1, ADR-0017, ADR-0023, ADR-0026.
+
+## Context
+
+ADR-0027 correctly separated common and tenant-plane prerequisites, but used
+the absence of a tenant binding to select a platform-only installation. Its
+Vendor CP premise was wrong. Vendor CP is semantically platform-only, yet its
+database physically composes kernel 0001 and therefore truthfully contains the
+tenant catalogue and roles.
+
+Two facts had been collapsed:
+
+1. **Provider fact:** which revision supplies a database effect?
+2. **Installation intent:** which planes of this module should this product own?
+
+The first cannot safely infer the second. Omitting an optional binding looked
+identical whether deliberate or accidental, and the live gate then adjusted its
+expectation to match that omission. A forgotten binding could silently erase a
+declared tenant plane from both migration DDL and its monitor.
+
+The same implementation was asymmetric: it could build platform-only or both,
+but always built the platform plane and could not express tenant-only.
+
+## Decision
+
+### 1. The module declares what its one lineage can build
+
+`ModuleManifest` keeps three disjoint prerequisite lists:
+
+- `requires`: effects every installation needs;
+- `tenant_requires`: effects only the tenant plane needs;
+- `platform_requires`: effects only the platform plane needs.
+
+It may declare `supported_plane_sets`. Empty preserves the historical atomic
+contract: every declared plane is installed together. A selectable dual-plane
+module lists every supported non-empty combination explicitly. A combination
+cannot name a plane for which the manifest owns no tables, and the full declared
+combination remains supported.
+
+`dotmac-approvals` supports tenant-only, platform-only, and both. Existing
+`dotmac-ticketing` remains atomic until its separately released lineage adopts
+this contract; this ADR does not silently change a published module's DDL.
+
+### 2. The assembly selects; omission fails
+
+`ProductAssemblySpec.module_planes` carries one typed `ModulePlaneSelection`
+per selectable module. A selectable module with no selection is an invalid
+assembly. An unknown module, duplicate selection, empty selection, undeclared
+plane, or unsupported combination is refused before startup and by the composed
+migration gate.
+
+This is not a second switch competing with bindings. It owns a different fact:
+
+- the plane selection says **what this product installs**;
+- prerequisite bindings say **where the selected installation's effects come
+  from**.
+
+The gate joins them and refuses disagreement. Selecting TENANT makes every
+`tenant_requires` entry mandatory; selecting PLATFORM does the same for
+`platform_requires`. A provider may exist without its plane being selected.
+
+### 3. Migrations and the live gate consume the same selection
+
+A selectable lineage calls
+`resolve_depends_on(common, module=..., tenant=..., platform=...)`. Only the
+selected planes contribute physical Alembic edges, but every selected edge is
+strict. `upgrade()` reads `selected_module_planes(module)` and creates exactly
+those tables.
+
+`NamespaceRegistry.expected_tables` reads the same typed assembly selection.
+`declared_tables` remains the immutable full ownership claim; expected tables
+are the selected subset. Provider bindings never alter either classification.
+
+Graph commands that do not run `env.py` retain the existing inspection
+tolerance. An assembly that exports `DOTMAC_MIGRATION_BINDINGS` for a faithful
+graph also exports `DOTMAC_MODULE_PLANE_SELECTIONS` as the same kind of
+`module.path:ATTRIBUTE` pointer to its typed selection sequence. Upgrade
+entrypoints install both bindings and plane selections before the revision map
+is built; the static gate checks the checked-in composition and refuses a
+selectable lineage whose reachable `upgrade()` path never consumes
+`selected_module_planes(module)`.
+
+### 4. PostgreSQL proves the distinguishing case
+
+The platform-only approvals canary first runs the kernel lineage and proves
+`public.tenants` exists. It then runs `ap_0001` with an explicit PLATFORM-only
+selection and proves:
+
+- all three platform approval tables exist and remain reachable by
+  `platform_api`;
+- all three tenant approval tables are absent;
+- the truthful tenant provider did not opt the tenant plane in.
+
+The existing both-plane canaries continue to prove forced RLS, tenant isolation,
+platform-role reachability, tenant-role revocation and no cross-plane FK.
+
+## Consequences
+
+- Kernel a60 and `dotmac-approvals` a2 are withdrawn, never published. The
+  corrected public surfaces are kernel a61 and approvals a3.
+- Vendor CP can adopt only the approvals platform plane while continuing to run
+  the kernel lineage it already composes.
+- A future module may support only a subset of the three combinations; the
+  assembly cannot select a combination the module did not promise.
+- `dotmac-files` remains unadopted in Vendor CP. A generic installation mechanism
+  does not create a stored-byte consumer or lift ADR-0017's demand gate.
+
+## Alternatives rejected
+
+**Keep absence of a binding as the selector.** It cannot distinguish intent from
+omission and is factually wrong for a platform-only product that composes a
+tenant provider.
+
+**Infer from the live catalogue.** That turns drift into configuration: the
+monitor would bless whatever happened to be present.
+
+**Use one assembly-wide plane flag.** Different modules may legitimately install
+different plane combinations. Intent belongs to each module installation.
+
+**Split the distribution or lineage.** ADR-0023's one behaviour/one lineage rule
+still holds. Plane selection controls one lineage; it does not create a second
+owner or release train.

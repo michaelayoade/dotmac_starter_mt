@@ -290,7 +290,13 @@ specifics) points here and must never fork these rules.
     `tenant_id`, sentinel/fake tenants and polymorphic scope columns are
     rejected and refused by the gate. Two
     planes require a real named assembly on each side TODAY; most modules are
-    tenant-only and must stay that way. (ADR-0023;
+    tenant-only and must stay that way. A module whose one lineage can install
+    plane subsets declares every supported combination; its assembly MUST make
+    one explicit per-module `ModulePlaneSelection`. Prerequisite bindings only
+    name providers and NEVER select a plane — a provider may truthfully exist
+    while the product intentionally excludes that plane. Missing, duplicate,
+    unknown or unsupported selections fail the static composition; migrations
+    and the live-catalog gate consume the same selection (ADR-0028). (ADR-0023;
     `tests/unit/test_live_catalog_contract.py`,
     `tests/unit/test_namespaces.py`,
     `tests/architecture/test_ticketing_module.py`)

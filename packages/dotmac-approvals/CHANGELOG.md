@@ -6,7 +6,23 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 catalog gate passed, which is what makes a release possible rather than one that
 has happened.
 
+## 0.1.0a3 — 2026-08-14
+
+Corrects the withdrawn a2 plane selector (ADR-0028). The manifest declares all
+three supported installations — tenant-only, platform-only and both — and an
+assembly must select one explicitly. `ap_0001` builds exactly that selection;
+truthfully binding a tenant catalogue no longer opts the tenant tables in.
+
+Kernel floor is `>=0.1.0a61`. The live PostgreSQL platform-only canary runs the
+kernel lineage first, proves `public.tenants` exists, then proves all three
+tenant approval tables are absent while all three platform tables are usable.
+
 ## 0.1.0a2 — 2026-08-14
+
+**Withdrawn before publication; superseded by a3.** This version incorrectly
+used absence of a tenant prerequisite binding as installation intent. Vendor CP
+has that provider through its composed kernel lineage, so the premise and the
+selector were both wrong.
 
 Makes the module installable in a platform-only assembly (ADR-0027). Found while
 starting ADR-0026's cutover 1: the vendor control plane has no tenant catalogue

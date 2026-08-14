@@ -6,7 +6,39 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a61 — 2026-08-14
+
+Replaces a60's unshipped implicit plane selector with the explicit assembly
+contract in ADR-0028. A prerequisite binding names a provider; it never chooses
+which tables a product intends to install.
+
+### Added
+
+- `ModulePlane`, `ModulePlaneSelection` and
+  `ProductAssemblySpec.module_planes`: a selectable module requires one
+  explicit per-assembly choice.
+- `ModuleManifest.platform_requires` and `supported_plane_sets`: the module
+  declares common/tenant/platform effects plus every plane combination its one
+  lineage can actually build. An empty declaration preserves atomic behaviour.
+- Static and live-catalog gates derive mandatory bindings and expected tables
+  from that explicit selection. The static gate also proves a selectable
+  lineage's reachable upgrade path consumes its own selection.
+
+### Changed
+
+- `resolve_depends_on(..., module=..., tenant=..., platform=...)` emits edges
+  for the selected planes and fails when any selected requirement is unbound.
+- Provider availability no longer controls migration DDL. This is the Vendor CP
+  canary: kernel 0001 truthfully supplies a tenant catalogue, while the product
+  can explicitly install only a module's platform plane.
+
 ## 0.1.0a60 — 2026-08-14
+
+**Withdrawn before publication; superseded by a61.** The implementation made an
+unbound `tenant_requires` entry select the platform-only shape. Direct inventory
+proved Vendor CP actually composes kernel 0001 and therefore has the tenant
+catalogue, so binding availability was the wrong fact and could not distinguish
+an intentional platform-only installation from an accidental missing binding.
 
 Lets a dual-plane module install into an assembly that can operate only one of
 its planes (ADR-0027). Demand-pulled: `dotmac-approvals` could not be adopted by

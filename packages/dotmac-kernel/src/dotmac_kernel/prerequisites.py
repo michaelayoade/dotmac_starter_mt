@@ -69,6 +69,8 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import Final
 
+from dotmac_kernel.planes import ModulePlane, selected_module_planes
+
 #: Dotted `module.path:ATTRIBUTE` naming this assembly's binding sequence, for
 #: entry points that never run `env.py` (`alembic heads`, `history`, `show`).
 BINDINGS_ENV_VAR: Final[str] = "DOTMAC_MIGRATION_BINDINGS"
@@ -370,25 +372,10 @@ def autoload_bindings() -> bool:
 
 
 def is_bound(name: str) -> bool:
-    """Has this assembly bound a provider for `name`?
+    """Has this assembly bound a provider for ``name``?
 
-    The question a DUAL-PLANE lineage asks before building its tenant plane
-    (ADR-0027). A platform-only assembly — the vendor control plane — has no
-    tenant catalogue and never will: it is not a product data plane. Under the
-    all-or-nothing model it therefore could not install a dual-plane module at
-    all, because the single lineage created tenant tables with foreign keys to
-    `public.tenants` and RLS policies calling `public.app_current_tenant_id()`,
-    neither of which exists there.
-
-    Answering False is what lets that assembly install the plane it can operate
-    and skip the one it cannot. It is deliberately NOT a way to make a
-    requirement optional in general: a prerequisite listed in `requires` is
-    still mandatory and still fails closed. Only a plane's OWN prerequisites,
-    declared in `tenant_requires`, are read through this.
-
-    Never raises for an unbound prerequisite — that is the answer, not an error.
-    An unknown NAME still raises: asking about a prerequisite nobody registered
-    is a typo, and returning False for it would silently skip a plane.
+    This is observation only. Provider availability never selects a module
+    plane; ``ModulePlaneSelection`` owns that independent assembly decision.
     """
     prerequisite(name)
     with _lock:
@@ -400,13 +387,16 @@ def is_bound(name: str) -> bool:
 
 
 def all_bound(names: Iterable[str]) -> bool:
-    """True when every name is bound. Empty means True — a plane with no
-    prerequisites of its own is always installable."""
+    """True when every name is bound. Empty means True."""
     return all(is_bound(name) for name in names)
 
 
 def resolve_depends_on(
-    names: Sequence[str], *, optional: Sequence[str] = ()
+    names: Sequence[str],
+    *,
+    module: str | None = None,
+    tenant: Sequence[str] = (),
+    platform: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """Turn a lineage's logical `requires` into real Alembic `depends_on`.
 
@@ -439,35 +429,43 @@ def resolve_depends_on(
     `require_prerequisites` proving the effects against the database before any
     DDL. Set `DOTMAC_MIGRATION_BINDINGS` to keep the inspected graph faithful too.
 
-    ## `optional`
-
-    A dual-plane lineage passes its tenant plane's prerequisites here
-    (ADR-0027). An optional name that IS bound contributes a real ordering edge,
-    exactly like a required one — the tenant plane must still be created after
-    whatever supplies the tenant catalogue. An optional name that is NOT bound
-    contributes nothing, because the plane needing it will not be built.
-
-    Optional is a property of the PLANE, never a way to soften a requirement:
-    anything in `names` is still mandatory and still fails closed.
+    ``tenant`` and ``platform`` are not optional requirements. They are strict
+    requirements of an explicitly selected module plane. The assembly selects
+    through ``ModulePlaneSelection``; every requirement of that selection must
+    then have a binding. This keeps provider availability from becoming an
+    implicit installation flag.
     """
     validate_prerequisites(names)
-    validate_prerequisites(optional)
-    overlap = set(names) & set(optional)
+    validate_prerequisites(tenant)
+    validate_prerequisites(platform)
+    groups = (set(names), set(tenant), set(platform))
+    overlap = {
+        name
+        for name in set().union(*groups)
+        if sum(name in group for group in groups) > 1
+    }
     if overlap:
         raise DuplicatePrerequisiteError(
-            f"{sorted(overlap)} declared both required and optional — a "
-            "prerequisite is one or the other, and 'both' reads as required "
-            "while behaving as optional"
+            f"{sorted(overlap)} declared in more than one prerequisite list — "
+            "an effect is common, tenant-only, or platform-only"
+        )
+    if (tenant or platform) and not module:
+        raise PrerequisiteError(
+            "plane-specific prerequisites require the module code whose "
+            "ModulePlaneSelection controls them"
         )
     with _lock:
         installed = bool(_bindings)
     if not installed and not autoload_bindings():
         return ()
-    edges = [binding_for(name).provider_revision for name in names]
-    edges.extend(
-        binding_for(name).provider_revision for name in optional if is_bound(name)
-    )
-    return tuple(edges)
+    selected_names = list(names)
+    if module is not None:
+        planes = selected_module_planes(module)
+        if ModulePlane.TENANT in planes:
+            selected_names.extend(tenant)
+        if ModulePlane.PLATFORM in planes:
+            selected_names.extend(platform)
+    return tuple(binding_for(name).provider_revision for name in selected_names)
 
 
 def binding_map() -> Mapping[str, str]:

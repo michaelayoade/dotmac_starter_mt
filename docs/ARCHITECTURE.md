@@ -1604,6 +1604,7 @@ enforcement is `dotmac_kernel.migrations.catalog`.
 | That the allocation never moves | `namespaces.MIGRATION_OWNER_LEDGER` (checked-in, kernel-shipped) | unconditional whole-ledger validation, then `NamespaceRegistry.from_manifests` → `UnallocatedNamespaceError` / `NamespaceAllocationError` |
 | No two owners share a schema / prefix / branch label / table | `NamespaceRegistry` | construction raises `DuplicateSchemaError` / `DuplicateMigrationPrefixError` / `DuplicateBranchLabelError` / `DuplicateTableOwnerError` |
 | Coherent composed migration graph | `migrations.gate.run_gate` | `make migration-gate` (in `make check`; the CI `quality` matrix, which `docker-build` now `needs`) |
+| Per-module persistence-plane intent | `ProductAssemblySpec.module_planes` (`ModulePlaneSelection`) checked against each manifest's `supported_plane_sets`; prerequisite bindings remain provider mappings only | assembly construction + `migrations.gate.run_gate`; `NamespaceRegistry.expected_tables` and selectable migrations consume the same declaration (ADR-0028) |
 | Live RLS/grant contract per module schema | `migrations.catalog.audit_live_schemas` | `tests/test_module_schema_catalog.py` (Postgres) |
 
 **`public` is a compatibility namespace, not a shared one.** It belongs to the

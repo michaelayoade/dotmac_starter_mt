@@ -72,7 +72,10 @@ def main() -> int:
         print(f"{ini_path} selects no version_locations", file=sys.stderr)
         return 2
     report = run_gate(
-        assembly.modules, locations, bindings=ASSEMBLY_PREREQUISITE_BINDINGS
+        assembly.modules,
+        locations,
+        bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+        module_planes=assembly.module_planes,
     )
     print(report.render())
     return 0 if report.ok else 1

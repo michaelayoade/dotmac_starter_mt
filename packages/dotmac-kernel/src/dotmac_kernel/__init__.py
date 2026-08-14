@@ -167,6 +167,7 @@ from dotmac_kernel.permissions import (
     active_permissions,
     install_permissions,
 )
+from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from dotmac_kernel.product_manifest import (
     PRODUCT_MANIFEST_SCHEMA,
     ProductManifestDigestMismatchError,
@@ -195,7 +196,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a60"
+__version__ = "0.1.0a61"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -256,6 +257,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.money",
         "dotmac_kernel.namespaces",
         "dotmac_kernel.permissions",
+        "dotmac_kernel.planes",
         "dotmac_kernel.platform_auth",
         "dotmac_kernel.prerequisites",
         "dotmac_kernel.product_manifest",
@@ -314,6 +316,8 @@ __all__ = [
     # assembly composition
     "ProductAssemblySpec",
     "ProductSecurityPolicy",
+    "ModulePlane",
+    "ModulePlaneSelection",
     "create_app",
     # audit
     "AuditEvent",

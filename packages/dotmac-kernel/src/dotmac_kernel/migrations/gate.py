@@ -70,6 +70,13 @@ from dotmac_kernel.namespaces import (
     module_schema,
     qualified,
 )
+from dotmac_kernel.planes import (
+    ModulePlane,
+    ModulePlaneSelection,
+    ModulePlaneSelectionError,
+    declared_planes,
+    validate_module_plane_selections,
+)
 from dotmac_kernel.prerequisites import PrerequisiteBinding, installed_bindings
 
 # `op.*` calls that create or alter a table and therefore MUST name the schema
@@ -126,6 +133,10 @@ class RevisionRecord:
     # Prerequisite names passed to `resolve_depends_on`, when statically
     # readable. Empty when the call takes a name the gate cannot resolve.
     declared_prerequisites: tuple[str, ...] = ()
+    # Module codes passed to `selected_module_planes(...)` from upgrade's
+    # reachable call graph. A selectable manifest without this executable
+    # consumer would leave the assembly declaration as unenforced prose.
+    selected_plane_modules: tuple[str, ...] = ()
 
     @property
     def is_root(self) -> bool:
@@ -398,6 +409,65 @@ def _scan_ddl(
     return creates, unqualified, targeted, raw_sql
 
 
+def _read_plane_selection_calls(
+    tree: ast.Module, expressions: Mapping[str, ast.AST]
+) -> tuple[str, ...]:
+    """Read selection consumers reachable from ``upgrade()``.
+
+    A dead helper or a call in ``downgrade()`` is not evidence that upgrade DDL
+    obeys the assembly's choice, so this follows the same local call graph as
+    the DDL scanner rather than walking the whole file.
+    """
+    functions = {
+        node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    upgrade = functions.get("upgrade")
+    if upgrade is None:
+        return ()
+
+    class Calls(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.nodes: list[ast.Call] = []
+
+        def visit_Call(self, node: ast.Call) -> None:
+            self.nodes.append(node)
+            self.generic_visit(node)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            return
+
+    selected: list[str] = []
+    pending = [upgrade]
+    visited: set[str] = set()
+    while pending:
+        function = pending.pop()
+        if function.name in visited:
+            continue
+        visited.add(function.name)
+        visitor = Calls()
+        for statement in function.body:
+            visitor.visit(statement)
+        for node in visitor.nodes:
+            if isinstance(node.func, ast.Name) and node.func.id in functions:
+                pending.append(functions[node.func.id])
+            func = node.func
+            name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if name != "selected_module_planes" or not node.args:
+                continue
+            module = _static_value(node.args[0], expressions)
+            selected.append(module if isinstance(module, str) else "<uninspectable>")
+    return tuple(selected)
+
+
 def scan_revision_file(path: Path, location: Path) -> RevisionRecord | None:
     """Read one revision file's identity statically. `None` when the file
     declares no `revision` (an `__init__.py`, a helper module)."""
@@ -419,6 +489,7 @@ def scan_revision_file(path: Path, location: Path) -> RevisionRecord | None:
         return None
     creates, unqualified, targeted, raw_sql = _scan_ddl(tree, expressions)
     resolves, declared = _read_prerequisite_call(expressions)
+    selected_plane_modules = _read_plane_selection_calls(tree, expressions)
     return RevisionRecord(
         path=path,
         location=location,
@@ -432,6 +503,7 @@ def scan_revision_file(path: Path, location: Path) -> RevisionRecord | None:
         raw_sql=tuple(raw_sql),
         resolves_prerequisites=resolves,
         declared_prerequisites=declared,
+        selected_plane_modules=selected_plane_modules,
     )
 
 
@@ -451,10 +523,13 @@ def _read_prerequisite_call(
     name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
     if name != "resolve_depends_on":
         return False, ()
-    if not node.args:
-        return True, ()
-    declared = _literal(node.args[0], expressions)
-    return True, _as_tuple(declared)
+    declared: list[str] = []
+    if node.args:
+        declared.extend(_as_tuple(_literal(node.args[0], expressions)))
+    for keyword in node.keywords:
+        if keyword.arg in {"tenant", "platform"}:
+            declared.extend(_as_tuple(_literal(keyword.value, expressions)))
+    return True, tuple(declared)
 
 
 def scan_location(location: Path) -> tuple[RevisionRecord, ...]:
@@ -502,6 +577,7 @@ def run_gate(
     *,
     registry: NamespaceRegistry | None = None,
     bindings: Sequence[PrerequisiteBinding] | None = None,
+    module_planes: Sequence[ModulePlaneSelection] = (),
 ) -> GateReport:
     """Compose `locations` under the namespaces `manifests` declare and report
     every violation found.
@@ -520,8 +596,10 @@ def run_gate(
         bindings = installed_bindings()
     if registry is None:
         try:
-            registry = NamespaceRegistry.from_manifests(manifests)
-        except NamespaceError as exc:
+            registry = NamespaceRegistry.from_manifests(
+                manifests, module_planes=module_planes
+            )
+        except (NamespaceError, ModulePlaneSelectionError) as exc:
             # Duplicate schema claims, duplicate prefixes, duplicate branch
             # labels, duplicate table ownership and ledger drift all surface
             # here: the namespace registry IS the declaration-side gate.
@@ -551,8 +629,15 @@ def run_gate(
     _check_table_ownership(records, owner_of_location, registry, violations)
     _check_search_path_independence(records, owner_of_location, violations)
     _check_stateful_modules_have_a_lineage(owner_of_location, registry, violations)
+    _check_plane_selection_consumers(manifests, records, owner_of_location, violations)
     _check_prerequisites(
-        manifests, records, owner_of_location, registry, bindings, violations
+        manifests,
+        records,
+        owner_of_location,
+        registry,
+        bindings,
+        module_planes,
+        violations,
     )
 
     attribution: dict[str, Mapping[str, str | None]] = {}
@@ -705,6 +790,7 @@ def _check_prerequisites(
     owner_of_location: Mapping[Path, MigrationOwner],
     registry: NamespaceRegistry,
     bindings: Sequence[PrerequisiteBinding],
+    module_planes: Sequence[ModulePlaneSelection],
     violations: list[str],
 ) -> None:
     """A module names the EFFECT it needs; the assembly names the revision.
@@ -725,6 +811,12 @@ def _check_prerequisites(
         record.revision: owner_of_location.get(record.location) for record in records
     }
     bound = {binding.prerequisite: binding for binding in bindings}
+    try:
+        selections = validate_module_plane_selections(manifests, module_planes)
+    except ModulePlaneSelectionError as exc:
+        violations.append(f"module plane composition: {exc}")
+        selections = ()
+    selection_by_code = {selection.module: selection for selection in selections}
     provides_by_owner = {
         owner.owner: set(owner.provides) for owner in registry.owners()
     }
@@ -765,21 +857,23 @@ def _check_prerequisites(
                 )
 
     for manifest in manifests:
-        required = tuple(getattr(manifest, "requires", ()))
-        # ADR-0027: a tenant plane's own prerequisites are OPTIONAL to bind. An
-        # assembly that binds none of them installs the platform plane alone,
-        # which is the whole point — but anything it DOES bind is still checked
-        # exactly as strictly, because a half-truthful binding is worse than an
-        # absent one.
-        optional = tuple(getattr(manifest, "tenant_requires", ()))
-        checked = required + tuple(name for name in optional if name in bound)
+        code = str(getattr(manifest, "code", "<unknown>"))
+        selection = selection_by_code.get(code)
+        planes = (
+            frozenset(selection.planes)
+            if selection is not None
+            else frozenset(declared_planes(manifest))
+        )
+        checked = list(getattr(manifest, "requires", ()))
+        if ModulePlane.TENANT in planes:
+            checked.extend(getattr(manifest, "tenant_requires", ()))
+        if ModulePlane.PLATFORM in planes:
+            checked.extend(getattr(manifest, "platform_requires", ()))
         if not checked:
             continue
-        code = getattr(manifest, "code", "<unknown>")
         for name in checked:
             binding = bound.get(name)
-            # 2 — composed but unbound. Only reachable for a MANDATORY
-            # requirement: an unbound optional one was filtered out above.
+            # 2 — every requirement of every selected plane is mandatory.
             if binding is None:
                 violations.append(
                     f"module {code!r} requires {name!r} but this assembly binds "
@@ -835,6 +929,7 @@ def _check_prerequisites(
         getattr(manifest, "migration_prefix", None): (
             tuple(getattr(manifest, "requires", ()))
             + tuple(getattr(manifest, "tenant_requires", ()))
+            + tuple(getattr(manifest, "platform_requires", ()))
         )
         for manifest in manifests
     }
@@ -956,6 +1051,48 @@ def _check_stateful_modules_have_a_lineage(
             f"module {owner.owner!r} owns schema {owner.db_schema!r} but no "
             "selected version location carries its lineage — its tables would "
             "never be created"
+        )
+
+
+def _check_plane_selection_consumers(
+    manifests: Sequence[AnyManifest],
+    records: Sequence[RevisionRecord],
+    owner_of_location: Mapping[Path, MigrationOwner],
+    violations: list[str],
+) -> None:
+    """A selectable manifest has an executable migration consumer.
+
+    The assembly declaration controls installation only if the module's own
+    upgrade path reads it. Calls must also name their own lineage; reading a
+    different module's selection would couple two independently released
+    migrations and leave the current module uncontrolled.
+    """
+    consumed_by_owner: dict[str, set[str]] = {}
+    for record in records:
+        owner = owner_of_location.get(record.location)
+        if owner is None or owner.db_schema is None:
+            continue
+        consumed = consumed_by_owner.setdefault(owner.owner, set())
+        consumed.update(record.selected_plane_modules)
+        for module in record.selected_plane_modules:
+            if module != owner.owner:
+                violations.append(
+                    f"{record.revision} ({owner.owner}): reads the plane selection "
+                    f"for {module!r}, not its own module code — installable "
+                    "lineages may consume only their own assembly selection"
+                )
+
+    for manifest in manifests:
+        supported = tuple(getattr(manifest, "supported_plane_sets", ()))
+        if len(supported) <= 1:
+            continue
+        code = str(getattr(manifest, "code", "<unknown>"))
+        if code in consumed_by_owner.get(code, set()):
+            continue
+        violations.append(
+            f"selectable module {code!r} never consumes its explicit assembly "
+            "plane selection from a reachable migration upgrade path — its "
+            "DDL could create an unselected plane"
         )
 
 

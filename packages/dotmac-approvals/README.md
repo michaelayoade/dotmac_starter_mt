@@ -75,14 +75,18 @@ fail-open "a missing workflow may mean no approval is required".
 
 ## Status
 
-`audit-complete` with zero contract consumers. Vendor CP is cutover 1 (its plane
-has no `tenant_id` prerequisite), ERP is cutover 2 after its E8 gate.
+`audit-complete` with zero contract consumers. Vendor CP is cutover 1: its
+assembly will explicitly select only `ModulePlane.PLATFORM`, even though the
+kernel lineage it already composes truthfully supplies the tenant catalogue.
+ERP is cutover 2 after its E8 gate.
 
 **Release-eligible, not yet released.** The live Postgres migration and catalog
-gate passed — `tests/test_approvals_isolation.py` migrates the `ap` lineage into
-a scratch database and proves FORCEd RLS on every tenant table, `app_user`
-locked out of every platform table with the platform role still able to operate,
-no cross-plane foreign key in the live catalog, and the duplicate-vote
-constraint refusing a second vote. The `.github/release-modules.json` entry
-landed with that proof rather than ahead of it, which is what ADR-0026 § 8
-requires; nothing has been published yet.
+gate covers both contracts — `tests/test_approvals_isolation.py` migrates the
+`ap` lineage into one scratch database with both planes and another with an
+explicit platform-only selection. It proves FORCEd RLS on every tenant table,
+`app_user` locked out of every platform table with the platform role still able
+to operate, no cross-plane foreign key, duplicate-vote refusal, and no tenant
+approval tables in the platform-only database even though kernel `public.tenants`
+exists there. The `.github/release-modules.json` entry landed with that proof
+rather than ahead of it, which is what ADR-0026 § 8 requires; nothing has been
+published yet.

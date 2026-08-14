@@ -83,10 +83,9 @@ LEDGER_ALLOCATION_RELEASES = {
     # `platform_tables` (a53) and `requires` (a56): the floor is the higher of
     # the two, and its own allocation is the higher.
     "dotmac-integration": "0.1.0a58",
-    # ADR-0026 allocated `mod_approvals` in a59; ADR-0027's per-plane
-    # prerequisites in a60 are a CAPABILITY the manifest now consumes
-    # (`tenant_requires`), and the floor is always the higher of the two — so
-    # this row moves to CAPABILITY_RAISED_FLOORS below rather than staying here.
+    # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
+    # plane-selection contract lands in a61, so this row moves to
+    # CAPABILITY_RAISED_FLOORS below rather than staying here.
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -111,14 +110,16 @@ CAPABILITY_RAISED_FLOORS = {
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
     # prerequisite contract raises it again. The floor is always the highest
     # capability the module actually consumes, not the first one that moved it.
-    # ADR-0027 raises it again: the manifest now passes `tenant_requires`,
-    # added in a60. The floor is always the highest capability the module
+    # ADR-0028: both modules declare `supported_plane_sets`, added in a61, and
+    # their lineages consume `selected_module_planes`. An earlier kernel raises
+    # TypeError at manifest import, before the allocation check is ever reached,
+    # so the capability outranks each module's own allocation.
+    #
+    # Ticketing passed through a56 (`requires`) and a60 (`tenant_requires`) on
+    # the way here. The floor is always the highest capability the module
     # actually consumes, not the first one that moved it.
-    "dotmac-ticketing": ("0.1.0a60", "0.1.0a39"),
-    # ADR-0027: the manifest passes `tenant_requires`, added in a60. An earlier
-    # kernel raises TypeError at import, before the allocation check is reached,
-    # so the capability outranks its own a59 allocation.
-    "dotmac-approvals": ("0.1.0a60", "0.1.0a59"),
+    "dotmac-ticketing": ("0.1.0a61", "0.1.0a39"),
+    "dotmac-approvals": ("0.1.0a61", "0.1.0a59"),
 }
 
 

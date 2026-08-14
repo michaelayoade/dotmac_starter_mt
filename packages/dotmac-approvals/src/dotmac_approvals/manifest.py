@@ -12,6 +12,7 @@ DECLARED rather than one being inferred from a missing column.
 """
 
 from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.planes import ModulePlane
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
@@ -21,23 +22,28 @@ from dotmac_approvals.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="approvals",
-    version="0.1.0a1",
+    version="0.1.0a3",
     core=False,
     short_code="approvals",
     migration_prefix="ap",
     migration_branch="approvals",
     tables=TENANT_TABLES,
     platform_tables=PLATFORM_TABLES,
-    # Split by PLANE (ADR-0027). Roles are needed to create anything at all;
-    # a tenant catalogue is needed only by the tenant plane, so an assembly
-    # that has none — the vendor control plane — installs the platform plane
-    # and skips the rest instead of being unable to install the module.
+    # Split by plane, but NEVER used as the selector. Vendor CP truthfully has
+    # the kernel tenant catalogue in its composed database and still selects
+    # only PLATFORM here; the assembly's ModulePlaneSelection owns that intent.
+    # Roles are common, while only the tenant plane needs the tenant catalogue.
     #
     # Deliberately NOT an identity or RBAC prerequisite either way: role
     # membership arrives on the `Actor` value at the call site, so this module
     # installs beside a product whose RBAC the kernel has never seen.
     requires=(MODULE_DATABASE_ROLES_V1.name,),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
+    supported_plane_sets=(
+        (ModulePlane.TENANT,),
+        (ModulePlane.PLATFORM,),
+        (ModulePlane.TENANT, ModulePlane.PLATFORM),
+    ),
 )
 
 __all__ = ["module"]

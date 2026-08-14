@@ -34,6 +34,7 @@ from dotmac_kernel.namespaces import (
     NamespaceRegistry,
     module_schema,
 )
+from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from dotmac_kernel.prerequisites import PrerequisiteBinding
 
 from app.assembly import assembly
@@ -127,7 +128,10 @@ def test_the_real_repo_composes() -> None:
     would be checking something other than what ships."""
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
     report = run_gate(
-        assembly.modules, locations, bindings=ASSEMBLY_PREREQUISITE_BINDINGS
+        assembly.modules,
+        locations,
+        bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+        module_planes=assembly.module_planes,
     )
     assert report.ok, report.render()
     # Non-vacuity: a gate that walked an empty set would pass silently. Bump
@@ -142,7 +146,10 @@ def test_every_real_revision_is_attributed_to_exactly_one_owner() -> None:
     explainable through manifest-to-branch attribution."""
     locations = version_locations_from_ini(REPO_ROOT / "alembic.ini")
     report = run_gate(
-        assembly.modules, locations, bindings=ASSEMBLY_PREREQUISITE_BINDINGS
+        assembly.modules,
+        locations,
+        bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+        module_planes=assembly.module_planes,
     )
     assert report.attribution["0001_initial_tenant_schema"]["owner"] == "kernel"
     assert report.attribution["a001_adopt_cfd"]["owner"] == "assembly"
@@ -713,8 +720,7 @@ def test_composing_a_module_whose_requirement_is_unbound_fails_closed(
     tmp_path: Path,
 ) -> None:
     """An assembly that cannot supply an effect must not compose a module that
-    needs one. Vendor CP has no product tenant at all, and this is what stops it
-    silently installing a tenant-scoped module."""
+    needs one. Plane intent is a separate declaration and cannot soften this."""
     billing, kernel = tmp_path / "billing", tmp_path / "kernel"
     _kernel_root(kernel)
     _billing_root(billing)
@@ -733,6 +739,186 @@ def test_a_bound_requirement_composes(tmp_path: Path) -> None:
         billing,
         kernel,
         bindings=[PrerequisiteBinding(TENANT_SCOPE, "0001_root", "kernel")],
+    )
+    assert report.ok, report.render()
+
+
+def test_a_selectable_module_without_an_explicit_selection_is_rejected(
+    tmp_path: Path,
+) -> None:
+    manifest = ModuleManifest(
+        code="billing",
+        version="1.0.0",
+        short_code="bill",
+        migration_prefix="bl",
+        migration_branch="billing",
+        tables=("invoices",),
+        platform_tables=("platform_invoices",),
+        requires=("module_database_roles.v1",),
+        tenant_requires=(TENANT_SCOPE,),
+        supported_plane_sets=(
+            (ModulePlane.TENANT,),
+            (ModulePlane.PLATFORM,),
+            (ModulePlane.TENANT, ModulePlane.PLATFORM),
+        ),
+    )
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(
+        billing,
+        body=(
+            "    selected_module_planes('billing')\n"
+            '    op.create_table("invoices", schema="mod_bill")'
+        ),
+    )
+    ledger = (*HOST_MIGRATION_OWNERS, BILLING_OWNER)
+    report = run_gate(
+        [manifest],
+        [billing, kernel],
+        registry=NamespaceRegistry.from_manifests([manifest], ledger=ledger),
+        bindings=[
+            PrerequisiteBinding("module_database_roles.v1", "0001_root", "kernel"),
+            PrerequisiteBinding(TENANT_SCOPE, "0001_root", "kernel"),
+        ],
+        module_planes=[],
+    )
+    assert not report.ok
+    assert "no plane selection" in _messages(report)
+
+
+def test_only_selected_plane_requirements_are_mandatory(tmp_path: Path) -> None:
+    manifest = ModuleManifest(
+        code="billing",
+        version="1.0.0",
+        short_code="bill",
+        migration_prefix="bl",
+        migration_branch="billing",
+        tables=("invoices",),
+        platform_tables=("platform_invoices",),
+        requires=("module_database_roles.v1",),
+        tenant_requires=(TENANT_SCOPE,),
+        supported_plane_sets=(
+            (ModulePlane.TENANT,),
+            (ModulePlane.PLATFORM,),
+            (ModulePlane.TENANT, ModulePlane.PLATFORM),
+        ),
+    )
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(
+        billing,
+        body=(
+            "    selected_module_planes('billing')\n"
+            '    op.create_table("invoices", schema="mod_bill")'
+        ),
+    )
+    ledger = (*HOST_MIGRATION_OWNERS, BILLING_OWNER)
+    roles = [PrerequisiteBinding("module_database_roles.v1", "0001_root", "kernel")]
+    platform = [ModulePlaneSelection("billing", (ModulePlane.PLATFORM,))]
+    report = run_gate(
+        [manifest],
+        [billing, kernel],
+        registry=NamespaceRegistry.from_manifests(
+            [manifest], ledger=ledger, module_planes=platform
+        ),
+        bindings=roles,
+        module_planes=platform,
+    )
+    assert report.ok, report.render()
+
+    tenant = [ModulePlaneSelection("billing", (ModulePlane.TENANT,))]
+    report = run_gate(
+        [manifest],
+        [billing, kernel],
+        registry=NamespaceRegistry.from_manifests(
+            [manifest], ledger=ledger, module_planes=tenant
+        ),
+        bindings=roles,
+        module_planes=tenant,
+    )
+    assert not report.ok
+    assert TENANT_SCOPE in _messages(report)
+    assert "binds no provider" in _messages(report)
+
+
+def test_selectable_module_lineage_must_consume_the_assembly_selection(
+    tmp_path: Path,
+) -> None:
+    """A manifest field that no migration reads is documentary, not a guard.
+
+    Sensitivity proof: the selection and its provider bindings are both valid,
+    but the migration remains unconditional.  The static gate must reject that
+    lineage before its DDL can create the unselected plane.
+    """
+    manifest = ModuleManifest(
+        code="billing",
+        version="1.0.0",
+        short_code="bill",
+        migration_prefix="bl",
+        migration_branch="billing",
+        tables=("invoices",),
+        platform_tables=("platform_invoices",),
+        requires=("module_database_roles.v1",),
+        tenant_requires=(TENANT_SCOPE,),
+        supported_plane_sets=(
+            (ModulePlane.TENANT,),
+            (ModulePlane.PLATFORM,),
+            (ModulePlane.TENANT, ModulePlane.PLATFORM),
+        ),
+    )
+    billing, kernel = tmp_path / "billing", tmp_path / "kernel"
+    _kernel_root(kernel)
+    _billing_root(billing)
+    selection = [ModulePlaneSelection("billing", (ModulePlane.PLATFORM,))]
+    ledger = (*HOST_MIGRATION_OWNERS, BILLING_OWNER)
+    report = run_gate(
+        [manifest],
+        [billing, kernel],
+        registry=NamespaceRegistry.from_manifests(
+            [manifest], ledger=ledger, module_planes=selection
+        ),
+        bindings=[
+            PrerequisiteBinding("module_database_roles.v1", "0001_root", "kernel")
+        ],
+        module_planes=selection,
+    )
+    assert not report.ok
+    assert "never consumes its explicit assembly plane selection" in _messages(report)
+
+
+def test_reachable_plane_selection_call_satisfies_the_gate(tmp_path: Path) -> None:
+    """Sensitivity proof for the consumer check's accepted path."""
+    manifest = ModuleManifest(
+        code="billing",
+        version="1.0.0",
+        short_code="bill",
+        migration_prefix="bl",
+        migration_branch="billing",
+        tables=("invoices",),
+        platform_tables=("platform_invoices",),
+        supported_plane_sets=(
+            (ModulePlane.TENANT,),
+            (ModulePlane.PLATFORM,),
+            (ModulePlane.TENANT, ModulePlane.PLATFORM),
+        ),
+    )
+    billing = tmp_path / "billing"
+    _billing_root(
+        billing,
+        body=(
+            "    selected_module_planes('billing')\n"
+            '    op.create_table("invoices", schema="mod_bill")'
+        ),
+    )
+    selection = [ModulePlaneSelection("billing", (ModulePlane.PLATFORM,))]
+    ledger = (*HOST_MIGRATION_OWNERS, BILLING_OWNER)
+    report = run_gate(
+        [manifest],
+        [billing],
+        registry=NamespaceRegistry.from_manifests(
+            [manifest], ledger=ledger, module_planes=selection
+        ),
+        module_planes=selection,
     )
     assert report.ok, report.render()
 
@@ -880,6 +1066,30 @@ def test_the_scanner_reads_a_resolved_depends_on_without_importing_it(
     assert record.resolves_prerequisites
     assert record.declared_prerequisites == (TENANT_SCOPE,)
     assert record.depends_on == ()
+
+
+def test_the_scanner_reads_every_plane_specific_prerequisite(tmp_path: Path) -> None:
+    billing = tmp_path / "billing"
+    _billing_root(billing)
+    path = billing / "bl_0001_invoices.py"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "depends_on = None",
+            "COMMON = ('module_database_roles.v1',)\n"
+            "TENANT = ('tenant_scope_catalog.v1',)\n"
+            "PLATFORM = ()\n"
+            "depends_on = resolve_depends_on(\n"
+            "    COMMON, module='billing', tenant=TENANT, platform=PLATFORM\n"
+            ")",
+        ),
+        encoding="utf-8",
+    )
+    record = scan_revision_file(path, billing)
+    assert record is not None
+    assert record.declared_prerequisites == (
+        "module_database_roles.v1",
+        "tenant_scope_catalog.v1",
+    )
 
 
 def test_a_host_owner_may_provide_without_a_central_declaration(

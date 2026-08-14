@@ -28,22 +28,27 @@ from dotmac_kernel.messaging import (
 from dotmac_kernel.models import (  # registers Tenant/Party/Role/PartyRole/AuthSession/UserCredential
     Base,
 )
+from dotmac_kernel.planes import install_module_plane_selections
 from dotmac_kernel.prerequisites import install_prerequisite_bindings
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from app.assembly import assembly
 from app.features.custom_fields import (
     models as custom_fields,  # noqa: F401  (register CustomFieldDefinition)
 )
 from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
+config = context.config
 
 # Installed BEFORE the revision map is built: a composed module lineage resolves
 # its `depends_on` from these bindings at script-load time, so an assembly that
 # composes a module without answering what it requires fails loudly here rather
 # than ordering wrongly. See `app/migration_bindings.py`.
 install_prerequisite_bindings(ASSEMBLY_PREREQUISITE_BINDINGS)
-
-config = context.config
+install_module_plane_selections(
+    config.attributes.get("module_plane_selections", assembly.module_planes)
+)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
