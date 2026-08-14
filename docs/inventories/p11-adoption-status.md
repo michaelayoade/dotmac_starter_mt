@@ -320,7 +320,8 @@ dashboard starts lying:
   `dotmac-ticketing`. Their lineages run in the starter's own database, which
   ADR-0017 explicitly excludes from counting.
 - **Not composed anywhere, proven only by a scratch-database canary:**
-  `dotmac-files`, `dotmac-imports`, `dotmac-integration`, `dotmac-approvals`.
+  `dotmac-files`, `dotmac-imports`, `dotmac-integration`, `dotmac-approvals`,
+  `dotmac-application-directory`.
   Each has a `tests/test_*_isolation.py` that builds a throwaway database,
   composes the kernel plus its own lineage in a temporary Alembic config, and
   audits the planes. This is real evidence that the migration *applies* — and
@@ -328,9 +329,8 @@ dashboard starts lying:
   normal CI push exercises neither `ig_0001` nor `ig_0002`… The migrations would
   first run in production."* It is not evidence of adoption.
 - **Allocated, released, and composed nowhere at all:**
-  `dotmac-release-catalog`, `dotmac-entitlement-allocation`,
-  `dotmac-application-directory`. Note that the first two additionally carry a
-  known latent conformance defect — see the conformance spec § "the
+  `dotmac-release-catalog`, `dotmac-entitlement-allocation`. Both carry a known
+  latent conformance defect — see the conformance spec § "the
   `tables=`/`platform_tables=` misdeclaration", recorded by ADR-0023's own
   Consequences.
 
