@@ -7,8 +7,15 @@
 > amendment (extraction rule), ADR-0008 (declaration registries), ADR-0011/0012
 > (settings), ADR-0014 (at-most-once), ADR-0016 (coverage is derived),
 > **ADR-0017 (adoption is the scarce resource)**, **ADR-0020 (billing owns
-> operational receivables; three commercial modules)**, `dotmac_sub` ADR-0007
+> operational receivables; three commercial modules) and its 2026-08-14
+> amendment**, ADR-0022 (`dotmac-files` owns stored bytes), ADR-0023 (dual-plane
+> module persistence), ADR-0024 (apps compose by synchronizing data; the
+> Integrator owns provider transport), `dotmac_sub` ADR-0007
 > (end-to-end billing target architecture).
+> **Revised 2026-08-14** to carry ADR-0020's amendment: modules are peers wired
+> by the assembly, all three are dual-plane, PSP transport is Integrator work,
+> P8b is met by `dotmac-files`, A2b resolves the reusable offer/recurrence core
+> into `dotmac-subscriptions`, and Part 6 states the per-application composition.
 > **Supersedes nothing.** This is the concrete shape of the deployment plan's
 > workstreams 4–7; that plan stays the decision record.
 
@@ -18,12 +25,17 @@ The capability is not blocked on design. Sub's ADR-0007 is an accepted,
 detailed target architecture, and ~74,000 lines of production billing code and
 174 test files already exist to port from.
 
-Its complete automated shape is blocked on **four shared facilities that
-ADR-0017 put under moratorium** — inbound webhooks, scheduling, numbering, and
-object storage. ADR-0017's 2026-08-12 amendment makes explicit that `webhooks`
-names the inbound/outbound facility family. Money persistence is a separate
-partially-adoptable gap: ERP can consume and retire the ADR-0016 coverage owner
-without using the rest of billing.
+Its complete automated shape is blocked on shared facilities that ADR-0017 put
+under moratorium. When this plan was written that was four — inbound webhooks,
+scheduling, numbering, and object storage. **Two of those four have since
+moved.** `dotmac-files` (ADR-0022) now owns object storage on both planes, so
+P8b is met; and inbound provider webhooks became Integrator work under
+ADR-0024's 2026-08-13 amendment, so billing is that facility's consumer rather
+than its owner. Scheduling (P3) and numbering (P4) remain genuine gap-listed
+blockers, joined by document rendering (P8a). ADR-0017's 2026-08-12 amendment
+makes explicit that `webhooks` names the inbound/outbound facility family.
+Money persistence is a separate partially-adoptable gap: ERP can consume and
+retire the ADR-0016 coverage owner without using the rest of billing.
 
 Those dependencies are **profile- and slice-specific**, not one all-or-nothing
 gate. A manual/ERP-invoiced deployment does not need a PSP webhook receiver; a
@@ -63,14 +75,14 @@ on this today."
 | # | Capability | Slice that needs it | ADR-0017 |
 |---|---|---|---|
 | **P1** | **Money persistence primitives**: a column/composite, the ADR-0016 coverage mixin (`total_amount`, `amount_paid`, generated `balance_due`), declared rounding, configurable currencies, and immutable FX snapshots | Every money table otherwise hand-rolls its representation. The coverage owner is independently useful and ERP can retire its local `coverage.py`; configurable-currency and persisted-FX work need separate named adopters. | Not gap-listed. Only the coverage slice is demand-backed now; do not bundle the rest into its cutover. |
-| **P2** | **Inbound webhook receiver**: signature verification, raw-payload store, provider-event dedupe, replay, and ordering policy | Required when a PSP/provider supplies settlement facts by webhook. Manual/ERP invoicing does not need it. | **Gap-listed. Blocked** absent a live adopter; ADR-0017 amendment 2026-08-12. |
+| **P2** | **Inbound webhook receiver**: signature verification, raw-payload store, provider-event dedupe, replay, and ordering policy — **owned by the Integrator, not by billing** | Required when a PSP/provider supplies settlement facts by webhook. Manual/ERP invoicing does not need it. Billing is the consumer of a typed, provider-neutral settlement observation. | **Relocated 2026-08-14.** ADR-0024 § 6/§ 7 put provider ingress in `dotmac-integration` + a connector plugin. Still gap-listed as a facility; billing no longer proposes to own it. |
 | **P3** | **Durable timers**: wake an owner/entity at a time, exactly once, with a generation | Required for recurring renewals, grace expiry, dunning offsets, retry ladders, and arrangement due dates—not for billing core itself. | **Gap-listed as scheduling. Blocked.** |
 | **P4** | **Document numbering**: one owner per series, declared gapless-or-not policy, period reset, concurrency-safe | Required when internal billing issues invoices, credit notes, or receipts. Provider/manual authorities keep their own series. | **Gap-listed. Blocked.** |
 | **P5** | **Cadence value object + calendar arithmetic**, owned by `dotmac-subscriptions` | The recurring-contract composability core. Without it "monthly" becomes a code path, as measured in Sub. One-off billing does not need it. | Not gap-listed, but it is module domain code—not a reason to grow the kernel before the module/adopter exists. |
-| **P6** | **`PaymentProvider` seam**, owned by `dotmac-billing`: protocol, typed results, stable errors, fake, parametrized contract suite | Required only by profiles that take provider payments or ingest provider-owned invoice/settlement state. | Contract-only does not mean adoption-free. Land with the billing module and named adopter, not in the kernel now. |
+| **P6** | **`PaymentProvider` domain port**, owned by `dotmac-billing`: protocol, typed results, stable errors, fake, parametrized contract suite. **Provider-neutral only** — the PSP client, credentials, signature verification, retries and checkpoints live in an Integrator connector plugin | Required only by profiles that take provider payments or ingest provider-owned invoice/settlement state. | Contract-only does not mean adoption-free. Land with the billing module and named adopter, not in the kernel now. Scope narrowed 2026-08-14 by ADR-0020 A3. |
 | **P7** | **Tax seam**, owned by `dotmac-billing`: rate resolution, inclusive/exclusive/exempt, reverse charge, immutable applied-policy snapshot | Required only where the selected invoicing authority applies jurisdiction policy. ERP owns the source structure to port. | Land with billing and an adopter. No shared Nigerian VAT default. |
-| **P8a** | **Document rendering**, owned by a document-generation capability separate from billing and Template Studio | Required when the product renders invoices, statements, or attachments locally. Billing supplies immutable document facts; rendering produces bytes. | Not the object-storage facility. Needs its own dossier and adopter. |
-| **P8b** | **Object storage**, a byte-storage provider seam | Required to retain locally produced documents and attachments. It does not decide content or render PDFs. | **Gap-listed. Blocked.** |
+| **P8a** | **Document rendering**, owned by a document-generation capability separate from billing and Template Studio | Required when the product renders invoices, statements, or attachments locally. Billing supplies immutable document facts; rendering produces bytes. | Not the object-storage facility. Needs its own dossier and adopter. **Still a genuine gap.** |
+| **P8b** | **Object storage**, a byte-storage provider seam | Required to retain locally produced documents and attachments. It does not decide content or render PDFs. | **Met, 2026-08-14.** `dotmac-files` (ADR-0022) owns stored bytes on both planes and publishes `StorageProvider`; its adoption cutovers are separately tracked. Billing emits document facts and does **not** import it — the assembly wires rendering to files (ADR-0020 A5/A1). |
 | **P9** | **Locale, message IDs, formatting** (deployment plan WS4) | Required for a second locale and for localized invoices/notices. `display.py` gives timezone/date formatting only. | Not gap-listed; defer until a named locale/document adopter needs it. |
 | **P10** | **Operational receivables subledger**, owned by `dotmac-billing`: immutable posting groups and typed receivable/funding effects | Required for internal billing. ADR-0020 limits it to operational receivables; ERP keeps the chart of accounts, journals, periods, statutory posting, and GL reconciliation. | Ownership decided. Stateful implementation waits on P11. |
 
@@ -83,13 +95,18 @@ shared lineage—the ADR-0014 failure repeated.
 
 ### The honest read of that table
 
-Four capability areas contain gap-listed work and P11 is gate-shaped.
-**Automated end-to-end billing is downstream of the
-single blockage ADR-0017 identified**, and adding it to the queue does not move
-that queue. What it does do — and this is the value of doing the dossier now —
-is make billing a *named consumer* of P2/P3/P4/P8b, so that when Sub or the
-vendor control plane is genuinely blocked on one of them, the demand-pulled
-exception has a designed contract to build rather than an improvised one.
+Three capability areas still contain gap-listed work — P3 timers, P4 numbering,
+P8a rendering — and P11 is gate-shaped. **Automated end-to-end billing is
+downstream of the single blockage ADR-0017 identified**, and adding it to the
+queue does not move that queue. What it does do — and this is the value of doing
+the dossier now — is make billing a *named consumer* of P3/P4/P8a and of the
+Integrator's payment capability, so that when Sub or the vendor control plane is
+genuinely blocked on one of them, the demand-pulled exception has a designed
+contract to build rather than an improvised one.
+
+Two of the original four have since resolved without billing building anything,
+which is the argument for consumer-not-owner framing rather than an accident:
+P8b became `dotmac-files`, and P2 became an Integrator connector capability.
 
 ## Part 2 — The composability contract
 
@@ -193,8 +210,18 @@ tax, rendering, or storage credentials.
 Forbidden: `paystack`, `flutterwave`, `stripe`, `remita` or `NGN` as an
 identifier or default anywhere in the shared module.
 
+**Revised 2026-08-14 (ADR-0020 A3).** `PaymentProvider` is a provider-neutral
+**domain port**, and that is all it is. The PSP client, its credentials, webhook
+signature verification, raw ingress, dedupe, retries and checkpoints belong to a
+payment connector plugin inside the Integrator (ADR-0024 § 6/§ 7); billing
+accepts a typed settlement observation and never learns which provider produced
+it. `DocumentStorageProvider` likewise ceases to be a billing seam — `dotmac-files`
+owns that contract already (A5), and the assembly wires rendering to it.
+
 *Check:* a grep-based architecture test over the module for provider and
-currency names; profile tests that boot with only fakes bound.
+currency names; a check that no module ships an HTTP client, credential
+reference, or signature verifier for an external provider; profile tests that
+boot with only fakes bound.
 
 ### C6 — The deployment profile names the billing authority
 
@@ -251,31 +278,56 @@ plan makes subscriptions (WS5), metering/rating (WS6), and billing (WS7)
 independently optional, and a product that invoices one-off orders should not
 carry a subscription engine.
 
+**Peers over the kernel, wired by the assembly** (ADR-0020 A1, ADR-0024 § 2):
+
 ```text
 dotmac-subscriptions ──┐
-                       ├──> dotmac-billing ──> dotmac-kernel
+dotmac-billing ────────┼──> dotmac-kernel
 dotmac-collections ────┘
+
+subscriptions --obligation command--> billing
+integrator ----settlement fact------> billing
+billing -------receivable fact------> collections
+collections ---consequence request--> the owning service (Sub / Vendor CP)
+billing -------accounting fact------> ERP
+billing -------document facts-------> rendering --> dotmac-files
 ```
 
 `dotmac-billing` owns rated-obligation acceptance, invoices, credit notes,
-payments, operational receivables, allocations, coverage, and tax/FX/provider
-seam consumption. `dotmac-subscriptions` owns catalog offers, immutable
-contract/price versions, cadence, lifecycle, proration, fixed recurring charge
-generation, and entitlement projection. `dotmac-collections` owns dunning
-cases, versioned ladders, arrangements, grace, and consequence requests.
+payment intents and accepted settlement facts, operational receivables,
+allocations, coverage, and tax/FX/provider *port* consumption.
+`dotmac-subscriptions` owns stable offers, immutable offer/price and
+subscription-contract versions, cadence, proration, and fixed recurring charge
+occurrences. Product owners project those commercial facts into their own
+service, allocation, licensing, and entitlement state. `dotmac-collections`
+owns dunning cases, versioned ladders, arrangements, grace, and consequence
+requests.
 
-Dependency direction is deliberate: **subscriptions and collections are
-sibling dependents of billing; billing knows about neither.** Subscriptions
-submit immutable rated obligations; collections read receivables and request
-consequences from whichever owner the product declares. Cross-module outcomes
-travel through versioned contracts/outbox events, not reverse imports. A product
-can install billing alone (one-off invoicing), billing + subscriptions (SaaS
-without collections), or all three.
+The earlier draft of this section drew subscriptions and collections as
+**sibling dependents of billing**. ADR-0024 § 2 forbids that: no installable
+module imports another business module, and the consuming assembly is the
+composition root that connects their published contracts. Every arrow above is a
+versioned contract or outbox event owned by the assembly, in both directions —
+not only the reverse ones. A product can still install billing alone (one-off
+invoicing), billing + subscriptions (SaaS without collections), or all three; it
+is the assembly that decides which arrows exist.
+
+**All three are dual-plane modules** (ADR-0023): one persistence-free behaviour
+engine, `tables` for the tenant plane (`tenant_id NOT NULL`, RLS ENABLEd and
+FORCEd, composite uniques) and `platform_tables` for the control plane (no
+tenant column, no RLS, `REVOKE ALL` from the tenant app role, `USAGE` + row DML
+for the online platform role), separate repository/link helpers per plane, and
+no FK crossing them. Sub needs the first; the vendor control plane is
+platform-only and has no `tenant_id` to give. Invoice numbering uniqueness is
+therefore composite on the tenant plane and control-plane-wide on the platform
+plane — the same shape ticketing's ticket numbers took.
 
 Each stateful module takes one `mod_<short>` allocation in
-`MIGRATION_OWNER_LEDGER` (`namespaces.py`) and owns one migration lineage.
-Metering/usage rating (WS6) stays out of scope here; it is a fourth module and
-submits rated usage obligations through the same billing input contract.
+`MIGRATION_OWNER_LEDGER` (`namespaces.py`) and owns one migration lineage,
+allocated in the diff that creates the package rather than reserved ahead of it
+(ADR-0017's 2026-08-14 amendment records why). Metering/usage rating (WS6) stays
+out of scope here; it is a fourth module and submits rated usage obligations
+through the same billing input contract.
 
 ### What these modules must not absorb
 
@@ -294,7 +346,13 @@ language applies unchanged.
    collections are three distributions.
 3. C1–C10 — accepted as ADR-0020's binding implementation contract.
 4. This plan registers the module slices as named future consumers of
-   P2/P3/P4/P8b, without claiming the demand-pulled exception.
+   P3/P4/P8a and of the Integrator's payment capability, without claiming the
+   demand-pulled exception.
+5. **ADR-0020's 2026-08-14 amendment** — modules are peers wired by the
+   assembly, all three are dual-plane, PSP transport is Integrator work, P8b is
+   met by `dotmac-files`, A2b is resolved into `dotmac-subscriptions`, and the
+   per-application composition is stated (Part 6 below). This revision is that
+   amendment landing in the plan.
 
 The three `EXTRACTION.toml` dossiers are **not** created in Stage A. Repository
 convention locates a dossier in its package root, and this stage deliberately
@@ -339,30 +397,60 @@ metric.
 its local `coverage.py` is deleted. This is a second adopted kernel contract in
 the product that currently imports one, not a pretext for the rest of P1.
 
+### Stage B′ — The offer-catalogue audit (complete 2026-08-14)
+
+The table-by-table, writer-by-writer audit is
+[`subscriptions-sources.md`](../../inventories/subscriptions-sources.md).
+ADR-0020 A4 accepts its conclusion: Vendor's legal commercial agreement remains
+distinct, while `dotmac-subscriptions` owns stable offers, immutable offer/price
+and subscription-contract versions, cadence, proration, and recurring charge
+occurrences. Vendor CP takes the platform plane first; Sub takes the tenant
+plane second. A2 is no longer an implementation gate. P11, P3 timers, and the
+assembly-wired billing input remain gates.
+
 ### Stage C — Wait on the lineage gate (P11)
 
 Sub's S7. **Billing does not jump this queue and does not lobby to.** ADR-0017's
 stop rule has a start rule: the freed capacity goes to the constraint.
 
+The gate is met by evidence, not by intent: the kernel migration lineage
+composed and running in Sub's **production** database. Sub's own
+`PLATFORM_ADOPTION_LEDGER.md` is the record, and it must show the composed
+lineage rather than a prepared branch.
+
 ### Stage D — Blocked prerequisites, demand-pulled only
 
-P2, P3, P4, P8b — each when a product is blocked on it *today*, built to the
+P3, P4, P8a — each when a product is blocked on it *today*, built to the
 contract Stage A designed. Likely order by real demand: numbering (ERP has
-five), webhooks (Sub's PSP path), timers (any dunning cutover), storage.
+five), timers (any dunning cutover), rendering. P8b is met by `dotmac-files`;
+P2's provider ingress is Integrator work under ADR-0024 and arrives as a
+connector capability, not as a billing facility.
 
-### Stage E — The modules
+### Stage E — `dotmac-billing` first
 
-Create each package root and its `EXTRACTION.toml` **before implementation**.
-Product-first: port Sub's cadence, fixed recurring charge generation,
-obligation, allocation, and dunning owners with their tests; port ERP's
-coverage and tax structure. P5 lives in subscriptions; P6/P7/P10 live in
-billing. Usage rating remains outside these three modules. Ship the C1–C10
-gates in the same revisions as the code they govern, never after.
+Create the package root and its `EXTRACTION.toml` **before implementation**,
+status `audit-complete`. Product-first: port Sub's **financial obligation
+acceptance/open/resolution**, allocation, settlement and coverage owners with
+their tests, plus ERP's coverage and tax structure. Recurrence scheduling,
+cadence, pre-tax fixed rating and proration stay for subscriptions. P6/P7/P10
+live here; P5 cadence waits for subscriptions. Both
+persistence planes ship in the first revision — retrofitting a platform plane
+after a tenant-only release is the `dotmac-ticketing 0.1.0a1` mistake, and it
+cost a rename there only because nothing consumed it yet. Ship the C1–C10 gates
+in the same revisions as the code they govern, never after.
 
 ### Stage F — First cutover
 
+The focused execution plan is
+[`2026-08-14-billing-vendor-cp-sub-cutover.md`](2026-08-14-billing-vendor-cp-sub-cutover.md).
+It defines the complete invoice/receivable/settlement/allocation boundary,
+Vendor CP acceptance evidence, and the production authority switch Sub must
+rehearse before this stage can be claimed.
+
 **Decision: the vendor control plane, after P11—not Sub—is the first adopter of
-the billing module.**
+the billing module.** Concretely it is the first **platform-plane
+internal-invoicing** adopter, which is also the first real proof that the
+dual-plane declaration holds for a money-domain module.
 
 It already owns `offer_versions`, `contracts` and `contract_lines`, consumes
 `dotmac_kernel.money`, and has **no invoicing at all** — greenfield, so no rows
@@ -380,6 +468,45 @@ will be several, because § 4 of the inventory lists behaviours that are wrong
 today and whose correction will change customer-visible numbers. Those get
 measured before cutover, not discovered in a billing run.
 
+### Stage G — Sub onto the tenant plane, one slice at a time
+
+Implement and shadow per capability slice, but switch the coupled production
+invoice/settlement/allocation authority once for the deployment. The focused
+cutover plan rejects customer, date, and document-type writer partitions because
+settlements and credits cross them. A slice is done when its local financial
+writer is **deleted**, not when the module is also able to do the work; two
+writers of an allocation is the failure this whole programme exists to remove.
+The § 4 non-conformances are corrected at the shared boundary and their
+customer-visible deltas are measured during shadow.
+
+### Stage H — `dotmac-subscriptions`
+
+The focused execution plan is
+[`2026-08-14-subscriptions-vendor-sub-adoption.md`](2026-08-14-subscriptions-vendor-sub-adoption.md).
+It builds the A2b contract Stage B′ accepted, splits recurrence from billing's
+financial obligation lifecycle, and defines the Vendor-platform-first then
+Sub-tenant cutovers. P5 cadence lives here; C1 (cadence is a value object) and
+C2 (collection timing is one field) remain load-bearing conformance gates.
+
+### Stage I — `dotmac-collections`, from Sub's live dunning
+
+Sub is both the qualifying source and the first adopter here, which is the
+opposite of billing's ordering and is correct for the same reason: the vendor
+control plane has no overdue cases to collect yet, so a cutover there would
+prove nothing. Vendor follows when it has real ones. C4 (policy is versioned
+data) and the consequence-request rule are its gates — collections asks an
+owning service, and never writes service or entitlement state.
+
+The focused contract, Sub shadow/cutover sequence, local-owner retirement, and
+demand gate for Vendor CP are in
+`docs/superpowers/plans/2026-08-14-collections-sub-vendor-cp-adoption.md`.
+
+### Stage J — Metering, later
+
+A fourth module and a fourth independent producer of rated obligations,
+submitted through the same billing input contract. Billing does not absorb a
+meter merely because it can invoice the result.
+
 ## Part 5 — What this plan deliberately does not do
 
 - It does not start a `packages/dotmac-billing/` directory. Stage A is
@@ -390,3 +517,23 @@ measured before cutover, not discovered in a billing run.
   only where a product prices usage.
 - It does not touch ERP's general ledger. Sub must not become a shadow ERP, and
   neither must a shared module.
+- It does not merge Vendor's legal commercial contracts into subscriptions;
+  A2's ruled half remains a distinct module.
+- It does not build a payment connector, and no module here acquires a PSP
+  client, credential or webhook verifier (ADR-0024 § 6).
+
+## Part 6 — Which applications compose these modules
+
+Stated because "optional module" has previously been read as "install it
+everywhere it might help". ADR-0020 A6 is the decision; this is the same table.
+
+| Application | Composition |
+|---|---|
+| **Starter** | Owns the packages, contracts, conformance tests, and reference assembly. No commercial rows of its own. |
+| **Sub** | Tenant-plane subscriptions + billing + collections; metering later. Qualifying source, and adopter only through measured shadow-and-cutover. |
+| **Vendor CP** | Platform-plane subscriptions + billing + collections. Keeps commercial accounts, approval, allocation/licensing and consequence execution. No fake tenant. |
+| **ERP** | Installs none. Remains the GL and statutory-accounting authority, consuming billing's immutable accounting facts. |
+| **CRM** | Installs none. Local sales/payment/subscription writers retire into Sub; only temporary projections and adapters survive consolidation. |
+| **Academy** | Installs none today — no demonstrated paid-commerce owner. Compose only when a real paid-course slice exists. |
+| **Workspace** | No billing state; consumes entitlement and application-access projections only. |
+| **Integrator** | No billing decisions and no billing state. Hosts the PSP/payment connector plugins and their transport evidence. |

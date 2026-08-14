@@ -8,6 +8,59 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-14: the lineage gate splits by plane, and two facilities get owners
+
+Decided after the commercial-module evidence batch, whose P11 dashboard is
+[`../inventories/p11-adoption-status.md`](../inventories/p11-adoption-status.md).
+
+### The reference adopter splits in two
+
+This ADR named Sub the first adopter of kernel persistence. The measurement
+found that Sub composes **no** kernel lineage at all — `alembic.ini` carries no
+`version_locations`, there is no `migration_bindings.py`, and Sub's own rehearsal
+gate expects failure at revision `0001`, which applies atomically, so there is no
+partial-credit path. Meanwhile the **vendor control plane already composes four
+lineages** programmatically, making it the fleet's only real multi-lineage
+composition; it fails this gate on one clause only — "in production".
+
+So the gate splits by plane:
+
+- **Vendor CP is the platform-lineage reference adopter.**
+- **Sub remains the tenant-plane / RLS reference adopter**, and its S7 work
+  continues on its own track.
+
+This is the ADR's own "a stop rule needs a start rule" applied to itself: the
+freed capacity goes to the constraint, and the constraint turned out not to be
+where this ADR assumed.
+
+**P11 is still UNMET.** It closes only when Vendor CP runs the composed lineages
+in a real, explicitly named production deployment. Before that: correct `mod_rel`
+and `mod_ealloc` to declare their platform tables properly, release them, repin
+Vendor from `a45` to the accepted kernel floor, and prove live privilege and
+catalog behaviour. The floor gap is load-bearing and was uncosted — module floors
+are `a56+` while Vendor pins `a45` and Sub pins `a50`, so **neither cutover-1
+product can compose a module lineage at its present pin**.
+
+### Two facilities get named owners
+
+Both were fully specified by the batch and owned by nobody, which is the state
+this ADR exists to prevent.
+
+- **P3 durable timers → `dotmac_kernel.durable_timers`**, extracted
+  product-first from Sub. Sub's facility (`runtime_durable_timers.py` +
+  `models/durable_timer.py` + its tests) is complete and tested, and neither
+  production collections path uses it. A sweep is not a substitute: it rescans,
+  it cannot be cancelled by identity, and it turns ordering into business state.
+- **P4 document numbering → a new stateful, dual-plane `dotmac-numbering`
+  module**, extracted product-first from ERP. **This is an extraction, not
+  greenfield.** `dotmac_erp:app/services/finance/common/numbering.py:456` is
+  production-used and tested; what is missing is PostgreSQL concurrency,
+  rollback, replay and invoice-specific proof, which the extraction writes fresh.
+
+Naming an owner is not an implementation start. Both remain behind the gate
+above; what changes is that each now has a named owner and a source ruling, so
+the work is no longer unassignable when the gate opens.
+
 ## Amendment, 2026-08-14: owner-directed exception for `dotmac-approvals`
 
 [ADR-0026](0026-approvals-decide-approval-never-the-transition.md) accepted the
