@@ -5,13 +5,27 @@ services:
       POSTGRES_USER: ${TEST_DB_ADMIN_USER:-postgres}
       POSTGRES_PASSWORD: ${TEST_DB_ADMIN_PASSWORD:-postgres}
       POSTGRES_DB: ${TEST_DB_NAME:-starter_test}
-      # Disposable localhost-only test DB. The initial Alembic migration creates
-      # `app_user` with LOGIN but no password, so TCP auth would fail without this;
-      # trust auth is acceptable here because the container only binds to 127.0.0.1
-      # on a throwaway port and never holds real data.
+      # Disposable loopback-bound test DB. The initial Alembic migration creates
+      # `app_user` with LOGIN but no password, so TCP auth would fail without
+      # this; trust auth is acceptable here ONLY because the publish below is
+      # pinned to 127.0.0.1, the port is throwaway, and the database never holds
+      # real data. If that binding ever widens, this setting becomes an
+      # unauthenticated Postgres on a routable address.
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
-      - "${TEST_DB_PORT:-5433}:5432"
+      # The bind address is HARDCODED, and the variable supplies only the port.
+      #
+      # This previously read `"${TEST_DB_PORT:-5433}:5432"`, which publishes on
+      # 0.0.0.0 — every interface — while the comment above claimed 127.0.0.1.
+      # On a laptop or an ephemeral CI runner that is harmless. Run on a host
+      # with a routable address and it is an unauthenticated Postgres exposed to
+      # the network, and a docker publish BYPASSES ufw, so a host firewall does
+      # not save you. Found when this compose was run on a production host.
+      #
+      # Keeping the variable numeric is deliberate: a caller may move the port,
+      # and may not move the bind address. `TEST_DB_PORT=0.0.0.0:5433` used to
+      # be an accepted way to widen it.
+      - "127.0.0.1:${TEST_DB_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
