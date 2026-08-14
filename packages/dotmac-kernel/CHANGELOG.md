@@ -6,6 +6,66 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a63 — 2026-08-15
+
+Adds the external-identity binding contract: the LOCAL half of federated login.
+Additive — one new table, one new module, no existing behaviour changes.
+
+### Added
+
+- `external_identity_bindings` (migration `0024_external_identity_bindings`) and
+  `dotmac_kernel.models.ExternalIdentityBinding`. A verified external subject,
+  bound to one local `Party`, with the evidence of who bound it and why.
+- `dotmac_kernel.external_identity` — `resolve_external_identity`,
+  `bind_external_identity`, `disable_external_identity_binding`,
+  `record_external_authentication`, and the `ResolvedExternalIdentity` result.
+  Resolution returns the party AND the `binding_id` that authorised it, so a
+  caller can stamp `last_authenticated_at` without re-running the same lookup —
+  a second query could return a different row if the binding changed in
+  between, which would mean the row that authorised the login is not the row
+  that records it.
+
+### The boundary
+
+This module answers exactly one question: *this provider registration says it
+authenticated subject S at issuer I — which local party is that, in this
+tenant?* It holds **no protocol** (no HTTP, no discovery, no JWKS, no token
+parsing — it takes strings a caller has already verified), reads **no external
+authorization** (roles, groups and scopes from the provider are not stored or
+mapped), and **provisions nothing** — an unbound subject resolves to `None`, and
+there is deliberately no match-by-email fallback, because email-based linking is
+account takeover with a convenience argument.
+
+`provider_binding` names WHICH configured provider registration the caller
+completed a ceremony against. It is the caller's own configuration, not a string
+parsed from a token; `issuer` is recorded as corroboration and selects nothing
+on its own. Resolution keys on the whole tuple, so the deciding component is the
+one that did not arrive inside the credential being verified. It is a plain
+string, not an ADR-0008 declaration — the line ADR-0026 §4 draws for
+`policy_code`: an operator configures a provider, and a manifest entry would put
+a release between them and their own IdP.
+
+### Sources (hard rule 24)
+
+`docs/inventories/external-identity-sources.md`. `module ← ERP`
+(`federated_identities`, its written contract and its no-auto-provision refusal)
+with named Sub deltas (the binding-as-discriminator from
+`authentication_bindings`, the CHECK-forced evidence pair). Neither product has
+both halves, and **neither has tenant isolation** — ERP's table has no tenant
+column at all, so its `(issuer, subject)` uniqueness is global across every
+organization; Sub's migration 527 states `- no NOT NULL, no RLS` outright. Hard
+rule 11 lands here in one migration, proven by
+`tests/test_external_identity_isolation.py`.
+
+### Not included
+
+No provider-registration table, and no OIDC client. The first is a second
+contract whose secret half is governed by ADR-0009; the second is a separate
+decision, and the inventory records why ERP's implementation does not qualify as
+a source for it: its signature and claim validation are monkeypatched out in
+every existing test. Its production adoption is separately unverified — the
+repository cannot prove absence.
+
 ## 0.1.0a62 — 2026-08-15
 
 Adds the authentication-neutral permission seam. Additive: no signature, status

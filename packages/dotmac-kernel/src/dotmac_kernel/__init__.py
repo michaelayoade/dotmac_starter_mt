@@ -82,6 +82,7 @@ from dotmac_kernel.exceptions import (
     NotFoundError,
     UnauthorizedError,
 )
+from dotmac_kernel.external_identity import ResolvedExternalIdentity
 from dotmac_kernel.features import (
     FeatureManifest,
     NavItem,
@@ -101,6 +102,7 @@ from dotmac_kernel.identity import normalize_email, person_display_name
 from dotmac_kernel.models import (
     AuthSession,
     Base,
+    ExternalIdentityBinding,
     Party,
     PartyOrganization,
     PartyPerson,
@@ -196,7 +198,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a62"
+__version__ = "0.1.0a63"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -222,6 +224,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.entitlements",
         "dotmac_kernel.errors",
         "dotmac_kernel.exceptions",
+        "dotmac_kernel.external_identity",
         "dotmac_kernel.features",
         "dotmac_kernel.idempotency",
         "dotmac_kernel.idempotency_models",
@@ -438,11 +441,13 @@ __all__ = [
     "TenantDomain",
     "Party",
     "PartyType",
+    "ResolvedExternalIdentity",
     "PartyPerson",
     "PartyOrganization",
     "Role",
     "PartyRoleGrant",
     "AuthSession",
+    "ExternalIdentityBinding",
     "UserCredential",
     "PlatformAdmin",
     "PlatformSession",
