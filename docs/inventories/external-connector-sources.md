@@ -131,14 +131,24 @@ repository it cannot see as zero would report the duplication as solved.
    above.*
 2. Extract the mature generic control-plane behaviour and parity tests
    product-first from Sub into Starter's stateful `dotmac-integration` module —
-   **without** its `ConnectorType` enum.
+   **without** its `ConnectorType` enum. *Done: `packages/dotmac-integration`,
+   with a disposition per source suite in its `EXTRACTION.toml` `[parity]` table
+   and each ported suite bound to its landing test in `[parity.ported_to]`.*
 3. Implement the module's SPI, package discovery and shared fake-connector
-   conformance kit.
+   conformance kit. *Done: `spi.py`, `discovery.py`, `conformance.py`. SPI 1.1
+   replaced the decorative `modes` field with mode-specific plugin protocols
+   (`DeliveryPlugin`/`IngressPlugin`/`PollPlugin`) the kit verifies.*
 4. Create the thin `dotmac_integrator` assembly repository. It pins kernel, the
    exact module release and connector distributions; it does not own a second
-   engine implementation.
-5. Shadow the first genuinely required, non-retiring external capability through
-   that deployment.
+   engine implementation. *Done: the private `dotmac_integrator` repository
+   exists and is CI-green. It pins `dotmac-kernel 0.1.0a58` and
+   `dotmac-integration 0.1.0a1` exactly (not floors), composes them, and applies
+   both lineages against a real PostgreSQL in its own composition test. It
+   publishes nothing — `Private :: Do Not Upload` — because it is a deployment,
+   not a distribution.*
+5. **← next.** Shadow the first genuinely required, non-retiring external
+   capability through that deployment — ingress-only Meta/WhatsApp, per
+   [`whatsapp-connector-sources.md`](whatsapp-connector-sources.md).
 6. Delete each product connector after verified cutover, lowering this baseline
    in the same change. Do not recreate ERPNext or CRM plugins if those systems
    are being retired.

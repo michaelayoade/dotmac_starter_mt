@@ -8,15 +8,17 @@ The target is the first real connector for the Integrator: **ingress-only**
 Meta/WhatsApp, a separately released distribution discovered through the
 `dotmac_integration.connectors` entry-point group.
 
-## Blocking finding: `modes` is decorative across the whole SPI
+## Resolved finding: `modes` was decorative across the whole SPI
 
-**This must be resolved before any connector code is written.** It is broader
-than ingress.
+**Resolved in `0.1.0a3`/`0.1.0a4` (SPI 1.1), which this document specified.** The
+analysis below is retained as the requirement record; it describes
+`dotmac-integration 0.1.0a1` as shipped, not the current module. See
+"Proposed resolution" for what landed.
 
-`dotmac-integration 0.1.0a1` declares three modes — `INGRESS`, `POLL`,
-`DELIVERY` — and **nothing consults `modes` anywhere**. Verified: no reference
-in `dispatch.py`, `execution.py` or `selection.py`; `POLL` appears only in the
-enum definition.
+`dotmac-integration 0.1.0a1` declared three modes — `INGRESS`, `POLL`,
+`DELIVERY` — and **nothing consulted `modes` anywhere**. Verified at the time: no
+reference in `dispatch.py`, `execution.py` or `selection.py`; `POLL` appeared
+only in the enum definition.
 
 `ConnectorPlugin` lists **five** members: `manifest`, `historical_manifests`,
 `modes`, `handler_for`, `validate_connection`. Two are callable —
@@ -237,7 +239,9 @@ in scope here, and neither is closed by this document.
 
 1. Resolve the SPI gap — base protocol plus mode-specific protocols, ingress
    hook, binding-addressed route, mode-checked dispatch — and release the next
-   `dotmac-integration` alpha **as its own change**.
+   `dotmac-integration` alpha **as its own change**. *Landed in tree as
+   `0.1.0a4` (SPI 1.1 protocols, `ingress.py`, migration `ig_0003`); the
+   RELEASE of that alpha is still outstanding, and step 2 blocks on it.*
 2. Raise the assembly pin; add the provider-agnostic binding-addressed route
    pair with its size limit.
 3. Build `dotmac-connector-whatsapp` as a Starter package, ingress-only, porting

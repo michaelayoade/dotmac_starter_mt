@@ -10,6 +10,14 @@ while this train was in flight. The SPI and ingress work below was written as
 `a2`/`a3` and renumbered to `a3`/`a4` on rebase rather than reusing a number
 main had already published against.
 
+The distribution version, `__version__` and `ModuleManifest.version` are in
+step, and a gate keeps them there. #164 is the reason it exists: it bumped
+`pyproject.toml` to `0.1.0a2` and left the other two on `0.1.0a1`, so a running
+Integrator's health output could not distinguish the two.
+`tests/architecture/test_module_version_sync.py` checks all three surfaces for
+every module in `.github/release-modules.json` rather than for this one, and it
+caught that drift the moment this branch rebased onto it.
+
 ## 0.1.0a4 — 2026-08-14
 
 The ingress engine: a provider can now reach a connector through this module,
