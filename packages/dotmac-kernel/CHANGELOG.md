@@ -6,6 +6,40 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a57 — 2026-08-14
+
+Corrects the live-catalog gate for a PLATFORM-ONLY module schema (ADR-0023).
+
+### Fixed
+
+- Schema `USAGE` is now required of the role that must REACH the tables, and
+  only of that role: the tenant role when the schema holds tenant-plane tables,
+  the online platform role when it holds platform-plane ones, both when it holds
+  both.
+
+The tenant-role check was unconditional, which made the contract
+self-contradictory on a platform-only schema: `app_user` was required to hold
+`USAGE` on a schema in which it is separately required to hold no privilege on
+any table. The first such module grants `USAGE` to the platform roles alone —
+correctly — and the audit failed a schema that was right. Granting `app_user`
+`USAGE` to satisfy the old check would have been worse than the false positive:
+pointless reachability on a schema the tenant role must never read.
+
+Found by the first real-Postgres run of a platform-only module. A synthetic
+snapshot could not show it, because the contradiction only appears when both
+halves of the contract meet one live schema.
+
+### Unchanged
+
+Every table-privilege, RLS and cross-plane foreign-key check is untouched, with
+a canary asserting a platform table that breaks a prohibition still fails. A
+tenant-only module — every module shipped before ADR-0023 — is audited exactly
+as before.
+
+Failure messages now name the role AND the plane, so a violation says which
+half of the contract was missed.
+
+
 ## 0.1.0a56 — 2026-08-13
 
 Cross-lineage migration ordering becomes LOGICAL. A module declares the database
