@@ -120,3 +120,59 @@ operator only when durable byte-for-byte delivery evidence is required.
 domain-owned relation references `platform_stored_files.id`. Platform adoption
 must prove `app_user` has no table privilege, no tenant column or RLS exists,
 and the platform provider prefix cannot enumerate or delete tenant objects.
+
+## Per-assembly adoption disposition (2026-08-14)
+
+Measured after the ADR-0006 D1 amendment made prerequisites logical. One row per
+assembly, because "can it satisfy the prerequisites?" and "should it install the
+module?" are different questions and only the first is mechanical.
+
+| Assembly | Satisfies `tenant_scope_catalog.v1` | Satisfies `module_database_roles.v1` | Disposition |
+|---|---|---|---|
+| Starter | yes — kernel `0001` | yes — kernel `0001` | Composes it; the reference consumer |
+| ERP | yes — `20260813_tenant_projection` | yes — `20260814_database_roles` | Adopting; gated on the Seabone ownership cutover |
+| Academy | yes — its own `0001_initial_tenant_schema` | yes — same revision | Eligible; needs kernel `a38 → a56` and its first module composition |
+| **Vendor control plane** | **yes, truthfully** | **yes, truthfully** | **Does NOT adopt — see below** |
+
+### The vendor control plane must not adopt `dotmac-files`
+
+This is the case that shows why satisfying a prerequisite is not a reason to
+install a module.
+
+Vendor CP composes the kernel base lineage wholesale, so kernel `0001` really
+does create `public.tenants`, `tenant_domains`, `app_current_tenant_id()` and the
+three roles in the control-plane database. It would therefore pass
+`require_prerequisites` **honestly** — no lie, no workaround — and receive a
+tenant-scoped `mod_files.stored_files` with FORCE RLS that nothing in a
+platform-only product will ever write.
+
+Three facts make "just install the platform half" unavailable today:
+
+1. **`fi_0001_stored_files` is atomic across both planes.** One `upgrade()`, no
+   conditional; the platform table cannot be created without the tenant table and
+   its foreign key to `public.tenants`.
+2. **`mod_files` is allocated to exactly one migration owner** (hard rule 14), so
+   a second distribution owning a platform-only files schema is not permitted.
+3. **Vendor CP has no stored-byte requirement at all.** Licence envelopes are
+   JSONB; offline bundles stream from the response. There is no
+   `StorageProvider`, no object-store credential, and no storage configuration
+   knob anywhere in the assembly.
+
+Fact 3 is the decisive one. Building a platform-plane contract now would add
+kernel surface for a consumer that does not exist, which is precisely what
+ADR-0017 forbids during the adoption gate. **A capability nobody needs is not
+unblocked by making it installable.**
+
+### What would have to change first
+
+If Vendor CP ever acquires real platform-owned stored bytes — signed artefacts
+persisted rather than streamed, evidence bundles retained — then, and only then:
+
+- a `platform_file_store.v1` prerequisite naming only the roles and schema
+  (no tenant catalogue), and
+- a split of `fi_0001` so an assembly can install the platform plane alone,
+  which is a contract change to a released module and needs its own ADR.
+
+Until a second real consumer exists, the honest disposition is this row in this
+table, not a mechanism. Recorded so the next reader does not mistake "it would
+pass the check" for "it should be installed".
