@@ -73,7 +73,10 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 LEDGER_ALLOCATION_RELEASES = {
-    "dotmac-release-catalog": "0.1.0a44",
+    # `dotmac-release-catalog` allocated `mod_rel` in a44 and lived here until
+    # 0.1.0a4, when its manifest began declaring `platform_tables` — the plane
+    # `rl_0001` always built. That field arrived in a53, which is higher, so the
+    # row moves to CAPABILITY_RAISED_FLOORS below rather than staying here.
     "dotmac-entitlement-allocation": "0.1.0a45",
     # Listed here though the module is not release-registered yet: this map
     # gates the FLOOR, not publication. An unenforced floor is how the same
@@ -120,6 +123,14 @@ CAPABILITY_RAISED_FLOORS = {
     # actually consumes, not the first one that moved it.
     "dotmac-ticketing": ("0.1.0a61", "0.1.0a39"),
     "dotmac-approvals": ("0.1.0a61", "0.1.0a59"),
+    # ADR-0023 again, and on its own: from 0.1.0a4 this manifest declares both
+    # its tables in `platform_tables` — the plane `rl_0001` has built since
+    # a1 — and that field arrived in a53, above the a44 that allocated
+    # `mod_rel`. Deliberately NOT a61: the module supports exactly one plane
+    # set, so ADR-0028 derives it and the manifest passes no
+    # `supported_plane_sets`. A floor names the capabilities a module CONSUMES,
+    # never the newest one that exists.
+    "dotmac-release-catalog": ("0.1.0a53", "0.1.0a44"),
 }
 
 

@@ -19,7 +19,7 @@
     "     earlier kernel raises UnallocatedNamespaceError and the module cannot",
     "     register at all;",
     "  2. the release that added any kernel CAPABILITY the manifest consumes \u2014",
-    "     e.g. ADR-0023's `platform_tables`, added in a49; an earlier kernel",
+    "     e.g. ADR-0023's `platform_tables`, added in a53; an earlier kernel",
     "     raises TypeError at import, before the allocation check is reached.",
     "",
     "For most modules (1) is the answer and (2) does not apply. Where both",
@@ -30,10 +30,23 @@
   ],
   "modules": {
     "dotmac-release-catalog": {
+      "$comment": [
+        "kernel_floor is a53, NOT the a44 that allocated mod_rel. From 0.1.0a4",
+        "the manifest declares both tables in `platform_tables` (ADR-0023) —",
+        "the plane rl_0001 has always built — and that field arrived in a53, so",
+        "an earlier kernel raises TypeError at import before the allocation",
+        "check is reached. Capability over allocation, as with dotmac-ticketing",
+        "and dotmac-files.",
+        "",
+        "Not a61: the module is NOT selectable. It supports one plane set, so",
+        "ADR-0028's plane selection derives it and nothing here consumes the",
+        "mechanism — pinning a61 would exclude adopters for a field this",
+        "manifest never passes."
+      ],
       "package_dir": "packages/dotmac-release-catalog",
       "import_name": "dotmac_release_catalog",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a44",
+      "kernel_floor": "0.1.0a53",
       "db_schema": "mod_rel",
       "tag_prefix": "dotmac-release-catalog-v",
       "wheel_contents": {
