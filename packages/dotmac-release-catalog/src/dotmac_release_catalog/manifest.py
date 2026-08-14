@@ -8,8 +8,37 @@ refuses the composition at boot:
 - `short_code="rel"` → the derived, read-only schema `mod_rel`
 - `migration_prefix="rl"` → revision ids `rl_0001_…`
 - `migration_branch="release_catalog"` → how an `alembic_version` row is attributed
-- `tables=(...)` → the composed gate rejects a migration creating anything
-  outside this declaration, in both directions
+- `tables=(...)` / `platform_tables=(...)` → the composed gate rejects a
+  migration creating anything outside these declarations, in both directions
+
+## Both tables are PLATFORM-plane (ADR-0023), and now say so
+
+Until `0.1.0a4` this manifest declared both tables in the TENANT tuple, while
+`rl_0001` created neither with row-level security and REVOKEd both from
+`app_user`. Every word of prose in this package — and the kernel's own ledger
+comment beside `RELEASE_CATALOG_MIGRATION_OWNER` — already called them platform
+catalog tables; only the declaration disagreed.
+
+The disagreement survived because this repository composes the module in no
+assembly, so the live-catalog gate never walked `mod_rel`. It would have failed
+at the first vendor control plane that DID compose it: `audit_snapshot` requires
+RLS ENABLEd AND FORCEd plus a policy for every table not declared platform, so a
+correct migration would have been reported as a broken one — in an adopter's
+deployment rather than here. `tests/test_release_catalog_platform_plane.py` now
+runs that gate against a real scratch database, so the claim is proven where it
+is made rather than deferred to a consumer.
+
+`tables=()` is written out rather than omitted, exactly as `dotmac-integration`
+writes it: "this module owns no tenant data" is a STATEMENT a reader and the gate
+can both see, not an absence either could read as an oversight.
+
+## Not a selectable module (ADR-0028)
+
+No `supported_plane_sets`, deliberately. The one supported combination is
+platform-only, so `dotmac_kernel.planes.supported_plane_sets` derives it and the
+contract stays ATOMIC — an assembly composing this module makes no plane choice,
+because there is no second answer to choose between. Declaring a single-element
+`supported_plane_sets` would ask every consumer to restate the only possibility.
 
 ## Why `core=False`
 
@@ -38,13 +67,14 @@ from dotmac_kernel.modules import ModuleManifest
 
 module = ModuleManifest(
     code="release_catalog",
-    version="0.1.0a2",
+    version="0.1.0a4",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="rel",
     migration_prefix="rl",
     migration_branch="release_catalog",
-    tables=("release_artifacts", "artifact_attestations"),
+    tables=(),
+    platform_tables=("release_artifacts", "artifact_attestations"),
 )
 
 __all__ = ["module"]

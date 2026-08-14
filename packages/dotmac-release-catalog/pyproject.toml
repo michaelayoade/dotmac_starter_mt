@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-release-catalog"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -23,20 +23,27 @@ python = ">=3.11,<3.14"
 # `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
 # kernel; never on an assembly, and never on another module.
 #
-# The floor is the release that allocates `mod_rel` in
-# `MIGRATION_OWNER_LEDGER`. An earlier kernel cannot register this module at
-# all — `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` —
-# so this is a hard floor rather than a preference.
+# TWO things set this floor, and the higher one wins.
 #
-# 0.1.0a44 is the kernel version bumped IN THIS CHANGE, which is what carries
-# the allocation. It is a real floor, not a placeholder: no earlier kernel can
-# contain the row.
+# 1. `0.1.0a44` allocates `mod_rel` in `MIGRATION_OWNER_LEDGER`. An earlier
+#    kernel cannot register this module at all — `NamespaceRegistry
+#    .from_manifests` raises `UnallocatedNamespaceError`. (a44, not a42: a42 and
+#    a43 are claimed by the upstream train — Audit R1 and Application Directory
+#    / Workspace — and two branches minting the same kernel version leave
+#    consumers unable to say which a42 they pinned.)
+# 2. `0.1.0a53` adds `ModuleManifest.platform_tables` and the platform half of
+#    the live-catalog contract (ADR-0023). As of `0.1.0a4` this manifest passes
+#    that field, so an earlier kernel raises `TypeError` at import — before the
+#    allocation check is ever reached.
 #
-# a44, not a42: a42 and a43 are claimed by the upstream train (Audit R1 and
-# Application Directory / Workspace). Two branches minting the same kernel
-# version collide in the changelog and leave consumers unable to say which a42
-# they pinned, so the vendor modules renumber rather than the foundations.
-dotmac-kernel = ">=0.1.0a44"
+# So the floor is a53. Like `dotmac-ticketing`, and unlike the ordinary case,
+# this module's floor is set by a kernel CAPABILITY it consumes rather than by
+# its own namespace row.
+#
+# NOT a61: this module is not selectable (ADR-0028). It declares one plane and
+# no `supported_plane_sets`, so it consumes no part of the plane-selection
+# mechanism and pinning a61 would exclude adopters for nothing.
+dotmac-kernel = ">=0.1.0a53"
 sqlalchemy = "^2.0"
 
 # No `alembic` runtime dependency: unlike `dotmac_ticketing.linking`, nothing
