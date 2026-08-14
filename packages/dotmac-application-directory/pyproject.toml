@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-application-directory"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -28,7 +28,7 @@ python = ">=3.11,<3.14"
 # `MIGRATION_OWNER_LEDGER`. An earlier kernel cannot register this module at
 # all — `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` —
 # so this is a hard floor rather than a preference.
-dotmac-kernel = ">=0.1.0a46"
+dotmac-kernel = ">=0.1.0a56"
 sqlalchemy = "^2.0"
 
 # No `fastapi` and no `pydantic`: this module ships no routers. ADR-0021 puts

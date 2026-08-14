@@ -138,6 +138,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE`, `DEFAULT_PLATFORM_ROLE`, `TABLE_PRIVILEGES` (the post-migration live-catalog contract, both planes — see the same section) |
+| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `PrerequisiteNotSatisfiedError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
@@ -320,6 +322,37 @@ touched, so it runs in the same cheap CI step as lint and fails **before an
 image can be built**. Locations are attributed to owners through the lineage
 root's branch label, which is also what makes an `alembic_version` row
 explainable (`GateReport.attribution`).
+
+### Logical migration prerequisites (`dotmac_kernel.prerequisites`, `dotmac_kernel.migrations.verify`)
+
+A module lineage that needs another lineage's *effects* declares those effects,
+not a revision. ADR-0006 D1 originally said cross-lineage ordering used
+`depends_on`; the 2026-08-13 amendment replaced that, because a physical edge is
+a claim about a deployment the module has never seen. `dotmac-files` naming
+`0001_initial_tenant_schema` was true in the reference assembly and false in ERP,
+which hosts `public.tenants` in its own lineage and can never run kernel `0001`.
+
+Three declaration points, one per role:
+
+- a module declares `ModuleManifest.requires` — the effects it needs;
+- the supplying lineage declares `MigrationOwner.provides`;
+- the **assembly** declares `PrerequisiteBinding`s mapping effect → revision, and
+  installs them from its Alembic `env.py` via `install_prerequisite_bindings()`.
+  The kernel ships no binding: only the assembly knows which of its revisions
+  supplies an effect.
+
+The requiring migration then calls `resolve_depends_on(REQUIRES)` at module
+scope, which returns a real `depends_on` tuple — **Alembic orders exactly as it
+always did**; only the author of the edge changed — and
+`require_prerequisites(op.get_bind(), REQUIRES)` at the top of `upgrade()`, which
+proves the effects against the live catalog before any DDL. A **stamped** or
+aliased provider fails there, because stamping writes no columns.
+
+The vocabulary is an open **registry, never an enum** (ADR-0008): the kernel
+ships `tenant_scope_catalog.v1` and `module_database_roles.v1`; a product adds
+its own with `register_prerequisites()`. A changed contract is a new `.vN`,
+never a redefinition, because every existing binding was accepted against the
+old one.
 
 **The post-migration live-catalog gate**
 (`dotmac_kernel.migrations.catalog.audit_live_schemas`) applies the kernel's

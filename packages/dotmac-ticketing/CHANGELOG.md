@@ -1,5 +1,24 @@
 # Changelog — dotmac-ticketing
 
+## 0.1.0a2 — 2026-08-13
+
+Declares the database EFFECTS this lineage needs instead of naming a foreign
+revision (ADR-0006 D1 amendment).
+
+### Changed
+
+- `tk_0001_tickets` previously read
+  `depends_on = ("0001_initial_tenant_schema",)`. That edge is true only in an
+  assembly that runs the kernel lineage: ERP hosts `public.tenants` in its own
+  lineage and can never run kernel `0001`, so the module was un-installable
+  there for want of a foreign-key target. The manifest now declares
+  `requires=("tenant_scope_catalog.v1", "module_database_roles.v1")`, the root
+  resolves its `depends_on` from the assembly's bindings, and `upgrade()` proves
+  both effects against the live catalog before any DDL.
+- Kernel floor raised to `>=0.1.0a56`, the release that added the prerequisite
+  contract. A kernel below it cannot import this manifest.
+
+
 ## 0.1.0a1 — amended 2026-08-13, before release
 
 Split into two persistence planes (ADR-0023). Amended IN PLACE rather than

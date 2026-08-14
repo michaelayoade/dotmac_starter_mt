@@ -82,6 +82,12 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from dotmac_kernel.prerequisites import (
+    MODULE_DATABASE_ROLES_V1,
+    TENANT_SCOPE_CATALOG_V1,
+    validate_prerequisites,
+)
+
 if TYPE_CHECKING:  # avoids a runtime cycle: `modules` imports this module
     from dotmac_kernel.modules import AnyManifest
 
@@ -316,6 +322,14 @@ class MigrationOwner:
     `<prefix>_<sequence>_<slug>` form would break every existing deployment.
     This is the same compatibility carve-out `public` gets, and it is available
     ONLY to host owners — an installable module always uses the strict form.
+
+    `provides` names the logical prerequisites this lineage's revisions supply
+    (`dotmac_kernel.prerequisites`). It is a claim about capability, not about
+    ordering: an assembly's `PrerequisiteBinding` still names the exact revision,
+    and the live verifier still proves the effect against the database. What
+    declaring it buys is that the gate can reject a binding pointing at a
+    lineage which never claimed to supply the effect at all — catching a
+    mis-typed or wishful binding statically, before the database has to.
     """
 
     owner: str
@@ -323,12 +337,14 @@ class MigrationOwner:
     branch_label: str
     db_schema: str | None = None
     legacy_revision_pattern: str | None = None
+    provides: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.owner:
             raise NamespaceError("migration owner requires a non-empty `owner`")
         validate_migration_prefix(self.prefix)
         validate_branch_label(self.branch_label)
+        validate_prerequisites(self.provides)
         if self.db_schema is not None:
             validate_schema(self.db_schema)
         elif self.legacy_revision_pattern is None:
@@ -354,12 +370,19 @@ class MigrationOwner:
 
 # The kernel's own base lineage (`0001_initial_tenant_schema` … ), branch label
 # `kernel`, tables in `public`.
+#
+# `0001` supplies both shipped prerequisites — the tenant catalogue plus
+# `app_current_tenant_id()`, and the three grantable database roles. It supplies
+# a great deal else besides (people, credentials, sessions, RBAC, audit), and
+# that is exactly why the prerequisites are declared separately: a module
+# needing a foreign-key target must not thereby require an identity estate.
 KERNEL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="kernel",
     prefix="k",
     branch_label="kernel",
     db_schema=None,
     legacy_revision_pattern=r"^\d{4}_[a-z0-9_]+$",
+    provides=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
 )
 
 # The one host assembly composing the kernel (`a001_adopt_cfd` … ), branch label

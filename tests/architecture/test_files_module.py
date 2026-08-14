@@ -153,7 +153,28 @@ def test_migration_creates_rls_and_grants_in_the_same_revision() -> None:
     assert 'revision = "fi_0001_stored_files"' in source
     assert "down_revision = None" in source
     assert 'branch_labels = ("files",)' in source
-    assert 'depends_on = ("0001_initial_tenant_schema",)' in source
+    # AMENDED (ADR-0006 D1 amendment): this used to assert
+    # `depends_on = ("0001_initial_tenant_schema",)`. A module may not name a
+    # foreign revision — that edge was true in the Starter and false in ERP,
+    # which hosts `public.tenants` itself and can never run kernel 0001. The
+    # module names the EFFECTS; the assembly binds them.
+    # Asserted on the AST, not the text: the docstring QUOTES the old
+    # `depends_on = ("0001_initial_tenant_schema",)` to explain why it is gone,
+    # so a substring check matches the explanation too. The shape of the
+    # assignment is the thing that matters, and only a parse can see it.
+    assigned = {
+        target.id: node.value
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert isinstance(assigned["depends_on"], ast.Call)
+    assert getattr(assigned["depends_on"].func, "id", None) == "resolve_depends_on"
+    assert ast.literal_eval(assigned["REQUIRES"]) == (
+        "tenant_scope_catalog.v1",
+        "module_database_roles.v1",
+    )
     assert "schema=_SCHEMA" in source
     assert "mod_files.stored_files ENABLE ROW LEVEL SECURITY" in source
     assert "mod_files.stored_files FORCE ROW LEVEL SECURITY" in source
@@ -213,7 +234,34 @@ def test_public_package_import_needs_no_database_configuration() -> None:
 
 
 def test_lineage_passes_the_composed_migration_gate() -> None:
-    """The shipped assembly omits this optional lineage, so compose it here."""
+    """The shipped assembly omits this optional lineage, so compose it here.
+
+    Composing it means answering what it requires: this module declares the
+    EFFECTS it needs rather than a foreign revision, so the gate only accepts it
+    once an assembly has bound those effects to revisions it actually runs. The
+    reference assembly's answer is kernel `0001`; ERP's will be its own tenant
+    projection. Passing the binding here exercises the whole loop.
+    """
+    from dotmac_kernel.migrations.gate import run_gate
+
+    from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
+    report = run_gate(
+        [module],
+        [
+            REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
+            REPO_ROOT / "alembic/versions",
+            MIGRATIONS,
+        ],
+        bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+    )
+    assert report.ok, f"composed gate violations: {report.violations}"
+
+
+def test_the_gate_refuses_this_module_in_an_assembly_that_binds_nothing() -> None:
+    """Sensitivity proof for the test above, and the property that matters for
+    Vendor CP: an assembly with no tenant scope must not silently compose a
+    tenant-scoped module."""
     from dotmac_kernel.migrations.gate import run_gate
 
     report = run_gate(
@@ -223,5 +271,7 @@ def test_lineage_passes_the_composed_migration_gate() -> None:
             REPO_ROOT / "alembic/versions",
             MIGRATIONS,
         ],
+        bindings=(),
     )
-    assert report.ok, f"composed gate violations: {report.violations}"
+    assert not report.ok
+    assert any("binds no provider" in v for v in report.violations)

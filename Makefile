@@ -74,10 +74,18 @@ test-db-up: ## Start disposable test Postgres (TEST_DB_PORT, default 5433) and m
 test-db-down: ## Stop test Postgres
 	TEST_DB_PORT=$(TEST_DB_PORT) TEST_DB_ADMIN_USER=$(TEST_DB_ADMIN_USER) TEST_DB_ADMIN_PASSWORD=$(TEST_DB_ADMIN_PASSWORD) TEST_DB_NAME=$(TEST_DB_NAME) \
 	docker compose -f docker-compose.test.yml down -v
+# Graph commands never run `env.py`, so they cannot see the bindings it
+# installs. Exporting the pointer here keeps `make migrate-graph` truthful about
+# cross-lineage edges; `upgrade` does not need it (env.py installs directly).
+MIGRATION_BINDINGS ?= app.migration_bindings:ASSEMBLY_PREREQUISITE_BINDINGS
+
 migrate: ## Apply migrations (uses MIGRATION_DATABASE_URL from env)
 	poetry run alembic upgrade heads
 migrate-new: ## Create migration: make migrate-new msg="..."
 	poetry run alembic revision --autogenerate -m "$(msg)"
+migrate-graph: ## Show composed lineage heads + history (no database needed)
+	DOTMAC_MIGRATION_BINDINGS=$(MIGRATION_BINDINGS) poetry run alembic heads
+	DOTMAC_MIGRATION_BINDINGS=$(MIGRATION_BINDINGS) poetry run alembic history
 
 ##@ Dev
 dev: ## Run dev server (run `make css-build` at least once first — templates reference static/css/main.css, which is gitignored/build-only)

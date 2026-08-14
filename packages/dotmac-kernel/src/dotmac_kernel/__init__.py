@@ -195,7 +195,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a55"
+__version__ = "0.1.0a56"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -245,6 +245,11 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.migrations",
         "dotmac_kernel.migrations.catalog",
         "dotmac_kernel.migrations.gate",
+        # Public because an ASSEMBLY must declare its prerequisite bindings and
+        # a MODULE migration must verify them — both are consumer-facing halves
+        # of the composition contract, not kernel internals (ADR-0006 D1
+        # amendment).
+        "dotmac_kernel.migrations.verify",
         "dotmac_kernel.models",
         "dotmac_kernel.models_platform",
         "dotmac_kernel.modules",
@@ -252,6 +257,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.namespaces",
         "dotmac_kernel.permissions",
         "dotmac_kernel.platform_auth",
+        "dotmac_kernel.prerequisites",
         "dotmac_kernel.product_manifest",
         "dotmac_kernel.profiles",
         "dotmac_kernel.providers",

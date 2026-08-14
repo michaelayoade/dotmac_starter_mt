@@ -107,11 +107,30 @@ specifics) points here and must never fork these rules.
     policies and raw SQL fully qualify their schema — never `search_path`.
     Revision ids are `<prefix>_<sequence>_<slug>` and must fit
     `alembic_version.version_num`'s VARCHAR(32); each module lineage has its
-    own base and branch label, and cross-lineage ordering uses `depends_on`,
-    never `down_revision`. The composed gate (`make migration-gate`, also in
-    `make check` and in CI *before* `docker-build`) rejects duplicate
-    revisions, prefixes, branch labels, schema claims and table ownership.
+    own base and branch label, and `down_revision` never crosses lineages.
+    **Cross-lineage ordering is LOGICAL, not physical** (ADR-0006 D1
+    amendment, 2026-08-13): a module declares the database EFFECTS it needs
+    (`ModuleManifest.requires`), the supplying lineage declares
+    `MigrationOwner.provides`, and each ASSEMBLY binds requirement to provider
+    revision (`app/migration_bindings.py`, installed from `alembic/env.py`).
+    `resolve_depends_on` turns that binding back into a real `depends_on` edge
+    at script load, so Alembic ordering is unchanged — but a module lineage
+    may **never** name a foreign revision itself, because that edge is true
+    only in the assembly that wrote it. Host owners (`kernel`, `assembly`)
+    keep literal edges. A binding is a claim, so it is checked two ways:
+    the composed gate (`make migration-gate`, also in `make check` and in CI
+    *before* `docker-build`) rejects duplicate revisions, prefixes, branch
+    labels, schema claims, table ownership, unbound requirements, bindings to
+    a lineage that never declared the effect, bindings to an uncomposed
+    revision, and migration/manifest drift; and `require_prerequisites`
+    verifies the real catalog before any DDL, so a STAMPED provider fails.
+    Ordering needs no third check — Alembic enforces the resolved edge, and
+    `alembic_version` records branch HEADS, not applied history, so asserting
+    a root revision appears there is simply wrong. `alembic stamp`, a blanket
+    `IF EXISTS`, and a product conditional inside a kernel migration are not
+    bindings and stay forbidden.
     (`tests/unit/test_namespaces.py`, `tests/unit/test_migration_gate.py`,
+    `tests/unit/test_prerequisites.py`,
     `tests/unit/test_live_catalog_contract.py`;
     `tests/test_module_schema_catalog.py` is the post-migration live-catalog
     gate on Postgres.)

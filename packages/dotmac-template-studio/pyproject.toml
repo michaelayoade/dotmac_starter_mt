@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-template-studio"
-version = "0.2.0a2"
+version = "0.2.0a3"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -33,7 +33,7 @@ python = ">=3.11,<3.14"
 # `>=0.1.0a13` because `packaged_template_dirs` (the slot this module's admin
 # screens are mounted through) and the `mod_tstudio` ledger allocation both land
 # in that release: an earlier kernel cannot register this module at all.
-dotmac-kernel = ">=0.1.0a13"
+dotmac-kernel = ">=0.1.0a56"
 fastapi = ">=0.111,<0.116"
 sqlalchemy = "^2.0"
 pydantic = ">=2.7.4,<3.0"

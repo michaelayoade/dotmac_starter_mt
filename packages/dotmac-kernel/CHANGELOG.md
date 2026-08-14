@@ -6,6 +6,34 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a56 — 2026-08-13
+
+Cross-lineage migration ordering becomes LOGICAL. A module declares the database
+EFFECTS it needs; the assembly binds them to the revisions that supply them.
+
+### Added
+
+- `dotmac_kernel.prerequisites` — the vocabulary (`tenant_scope_catalog.v1`,
+  `module_database_roles.v1`), an OPEN registry per ADR-0008, the per-assembly
+  `PrerequisiteBinding`, and `resolve_depends_on`. Pure, no I/O.
+- `dotmac_kernel.migrations.verify` — `require_prerequisites` proves a binding
+  against the live catalog before any DDL, so a STAMPED provider fails.
+  `register_verifier` keeps enforcement open to product-owned prerequisites.
+- `MigrationOwner.provides` and `ModuleManifest.requires`, the two declaration
+  sites. Kernel `0001` declares both shipped effects.
+- The composed gate rejects a module naming a foreign revision, an unbound
+  requirement, an unknown or mismatched provider lineage, a binding to an
+  uncomposed revision, and migration/manifest drift.
+
+### Changed
+
+- **A module lineage may no longer author a cross-lineage `depends_on`.** That
+  edge is true only in the assembly that wrote it: `dotmac-files` naming
+  `0001_initial_tenant_schema` made stored bytes un-installable in ERP, which
+  hosts `public.tenants` in its own lineage and can never run kernel `0001`.
+  Host owners (`kernel`, `assembly`) keep literal edges. See the ADR-0006 D1
+  amendment; a blocked-adopter exception under ADR-0017.
+
 ## 0.1.0a55 — 2026-08-13
 
 Allocates one namespace. No behaviour changes, and nothing existing moves.

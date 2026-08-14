@@ -64,6 +64,7 @@ from dotmac_kernel.namespaces import (
     validate_short_code,
 )
 from dotmac_kernel.permissions import PermissionSpec
+from dotmac_kernel.prerequisites import validate_prerequisites
 
 if TYPE_CHECKING:
     # Type-only: `capabilities` imports THIS module for `AnyManifest`, so a
@@ -196,6 +197,14 @@ class ModuleManifest:
     # A capability only declares both when it genuinely operates in both
     # security contexts. Most modules leave this empty and stay tenant-only.
     platform_tables: Sequence[str] = field(default_factory=tuple)
+    # The logical database effects this module's LINEAGE needs another lineage
+    # to have supplied — `dotmac_kernel.prerequisites`. Distinct from
+    # `dependencies`, which orders module *code* by module code; this orders
+    # *migrations* by verifiable database capability, and deliberately never
+    # names a foreign revision. The assembly binds each entry to the revision
+    # that supplies it, so the same module composes into a Starter that runs the
+    # kernel lineage and into ERP, which structurally cannot.
+    requires: Sequence[str] = field(default_factory=tuple)
     core: bool = True
     enabled_by_default: bool = True
     seed: Callable[[], None] | None = None
@@ -221,8 +230,16 @@ class ModuleManifest:
             "tables",
             "platform_tables",
             "feature_flags",
+            "requires",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        validate_prerequisites(self.requires)
+        if self.requires and self.migration_prefix is None:
+            raise ModuleRegistryError(
+                f"module {self.code!r} declares migration prerequisites but owns "
+                "no lineage — `requires` orders migrations, so a module with no "
+                "migrations has nothing to order"
+            )
         self._validate_namespace()
 
     def _validate_namespace(self) -> None:

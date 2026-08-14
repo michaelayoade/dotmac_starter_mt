@@ -54,6 +54,13 @@ from dotmac_kernel.migrations.gate import (  # noqa: E402
 # that checks a different composition than the one that ships is not a gate.
 from app.assembly import assembly  # noqa: E402
 
+# Gate the composition the app boots INCLUDING its prerequisite answers. A
+# composed module declares the database effects it needs; this assembly's
+# binding of those effects to revisions is part of the composition, so a gate
+# run without it would report every requirement as unbound and check nothing
+# useful. Same source `alembic/env.py` installs at runtime.
+from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS  # noqa: E402
+
 
 def main() -> int:
     ini_path = Path(os.getenv("ALEMBIC_INI") or (REPO_ROOT / "alembic.ini"))
@@ -64,7 +71,9 @@ def main() -> int:
     if not locations:
         print(f"{ini_path} selects no version_locations", file=sys.stderr)
         return 2
-    report = run_gate(assembly.modules, locations)
+    report = run_gate(
+        assembly.modules, locations, bindings=ASSEMBLY_PREREQUISITE_BINDINGS
+    )
     print(report.render())
     return 0 if report.ok else 1
 
