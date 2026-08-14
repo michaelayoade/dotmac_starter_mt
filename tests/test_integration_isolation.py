@@ -30,6 +30,7 @@ migrations would first run in production.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -196,17 +197,36 @@ def test_app_user_holds_nothing_on_any_table(
 # winner. These do, against the mechanism that actually ships.
 
 
-def _installation_and_binding(conn) -> tuple[uuid.UUID, uuid.UUID]:  # type: ignore[no-untyped-def]
+def _installation_and_binding(conn, request=None) -> tuple[uuid.UUID, uuid.UUID]:  # type: ignore[no-untyped-def]
+    """A distinctly-named installation per call.
+
+    The scratch database is MODULE-scoped and stays that way: sharing it is what
+    exposed `uq_connector_installations_key_name` doing its job when three
+    canaries reused one name. The constraint is right; the factory was wrong.
+
+    Deliberately NOT fixed by relaxing the constraint, truncating between tests,
+    or making the database function-scoped — each of those hides the collision
+    rather than removing the reason for it, and the last would also throw away
+    the shared-state coverage that found it.
+
+    The name carries the TEST NODE plus a random suffix: the node makes a
+    failure traceable to the test that created the row, and the suffix keeps
+    repeated calls inside one test distinct.
+    """
+    node = "shared"
+    if request is not None:
+        node = re.sub(r"[^a-z0-9]+", "-", request.node.name.lower()).strip("-")[:80]
     installation_id, binding_id = uuid.uuid4(), uuid.uuid4()
+    unique_name = f"{node}-{uuid.uuid4().hex[:8]}"
     conn.execute(
         text(
             "INSERT INTO mod_intg.connector_installations ("
             "id, connector_key, connector_version, spi_range, manifest_digest, "
             "name, environment, state) VALUES ("
-            ":id, 'fake', '1.0.0', '>=1.0,<2.0', :digest, 'primary', "
+            ":id, 'fake', '1.0.0', '>=1.0,<2.0', :digest, :name, "
             "'production', 'enabled')"
         ),
-        {"id": installation_id, "digest": "d" * 64},
+        {"id": installation_id, "digest": "d" * 64, "name": unique_name},
     )
     conn.execute(
         text(
@@ -221,6 +241,7 @@ def _installation_and_binding(conn) -> tuple[uuid.UUID, uuid.UUID]:  # type: ign
 
 def test_inbox_deduplication_is_enforced_by_the_database(
     migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
 ) -> None:
     """Two workers racing one redelivery is the NORMAL case, not the edge case,
     so the constraint must be in the database rather than in a service."""
@@ -229,7 +250,7 @@ def test_inbox_deduplication_is_enforced_by_the_database(
     admin_url, _ = migrated_scratch
     engine = create_engine(admin_url)
     with engine.begin() as conn:
-        _, binding_id = _installation_and_binding(conn)
+        _, binding_id = _installation_and_binding(conn, request)
         installation_id = conn.execute(
             text(
                 "SELECT installation_id FROM mod_intg.capability_bindings WHERE id=:b"
@@ -267,6 +288,7 @@ def test_inbox_deduplication_is_enforced_by_the_database(
 
 def test_only_one_session_can_claim_a_delivery(
     migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
 ) -> None:
     """The lease, proved as a race rather than asserted.
 
@@ -277,7 +299,7 @@ def test_only_one_session_can_claim_a_delivery(
     setup = create_engine(admin_url)
     delivery_id = uuid.uuid4()
     with setup.begin() as conn:
-        installation_id, binding_id = _installation_and_binding(conn)
+        installation_id, binding_id = _installation_and_binding(conn, request)
         conn.execute(
             text(
                 "INSERT INTO mod_intg.delivery_attempts ("
@@ -315,6 +337,7 @@ def test_only_one_session_can_claim_a_delivery(
 
 def test_only_one_session_can_advance_a_checkpoint(
     migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
 ) -> None:
     """The optimistic version, proved as a race.
 
@@ -325,7 +348,7 @@ def test_only_one_session_can_advance_a_checkpoint(
     setup = create_engine(admin_url)
     checkpoint_id = uuid.uuid4()
     with setup.begin() as conn:
-        _, binding_id = _installation_and_binding(conn)
+        _, binding_id = _installation_and_binding(conn, request)
         conn.execute(
             text(
                 "INSERT INTO mod_intg.polling_checkpoints ("
@@ -353,6 +376,7 @@ def test_only_one_session_can_advance_a_checkpoint(
 
 def test_only_one_session_can_settle_a_delivery(
     migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
 ) -> None:
     """The settlement race, proved with two real sessions.
 
@@ -368,7 +392,7 @@ def test_only_one_session_can_settle_a_delivery(
     setup = create_engine(admin_url)
     delivery_id = uuid.uuid4()
     with setup.begin() as conn:
-        installation_id, binding_id = _installation_and_binding(conn)
+        installation_id, binding_id = _installation_and_binding(conn, request)
         conn.execute(
             text(
                 "INSERT INTO mod_intg.delivery_attempts ("
@@ -418,6 +442,7 @@ def test_only_one_session_can_settle_a_delivery(
 
 def test_a_delivery_scheduled_for_the_future_is_not_claimable(
     migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
 ) -> None:
     """Backoff, enforced by the claim predicate against a real clock.
 
@@ -429,7 +454,7 @@ def test_a_delivery_scheduled_for_the_future_is_not_claimable(
     setup = create_engine(admin_url)
     delivery_id = uuid.uuid4()
     with setup.begin() as conn:
-        installation_id, binding_id = _installation_and_binding(conn)
+        installation_id, binding_id = _installation_and_binding(conn, request)
         conn.execute(
             text(
                 "INSERT INTO mod_intg.delivery_attempts ("
