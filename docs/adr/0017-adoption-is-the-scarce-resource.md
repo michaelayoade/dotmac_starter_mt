@@ -61,6 +61,63 @@ Naming an owner is not an implementation start. Both remain behind the gate
 above; what changes is that each now has a named owner and a source ruling, so
 the work is no longer unassignable when the gate opens.
 
+## Amendment, 2026-08-14: owner-directed exception for the identity seams and `dotmac-auth-oidc`
+
+Michael directed the tenant-workspace login programme — the kernel permission
+seam, the kernel external-identity binding contract, and an OIDC relying-party
+distribution — lifting decision 2's moratorium for those named units only.
+
+The evidence is the 2026-08-14 source audit
+([`external-identity-sources.md`](../inventories/external-identity-sources.md)),
+which swept all six repositories for two capabilities that are routinely
+confused — the OIDC protocol client, and the local binding from a verified
+external subject to a local identity — before any shared code was proposed.
+
+**Two of the three are demand-pulled; one is owner-directed. The difference
+matters and is recorded rather than blurred.**
+
+- **The kernel permission seam IS a demand pull**, and the only clean one in
+  this programme. `dotmac_workspace` recorded it as blocker B1 in its own
+  repository, in writing, before this change existed: it authenticates with its
+  own `dmws_session` cookie, neither existing kernel seam fits, and its
+  documented conclusion was *"the fix is not to hand-roll the role query here."*
+  A product was stopped, said so, and named the seam it needed. That is exactly
+  the exception this ADR's decision 2 already permits.
+- **The external-identity binding contract is directed**, though it is close to
+  a pull. Workspace's B2 (nothing issues `dmws_session`, `/login` does not exist)
+  is a real block, but a login could be built on passwords alone; the binding
+  table is needed for FEDERATED login specifically, which is the programme's
+  goal rather than a current outage.
+- **`dotmac-auth-oidc` is directed, and is the furthest from a pull.** No
+  product is blocked on it: ERP has an implementation, and every other product
+  has no OIDC requirement in flight. It creates no general route around the
+  moratorium for the next dossier, exactly as the `dotmac-approvals`,
+  `dotmac-files` and `dotmac-imports` amendments record for theirs.
+
+**The OIDC package is additionally an exception to the extraction rule itself,
+and this is the part to read twice.** Hard rule 24 makes a qualifying
+production-used, tested implementation the mandatory source. The audit found
+ERP's — the fleet's only OIDC client — qualifies on neither count: it has never
+been deployed (`OIDC_ENABLED=false`, one commit, its contract doc written as a
+future cutover gate), and its two security-critical functions are monkeypatched
+out of every one of its tests, so signature verification and the algorithm
+allowlist have zero real coverage. Rule 24's own escape applies — *"a greenfield
+shared implementation requires checked-in evidence that no qualifying product
+implementation exists"* — and § D4 of the audit is that evidence.
+
+So the package ships `source_mode = "greenfield-after-inventory"`. That is a
+weaker provenance than any module accepted under this ADR so far, and the
+consequence is recorded in its dossier: `contract_consumers = []`, no entry in
+`.github/release-modules.json`, and no claim of production readiness. A passing
+test suite is not a pilot.
+
+**What this amendment does not do.** It does not authorise
+`dotmac-application-access`, which ADR-0021 §5 defers until a generic
+signed-document mechanism exists; it does not authorise that mechanism's
+extraction from `licensing`, which ADR-0021 §8 sequences after the lineage gate;
+and it does not resolve the ADR-0021/ADR-0026 conflict over who owns access
+approval. Each remains its own decision.
+
 ## Amendment, 2026-08-14: owner-directed exception for `dotmac-approvals`
 
 [ADR-0026](0026-approvals-decide-approval-never-the-transition.md) accepted the
