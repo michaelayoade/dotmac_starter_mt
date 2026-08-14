@@ -40,6 +40,7 @@ deliberately absent from this release.
 from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.planes import ModulePlane
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
@@ -47,7 +48,7 @@ from dotmac_kernel.prerequisites import (
 
 module = ModuleManifest(
     code="ticketing",
-    version="0.1.0a3",
+    version="0.1.0a4",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="tkt",
@@ -71,14 +72,24 @@ module = ModuleManifest(
     # `ticketing.use`, the read/work/administer permission split, and the five
     # audit actions all land in the release that ships the routers — with the
     # guards that reference them in the same change.
-    # Split by PLANE (ADR-0027): roles to create anything, a tenant catalogue
-    # only for the tenant plane. An assembly with no tenant scope — the vendor
-    # control plane — installs the platform plane and skips the rest, rather
-    # than being unable to install the module at all. Never the kernel's
-    # identity/RBAC/audit estate either way; the assembly binds these effects to
-    # the revisions that supply them (ADR-0006 D1 amendment).
+    # Split by PLANE: roles to create anything, a tenant catalogue only for the
+    # tenant plane. Never the kernel's identity/RBAC/audit estate either way;
+    # the assembly binds these effects to the revisions that supply them
+    # (ADR-0006 D1 amendment).
     requires=(MODULE_DATABASE_ROLES_V1.name,),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
+    # ADR-0028. Under ADR-0027 this module inferred its planes from which
+    # prerequisites happened to be bound, which reads provider availability as
+    # if it were intent. The vendor control plane is where those two part
+    # company: it composes a truthful tenant catalogue and still wants only
+    # platform tickets, so nothing is missing and inference has nothing to see.
+    # The assembly now SELECTS, and every combination below is one this lineage
+    # is actually built and tested to produce.
+    supported_plane_sets=(
+        (ModulePlane.TENANT,),
+        (ModulePlane.PLATFORM,),
+        (ModulePlane.TENANT, ModulePlane.PLATFORM),
+    ),
 )
 
 __all__ = ["module"]

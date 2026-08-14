@@ -168,10 +168,15 @@ unblocked by making it installable.**
 If Vendor CP ever acquires real platform-owned stored bytes — signed artefacts
 persisted rather than streamed, evidence bundles retained — then, and only then:
 
-- a `platform_file_store.v1` prerequisite naming only the roles and schema
-  (no tenant catalogue), and
-- a split of `fi_0001` so an assembly can install the platform plane alone,
-  which is a contract change to a released module and needs its own ADR.
+- `dotmac-files` declares the independently supported plane combinations and
+  makes `fi_0001` consume ADR-0028's explicit `ModulePlaneSelection`; and
+- Vendor CP declares PLATFORM for that module and adds a real domain-owned
+  relation to `platform_stored_files.id`.
+
+No synthetic `platform_file_store.v1` is needed merely as a selector. A
+prerequisite names a verifiable database effect; ADR-0028 gives installation
+intent its own typed assembly declaration. The migration change remains a
+released-module contract change and needs its own version and live canary.
 
 Until a second real consumer exists, the honest disposition is this row in this
 table, not a mechanism. Recorded so the next reader does not mistake "it would

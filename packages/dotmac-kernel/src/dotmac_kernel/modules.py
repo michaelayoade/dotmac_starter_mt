@@ -64,6 +64,14 @@ from dotmac_kernel.namespaces import (
     validate_short_code,
 )
 from dotmac_kernel.permissions import PermissionSpec
+from dotmac_kernel.planes import (
+    ModulePlane,
+    ModulePlaneSelectionError,
+    declared_planes,
+)
+from dotmac_kernel.planes import (
+    supported_plane_sets as _supported_plane_sets,
+)
 from dotmac_kernel.prerequisites import validate_prerequisites
 
 if TYPE_CHECKING:
@@ -205,19 +213,20 @@ class ModuleManifest:
     # that supplies it, so the same module composes into a Starter that runs the
     # kernel lineage and into ERP, which structurally cannot.
     requires: Sequence[str] = field(default_factory=tuple)
-    # Effects only the TENANT plane needs (ADR-0027). Declared separately from
-    # `requires` because a dual-plane module is installable in an assembly that
-    # can operate only one of its planes: the vendor control plane has no tenant
-    # catalogue and never will — it is not a product data plane — so a lineage
-    # that unconditionally created tenant tables with `public.tenants` foreign
-    # keys and RLS predicates could not run there at all.
-    #
-    # An assembly that binds these gets both planes. One that does not gets the
-    # platform plane only, and the live-catalog gate expects exactly that rather
-    # than reporting the tenant tables missing. Anything genuinely needed by
-    # BOTH planes belongs in `requires`, where it stays mandatory and fails
-    # closed; this list is not a way to soften a requirement.
+    # Effects only the TENANT plane needs.  These declarations never select a
+    # plane: bindings answer where an effect comes from, while the assembly's
+    # explicit ModulePlaneSelection answers what it intends to install.
     tenant_requires: Sequence[str] = field(default_factory=tuple)
+    # The symmetric PLATFORM-plane prerequisites. Empty is legitimate: a plane
+    # may need nothing beyond the module's common `requires`.
+    platform_requires: Sequence[str] = field(default_factory=tuple)
+    # Plane combinations the module's ONE lineage can build independently.
+    # Empty preserves the atomic historical contract: every declared plane is
+    # installed together. A module listing alternatives requires its assembly
+    # to choose one explicitly; prerequisite availability never chooses for it.
+    supported_plane_sets: Sequence[Sequence[ModulePlane | str]] = field(
+        default_factory=tuple
+    )
     core: bool = True
     enabled_by_default: bool = True
     seed: Callable[[], None] | None = None
@@ -245,17 +254,32 @@ class ModuleManifest:
             "feature_flags",
             "requires",
             "tenant_requires",
+            "platform_requires",
         ):
             object.__setattr__(self, name, tuple(getattr(self, name)))
+        object.__setattr__(
+            self,
+            "supported_plane_sets",
+            tuple(tuple(planes) for planes in self.supported_plane_sets),
+        )
         validate_prerequisites(self.requires)
         validate_prerequisites(self.tenant_requires)
-        overlap = set(self.requires) & set(self.tenant_requires)
+        validate_prerequisites(self.platform_requires)
+        prerequisite_lists = {
+            "requires": set(self.requires),
+            "tenant_requires": set(self.tenant_requires),
+            "platform_requires": set(self.platform_requires),
+        }
+        overlap = {
+            name
+            for name in set().union(*prerequisite_lists.values())
+            if sum(name in values for values in prerequisite_lists.values()) > 1
+        }
         if overlap:
             raise ModuleRegistryError(
-                f"module {self.code!r} declares {sorted(overlap)} as both always "
-                "required and tenant-plane only — a prerequisite is one or the "
-                "other, and listing it in both reads as mandatory while behaving "
-                "as optional"
+                f"module {self.code!r} declares {sorted(overlap)} in more than "
+                "one prerequisite list — an effect is common, tenant-only, or "
+                "platform-only, never two at once"
             )
         if self.tenant_requires and not self.tables:
             raise ModuleRegistryError(
@@ -263,12 +287,41 @@ class ModuleManifest:
                 "tenant tables — the list names what the TENANT PLANE needs, so "
                 "a module without one has nothing to condition on"
             )
-        if (self.requires or self.tenant_requires) and self.migration_prefix is None:
+        if self.platform_requires and not self.platform_tables:
+            raise ModuleRegistryError(
+                f"module {self.code!r} declares `platform_requires` but owns no "
+                "platform tables — the list names what the PLATFORM PLANE needs"
+            )
+        if (
+            self.requires or self.tenant_requires or self.platform_requires
+        ) and self.migration_prefix is None:
             raise ModuleRegistryError(
                 f"module {self.code!r} declares migration prerequisites but owns "
                 "no lineage — `requires` orders migrations, so a module with no "
                 "migrations has nothing to order"
             )
+        try:
+            supported = _supported_plane_sets(self)
+        except ModulePlaneSelectionError as exc:
+            raise ModuleRegistryError(f"module {self.code!r}: {exc}") from exc
+        declared = frozenset(declared_planes(self))
+        if self.supported_plane_sets:
+            if len(set(supported)) != len(supported):
+                raise ModuleRegistryError(
+                    f"module {self.code!r} repeats a supported plane set"
+                )
+            for planes in supported:
+                if not frozenset(planes) <= declared:
+                    raise ModuleRegistryError(
+                        f"module {self.code!r} supports planes outside its table "
+                        f"declaration: {[plane.value for plane in planes]}"
+                    )
+            if tuple(sorted(declared, key=lambda plane: plane.value)) not in supported:
+                raise ModuleRegistryError(
+                    f"module {self.code!r} must retain its full declared plane set "
+                    "as a supported installation"
+                )
+            object.__setattr__(self, "supported_plane_sets", supported)
         self._validate_namespace()
 
     def _validate_namespace(self) -> None:

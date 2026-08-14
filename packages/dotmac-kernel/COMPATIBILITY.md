@@ -95,7 +95,7 @@ and may change or disappear without a deprecation cycle**.
 | Module | Public names |
 |---|---|
 | `dotmac_kernel.app_factory` | `create_app`, `LayeredStaticFiles` |
-| `dotmac_kernel.assembly` | `ProductAssemblySpec`, `ProductSecurityPolicy`, `StartupCheck`, `StartupHook` |
+| `dotmac_kernel.assembly` | `ProductAssemblySpec`, `ProductSecurityPolicy`, `ModulePlaneSelection`, `StartupCheck`, `StartupHook` |
 | `dotmac_kernel.audit` | `ACTOR_TYPES`, `AuditEvent`, `MissingAuditActorError`, `UnknownAuditActorTypeError`, `resolve_audit_actor`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `RETIRED_BRAND_KEYS`, `reject_retired_brand_keys` (`sanitize_branding_css` was REMOVED in 0.1.0a47 — see CHANGELOG) |
@@ -147,6 +147,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
 | `dotmac_kernel.permissions` | `PermissionSpec`, `PermissionCatalogue`, `DuplicatePermissionError`, `UndeclaredPermissionError`, `install_permissions`, `active_permissions` (permission catalogue; also top-level — see "Manifest declaration catalogues" below) |
+| `dotmac_kernel.planes` | `ModulePlane`, `ModulePlaneSelection`, `ModulePlaneSelectionError`, `install_module_plane_selections`, `installed_module_plane_selections`, `selected_module_planes`, `supported_plane_sets`, `validate_module_plane_selections` (explicit per-module persistence-plane composition; ADR-0028) |
 | `dotmac_kernel.platform_auth` | `require_platform_admin`, `platform_auth_router`, `PLATFORM_AUDIENCE` |
 | `dotmac_kernel.product_manifest` | `PRODUCT_MANIFEST_SCHEMA`, `ProductManifestSnapshot`, `ProductManifestError`, `ProductManifestDigestMismatchError` (canonical release-bound product/capability document; also top-level) |
 | `dotmac_kernel.providers` | re-exports the provisioning surface (see below) |
@@ -354,6 +355,22 @@ its own with `register_prerequisites()`. A changed contract is a new `.vN`,
 never a redefinition, because every existing binding was accepted against the
 old one.
 
+**Plane intent is not provider availability (ADR-0028, since a61).** A module
+with independently installable planes declares common `requires`,
+`tenant_requires`, `platform_requires`, and its `supported_plane_sets`. The
+assembly selects one set with `ProductAssemblySpec.module_planes`; omission is
+an error for a selectable module. Its migration uses
+`resolve_depends_on(common, module=..., tenant=..., platform=...)` and
+`selected_module_planes(module)`. Every requirement of the selected planes is
+mandatory. This distinction is load-bearing where a platform-only product
+physically composes kernel 0001 and therefore truthfully has a tenant catalogue:
+the binding supplies the effect, but cannot opt tenant tables into that product.
+Alembic graph commands skip `env.py`; alongside `DOTMAC_MIGRATION_BINDINGS`, set
+`DOTMAC_MODULE_PLANE_SELECTIONS=module.path:ATTRIBUTE` to point at the same typed
+selection sequence that `ProductAssemblySpec` receives. The composed gate also
+refuses a selectable lineage whose reachable `upgrade()` path does not consume
+its own selection.
+
 **The post-migration live-catalog gate**
 (`dotmac_kernel.migrations.catalog.audit_live_schemas`) applies the kernel's
 RLS/grant contract across every registered module schema after migrations run.
@@ -488,7 +505,7 @@ release.
 ### Composing an app: `ProductAssemblySpec` + `create_app`
 
 A product assembly declares itself as a frozen `dotmac_kernel.assembly.ProductAssemblySpec`
-(`name`, `modules`, `setting_defaults`, `branding`, `providers`, `tenancy`,
+(`name`, `modules`, `module_planes`, `setting_defaults`, `branding`, `providers`, `tenancy`,
 `platform_surface_enabled`, `web_enabled`, `startup_checks`, `startup_hooks`,
 `security_policy`, `disabled_modules`, `assembly_template_dir`,
 `assembly_static_dir`, `packaged_static_dirs`, `packaged_template_dirs`,

@@ -138,21 +138,22 @@ def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
 
     A module absent from the allowlist is not merely unreleased — it is
     unreleasable, so `first_cutover` names a cutover no product can begin. The
-    kernel floor is `0.1.0a60`, and deliberately NOT the `0.1.0a39` that added
+    kernel floor is `0.1.0a61`, and deliberately NOT the `0.1.0a39` that added
     `TICKETING_MIGRATION_OWNER` to `MIGRATION_OWNER_LEDGER`. This module's floor
-    has been raised by a kernel CAPABILITY twice rather than by its own
-    namespace row: first `platform_tables` (ADR-0023, dual-plane), then the
-    logical prerequisite contract (ADR-0006 D1 amendment, a56), and now per-plane
-    prerequisites (ADR-0027, a60) — its manifest passes `tenant_requires` so it
-    can install into a platform-only assembly. The floor is always the highest
-    capability the module actually consumes.
+    has been raised by a kernel CAPABILITY rather than by its own namespace row,
+    three times now: `platform_tables` (ADR-0023, dual-plane), the logical
+    prerequisite contract (ADR-0006 D1 amendment, a56), and explicit plane
+    selection (ADR-0028, a61) — its manifest declares `supported_plane_sets` and
+    its lineage reads the assembly's selection, neither of which an earlier
+    kernel can even import. The floor is always the highest capability the
+    module actually consumes.
     """
-    result = _resolve("dotmac-ticketing", version="0.1.0a3")
+    result = _resolve("dotmac-ticketing", version="0.1.0a4")
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
-    assert emitted["kernel_floor"] == "0.1.0a60"
+    assert emitted["kernel_floor"] == "0.1.0a61"
     assert emitted["db_schema"] == "mod_tkt"
-    assert emitted["tag"] == "dotmac-ticketing-v0.1.0a3"
+    assert emitted["tag"] == "dotmac-ticketing-v0.1.0a4"
 
 
 def test_only_ticketing_may_require_alembic_at_runtime() -> None:

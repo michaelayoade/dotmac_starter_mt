@@ -22,6 +22,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
@@ -87,6 +88,12 @@ def migrated_scratch() -> Iterator[tuple[str, str, str]]:
             "version_locations",
             f"{KERNEL_VERSIONS} {ASSEMBLY_VERSIONS} {APPROVALS_VERSIONS}",
         )
+        cfg.attributes["module_plane_selections"] = (
+            ModulePlaneSelection(
+                module="approvals",
+                planes=(ModulePlane.TENANT, ModulePlane.PLATFORM),
+            ),
+        )
         os.environ["MIGRATION_DATABASE_URL"] = admin_url
         command.upgrade(cfg, "heads")
         yield (
@@ -105,6 +112,80 @@ def migrated_scratch() -> Iterator[tuple[str, str, str]]:
             )
             conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
         server.dispose()
+
+
+@pytest.fixture
+def platform_only_scratch() -> Iterator[str]:
+    """The real Vendor shape: kernel tenant objects exist, but this module's
+    explicit assembly declaration selects only its platform plane."""
+    superuser = _superuser_url()
+    name = f"approvals_platform_{uuid.uuid4().hex[:12]}"
+    server = create_engine(superuser, isolation_level="AUTOCOMMIT")
+    with server.connect() as conn:
+        conn.execute(text(f'CREATE DATABASE "{name}"'))
+
+    setup = create_engine(_url_for(superuser, name), isolation_level="AUTOCOMMIT")
+    with setup.connect() as conn:
+        conn.execute(text("ALTER SCHEMA public OWNER TO app_admin"))
+        conn.execute(text(f'GRANT CREATE ON DATABASE "{name}" TO app_admin'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO app_user'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO platform_api'))
+    setup.dispose()
+
+    admin_url = _url_for(superuser, name, user="app_admin")
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config(str(REPO_ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        cfg.set_main_option(
+            "version_locations",
+            f"{KERNEL_VERSIONS} {ASSEMBLY_VERSIONS} {APPROVALS_VERSIONS}",
+        )
+        cfg.attributes["module_plane_selections"] = (
+            ModulePlaneSelection(module="approvals", planes=(ModulePlane.PLATFORM,)),
+        )
+        os.environ["MIGRATION_DATABASE_URL"] = admin_url
+        command.upgrade(cfg, "heads")
+        yield admin_url
+    finally:
+        with server.connect() as conn:
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :n AND pid <> pg_backend_pid()"
+                ),
+                {"n": name},
+            )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        server.dispose()
+
+
+def test_platform_only_selection_is_not_inferred_from_provider_availability(
+    platform_only_scratch: str,
+) -> None:
+    engine = create_engine(platform_only_scratch)
+    try:
+        with engine.connect() as conn:
+            # Kernel 0001 really ran: the false premise in ADR-0027 is now a
+            # canary. The tenant catalogue exists and is truthfully bindable.
+            assert conn.execute(text("SELECT to_regclass('public.tenants')")).scalar()
+            for table in PLATFORM_TABLES:
+                assert conn.execute(
+                    text("SELECT to_regclass(:table)"),
+                    {"table": f"mod_approvals.{table}"},
+                ).scalar()
+            for table in TENANT_TABLES:
+                assert (
+                    conn.execute(
+                        text("SELECT to_regclass(:table)"),
+                        {"table": f"mod_approvals.{table}"},
+                    ).scalar()
+                    is None
+                )
+    finally:
+        engine.dispose()
 
 
 def _seed_two_tenants(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:

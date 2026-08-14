@@ -1,8 +1,32 @@
 # Changelog — dotmac-ticketing
 
+## 0.1.0a4 — 2026-08-14
+
+Moves this module off a3's implicit plane selector onto ADR-0028's explicit
+assembly selection. **a3 was published**, so an assembly already on it must add a
+`ModulePlaneSelection` for `ticketing`; a missing one is a hard error rather than
+a default, because silence is exactly what a3 mistook for intent.
+
+a3 read "is a tenant catalogue bound?" as "does this product want tenant
+tickets?". Vendor CP separates those: it composes kernel 0001, so the catalogue
+is genuinely there, while only platform tickets are wanted. Nothing is missing,
+so nothing could be inferred.
+
+### Changed
+
+- The manifest declares `supported_plane_sets` — tenant-only, platform-only, and
+  both — and `tk_0001` builds exactly the planes `selected_module_planes` names.
+- The platform plane is no longer built unconditionally; `platform_api` gets
+  schema USAGE only when that plane is selected, matching the tenant side.
+- Kernel floor is `>=0.1.0a61`.
+- Fixes `__version__`, which had been stale at `0.1.0a1` since the module's
+  first release while `pyproject` and the manifest moved on — the drift class
+  `dotmac-files` was caught by, now guarded here too.
+
 ## 0.1.0a3 — 2026-08-14
 
 Makes the module installable in a platform-only assembly (ADR-0027).
+**Published, then superseded by a4.**
 
 `0.1.0a2` declared what the lineage needs instead of naming a foreign revision,
 which unblocked ERP. It did not help the vendor control plane: one flat

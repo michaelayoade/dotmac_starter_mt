@@ -26,6 +26,10 @@ from pathlib import Path
 from types import MappingProxyType
 
 from dotmac_kernel.modules import AnyManifest
+from dotmac_kernel.planes import (
+    ModulePlaneSelection,
+    validate_module_plane_selections,
+)
 
 StartupCheck = Callable[[], Sequence[str]]
 StartupHook = Callable[[], None | Awaitable[None]]
@@ -79,6 +83,11 @@ class ProductAssemblySpec:
     # adapts when it builds the `ModuleRegistry`. The two may be MIXED in one
     # assembly — that is what makes migrating feature packages incremental.
     modules: Sequence[AnyManifest] = ()
+    # Explicit per-module plane intent for lineages that declare more than one
+    # supported plane combination. This is distinct from migration bindings:
+    # a product may physically have a tenant catalogue and still select only a
+    # module's platform plane. Omitting a required selection fails construction.
+    module_planes: Sequence[ModulePlaneSelection] = ()
     # The deployment's DECLARED DEFAULTS, keyed "<domain>/<key>".
     #
     # Named `setting_defaults` and not `settings_overrides` because the
@@ -189,6 +198,11 @@ class ProductAssemblySpec:
     def __post_init__(self) -> None:
         object.__setattr__(self, "modules", tuple(self.modules))
         object.__setattr__(
+            self,
+            "module_planes",
+            validate_module_plane_selections(self.modules, self.module_planes),
+        )
+        object.__setattr__(
             self, "setting_defaults", MappingProxyType(dict(self.setting_defaults))
         )
         object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
@@ -205,6 +219,7 @@ class ProductAssemblySpec:
 
 
 __all__ = [
+    "ModulePlaneSelection",
     "ProductAssemblySpec",
     "ProductSecurityPolicy",
     "StartupCheck",

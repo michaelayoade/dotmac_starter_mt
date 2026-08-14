@@ -49,7 +49,9 @@ def test_registered_module_schemas_are_compliant(admin_engine) -> None:
     only. With the narrower set this test walked an empty tuple and passed over
     nothing, which is exactly the vacuity the file's docstring warned about.
     """
-    registry = NamespaceRegistry.from_manifests(assembly.modules)
+    registry = NamespaceRegistry.from_manifests(
+        assembly.modules, module_planes=assembly.module_planes
+    )
     schemas = audited_schemas(registry)
     assert (
         "mod_tstudio" in schemas
@@ -86,7 +88,9 @@ def test_the_ticketing_module_schema_holds_both_planes(admin_engine) -> None:
     - the tenant application role holds NOTHING on them;
     - the online platform role has schema USAGE and row DML, through the gate.
     """
-    registry = NamespaceRegistry.from_manifests(assembly.modules)
+    registry = NamespaceRegistry.from_manifests(
+        assembly.modules, module_planes=assembly.module_planes
+    )
     assert "mod_tkt" in audited_schemas(registry)
 
     with admin_engine.connect() as conn:
@@ -160,7 +164,9 @@ def test_the_gate_flags_a_column_level_platform_grant(admin_engine) -> None:
     `has_any_column_privilege` can see it. The rollback leaves the migrated
     schema exactly as the following tests found it.
     """
-    registry = NamespaceRegistry.from_manifests(assembly.modules)
+    registry = NamespaceRegistry.from_manifests(
+        assembly.modules, module_planes=assembly.module_planes
+    )
     with admin_engine.connect() as conn:
         transaction = conn.begin()
         try:
@@ -192,7 +198,9 @@ def test_the_gate_flags_a_column_level_platform_grant(admin_engine) -> None:
 
 def test_the_gate_flags_missing_platform_schema_usage(admin_engine) -> None:
     """LIVE sensitivity proof: table DML cannot bypass missing schema USAGE."""
-    registry = NamespaceRegistry.from_manifests(assembly.modules)
+    registry = NamespaceRegistry.from_manifests(
+        assembly.modules, module_planes=assembly.module_planes
+    )
     with admin_engine.connect() as conn:
         transaction = conn.begin()
         try:

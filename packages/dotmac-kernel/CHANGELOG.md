@@ -6,7 +6,59 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a61 — 2026-08-14
+
+Replaces a60's implicit plane selector with the explicit assembly contract in
+ADR-0028. **a60 was published**, so this is a breaking change to a released
+surface rather than a pre-publication correction — see "Migrating from a60". A prerequisite binding names a provider; it never chooses
+which tables a product intends to install.
+
+### Added
+
+- `ModulePlane`, `ModulePlaneSelection` and
+  `ProductAssemblySpec.module_planes`: a selectable module requires one
+  explicit per-assembly choice.
+- `ModuleManifest.platform_requires` and `supported_plane_sets`: the module
+  declares common/tenant/platform effects plus every plane combination its one
+  lineage can actually build. An empty declaration preserves atomic behaviour.
+- Static and live-catalog gates derive mandatory bindings and expected tables
+  from that explicit selection. The static gate also proves a selectable
+  lineage's reachable upgrade path consumes its own selection.
+
+### Changed
+
+- `resolve_depends_on(..., module=..., tenant=..., platform=...)` emits edges
+  for the selected planes and fails when any selected requirement is unbound.
+- Provider availability no longer controls migration DDL. This is the Vendor CP
+  canary: kernel 0001 truthfully supplies a tenant catalogue, while the product
+  can explicitly install only a module's platform plane.
+
+### Migrating from a60
+
+`tenant_requires` still exists and still means the same thing, so a manifest
+needs no edit to keep compiling. What changed is who decides: a60 built the
+tenant plane whenever its prerequisite happened to be bound, and a61 builds it
+only when the assembly SELECTS it.
+
+A consumer on a60 must, in one change:
+
+1. add `supported_plane_sets` to each dual-plane manifest it owns;
+2. add a `ModulePlaneSelection` to its `ProductAssemblySpec` for every selectable
+   module — a missing one is a hard error, deliberately, because silence is what
+   a60 mistook for intent; and
+3. replace any `all_bound(...)` plane test in its lineages with
+   `selected_module_planes(...)`.
+
+`is_bound` / `all_bound` remain for asking whether a provider exists, which is a
+legitimate question. They are no longer a legitimate way to choose DDL.
+
 ## 0.1.0a60 — 2026-08-14
+
+**Published, then superseded by a61.** The implementation made an
+unbound `tenant_requires` entry select the platform-only shape. Direct inventory
+proved Vendor CP actually composes kernel 0001 and therefore has the tenant
+catalogue, so binding availability was the wrong fact and could not distinguish
+an intentional platform-only installation from an accidental missing binding.
 
 Lets a dual-plane module install into an assembly that can operate only one of
 its planes (ADR-0027). Demand-pulled: `dotmac-approvals` could not be adopted by

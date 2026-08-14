@@ -28,6 +28,8 @@ from dotmac_ticketing.manifest import module
 
 MODULE_ROOT = Path(inspect.getfile(lifecycle)).parent
 MIGRATIONS = MODULE_ROOT / "migrations" / "versions"
+MIGRATION = MIGRATIONS / "tk_0001_tickets.py"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_SQL = (MIGRATIONS / "tk_0001_tickets.py").read_text(encoding="utf-8")
 
 #: The migration's SQL with Python's adjacent-string-literal concatenation
@@ -482,3 +484,50 @@ def test_the_tenant_link_helper_emits_isolation_and_the_platform_one_a_revoke(
             )
             assert "ROW LEVEL SECURITY" not in sql
             assert "REVOKE ALL ON public.vcp_ticket_account FROM app_user" in sql
+
+
+def test_dunder_version_matches_the_distribution_and_manifest() -> None:
+    """A wheel that misreports its own version lies to every consumer that logs
+    it, and the release publishes whatever `pyproject` says regardless.
+
+    This drifted for real and went unnoticed across three releases:
+    `pyproject` and the manifest reached `0.1.0a3` while `__version__` sat at
+    `0.1.0a1`, because nothing here compared them. `dotmac-files` grew the same
+    guard after the same drift; ticketing had no equivalent until a4.
+    """
+    import tomllib
+
+    import dotmac_ticketing
+
+    declared = tomllib.loads(
+        (REPO_ROOT / "packages/dotmac-ticketing/pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )["tool"]["poetry"]["version"]
+    assert dotmac_ticketing.__version__ == declared, (
+        f"dotmac_ticketing.__version__ is {dotmac_ticketing.__version__!r} but "
+        f"the distribution declares {declared!r}"
+    )
+    assert (
+        module.version == declared
+    ), f"manifest version {module.version!r} != distribution {declared!r}"
+
+
+def test_the_lineage_builds_only_the_planes_the_assembly_selected() -> None:
+    """ADR-0028's central property, asserted on the artifact that runs.
+
+    a3 chose its planes with `all_bound(TENANT_REQUIRES)` — provider
+    availability standing in for product intent. Vendor CP is where those part
+    company, so the migration must read the SELECTION and nothing else.
+    """
+    tree = ast.parse(MIGRATION.read_text(encoding="utf-8"))
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "selected_module_planes" in called
+    assert "all_bound" not in called, (
+        "a bound provider is not a decision to install a plane — read the "
+        "assembly's ModulePlaneSelection instead"
+    )

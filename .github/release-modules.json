@@ -106,7 +106,7 @@
       "package_dir": "packages/dotmac-ticketing",
       "import_name": "dotmac_ticketing",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a60",
+      "kernel_floor": "0.1.0a61",
       "db_schema": "mod_tkt",
       "tag_prefix": "dotmac-ticketing-v",
       "wheel_contents": {
@@ -301,7 +301,7 @@
       "package_dir": "packages/dotmac-approvals",
       "import_name": "dotmac_approvals",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a60",
+      "kernel_floor": "0.1.0a61",
       "db_schema": "mod_approvals",
       "tag_prefix": "dotmac-approvals-v",
       "wheel_contents": {

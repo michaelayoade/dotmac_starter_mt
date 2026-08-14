@@ -51,7 +51,8 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
-from dotmac_kernel.prerequisites import all_bound, resolve_depends_on
+from dotmac_kernel.planes import ModulePlane, selected_module_planes
+from dotmac_kernel.prerequisites import resolve_depends_on
 from sqlalchemy.dialects import postgresql
 
 from alembic import op
@@ -66,21 +67,33 @@ branch_labels = ("ticketing",)
 # ERP hosts `public.tenants` itself and can never run kernel 0001 (ADR-0006 D1
 # amendment). Literals, not imported constants, so the composed gate can read
 # them statically and diff them against the manifest.
-# Split by PLANE (ADR-0027). The platform plane needs roles to grant to; the
-# tenant plane additionally needs a catalogue for its foreign keys and an RLS
-# predicate to evaluate. Merged into one list, this lineage demanded a tenant
-# scope in order to create ANY table — which made the module un-installable in
-# the vendor control plane, an assembly that has no tenant catalogue and never
-# will.
-PLATFORM_REQUIRES = ("module_database_roles.v1",)
+# Split by PLANE. The database roles are common to both; the tenant plane
+# additionally needs a catalogue for its foreign keys and an RLS predicate to
+# evaluate. Merged into one list, this lineage demanded a tenant scope in order
+# to create ANY table — which made the module un-installable in the vendor
+# control plane.
+#
+# These lists never SELECT a plane (ADR-0028). A binding says where an effect
+# comes from; it cannot say which part of this module the product intends to
+# install, and Vendor CP is the case that proves it — a truthful tenant
+# catalogue is bound there while only platform tickets are wanted.
+MODULE_CODE = "ticketing"
+
+COMMON_REQUIRES = ("module_database_roles.v1",)
 TENANT_REQUIRES = ("tenant_scope_catalog.v1",)
-REQUIRES = PLATFORM_REQUIRES + TENANT_REQUIRES
+PLATFORM_REQUIRES: tuple[str, ...] = ()
+REQUIRES = COMMON_REQUIRES + TENANT_REQUIRES + PLATFORM_REQUIRES
 
 # Resolved from this assembly's installed bindings, so Alembic still orders on a
-# concrete revision id.
-# A bound optional prerequisite still contributes a real ordering edge; an
-# unbound one contributes nothing, because the plane needing it is not built.
-depends_on = resolve_depends_on(PLATFORM_REQUIRES, optional=TENANT_REQUIRES)
+# concrete revision id. A plane's prerequisites contribute an ordering edge only
+# when that plane is selected: having a binding does not opt a plane in, and
+# selecting a plane without its prerequisite bound fails closed in `upgrade()`.
+depends_on = resolve_depends_on(
+    COMMON_REQUIRES,
+    module=MODULE_CODE,
+    tenant=TENANT_REQUIRES,
+    platform=PLATFORM_REQUIRES,
+)
 
 # A literal, not `module_schema("tkt")`. A migration is a frozen historical
 # artifact and must keep building the same schema even if a future kernel
@@ -97,22 +110,28 @@ _PLATFORM_COMMENTS = "platform_ticket_comments"
 def upgrade() -> None:
     # A binding is a claim about the database, so it is checked against the
     # database before any DDL runs.
-    require_prerequisites(op.get_bind(), PLATFORM_REQUIRES)
+    planes = selected_module_planes(MODULE_CODE)
+    tenant_plane = ModulePlane.TENANT in planes
+    platform_plane = ModulePlane.PLATFORM in planes
 
-    tenant_plane = all_bound(TENANT_REQUIRES)
+    require_prerequisites(op.get_bind(), COMMON_REQUIRES)
     if tenant_plane:
         require_prerequisites(op.get_bind(), TENANT_REQUIRES)
+    if platform_plane:
+        require_prerequisites(op.get_bind(), PLATFORM_REQUIRES)
 
     op.execute("CREATE SCHEMA IF NOT EXISTS mod_tkt;")
-    # `app_admin` joins `platform_api` because the platform plane below grants it
-    # DML: schema USAGE is a prerequisite for reaching any table in it.
-    op.execute("GRANT USAGE ON SCHEMA mod_tkt TO platform_api, app_admin;")
+    # `app_admin` owns the schema in every composition; the two online roles get
+    # USAGE only where their plane was selected, because a role must not hold
+    # reach into a schema holding nothing it may touch (kernel a57).
+    op.execute("GRANT USAGE ON SCHEMA mod_tkt TO app_admin;")
+    if platform_plane:
+        op.execute("GRANT USAGE ON SCHEMA mod_tkt TO platform_api;")
     if tenant_plane:
-        # Only where there is something for the tenant role to reach — a
-        # platform-only schema must not demand tenant-role USAGE (kernel a57).
         op.execute("GRANT USAGE ON SCHEMA mod_tkt TO app_user;")
 
-    _upgrade_platform_plane()
+    if platform_plane:
+        _upgrade_platform_plane()
     if tenant_plane:
         _upgrade_tenant_plane()
 
@@ -264,7 +283,7 @@ def _upgrade_tenant_plane() -> None:
 
 
 def _upgrade_platform_plane() -> None:
-    """Always built (ADR-0023/ADR-0027).
+    """Built when the assembly SELECTS this plane (ADR-0023, ADR-0028).
 
     No tenant_id, no RLS, and REVOKEd from app_user. See this file's docstring
     for why that is a contract rather than an omission.

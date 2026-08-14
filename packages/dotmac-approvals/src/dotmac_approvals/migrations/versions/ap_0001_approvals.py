@@ -39,7 +39,8 @@ from typing import Any
 
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
-from dotmac_kernel.prerequisites import all_bound, resolve_depends_on
+from dotmac_kernel.planes import ModulePlane, selected_module_planes
+from dotmac_kernel.prerequisites import resolve_depends_on
 
 from alembic import op
 
@@ -50,22 +51,25 @@ branch_labels = ("approvals",)
 # Literals, not imported constants: a migration is a snapshot of an accepted
 # decision, and the composed gate reads this list statically to diff it against
 # `dotmac_approvals.manifest`.
-# Split by PLANE (ADR-0027), not merged into one list. The platform plane needs
-# roles to grant to and nothing else; the tenant plane additionally needs a
-# tenant catalogue to point a foreign key at and an RLS predicate to evaluate.
-#
-# That split is what makes this module installable in the vendor control plane,
-# which has no tenant catalogue and never will — it is not a product data plane.
-# Under one merged list the lineage demanded a tenant scope in order to create
-# ANY table, so a platform-only assembly could not install it at all.
-PLATFORM_REQUIRES = ("module_database_roles.v1",)
+# Split by plane, not merged into one list. The database roles are common; the
+# tenant plane additionally needs a catalogue FK target and RLS function. These
+# lists never select a plane: Vendor CP composes a truthful tenant provider but
+# its assembly explicitly selects PLATFORM approvals only (ADR-0028).
+MODULE_CODE = "approvals"
+COMMON_REQUIRES = ("module_database_roles.v1",)
 TENANT_REQUIRES = ("tenant_scope_catalog.v1",)
-REQUIRES = PLATFORM_REQUIRES + TENANT_REQUIRES
+PLATFORM_REQUIRES: tuple[str, ...] = ()
+REQUIRES = COMMON_REQUIRES + TENANT_REQUIRES + PLATFORM_REQUIRES
 
-# A bound optional prerequisite still contributes a real ordering edge: where
-# the tenant plane IS built, it must still run after whatever supplies the
-# catalogue. Where it is not, the edge is simply absent.
-depends_on = resolve_depends_on(PLATFORM_REQUIRES, optional=TENANT_REQUIRES)
+# The explicit assembly selection determines which strict edges exist. Merely
+# having a binding does not opt a plane in, and selecting a plane without its
+# binding fails at script load.
+depends_on = resolve_depends_on(
+    COMMON_REQUIRES,
+    module=MODULE_CODE,
+    tenant=TENANT_REQUIRES,
+    platform=PLATFORM_REQUIRES,
+)
 
 _SCHEMA = "mod_approvals"
 
@@ -142,28 +146,30 @@ def _tenant_fk(name: str) -> sa.ForeignKeyConstraint:
 
 
 def upgrade() -> None:
-    # Before any DDL: the binding is a claim, so check it against the database.
-    require_prerequisites(op.get_bind(), PLATFORM_REQUIRES)
-
-    tenant_plane = all_bound(TENANT_REQUIRES)
-    if tenant_plane:
+    planes = selected_module_planes(MODULE_CODE)
+    # Before any DDL: every requirement of the selected planes is a claim and
+    # is re-proven against the live database.
+    require_prerequisites(op.get_bind(), COMMON_REQUIRES)
+    if ModulePlane.TENANT in planes:
         require_prerequisites(op.get_bind(), TENANT_REQUIRES)
+    if ModulePlane.PLATFORM in planes:
+        require_prerequisites(op.get_bind(), PLATFORM_REQUIRES)
 
     op.execute("CREATE SCHEMA IF NOT EXISTS mod_approvals;")
-    op.execute("GRANT USAGE ON SCHEMA mod_approvals TO platform_api, app_admin;")
-    if tenant_plane:
-        # Only when there is something here for the tenant role to reach. A
-        # platform-only schema must not demand tenant-role USAGE (kernel
-        # 0.1.0a57).
+    op.execute("GRANT USAGE ON SCHEMA mod_approvals TO app_admin;")
+    if ModulePlane.PLATFORM in planes:
+        op.execute("GRANT USAGE ON SCHEMA mod_approvals TO platform_api;")
+    if ModulePlane.TENANT in planes:
         op.execute("GRANT USAGE ON SCHEMA mod_approvals TO app_user;")
 
-    _upgrade_platform_plane()
-    if tenant_plane:
+    if ModulePlane.TENANT in planes:
         _upgrade_tenant_plane()
+    if ModulePlane.PLATFORM in planes:
+        _upgrade_platform_plane()
 
 
 def _upgrade_tenant_plane() -> None:
-    """Built only where the assembly bound `tenant_scope_catalog.v1`."""
+    """Built only where the assembly explicitly selected TENANT."""
     op.create_table(
         "approval_policies",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -274,7 +280,7 @@ def _upgrade_tenant_plane() -> None:
 
 
 def _upgrade_platform_plane() -> None:
-    """Always built: the control plane is the one both assemblies can operate."""
+    """Built only where the assembly explicitly selected PLATFORM."""
     op.create_table(
         "platform_approval_policies",
         sa.Column("id", sa.Uuid(), primary_key=True),

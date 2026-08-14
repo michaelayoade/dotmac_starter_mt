@@ -43,6 +43,7 @@ import dotmac_ui
 from dotmac_kernel.assembly import ProductAssemblySpec
 from dotmac_kernel.config import settings
 from dotmac_kernel.features import load_manifests
+from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 
 from app.features import FEATURE_MODULES
 from app.features.presentation.contract import BRAND_STYLESHEET_URL
@@ -97,6 +98,16 @@ assembly = ProductAssemblySpec(
         dotmac_template_studio.module,
         dotmac_ticketing.module,
     ],
+    # ADR-0028: a selectable module's planes are DECLARED here, never inferred
+    # from which prerequisites happen to be bound. This assembly is a tenant
+    # product that also keeps control-plane ticket state, so it selects both;
+    # the vendor control plane selects PLATFORM alone from the same lineage.
+    module_planes=(
+        ModulePlaneSelection(
+            module="ticketing",
+            planes=(ModulePlane.TENANT, ModulePlane.PLATFORM),
+        ),
+    ),
     web_enabled=settings.web_enabled,
     disabled_modules=_DISABLED_MODULES,
     packaged_static_dirs=(dotmac_ui.static_dir(),),

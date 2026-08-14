@@ -88,7 +88,7 @@ from dotmac_ticketing.vocabulary import (
     validate_reason,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a4"
 
 __all__ = [
     "CORE_REASONS",

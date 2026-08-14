@@ -1,6 +1,6 @@
 # ADR-0027: A plane declares its own prerequisites
 
-**Status:** Accepted
+**Status:** Superseded by ADR-0028 before publication
 **Date:** 2026-08-14
 **Decision owner:** Michael
 **Scope:** FLEET-WIDE for dual-plane modules.
@@ -8,6 +8,25 @@
 ADR-0006 D1 amendment (logical prerequisites), ADR-0026 (`dotmac-approvals`,
 whose Vendor CP cutover this unblocks), ADR-0017 (adoption is the scarce
 resource — this removes a structural bar to one), hard rule 27.
+
+## Supersession note — 2026-08-14
+
+Direct inspection after acceptance disproved this ADR's load-bearing inventory.
+Vendor CP `main` pins kernel `0.1.0a50` and its
+`src/vendor_cp/migrations.py` composes the kernel versions directory. Kernel
+0001 therefore really creates `public.tenants`, `tenant_domains`,
+`app_current_tenant_id()` and the database roles in that database. Its eleven
+vendor-local migrations are platform-only, but they are not the whole composed
+graph. The statement below that Vendor CP has neither tenant prerequisite was
+false.
+
+That exposed the contract defect: absence of a binding cannot distinguish
+"this product intentionally excludes the tenant plane" from "the assembly
+forgot the binding". CI exercised the reference both-plane path and did not run
+the platform-only migration against PostgreSQL. Kernel a60 and approvals a2
+were therefore withdrawn before publication. ADR-0028 replaces the selector
+with an explicit per-module assembly declaration while retaining per-plane
+prerequisite declarations.
 
 ## Context
 
