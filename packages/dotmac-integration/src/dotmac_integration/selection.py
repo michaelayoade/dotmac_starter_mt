@@ -102,7 +102,11 @@ def resolve_binding(
             ConnectorInstallation.connector_key == connector_key.strip().lower()
         )
 
-    rows = list(db.execute(query).all())
+    # Typed once, here: `db.execute(...).all()` yields untyped Rows, which made
+    # every `return` below an implicit Any escaping a declared return type.
+    rows: list[tuple[CapabilityBinding, ConnectorInstallation]] = list(
+        db.execute(query).all()
+    )
 
     if capability_binding_id is not None:
         if not rows:

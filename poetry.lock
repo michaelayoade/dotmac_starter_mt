@@ -585,7 +585,7 @@ url = "packages/dotmac-imports"
 
 [[package]]
 name = "dotmac-integration"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"

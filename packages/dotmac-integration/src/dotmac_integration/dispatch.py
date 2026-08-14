@@ -113,9 +113,9 @@ class PreparedDispatch:
     connector_key: str
     capability_id: str
     event_type: str
-    payload: dict
-    config: dict
-    secret_refs: dict
+    payload: dict[str, object]
+    config: dict[str, object]
+    secret_refs: dict[str, str]
     idempotency_key: str
     #: The revision the attempt is pinned to. Captured with the claim so a
     #: mid-flight configuration change cannot be recorded as though it ran.
