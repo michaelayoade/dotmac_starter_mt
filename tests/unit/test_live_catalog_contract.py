@@ -372,6 +372,101 @@ def test_an_undeclared_platform_table_still_gets_the_tenant_contract() -> None:
     assert any("RLS must be ENABLEd AND FORCEd" in v for v in violations), violations
 
 
+def test_a_platform_only_schema_does_not_demand_tenant_role_usage() -> None:
+    """The self-contradiction, and the reason this correction exists.
+
+    A platform-only module grants schema USAGE to the platform roles and nothing
+    to `app_user` — correctly, since that role must hold no privilege on any
+    table in it. The audit nonetheless demanded tenant-role USAGE, so a correct
+    schema failed. Granting it to pass would have been worse than the false
+    positive: reachability on a schema the tenant role must never read.
+    """
+    snapshot = _snapshot(
+        _platform_table(),
+        platform_tables=frozenset({"platform_tickets"}),
+        app_role_has_usage=False,
+        platform_role_has_usage=True,
+    )
+    assert audit_snapshot(snapshot) == ()
+
+
+def test_a_platform_only_schema_still_needs_the_platform_role_to_reach_it() -> None:
+    """A table grant is ineffective without schema USAGE, so a plane nobody can
+    reach is broken even when every prohibition passes."""
+    snapshot = _snapshot(
+        _platform_table(),
+        platform_tables=frozenset({"platform_tickets"}),
+        app_role_has_usage=False,
+        platform_role_has_usage=False,
+    )
+    violations = audit_snapshot(snapshot)
+    assert any(f"{DEFAULT_PLATFORM_ROLE!r} has no USAGE" in v for v in violations)
+    # And the message must name the PLANE, not just the role.
+    assert any("platform" in v for v in violations)
+
+
+def test_a_tenant_only_schema_still_demands_tenant_role_usage() -> None:
+    """SPECIFICITY. The relaxation is for platform-ONLY schemas; every module
+    shipped before ADR-0023 keeps this check exactly as it was."""
+    snapshot = _snapshot(_compliant_table(), app_role_has_usage=False)
+    violations = audit_snapshot(snapshot)
+    assert any(
+        f"tenant role {DEFAULT_APP_ROLE!r} has no USAGE" in v for v in violations
+    )
+    assert any("TENANT-plane" in v for v in violations)
+
+
+def test_a_mixed_schema_demands_both_roles() -> None:
+    """Both planes present means both roles must be able to reach the schema."""
+    snapshot = _snapshot(
+        _compliant_table(),
+        _platform_table(),
+        platform_tables=frozenset({"platform_tickets"}),
+        app_role_has_usage=False,
+        platform_role_has_usage=False,
+    )
+    violations = audit_snapshot(snapshot)
+    assert any(
+        f"tenant role {DEFAULT_APP_ROLE!r} has no USAGE" in v for v in violations
+    )
+    assert any(f"{DEFAULT_PLATFORM_ROLE!r} has no USAGE" in v for v in violations)
+
+
+def test_a_declared_but_unmigrated_tenant_table_still_demands_usage() -> None:
+    """Declared beats live. A tenant table whose migration has not run still
+    needs the tenant role to reach the schema, and reporting only the missing
+    table would send someone to fix the wrong thing."""
+    snapshot = _snapshot(
+        _platform_table(),
+        declared_tables=frozenset({"platform_tickets", "not_yet_created"}),
+        platform_tables=frozenset({"platform_tickets"}),
+        app_role_has_usage=False,
+    )
+    violations = audit_snapshot(snapshot)
+    assert any(
+        f"tenant role {DEFAULT_APP_ROLE!r} has no USAGE" in v for v in violations
+    )
+
+
+def test_every_table_privilege_and_rls_check_survives_the_correction() -> None:
+    """The correction touches reachability only. A platform table that breaks a
+    prohibition must still fail, or relaxing USAGE would have relaxed the plane.
+    """
+    leaky = _snapshot(
+        _platform_table(app_role_privileges=("TRUNCATE",)),
+        platform_tables=frozenset({"platform_tickets"}),
+        app_role_has_usage=False,
+    )
+    assert any("effectively holds" in v for v in audit_snapshot(leaky))
+
+    with_rls = _snapshot(
+        _platform_table(rls_enabled=True, rls_forced=True),
+        platform_tables=frozenset({"platform_tickets"}),
+        app_role_has_usage=False,
+    )
+    assert audit_snapshot(with_rls)
+
+
 def test_a_foreign_key_across_the_planes_is_flagged() -> None:
     """They share a lifecycle, never a row. An FK is the one crossing the
     database itself would enforce and therefore permit."""

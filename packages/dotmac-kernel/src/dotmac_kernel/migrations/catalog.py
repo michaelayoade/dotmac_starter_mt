@@ -37,8 +37,12 @@ synthetic snapshots covering each violation, while the executable seam
 7. **Table ownership matches the manifest**: no undeclared table in the schema,
    no declared table missing from it, and none of the module's tables squatting
    in ``public``.
-8. The application role has **USAGE on the schema** and no privilege on a
-   module schema it does not own.
+8. The role that must REACH the tables has **USAGE on the schema** — the
+   tenant role when the schema holds tenant-plane tables, the online platform
+   role when it holds platform-plane ones, both when it holds both. Asking for
+   tenant-role USAGE unconditionally made the contract self-contradictory on a
+   platform-only schema, where that role is separately required to hold no
+   privilege at all.
 
 ## Two planes, two contracts (ADR-0023)
 
@@ -324,6 +328,18 @@ class SchemaSnapshot:
 # ── The decision (pure) ─────────────────────────────────────────────────────
 
 
+def _has_tenant_plane(snapshot: SchemaSnapshot, live_tables: set[str]) -> bool:
+    """Does this schema hold any table held to the TENANT contract?
+
+    Declared tables are preferred over live ones: a module that declares a
+    tenant table whose migration has not run yet still needs the tenant role to
+    reach the schema, and reporting only the missing table would send someone
+    to fix the wrong thing.
+    """
+    known = set(snapshot.declared_tables) or live_tables
+    return bool(known - snapshot.platform_tables)
+
+
 def audit_snapshot(
     snapshot: SchemaSnapshot,
     *,
@@ -343,13 +359,31 @@ def audit_snapshot(
         )
 
     violations: list[str] = []
-    if not snapshot.app_role_has_usage:
+    live_tables = {table.name for table in snapshot.tables}
+
+    # Schema USAGE is required of the role that must REACH the tables, and only
+    # of that role.
+    #
+    # This was unconditional, which made the contract SELF-CONTRADICTORY on a
+    # platform-only schema: the tenant role was required to hold USAGE on a
+    # schema in which it is separately required to hold no privilege on any
+    # table. `dotmac-integration` — the first module whose tables are all
+    # platform-plane — correctly grants USAGE to the platform roles alone, and
+    # the audit failed a schema that was right.
+    #
+    # Granting `app_user` USAGE to satisfy the old check would have been worse
+    # than the false positive: pointless reachability on a schema the tenant
+    # role must never read.
+    #
+    # Found by the first real-Postgres run of a platform-only module. A
+    # synthetic snapshot could not show it, because the contradiction only
+    # appears when both halves meet one live schema.
+    if _has_tenant_plane(snapshot, live_tables) and not snapshot.app_role_has_usage:
         violations.append(
-            f"{schema}: role {app_role!r} has no USAGE on the schema — the "
-            "module's tables are unreachable at request time"
+            f"{schema}: tenant role {app_role!r} has no USAGE on the schema — "
+            "the module's TENANT-plane tables are unreachable at request time"
         )
 
-    live_tables = {table.name for table in snapshot.tables}
     if snapshot.declared_tables:
         for undeclared in sorted(live_tables - snapshot.declared_tables):
             violations.append(
