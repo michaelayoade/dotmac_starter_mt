@@ -230,7 +230,7 @@ def test_public_package_import_needs_no_database_configuration() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "0.1.0a1"
+    assert result.stdout.strip() == "0.1.0a2"
 
 
 def test_lineage_passes_the_composed_migration_gate() -> None:
@@ -275,3 +275,28 @@ def test_the_gate_refuses_this_module_in_an_assembly_that_binds_nothing() -> Non
     )
     assert not report.ok
     assert any("binds no provider" in v for v in report.violations)
+
+
+def test_dunder_version_matches_the_distribution_and_manifest() -> None:
+    """A wheel that misreports its own version lies to every consumer that logs
+    it, and the release publishes whatever `pyproject` says regardless.
+
+    This drifted for real: `pyproject` and the manifest moved to `0.1.0a2` while
+    `__version__` stayed `0.1.0a1`, and the test above PINNED the stale value —
+    so the suite actively protected the drift. The kernel has had this guard
+    since its own version sync test; files did not.
+    """
+    import tomllib
+
+    declared = tomllib.loads(
+        (REPO_ROOT / "packages/dotmac-files/pyproject.toml").read_text(encoding="utf-8")
+    )["tool"]["poetry"]["version"]
+    import dotmac_files
+
+    assert dotmac_files.__version__ == declared, (
+        f"dotmac_files.__version__ is {dotmac_files.__version__!r} but the "
+        f"distribution declares {declared!r}"
+    )
+    assert (
+        module.version == declared
+    ), f"manifest version {module.version!r} != distribution {declared!r}"

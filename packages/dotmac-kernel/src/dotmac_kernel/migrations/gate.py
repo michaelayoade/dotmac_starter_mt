@@ -728,6 +728,21 @@ def _check_prerequisites(
     provides_by_owner = {
         owner.owner: set(owner.provides) for owner in registry.owners()
     }
+    # Host owners (`kernel`, `assembly`) cannot usefully declare `provides` in a
+    # SHARED ledger row. `MIGRATION_OWNER_LEDGER` ships in the kernel and is the
+    # same for every deployment, but what an assembly supplies is a per-deployment
+    # fact: ERP's `assembly` lineage hosts the tenant catalogue, and the vendor
+    # control plane's does not. Declaring `provides` centrally would assert both
+    # at once, and the false half is the dangerous one — it would tell a
+    # tenant-scoped module that a platform-only deployment can host it.
+    #
+    # So a host owner is accepted as a provider without a central declaration,
+    # and `require_prerequisites` proves the effect against that specific
+    # database instead. Module owners keep the strict check: their ledger row IS
+    # fleet-wide and immutable, so `provides` there is a real, checkable claim.
+    host_owners = {
+        owner.owner for owner in registry.owners() if owner.db_schema is None
+    }
 
     # 1 — a module lineage may not name a foreign revision.
     for record in records:
@@ -784,6 +799,9 @@ def _check_prerequisites(
                     "composition — an unknown owner cannot be checked, so it is "
                     "refused rather than skipped"
                 )
+            elif binding.provider_owner in host_owners:
+                # Per-deployment by nature; proven by the live verifier, not here.
+                pass
             elif name not in claimed:
                 violations.append(
                     f"module {code!r} requires {name!r}, bound to revision "
