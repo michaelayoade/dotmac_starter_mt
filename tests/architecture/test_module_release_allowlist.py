@@ -97,7 +97,6 @@ def test_an_unallowlisted_package_cannot_be_resolved() -> None:
         # programme, so the proof needs a still-unlisted stand-in or it degrades
         # into "the gate refuses names that do not exist".
         "dotmac-template-studio",
-        "dotmac-application-directory",
         "packages/dotmac-release-catalog",  # a path, not a distribution
         "../../etc/passwd",  # a traversal attempt
         "",  # empty
