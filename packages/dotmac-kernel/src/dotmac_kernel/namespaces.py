@@ -649,12 +649,16 @@ class NamespaceRegistry:
         # ADR-0027: what this schema's TENANT plane needs, so a gate can ask
         # whether the plane is installable in THIS assembly rather than
         # assuming every declared table exists everywhere.
+        # A host owner has no module schema, so it is skipped rather than
+        # keyed by None — written as a loop because the narrowing that makes
+        # that safe has to be visible to a reader and to the type checker.
         schema_of = {o.owner: o.db_schema for o in declared}
-        self._tenant_requires_by_schema: dict[str, tuple[str, ...]] = {
-            schema_of[owner]: tuple(names)
-            for owner, names in (tenant_requires_by_owner or {}).items()
-            if schema_of.get(owner) is not None and names
-        }
+        self._tenant_requires_by_schema: dict[str, tuple[str, ...]] = {}
+        for owner, names in (tenant_requires_by_owner or {}).items():
+            schema = schema_of.get(owner)
+            if schema is None or not names:
+                continue
+            self._tenant_requires_by_schema[schema] = tuple(names)
 
     # ── Construction from manifests ─────────────────────────────────────────
 

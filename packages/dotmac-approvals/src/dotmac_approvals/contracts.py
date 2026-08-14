@@ -270,7 +270,16 @@ class PolicyRevision:
     @classmethod
     def from_document(cls, document: Mapping[str, Any]) -> PolicyRevision:
         levels = document["levels"]
-        assert isinstance(levels, Sequence)
+        # A typed refusal, not an `assert`. This parses a document read back
+        # from the database, so the check must survive `python -O` — an assert
+        # is removed there, and a malformed row would reach `ApprovalLevel
+        # .from_document` as whatever it happened to be. `InvalidPolicy` is also
+        # what every other malformed-policy path already raises.
+        if isinstance(levels, str) or not isinstance(levels, Sequence):
+            raise InvalidPolicy(
+                f"policy {document.get('policy_code')!r} stores `levels` as "
+                f"{type(levels).__name__}; an ordered sequence is required"
+            )
         return cls(
             policy_code=str(document["policy_code"]),
             version=int(document["version"]),
