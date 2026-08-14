@@ -46,8 +46,8 @@ from dotmac_ticketing.lifecycle import Status
 __all__ = [
     "ReasonSpec",
     "UnknownReasonError",
-    "registered_reasons",
     "register_reasons",
+    "registered_reasons",
     "reset_registry_for_tests",
     "validate_reason",
 ]

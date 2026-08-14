@@ -1,14 +1,15 @@
 # Changelog — dotmac-approvals
 
 All notable changes to the `dotmac-approvals` distribution. This package follows
-[Semantic Versioning](https://semver.org). Nothing has been published yet; the
-`.github/release-modules.json` entry landed once the live Postgres migration and
-catalog gate passed, which is what makes a release possible rather than one that
-has happened.
+[Semantic Versioning](https://semver.org). The `.github/release-modules.json`
+entry landed once the live Postgres migration and catalog gate passed; `0.1.0a1`
+and `0.1.0a2` have since been published.
 
 ## 0.1.0a3 — 2026-08-14
 
-Corrects the withdrawn a2 plane selector (ADR-0028). The manifest declares all
+Corrects a2's plane selector (ADR-0028). **a2 was published**, so an assembly
+already on it must add an explicit selection — see the kernel a61 changelog's
+"Migrating from a60" for the three-step change. The manifest declares all
 three supported installations — tenant-only, platform-only and both — and an
 assembly must select one explicitly. `ap_0001` builds exactly that selection;
 truthfully binding a tenant catalogue no longer opts the tenant tables in.
@@ -19,7 +20,7 @@ tenant approval tables are absent while all three platform tables are usable.
 
 ## 0.1.0a2 — 2026-08-14
 
-**Withdrawn before publication; superseded by a3.** This version incorrectly
+**Published, then superseded by a3.** This version incorrectly
 used absence of a tenant prerequisite binding as installation intent. Vendor CP
 has that provider through its composed kernel lineage, so the premise and the
 selector were both wrong.
