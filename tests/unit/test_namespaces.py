@@ -182,7 +182,11 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # than this repository's — its consumer is the Tenant Workspace.
     # `files` is the sixth, allocated to the optional byte-lifecycle owner in
     # ADR-0022, and `imports` the seventh, to the bulk-import run ledger in
-    # ADR-0025. None of these allocations installs behaviour in the kernel.
+    # ADR-0025. `approvals` (ADR-0026) is the ninth, and the first allocated for
+    # a capability that is real in BOTH planes in production — ERP approves
+    # back-office subjects for a tenant, the vendor control plane approves fleet
+    # plans with no tenant at all. None of these allocations installs behaviour
+    # in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -192,6 +196,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "files",
         "imports",
         "integration",
+        "approvals",
     }
 
 

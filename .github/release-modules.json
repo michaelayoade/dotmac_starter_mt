@@ -272,6 +272,62 @@
           "python"
         ]
       }
+    },
+    "dotmac-approvals": {
+      "$comment": [
+        "Approval state on two declared planes (ADR-0026). Listed only now that",
+        "the live Postgres migration and catalog gate has passed in this",
+        "repository's integration job: absence from this file was the safety",
+        "mechanism while it had not, and ADR-0026 section 8 says the entry lands",
+        "with the proof rather than ahead of it.",
+        "",
+        "kernel_floor is a59, its OWN ledger allocation. It consumes",
+        "platform_tables (a53) and the logical prerequisite contract (a56), but",
+        "the floor is the highest of everything the module needs and its",
+        "allocation is the highest - the ordinary case, like dotmac-integration",
+        "and unlike dotmac-ticketing.",
+        "",
+        "The migration is a required wheel content. This repository does not",
+        "compose the module - `app/assembly.py` omits it and `alembic.ini`",
+        "carries no `ap` lineage - so a wheel that shipped the manifest but",
+        "dropped the lineage would fail first in an ADOPTER's deployment rather",
+        "than here.",
+        "",
+        "No `alembic` in allowed_requires: the module ships no helper that emits",
+        "DDL into a consuming product's migration, so Alembic is a packaging",
+        "input rather than a runtime import. `dotmac-ticketing` remains the only",
+        "module permitted it."
+      ],
+      "package_dir": "packages/dotmac-approvals",
+      "import_name": "dotmac_approvals",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a59",
+      "db_schema": "mod_approvals",
+      "tag_prefix": "dotmac-approvals-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_approvals/py.typed",
+          "dotmac_approvals/manifest.py",
+          "dotmac_approvals/contracts.py",
+          "dotmac_approvals/policy.py",
+          "dotmac_approvals/models.py",
+          "dotmac_approvals/service.py",
+          "dotmac_approvals/outbox.py",
+          "dotmac_approvals/migrations/__init__.py",
+          "dotmac_approvals/migrations/versions/ap_0001_approvals.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

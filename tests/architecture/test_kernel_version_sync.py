@@ -83,6 +83,10 @@ LEDGER_ALLOCATION_RELEASES = {
     # `platform_tables` (a53) and `requires` (a56): the floor is the higher of
     # the two, and its own allocation is the higher.
     "dotmac-integration": "0.1.0a58",
+    # ADR-0026. Same shape as integration above: it consumes `platform_tables`
+    # (a53) and `requires` (a56), but its own allocation is a59 and the floor is
+    # always the higher of the two.
+    "dotmac-approvals": "0.1.0a59",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
