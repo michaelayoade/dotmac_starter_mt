@@ -38,6 +38,7 @@ from dotmac_integration.spi import (
     Diagnostic,
     DispatchRequest,
     InboundEvent,
+    IngressHandler,
     SpiRange,
 )
 
@@ -132,8 +133,8 @@ class FakePlugin:
     #: not a Session", true for reasons that have nothing to do with the engine
     #: — while the route a session would actually take is a `dict[str, Any]`
     #: config VALUE, which no field-type check inspects.
-    configs_seen: list[dict] = field(default_factory=list)
-    secrets_seen: list[dict] = field(default_factory=list)
+    configs_seen: list[dict[str, object]] = field(default_factory=list)
+    secrets_seen: list[dict[str, str]] = field(default_factory=list)
     #: Make `verify` and `challenge` throw, driving the engine's
     #: `ConnectorRaised` path — including the assertion that the thrown
     #: message, built from provider-controlled bytes, never escapes.
@@ -169,7 +170,7 @@ class FakePlugin:
 
         return _handle
 
-    def ingress_handler_for(self, capability_id: str):
+    def ingress_handler_for(self, capability_id: str) -> IngressHandler:
         """An ingress handler that needs no provider and no credentials.
 
         `verify` answers from the `signature_valid` knob rather than computing an
@@ -183,7 +184,11 @@ class FakePlugin:
 
         class _Ingress:
             def challenge(
-                self, params: Mapping[str, str], *, config: dict, secrets: dict
+                self,
+                params: Mapping[str, str],
+                *,
+                config: dict[str, object],
+                secrets: dict[str, str],
             ) -> str | None:
                 fake.challenged.append(dict(params))
                 fake.configs_seen.append(config)
@@ -201,8 +206,8 @@ class FakePlugin:
                 raw_body: bytes,
                 headers: Mapping[str, str],
                 *,
-                config: dict,
-                secrets: dict,
+                config: dict[str, object],
+                secrets: dict[str, str],
             ) -> bool:
                 fake.verified.append(raw_body)
                 fake.configs_seen.append(config)
@@ -212,7 +217,11 @@ class FakePlugin:
                 return fake.signature_valid
 
             def normalize(
-                self, raw_body: bytes, headers: Mapping[str, str], *, config: dict
+                self,
+                raw_body: bytes,
+                headers: Mapping[str, str],
+                *,
+                config: dict[str, object],
             ) -> tuple[InboundEvent, ...]:
                 fake.normalized.append(raw_body)
                 fake.configs_seen.append(config)

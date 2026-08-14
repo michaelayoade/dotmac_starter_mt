@@ -321,7 +321,7 @@ class InboundEvent:
 
     provider_event_id: str
     event_type: str
-    payload: dict
+    payload: dict[str, object]
 
 
 @runtime_checkable
@@ -354,7 +354,11 @@ class IngressHandler(Protocol):
     """
 
     def challenge(
-        self, params: Mapping[str, str], *, config: dict, secrets: dict
+        self,
+        params: Mapping[str, str],
+        *,
+        config: dict[str, object],
+        secrets: dict[str, str],
     ) -> str | None: ...
 
     def verify(
@@ -362,12 +366,12 @@ class IngressHandler(Protocol):
         raw_body: bytes,
         headers: Mapping[str, str],
         *,
-        config: dict,
-        secrets: dict,
+        config: dict[str, object],
+        secrets: dict[str, str],
     ) -> bool: ...
 
     def normalize(
-        self, raw_body: bytes, headers: Mapping[str, str], *, config: dict
+        self, raw_body: bytes, headers: Mapping[str, str], *, config: dict[str, object]
     ) -> tuple[InboundEvent, ...]: ...
 
 
@@ -382,7 +386,11 @@ class PollHandler(Protocol):
     """
 
     def poll(
-        self, cursor: str | None, *, config: dict, secrets: dict
+        self,
+        cursor: str | None,
+        *,
+        config: dict[str, object],
+        secrets: dict[str, str],
     ) -> tuple[tuple[InboundEvent, ...], str | None]: ...
 
 
