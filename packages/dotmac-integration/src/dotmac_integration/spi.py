@@ -331,9 +331,16 @@ class IngressHandler(Protocol):
     Three separable jobs, kept separate because they have different inputs and
     different failure meanings:
 
-    * `challenge` answers the provider's subscription handshake. Returning
-      `None` means "not a handshake for me" — the caller then treats the request
-      as a delivery rather than guessing from the HTTP verb.
+    * `challenge` answers the provider's subscription handshake. It is consulted
+      for a request carrying NO BYTES — a protocol fact, since a bodyless
+      request cannot carry a signed payload, rather than a guess from the HTTP
+      verb. Returning `None` there is a REFUSAL, not a fall-through to the
+      delivery path: the engine answers 400 and `verify` is never reached.
+      Offering every bodied delivery to `challenge` first would let a plugin
+      that returns non-`None` by accident silently swallow a batch of real
+      events, so the engine does not. A connector whose provider confirms a
+      subscription with a BODIED request is therefore not yet serviceable —
+      stated here rather than discovered at integration time.
     * `verify` decides authenticity from the RAW bytes. It receives the body
       exactly as received, because every provider worth verifying signs the
       bytes and not a re-serialization of them.

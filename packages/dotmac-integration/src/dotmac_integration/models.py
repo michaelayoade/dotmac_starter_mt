@@ -233,6 +233,14 @@ class CapabilityBinding(Base, TimestampMixin):
         # Supports the selection query; deliberately NOT unique — see the module
         # docstring.
         Index("ix_capability_bindings_capability_state", "capability_id", "state"),
+        # A unique INDEX rather than a UniqueConstraint: Postgres treats NULLs
+        # as distinct in a unique index, so every UNMINTED binding coexists
+        # while a minted key can never be claimed by two bindings.
+        Index(
+            "uq_capability_bindings_ingress_endpoint",
+            "ingress_endpoint_key",
+            unique=True,
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -245,6 +253,23 @@ class CapabilityBinding(Base, TimestampMixin):
     #: A capability CONTRACT id, e.g. `ticket.observation.v1`. Must be declared
     #: by the installation's connector manifest — see `activation`.
     capability_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    #: The ONE stable identifier an ingress URL addresses, and NULL until
+    #: minted. Three properties the primary key cannot offer:
+    #:
+    #: * **minted** — an endpoint is a deliberate act. With the PK as the
+    #:   address every binding in the fleet, delivery-only ones included, would
+    #:   carry a live URL a stranger could drive the SPI through.
+    #: * **rotatable** — the PK is FK-referenced `ON DELETE CASCADE` from three
+    #:   tables and copied onto delivery rows, so changing it after a leak
+    #:   means rewriting the inbox history. Rotating this column keeps every
+    #:   receipt, because receipts are keyed on the BINDING.
+    #: * **undisclosed** — the PK is already interpolated into operator-facing
+    #:   error text (`selection`, `dispatch`) and destined for an admin UI.
+    #:
+    #: Never a `(connector_key, capability_id)` pair: several installations may
+    #: serve one such pair (a production and a test provider account), so the
+    #: pair cannot address one endpoint unambiguously.
+    ingress_endpoint_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     state: Mapped[str] = mapped_column(
         String(24), nullable=False, server_default="disabled"
     )
@@ -350,9 +375,11 @@ class EventSubscription(Base, TimestampMixin):
 class InboxReceipt(Base):
     """A verified inbound provider event, recorded once.
 
-    `(installation_id, provider_event_id)` is the DEDUPLICATION key, and it is a
-    database constraint rather than a service check because two webhook workers
-    racing the same redelivery is the normal case, not the edge case.
+    `(capability_binding_id, provider_event_id)` is the DEDUPLICATION key — the
+    BINDING, not the installation, matching both the constraint below and
+    `receive_verified`'s query. It is a database constraint rather than a
+    service check because two webhook workers racing the same redelivery is the
+    normal case, not the edge case.
 
     `payload_digest` makes the stronger statement: the same event id arriving
     with DIFFERENT content is a provider identity collision, and the service

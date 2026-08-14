@@ -32,9 +32,10 @@ retries after a timeout.
 
 from __future__ import annotations
 
+import secrets as _secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
@@ -45,7 +46,12 @@ from dotmac_integration.models import (
     ConnectorInstallation,
 )
 from dotmac_integration.secret_refs import validate_config_revision
-from dotmac_integration.spi import accepts_manifest_digest
+from dotmac_integration.spi import (
+    ConnectorMode,
+    ModeNotDeclaredError,
+    accepts_manifest_digest,
+    require_mode,
+)
 
 __all__ = [
     "AdoptionPreview",
@@ -55,10 +61,13 @@ __all__ = [
     "create_draft",
     "disable",
     "enable",
+    "mint_ingress_endpoint",
     "preview_adoption",
     "put_config_revision",
     "quarantine",
     "retire",
+    "revoke_ingress_endpoint",
+    "rotate_ingress_endpoint",
     "set_binding_enabled",
 ]
 
@@ -223,6 +232,130 @@ def set_binding_enabled(
     binding.updated_by = actor
     db.flush()
     return binding
+
+
+# ── The ingress endpoint ────────────────────────────────────────────────────
+#
+# An ingress URL addresses ONE minted key on ONE binding. Minting is a
+# deliberate act rather than a property every binding has: with the primary key
+# as the address, every binding in the fleet — delivery-only ones included —
+# would carry a live URL, and the PK is already disclosed in operator-facing
+# error text. An unminted binding is a 404 that no plugin ever sees.
+#
+# No audit action is DECLARED for these yet. `manifest.py`'s stated rule is that
+# a declared code with no writer is dead vocabulary that reads as a working
+# trail; minting is security-relevant and will be audited in the same change as
+# the admin route and the guard that protects it.
+
+#: 24 bytes of `secrets.token_hex` — 192 bits, 48 lowercase hex characters, and
+#: exactly the shape `ingress._ENDPOINT_KEY_RE` admits before it will query.
+_ENDPOINT_KEY_BYTES: Final[int] = 24
+
+
+def _fresh_endpoint_key(db: Any, binding: CapabilityBinding) -> str:
+    """Assign a new key, retrying ONCE against the unique index.
+
+    192 bits makes a collision fictional, but a bare insert that CAN raise is
+    worse than a loop that cannot. The attempt runs inside a SAVEPOINT rather
+    than a transaction: this module never rolls back a caller's unit of work,
+    and a failed flush without a savepoint would leave the session unusable.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    for remaining in (1, 0):
+        key = _secrets.token_hex(_ENDPOINT_KEY_BYTES)
+        try:
+            with db.begin_nested():
+                binding.ingress_endpoint_key = key
+                db.flush()
+        except IntegrityError:
+            if not remaining:
+                raise
+            continue
+        return key
+    raise LifecycleError("could not mint a distinct ingress endpoint key")
+
+
+def mint_ingress_endpoint(
+    db: Any,
+    binding: CapabilityBinding,
+    *,
+    registry: ConnectorRegistry,
+    actor: str | None = None,
+) -> str:
+    """Give this binding an ingress address. Refuses if it already has one.
+
+    Gated on the connector declaring INGRESS: minting an endpoint for a
+    connector that cannot receive creates a URL whose only possible answer is
+    503, and hands out an address that lets a stranger reach the SPI path for
+    nothing.
+
+    Re-minting is refused rather than treated as rotation. The two are different
+    intentions — one is "this binding should be reachable", the other is "the
+    address it already publishes has been compromised" — and only the second
+    should silently retire a URL that lives in a third party's console.
+    """
+    if binding.ingress_endpoint_key is not None:
+        raise LifecycleError(
+            f"binding {binding.id} already publishes an ingress endpoint; "
+            "rotate it deliberately rather than minting a second address"
+        )
+
+    installation = db.get(ConnectorInstallation, binding.installation_id)
+    if installation is None:
+        raise LifecycleError(f"binding {binding.id} has no installation")
+    plugin = registry.plugin(installation.connector_key)
+    try:
+        require_mode(plugin, ConnectorMode.INGRESS)
+    except ModeNotDeclaredError as exc:
+        raise LifecycleError(
+            f"connector {installation.connector_key!r} cannot receive, so an "
+            f"ingress endpoint for binding {binding.id} would answer nothing "
+            f"but 503: {exc}"
+        ) from exc
+
+    key = _fresh_endpoint_key(db, binding)
+    binding.updated_by = actor
+    db.flush()
+    return key
+
+
+def rotate_ingress_endpoint(
+    db: Any, binding: CapabilityBinding, *, actor: str | None = None
+) -> str:
+    """Replace the published address, keeping the entire inbox history.
+
+    Receipts are keyed on the BINDING, so rotation retires a URL without
+    touching a single row of evidence — the property the primary key cannot
+    offer, since it is FK-referenced from three tables.
+
+    No mode re-check and no registry: rotation cannot make an endpoint exist
+    that did not, so it cannot bypass the gate `mint_ingress_endpoint` applies.
+    An unminted binding is refused for exactly that reason.
+    """
+    if binding.ingress_endpoint_key is None:
+        raise LifecycleError(
+            f"binding {binding.id} publishes no ingress endpoint; there is "
+            "nothing to rotate. Mint one, which is where the mode gate lives"
+        )
+    key = _fresh_endpoint_key(db, binding)
+    binding.updated_by = actor
+    db.flush()
+    return key
+
+
+def revoke_ingress_endpoint(
+    db: Any, binding: CapabilityBinding, *, actor: str | None = None
+) -> None:
+    """Withdraw the address. The endpoint 404s; the binding is untouched.
+
+    Deliberately not the same act as disabling the binding: a revoked endpoint
+    stops being reachable while the binding keeps delivering and keeps every
+    receipt it ever recorded.
+    """
+    binding.ingress_endpoint_key = None
+    binding.updated_by = actor
+    db.flush()
 
 
 def enable(

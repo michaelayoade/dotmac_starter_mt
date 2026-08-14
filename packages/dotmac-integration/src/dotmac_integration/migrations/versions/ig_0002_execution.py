@@ -6,8 +6,10 @@ no `tenant_id`, no RLS, GRANT to the platform roles and **REVOKE ALL from
 
 ## Three mechanisms, three different concurrency defences
 
-`inbox_receipts` — `(installation_id, provider_event_id)` UNIQUE is the
-deduplication key, in the database rather than in a service, because two webhook
+`inbox_receipts` — `(capability_binding_id, provider_event_id)` UNIQUE is the
+deduplication key, matching the DDL below rather than the installation-scoped
+key an earlier draft of this docstring claimed. In the database rather than in a
+service, because two webhook
 workers racing one redelivery is the normal case. `payload_digest` is what lets
 the service tell a redelivery from a provider identity collision.
 

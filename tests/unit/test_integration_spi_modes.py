@@ -202,10 +202,15 @@ def test_an_ingress_handler_can_reject() -> None:
 
 def test_challenge_returns_none_when_it_is_not_a_handshake() -> None:
     """`None` means "not mine", so the caller never has to guess from the HTTP
-    verb which kind of request it is holding."""
+    verb which kind of request it is holding.
+
+    The kit's fake reads a NEUTRAL `"challenge"` parameter. Which parameter
+    carries a real handshake echo is the connector's business, and naming a
+    particular provider's would breach ADR-0024 § 7 inside the module itself.
+    """
     handler = fake_plugin().ingress_handler_for("conformance.echo.v1")
     assert handler.challenge({}, config={}, secrets={}) is None
-    assert handler.challenge({"hub.challenge": "abc"}, config={}, secrets={}) == "abc"
+    assert handler.challenge({"challenge": "abc"}, config={}, secrets={}) == "abc"
 
 
 def test_an_undeclared_capability_has_no_ingress_handler() -> None:

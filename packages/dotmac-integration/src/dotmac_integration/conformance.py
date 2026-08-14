@@ -118,6 +118,33 @@ class FakePlugin:
     #: Every raw body `verify` was handed, so a test can assert the EXACT bytes
     #: crossed the boundary — a re-serialization would invalidate a real HMAC.
     verified: list[bytes] = field(default_factory=list)
+    #: Every raw body `normalize` was handed. Kept SEPARATE from `verified` so a
+    #: test can assert normalization never ran on a body whose signature was
+    #: rejected — "nothing was written" would still pass if it had.
+    normalized: list[bytes] = field(default_factory=list)
+    #: Every params mapping `challenge` was handed, WHOLE. A test asserts the
+    #: entire mapping crossed rather than a key the module selected, because
+    #: selecting one would be provider knowledge in a module that may hold none.
+    challenged: list[Mapping[str, str]] = field(default_factory=list)
+    #: Every `config` mapping an ingress call was handed, and every `secrets`
+    #: one. Recorded because "no database session reached the plugin" is
+    #: otherwise asserted about the raw bodies — where it reduces to "bytes are
+    #: not a Session", true for reasons that have nothing to do with the engine
+    #: — while the route a session would actually take is a `dict[str, Any]`
+    #: config VALUE, which no field-type check inspects.
+    configs_seen: list[dict] = field(default_factory=list)
+    secrets_seen: list[dict] = field(default_factory=list)
+    #: Make `verify` and `challenge` throw, driving the engine's
+    #: `ConnectorRaised` path — including the assertion that the thrown
+    #: message, built from provider-controlled bytes, never escapes.
+    ingress_raises: BaseException | None = None
+    #: The same for `normalize`, separately: a throw AFTER a good signature is
+    #: the case where a partial batch would otherwise be tempting.
+    normalize_raises: BaseException | None = None
+    #: Return a `list` instead of a `tuple`, driving `ConnectorContract`. A
+    #: plugin that hands back the wrong container is not a plugin whose output
+    #: the engine may iterate.
+    ingress_contract_broken: bool = False
 
     @property
     def manifest(self) -> ConnectorManifest:
@@ -158,7 +185,16 @@ class FakePlugin:
             def challenge(
                 self, params: Mapping[str, str], *, config: dict, secrets: dict
             ) -> str | None:
-                return params.get("hub.challenge")
+                fake.challenged.append(dict(params))
+                fake.configs_seen.append(config)
+                fake.secrets_seen.append(secrets)
+                if fake.ingress_raises is not None:
+                    raise fake.ingress_raises
+                # A NEUTRAL key. The kit ships inside a module that may not name
+                # a provider, and a real provider's handshake parameter is that
+                # provider's business — the engine hands over the whole mapping
+                # precisely so the connector, not this module, picks the key.
+                return params.get("challenge")
 
             def verify(
                 self,
@@ -169,11 +205,21 @@ class FakePlugin:
                 secrets: dict,
             ) -> bool:
                 fake.verified.append(raw_body)
+                fake.configs_seen.append(config)
+                fake.secrets_seen.append(secrets)
+                if fake.ingress_raises is not None:
+                    raise fake.ingress_raises
                 return fake.signature_valid
 
             def normalize(
                 self, raw_body: bytes, headers: Mapping[str, str], *, config: dict
             ) -> tuple[InboundEvent, ...]:
+                fake.normalized.append(raw_body)
+                fake.configs_seen.append(config)
+                if fake.normalize_raises is not None:
+                    raise fake.normalize_raises
+                if fake.ingress_contract_broken:
+                    return list(fake.inbound)  # type: ignore[return-value]
                 return fake.inbound
 
         return _Ingress()
