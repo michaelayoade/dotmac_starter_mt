@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -136,6 +136,35 @@ def _holds_any_role(
     )
 
 
+def authorize_party(db: Session, *, tenant: Tenant, party: Party, code: str) -> bool:
+    """The ONE permission decision — SoT for every surface, however the party
+    was authenticated.
+
+    Exactly the relationship `authenticate_request` has to the bearer and cookie
+    auth flows, one layer up: that seam answers "who is this?" without caring
+    which transport carried the credential, and this one answers "may they?"
+    without caring how they were identified. A bearer route, a cookie-rendered
+    admin page and a separate assembly's portal reach the SAME arithmetic, so a
+    fix to the tenant scoping, the join, or the code→roles binding lands once.
+
+    Authentication-neutral means the caller has ALREADY proved the party. This
+    function never reads a header, a cookie or a session; it takes an
+    established `(tenant, party)` and a declared `code`, and returns a bool.
+    It raises `UndeclaredPermissionError` for a code no installed module
+    declares — fail closed, never fail open (see `dotmac_kernel.permissions`).
+
+    Prefer `permission_guard` on a route: it wraps this with the boot-time
+    declaration check that makes a typo'd code stop the boot rather than
+    surface as a mystery 403. Call this directly only where a decision is
+    needed OUTSIDE a route dependency — inside a service, or a template's
+    optional slot.
+    """
+    spec = active_permissions().require(code)
+    return _holds_any_role(
+        db, tenant=tenant, party=party, role_slugs=spec.default_roles
+    )
+
+
 def require_role(role_slug: str):
     """Return a dependency that requires the current party to hold `role_slug`.
 
@@ -159,9 +188,71 @@ def require_role(role_slug: str):
     return _dependency
 
 
+def _forbidden(request: Request) -> Exception:
+    """The API plane's refusal: the same 403 `require_role` gives."""
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+def permission_guard(
+    code: str,
+    *,
+    authenticated_party: Callable[..., Party],
+    denied: Callable[[Request], Exception] = _forbidden,
+):
+    """Return a route dependency enforcing `code`, over ANY authentication.
+
+    The authentication-neutral half of `require_permission`. Two parameters are
+    what a surface supplies, and they are the only two things the surfaces
+    actually disagree about:
+
+    - `authenticated_party` — a dependency that proves the actor and returns a
+      `Party`. Bearer routes pass `require_user_auth`; a cookie surface passes
+      its own guard, which reads ITS OWN cookie and calls
+      `authenticate_request`. The kernel never learns the cookie's name.
+    - `denied` — builds the refusal from the request. It answers the
+      AUTHORIZATION question, so it is a permission-denied response (403) on
+      every surface, including a rendered portal.
+
+      **A denial must not redirect to login.** By the time `denied` is called
+      the actor is already authenticated: `authenticated_party` succeeded. A
+      redirect to login tells a signed-in user to sign in, which they cannot
+      usefully act on — best case a confusing bounce, worst case a loop as the
+      login sees a valid session and sends them back. Unauthenticated is the
+      OTHER seam's job: `authenticated_party` raises its own redirect
+      (`web_deps.WebAuthRedirect`) before authorization is ever consulted. Keep
+      the two answers distinct — "who are you?" redirects, "may you?" refuses.
+      A portal that wants a branded 403 renders one; that is still a refusal.
+
+    Everything else — the declaration lookup, the code→roles binding and the
+    membership query — is `authorize_party`, shared verbatim.
+
+    **Why a factory rather than a documented recipe.** An assembly with its own
+    session cookie (ADR-0021's third plane) must not re-implement the role query
+    to get an authorization check; that is how a plane falls behind a kernel
+    security fix. It must also not lose the boot-time declaration check, which
+    is the whole reason a typo'd code is a startup failure instead of a mystery
+    403. This factory hands over both: the stamp below is what `create_app`
+    reads back off every mounted route, so a guard built here is validated at
+    boot exactly like a first-party one.
+    """
+
+    def _dependency(
+        request: Request,
+        party: Party = Depends(authenticated_party),
+        db: Session = Depends(get_db),
+    ) -> Party:
+        tenant = require_tenant(request)
+        if not authorize_party(db, tenant=tenant, party=party, code=code):
+            raise denied(request)
+        return party
+
+    setattr(_dependency, PERMISSION_CODE_ATTR, code)
+    return _dependency
+
+
 def require_permission(code: str):
-    """Return a dependency that requires the current party to hold the declared
-    permission `code` (module control-plane directive step 3).
+    """Return a BEARER dependency requiring the declared permission `code`
+    (module control-plane directive step 3).
 
     The declaration-driven guard, layered over `require_role`'s role check:
     `code` must be declared by an installed module's manifest
@@ -183,25 +274,11 @@ def require_permission(code: str):
     A code that is somehow undeclared at request time (no catalogue installed —
     see `dotmac_kernel.permissions`) raises `UndeclaredPermissionError` rather
     than allowing the request: fail closed, never fail open.
+
+    This is now `permission_guard` bound to the bearer flow, and holds no
+    decision of its own — see that factory for a cookie-authenticated surface.
     """
-
-    def _dependency(
-        request: Request,
-        party: Party = Depends(require_user_auth),
-        db: Session = Depends(get_db),
-    ) -> Party:
-        tenant = require_tenant(request)
-        spec = active_permissions().require(code)
-        if not _holds_any_role(
-            db, tenant=tenant, party=party, role_slugs=spec.default_roles
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
-            )
-        return party
-
-    setattr(_dependency, PERMISSION_CODE_ATTR, code)
-    return _dependency
+    return permission_guard(code, authenticated_party=require_user_auth)
 
 
 def require_capability(code: str):
@@ -313,9 +390,11 @@ def _bearer_token(authorization: str | None) -> str | None:
 __all__ = [
     "Depends",
     "authenticate_request",
+    "authorize_party",
     "get_db",
     "get_platform_db",
     "idempotency_key",
+    "permission_guard",
     "require_capability",
     "require_permission",
     "require_role",

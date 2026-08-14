@@ -111,7 +111,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.delivery_models` | `DELIVERY_ACCEPTED`, `DELIVERY_BOUNCED`, `DELIVERY_COMPLAINT`, `DELIVERY_DELIVERED`, `DELIVERY_FAILED`, `DELIVERY_REJECTED`, `DELIVERY_STATUSES`, `SUPPRESSING_STATUSES`, `CommunicationDelivery` |
 | `dotmac_kernel.delivery_providers` | `DeliveryProvider`, `OutboundMessage`, `ProviderResult`, `Sent`, `Suppressed`, `send` |
 | `dotmac_kernel.tenancy` | `bind_single_tenant`, `single_tenant_binding`, `clear_single_tenant_binding` (which tenant, if any, this deployment is bound to) |
-| `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
+| `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `permission_guard`, `authorize_party`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
 | `dotmac_kernel.errors` | `register_error_handlers` |
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
@@ -465,6 +465,30 @@ constraint on the backing column. If you are adding a sixth, copy
   dependency carries the code, and `create_app` walks every MOUNTED route and
   raises `UndeclaredPermissionError` at boot if any references a code the
   catalogue does not declare.
+- `dotmac_kernel.deps.authorize_party(db, *, tenant, party, code)` is that same
+  decision with the authentication removed: an already-established party, a
+  declared code, a bool. It is what `require_permission` is built from, and the
+  seam for a consumer whose actors do not arrive by bearer header. It raises
+  `UndeclaredPermissionError` rather than returning `False`, because "the
+  question is not real" and "asked and refused" must not collapse into one
+  answer.
+- `dotmac_kernel.deps.permission_guard(code, *, authenticated_party, denied)`
+  builds a route dependency over `authorize_party` for any authentication.
+  `authenticated_party` is a dependency returning a `Party` — the kernel never
+  learns which cookie or header proved it — and `denied` turns a refusal into
+  the surface's own response. Guards built here are stamped with the code, so an
+  assembly's own guard keeps the boot-time declaration check rather than trading
+  it away for a runtime 500.
+
+  **`denied` must not redirect to login.** It runs only after
+  `authenticated_party` has succeeded, so the actor is already signed in;
+  sending them to login is advice they cannot act on and loops once the login
+  page finds a valid session. Unauthenticated is the other seam's job. A portal
+  that wants a branded refusal renders a 403 — still a refusal.
+
+  **This is the supported way for an assembly with its own session cookie to
+  authorize.** Re-implementing the role query locally is not: a private copy is
+  the one that will not receive the next fix to the tenant scoping or the join.
 - `dotmac_kernel.audit.write_audit_event` validates `action` against the active
   registry **before** it adds anything to the session, so a rejected write leaves
   no partial state. `write_platform_audit_event` is deliberately NOT validated
