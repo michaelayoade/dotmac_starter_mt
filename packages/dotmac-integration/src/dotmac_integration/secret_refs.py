@@ -1,5 +1,14 @@
 """Secret REFERENCES only — the refusal that keeps `secret_refs` honest.
 
+Named for what it enforces, not for what it forbids. It was `secrets.py`, which
+the release wheel-content policy correctly refuses: a name-shaped check cannot
+tell a module ABOUT secret handling from a file CONTAINING secret material, and
+the guard is right to assume the worse of the two. Weakening a security check to
+accommodate a filename would trade a real protection for a cosmetic one — and
+`secret_refs` is the more accurate name anyway, since references are the only
+thing here.
+
+
 ADR-0024 § 7 requires a connector's configuration contract to carry "secret
 REFERENCES, never secret values". A column named `secret_refs` does not enforce
 that; this does.

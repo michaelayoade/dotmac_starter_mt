@@ -47,7 +47,9 @@ import subprocess
 import sys
 import tomllib
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Final
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = REPO_ROOT / ".github" / "release-modules.json"
@@ -189,13 +191,7 @@ def cmd_inspect(args: argparse.Namespace) -> None:
 
     # Secret-shaped material. A wheel is world-readable to anyone with index
     # access; a key that ships once is a key that is rotated, not recalled.
-    for name in names:
-        lowered = name.lower()
-        if any(
-            marker in lowered
-            for marker in (".env", "id_rsa", ".pem", ".key", "secrets.", "credentials.")
-        ):
-            problems.append(f"secret-shaped file in the wheel: {name}")
+    problems.extend(secret_shaped(names))
 
     if problems:
         raise ReleaseRefused(
@@ -203,6 +199,37 @@ def cmd_inspect(args: argparse.Namespace) -> None:
             + "\n  - ".join(problems)
         )
     print(f"{wheel.name}: content policy OK ({len(names)} entries)")
+
+
+# Name shapes that must never ship in a wheel. A NAME check, deliberately: it
+# cannot tell a module ABOUT secret handling from a file CONTAINING secret
+# material, and it assumes the worse of the two. That is the right bias — the
+# cost of a false positive is a rename, and the cost of a false negative is a
+# credential in an immutable published artefact.
+#
+# `dotmac-integration` hit exactly that false positive: its `secrets.py` was the
+# refusal enforcing "references, never values". It was renamed to
+# `secret_refs.py` rather than exempted, because widening a security check to
+# accommodate a filename trades a real protection for a cosmetic one.
+SECRET_SHAPED_MARKERS: Final = (
+    ".env",
+    "id_rsa",
+    ".pem",
+    ".key",
+    "secrets.",
+    "credentials.",
+)
+
+
+def secret_shaped(names: Iterable[str]) -> list[str]:
+    """Names matching a shape that must never ship. Shared with the PR-time gate
+    in `tests/architecture/test_publishable_packages_ship_no_secret_shape.py` so
+    the release check and the local check cannot drift apart."""
+    return [
+        f"secret-shaped file in the wheel: {name}"
+        for name in names
+        if any(marker in name.lower() for marker in SECRET_SHAPED_MARKERS)
+    ]
 
 
 def _venv(path: Path) -> tuple[Path, Path]:

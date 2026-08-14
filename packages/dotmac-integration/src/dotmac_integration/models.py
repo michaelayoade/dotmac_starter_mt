@@ -41,7 +41,7 @@ installation is the only mutable pointer — so "what was this connector
 configured with on the 3rd?" is answerable, which is the question an incident
 asks.
 
-`secret_refs` holds REFERENCES only. See `dotmac_integration.secrets` for the
+`secret_refs` holds REFERENCES only. See `dotmac_integration.secret_refs` for the
 refusal that keeps it that way.
 """
 
@@ -195,7 +195,7 @@ class ConnectorConfigRevision(Base):
     schema_version: Mapped[str] = mapped_column(String(32), nullable=False)
 
     config_json: Mapped[dict] = mapped_column(_JSON, nullable=False)
-    #: Secret REFERENCES only — never values. `dotmac_integration.secrets`
+    #: Secret REFERENCES only — never values. `dotmac_integration.secret_refs`
     #: refuses anything that looks like material rather than a pointer.
     secret_refs: Mapped[dict] = mapped_column(_JSON, nullable=False)
     #: Over config + refs. Immutability is checkable rather than asserted.

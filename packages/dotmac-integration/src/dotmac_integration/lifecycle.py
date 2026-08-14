@@ -44,7 +44,7 @@ from dotmac_integration.models import (
     ConnectorConfigRevision,
     ConnectorInstallation,
 )
-from dotmac_integration.secrets import validate_config_revision
+from dotmac_integration.secret_refs import validate_config_revision
 from dotmac_integration.spi import accepts_manifest_digest
 
 __all__ = [
