@@ -8,6 +8,49 @@ here.
 
 ## 0.1.0a65 — 2026-08-15
 
+### Session provenance and selective revocation
+
+`auth_sessions` gains `external_identity_binding_id UUID NULL`: WHICH external
+identity binding produced this session. This closes the contract
+`dotmac_kernel.external_identity`'s module docstring has carried as "deferred"
+since a63, point for point, and that docstring now records what shipped against
+what was promised.
+
+Before this, `disable_external_identity_binding` stopped FURTHER logins but left
+every session already issued from the binding working until it expired. The gap
+was named rather than hidden; it is now closed.
+
+- `disable_external_identity_binding` REVOKES those sessions itself, in the same
+  transaction under the same row lock. There is deliberately no opt-out: the
+  contract's own wording was *disabling and revoking must not be two calls a
+  caller can do half of*, and a flag whose off position is a security incident
+  is not flexibility.
+- `revoke_sessions_for_binding(db, *, tenant, binding_id) -> int` is the new
+  kernel-owned writer, exposed separately so a caller can report the count and
+  so a targeted sign-out is possible without disabling the binding. Idempotent
+  by predicate (`revoked_at IS NULL`), so a second call revokes nothing and the
+  original timestamp never moves.
+- Scope is SELECTIVE: sessions from other bindings and from password logins are
+  untouched. A canary asserts exactly that, including the password case, which
+  is where a missing NULL guard would sign out every password user in a tenant.
+
+**Migration `0025_session_provenance`.** The FK is composite
+`(tenant_id, external_identity_binding_id)` → `(tenant_id, id)`, so a session
+cannot cite a binding in another tenant even if the id is written in by hand,
+and it is `ON DELETE RESTRICT` rather than `SET NULL`. `SET NULL` was the
+obvious choice and breaks the rule the column is defined by: NULL means
+provenance ABSENT (a password login), never provenance unknown, and `SET NULL`
+converts the second into the first silently while leaving the session live.
+
+Additive and backward compatible: the column is nullable with no default, every
+existing session reads as a password login, and an assembly that does not stamp
+it keeps working — it simply cannot benefit from selective revocation. Stamping
+is the assembly's job because the assembly mints the session; the kernel can
+make the correct thing easy and say what the incorrect thing costs, and cannot
+enforce it.
+
+### Numbering owner allocation
+
 Allocates the `numbering` migration owner: schema `mod_numbering`, revision
 prefix `nu`, branch label `numbering`. Additive — one ledger row, no schema
 change, no existing behaviour changed.

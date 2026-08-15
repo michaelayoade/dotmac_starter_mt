@@ -63,33 +63,41 @@ binding that was already inactive when the login took the lock.
   SERIALIZABLE the same statement raises a serialization failure instead —
   which also fails closed, and the caller retries.
 
-## Session provenance — the contract, deferred
+## Session provenance — the contract, DELIVERED in a65
 
 Selective revocation ("disable this binding, and drop the sessions it
-produced") needs a session to record WHICH binding produced it. That is not
-built here, and the reason is ownership rather than effort: `AuthSession` is
-minted by the assembly (`app/features/auth/service.py`), so the change spans a
-kernel migration, a new kernel revocation operation and an assembly issuance
-path — three writers, none of which this slice owns. The contract it needs:
+produced") needs a session to record WHICH binding produced it. It is built, and
+each numbered point below records what was promised and what shipped:
 
-1. `auth_sessions` gains `external_identity_binding_id UUID NULL`, with a
-   composite FK `(tenant_id, external_identity_binding_id)` →
+1. `auth_sessions.external_identity_binding_id UUID NULL`, with a composite FK
+   `(tenant_id, external_identity_binding_id)` →
    `external_identity_bindings (tenant_id, id)`. NULL is correct and permanent:
    a password login has no binding, so the column is provenance that is absent,
-   never provenance that is unknown.
+   never provenance that is unknown. **Delivered, with one decision the contract
+   did not specify:** the FK is `ON DELETE RESTRICT`. `SET NULL` was the obvious
+   choice and would have broken the rule this very point states — it converts
+   provenance that is KNOWN into the shape of provenance that is absent, and
+   does it silently while leaving the session live.
 2. `finalize_external_login`'s returned `binding_id` is that column's ONLY
    source. A caller that mints a session from this function without stamping it
-   has produced an unattributable session.
-3. Revocation is a kernel operation beside `disable_external_identity_binding`
-   — one writer, taking the same row lock in the same transaction as the
-   disable, setting `revoked_at` on every unrevoked session carrying that
-   binding id. Disabling and revoking must not be two calls a caller can do
-   half of.
+   has produced an unattributable session. **Unchanged, and it remains a rule
+   the kernel cannot enforce** — the assembly mints the session, so the kernel
+   can only make the correct thing easy and say plainly what the incorrect thing
+   costs.
+3. Revocation is a kernel operation beside `disable_external_identity_binding` —
+   one writer, taking the same row lock in the same transaction as the disable,
+   setting `revoked_at` on every unrevoked session carrying that binding id.
+   Disabling and revoking must not be two calls a caller can do half of.
+   **Delivered as `revoke_sessions_for_binding`, and `disable_...` calls it
+   itself.** There is no opt-out flag; see that function on why.
 4. Scope is SELECTIVE. It revokes the sessions derived from that binding and
    nothing else; a global logout is a different decision with a different blast
-   radius and does not belong on this path.
+   radius and does not belong on this path. **Delivered** — the `WHERE` names
+   the tenant and the binding.
 5. Its canary is the mirror of this module's: a session issued from binding A
    survives a disable of binding B, and does not survive a disable of A.
+   **Delivered** in `tests/test_session_provenance.py`, against a real database,
+   because the FK and the RLS policy are half of what is being asserted.
 
 ## What must never enter this module
 
@@ -144,14 +152,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
-from dotmac_kernel.models import ExternalIdentityBinding, Party, PartyType, Tenant
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from sqlalchemy.engine import CursorResult
+
+from dotmac_kernel.models import (
+    AuthSession,
+    ExternalIdentityBinding,
+    Party,
+    PartyType,
+    Tenant,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -489,14 +508,35 @@ def disable_external_identity_binding(
     table exists to prevent. Reassignment is a delete, and a delete is a
     decision to discard evidence.
 
-    **It does not revoke sessions**, and that gap is named rather than hidden.
-    A session issued before this call keeps working until it expires; the
-    provenance column that would let this revoke exactly the right ones is the
-    module docstring's deferred contract. What this call DOES guarantee is that
-    no FURTHER session is derived from the binding: its `UPDATE` takes the same
-    row lock `finalize_external_login` holds, so a login in flight either
-    already committed with its session, or blocks here and then refuses. The
-    two can never both believe they won.
+    **It REVOKES the sessions that binding produced**, in this same call and
+    this same transaction. That was the deferred contract's point 3 and the
+    wording was deliberate: *disabling and revoking must not be two calls a
+    caller can do half of*. A caller that could disable without revoking would
+    routinely leave the sessions the disable was meant to end still working, and
+    would do so silently.
+
+    So there is no `revoke_sessions=False`. An operator who wants a binding
+    stopped for FUTURE logins while existing sessions run out on their own is
+    describing a different operation, and it does not exist because nobody has
+    argued for it — a knob added "for flexibility" here is one whose off
+    position is a security incident.
+
+    Two guarantees, and they are different:
+
+    * no FURTHER session is derived from the binding — the `UPDATE` takes the
+      same row lock `finalize_external_login` holds, so a login in flight either
+      already committed with its session (and this call then revokes it) or
+      blocks here and afterwards refuses. The two can never both believe they
+      won;
+    * no EXISTING session derived from it survives — `revoke_sessions_for_
+      binding` stamps `revoked_at` on every unrevoked one.
+
+    Scope is SELECTIVE (contract point 4). Sessions from OTHER bindings and from
+    password logins are untouched; a global logout is a different decision with
+    a different blast radius and does not belong on this path.
+
+    Returns the binding. The revoked count is available from
+    `revoke_sessions_for_binding` if a caller needs it for an audit event.
 
     Raises `NotFoundError` if no such binding exists IN THIS TENANT — a
     cross-tenant id is a miss, not an error disclosing that the id is real.
@@ -507,8 +547,56 @@ def disable_external_identity_binding(
     if binding is None or binding.tenant_id != tenant.id:
         raise NotFoundError("external identity binding not found")
     binding.is_active = False
+    # Ordering is not load-bearing here — both statements are in one
+    # transaction under one lock, so nothing can observe the in-between — but
+    # disabling first reads correctly: stop the source, then clear what it
+    # produced.
+    revoke_sessions_for_binding(db, tenant=tenant, binding_id=binding.id)
     db.flush()
     return binding
+
+
+def revoke_sessions_for_binding(
+    db: Session, *, tenant: Tenant, binding_id: UUID
+) -> int:
+    """Revoke every unrevoked session this binding produced. Returns the count.
+
+    The kernel owns this because `auth_sessions.revoked_at` has ONE writer and
+    a product that revoked sessions itself would be a second one. An assembly
+    MINTS sessions — that is its own decision, and it stamps the provenance
+    column when it does — but ending them on an identity decision is the
+    kernel's, since the kernel is what knows a binding was disabled.
+
+    Idempotent by predicate rather than by bookkeeping: `revoked_at IS NULL`
+    means a second call revokes nothing and returns 0, and a session revoked
+    earlier for another reason keeps its original timestamp. Overwriting it
+    would move the recorded moment somebody was signed out, which is the one
+    fact this column exists to carry.
+
+    EXPIRED sessions are included, deliberately. A session past `expires_at` is
+    already refused at authentication, so revoking it changes no access — but it
+    makes the row say what happened, and an operator reading the trail after a
+    binding was disabled should not have to reason about which rows were
+    skipped because a clock had passed.
+
+    Called by `disable_external_identity_binding`, and exposed separately only
+    so a caller can report the count. Calling it WITHOUT disabling is legitimate
+    (a targeted "sign this person out" that leaves the binding usable) and is
+    the reason it takes a tenant rather than trusting the binding row.
+    """
+    result = db.execute(
+        update(AuthSession)
+        .where(
+            AuthSession.tenant_id == tenant.id,
+            AuthSession.external_identity_binding_id == binding_id,
+            AuthSession.revoked_at.is_(None),
+        )
+        .values(revoked_at=datetime.now(UTC))
+    )
+    db.flush()
+    # `rowcount` lives on the DBAPI cursor result; the ORM's `Result` type does
+    # not declare it, so it is read through `cast` rather than silenced.
+    return int(cast("CursorResult[Any]", result).rowcount)
 
 
 def record_external_authentication(

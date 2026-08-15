@@ -357,6 +357,15 @@ class AuthSession(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_auth_sessions_tenant_party",
         ),
+        # RESTRICT, not SET NULL: see migration 0025. NULL on this column means
+        # provenance ABSENT (a password login), never provenance unknown, and
+        # SET NULL would quietly convert the second into the first.
+        ForeignKeyConstraint(
+            ["tenant_id", "external_identity_binding_id"],
+            ["external_identity_bindings.tenant_id", "external_identity_bindings.id"],
+            ondelete="RESTRICT",
+            name="fk_auth_sessions_tenant_external_identity_binding",
+        ),
     )
 
     id: Mapped[UUID] = uuid_pk()
@@ -376,6 +385,17 @@ class AuthSession(Base, TimestampMixin):
         DateTime(timezone=True), nullable=False
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: WHICH external identity binding produced this session, or NULL for a
+    #: password login. Its only legitimate source is `binding_id` from
+    #: `dotmac_kernel.external_identity.finalize_external_login` — a session
+    #: minted from that call without this stamped is unattributable, and a
+    #: value from anywhere else is a claim nobody verified.
+    #:
+    #: Read by `revoke_sessions_for_binding`, which is what makes disabling a
+    #: binding able to end exactly the sessions it produced.
+    external_identity_binding_id: Mapped[UUID | None] = mapped_column(
+        Uuid(), nullable=True
+    )
 
 
 class ExternalIdentityBinding(Base, TimestampMixin):
