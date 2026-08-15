@@ -183,6 +183,20 @@ cutover, and because a module inherits a defect it was never told about.
 3. **Fix Sub's manufactured-funding path immediately** — see §5b. This is an
    active authority bypass in a live product, not a migration task.
 4. **Harden Vendor CP's offer-version immutability if it is live** — see §5a.
+   **Status 2026-08-15: CONDITIONALLY SKIPPED — no operational runtime
+   exists.** Skipped by condition, not done and not waived. Vendor CP has
+   never deployed: the production-deploy workflow has zero runs, the
+   deployments API holds zero records, and there are no releases or tags. A
+   production environment, a named host and provisioned secrets now exist, and
+   the human-approval blocker recorded on 2026-08-14 has cleared — but
+   configuration is not execution. The defect is unchanged and still real on
+   `origin/main`: `v002_offer_versions.py` grants `UPDATE, DELETE` on
+   `offer_versions` to `platform_api`, with no later `REVOKE` and no trigger
+   anywhere in the v001–v011 lineage. Hardening becomes due the moment any one
+   of these appears: a successful production-deploy run, a non-empty
+   deployments API, or host-side evidence of a running Vendor instance. Until
+   then the fix lands with the extraction, because there is no live data to
+   protect and no cutover to sequence.
 5. **Build `dotmac-numbering`.**
 6. **Build `dotmac_kernel.durable_timers`.**
 7. **Build `dotmac-billing`.** It is the commercial spine and already has the
