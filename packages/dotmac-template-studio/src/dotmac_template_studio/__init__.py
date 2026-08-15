@@ -65,7 +65,7 @@ _PKG_DIR = Path(__file__).resolve().parent
 # 0.2.0a1, not 0.1.0a2: § 5b is a BREAKING change to every part of the surface —
 # `kind` is gone, `channel` and `context` are required, and the render route
 # moved. Pre-1.0 a `0.MINOR` bump is how this package signals that (CHANGELOG).
-__version__ = "0.2.0a2"
+__version__ = "0.2.0a3"
 
 
 def migrations_dir() -> Path:
