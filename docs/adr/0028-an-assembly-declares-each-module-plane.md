@@ -101,6 +101,44 @@ selection and proves:
 The existing both-plane canaries continue to prove forced RLS, tenant isolation,
 platform-role reachability, tenant-role revocation and no cross-plane FK.
 
+### 5. A checked-in declaration outranks the ambient environment
+
+`DOTMAC_MIGRATION_BINDINGS` and `DOTMAC_MODULE_PLANE_SELECTIONS` exist so that
+Alembic's graph commands — which build the revision map WITHOUT running
+`env.py` — inspect the same graph an upgrade applies. They are a transport for
+one assembly's declarations, never a way to configure that assembly from
+outside.
+
+**So an assembly that has checked-in declarations ASSIGNS both variables; it
+does not `setdefault` them.** A value already exported into the process must
+lose, not win.
+
+The failure this prevents is quiet and specific. `setdefault` has it exactly
+backwards: a stale or foreign value left over from another assembly, a test
+harness, or an operator's shell survives into the process, and the assembly
+then *inspects* a different graph from the one it *applies*. That is precisely
+the divergence these variables exist to close, reintroduced by the mechanism
+meant to close it. Nothing fails loudly — the graph is well-formed, just not
+this product's.
+
+The rule is therefore about authority, not convenience: **the assembly is
+authoritative for what it composes, and ambient environment is authoritative
+for nothing it declares.** A deployment's own runtime values that the assembly
+does NOT own — a database DSN, for instance — are the opposite case and must
+not be overwritten; supply a fallback and leave the operator's value standing.
+
+The distinguishing question, when adding a variable to either group: *does this
+name a fact the assembly declares in checked-in code?* If yes, assign it. If it
+names a fact the deployment owns, defer to it.
+
+**Implementation stays assembly-local for now.** Vendor CP implements this in
+`vendor_cp.migrations.make_alembic_config`; the kernel ships the rule, not a
+helper. Extract a shared mechanism only when a SECOND real assembly needs it,
+and migrate both consumers together in that change — one shared rule now, one
+shared mechanism only when reuse is proven. Writing the helper first would be
+building a generalisation from a single instance, which ADR-0006's product-first
+extraction rule already forbids.
+
 ## Consequences
 
 - Kernel a60 and `dotmac-approvals` a2 are superseded. The corrected public
