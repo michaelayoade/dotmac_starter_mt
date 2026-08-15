@@ -82,9 +82,12 @@ prerequisite.
 modules — `dotmac-integration` and `dotmac-entitlement-allocation` — call
 `dotmac_kernel.idempotency.execute_once_platform` at request time and declare
 **no `requires` at all**. `idempotency_ledger.v1` already exists, was published
-in a66 precisely for this, and neither module declares it. The gap the two
-existing prerequisites were created to close is still open in the two modules
-that most need it, and there is no generic guard that would catch it. See § 8.
+in a66 precisely for this. Integration's omission is known and has a draft fix
+in flight (PR #204); **`dotmac-entitlement-allocation`'s has nothing** — no open
+or merged PR touches it — even though one grep for `execute_once` across
+`packages/` returns both. There is no generic guard tying a caller to a
+declaration, only a hand-written per-module test for `dotmac-numbering`. See
+§ 8.1.
 
 ---
 
@@ -825,28 +828,38 @@ missing it passed every gate and failed in production instead."*
 
 Yet at `1208102`:
 
-| Module | Calls | Manifest `requires` |
-| --- | --- | --- |
-| `dotmac-integration` a3 | `execute_once_platform` at `…/dotmac_integration/idempotency.py:97` | **absent — the manifest has no `requires` field at all** (`manifest.py:36-93`) |
-| `dotmac-entitlement-allocation` a4 | `execute_once_platform` at `…/service.py:375` | **absent — no `requires` field** (`manifest.py:35-45`) |
-| `dotmac-numbering` a2 | `execute_once` / `execute_once_platform` at `…/service.py:481,492` | `requires=(MODULE_DATABASE_ROLES_V1.name, IDEMPOTENCY_LEDGER_V1.name)` (`manifest.py:57`) |
+| Module | Calls | Manifest `requires` at `1208102` | In-flight fix |
+| --- | --- | --- | --- |
+| `dotmac-numbering` a2 | `execute_once` / `execute_once_platform` at `…/service.py:481,492` | `requires=(MODULE_DATABASE_ROLES_V1.name, IDEMPOTENCY_LEDGER_V1.name)` (`manifest.py:57`) | — declared |
+| `dotmac-integration` a3 | `execute_once_platform` at `…/dotmac_integration/idempotency.py:97` | **absent — the manifest has no `requires` field at all** (`manifest.py:36-93`) | **PR #204, OPEN DRAFT** — `feat(integration): declare the at-most-once ledger it already writes (a4)`. Known, unmerged, unpublished. |
+| `dotmac-entitlement-allocation` a4 | `execute_once_platform` at `…/service.py:375` | **absent — no `requires` field** (`manifest.py:35-45`) | **NONE.** No open or merged PR addresses it. |
+
+`dotmac-entitlement-allocation` is the finding. Integration's omission is
+already known and has a draft fix in flight; entitlement-allocation's does not,
+and it is the module with the tighter coupling — its
+`write_platform_audit_event` sits INSIDE the `execute_once_platform` operation
+(`service.py:357` within `_operation`, invoked at `:375`), so it needs BOTH
+kernel facilities' tables in one transaction and declares neither.
 
 Both undeclared modules are published and pinnable today. Both are
 platform-plane modules whose adopting assemblies (`dotmac_integrator`, and the
 Vendor CP path ADR-0027's supersession note describes) are precisely the
 assemblies that might not run the kernel's own lineage.
 
-**There is no generic guard.** The only enforcement is a hand-written per-module
-test, `tests/architecture/test_numbering_module.py:384-393`, which asserts the
-string `execute_once` appears in numbering's source and that numbering declares
-the prerequisite. Nothing generalises it. The same omission that motivated
-`idempotency_ledger.v1` recurred immediately in two other modules and was not
-caught.
+**There is no generic guard, and its absence is measurable.** The only
+enforcement is a hand-written per-module test,
+`tests/architecture/test_numbering_module.py:384-393`, which asserts the string
+`execute_once` appears in numbering's source and that numbering declares the
+prerequisite. Nothing generalises it — which is why the sweep that found
+integration's omission and produced PR #204 did not also find
+entitlement-allocation's, even though a single grep for `execute_once` across
+`packages/` returns both.
 
 This matters directly to the question this report was commissioned to answer:
 **adding a third and fourth named prerequisite does not help if the mechanism
 that ties a caller to a declaration is a per-module test somebody has to
-remember to write.**
+remember to write.** The audit facility would inherit exactly the same
+enforcement gap on day one.
 
 ### 8.2 `dotmac_kernel.audit`'s compatibility rule rests on a false premise
 
@@ -1044,8 +1057,11 @@ The adopter evidence points the same way, from three directions:
   verifier strict enough to be worth having would fail the fleet's most
   converged adopter for its own reasoned choices.
 
-**The finding that should be acted on before either of the above** is § 8.1: two
-published modules already fail to declare a prerequisite that already exists,
-and the only thing that would have caught it is a per-module test nobody wrote.
-Naming more prerequisites without closing that is adding vocabulary to a
-mechanism that is not being applied.
+**The finding that should be acted on before either of the above** is § 8.1.
+`dotmac-entitlement-allocation` a4 is published, calls `execute_once_platform`,
+declares nothing, and has no fix in flight — while its sibling
+`dotmac-integration` does (PR #204). The sweep that caught one missed the other,
+because the only enforcement is a per-module test somebody has to remember to
+write. Naming more prerequisites without closing that is adding vocabulary to a
+mechanism that is not being applied — and a platform-audit prerequisite would
+inherit the same gap on the day it ships.
