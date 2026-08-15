@@ -1091,6 +1091,101 @@ proof ADR-0018 requires: the checker is a pure function over a synthetic package
 tree, shown to fire on a planted manifest, a planted migrations directory and a
 planted ORM import, and shown NOT to fire on a conforming one.
 
+### Decision amendment — 2026-08-15 (a legacy source and its module shadow, disambiguated)
+
+D1 says that until an extraction's cutover is proven, "the source product and
+the candidate module are simply not composable in one database." That sentence
+is right about the danger and too blunt about the remedy, and a real adoption
+found the gap.
+
+The vendor control plane installs `dotmac-entitlement-allocation` in **shadow
+mode**: the module's lineage is composed so its schema and migration path are
+exercised, while the vendor-local writer stays authoritative until a data
+preflight proves every historical row maps to a product. Both sets of tables
+therefore exist at once — and because the legacy tables were named `allocations`
+and `allocation_entries`, exactly what the module owns in `mod_ealloc`, the
+composed live-catalog audit correctly refused the database.
+
+Refusing was right. The two decisions collided because **the names were
+ambiguous**, not because shadowing is wrong.
+
+#### What stays forbidden
+
+**Same-named legacy and module tables must not coexist.** `public.allocations`
+beside `mod_ealloc.allocations` is refused, and no exemption list may permit it.
+This is the original collision class D1 exists to prevent: two tables with one
+name, where a mis-set `search_path`, a hand-written query or an ORM mapping
+reads the wrong rows. A composition that requires a reader to know which
+`allocations` was meant is already broken, whatever the migration state.
+
+#### What is now permitted, narrowly
+
+A **disambiguated** legacy table may coexist temporarily with an **empty,
+non-authoritative** module shadow, provided every one of these holds:
+
+1. **The legacy table is renamed, not the module's.** `public.allocations`
+   becomes `public.legacy_entitlement_allocations`. The module keeps the clean
+   name it will own after cutover, so the end state needs no second rename and
+   no reader learns a name that is about to change again.
+2. **The rename is a new migration.** The original revision is never edited: it
+   already ran in production, and a lineage that rewrites its own history cannot
+   be replayed or audited.
+3. **Exactly one authoritative writer**, and it is the legacy one. The module
+   shadow stays empty and non-authoritative until cutover. Dual-write is not
+   shadowing; it is two owners.
+4. **No foreign key crosses the planes**, in either direction (ADR-0023 § 4).
+   An FK is the one crossing the database itself would enforce, and therefore
+   permit.
+5. **Every row is preserved.** A rename moves rows; it does not drop and
+   recreate.
+6. **A named cutover gate and a retirement gate.** The shadow is temporary by
+   construction: the dossier records what must be true to cut over, and what
+   retires the renamed legacy table afterwards. A shadow with no retirement
+   condition is a permanent second copy wearing a temporary label.
+
+#### Why the rename is not a naming trick
+
+Renaming to make a gate pass would be exactly the sort of evasion ADR-0018
+forbids. This is the opposite: the ambiguity was itself the defect. Before the
+rename a reader cannot tell which `allocations` a query means; after it, the
+legacy table says in its own name that it is legacy and scheduled to go. The
+gate goes green because the database became honest, not because the check was
+weakened.
+
+#### Enforcement, and what enforcement does not reach
+
+**Condition 1 is machine-checked, by the audit that already exists.**
+`dotmac_kernel.migrations.catalog.audit_snapshot` reports
+`host_schema_squatters` — a module's declared tables found in `public` — and
+that is precisely the ambiguity this clarification forbids. It is the check that
+refused the vendor database, so it is the one the tests exercise. A second,
+parallel predicate was written first and deliberately removed: test-only code
+that duplicates a production rule proves nothing about production, and leaves
+two definitions to drift apart.
+
+Its sensitivity proof is the pair, not the pass. The audit is shown to refuse
+the exact composition that failed in the vendor control plane, and to accept the
+same declared tables once the legacy side is renamed — so a squatter check that
+degraded to silence fails the suite rather than passing it quietly.
+
+**The other five conditions are NOT machine-checked here, and pretending
+otherwise would be worse than saying so.** They are properties of one adopter's
+database and cutover, not of a composed manifest, so each names the gate that
+owns it:
+
+| Condition | Owning gate |
+|---|---|
+| One authoritative writer; the shadow takes no writes | the adopter's writer-retirement ratchet (ADR-0018, two-directional), which counts writers and fails when the count rises |
+| The module shadow stays empty | the adopter's cutover preflight, which asserts a zero row count before authority moves |
+| The rename is a new migration, never an edit | the composed migration gate — an edited revision changes a hash that already ran |
+| Every row preserved | the adopter's data preflight, which reconciles counts across the rename |
+| No cross-plane foreign key | ADR-0023 § 4, enforced by the kernel gate for FKs whose SOURCE is inside the module schema — a product-owned link table in `public` remains *unmonitored rather than exempt*, and that gap is ADR-0023's own recorded follow-up |
+| A named cutover and retirement gate | the module's `EXTRACTION.toml` — `first_cutover`, `shadow_and_drift`, `local_copy_retirement` — which is reviewed, not executed |
+
+Recording the split matters more than closing it. A reader who believes all six
+are enforced will skip the five that are not, which is exactly how a shadow
+becomes permanent while every check stays green.
+
 ## Consequences
 
 - F1–P1 have fixed vocabulary. "Module", "theme", "brand", and "facet" mean one

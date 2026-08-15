@@ -514,3 +514,89 @@ def test_audited_schemas_is_the_registered_module_set() -> None:
     registry = NamespaceRegistry((*HOST_MIGRATION_OWNERS, allocated))
     assert audited_schemas(registry) == ("mod_bill",)
     assert audited_schemas(NamespaceRegistry(HOST_MIGRATION_OWNERS)) == ()
+
+
+# ---------------------------------------------------------------------------
+# ADR-0006, 2026-08-15: a legacy source and its module shadow, disambiguated.
+#
+# The vendor control plane composes `dotmac-entitlement-allocation` in SHADOW
+# mode while its own writer stays authoritative. Both sets of tables exist at
+# once by design — and its legacy tables were named `allocations` and
+# `allocation_entries`, exactly what the module owns in `mod_ealloc`, so this
+# audit refused the database. Refusing was correct.
+#
+# These two cases pin the before and after against the REAL audit rather than a
+# parallel predicate, because only this one runs in production.
+# ---------------------------------------------------------------------------
+
+SHADOWED_TABLES = ("allocations", "allocation_entries")
+
+
+def test_an_ambiguous_legacy_shadow_is_refused() -> None:
+    """The exact shape that failed: legacy tables squatting under module names.
+
+    A composition where a reader cannot tell which `allocations` a query means
+    is broken whatever the migration state — a mis-set `search_path`, a
+    hand-written query or an ORM mapping silently reads the wrong rows.
+    """
+    snapshot = _snapshot(
+        *(_compliant_table(name) for name in SHADOWED_TABLES),
+        declared_tables=frozenset(SHADOWED_TABLES),
+        host_schema_squatters=SHADOWED_TABLES,
+    )
+
+    violations = audit_snapshot(snapshot)
+
+    squatting = [v for v in violations if "compatibility namespace" in v]
+    assert len(squatting) == len(SHADOWED_TABLES), violations
+    for name in SHADOWED_TABLES:
+        assert any(name in v for v in squatting), (name, squatting)
+
+
+def test_a_disambiguated_legacy_shadow_is_permitted() -> None:
+    """The permitted shape: the LEGACY table renamed, so nothing squats.
+
+    `public.legacy_entitlement_allocations` no longer collides with
+    `mod_ealloc.allocations`, so the module's schema and lineage can be
+    exercised before any data moves. The module keeps the clean name it owns
+    after cutover, which is why the legacy side is the side that gets renamed.
+
+    The audit sees this as zero squatters — which is the point: disambiguation
+    removes the finding rather than suppressing it.
+    """
+    snapshot = _snapshot(
+        *(_compliant_table(name) for name in SHADOWED_TABLES),
+        declared_tables=frozenset(SHADOWED_TABLES),
+        host_schema_squatters=(),
+    )
+
+    violations = audit_snapshot(snapshot)
+
+    assert not [v for v in violations if "compatibility namespace" in v], violations
+
+
+def test_the_squatter_rule_still_bites_after_disambiguation() -> None:
+    """Sensitivity proof: the permitted case must not pass for the wrong reason.
+
+    If the squatter check ever stopped reporting, the permitted-shape test above
+    would keep passing and stop meaning anything. This pins the difference — the
+    same declared tables must be refused when they squat and accepted when they
+    do not.
+    """
+    declared = frozenset(SHADOWED_TABLES)
+    tables = tuple(_compliant_table(name) for name in SHADOWED_TABLES)
+
+    refused = audit_snapshot(
+        _snapshot(
+            *tables, declared_tables=declared, host_schema_squatters=SHADOWED_TABLES
+        )
+    )
+    permitted = audit_snapshot(
+        _snapshot(*tables, declared_tables=declared, host_schema_squatters=())
+    )
+
+    assert [v for v in refused if "compatibility namespace" in v], (
+        "the audit accepted the exact composition it refused in production — "
+        "the squatter rule has stopped detecting anything"
+    )
+    assert not [v for v in permitted if "compatibility namespace" in v]
