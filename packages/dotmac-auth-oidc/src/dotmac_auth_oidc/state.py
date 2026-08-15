@@ -31,6 +31,22 @@ The store is REQUIRED, not optional. Replay protection is not a feature a
 deployment opts into: with the ceremony held server-side, `take` IS how the
 verifier is recovered, so a replayed callback finds nothing and single use is
 structural rather than an added check.
+
+## A store may be process-lifetime or REQUEST-BOUND
+
+Some stores are built once and live as long as the process — Redis, say, whose
+client is a connection pool. Others cannot be: a store backed by the
+consumer's own database must write through THAT REQUEST's transaction, because
+the consumer's framework owns when a transaction opens and commits and a
+library that opened its own would be a second transaction authority — the
+ceremony would commit at a different moment from everything else the request
+did, and a rolled-back request would leave a live ceremony behind.
+
+So a `StateStore` may be supplied per ceremony operation instead of at
+construction. What may NOT happen is neither: `PER_REQUEST_STATE_STORE` is a
+positive declaration that the consumer supplies one per call, so a client with
+no store is still a configuration error at construction rather than a surprise
+at the first login. See `OIDCClient.start_login`.
 """
 
 from __future__ import annotations
@@ -126,6 +142,33 @@ class StateStore(Protocol):
         ...
 
 
+class PerRequestStateStore:
+    """The sentinel type — use the `PER_REQUEST_STATE_STORE` singleton.
+
+    Public because it appears in `OIDCClient.__init__`'s signature, and a type
+    a consumer cannot name is a type they cannot annotate around.
+
+    Deliberately implements NEITHER `put` nor `take`.
+
+    If it did, a consumer that passed it and then forgot the per-call argument
+    would get a store-shaped object that silently did the wrong thing. With no
+    methods, the same mistake is an explicit `ConfigurationError` naming the
+    parameter that is missing.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostic only
+        return "PER_REQUEST_STATE_STORE"
+
+
+#: Declares that this client's ceremony store is supplied per operation rather
+#: than held for the life of the process. Pass it as `state_store=` when the
+#: real store is bound to a request — a database session, most often. It is not
+#: a store and cannot be used as one.
+PER_REQUEST_STATE_STORE = PerRequestStateStore()
+
+
 class InMemoryStateStore:
     """A `StateStore` in one process — **tests and single-worker development
     only.**
@@ -192,7 +235,9 @@ def claim_state(store: StateStore, state_id: str, *, ttl_seconds: int) -> LoginS
 
 __all__ = [
     "DEFAULT_STATE_TTL_SECONDS",
+    "PER_REQUEST_STATE_STORE",
     "InMemoryStateStore",
+    "PerRequestStateStore",
     "LoginState",
     "PKCEPair",
     "StateStore",
