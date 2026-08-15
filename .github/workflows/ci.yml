@@ -145,6 +145,15 @@ jobs:
       - env:
           FLOOR_PYTHON: python${{ matrix.python-version }}
         run: bash scripts/kernel_floor_check.sh
+      # The other half of the same claim. The step above proves the KERNEL's
+      # declared third-party floors are real; this proves a MODULE's declared
+      # kernel floor is real — sufficient AT the floor, and necessary, by
+      # failing against the previous PUBLISHED kernel. Two modules shipped
+      # three releases each with floors seventeen versions too low, because
+      # nothing ever compared a floor against anything but itself.
+      - env:
+          FLOOR_PYTHON: python${{ matrix.python-version }}
+        run: bash scripts/module_floor_check.sh
 
   docker-build:
     runs-on: ubuntu-latest

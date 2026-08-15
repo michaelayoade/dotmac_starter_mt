@@ -29,8 +29,8 @@ contract and implementation, never sharing rows (ADR-0024).
 Academy was considered and dropped. It has no ticket capability — zero source
 references — so installing the module there would retire no local owner and
 prove no contract, which ADR-0017 decision 1 says is not adoption. It also pins
-`dotmac-kernel 0.1.0a32`, below this module's effective `0.1.0a53` floor after
-ADR-0023. If Academy later wants tickets that is a product decision on its own
+`dotmac-kernel 0.1.0a32`, far below this module's floor (`0.1.0a61`; see the
+release gate below). If Academy later wants tickets that is a product decision on its own
 merits; it does not become a contract consumer of this programme.
 
 ## The ordering risk, stated once
@@ -50,21 +50,36 @@ in a footnote:
   written: cutover 2 was blocked on a contract mismatch of its own. ADR-0023
   resolved that by splitting the module into two persistence planes, so
   promoting the vendor control plane — greenfield, with a required kernel
-  upgrade from `0.1.0a46` to `0.1.0a53` — is a real fallback if E8 stalls.
+  upgrade from `0.1.0a46` to `0.1.0a61` — is a real fallback if E8 stalls.
   Take it rather than reporting progress that is not happening.
 
 ## Release gate
 
 1. `dotmac-ticketing` is in `.github/release-modules.json` as of this change,
-   with `db_schema = mod_tkt` and `kernel_floor = 0.1.0a53`. Before this entry
+   with `db_schema = mod_tkt` and `kernel_floor = 0.1.0a61`. Before this entry
    the module was unreleasable and `first_cutover` named a cutover no product
-   could begin. The floor is **not** the `a39` that allocated `mod_tkt`:
-   ADR-0023 made this module dual-plane, so its manifest passes
-   `platform_tables`, which `a49` added — an earlier kernel raises `TypeError`
-   at import, before the allocation check runs.
-2. Publish kernel `0.1.0a53` **first**, then `0.1.0a1`, through the normal
+   could begin. The floor is **not** the `a39` that allocated `mod_tkt` — a
+   kernel CAPABILITY sets it, and it has moved three times:
+
+   - ADR-0023 made this module dual-plane, so its manifest passes
+     `platform_tables`. That field entered kernel source at `a53`, but a53–a55
+     were never published, so `a56` is the first installable kernel carrying
+     it.
+   - The logical prerequisite contract (ADR-0006 D1 amendment) also lands at
+     `a56`.
+   - ADR-0028 gives plane selection its own declaration: the manifest declares
+     `supported_plane_sets` and `tk_0001` calls `selected_module_planes`, both
+     `a61`.
+
+   The floor is the highest capability the module actually CONSUMES, so `a61`.
+   An earlier kernel raises `TypeError` at import, before the allocation check
+   runs. (`a56` is where the platform-only modules stop; it is not this
+   module's floor.)
+2. Publish kernel `0.1.0a61` **first**, then `0.1.0a1`, through the normal
    branch/review/release workflow. Registry verification installs the module
-   against its floor, so it cannot pass until that kernel exists.
+   against its floor, so it cannot pass until that kernel exists. This step
+   named `0.1.0a53` until now, which was unfollowable: a53 was never
+   published.
 3. Prove the wheel contains the `tk` migrations and is importable in a clean
    consumer environment. `alembic` is an expected runtime requirement here and
    only here — the link helpers emit DDL into a consuming product's migration.
@@ -194,7 +209,7 @@ proof for the retirement ratchet.
 ## Cutover 2 — Vendor control plane
 
 Greenfield: no rows to migrate and no writer to retire. It currently pins
-`dotmac-kernel 0.1.0a46`, so it must upgrade to the module's `0.1.0a53` floor.
+`dotmac-kernel 0.1.0a46`, so it must upgrade to the module's `0.1.0a61` floor.
 Its value here is proving a separate installation of the same contract composes
 cleanly on a vocabulary ERP has already exercised, which is the whole reason it
 moved to second.
@@ -237,10 +252,13 @@ routing, SLA policy, reason declarations and subject relationships stay with the
 consuming assembly on either plane.
 
 **What this cost.** A kernel change — `ModuleManifest.platform_tables` and the
-platform half of the live-catalog contract, released as `0.1.0a53`. Before it,
-`audit_snapshot` required RLS on every table in a module schema, so a dual-plane
-module could not compose at all. Ticketing's kernel floor is therefore `a49`,
-not the `a39` that allocated `mod_tkt`.
+platform half of the live-catalog contract, introduced in kernel source at
+`0.1.0a53`. Before it, `audit_snapshot` required RLS on every table in a module
+schema, so a dual-plane module could not compose at all. Ticketing's floor is
+therefore set by a capability rather than by the `a39` that allocated
+`mod_tkt` — and a floor names the earliest INSTALLABLE kernel carrying it, so
+`a56` rather than `a53`, since a53–a55 were never published. It has since moved
+again, to `a61`, where ADR-0028 gave plane selection its own declaration.
 
 **Still owed — corrected.** An earlier revision of this plan said the platform
 plane had no live-catalog proof because the starter composes only the tenant

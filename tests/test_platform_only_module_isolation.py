@@ -303,3 +303,209 @@ def test_the_online_platform_role_can_actually_reach_the_tables(
             )
             conn.execute(text(f"SELECT 1 FROM {qualified} LIMIT 1"))  # noqa: S608
     engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("composed", "schema", "tables"), PLATFORM_ONLY_MODULES, indirect=["composed"]
+)
+def test_the_offline_role_keeps_a_repair_path(
+    composed: tuple[str, str, str], schema: str, tables: tuple[str, ...]
+) -> None:
+    """Isolation must not mean unrepairable.
+
+    `app_admin` is the OFFLINE migration role, not a request-path one. A
+    mis-recorded artifact or allocation, or a legally required erasure, has to
+    be possible by SOMEONE, and confining that to the role which already runs
+    reviewed migrations is the difference between a deliberate repair and an
+    accident during a request.
+
+    Without this the tests above are satisfied by a schema NOBODY can correct:
+    they constrain `app_user` to nothing and require only that `platform_api`
+    holds *some* row DML. `platform_api` deliberately holds no UPDATE on
+    `mod_rel` (immutability is enforced by privilege there), so if `app_admin`
+    were revoked too, a published artifact would be beyond repair by any role
+    and every existing assertion would still pass.
+    """
+    admin_url, _, _ = composed
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        assert conn.execute(
+            text("SELECT has_schema_privilege(:r, :s, 'USAGE')"),
+            {"r": "app_admin", "s": schema},
+        ).scalar(), f"app_admin lacks USAGE on {schema}"
+        for table in tables:
+            qualified = f"{schema}.{table}"
+            for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                assert conn.execute(
+                    text("SELECT has_table_privilege(:r, :t, :p)"),
+                    {"r": "app_admin", "t": qualified, "p": privilege},
+                ).scalar(), f"app_admin cannot {privilege} on {qualified}"
+    engine.dispose()
+
+
+# ── The gate itself, not only the facts underneath it ────────────────────────
+#
+# Everything above asserts the individual catalog facts the platform contract is
+# made of. This section runs the REAL composed gate — `audit_live_schemas`, what
+# an adopting assembly actually executes — over the same live schema, and then
+# proves that same gate rejects a schema that violates the contract.
+#
+# The distinction is the whole point of the section: a set of facts that each
+# look right is not a proof that the code CONSUMING them agrees. The defect this
+# file exists for survived three releases per module precisely because nobody
+# ever ran this gate over `mod_rel` or `mod_ealloc` — the Starter composes
+# neither module, so neither schema was ever walked.
+
+
+def _manifest_for(schema: str) -> object:
+    """The manifest owning `schema`, imported lazily.
+
+    Keyed by schema rather than parametrised alongside it, so the module tuple
+    at the top of this file stays a description of MIGRATIONS — which is what
+    the fixture composes.
+    """
+    if schema == "mod_rel":
+        from dotmac_release_catalog.manifest import module
+
+        return module
+    if schema == "mod_ealloc":
+        from dotmac_entitlement_allocation.manifest import module
+
+        return module
+    raise AssertionError(f"no manifest mapped for {schema!r}")
+
+
+@pytest.mark.parametrize(
+    ("composed", "schema", "tables"), PLATFORM_ONLY_MODULES, indirect=["composed"]
+)
+def test_the_composed_live_catalog_gate_passes_over_the_module_schema(
+    composed: tuple[str, str, str], schema: str, tables: tuple[str, ...]
+) -> None:
+    """The gate an adopter runs, run here, against a real database.
+
+    With these tables declared TENANT — as both manifests had them until
+    `0.1.0a4` — `audit_snapshot` demands RLS ENABLEd AND FORCEd plus a policy on
+    each, none of which either lineage creates, correctly, because they are
+    platform catalog tables. So this is the assertion the old declaration could
+    not have satisfied, and the one whose absence let the defect ship.
+
+    It asserts on what it FOUND as well as on what was flagged: an audit over a
+    schema whose tables were never created reports no violations and no
+    coverage, and the two are indistinguishable in a green run.
+    """
+    from dotmac_kernel.migrations.catalog import audit_live_schemas, audited_schemas
+    from dotmac_kernel.namespaces import NamespaceRegistry
+
+    registry = NamespaceRegistry.from_manifests((_manifest_for(schema),))
+    assert schema in audited_schemas(registry), f"{schema} is not audited at all"
+
+    # Declaration and reality must agree in BOTH directions, which is also what
+    # makes the audit below non-vacuous.
+    assert registry.declared_platform_tables(schema) == frozenset(tables)
+    assert registry.expected_tables(schema) == frozenset(tables)
+    assert registry.platform_plane_installed(schema) is True
+    assert registry.tenant_plane_installed(schema) is False
+
+    admin_url, _, _ = composed
+    engine = create_engine(admin_url)
+    try:
+        with engine.connect() as conn:
+            live = {
+                row[0]
+                for row in conn.execute(
+                    text("SELECT tablename FROM pg_tables WHERE schemaname = :s"),
+                    {"s": schema},
+                )
+            }
+            assert live == set(tables), f"{schema} holds {sorted(live)}"
+            violations = audit_live_schemas(conn, registry)
+    finally:
+        engine.dispose()
+    assert not violations, "module schema violations:\n" + "\n".join(violations)
+
+
+@pytest.mark.parametrize(
+    ("composed", "schema", "tables"), PLATFORM_ONLY_MODULES, indirect=["composed"]
+)
+def test_the_live_audit_fails_when_a_platform_invariant_is_broken(
+    composed: tuple[str, str, str], schema: str, tables: tuple[str, ...]
+) -> None:
+    """SENSITIVITY PROOF for the gate above, against real mutated catalog state.
+
+    A green audit is indistinguishable from an audit that examined nothing, so
+    the invariants are BROKEN in the live database — inside a transaction that
+    is rolled back — and `fetch_snapshot` is re-run over the damaged schema.
+    Each mutation must be caught, and each is a real failure mode:
+
+    - RLS enabled on a platform table denies every row to the control plane,
+      because there is no policy and no tenant column for one to test. It reads
+      as "more secure" and is a silent outage.
+    - a `tenant_id` column on a platform table asserts the row belongs to a
+      tenant of some product data plane, which is the plane crossing ADR-0023
+      exists to prevent.
+    - a grant to `app_user` is the failure the whole plane turns on: here the
+      REVOKE *is* the isolation, so an un-revoked platform table is exactly as
+      exposed as an unpolicied tenant one.
+
+    `fetch_snapshot` is exercised directly rather than through
+    `audit_live_schemas` so the snapshot's own catalog queries are proven to
+    observe each mutation — an audit that is blind at the FETCH step would
+    report a clean snapshot of a broken database.
+    """
+    from dotmac_kernel.migrations.catalog import audit_snapshot, fetch_snapshot
+
+    victim = tables[0]
+    qualified = f"{schema}.{victim}"
+    mutations = (
+        (
+            f"ALTER TABLE {qualified} ENABLE ROW LEVEL SECURITY",
+            "row-level security",
+        ),
+        (
+            f"ALTER TABLE {qualified} ADD COLUMN tenant_id uuid",
+            "has a tenant_id column",
+        ),
+        (
+            f"GRANT SELECT ON {qualified} TO app_user",
+            "effectively holds",
+        ),
+    )
+
+    admin_url, _, _ = composed
+    engine = create_engine(admin_url)
+    try:
+        for statement, expected in mutations:
+            with engine.connect() as conn:
+                transaction = conn.begin()
+                try:
+                    # `statement` is built from this file's own literals.
+                    conn.execute(text(statement))
+                    snapshot = fetch_snapshot(
+                        conn,
+                        schema,
+                        declared_tables=frozenset(tables),
+                        platform_tables=frozenset(tables),
+                    )
+                    violations = audit_snapshot(snapshot)
+                    assert violations, (
+                        f"{schema}: the audit found nothing wrong after "
+                        f"{statement!r} — it is not observing this invariant"
+                    )
+                    flagged = "\n".join(violations)
+                    assert qualified in flagged, flagged
+                    assert expected in flagged, flagged
+                finally:
+                    transaction.rollback()
+
+        # Specificity: the same fetch over the UNDAMAGED schema must be clean,
+        # or the assertions above are satisfied by an audit that always fails.
+        with engine.connect() as conn:
+            snapshot = fetch_snapshot(
+                conn,
+                schema,
+                declared_tables=frozenset(tables),
+                platform_tables=frozenset(tables),
+            )
+            assert not audit_snapshot(snapshot)
+    finally:
+        engine.dispose()

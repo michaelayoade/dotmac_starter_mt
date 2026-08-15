@@ -23,18 +23,32 @@ python = ">=3.11,<3.14"
 # `assembly → module → dotmac-ui → dotmac-kernel`. A module depends on the
 # kernel; never on an assembly, and never on another module.
 #
-# TWO things set this floor, and the higher one wins.
+# THREE things set this floor, and the highest one wins.
 #
 # 1. `0.1.0a39` allocates `mod_tkt` in `MIGRATION_OWNER_LEDGER`. An earlier
 #    kernel cannot register this module at all — `NamespaceRegistry
 #    .from_manifests` raises `UnallocatedNamespaceError`.
-# 2. `0.1.0a53` adds `ModuleManifest.platform_tables` and the platform half of
-#    the live-catalog contract (ADR-0023). This module is DUAL-PLANE and its
-#    manifest passes that field, so an earlier kernel raises `TypeError` at
-#    import — before the allocation check is ever reached.
+# 2. `ModuleManifest.platform_tables` and the platform half of the live-catalog
+#    contract (ADR-0023) were introduced in kernel source at `0.1.0a53`.
+#    Because a53-a55 were not published, `0.1.0a56` is the earliest installable
+#    compatible kernel. This module is DUAL-PLANE and its manifest passes that
+#    field, so an earlier kernel raises `TypeError` at import — before the
+#    allocation check is ever reached.
+# 3. `0.1.0a61` adds ADR-0028's `supported_plane_sets` and
+#    `selected_module_planes`. This manifest declares the first and `tk_0001`
+#    calls the second, so a61 is the highest capability this module CONSUMES —
+#    and, being published, it is installable as written.
 #
-# So the floor is a49. Unlike the other modules, this one is NOT simply its
-# allocation release: it consumes a kernel capability newer than its namespace.
+# So the floor is a61. Unlike the other modules, this one is NOT simply its
+# allocation release: it consumes kernel capabilities newer than its namespace.
+#
+# (This comment read "So the floor is a49" from the dual-plane change until
+# now. No kernel a49 ever added `platform_tables`; a53 introduced it in source
+# and a56 was the first release a consumer could install. Note that a56 is
+# where the PLATFORM-ONLY modules stop — they consume nothing after
+# `platform_tables` — and is NOT this module's floor: step 3 above takes
+# ticketing past it. Quoting a56 here would be the same field/prose drift in a
+# new spelling.)
 dotmac-kernel = ">=0.1.0a61"
 sqlalchemy = "^2.0"
 # `alembic` is imported by `dotmac_ticketing.linking`, which emits DDL into a
