@@ -18,6 +18,28 @@ portfolio pass before the new Cloud owners are opened. Each package still needs
 its own `EXTRACTION.toml`, exact parity dispositions and sensitivity canaries in
 the change that creates it.
 
+> **Superseded in part on 2026-08-15.** This portfolio pass was written before
+> the per-owner dossiers existed. Two of its rulings below were refuted by the
+> deeper audits and are corrected by the ADR-0030 amendment; where this table
+> and a per-owner dossier disagree, **the dossier wins**.
+>
+> - **`dotmac-fulfillment` is NOT product-first.** This table cites "Sub's
+>   service-order lifecycle, provisioning runs/readiness decisions". Sub has no
+>   saga engine: `saga_executions` and `provisioning_step_executions` exist only
+>   in migrations and carry foreign keys to `ont_units`/`olt_devices`. The
+>   verdict is greenfield-after-inventory on the kernel participant contract —
+>   see [`fulfillment-sources.md`](fulfillment-sources.md) and ADR-0030 §5d.
+> - **Vendor CP does not supply "immutable publication deltas".**
+>   `v002_offer_versions.py` grants `UPDATE, DELETE` on `offer_versions` to the
+>   online API role, with no trigger, digest or previous-version link.
+>   Structural immutability is built, not ported — see
+>   [`subscriptions-sources.md`](subscriptions-sources.md) and ADR-0030 §5a.
+>
+> Two further corrections apply to the `dotmac-orders` row: no source in the
+> fleet keeps an accepted line immutable or snapshots a price version, so both
+> are mandatory greenfield deltas rather than ports
+> ([`orders-sources.md`](orders-sources.md), ADR-0030 §5b).
+
 ## 1. Verdict by owner
 
 | Target owner | Source ruling | Mandatory source / evidence | Excluded coupling |
