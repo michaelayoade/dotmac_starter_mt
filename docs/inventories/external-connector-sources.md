@@ -1,6 +1,7 @@
 # External-connector sources — what the Integrator has to absorb
 
-**As of:** 2026-08-14
+**As of:** 2026-08-15 (counts 2026-08-14; coverage and execution record
+2026-08-15)
 **Measured by:** [`scripts/external_connector_sweep.py`](../../scripts/external_connector_sweep.py)
 **Frozen baseline:** [`external-connector-baseline.json`](external-connector-baseline.json)
 **Ratchet:** `tests/architecture/test_external_connector_ratchet.py`
@@ -114,6 +115,67 @@ Tests, migrations and scripts are excluded everywhere. A test that fakes a
 provider is how a connector is verified, not a connector; a connector in a
 migration is history.
 
+## Coverage — what the measurement does not reach (2026-08-15)
+
+A bounded measurement that does not state its bounds reads as "covered
+everything": the strongest possible claim made by the weakest possible evidence.
+The sweep therefore prints a `COVERAGE` block on **every** run — not behind a
+flag, because a disclosure nobody turned on is not a disclosure. Four bounds
+exist and all four are now said out loud rather than left to be inferred from
+the source.
+
+**1. Only one subtree per repository is read.** As measured on 2026-08-15:
+
+| Repo | Subtree | Files measured | Runtime `.py` files elsewhere in the repo |
+|---|---|---:|---:|
+| `dotmac_academy_app` | `app/` | 152 | 4 |
+| `dotmac_crm` | `app/` | 784 | 73 |
+| `dotmac_erp` | `app/` | 1452 | 185 |
+| `dotmac_sub` | `app/` | 1931 | 282 |
+| `dotmac_vendor_control_plane` | `src/vendor_cp/` | 59 | 1 |
+
+The right-hand column is the size of the bound, and it is stated as a number so
+a reviewer can weigh it rather than guess at it. ERP's figure is 185 and not the
+3,432 a naive walk reports: `dotmac_erp/worktrees/` holds two nested git
+checkouts whose thousands of files are COPIES of code measured elsewhere. They
+are pruned on a premise anyone can check — the directory contains a `.git`
+entry — and the pruning is itself printed, because a silent correction to a
+coverage number is just another silent cap.
+
+**2. A file that cannot be read is not a clean file.** An unreadable or
+unparseable file used to return an empty classification, which is
+indistinguishable from "no connector here" and silently lowers a count. Worse,
+the fall would then surface through the ratchet's *falling* direction as "lower
+the baseline", inviting a reviewer to ratify an undercount as a retirement.
+Such files are now named, and they make `--check` refuse. Zero today.
+
+**3. An absent enumerated repository is UNMEASURED, never zero** — unchanged,
+and the ratchet abstains.
+
+**4. Five repositories are measured; the fleet has more.** Every other Dotmac
+Python distribution is now listed in the sweep's `OUT_OF_SCOPE` with a premise a
+reader can check against that repository, per ADR-0018 — an exemption states an
+enforceable premise or the region is unmonitored rather than exempt, and
+"grandfathered" is refused by the guard as a description of history rather than
+a premise. The load-bearing distinction is **destination versus source**:
+`dotmac_integrator` and `dotmac-integration-client` are where connector surface
+is supposed to ARRIVE, so counting them would make every successful migration
+read as a regression. A distribution in neither list is reported as
+UNCLASSIFIED; `--strict-coverage` turns that into a refusal, which is how CI
+runs it, while a workstation carrying a second clone of an already-measured repo
+is not a governance defect.
+
+### Execution record
+
+| Date | Fleet root | Result |
+|---|---|---|
+| 2026-08-15 | `/Users/michaelayoade/Downloads/management` | **PASS** — every count identical to the frozen baseline; zero unmeasurable files; 4 unclassified entries, all local clones of already-measured repositories (`crm-wt`, `crm-verify`, `erp-wt`, `academy-metrics-wt`) |
+
+The baseline is therefore **unchanged by this execution**, which is the outcome
+worth recording: a ratchet run that produces no diff is evidence the frozen
+numbers still describe the fleet, and a ratchet nobody has run since the day it
+was written is a file, not a guard.
+
 ## The ratchet
 
 Two-directional. Rising fails ("a new direct connector surface landed"); falling
@@ -123,7 +185,16 @@ is reviewable as a diff and a detector that quietly stops matching cannot pass
 as progress.
 
 It **abstains** when the fleet is not checked out beside Starter. Scoring a
-repository it cannot see as zero would report the duplication as solved.
+repository it cannot see as zero would report the duplication as solved. It also
+abstains when a file inside a measured subtree could not be read — the counts
+are then an undercount of unknown size, and failing on the cause beats letting
+it surface as a mislabelled symptom in the falling direction.
+
+Baselines freeze **counts only**. Coverage is a property of the run rather than
+of the fleet: file totals move with every unrelated commit in a sibling
+repository, so freezing them would demand a re-baseline for changes this ratchet
+does not govern and would bury the disclosure in diff noise — which is how
+disclosures stop being read.
 
 ## Sequence this belongs to
 

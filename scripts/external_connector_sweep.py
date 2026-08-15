@@ -33,9 +33,39 @@ Two choices inherited from `fleet_decomposition_sweep.py`, both load-bearing:
 Tests are excluded everywhere: a test that fakes a provider is how a connector
 is verified, not a connector.
 
+## No silent caps
+
+Every run prints a COVERAGE block, because a bounded measurement that does not
+state its bounds reads as "covered everything". Four bounds exist and all four
+are now said out loud rather than inferred:
+
+1. **The measured subtree.** Only `app/` (or the repo's equivalent) is read, so
+   every other Python file in that repository is outside the measurement. The
+   count of those files is reported per repo — a bound with a number is a bound
+   a reviewer can weigh; a bound in a docstring is one they cannot.
+2. **Unreadable and unparseable files.** These used to return an empty
+   classification, which is indistinguishable from "this file has no connector"
+   and silently LOWERS a count. They are now named, and they FAIL `--check`:
+   inside an enumerated repo a dropped file corrupts the number the ratchet is
+   defending.
+3. **Absent enumerated repos.** Already handled — named, and the ratchet
+   abstains rather than scoring them zero.
+4. **Fleet repositories nobody classified.** `RUNTIME_ROOTS` measures five
+   repositories; the fleet has more. A repository that is neither measured nor
+   listed in `OUT_OF_SCOPE` with a premise is reported as UNCLASSIFIED. It does
+   not fail by default — a developer's second clone of an already-measured repo
+   is not a governance defect — but `--strict-coverage` turns it into one, which
+   is how CI runs it.
+
+ADR-0018 governs (4): an exemption states an ENFORCEABLE premise, or the region
+is unmonitored rather than exempt. Each `OUT_OF_SCOPE` entry therefore says
+something a reader can check against the repository, and "grandfathered" is not
+one of them.
+
 Run it from a checkout that has the fleet beside it::
 
     python scripts/external_connector_sweep.py --check
+    python scripts/external_connector_sweep.py --check --strict-coverage
     python scripts/external_connector_sweep.py --write-baseline
 """
 
@@ -44,6 +74,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import pathlib
 import sys
 
@@ -62,6 +93,56 @@ RUNTIME_ROOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 REPOS = tuple(repo for repo, _ in RUNTIME_ROOTS)
+
+#: Fleet directories deliberately NOT measured, each with the premise that keeps
+#: it out of scope. ADR-0018: an exemption states an ENFORCEABLE premise — one a
+#: reader can check against the repository — or the region is unmonitored rather
+#: than exempt. "Grandfathered" is not a premise and none of these say it.
+#:
+#: The distinction that matters here is DESTINATION versus SOURCE. ADR-0024 § 6
+#: retires connector surface out of product runtimes and INTO the Integrator, so
+#: counting the Integrator would ratchet the place the surface is supposed to
+#: arrive, and every successful migration would read as a regression.
+OUT_OF_SCOPE: tuple[tuple[str, str], ...] = (
+    (
+        "dotmac_starter_mt",
+        "the Starter is the module workspace this sweep is RUN from, not a "
+        "product runtime; its packages are the destination of the retirement",
+    ),
+    (
+        "dotmac_integrator",
+        "the Integrator assembly — the DESTINATION of every retirement this "
+        "ratchet drives. Counting it would make each successful migration read "
+        "as a new connector surface (ADR-0024 § 6)",
+    ),
+    (
+        "dotmac-integration-client",
+        "the client library products CALL to reach the Integrator; a connector "
+        "it holds is the point, not the debt",
+    ),
+    (
+        "dotmac_workspace",
+        "an assembly that composes modules and owns no provider integration; if "
+        "it grows one it must be MEASURED, not re-exempted",
+    ),
+    (
+        "dotmac_governance",
+        "engineering-standards tooling with no application runtime and no "
+        "`app/` subtree — nothing this sweep's categories can describe",
+    ),
+    (
+        "dotmac-academy",
+        "course and manual content plus build scripts; its Python is authoring "
+        "tooling, not a request path",
+    ),
+    (
+        "claude_knowledge",
+        "the knowledge MCP server — operator tooling outside the product fleet "
+        "ADR-0024 governs",
+    ),
+)
+
+OUT_OF_SCOPE_REASONS: dict[str, str] = dict(OUT_OF_SCOPE)
 
 #: Directory names that are never application runtime.
 _EXCLUDED_PARTS = frozenset(
@@ -180,11 +261,49 @@ CATEGORIES = (
 _RETRY_HINTS = ("dead_letter", "deadletter", "retry_backoff", "max_retries", "requeue")
 
 
-def _runtime_files(root: pathlib.Path) -> list[pathlib.Path]:
+def _walk_python(
+    root: pathlib.Path, *, nested_checkouts: list[pathlib.Path] | None = None
+) -> list[pathlib.Path]:
+    """Every `.py` under `root`, pruning excluded directories as it descends.
+
+    Pruning rather than filtering `rglob` output: a repository with a `.venv`
+    holds tens of thousands of files this sweep will discard, and descending
+    into them to throw them away makes the coverage report expensive enough that
+    someone would be tempted to drop it.
+
+    Passing `nested_checkouts` also prunes any subdirectory that is itself a git
+    checkout, appending it to that list. `dotmac_erp/worktrees/` holds 5,000+
+    `.py` files that are COPIES of code measured elsewhere; counting them would
+    have made the coverage disclosure read as though two-thirds of ERP were
+    unmeasured, and a disclosure that overstates is discarded as fast as one
+    that understates. The premise is checkable rather than a name guess: the
+    directory contains a `.git` entry.
+    """
+    found: list[pathlib.Path] = []
+    for directory, subdirectories, filenames in os.walk(root):
+        keep: list[str] = []
+        for name in sorted(subdirectories):
+            if name in _EXCLUDED_PARTS or name.startswith("."):
+                continue
+            candidate = pathlib.Path(directory) / name
+            if nested_checkouts is not None and (candidate / ".git").exists():
+                nested_checkouts.append(candidate)
+                continue
+            keep.append(name)
+        subdirectories[:] = keep
+        for filename in sorted(filenames):
+            if filename.endswith(".py"):
+                found.append(pathlib.Path(directory) / filename)
+    return found
+
+
+def _runtime_files(
+    root: pathlib.Path, *, nested_checkouts: list[pathlib.Path] | None = None
+) -> list[pathlib.Path]:
     return [
         path
-        for path in sorted(root.rglob("*.py"))
-        if not _EXCLUDED_PARTS & set(path.parts) and not path.name.startswith("test_")
+        for path in _walk_python(root, nested_checkouts=nested_checkouts)
+        if not path.name.startswith("test_")
     ]
 
 
@@ -311,13 +430,34 @@ def _owns_delivery_retry(tree: ast.AST, source: str) -> bool:
     return _imports_http_client(tree) or _is_webhook_surface(tree)
 
 
-def _classify(path: pathlib.Path) -> set[str]:
+def _parse(path: pathlib.Path) -> tuple[ast.AST | None, str, str | None]:
+    """Parse one file, returning WHY it could not be parsed rather than nothing.
+
+    The old form swallowed `OSError`/`SyntaxError` into an empty classification,
+    which is byte-for-byte indistinguishable from "this file holds no connector"
+    — and silently LOWERS the number the ratchet defends. A file the sweep
+    cannot read is not a clean file; it is an unmeasured one, and the difference
+    has to survive as far as the report.
+    """
     try:
         source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, "", f"unreadable ({type(exc).__name__}: {exc})"
+    try:
         tree = ast.parse(source)
-    except (OSError, SyntaxError):
-        return set()
+    except SyntaxError as exc:
+        return None, source, f"unparseable (SyntaxError line {exc.lineno}: {exc.msg})"
+    return tree, source, None
 
+
+def _classify(path: pathlib.Path) -> set[str]:
+    tree, source, error = _parse(path)
+    if tree is None or error is not None:
+        return set()
+    return _classify_source(tree, source)
+
+
+def _classify_source(tree: ast.AST, source: str) -> set[str]:
     found: set[str] = set()
     if _imports_http_client(tree) and _issues_a_request(tree):
         found.add("http_client")
@@ -334,20 +474,71 @@ def _classify(path: pathlib.Path) -> set[str]:
     return found
 
 
+def _unclassified_repositories(fleet_root: pathlib.Path) -> list[str]:
+    """Fleet directories that are neither measured nor exempted with a premise.
+
+    A Python distribution — something with a `pyproject.toml` or a `setup.py` —
+    sitting beside the measured repositories and named in neither list is a
+    coverage bound nobody declared. Reporting it is the whole point: five of N
+    repositories measured, presented as a fleet sweep, is the silent truncation
+    this block exists to prevent.
+    """
+    if not fleet_root.is_dir():
+        return []
+    known = set(REPOS) | set(OUT_OF_SCOPE_REASONS)
+    found: list[str] = []
+    for entry in sorted(fleet_root.iterdir()):
+        if not entry.is_dir() or entry.name in known or entry.name.startswith("."):
+            continue
+        if (entry / "pyproject.toml").is_file() or (entry / "setup.py").is_file():
+            found.append(entry.name)
+    return found
+
+
 def measure(fleet_root: pathlib.Path) -> tuple[dict, list[str]]:
     measured: dict[str, dict[str, int]] = {}
     absent: list[str] = []
+    subtrees: dict[str, str] = {}
+    scanned: dict[str, int] = {}
+    outside: dict[str, int] = {}
+    unmeasurable: dict[str, list[str]] = {}
+    nested: dict[str, list[str]] = {}
 
     for repo, parts in RUNTIME_ROOTS:
-        root = fleet_root / repo / pathlib.Path(*parts)
+        repo_root = fleet_root / repo
+        root = repo_root / pathlib.Path(*parts)
+        subtrees[repo] = "/".join(parts)
         if not root.is_dir():
             absent.append(repo)
             continue
         counts = dict.fromkeys(CATEGORIES, 0)
-        for path in _runtime_files(root):
-            for category in _classify(path):
+        files = _runtime_files(root)
+        scanned[repo] = len(files)
+        for path in files:
+            tree, source, error = _parse(path)
+            if error is not None:
+                unmeasurable.setdefault(repo, []).append(
+                    f"{path.relative_to(repo_root)}: {error}"
+                )
+                continue
+            assert tree is not None
+            for category in _classify_source(tree, source):
                 counts[category] += 1
         measured[repo] = counts
+        # Everything the repository holds that the measured subtree does not.
+        # A bound with a number is one a reviewer can weigh.
+        checkouts: list[pathlib.Path] = []
+        outside[repo] = len(
+            [
+                path
+                for path in _runtime_files(repo_root, nested_checkouts=checkouts)
+                if not path.is_relative_to(root)
+            ]
+        )
+        if checkouts:
+            nested[repo] = sorted(
+                str(path.relative_to(repo_root)) for path in checkouts
+            )
 
     return (
         {
@@ -358,9 +549,72 @@ def measure(fleet_root: pathlib.Path) -> tuple[dict, list[str]]:
                 category: sum(counts[category] for counts in measured.values())
                 for category in CATEGORIES
             },
+            "coverage": {
+                "fleet_root": str(fleet_root),
+                "measured_subtrees": subtrees,
+                "files_scanned": scanned,
+                "files_outside_measured_subtree": outside,
+                "files_unmeasurable": unmeasurable,
+                "nested_checkouts_pruned": nested,
+                "repos_absent": sorted(absent),
+                "repos_out_of_scope": dict(sorted(OUT_OF_SCOPE_REASONS.items())),
+                "repos_unclassified": _unclassified_repositories(fleet_root),
+            },
         },
         absent,
     )
+
+
+def coverage_report(measured: dict) -> str:
+    """Everything this run did NOT look at, as prose, on every run.
+
+    Printed unconditionally rather than under a flag. A disclosure nobody turned
+    on is the same as no disclosure.
+    """
+    coverage = measured["coverage"]
+    lines = ["COVERAGE — what this measurement does and does not cover:"]
+    for repo in sorted(coverage["measured_subtrees"]):
+        subtree = coverage["measured_subtrees"][repo]
+        if repo in coverage["repos_absent"]:
+            lines.append(f"  {repo}: ABSENT under {coverage['fleet_root']} — not 0")
+            continue
+        lines.append(
+            f"  {repo}: measured {coverage['files_scanned'][repo]} files under "
+            f"{subtree}/; {coverage['files_outside_measured_subtree'][repo]} "
+            "runtime .py files elsewhere in the repo are OUTSIDE the measurement"
+        )
+    for repo, problems in sorted(coverage["files_unmeasurable"].items()):
+        for problem in problems:
+            lines.append(f"  {repo}: UNMEASURABLE {problem}")
+    for repo, checkouts in sorted(coverage["nested_checkouts_pruned"].items()):
+        lines.append(
+            f"  {repo}: pruned {len(checkouts)} nested git checkout(s) from the "
+            f"outside-the-subtree count ({', '.join(checkouts)}) — copies of "
+            "code measured elsewhere, not additional unmeasured runtime"
+        )
+    if coverage["repos_unclassified"]:
+        lines.append(
+            "  UNCLASSIFIED fleet distributions (neither measured nor exempted "
+            "with a premise in OUT_OF_SCOPE): "
+            + ", ".join(coverage["repos_unclassified"])
+        )
+    lines.append(
+        f"  out of scope by declared premise: "
+        f"{', '.join(sorted(coverage['repos_out_of_scope']))}"
+    )
+    return "\n".join(lines)
+
+
+def frozen(measured: dict) -> dict:
+    """The part of a measurement a baseline may freeze: the COUNTS.
+
+    Coverage is a property of the run, not of the fleet — file totals move with
+    every unrelated commit in a sibling repository, and a baseline that froze
+    them would demand a re-baseline for changes this ratchet does not govern.
+    Freezing it would also convert a genuine disclosure into diff noise, which
+    is how disclosures stop being read.
+    """
+    return {key: value for key, value in measured.items() if key != "coverage"}
 
 
 def _ratchet(measured: dict, baseline: dict) -> list[str]:
@@ -399,6 +653,15 @@ def main() -> int:
     parser.add_argument("--fleet-root", type=pathlib.Path, default=PROJECT_ROOT.parent)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--write-baseline", action="store_true")
+    parser.add_argument(
+        "--strict-coverage",
+        action="store_true",
+        help=(
+            "refuse when a fleet distribution is neither measured nor exempted "
+            "with a premise. CI runs it this way; a workstation with a second "
+            "clone of an already-measured repo is not a governance defect"
+        ),
+    )
     args = parser.parse_args()
 
     measured, absent = measure(args.fleet_root)
@@ -411,16 +674,39 @@ def main() -> int:
         return 2 if args.check else 0
 
     if args.write_baseline:
-        BASELINE.write_text(json.dumps(measured, indent=2, sort_keys=True) + "\n")
+        BASELINE.write_text(
+            json.dumps(frozen(measured), indent=2, sort_keys=True) + "\n"
+        )
         print(f"wrote {BASELINE.relative_to(PROJECT_ROOT)}")
+        print(coverage_report(measured))
         return 0
 
     print(json.dumps(measured, indent=2, sort_keys=True))
+    print("\n" + coverage_report(measured))
     if not args.check:
         return 0
     if absent:
         print(
             "\nRatchet abstains: the baseline covers every repository in RUNTIME_ROOTS."
+        )
+        return 2
+
+    unmeasurable = measured["coverage"]["files_unmeasurable"]
+    if unmeasurable:
+        # Inside an enumerated repo, a file the sweep could not read lowers a
+        # count for a reason that has nothing to do with retirement — and the
+        # falling direction of the ratchet would then blame a rebaseline. Fail
+        # on the cause rather than let it surface as a mislabelled symptom.
+        print(
+            "\nRefusing: files inside a MEASURED subtree could not be read, so "
+            "the counts below are an undercount of unknown size."
+        )
+        return 2
+
+    if args.strict_coverage and measured["coverage"]["repos_unclassified"]:
+        print(
+            "\nRefusing (--strict-coverage): classify each distribution above in "
+            "RUNTIME_ROOTS or in OUT_OF_SCOPE with a premise a reader can check."
         )
         return 2
 

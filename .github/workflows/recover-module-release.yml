@@ -37,7 +37,6 @@ on:
           - dotmac-entitlement-allocation
           - dotmac-files
           - dotmac-ticketing
-          - dotmac-imports
           - dotmac-integration
           - dotmac-approvals
           - dotmac-application-directory

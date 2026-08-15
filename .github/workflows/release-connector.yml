@@ -1,0 +1,274 @@
+name: Release connector
+
+# Publish ONE connector plugin to the PRIVATE Forgejo index at
+# registry.dotmac.io. The same security sequence as `release-kernel.yml`,
+# `release-ui.yml`, `release-module.yml` and `release-adapter.yml` — build once
+# on the exact current protected-main SHA -> inspect the bytes -> conform them
+# -> AWAIT environment approval -> re-assert the approved SHA is still main's
+# tip -> publish THOSE SAME bytes -> install the published release from the
+# index and verify -> tag only then.
+#
+# THE ALLOWLIST IS THE LOCK, NOT THIS FILE
+#
+# `.github/release-connectors.json` lists NO connectors, so every dispatch of
+# this workflow fails at the gate. That empty object is the authorization
+# boundary. The existence of this workflow is not authorization and must not be
+# read as any — merging it grants nobody the ability to publish anything.
+#
+# It is merged now, shut, because publish permissions, freshness checks and
+# artifact handling are a different review from the first provider
+# implementation, with different reviewers and different failure modes. Bundling
+# them means whichever is more urgent carries the other through, and the one
+# that gets waved past is the security sequence — the half nobody can see
+# working until it is too late. PR #180 set this precedent for the adapter lane;
+# this follows it exactly.
+#
+# WHY A THIRD LANE, rather than optional fields in an existing one
+#
+# A connector is neither shape already governed. It is not a MODULE: no
+# `mod_*` schema, no migration lineage, no `MIGRATION_OWNER_LEDGER` allocation —
+# its state lives in the control plane's `mod_intg`, which `dotmac-integration`
+# owns and a connector never writes directly. And it is not simply an ADAPTER:
+# an adapter is a library a product CALLS, verified by its public surface, about
+# which nothing else in the fleet has an opinion. A connector is DISCOVERED and
+# EXECUTED — it registers in the `dotmac_integration.connectors` entry-point
+# group and is loaded at boot by `dotmac_integration.discovery.discover`, which
+# is FAIL-CLOSED AS A SET: one malformed connector refuses the whole registry
+# rather than silently offering the rest. So a connector that conforms only
+# alongside its neighbours is not independently releasable, and this lane has to
+# establish that before publication rather than after.
+#
+# Making the adapter lane's fields optional was rejected for the reason that
+# lane already records about the module lane: optionality is not scoped to the
+# package that needs it. Once `spi_range` and `connector_key` may be absent, a
+# connector whose entry-point registration was dropped in a bad merge stops
+# being refused and starts being treated as an adapter, its conformance proof
+# skipped rather than failed.
+#
+# A RELEASE PROFILE, NOT A FOURTH CLASSIFICATION. A connector's
+# `EXTRACTION.toml` declares `stateless-protocol-adapter` like any other
+# distribution a product does not install; `connector-plugin` names this release
+# profile and the architectural role only. So the classification check is a
+# FLOOR THIS LANE SHARES WITH THE ADAPTER LANE, not the thing that separates
+# them. What separates them is the strictness `scripts/release_connector.py`
+# adds and the adapter lane does not ask for: exactly one connector entry point,
+# a PUBLISHED `dotmac-integration` floor, connector-key consistency,
+# installed-wheel SPI conformance, a `packages/dotmac-connector-` path, and no
+# persistence, secret material or private retry/checkpoint engine.
+#
+# NO COMPOSITION CHECK, and that is not a gap — same argument as the adapter
+# lane. The module lane's level 2 installs a set beside one kernel and
+# constructs a `NamespaceRegistry`, because two modules that each register alone
+# can still collide on a schema, a prefix or a table. A connector owns none of
+# those. What it CAN collide on is its `connector_key`, and discovery already
+# refuses a duplicate at boot; the release-time half of that is the key
+# consistency `resolve` checks here.
+#
+# ONE CONNECTOR PER RUN, on purpose — the same reasoning as the other lanes.
+# Releasing two in a single dispatch would read as transactional when it is not:
+# the second upload can fail with the first already public.
+#
+# `connector` is a FREE-TEXT input rather than a `choice` for one reason only: a
+# `workflow_dispatch` choice must offer at least one option, and there is
+# nothing to offer. The enforced layer was never the input anyway — it is
+# `resolve`. `tests/architecture/test_connector_release_policy.py` proves no
+# dispatch can succeed today, and requires a `choice` list matching the
+# allowlist exactly once that allowlist is non-empty, so the first entry cannot
+# land without the UI layer following it.
+#
+# Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release`
+# environment secret whose canonical source is OpenBao
+# (secret/dotmac/forgejo/ci-publisher-token). Third-party actions are pinned to
+# the same reviewed full commit SHAs as the other release workflows.
+
+on:
+  workflow_dispatch:
+    inputs:
+      connector:
+        description: >-
+          Which allowlisted connector plugin to publish. The lane is currently
+          SHUT — `.github/release-connectors.json` lists none, so every value
+          fails at the gate.
+        required: true
+        type: string
+      version:
+        description: "Version to publish (MUST equal the package's pyproject version)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      package_dir: ${{ steps.resolve.outputs.package_dir }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Fail closed unless THIS run is the exact current tip of protected main
+      # (not merely an ancestor) — a stale or side-branch dispatch cannot publish.
+      - name: Assert run is on the current protected main SHA
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: ./.github/actions/setup-poetry
+
+      # THE GATE, and the lock. Refuses an unallowlisted distribution — which is
+      # every distribution today — a pyproject whose name disagrees with the
+      # dispatch, a version that was not typed exactly, an entry carrying
+      # stateful-only facts or missing any required field, a package outside
+      # `packages/dotmac-connector-`, a dossier whose classification is wrong, an
+      # entry point count other than one, a connector_key that disagrees with the
+      # registration, and an `integration_floor` naming a version nobody
+      # published. Everything after this step uses only its output.
+      #
+      # `git tag` needs the full history fetched above: the floor check asks
+      # whether the pinned dotmac-integration release was ever verified and
+      # tagged, and a shallow clone would answer "no" for every version.
+      - name: Resolve the allowlisted connector
+        id: resolve
+        run: |
+          python scripts/release_connector.py resolve \
+            "${{ inputs.connector }}" --version "${{ inputs.version }}" \
+            | tee -a "${GITHUB_OUTPUT}"
+
+      # Static conformance: the declared floor matches the gated one, no
+      # migration lineage, no secret-shaped file, no private retry/checkpoint
+      # engine. Runs before the build so a defect findable from source does not
+      # wait for a wheel.
+      - name: Static conformance
+        run: python scripts/release_connector.py conformance "${{ inputs.connector }}"
+
+      - name: Build wheel + sdist
+        working-directory: ${{ steps.resolve.outputs.package_dir }}
+        run: poetry build
+
+      # Release-artifact conformance: install the freshly built wheel into a
+      # clean venv beside the pinned control plane and run the SHIPPED kit
+      # (`assert_plugin_conforms`) against the installed bytes. The source tree
+      # and the wheel are different objects and only one of them gets published.
+      - name: Release wheel conformance
+        run: |
+          python -m venv /tmp/connector-smoke
+          /tmp/connector-smoke/bin/pip install --quiet \
+            "${{ steps.resolve.outputs.package_dir }}"/dist/*.whl
+          python scripts/release_connector.py verify-wheel "${{ inputs.connector }}" \
+            --python /tmp/connector-smoke/bin/python
+
+      - name: Upload built artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.connector }}-dist
+          path: ${{ steps.resolve.outputs.package_dir }}/dist/*
+          retention-days: 90
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: registry-release    # protected: main-only + required review
+    permissions:
+      contents: read
+    steps:
+      # RE-check freshness AFTER the approval wait, before anything is
+      # published. `build` proved this run was main's tip at dispatch time, but
+      # a protected environment can sit pending for hours — and the approval is
+      # a decision about a SHA, not about a run id. First step in the job, so it
+      # fails before the artifact is fetched or the publish token is used.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Re-assert the approved SHA is still the current protected main
+        run: bash scripts/assert_current_main.sh "${GITHUB_SHA}"
+
+      # Defence in depth: the allowlist is re-checked on the publish side, so a
+      # tampered `build` output cannot smuggle a target past the gate.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Re-assert the target is allowlisted
+        run: |
+          python scripts/release_connector.py resolve \
+            "${{ inputs.connector }}" --version "${{ inputs.version }}" >/dev/null
+
+      - name: Download the exact built bytes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.connector }}-dist
+          path: dist
+
+      # Publish the SAME bytes `build` inspected and conformed — downloaded,
+      # never rebuilt.
+      - name: Publish to the Forgejo private index
+        env:
+          TWINE_USERNAME: ci-publisher
+          TWINE_PASSWORD: ${{ secrets.FORGEJO_PUBLISH_TOKEN }}
+        run: |
+          python -m pip install --quiet twine
+          python -m twine upload \
+            --repository-url "https://registry.dotmac.io/api/packages/dotmac/pypi" dist/*
+
+  verify:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    environment: registry-release
+    permissions:
+      contents: write                # create the post-verification tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # The index may lag a few seconds after publish.
+      - name: Wait for the release on the Forgejo index
+        env:
+          IDX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple/${{ inputs.connector }}/
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "$IDX" | grep -q "${{ inputs.version }}"; then
+              echo "available on the Forgejo index"; exit 0
+            fi
+            echo "not yet on the Forgejo index (attempt $i)…"; sleep 10
+          done
+          echo "::error::${{ inputs.connector }} ${{ inputs.version }} did not appear in time"
+          exit 1
+
+      # Install the PUBLISHED release from the index into a clean venv, together
+      # with the exact `dotmac-integration` release it floors on, and run the
+      # shipped conformance kit against those bytes. The control plane comes
+      # from the private index and third-party dependencies from the public one,
+      # which is why both index flags are paired — `--index-url` REPLACES the
+      # default, so alone it would see the Dotmac distributions and nothing they
+      # depend on.
+      - name: Install from the Forgejo registry and verify conformance
+        env:
+          INDEX: https://ci-publisher:${{ secrets.FORGEJO_PUBLISH_TOKEN }}@registry.dotmac.io/api/packages/dotmac/pypi/simple
+          PUBLIC_INDEX_URL: https://pypi.org/simple
+        run: |
+          python -m venv /tmp/connector-registry
+          /tmp/connector-registry/bin/pip install --quiet \
+            --index-url "${INDEX}" --extra-index-url "${PUBLIC_INDEX_URL}" \
+            "${{ inputs.connector }}==${{ inputs.version }}"
+          python scripts/release_connector.py verify-wheel "${{ inputs.connector }}" \
+            --python /tmp/connector-registry/bin/python
+
+      # Only AFTER registry verification: tag the published SHA.
+      - name: Tag the verified release
+        run: |
+          TAG="${{ needs.build.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" \
+            -m "${{ inputs.connector }} ${{ inputs.version }} (verified on the Forgejo registry; installed and SPI conformance proved on the published bytes)" \
+            "${GITHUB_SHA}"
+          git push origin "${TAG}"
+          echo "tagged ${TAG} on ${GITHUB_SHA}"

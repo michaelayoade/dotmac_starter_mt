@@ -259,6 +259,148 @@ def test_a_retry_loop_without_a_connector_is_not_delivery_machinery() -> None:
     assert sweep._owns_delivery_retry(ast.parse(delivery), delivery)
 
 
+# ── No silent caps: every bound on coverage is stated ───────────────────────
+#
+# A ratchet is a claim about a measured region. The claim is only as good as the
+# statement of what the region EXCLUDES — a bounded sweep that does not say it
+# is bounded reads as "covered everything", which is the strongest possible
+# claim made by the weakest possible evidence.
+
+
+def test_an_unreadable_file_is_reported_rather_than_scored_as_clean(
+    tmp_path: pathlib.Path,
+) -> None:
+    """SENSITIVITY PROOF for the worst silent cap.
+
+    A file that fails to parse used to return an empty classification —
+    identical to a file with no connector in it — so it silently LOWERED a
+    count. Worse, the fall then surfaced through the ratchet's falling direction
+    as "lower the baseline", inviting a reviewer to ratify an undercount as a
+    retirement.
+    """
+    sweep = _sweep()
+    repo = tmp_path / "dotmac_erp" / "app"
+    repo.mkdir(parents=True)
+    (repo / "broken.py").write_text("def f(:\n", encoding="utf-8")
+
+    measured, _ = sweep.measure(tmp_path)
+    unmeasurable = measured["coverage"]["files_unmeasurable"]
+    assert "dotmac_erp" in unmeasurable, "an unparseable file vanished silently"
+    assert "broken.py" in unmeasurable["dotmac_erp"][0]
+    assert "unparseable" in unmeasurable["dotmac_erp"][0]
+    assert "UNMEASURABLE" in sweep.coverage_report(measured)
+
+
+def test_an_unclassified_fleet_distribution_is_named(
+    tmp_path: pathlib.Path,
+) -> None:
+    """The sweep measures five repositories; the fleet has more. One that is
+    neither measured nor exempted with a premise is a coverage bound nobody
+    declared, and it is named rather than dropped."""
+    sweep = _sweep()
+    (tmp_path / "dotmac_erp" / "app").mkdir(parents=True)
+    stranger = tmp_path / "dotmac_something_new"
+    stranger.mkdir()
+    (stranger / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+
+    measured, _ = sweep.measure(tmp_path)
+    assert measured["coverage"]["repos_unclassified"] == ["dotmac_something_new"]
+    assert "UNCLASSIFIED" in sweep.coverage_report(measured)
+
+
+def test_a_classified_repository_is_not_reported_as_unclassified(
+    tmp_path: pathlib.Path,
+) -> None:
+    """SPECIFICITY for the test above: it must report the stranger because it is
+    unclassified, not because it reports everything it finds."""
+    sweep = _sweep()
+    (tmp_path / "dotmac_erp" / "app").mkdir(parents=True)
+    for name in ("dotmac_integrator", "dotmac_erp"):
+        (tmp_path / name).mkdir(exist_ok=True)
+        (tmp_path / name / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+    measured, _ = sweep.measure(tmp_path)
+    assert measured["coverage"]["repos_unclassified"] == []
+
+
+def test_every_out_of_scope_repository_states_a_checkable_premise() -> None:
+    """ADR-0018. An exemption states an ENFORCEABLE premise — something a reader
+    can check against the repository — or the region is unmonitored rather than
+    exempt. "Grandfathered" is a description of history, not a premise, and is
+    refused here so it cannot become the boilerplate that ends the argument."""
+    sweep = _sweep()
+    assert sweep.OUT_OF_SCOPE, "an empty exemption list would pass vacuously"
+    for repo, premise in sweep.OUT_OF_SCOPE:
+        assert premise.strip(), repo
+        assert len(premise.split()) >= 8, f"{repo}: a premise, not a label"
+        lowered = premise.lower()
+        for evasion in ("grandfathered", "legacy", "historical", "for now", "tbd"):
+            assert evasion not in lowered, f"{repo}: {evasion!r} is not a premise"
+    # No repository may be both measured and exempted — the two lists would then
+    # disagree about whether it is covered, and the reader could not tell which
+    # wins.
+    assert not set(sweep.REPOS) & set(sweep.OUT_OF_SCOPE_REASONS)
+
+
+def test_the_coverage_report_states_what_each_measured_subtree_excludes() -> None:
+    """Only `app/` is read. Every other runtime file in the repository is
+    outside the measurement, and the number of them is stated so the bound can
+    be weighed rather than guessed at."""
+    sweep = _sweep()
+    measured, absent = sweep.measure(FLEET_ROOT)
+    if absent:
+        pytest.skip(f"fleet not checked out beside Starter; unmeasured: {absent}")
+    report = sweep.coverage_report(measured)
+    for repo in sweep.REPOS:
+        assert repo in report
+        assert repo in measured["coverage"]["files_outside_measured_subtree"]
+    assert "OUTSIDE the measurement" in report
+
+
+def test_the_baseline_freezes_counts_and_not_coverage() -> None:
+    """Coverage is a property of the RUN, not of the fleet: file totals move
+    with every unrelated commit in a sibling repository. Freezing them would
+    demand a re-baseline for changes this ratchet does not govern, and would
+    bury the disclosure in diff noise — which is how disclosures stop being
+    read."""
+    sweep = _sweep()
+    measured, _ = sweep.measure(FLEET_ROOT)
+    assert "coverage" in measured
+    assert "coverage" not in sweep.frozen(measured)
+    assert "coverage" not in _baseline()
+    # …and the frozen half still carries everything the ratchet compares.
+    assert set(sweep.frozen(measured)) >= {"counts", "categories", "totals"}
+
+
+def test_a_nested_checkout_is_pruned_and_the_pruning_is_disclosed(
+    tmp_path: pathlib.Path,
+) -> None:
+    """`dotmac_erp/worktrees/` holds 5,000+ `.py` files that are COPIES of code
+    measured elsewhere. Counting them would have reported two-thirds of ERP as
+    unmeasured, and a disclosure that overstates gets discarded exactly as fast
+    as one that understates. The premise is checkable — the directory holds a
+    `.git` entry — and the pruning is itself reported, because a silent
+    correction to a coverage number is just another silent cap.
+    """
+    sweep = _sweep()
+    repo = tmp_path / "dotmac_erp"
+    (repo / "app").mkdir(parents=True)
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "tool.py").write_text("x = 1\n", encoding="utf-8")
+    nested = repo / "worktrees" / "erp-cutover" / "app"
+    nested.mkdir(parents=True)
+    (nested / "copy.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "worktrees" / "erp-cutover" / ".git").write_text("gitdir: /x\n")
+
+    measured, _ = sweep.measure(tmp_path)
+    coverage = measured["coverage"]
+    assert coverage["files_outside_measured_subtree"]["dotmac_erp"] == 1
+    assert coverage["nested_checkouts_pruned"]["dotmac_erp"] == [
+        "worktrees/erp-cutover"
+    ]
+    assert "pruned 1 nested git checkout" in sweep.coverage_report(measured)
+
+
 def test_tests_and_migrations_are_not_application_runtime(
     tmp_path: pathlib.Path,
 ) -> None:
