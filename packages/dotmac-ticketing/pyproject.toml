@@ -32,9 +32,16 @@ python = ">=3.11,<3.14"
 #    the live-catalog contract (ADR-0023). This module is DUAL-PLANE and its
 #    manifest passes that field, so an earlier kernel raises `TypeError` at
 #    import — before the allocation check is ever reached.
+# 3. `0.1.0a61` adds ADR-0028's `supported_plane_sets` and
+#    `selected_module_planes`. This manifest declares the first and `tk_0001`
+#    calls the second, so a61 is the highest capability the module CONSUMES.
 #
-# So the floor is a49. Unlike the other modules, this one is NOT simply its
+# So the floor is a61. Unlike the other modules, this one is NOT simply its
 # allocation release: it consumes a kernel capability newer than its namespace.
+#
+# (This comment said "a49" from the dual-plane change until 0.1.0a4. There has
+# never been a kernel a49 that added `platform_tables`; a53 did, as item 2 above
+# and every other reference in the repository state.)
 dotmac-kernel = ">=0.1.0a61"
 sqlalchemy = "^2.0"
 # `alembic` is imported by `dotmac_ticketing.linking`, which emits DDL into a

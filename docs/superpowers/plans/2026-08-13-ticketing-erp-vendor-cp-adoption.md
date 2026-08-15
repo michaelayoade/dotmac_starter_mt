@@ -60,7 +60,7 @@ in a footnote:
    the module was unreleasable and `first_cutover` named a cutover no product
    could begin. The floor is **not** the `a39` that allocated `mod_tkt`:
    ADR-0023 made this module dual-plane, so its manifest passes
-   `platform_tables`, which `a49` added — an earlier kernel raises `TypeError`
+   `platform_tables`, which `a53` added — an earlier kernel raises `TypeError`
    at import, before the allocation check runs.
 2. Publish kernel `0.1.0a53` **first**, then `0.1.0a1`, through the normal
    branch/review/release workflow. Registry verification installs the module
@@ -239,8 +239,9 @@ consuming assembly on either plane.
 **What this cost.** A kernel change — `ModuleManifest.platform_tables` and the
 platform half of the live-catalog contract, released as `0.1.0a53`. Before it,
 `audit_snapshot` required RLS on every table in a module schema, so a dual-plane
-module could not compose at all. Ticketing's kernel floor is therefore `a49`,
-not the `a39` that allocated `mod_tkt`.
+module could not compose at all. Ticketing's kernel floor is therefore set by a
+capability rather than by the `a39` that allocated `mod_tkt` — `a53` at the time
+of writing, and `a61` since ADR-0028 gave plane selection its own declaration.
 
 **Still owed — corrected.** An earlier revision of this plan said the platform
 plane had no live-catalog proof because the starter composes only the tenant
