@@ -52,6 +52,12 @@ palette-baseline: ## Regenerate the hardcoded-palette debt baseline (commit the 
 	poetry run python scripts/palette_debt_baseline.py
 connector-baseline: ## Regenerate the external-connector baseline after a verified Integrator cutover (commit the diff in the same change)
 	poetry run python scripts/external_connector_sweep.py --write-baseline
+connector-ratchet: ## Run the external-connector ratchet with full coverage disclosure (needs the fleet beside this checkout; not in `check`)
+	poetry run python scripts/external_connector_sweep.py --fleet-root $(FLEET_ROOT) --check --strict-coverage
+publication-check: ## Report every distribution declaring a version nobody can install
+	poetry run python scripts/declared_publication_sweep.py --check
+publication-baseline: ## Regenerate the declared-but-unpublished ledger (state the reason; commit the diff in the same change)
+	poetry run python scripts/declared_publication_sweep.py --write-baseline
 module-catalog: ## Regenerate the composable-module discovery catalogue
 	poetry run python scripts/module_catalog.py
 module-catalog-check: ## Fail if the committed module catalogue is stale
@@ -132,6 +138,7 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	css-build css-watch ui-build ui-check palette-baseline connector-baseline module-catalog module-catalog-check \
+	css-build css-watch ui-build ui-check palette-baseline connector-baseline connector-ratchet \
+	publication-check publication-baseline module-catalog module-catalog-check \
 	docker-build docker-dev \
 	bump-version deploy
