@@ -606,7 +606,7 @@ def claim_statement(
     from sqlalchemy import text
 
     return text(
-        f"UPDATE {SCHEMA}.inbox_receipts SET state = 'processing', "  # noqa: S608 - schema and states are module-owned literals
+        f"UPDATE {SCHEMA}.inbox_receipts SET state = 'processing', "  # noqa: S608 # nosec B608 -- every interpolated fragment is a module-owned literal (schema name, state names, an int lease); all VALUES are bound
         "attempt_count = attempt_count + 1, "
         f"leased_until = {clock} + make_interval(secs => {lease_seconds:d}) "
         "WHERE id = :id "
@@ -628,7 +628,7 @@ def settle_statement() -> Any:
     from sqlalchemy import text
 
     return text(
-        f"UPDATE {SCHEMA}.inbox_receipts SET state = :state, "  # noqa: S608 - schema and states are module-owned literals
+        f"UPDATE {SCHEMA}.inbox_receipts SET state = :state, "  # noqa: S608 # nosec B608 -- every interpolated fragment is a module-owned literal (schema name, state names, an int lease); all VALUES are bound
         "leased_until = NULL, processed_at = now(), "
         "product_acceptance = :acceptance, product_ref = :product_ref, "
         "error_code = :error_code, error_detail = :error_detail, "
@@ -712,7 +712,7 @@ class ReceiptClaims:
             )
             session.execute(
                 text(
-                    f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 - schema and states are module-owned literals
+                    f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 # nosec B608 -- every interpolated fragment is a module-owned literal (schema name, state names, an int lease); all VALUES are bound
                     "destination_application = :application, "
                     "destination_contract_version = :contract_version, "
                     "destination_revision_id = :revision_id "
