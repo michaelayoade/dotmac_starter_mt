@@ -1,0 +1,76 @@
+schema_version = 1
+package = "dotmac-auth-oidc"
+# NOT an optional-module: nothing installs this. It has no ModuleManifest, no
+# namespace, no lineage and no release-allowlist shape — a consumer constructs
+# an `OIDCClient` and calls it. Naming it a module would send a reader looking
+# for a lineage that does not exist.
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+
+# NOT "product-first", and the distinction is the whole story of this dossier.
+# ERP has the fleet's only real OIDC implementation, so the reflex is to port it.
+# Rule 24 makes a *qualifying production-used, tested* implementation the
+# mandatory source, and ERP's qualifies on neither count:
+#
+#   - production adoption UNVERIFIED. Every repository-side artifact a
+#     deployment would touch says it is off — `.env.example` default
+#     `OIDC_ENABLED=false`, no compose or systemd reference, one commit
+#     (bded8aa9, 2026-07-20), contract document written as a future cutover
+#     gate. That is evidence of absence in git, NOT proof: the live value is
+#     environment-supplied and the host has not been read (Michael must name
+#     it first). This half is therefore unproven either way.
+#   - untested where it matters. `_validate_id_token` and `_exchange_code` are
+#     monkeypatched out in EVERY existing test, so signature verification, the
+#     algorithm allowlist, `kid` handling, nonce mismatch and every claim-
+#     validation failure path have zero real coverage.
+#
+# So the DESIGN and the written contract port with confidence; the crypto and
+# HTTP internals do not port as trusted code. That is greenfield-after-inventory,
+# and the inventory is what earns it.
+source_mode = "greenfield-after-inventory"
+
+owner = "The OIDC relying-party ceremony: discovery, JWKS, Authorization Code + PKCE, server-side single-use state, and ID-token validation — ending at a verified (issuer, subject)."
+
+contract = "Run an OIDC login and say which external subject authenticated. NOT which local party that is (dotmac_kernel.external_identity), NOT whether they may do anything (dotmac_kernel.deps.authorize_party), NOT a session (the product's own identity facet), NOT a user record (nothing here provisions), and NOT provider-specific behaviour (no Keycloak/Entra/Google/Auth0 branch, per ADR-0024)."
+
+source_repositories = [
+  "dotmac_erp",
+  "dotmac_sub",
+  "dotmac_crm",
+  "dotmac_academy_app",
+  "dotmac_vendor_control_plane",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  "dotmac_erp:app/services/sso/oidc.py",
+  "dotmac_erp:docs/oidc_identity_contract.md",
+  "dotmac_erp:tests/architecture/test_identity_protocol_boundary.py",
+  "dotmac_crm:app/services/oauth_state.py",
+  "dotmac_sub:app/services/authentication_mechanism_registry.py",
+  "dotmac_starter_mt:packages/dotmac-auth-oidc/src/dotmac_auth_oidc",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_auth_oidc_state.py",
+  "dotmac_starter_mt:tests/unit/test_auth_oidc_id_token.py",
+  "dotmac_starter_mt:tests/unit/test_auth_oidc_discovery.py",
+  "dotmac_starter_mt:tests/architecture/test_auth_oidc_public_surface.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_workspace", "dotmac_erp"]
+
+inventory_evidence = [
+  "docs/inventories/external-identity-sources.md",
+  "docs/adr/0021-the-tenant-workspace-is-a-third-plane.md",
+  "docs/adr/0017-adoption-is-the-scarce-resource.md",
+]
+
+first_cutover = "`dotmac_workspace` is the intended first consumer — it has a login blocker (B2: nothing issues `dmws_session` and `/login` does not exist) and no legacy authentication to migrate, so its cutover is a build rather than a replacement. ERP is the SECOND candidate and the more valuable proof, because it is the only repository with an existing implementation to retire; but whether its OIDC is live is unverified, so retirement is a DELETION if the host confirms it is off and a genuine login CUTOVER if it is on — which is exactly why it should follow rather than lead. No production login moves to this package in either case until a real pilot has run."
+
+shadow_and_drift = "No shadow comparison is available for the ceremony: ERP's implementation has no verified production usage, so there is no live behaviour known to be running beside which to diff. If a host inspection later shows it IS live, a shadow comparison becomes both possible and necessary before retirement. What replaces it is DIFFERENTIAL testing against the source's known gaps — each of the six defects the inventory measured in ERP (no JWKS/discovery caching, no clock-skew leeway, no `azp` check when `aud` is multi-valued, no one-time-use state, a borrowed state-signing key, an old pinned python-jose) is a named test here that fails if the behaviour regresses to ERP's. The ongoing drift risk is different in kind: a provider rotating signing keys. That is handled in the code (bounded forced JWKS refetch on an unknown `kid`, rate-limited against amplification) rather than by reconciliation, because there is no local projection to drift."
+
+local_copy_retirement = "ERP's `app/services/sso/oidc.py` is the only local copy and it is retired by adoption, not by this package's existence. Retirement is cheap IF the host inspection confirms it is off: no rows, no sessions, no migration. If it is on, this becomes a live-login migration and a different, much more careful piece of work — the reason the host reading is still worth doing even though it no longer changes the source ruling. Its `federated_identities` table is a SEPARATE retirement, governed by `dotmac_kernel.external_identity` rather than by this package — do not conflate them, the protocol client and the local binding are two capabilities with two owners (see the inventory's headline table). CRM's and Sub's forked `meta_oauth.py` pair is NOT retired by this package: Meta OAuth2 for API access is not SSO, has no ID token and no JWKS, and belongs to the Integrator connector story."
+
+next_action = "Nothing adopts this yet, and the status says so. The order that earns each step: (1) a pilot consumer wires `start_login`/`complete_login` and supplies a PRODUCTION `StateStore` — `InMemoryStateStore` is single-process only and must not reach a multi-worker deployment; (2) that consumer resolves the verified subject through `dotmac_kernel.external_identity` and issues its OWN session; (3) `contract_consumers` moves from empty to one and the status to `adopted`; (4) `reuse-proven` needs a second real consumer. Before ANY pilot: the client secret is resolved by the product and installed at startup (ADR-0009 — a secret is HELD, never dereferenced on a request path); the pilot supplies a SHARED, ATOMIC `StateStore` (Redis `GETDEL` or `DELETE ... RETURNING`) because `InMemoryStateStore` cannot complete a login started on another worker; and this package must never gain a knob that widens `ALLOWED_ALGORITHMS`, a `plain` PKCE method, a way to put the ceremony back on the wire, or a provider-name branch. The pyjwt floor `>=2.13` is a SECURITY floor (GHSA-jq35-7prp-9v3f, an algorithm allow-list bypass through 2.12.1) and must not be lowered for compatibility."

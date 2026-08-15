@@ -32,6 +32,12 @@ CLASSIFICATION_LABELS: Final = {
     "universal-facility": "universal facility",
     "presentation-foundation": "presentation foundation",
     "optional-module": "optional module",
+    # A distribution a product CALLS rather than installs: an external protocol
+    # and no rows. It has no manifest, so the "optional module has no
+    # manifest.py" rule below must not reach it — the catalogue renders `n/a`
+    # for its persistence plane, which is the truth rather than a gap
+    # (ADR-0006, 2026-08-14 amendment).
+    "stateless-protocol-adapter": "stateless protocol adapter",
 }
 DEDICATED_RELEASE_WORKFLOWS: Final = {
     "dotmac-kernel": ".github/workflows/release-kernel.yml",

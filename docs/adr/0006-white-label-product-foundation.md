@@ -1050,6 +1050,47 @@ writing to a product database.
 Note what is absent: "the component library is finished" and "a theme package
 exists" are not criteria. Neither is a measure of the system working.
 
+### Decision amendment — 2026-08-14 (a fourth classification: the stateless protocol adapter)
+
+`EXTRACTION.toml`'s `classification` had three values — `universal-facility`,
+`presentation-foundation`, `optional-module` — and all three describe something
+a product **installs**. A distribution that speaks an external protocol and
+holds nothing fits none of them, and calling it an `optional-module` is not a
+harmless approximation: it tells a reader to look for a `ModuleManifest`, a
+`mod_*` namespace, a migration lineage and a release-allowlist entry that do not
+exist, and it invites the dual-plane and namespace gates to ask questions the
+package cannot answer.
+
+`stateless-protocol-adapter` is added for a distribution that a product
+**calls** rather than installs. `dotmac-auth-oidc` is the first.
+
+**The classification is GOVERNED, not merely accepted.** A string in a valid-set
+is a label; the four properties below are what the word has to mean, and each is
+checked generically against any package that claims it — not against a named
+package:
+
+1. **No `ModuleManifest`.** Nothing to install, so nothing declares itself
+   installable.
+2. **No migration lineage.** No `migrations/` tree, and no `short_code` or
+   `migration_prefix` (hard rule 14 — stateful and stateless are the only two
+   coherent shapes, and this is the stateless one).
+3. **No namespace allocation.** No row in `MIGRATION_OWNER_LEDGER`. An
+   allocation is permanent once added, and one made for a package that will
+   never own a schema is a lie the ledger cannot later retract.
+4. **No persistence import.** No ORM, no database driver. A package that grew
+   one would have become a module without changing its dossier.
+
+The counterpart matters as much: a package classified any OTHER way must not be
+mistaken for this one. The check is keyed on the DECLARED classification, so a
+stateful module is simply out of scope rather than accidentally held to a rule
+it should fail.
+
+Enforced by `tests/architecture/test_product_first_extraction.py`
+(`test_a_stateless_protocol_adapter_holds_no_persistence`), with the sensitivity
+proof ADR-0018 requires: the checker is a pure function over a synthetic package
+tree, shown to fire on a planted manifest, a planted migrations directory and a
+planted ORM import, and shown NOT to fire on a conforming one.
+
 ## Consequences
 
 - F1–P1 have fixed vocabulary. "Module", "theme", "brand", and "facet" mean one
