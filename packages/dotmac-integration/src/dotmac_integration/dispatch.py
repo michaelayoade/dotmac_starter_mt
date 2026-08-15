@@ -48,7 +48,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
-from dotmac_integration.execution import claim_delivery
+from dotmac_integration.execution import LostClaim, claim_delivery
 from dotmac_integration.models import (
     CapabilityBinding,
     ConnectorConfigRevision,
@@ -103,10 +103,6 @@ class DispatchUnavailable(DispatchError):
                               caller that treated this as contention would idle
                               silently on a misconfiguration.
     """
-
-
-class LostClaim(RuntimeError):
-    """The lease expired and another worker took over before settle."""
 
 
 @dataclass(frozen=True, slots=True)

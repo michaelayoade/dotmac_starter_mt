@@ -98,6 +98,62 @@ would have excluded every honest `>=1.0,<2.0` delivery connector in order to
 protect a compatibility promise nothing ever consumed.
 
 ### Fixed (the type gate)
+## Unreleased
+
+Receipt-to-product delivery: the half that turns a recorded observation into a
+delivered one. **No version bump** — the persistence this slice specifies is
+still blocked on a staged handoff (below), so nothing here is releasable yet.
+
+### Added
+
+- **`dotmac_integration.receipt_delivery`** — the typed, deeply immutable
+  boundary contracts for landing a receipt on the product that owns it, plus
+  `deliver_receipt`, the three-phase orchestrator: claim transaction → product
+  call with **no session held** → conditional settlement guarded by the claim's
+  attempt/lease identity. A network call inside a transaction holds a row lock
+  for the duration of someone else's outage, so phase 2 touches no database at
+  all, and the fake store in the unit suite checks that rather than trusting it.
+- `ProductAcceptance` — five typed product answers, each mapped to an existing
+  `retry.OutcomeStatus` through a table rather than an `if` chain, so a new
+  member without a retry decision is a `KeyError` at the boundary instead of a
+  silent fall-through to "retryable" (the default that duplicates consequences).
+- `idempotency_key_for` — derived from the receipt and its DESTINATION, and
+  deliberately **not** from the attempt number. That absence is the whole
+  at-most-once property: a timeout on attempt 1 followed by a successful attempt
+  2 presents the product with the same key, so it deduplicates and the
+  consequence happens once. Had the key carried the attempt, the retry curve
+  would be a duplication machine.
+- `request_fingerprint_for` / `require_stable_fingerprint` — same identity plus
+  same fingerprint is a safe replay; a changed fingerprint is a
+  `FingerprintConflict`, raised BEFORE the product is contacted rather than
+  silently overwriting a recorded consequence.
+
+### Changed
+
+- **`LostClaim` moved to `execution`, which owns claiming.** It was defined in
+  `dispatch` for the outbox; the inbox now needs the same concept, and two
+  classes sharing the name would have made `except LostClaim` catch a delivery's
+  lost claim but not a receipt's, decided by nothing more than which module the
+  caller imported from. `dispatch.LostClaim` still resolves and the package
+  surface is unchanged.
+
+### Blocked (deliberately, and ratcheted)
+
+`inbox_receipts` needs a lease, due scheduling, a fingerprint and typed product
+outcome columns. Those are receipt-state model changes, and ownership is staged
+behind Team 2 (`models.py` / `ig_0003`) and Team 3's trusted destination
+(PR #184). Writing them now would collide with `models.py` mid-edit.
+
+So `tests/test_integration_receipt_delivery_isolation.py` specifies the
+behaviour FIRST, as 11 PostgreSQL canaries carrying
+`xfail(strict=True, raises=ProgrammingError)` — they must fail, and must fail
+*because the column is missing*. A twelfth test asserts those columns are still
+absent, so the moment the handoff lands the suite goes red and names the markers
+that must come off. The trusted destination is consumed through structural
+protocols (`TrustedDestination`, `TrustedScope`) that Team 3's frozen
+`DestinationBinding` already satisfies, so adopting it is a one-line import.
+
+## 0.1.0a2 — 2026-08-14
 
 Fixes a public function that could never have run, and the gate gap that let it
 ship. `pyproject.toml` declares `dotmac_integration.*` under mypy's strict
