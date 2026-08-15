@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-integration"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 authors = ["DotMac"]
 readme = "README.md"

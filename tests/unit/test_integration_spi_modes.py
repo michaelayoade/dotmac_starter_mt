@@ -33,6 +33,7 @@ import pytest
 from dotmac_integration.conformance import (
     ConformanceFailure,
     assert_plugin_conforms,
+    fake_manifest,
     fake_plugin,
     fake_registry,
 )
@@ -257,6 +258,118 @@ def test_a_plugin_declaring_what_it_implements_conforms() -> None:
     assert isinstance(plugin, IngressPlugin)
     assert isinstance(plugin, PollPlugin)
     assert fake_registry(plugins=[plugin]).keys == {"conformance_fake"}
+
+
+#: A value that must never survive the boundary. Distinctive enough that a
+#: substring search cannot match it by accident.
+SECRET_SENTINEL = "SENTINEL-MATERIALIZED-SECRET-9f3a71"
+
+
+class _FactoryRaises:
+    """A connector whose handler factory throws WITH secret material attached.
+
+    Not contrived: `verify_plugin_modes` calls the factory during DISCOVERY,
+    which happens after configuration has been resolved, so a plugin that
+    interpolates a resolved credential into its own error — a very ordinary
+    connector bug — hands that credential to this module.
+    """
+
+    def __init__(self) -> None:
+        self.manifest_ = fake_manifest()
+
+    @property
+    def manifest(self) -> Any:
+        return self.manifest_
+
+    @property
+    def historical_manifests(self) -> tuple[Any, ...]:
+        return ()
+
+    @property
+    def modes(self) -> frozenset[ConnectorMode]:
+        return frozenset({ConnectorMode.DELIVERY})
+
+    def handler_for(self, capability_id: str) -> Any:
+        raise KeyError(f"no route for {SECRET_SENTINEL}")
+
+    def validate_connection(
+        self, *, config: dict[str, object], secrets: dict[str, object]
+    ) -> tuple[Any, ...]:
+        return ()
+
+
+def test_a_connector_exception_never_reaches_the_mode_contract_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A connector's exception is not repeated, chained, rendered or logged.
+
+    The engine layer already holds this invariant for the REQUEST path
+    (`ingress.HandlerUnavailable`, raised `from None`). Discovery held the
+    inverse: it interpolated `{exc}` and chained `from exc`, so the connector's
+    message reached the operator's boot log verbatim.
+
+    Four surfaces, because suppressing only the first three is the usual
+    incomplete fix — `from None` is what closes the last two, and a message
+    fixed without it still leaks through any handler using `exc_info`.
+    """
+    import logging
+    import traceback
+
+    with pytest.raises(ModeContractError) as excinfo:
+        verify_plugin_modes(_FactoryRaises())
+    error = excinfo.value
+
+    # 1. the message
+    assert SECRET_SENTINEL not in str(error)
+    # 2. the representation
+    assert SECRET_SENTINEL not in repr(error)
+    # 3. the rendered traceback, chain included
+    rendered = "".join(
+        traceback.format_exception(type(error), error, error.__traceback__)
+    )
+    assert SECRET_SENTINEL not in rendered
+    # 4. a log record carrying exc_info — the surface a fixed message misses
+    with caplog.at_level(logging.ERROR):
+        logging.getLogger(__name__).error("discovery failed", exc_info=error)
+    assert SECRET_SENTINEL not in caplog.text
+
+    # The chain is SUPPRESSED, not merely absent: `raise ... from None` is what
+    # makes every renderer above stop before the original.
+    assert error.__cause__ is None
+    assert error.__suppress_context__ is True
+
+    # Still diagnosable. An operator must be able to find the connector, the
+    # capability, the mode and the failing hook without the message.
+    message = str(error)
+    assert "conformance_fake" in message
+    assert "handler_for" in message
+    assert "KeyError" in message, "the exception TYPE is safe and locates the bug"
+
+
+def test_the_sanitisation_guard_would_catch_a_leak() -> None:
+    """Sensitivity proof: the four assertions above must be able to fail.
+
+    A guard checking `sentinel not in ...` passes trivially if the sentinel
+    never had a route to those surfaces. Here the same value IS interpolated
+    and chained, the way the defect did it, and every surface is shown to
+    carry it — so the checks above are known to be load-bearing.
+    """
+    import traceback
+
+    source = KeyError(f"no route for {SECRET_SENTINEL}")
+    try:
+        try:
+            raise source
+        except Exception as exc:
+            raise ModeContractError(f"but returns no handler: {exc}") from exc
+    except ModeContractError as leaked:
+        assert SECRET_SENTINEL in str(leaked)
+        assert SECRET_SENTINEL in repr(leaked)
+        rendered = "".join(
+            traceback.format_exception(type(leaked), leaked, leaked.__traceback__)
+        )
+        assert SECRET_SENTINEL in rendered
+        assert leaked.__cause__ is source
 
 
 def test_a_connector_declaring_no_mode_is_still_refused() -> None:

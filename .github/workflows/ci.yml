@@ -43,6 +43,19 @@ jobs:
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+      # Poetry delegates venv creation to `virtualenv`, which on this runner
+      # rejects the argv Poetry builds:
+      #   virtualenv: error: argument dest: the destination . is not write-able at /
+      # It fires only when the `.venv` cache MISSES — i.e. on any change to
+      # poetry.lock — which is why it appeared the moment a version was bumped
+      # and not before. Verified NOT to be our toolchain: poetry 2.4.1 +
+      # virtualenv 21.7.1 + this exact lockfile installs cleanly in a
+      # linux/amd64 python:3.12-slim container.
+      #
+      # The stdlib `venv` builds the same directory Poetry would adopt, and
+      # sidesteps the delegation entirely. Guarded so a restored cache is never
+      # clobbered.
+      - run: '[ -d .venv ] || python -m venv .venv'
       - run: poetry install
       - run: make ${{ matrix.target }}
 
@@ -58,6 +71,19 @@ jobs:
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+      # Poetry delegates venv creation to `virtualenv`, which on this runner
+      # rejects the argv Poetry builds:
+      #   virtualenv: error: argument dest: the destination . is not write-able at /
+      # It fires only when the `.venv` cache MISSES — i.e. on any change to
+      # poetry.lock — which is why it appeared the moment a version was bumped
+      # and not before. Verified NOT to be our toolchain: poetry 2.4.1 +
+      # virtualenv 21.7.1 + this exact lockfile installs cleanly in a
+      # linux/amd64 python:3.12-slim container.
+      #
+      # The stdlib `venv` builds the same directory Poetry would adopt, and
+      # sidesteps the delegation entirely. Guarded so a restored cache is never
+      # clobbered.
+      - run: '[ -d .venv ] || python -m venv .venv'
       - run: poetry install
       - run: poetry run pytest tests/unit tests/architecture -q --cov=app --cov=dotmac_kernel --cov-report=term
 
@@ -93,6 +119,19 @@ jobs:
         with:
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+      # Poetry delegates venv creation to `virtualenv`, which on this runner
+      # rejects the argv Poetry builds:
+      #   virtualenv: error: argument dest: the destination . is not write-able at /
+      # It fires only when the `.venv` cache MISSES — i.e. on any change to
+      # poetry.lock — which is why it appeared the moment a version was bumped
+      # and not before. Verified NOT to be our toolchain: poetry 2.4.1 +
+      # virtualenv 21.7.1 + this exact lockfile installs cleanly in a
+      # linux/amd64 python:3.12-slim container.
+      #
+      # The stdlib `venv` builds the same directory Poetry would adopt, and
+      # sidesteps the delegation entirely. Guarded so a restored cache is never
+      # clobbered.
+      - run: '[ -d .venv ] || python -m venv .venv'
       - run: poetry install
       - run: make test-db-up
       - run: make test-integration
