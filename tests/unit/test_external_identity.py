@@ -604,7 +604,11 @@ def test_the_locking_read_locks_and_refuses_a_cached_row(
 
     source = inspect.getsource(finalize_external_login)
     assert "with_for_update()" in source, "the login path stopped locking the row"
-    assert source.count("populate_existing=True") == 2, (
+    # The CALL SITE, not the phrase. Counting `populate_existing=True` counts
+    # the docstring that explains the technique too — the assertion said 2 and
+    # the file has 3, of which one is prose. A source-text pin that counts its
+    # own documentation fails the moment the documentation is good.
+    assert source.count(".execution_options(populate_existing=True)") == 2, (
         "both the binding and the party must be re-read from the database, "
         "never served from the session's identity map"
     )
