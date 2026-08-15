@@ -65,8 +65,10 @@ from dotmac_auth_oidc.errors import (
 )
 from dotmac_auth_oidc.state import (
     DEFAULT_STATE_TTL_SECONDS,
+    PER_REQUEST_STATE_STORE,
     InMemoryStateStore,
     LoginState,
+    PerRequestStateStore,
     PKCEPair,
     StateStore,
     claim_state,
@@ -105,6 +107,7 @@ __all__ = [
     "DEFAULT_STATE_TTL_SECONDS",
     "DEFAULT_TIMEOUT_SECONDS",
     "INTERNAL_MODULES",
+    "PER_REQUEST_STATE_STORE",
     "SUPPORTED_MODULES",
     "AuthorizationRedirect",
     "ConfigurationError",
@@ -119,6 +122,7 @@ __all__ = [
     "OIDCClient",
     "OIDCError",
     "PKCEPair",
+    "PerRequestStateStore",
     "ProviderCache",
     "ProviderMetadata",
     "RelyingPartyConfig",

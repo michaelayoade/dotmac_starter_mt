@@ -17,7 +17,7 @@ private and may change or disappear without a deprecation cycle.
 | Module | Public names |
 |---|---|
 | `dotmac_auth_oidc.client` | `OIDCClient`, `RelyingPartyConfig`, `VerifiedSubject`, `AuthorizationRedirect`, `ALLOWED_ALGORITHMS`, `DEFAULT_LEEWAY_SECONDS`, `DEFAULT_SCOPES` |
-| `dotmac_auth_oidc.state` | `StateStore`, `InMemoryStateStore`, `LoginState`, `PKCEPair`, `generate_pkce`, `generate_state_id`, `claim_state`, `DEFAULT_STATE_TTL_SECONDS` |
+| `dotmac_auth_oidc.state` | `StateStore`, `InMemoryStateStore`, `PerRequestStateStore`, `PER_REQUEST_STATE_STORE`, `LoginState`, `PKCEPair`, `generate_pkce`, `generate_state_id`, `claim_state`, `DEFAULT_STATE_TTL_SECONDS` |
 | `dotmac_auth_oidc.discovery` | `ProviderCache`, `ProviderMetadata`, `fetch_metadata`, `discovery_url`, and the three TTL defaults |
 | `dotmac_auth_oidc.transport` | `Transport`, `HttpxTransport`, `DEFAULT_TIMEOUT_SECONDS`, `MAX_RESPONSE_BYTES` |
 | `dotmac_auth_oidc.errors` | `OIDCError` and every subclass |
@@ -57,8 +57,40 @@ require knowledge the package does not have:
 2. **A `StateStore`** — required, shared across every callback-serving
    process, with an ATOMIC `take` (Redis `GETDEL`, `DELETE ... RETURNING`).
    `InMemoryStateStore` is tests and single-worker development only.
+   Hold it for the life of the client, or supply it per ceremony operation —
+   see "Where the store lives" below.
 3. **The client secret** — resolved by the product and held, never fetched on a
    request path (ADR-0009).
+
+### Where the store lives
+
+A store may be held by the client for the life of the process, or supplied per
+ceremony operation:
+
+```python
+client = OIDCClient(config, state_store=redis_store)          # held
+client.start_login(return_to="/")
+
+client = OIDCClient(config, state_store=PER_REQUEST_STATE_STORE)   # per request
+client.start_login(return_to="/", state_store=store_for_this_request)
+```
+
+The second form exists for stores backed by the consumer's own database. Such a
+store is bound to one request's transaction, and the consumer's framework — not
+this package — decides when that transaction opens and commits. A client that
+held the session would be a second transaction authority: the ceremony would
+commit at a different moment from everything else the request did, and a
+rolled-back request would leave a live ceremony behind.
+
+The client is still built ONCE either way, because it owns the `ProviderCache`.
+Rebuilding it per request would refetch discovery and JWKS on every sign-in and
+lose the `kid`-rotation refresh with them.
+
+`PER_REQUEST_STATE_STORE` is a positive declaration rather than an absence: it
+says the consumer supplies a store per call, so omitting one is a
+`ConfigurationError` at the call rather than a login that silently loses its
+PKCE verifier. It implements neither `put` nor `take`, so it cannot be mistaken
+for a store that happens to hold nothing.
 
 There is no way to run without a store. The store holds the PKCE verifier, so
 `take` IS how the callback recovers it — replay protection is not a feature to

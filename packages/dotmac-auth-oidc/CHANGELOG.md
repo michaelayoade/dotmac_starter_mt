@@ -20,6 +20,12 @@ First release. An OIDC relying party that ends at a verified `(issuer, subject)`
   `generate_pkce` — the ceremony held server-side behind a random opaque state
   id, single-use by construction, and S256 PKCE. There is no state signer and no
   signing key: nothing is serialized onto the wire to sign.
+- `PER_REQUEST_STATE_STORE` / `PerRequestStateStore`, and a `state_store`
+  argument on `start_login`/`complete_login` — a store bound to one request's
+  transaction can be supplied per ceremony operation, while the client (and so
+  the `ProviderCache`) is still built once. The declaration keeps "no store at
+  all" a construction-time error. See COMPATIBILITY.md § "Where the store
+  lives".
 - `ProviderCache` — discovery and JWKS with TTLs and a rate-limited forced
   refetch for an unknown `kid`.
 - `Transport` / `HttpxTransport` — the one place the package touches a network,

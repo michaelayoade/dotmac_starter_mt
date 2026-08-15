@@ -35,6 +35,7 @@ from dotmac_auth_oidc.errors import (
 from dotmac_auth_oidc.state import (
     DEFAULT_STATE_TTL_SECONDS,
     LoginState,
+    PerRequestStateStore,
     StateStore,
     claim_state,
     generate_pkce,
@@ -163,6 +164,17 @@ class OIDCClient:
 
     Holds no per-login state of its own — every in-flight ceremony lives in the
     `StateStore`, which is REQUIRED rather than optional.
+
+    The client itself is built ONCE and reused: it owns the `ProviderCache`, so
+    discovery and JWKS are fetched on a schedule rather than per login, and a
+    client rebuilt per request would turn every sign-in into two extra calls to
+    the provider and lose the `kid`-rotation refresh with it.
+
+    That is why the store may be supplied per operation. A store backed by the
+    consumer's database is bound to ONE request's transaction and cannot be
+    held for the life of a client that outlives it. Declare it with
+    `state_store=PER_REQUEST_STATE_STORE` and pass the real store to
+    `start_login`/`complete_login`.
     """
 
     __slots__ = ("_cache", "_config", "_leeway", "_store", "_timeout")
@@ -171,7 +183,7 @@ class OIDCClient:
         self,
         config: RelyingPartyConfig,
         *,
-        state_store: StateStore,
+        state_store: StateStore | PerRequestStateStore,
         transport: Transport | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         leeway: int = DEFAULT_LEEWAY_SECONDS,
@@ -179,7 +191,8 @@ class OIDCClient:
         if state_store is None:
             raise ConfigurationError(
                 "a StateStore is required: it holds the PKCE verifier, so there "
-                "is no login without one"
+                "is no login without one. Pass a store, or "
+                "PER_REQUEST_STATE_STORE if yours is bound to a request"
             )
         self._config = config
         self._store = state_store
@@ -196,8 +209,31 @@ class OIDCClient:
     def config(self) -> RelyingPartyConfig:
         return self._config
 
+    def _resolve_store(self, supplied: StateStore | None) -> StateStore:
+        """The one place a ceremony store is decided. Never returns None.
+
+        A per-call store wins over a held one, so a consumer that holds a
+        process-lifetime store can still override it for a single ceremony
+        (a test, or a tenant whose ceremonies live somewhere else) without a
+        second client and a second provider cache.
+        """
+        if supplied is not None:
+            return supplied
+        if isinstance(self._store, PerRequestStateStore):
+            raise ConfigurationError(
+                "this client was built with PER_REQUEST_STATE_STORE, so a "
+                "state_store must be passed to this call. That declaration is "
+                "what keeps a missing store an error here rather than a login "
+                "that silently loses its PKCE verifier"
+            )
+        return self._store
+
     def start_login(
-        self, *, return_to: str = "/", ttl_seconds: int = DEFAULT_STATE_TTL_SECONDS
+        self,
+        *,
+        return_to: str = "/",
+        ttl_seconds: int = DEFAULT_STATE_TTL_SECONDS,
+        state_store: StateStore | None = None,
     ) -> AuthorizationRedirect:
         """Build the authorization redirect and store the ceremony server-side.
 
@@ -206,7 +242,16 @@ class OIDCClient:
         the consumer's application, and a library that guessed would either
         block legitimate targets or wave through an open redirect. Validate it
         on the way out, as ERP's `_sanitize_redirect_url` does.
+
+        `state_store` overrides the client's own, and is REQUIRED when the
+        client was built with `PER_REQUEST_STATE_STORE`. The ceremony is put
+        into whichever store answers here, and the callback must claim it from
+        one that can see it — a per-request store backed by the consumer's
+        database satisfies that as long as the write is committed by the
+        consumer's own transaction, which is exactly why it is passed in rather
+        than held.
         """
+        store = self._resolve_store(state_store)
         pkce = generate_pkce()
         state = LoginState(
             state_id=generate_state_id(),
@@ -216,7 +261,7 @@ class OIDCClient:
             issued_at=int(time.time()),
             return_to=return_to,
         )
-        self._store.put(state, ttl_seconds=ttl_seconds)
+        store.put(state, ttl_seconds=ttl_seconds)
 
         metadata = self._cache.metadata()
         query = urlencode(
@@ -244,6 +289,7 @@ class OIDCClient:
         state_parameter: str,
         stored_state: str,
         ttl_seconds: int = DEFAULT_STATE_TTL_SECONDS,
+        state_store: StateStore | None = None,
     ) -> VerifiedSubject:
         """Finish the ceremony and return the verified subject.
 
@@ -255,10 +301,22 @@ class OIDCClient:
         own login in a victim's browser, silently binding the victim's session
         to the attacker's identity.
 
+        `state_store` overrides the client's own and is REQUIRED when the client
+        was built with `PER_REQUEST_STATE_STORE`. It must be able to see what
+        `start_login` wrote — the same Redis, or the same database as the
+        request that started the ceremony.
+
         Order is deliberate and each step is a distinct refusal:
         state match → claim (single use) → code exchange → ID-token signature →
         claims → nonce.
+
+        The state pair is compared BEFORE the ceremony is claimed, and the
+        ordering is load-bearing: claiming first would let anyone who can reach
+        the callback with a valid state and a wrong cookie destroy somebody
+        else's in-flight login. A refusal must not cost the legitimate user
+        their sign-in.
         """
+        store = self._resolve_store(state_store)
         if not code:
             raise TokenExchangeError("callback carried no authorization code")
         if not state_parameter or not stored_state:
@@ -272,7 +330,7 @@ class OIDCClient:
         # Claiming is what RECOVERS the PKCE verifier, so single use is
         # structural rather than an added check: a replayed callback finds
         # nothing to exchange with.
-        state = claim_state(self._store, stored_state, ttl_seconds=ttl_seconds)
+        state = claim_state(store, stored_state, ttl_seconds=ttl_seconds)
 
         tokens = self._exchange_code(code=code, state=state)
         id_token = tokens.get("id_token")
