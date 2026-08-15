@@ -41,6 +41,7 @@ consumer forces ``adopted``, two force ``reuse-proven``.
 
 from __future__ import annotations
 
+import ast
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,27 @@ VALID_CLASSIFICATIONS = {
     "universal-facility",
     "presentation-foundation",
     "optional-module",
+    # A distribution a product CALLS rather than installs: it speaks an external
+    # protocol and holds nothing. The three values above all describe something
+    # INSTALLED, and calling such a package an `optional-module` sends a reader
+    # looking for a manifest, a `mod_*` namespace and a lineage that do not
+    # exist (ADR-0006, 2026-08-14 amendment).
+    #
+    # This is a GOVERNED value, not an accepted string: see
+    # `stateless_adapter_violations` below for the four properties the word has
+    # to mean, checked generically against whatever package claims it.
+    "stateless-protocol-adapter",
 }
+
+STATELESS_ADAPTER = "stateless-protocol-adapter"
+
+# Import roots that mean "this holds rows after all".
+PERSISTENCE_ROOTS = frozenset({"sqlalchemy", "alembic", "psycopg", "asyncpg"})
+
+# The two declarations that make a module STATEFUL (hard rule 14). Matched as
+# assignment targets or keyword arguments, never as text — a docstring saying
+# "declares no short_code" must not trip its own rule.
+_LINEAGE_DECLARATIONS = frozenset({"short_code", "migration_prefix"})
 VALID_SOURCE_MODES = {
     "product-first",
     "greenfield-after-inventory",
@@ -182,12 +203,121 @@ def _reference_problems(field: str, references: list[Any]) -> list[str]:
     return problems
 
 
+def stateless_adapter_violations(package_dir: Path) -> list[str]:
+    """The four properties `stateless-protocol-adapter` has to MEAN.
+
+    Generic over whatever package declares the classification — it takes a
+    directory, not a name, so it governs the next such package as much as the
+    first. Keyed on the DECLARED classification, so a stateful module is out of
+    scope rather than accidentally held to a rule it should fail.
+
+    A pure function over a directory tree so the sensitivity proof can build a
+    synthetic package and show the checker firing (ADR-0018: a guard that cannot
+    be shown to bite is not a guard).
+    """
+    problems: list[str] = []
+
+    for path in sorted(package_dir.rglob("*.py")):
+        rel = path.relative_to(package_dir)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover - a broken file fails elsewhere
+            continue
+
+        for node in ast.walk(tree):
+            # 1. Nothing to install. AST-only: this package's docstrings SAY
+            #    "declares no ModuleManifest" on purpose, and a substring scan
+            #    would fail on its own explanation.
+            if isinstance(node, ast.Name) and node.id == "ModuleManifest":
+                problems.append(
+                    f"{rel}:{node.lineno} references ModuleManifest — a "
+                    "stateless protocol adapter is CALLED, not installed"
+                )
+            # 2. No lineage (hard rule 14's stateless shape). A real declaration
+            #    is an assignment target or a keyword argument, never prose.
+            if isinstance(node, ast.keyword) and node.arg in _LINEAGE_DECLARATIONS:
+                problems.append(
+                    f"{rel} passes {node.arg!r} — that is the STATEFUL shape; "
+                    "a stateless adapter declares neither"
+                )
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if (
+                        isinstance(target, ast.Name)
+                        and target.id in _LINEAGE_DECLARATIONS
+                    ):
+                        problems.append(
+                            f"{rel}:{node.lineno} assigns {target.id!r} — that is "
+                            "the STATEFUL shape; a stateless adapter declares "
+                            "neither"
+                        )
+            # 4. No persistence.
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            else:
+                continue
+            for name in names:
+                root = name.split(".")[0]
+                if root in PERSISTENCE_ROOTS:
+                    problems.append(
+                        f"{rel}:{node.lineno} imports {root!r} — a stateless "
+                        "adapter that grew persistence has become a module "
+                        "without changing its dossier"
+                    )
+                if root == "dotmac_kernel" and "ModuleManifest" in (
+                    alias.name for alias in getattr(node, "names", [])
+                ):
+                    problems.append(
+                        f"{rel}:{node.lineno} imports ModuleManifest — a "
+                        "stateless protocol adapter is CALLED, not installed"
+                    )
+
+    # 2b. No migrations tree.
+    for migrations in package_dir.rglob("migrations"):
+        if migrations.is_dir():
+            problems.append(
+                f"{migrations.relative_to(package_dir)} exists — a stateless "
+                "adapter owns no lineage"
+            )
+
+    # 3. No namespace allocation. An allocation is permanent once added, so one
+    #    made for a package that will never own a schema cannot be retracted.
+    distribution = package_dir.name
+    if _ledger_allocates(distribution):
+        problems.append(
+            f"{distribution} holds a MIGRATION_OWNER_LEDGER allocation — a "
+            "stateless adapter owns no schema"
+        )
+    return problems
+
+
+def _ledger_allocates(distribution: str) -> bool:
+    """True if the kernel ledger allocates a namespace to `distribution`."""
+    try:
+        from dotmac_kernel.namespaces import MIGRATION_OWNER_LEDGER
+    except Exception:  # pragma: no cover - kernel absent is a different failure
+        return False
+    import_name = distribution.replace("-", "_")
+    for owner in MIGRATION_OWNER_LEDGER:
+        for attribute in ("distribution", "package", "import_name", "owner"):
+            value = getattr(owner, attribute, None)
+            if isinstance(value, str) and value.replace("-", "_") == import_name:
+                return True
+    return False
+
+
 def _load_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
 def _validate_dossier(
-    dossier: dict[str, Any], *, directory_name: str, distribution_name: str
+    dossier: dict[str, Any],
+    *,
+    directory_name: str,
+    distribution_name: str,
+    package_dir: Path | None = None,
 ) -> None:
     problems: list[str] = []
 
@@ -239,6 +369,8 @@ def _validate_dossier(
         problems.append(
             f"classification must be one of {sorted(VALID_CLASSIFICATIONS)}"
         )
+    if classification == STATELESS_ADAPTER and package_dir is not None:
+        problems.extend(stateless_adapter_violations(package_dir))
 
     source_mode = dossier.get("source_mode")
     if source_mode not in VALID_SOURCE_MODES:
@@ -475,6 +607,7 @@ def test_every_shared_distribution_has_a_valid_extraction_dossier() -> None:
             _load_toml(dossier_path),
             directory_name=package_dir.name,
             distribution_name=distribution_name,
+            package_dir=package_dir,
         )
 
 
@@ -809,3 +942,89 @@ def test_schema_2_summary_prose_must_cover_every_slice() -> None:
 
     with pytest.raises(ExtractionDossierError, match="does not mention"):
         _validate_ui(dossier)
+
+
+# ── `stateless-protocol-adapter` semantics, and the proof they bite ─────────
+
+
+def _synthetic_adapter(root: Path, *, body: str = "def go() -> None: ...\n") -> Path:
+    package = root / "dotmac-fake-adapter"
+    src = package / "src" / "dotmac_fake_adapter"
+    src.mkdir(parents=True)
+    (src / "__init__.py").write_text(body, encoding="utf-8")
+    return package
+
+
+def test_a_conforming_stateless_adapter_has_no_violations(tmp_path: Path) -> None:
+    """The negative control. Without it, every assertion below could pass
+    because the checker returns problems for anything at all."""
+    assert stateless_adapter_violations(_synthetic_adapter(tmp_path)) == []
+
+
+def test_the_real_adapter_conforms() -> None:
+    """`dotmac-auth-oidc` is the first package to claim the classification, so
+    it is also the first thing the rule is measured against."""
+    package = PACKAGES_DIR / "dotmac-auth-oidc"
+    if not package.is_dir():  # pragma: no cover - package not yet present
+        pytest.skip("dotmac-auth-oidc is not in this tree")
+    assert stateless_adapter_violations(package) == []
+
+
+def test_a_planted_manifest_is_caught(tmp_path: Path) -> None:
+    package = _synthetic_adapter(
+        tmp_path, body="from dotmac_kernel.modules import ModuleManifest\n"
+    )
+    problems = stateless_adapter_violations(package)
+    assert any("ModuleManifest" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize("declaration", ["short_code", "migration_prefix"])
+def test_a_planted_lineage_declaration_is_caught(
+    tmp_path: Path, declaration: str
+) -> None:
+    package = _synthetic_adapter(tmp_path, body=f'{declaration} = "oid"\n')
+    problems = stateless_adapter_violations(package)
+    assert any(declaration in problem for problem in problems), problems
+
+
+def test_a_planted_migrations_tree_is_caught(tmp_path: Path) -> None:
+    package = _synthetic_adapter(tmp_path)
+    (package / "src" / "dotmac_fake_adapter" / "migrations").mkdir()
+    problems = stateless_adapter_violations(package)
+    assert any("migrations" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize("root", ["sqlalchemy", "alembic", "psycopg"])
+def test_a_planted_persistence_import_is_caught(tmp_path: Path, root: str) -> None:
+    """The property that would otherwise rot silently: a package that grew an
+    ORM has become a module without its dossier changing."""
+    package = _synthetic_adapter(tmp_path, body=f"import {root}\n")
+    problems = stateless_adapter_violations(package)
+    assert any(root in problem for problem in problems), problems
+
+
+def test_prose_explaining_the_absence_does_not_trip_the_rule(tmp_path: Path) -> None:
+    """The complement, and it is not hypothetical: the FIRST version of this
+    checker used substring matching and failed `dotmac-auth-oidc`, whose
+    `__init__` docstring says it declares no `short_code`/`migration_prefix`
+    precisely so a reader knows it is stateless. A guard that punishes its own
+    documentation trains people to delete the documentation."""
+    package = _synthetic_adapter(
+        tmp_path,
+        body=(
+            '"""Declares no short_code, no migration_prefix, no ModuleManifest,\n'
+            'and imports no sqlalchemy — deliberately."""\n'
+            "# import sqlalchemy\n"
+        ),
+    )
+    assert stateless_adapter_violations(package) == []
+
+
+def test_the_classification_is_not_applied_to_other_packages(tmp_path: Path) -> None:
+    """Keyed on the DECLARED classification: a stateful module must be out of
+    scope, not accidentally held to a rule it is supposed to fail."""
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
+    assert dossier["classification"] != STATELESS_ADAPTER
+    # Ticketing WOULD fail the rule — it has a manifest and a lineage — and the
+    # sweep passes today, which is the evidence that the check is scoped.
+    assert stateless_adapter_violations(PACKAGES_DIR / "dotmac-ticketing")
