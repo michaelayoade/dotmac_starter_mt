@@ -1,0 +1,33 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "waba-1",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "contacts": [
+              {
+                "wa_id": "2348035550114"
+              }
+            ],
+            "messages": [
+              {
+                "from": "2348035550114",
+                "id": "wamid.media-1",
+                "timestamp": "1783670400",
+                "type": "image",
+                "image": {
+                  "id": "media-1",
+                  "mime_type": "image/jpeg"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

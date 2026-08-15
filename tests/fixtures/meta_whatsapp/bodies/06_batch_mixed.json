@@ -1,0 +1,103 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "waba-1",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "08000000000",
+              "phone_number_id": "phone-number-id"
+            },
+            "contacts": [
+              {
+                "wa_id": "2348035550114",
+                "profile": {
+                  "name": "Ada Nwosu"
+                }
+              }
+            ],
+            "messages": [
+              {
+                "from": "2348035550114",
+                "id": "wamid.meta-1",
+                "timestamp": "1783670400",
+                "type": "text",
+                "text": {
+                  "body": "My internet is down"
+                }
+              },
+              {
+                "from": "2348035550114",
+                "id": "wamid.batch-2",
+                "timestamp": "1783670401",
+                "type": "text",
+                "text": {
+                  "body": "Still down, any update?"
+                }
+              }
+            ],
+            "statuses": [
+              {
+                "id": "wamid.outbound-1",
+                "status": "delivered",
+                "timestamp": "1783670500",
+                "recipient_id": "2348035550114"
+              },
+              {
+                "id": "wamid.outbound-1",
+                "status": "read",
+                "timestamp": "1783670600",
+                "recipient_id": "2348035550114"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "waba-1",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "phone_number_id": "phone-number-id"
+            },
+            "messages": [
+              {
+                "id": "wamid.bad-1",
+                "timestamp": "1783670700",
+                "type": "text",
+                "text": {
+                  "body": "this entry carries no sender"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "waba-1",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "errors": [
+              {
+                "code": 131051,
+                "title": "Unsupported message type"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
