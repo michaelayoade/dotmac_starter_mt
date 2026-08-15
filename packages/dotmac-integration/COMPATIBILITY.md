@@ -1,0 +1,254 @@
+# dotmac-integration — the connector SPI, and what it promises
+
+This is the prose companion to `dotmac_integration.spi`. The module is
+authoritative; where this document and the code disagree, the code wins and this
+document is the bug.
+
+## Release state
+
+| | |
+|---|---|
+| Released | **`0.1.0a1`** only (tag `dotmac-integration-v0.1.0a1`), implementing **SPI 1.0** |
+| On `main`, unreleased | `0.1.0a2`, implementing **SPI 1.1** |
+
+`0.1.0a2` has no tag and is not on the index, and **SPI 1.1 is unpublished**. No
+connector anywhere has been built against anything but SPI 1.0, so the only
+compatibility obligation this contract carries is to 1.0's delivery connectors.
+That obligation is discharged by a test, not by this sentence — see
+"SPI 1.0 still works" below.
+
+There was never a published SPI 1.1 or 1.2. Two drafts existed on an abandoned
+branch and are collapsed into the single SPI 1.1 described here; version 1.2 is
+unused and available.
+
+## Two version axes, and only one of them is this package's version
+
+| Axis | Constant | What it gates |
+|---|---|---|
+| Package version | `pyproject.toml`, `__version__` | which wheel you installed |
+| **SPI version** | **`CURRENT_SPI_VERSION`** | **what a connector may assume about the contract** |
+
+They move independently. A package release that fixes a type annotation does not
+touch the SPI; an SPI change is what a connector's `spi_range` is checked
+against.
+
+`SpiVersion` is `major.minor` with no patch component — a patch that changes
+nothing a plugin can observe does not belong in a compatibility decision. Major
+is the break; minor is additive-or-safe. A connector declares a CLOSED range
+(`>=1.0,<2.0`); an open-ended range is refused rather than defaulted, because
+"works with any future SPI" is a claim no author can honestly make.
+
+The range is checked at **discovery**, again at **startup**, and again at
+**activation**. That looks redundant and is not: a distribution can be installed
+after discovery ran, and a binding activated long after startup.
+
+## What a connector implements
+
+### The base
+
+Every plugin satisfies `ConnectorPlugin`: `manifest`, `historical_manifests`,
+`modes`, `validate_connection`. Identity and metadata only — nothing on the base
+moves data.
+
+### One protocol per mode
+
+`ConnectorMode` is a **closed** union of three members. Each adds exactly one
+factory:
+
+| Mode | Plugin protocol | Factory | Returns |
+|---|---|---|---|
+| `DELIVERY` | `DeliveryPlugin` | `handler_for` | `CapabilityHandler` |
+| `INGRESS` | `IngressPlugin` | `ingress_handler_for` | `IngressHandler` |
+| `POLL` | `PollPlugin` | `poll_handler_for` | `PollHandler` |
+
+That table is `MODE_PROTOCOLS`, a read-only mapping asserted exhaustive at
+import. A mode cannot be added without deciding what makes it runnable — the
+omission that left `POLL` a label with no machinery behind it throughout SPI 1.0.
+
+**Why an enum here, when ADR-0008 says a new vocabulary is a declaration
+registry and never an enum.** This module obeys that rule for the vocabulary
+that is genuinely open: a capability id is a regex-validated `domain.noun.vN`
+string, declared by the connector, with no enum anywhere — because the module
+never has to *implement* a capability, it routes one. A mode is the opposite
+kind of name. Every member obliges the **engine** to run machinery only the
+engine can supply: `DELIVERY` a dispatch worker, `INGRESS` a mounted route and a
+verify/normalize pipeline, `POLL` a scheduler and the cursor it persists. A
+product cannot bring that machinery with it, so a product-declared mode would be
+a label with nothing behind it. The union is closed three ways — an `Enum` with
+members cannot be subclassed, `ConnectorMode("invented")` raises, and
+`MODE_PROTOCOLS` cannot be written to — and each is proved to bite in
+`tests/unit/test_integration_spi_modes.py`.
+
+### A declared mode is verified, both ways, at discovery
+
+`spi.verify_plugin_modes` runs inside `discovery.discover` and inside
+`conformance.assert_plugin_conforms` — the same function, so an author's suite
+and the host's boot cannot reach different verdicts. It refuses:
+
+1. a mode **declared and not implemented** — otherwise it fails at the first
+   dispatch;
+2. a mode **implemented and not declared** — otherwise the runtime never starts
+   the workers that would call it, and the connector looks installed and inert;
+3. a factory returning a handler of the **wrong shape** — checked against the
+   mode's handler protocol, not merely for non-null. A factory handing back a
+   delivery handler where an ingress handler was promised satisfies "not None"
+   perfectly and then fails on a provider's request;
+4. a connector declaring **no modes at all**.
+
+This calls plugin code at boot. That is intended: a factory is an in-process
+lookup returning a callable — it materializes no secrets and contacts no
+provider — and a factory that cannot survive being called at boot would not have
+survived a request either.
+
+`dispatch.invoke` additionally calls `require_mode(plugin, DELIVERY)` before the
+handler lookup, so a binding pointed at a connector that cannot deliver produces
+a stated refusal naming the connector and what it *does* declare.
+
+## The ingress contract
+
+### `IngressRequest` — one immutable envelope
+
+The raw body, the headers and the query params, handed **unchanged and as the
+same object** to `challenge`, `verify` and `normalize`.
+
+- **Nothing is normalised on the way in.** The engine's obligation is to hand
+  over what it received: the body as the exact bytes off the wire, and header
+  and query names and values exactly as they arrived — not lowercased, not
+  trimmed, not decoded, not re-encoded. This type preserves whatever it is
+  given and adds nothing. **An engine that normalises before constructing the
+  envelope has already broken the contract, and no check inside the SPI can see
+  that it did.**
+- **The same object, not an equal one.** What `verify` authenticated and what
+  `normalize` interpreted are then provably the same bytes. An engine that
+  re-read or re-decoded between the calls would authenticate one thing and
+  normalize another, and a signature check that guards a different byte string
+  guards nothing.
+- **Immutable for real.** `frozen`, `slots`, and the mappings copied and then
+  wrapped in `MappingProxyType` — a plugin can neither edit the engine's view
+  nor watch the engine edit it afterwards.
+- **`repr=False`.** It is a frame local in every traceback leaving the plugin
+  phase and it holds the raw body, the signature header, and any authorization
+  header or cookie a misconfigured proxy passed through. The values are still
+  there; this is a rendering rule, not a removal.
+
+**Stated limit of 1.1:** `headers` and `params` are `Mapping[str, str]`, so a
+repeated header or query key is not expressible and an engine handing one over
+must pick a value. No provider handshake or signature scheme in the requirement
+record repeats a key. The escape hatch is purely additive — a later minor may
+add multi-valued views beside these without breaking a single connector — which
+is why freezing the scalar view now costs nothing later.
+
+### `Acknowledgement` — the connector owns the body, the engine owns the meaning
+
+| | Owner |
+|---|---|
+| response **body** (`bytes`) | the **connector** |
+| response **media type** | the **connector** |
+| response **status code** | the **engine** |
+| response **headers** | nobody — not expressible |
+
+This split is the whole point of the type. A connector must be able to satisfy a
+provider's exact handshake format — a raw echo, a `{"status":"ok"}`, an empty
+200 — without being able to lie about whether the engine accepted the request.
+
+- The body is `bytes`, not `str`, for the same reason `verify` takes bytes: a
+  provider comparing an exact response body is comparing bytes, and an
+  engine-chosen encoding would be a guess.
+- A **status code is a retry instruction**. 200 means "never send this again",
+  5xx means "send it again", 4xx means "stop and page someone". A connector
+  choosing it could discard events the engine believes are safely persisted, and
+  only the engine knows whether the batch committed.
+- **Arbitrary headers** are a response-splitting surface and a place for request
+  material to be echoed back out of the module's sight. Not needed by any
+  handshake in the requirement record, so withheld rather than granted and
+  policed.
+- `media_type` is validated against a strict `type/subtype` (optional charset)
+  because it IS a header value; an unvalidated one carrying CRLF is header
+  injection with extra steps. `None` means "the engine picks", and
+  `Acknowledgement.resolved(default)` is how the engine fills it.
+
+### The three hooks
+
+- `challenge` answers a provider's subscription handshake, and is an **explicit
+  operation** the engine reaches through its own handshake entry point — never
+  inferred from the shape of a request. A bodyless POST is still a DELIVERY, and
+  a provider that confirms a subscription with a bodied request must still be
+  able to handshake. Returning `None` is a refusal.
+- `verify` decides authenticity from `request.raw_body`.
+- `normalize` shapes a verified request into `(events, acknowledgement)` and is
+  never called on an unverified body. It builds the acknowledgement because it
+  is the last connector code that runs: the engine records the batch after
+  `normalize` returns and emits the acknowledgement only once that batch has
+  committed, so calling back into the plugin afterwards would put plugin
+  exceptions on the far side of a durable write.
+
+`config` reaches `normalize`; `secrets` deliberately does not — normalization
+that needs a secret is doing verification in the wrong place.
+
+## SPI 1.0 still works
+
+`tests/unit/test_integration_spi_modes.py` carries a hand-written SPI 1.0
+delivery-only connector: `handler_for` directly on the plugin, `modes` naming
+`DELIVERY` and nothing else, `>=1.0,<2.0`, and no knowledge of ingress, poll,
+`IngressRequest` or `Acknowledgement`. It is deliberately not built from the
+conformance kit — a compatibility claim proved with the current release's own
+helper proves the helper, not the compatibility.
+
+It is proved to **discover**, to **conform**, and to actually be **dispatched
+to**. The range check is separately proved live, so "`>=1.0,<2.0` is admitted"
+is a fact about the range rather than about nothing being checked.
+
+This is why SPI 1.1 is a minor. A major would have excluded every honest
+`>=1.0,<2.0` delivery connector in order to protect a compatibility promise
+nothing ever consumed.
+
+## What would force a major (2.0)
+
+- removing or renaming a member of `ConnectorMode`, or a factory on a mode
+  protocol;
+- changing the parameters or return type of `handler_for`, an `IngressHandler`
+  hook, or `PollHandler.poll`;
+- moving a member onto `ConnectorPlugin` that every connector must then supply;
+- narrowing what `IngressRequest` preserves, or granting the connector any part
+  of the response the engine currently owns.
+
+Additive and **not** a major: a new mode with a full `MODE_PROTOCOLS` entry, a
+new optional field on `IngressRequest` (multi-valued header/param views), a new
+field on `ConnectorManifest` with a default, a new `Diagnostic` code.
+
+## Conformance
+
+A connector distribution certifies itself from its own test suite:
+
+```python
+from dotmac_integration.conformance import (
+    assert_connector_conforms,
+    assert_plugin_conforms,
+)
+from my_connector import MANIFEST, PLUGIN
+
+
+def test_manifest_conforms() -> None:
+    assert_connector_conforms(MANIFEST)
+
+
+def test_plugin_conforms() -> None:
+    assert_plugin_conforms(PLUGIN)
+```
+
+The kit reaches no network and needs no credentials: the whole
+installation/configuration/binding/dispatch slice must be provable without a
+provider, and a kit that needed credentials would make every author's first
+encounter with the SPI a secrets problem.
+
+The kit **owns no rules**. Every mode refusal is `spi.verify_plugin_modes`,
+which `discovery.discover` also runs; the kit only translates it into an
+`AssertionError` an author's suite can read.
+
+## What the module may never contain
+
+ADR-0024 § 7: no fixed provider enum, no import list, no `if provider == ...`
+branch. Which part of a request identifies a handshake, which header carries a
+signature, and what a provider wants echoed back are all connector knowledge —
+which is why the whole envelope is handed over and the whole acknowledgement
+body comes back, rather than the module selecting either.

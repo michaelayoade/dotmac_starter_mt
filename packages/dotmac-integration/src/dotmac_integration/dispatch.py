@@ -44,7 +44,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
@@ -62,7 +62,13 @@ from dotmac_integration.retry import (
     next_state,
     retry_delay_seconds,
 )
-from dotmac_integration.spi import DispatchRequest, accepts_manifest_digest
+from dotmac_integration.spi import (
+    ConnectorMode,
+    DeliveryPlugin,
+    DispatchRequest,
+    accepts_manifest_digest,
+    require_mode,
+)
 
 __all__ = [
     "DispatchError",
@@ -235,7 +241,17 @@ def invoke(
     effect did not happen.
     """
     plugin = registry.plugin(prepared.connector_key)
-    handler = plugin.handler_for(prepared.capability_id)
+    # BEFORE the lookup, not after. `handler_for` lives on `DeliveryPlugin`, so
+    # a binding pointed at an ingress-only connector used to fail with an
+    # AttributeError from inside the lookup — which reads as a broken plugin
+    # rather than as a binding pointed at a connector that cannot deliver.
+    require_mode(plugin, ConnectorMode.DELIVERY)
+    # The `cast` is honest rather than convenient: `registry.plugin` is typed to
+    # the BASE protocol and `handler_for` lives on `DeliveryPlugin`.
+    # `require_mode` on the line above is what turned "this connector delivers"
+    # from an assumption into a checked refusal, so the cast asserts something
+    # already proven rather than something hoped for.
+    handler = cast(DeliveryPlugin, plugin).handler_for(prepared.capability_id)
 
     request = DispatchRequest(
         capability_id=prepared.capability_id,
