@@ -62,7 +62,7 @@
   "unpublished": {
     "dotmac-auth-oidc": {
       "declared": "0.1.0a1",
-      "reason": "DELIBERATE, and the strongest case in this file. `.github/release-adapters.json` lists `adapters: {}` — the lane was built and left shut (PR #180), because absence from the allowlist is the safety mechanism until the `dotmac_workspace` pilot has run a real login against an exact-SHA local wheel and supplied a shared, atomic StateStore. Unpublished is the INTENDED state; publishing it early is the defect this row guards against.",
+      "reason": "INTENDED BUT NO LONGER INDEFINITE — this row is now a countdown, not a standing absolution. The lane was built shut in PR #180 because absence from `.github/release-adapters.json` was the safety mechanism until the `dotmac_workspace` pilot had run a real login against an exact-SHA local wheel with a shared, atomic StateStore. That pilot ran (Workspace PR #2, whose store is one `DELETE ... RETURNING` proven under concurrency), and it drove a package change on the way (starter PR #194, the request-bound store seam). The adapter is therefore LISTED as of 2026-08-15 and 0.1.0a1 is awaiting a dispatch that needs approval at the protected `registry-release` environment. DELETE THIS ROW in the change that verifies and tags `dotmac-auth-oidc-v0.1.0a1` — a row surviving publication is the stale absolution this file's own two-directional rule exists to fail on.",
       "state": "never-published"
     },
     "dotmac-imports": {

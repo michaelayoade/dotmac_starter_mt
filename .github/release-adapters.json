@@ -74,5 +74,71 @@
     "still not adoption — `EXTRACTION.toml`'s `status` and `contract_consumers`",
     "count CONSUMERS, and a release moves neither."
   ],
-  "adapters": {}
+  "adapters": {
+  "dotmac-auth-oidc": {
+    "$comment": [
+      "The fleet's OIDC relying party (ADR-0006's 2026-08-14 stateless-protocol-adapter amendment).",
+      "",
+      "LISTED NOW BECAUSE THE PILOT RAN. This lane was built shut in PR #180 and the",
+      "reason was explicit: absence from this file is the safety mechanism until a real",
+      "consumer wires start_login/complete_login and supplies a SHARED, ATOMIC StateStore.",
+      "dotmac_workspace PR #2 is that consumer. It runs the ceremony against its own",
+      "PostgreSQL table whose take() is one DELETE ... RETURNING, proven under real",
+      "concurrency in tests/db/test_state_store_atomicity.py, and it binds the callback to",
+      "the browser with a host-only cookie compared against the query state.",
+      "",
+      "The pilot also CHANGED the package rather than merely consuming it (PR #194): a",
+      "database-backed store belongs to one request's transaction, so the store is supplied",
+      "per ceremony operation while the client keeps its ProviderCache. Publishing before",
+      "that seam existed would have shipped a surface no honest consumer could use.",
+      "",
+      "NO db_schema, manifest_attr or kernel_floor, and their absence is checked rather",
+      "than assumed: scripts/release_adapter.py refuses an entry carrying any of them.",
+      "This package has no ModuleManifest, no lineage and no ledger allocation, and it does",
+      "not depend on dotmac-kernel at all -- a kernel floor would be a fact about a",
+      "relationship that does not exist.",
+      "",
+      "Required wheel contents, each earning its place rather than listing the directory:",
+      "  client.py    -- the flow, the algorithm allowlist and the state-pair check",
+      "  state.py     -- the StateStore contract, S256 PKCE, the per-request sentinel",
+      "  discovery.py -- metadata and JWKS with TTLs and rate-limited kid refetch",
+      "  transport.py -- the one place this package touches a network, redirects refused",
+      "  errors.py    -- the taxonomy whose subclass names are the stable reason codes",
+      "A wheel missing any of them is not a smaller adapter; it is one whose security core",
+      "was dropped, and import alone would not always say so.",
+      "",
+      "allowed_requires is pyjwt and httpx: signature verification and network I/O, the two",
+      "concerns ADR-0006 says cannot be faked. python-jose is deliberately absent -- see",
+      "COMPATIBILITY.md for why the fleet's 3.3.0 pin was not inherited.",
+      "",
+      "Publication is not adoption. EXTRACTION.toml's status stays audit-complete and",
+      "contract_consumers stays empty until Workspace PR #2 merges against the published",
+      "wheel; a release moves neither."
+    ],
+    "package_dir": "packages/dotmac-auth-oidc",
+    "import_name": "dotmac_auth_oidc",
+    "tag_prefix": "dotmac-auth-oidc-v",
+    "wheel_contents": {
+      "required": [
+        "dotmac_auth_oidc/py.typed",
+        "dotmac_auth_oidc/client.py",
+        "dotmac_auth_oidc/state.py",
+        "dotmac_auth_oidc/discovery.py",
+        "dotmac_auth_oidc/transport.py",
+        "dotmac_auth_oidc/errors.py"
+      ],
+      "forbidden_prefixes": [
+        "app/",
+        "tests/",
+        "alembic/",
+        "scripts/"
+      ],
+      "allowed_requires": [
+        "pyjwt",
+        "httpx",
+        "python"
+      ]
+    }
+  }
+}
 }
