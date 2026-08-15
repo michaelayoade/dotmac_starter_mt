@@ -109,11 +109,18 @@ def test_the_integration_gap_is_recorded_as_evidence() -> None:
     assert "NOT to be repaired by editing the version" in entry["reason"]
 
 
-def test_an_allowlisted_module_that_has_never_been_published_is_visible() -> None:
-    """`dotmac-imports` is the worst state in the file and the least visible:
-    release-allowlisted, so the allowlist reads as a catalogue of available
-    modules, while no `dotmac-imports-v` tag has ever been written. An allowlist
-    row means the workflow MAY publish — it is not proof that it did."""
+def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> None:
+    """An allowlist row means the workflow MAY publish; it is not proof that it
+    did. Any distribution in both states at once must be in the ledger.
+
+    Currently vacuous — deliberately, and it says so rather than being deleted.
+    The one module that was in both states, `dotmac-imports`, had its ALLOWLIST
+    ROW removed (see the test below), so the intersection is now empty. Keeping
+    the rule is what stops the next module from quietly entering that state; the
+    non-vacuity of the guard as a whole is carried by
+    `test_every_unpublished_declaration_is_recorded_with_a_reason` and the
+    planted-violation proofs below.
+    """
     sweep, survey = _survey()
     allowlist = json.loads(
         (PROJECT_ROOT / ".github" / "release-modules.json").read_text(encoding="utf-8")
@@ -123,10 +130,56 @@ def test_an_allowlisted_module_that_has_never_been_published_is_visible() -> Non
         for distribution, finding in survey["distributions"].items()
         if finding["state"] == sweep.NEVER_PUBLISHED
     }
-    assert "dotmac-imports" in never
-    assert "dotmac-imports" in allowlist
+    assert never, "the sweep found no never-published distribution at all"
     for distribution in never & set(allowlist):
         assert distribution in _ledger(), distribution
+
+
+def test_imports_is_unreleased_by_decision_not_by_omission() -> None:
+    """The 2026-08-15 ruling, pinned so neither half can drift back.
+
+    `dotmac-imports` was reported as an anomaly because it was
+    release-allowlisted with no tag in any version. The anomaly was the
+    ALLOWLIST ROW: its own `EXTRACTION.toml` says to keep the module
+    audit-complete and unreleased until a real first adopter is ready, and to
+    publish just in time for that cutover. So the row was removed and the module
+    was NOT published — the opposite repair from the one the report suggested.
+
+    Three things are asserted together because each alone can be undone by
+    somebody acting in good faith: the row stays out, the package stays intact,
+    and the ledger says which of the two is the decision.
+    """
+    sweep, survey = _survey()
+    allowlist = json.loads(
+        (PROJECT_ROOT / ".github" / "release-modules.json").read_text(encoding="utf-8")
+    )["modules"]
+    assert "dotmac-imports" not in allowlist, (
+        "dotmac-imports is allowlisted again. Its dossier gates release on ERP's "
+        "first-adopter cutover; re-add the row WITH that proof, not before it"
+    )
+    # The package is untouched: removal from the lane is not retirement.
+    package = PROJECT_ROOT / "packages" / "dotmac-imports"
+    assert (package / "pyproject.toml").is_file()
+    assert survey["distributions"]["dotmac-imports"]["declared"] == "0.1.0a2"
+    assert survey["distributions"]["dotmac-imports"]["state"] == sweep.NEVER_PUBLISHED
+    # …and the dossier still says why, so the ledger reason is not the only copy.
+    dossier = (package / "EXTRACTION.toml").read_text(encoding="utf-8")
+    assert "audit-complete and unreleased until a real first adopter" in dossier
+
+    reason = _ledger()["dotmac-imports"]["reason"]
+    assert "DO NOT" in reason and "dispatching a release" in reason
+
+
+def test_a_removed_allowlist_row_is_explained_where_it_was_removed_from() -> None:
+    """A deletion is the least self-explanatory diff there is: the next reader
+    sees a module with a package, a catalogue entry and no lane, and the
+    cheapest explanation is 'someone forgot'. The reason has to live in the file
+    the row left, not only in a ledger they may never open."""
+    allowlist = (PROJECT_ROOT / ".github" / "release-modules.json").read_text(
+        encoding="utf-8"
+    )
+    assert "dotmac-imports was REMOVED from this file" in allowlist
+    assert "re-added with ERP's adoption proof" in allowlist
 
 
 # ── Sensitivity proofs (ADR-0018) ───────────────────────────────────────────

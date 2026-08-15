@@ -18,6 +18,25 @@ whole registry rather than silently offering the rest — so a connector that
 conforms only in the presence of its neighbours is not independently
 releasable, and the gate has to say so before publication rather than after.
 
+## A release PROFILE, not a fourth classification
+
+`connector-plugin` names this release profile and the architectural role. It is
+NOT an `EXTRACTION.toml` classification: a connector's dossier declares
+`stateless-protocol-adapter`, the same as any other distribution a product does
+not install, because the four properties that classification governs (no
+`ModuleManifest`, no lineage, no ledger allocation, no persistence import) are
+exactly the four a connector has. Adding a synonym would mean amending ADR-0006
+and the global validator to describe the same properties twice.
+
+The consequence is the important part: **the classification does not separate
+this lane from the adapter lane.** It is a floor they share. What separates them
+is the strictness below, none of which the adapter lane asks for — exactly one
+connector entry point, a PUBLISHED integration floor, connector-key
+consistency, installed-wheel SPI conformance, and no persistence, secret
+material or private retry/checkpoint engine. `dotmac-auth-oidc` carries the
+identical classification and is refused here, which is what makes that claim
+checkable rather than asserted.
+
 ## Where the floor lives, and why that is the interesting check
 
 A module floors on a KERNEL release. A connector floors on a
@@ -71,6 +90,12 @@ INTEGRATION_TAG_PREFIX: Final = "dotmac-integration-v"
 #: owns no rows: its state lives in the control plane's `mod_intg`, which
 #: `dotmac-integration` owns and a connector never writes directly.
 STATEFUL_ONLY_FIELDS: Final = ("db_schema", "manifest_attr", "kernel_floor")
+
+#: Module stems that mean a connector has built its OWN copy of machinery the
+#: control plane owns. Matched on the module name because a private engine is a
+#: module a connector declares, not a function it calls: importing
+#: `dotmac_integration.retry` is the correct behaviour and must not trip this.
+PRIVATE_ENGINE_MARKERS: Final = ("retry", "backoff", "checkpoint", "dead_letter")
 
 #: What a connector entry must declare. Required rather than optional for the
 #: reason the adapter lane records about the module lane: optionality is not
@@ -163,6 +188,23 @@ def resolve(distribution: str, *, tags: set[str] | None = None) -> dict:
             "'unknown' rather than 'refused'."
         )
 
+    # First-party connectors live under Starter `packages/` with a name that
+    # announces what they are. Enforced rather than conventional: a connector
+    # released from an arbitrary directory would be governed by this lane while
+    # looking, to anyone reading the tree, like something else. Later
+    # third-party connectors may live in their own repositories under the same
+    # governance profile; this lane governs only the ones Starter builds.
+    prefix = policy["conformance"]["package_dir_prefix"]
+    if not entry["package_dir"].startswith(prefix):
+        raise ReleaseRefused(
+            f"{distribution}: package_dir {entry['package_dir']!r} does not "
+            f"start with {prefix!r}. First-party connectors are built, tested, "
+            "versioned and published from Starter `packages/` as independent "
+            "distributions — neither dotmac-integration nor the Integrator "
+            "assembly may import one, so the path is how a reader tells a "
+            "connector from a module without opening its dossier."
+        )
+
     package_dir = REPO_ROOT / entry["package_dir"]
     if not (package_dir / "pyproject.toml").is_file():
         raise ReleaseRefused(
@@ -170,7 +212,20 @@ def resolve(distribution: str, *, tags: set[str] | None = None) -> dict:
             "has no pyproject.toml"
         )
 
-    # The lane is tied to the GOVERNED classification, not to a name.
+    # The GOVERNED classification — `stateless-protocol-adapter`, shared with
+    # the adapter lane and NOT a fourth ADR-0006 classification. `connector-
+    # plugin` is the name of this RELEASE PROFILE and of the architectural role;
+    # promoting it to a dossier classification would need ADR-0006 and the
+    # global validator amended to describe the same four properties twice.
+    #
+    # So this check is a FLOOR both lanes share, not the thing that separates
+    # them. What separates them is everything else `resolve` and `conformance`
+    # demand and the adapter lane does not: exactly one connector entry point, a
+    # PUBLISHED integration floor, connector-key consistency, installed-wheel SPI
+    # conformance, and no persistence, secret material or private
+    # retry/checkpoint engine. `dotmac-auth-oidc` carries this exact
+    # classification and is still refused here — proved in
+    # `test_connector_release_policy.py`.
     dossier_path = package_dir / "EXTRACTION.toml"
     if not dossier_path.is_file():
         raise ReleaseRefused(
@@ -300,6 +355,30 @@ def cmd_conformance(args: argparse.Namespace) -> None:
         )
         if leaked:
             problems.append(f"secret-shaped files ship in the wheel: {leaked}")
+
+        # No PRIVATE retry/checkpoint engine. Delivery retry and feed
+        # checkpoints are two of the six categories
+        # `docs/inventories/external-connector-sources.md` ratchets OUT of
+        # products and into the control plane; a connector that rebuilds them
+        # locally moves the duplication instead of retiring it, and the fleet
+        # count would not even see it because connectors are not in
+        # `RUNTIME_ROOTS`. Declaring a MODULE is what makes it private — a
+        # connector calling the control plane's `retry`/`execution` helpers is
+        # doing exactly the right thing, so the check is on ownership, not on
+        # the word.
+        engines = sorted(
+            str(path.relative_to(package_src))
+            for path in package_src.rglob("*.py")
+            if any(marker in path.stem for marker in PRIVATE_ENGINE_MARKERS)
+        )
+        if engines:
+            problems.append(
+                f"ships what looks like its own retry/checkpoint engine: {engines}. "
+                "Delivery retry and feed checkpoints belong to the control plane "
+                "(ADR-0024 section 6) — call dotmac_integration's, do not rebuild "
+                "them behind a plugin boundary where the fleet ratchet cannot see "
+                "them"
+            )
 
     for name in policy["required_assertions"]:
         if not name.startswith("assert_"):

@@ -44,7 +44,30 @@
     "apply the higher wins, and tests/architecture/test_kernel_version_sync.py",
     "keeps the two cases in separate, reasoned maps so neither is silent.",
     "Either way registry verification can only pass once that kernel is",
-    "published."
+    "published.",
+    "",
+    "## dotmac-imports was REMOVED from this file on 2026-08-15",
+    "",
+    "It sat here, allowlisted, with no `dotmac-imports-v` tag in any version.",
+    "`scripts/declared_publication_sweep.py` surfaced that as an anomaly, and",
+    "the anomaly turned out to be THIS ROW rather than the missing tag: the",
+    "package's own EXTRACTION.toml `next_action` says to 'keep the module",
+    "audit-complete and unreleased until a real first adopter is ready' and to",
+    "'publish the exact kernel/imports releases just in time for that cutover'.",
+    "An allowlist row said the opposite, and an allowlist row is how this",
+    "repository states that a package may be published.",
+    "",
+    "So the row is gone and the PACKAGE is untouched: it keeps its declared",
+    "0.1.0a2, its catalogue entry, its kernel floor and its dossier. Removal is",
+    "not retirement — it is the absence that is the safety mechanism, the rule",
+    "ADR-0026 section 8 set for dotmac-approvals and PR #180 applied to",
+    "dotmac-auth-oidc: the entry lands WITH the proof, never ahead of it.",
+    "",
+    "The row is re-added with ERP's adoption proof, which the dossier names as",
+    "cutover 1 and gates behind the E8 Organization-to-Tenant and",
+    "composed-lineage decision. Until then the state is recorded, deliberately",
+    "and with its reason, in docs/inventories/declared-publication-baseline.json",
+    "so the next reader does not 'repair' it by dispatching a release."
   ],
   "modules": {
     "dotmac-release-catalog": {
@@ -186,47 +209,6 @@
           "dotmac_files/service.py",
           "dotmac_files/migrations/__init__.py",
           "dotmac_files/migrations/versions/fi_0001_stored_files.py"
-        ],
-        "forbidden_prefixes": [
-          "app/",
-          "tests/",
-          "alembic/",
-          "scripts/"
-        ],
-        "allowed_requires": [
-          "dotmac-kernel",
-          "sqlalchemy",
-          "python"
-        ]
-      }
-    },
-    "dotmac-imports": {
-      "$comment": [
-        "The bulk-import run ledger (ADR-0025). kernel_floor is a56: mod_imports",
-        "was allocated in a55, but the lineage now declares `requires` and calls",
-        "resolve_depends_on / require_prerequisites (ADR-0006 D1 amendment),",
-        "which a56 added \u2014 so a capability, not the allocation, sets it.",
-        "",
-        "No alembic in allowed_requires: this module ships its own im lineage",
-        "but emits no DDL into a CONSUMING product's migration, so Alembic is a",
-        "packaging input rather than a runtime import."
-      ],
-      "package_dir": "packages/dotmac-imports",
-      "import_name": "dotmac_imports",
-      "manifest_attr": "module",
-      "kernel_floor": "0.1.0a56",
-      "db_schema": "mod_imports",
-      "tag_prefix": "dotmac-imports-v",
-      "wheel_contents": {
-        "required": [
-          "dotmac_imports/py.typed",
-          "dotmac_imports/manifest.py",
-          "dotmac_imports/contracts.py",
-          "dotmac_imports/models.py",
-          "dotmac_imports/service.py",
-          "dotmac_imports/tabular.py",
-          "dotmac_imports/migrations/__init__.py",
-          "dotmac_imports/migrations/versions/im_0001_import_runs.py"
         ],
         "forbidden_prefixes": [
           "app/",

@@ -23,10 +23,31 @@ install it.
 | | Module | Stateless protocol adapter | **Connector plugin** |
 |---|---|---|---|
 | Governed by | `release-modules.json` | `release-adapters.json` | `release-connectors.json` |
+| `EXTRACTION.toml` classification | `optional-module` etc. | `stateless-protocol-adapter` | **`stateless-protocol-adapter`** (same) |
 | Owns rows | one `mod_*` schema + lineage | none | none — state lives in `mod_intg` |
 | Reached by | composed into an assembly | a product **calls** it | **discovered** by the control plane |
+| Lives at | `packages/*` | `packages/*` | `packages/dotmac-connector-*` (enforced) |
 | Floors on | a published kernel | (none) | a published `dotmac-integration` |
 | Proved by | namespace registration | public surface on installed bytes | SPI conformance on installed bytes |
+
+### `connector-plugin` is a release profile, not a classification
+
+A connector needs a distinct release **profile**, not a fourth extraction
+classification. Its dossier declares `stateless-protocol-adapter` like any other
+distribution a product does not install, because the four properties that
+classification governs — no `ModuleManifest`, no lineage, no ledger allocation,
+no persistence import — are exactly the four a connector has. Promoting
+`connector-plugin` to a dossier classification would mean amending ADR-0006 and
+the global validator to describe the same properties twice, and would put the
+same package in two vocabularies at once.
+
+**So the classification check does not separate this lane from the adapter
+lane.** It is a floor they share. What separates them is the strictness in § 2,
+none of which the adapter lane asks for. That claim is checkable rather than
+asserted: `test_a_real_adapter_with_the_same_classification_is_still_refused`
+drives the connector gate with `dotmac-auth-oidc` — a genuine
+`stateless-protocol-adapter` whose dossier passes the classification check
+exactly — and requires a refusal.
 
 The distinction that earns a third file is the middle row. An adapter is a
 library: it is verified by its public surface and nothing else in the fleet has
@@ -51,10 +72,19 @@ Five obligations. Each is checked by `scripts/release_connector.py`, and each
 check has a sensitivity proof that plants the violation rather than asserting
 clean input passes.
 
-1. **Classification.** `EXTRACTION.toml` declares `connector-plugin`, read from
-   the package and never trusted from the allowlist. This is what stops the lane
-   becoming a way to publish a stateful module while skipping the namespace,
-   lineage and dual-plane gates the module lane performs.
+1. **Classification and location.** `EXTRACTION.toml` declares
+   `stateless-protocol-adapter`, read from the package and never trusted from
+   the allowlist — what stops the lane becoming a way to publish a *stateful*
+   module while skipping the namespace, lineage and dual-plane gates. And
+   `package_dir` must start with `packages/dotmac-connector-`: first-party
+   connectors are built, tested, versioned and published from Starter
+   `packages/` as independent distributions, and neither `dotmac-integration`
+   nor the Integrator assembly may import one — discovery stays exclusively
+   through package metadata. The prefix is enforced rather than conventional so
+   a connector cannot be released from a directory whose name does not announce
+   what it is. *Later third-party connectors may live in separate repositories
+   under the same governance profile; this lane governs only the first-party
+   packages Starter builds.*
 2. **Discovery.** Exactly one entry point in `dotmac_integration.connectors`,
    and its key equals the `connector_key` the allowlist and the manifest
    declare. Two makes "which one failed" unanswerable at boot; zero is invisible
@@ -71,10 +101,18 @@ clean input passes.
 4. **An installable floor.** `integration_floor` names the earliest
    `dotmac-integration` release whose SPI admits the connector, **and that
    release must be published**. See § 4 — this is the check with live teeth.
-5. **No secret shape, no persistence.** A connector holds a *reference* to
-   credential material (ADR-0024 § 7), never the value, and ships no migration
-   lineage. The name-shape list is imported from the module lane rather than
-   copied: two copies drift, silently and in the worst direction.
+5. **No secret shape, no persistence, no private retry/checkpoint engine.** A
+   connector holds a *reference* to credential material (ADR-0024 § 7), never
+   the value, and ships no migration lineage. It also may not carry its own
+   delivery-retry or feed-checkpoint machinery: those are two of the six
+   categories [`external-connector-sources.md`](external-connector-sources.md)
+   is ratcheting *out* of products and into the control plane, and a connector
+   rebuilding them locally moves the duplication rather than retiring it —
+   invisibly, since connectors are not in the sweep's `RUNTIME_ROOTS`. The check
+   is on *ownership*, not on the word: importing `dotmac_integration.retry` is
+   correct and does not trip it; declaring a `retry.py` of your own does. The
+   secret name-shape list is imported from the module lane rather than copied —
+   two copies drift, silently and in the worst direction.
 
 ## 3. What an entry does **not** prove
 
@@ -121,7 +159,7 @@ whose tag step failed reads here as unpublished, which is exactly the state
 | Distribution | Declares | Newest tag | State |
 |---|---|---|---|
 | `dotmac-integration` | `0.1.0a2` | `0.1.0a1` | **declared-unpublished** |
-| `dotmac-imports` | `0.1.0a2` | — | **never-published** |
+| `dotmac-imports` | `0.1.0a2` | — | never-published, *intended* (allowlist row removed) |
 | `dotmac-auth-oidc` | `0.1.0a1` | — | never-published, *deliberate* |
 | `dotmac-template-studio` | `0.2.0a3` | — | never-published, no lane |
 | the other eight | — | = declared | published |
@@ -132,10 +170,27 @@ release is `0.1.0a1`, which ships a `run_effect_once` that raises `TypeError` on
 its first call. The release decision belongs to the release step — a guard that
 "fixed" this by bumping a number would delete the evidence that decision needs.
 
-`dotmac-imports` is the sharper case and was previously invisible: it is
-release-allowlisted, so the allowlist reads as a catalogue of available modules,
-while **no `dotmac-imports-v` tag has ever been written in any version**. Its own
-changelog says `0.1.0a1 — unreleased`. See § 6.
+`dotmac-imports` was the sharper case and is now **resolved — in the opposite
+direction from the one the report suggested.** It was release-allowlisted with no
+`dotmac-imports-v` tag in any version, so the allowlist read as a catalogue of
+available modules. The anomaly turned out to be the *allowlist row*, not the
+missing tag: the package's own `EXTRACTION.toml` `next_action` says to keep the
+module audit-complete and unreleased until a real first adopter is ready, and to
+publish just in time for that cutover.
+
+**Ruling (2026-08-15): remove the row, do not publish.** The entry is gone from
+`release-modules.json`, `release-module.yml` and `recover-module-release.yml`;
+the package keeps its declared `0.1.0a2`, its kernel floor, its dossier and its
+catalogue entry (which now reads `not allowlisted`). The row returns with ERP's
+adoption proof — cutover 1, gated behind the E8 Organization-to-Tenant and
+composed-lineage decision.
+
+The general lesson is worth more than the case: **a declared-but-unpublished
+finding does not imply the repair is a release.** Sometimes the wrong half is the
+permission, not the artifact. The ledger therefore distinguishes *intended*
+unpublished states (`dotmac-auth-oidc`, `dotmac-imports`) from *outstanding*
+ones (`dotmac-integration`), and the reason text is where that difference lives —
+which is why the guard demands a premise rather than a label.
 
 ### Two directions, both failures (ADR-0018)
 
@@ -169,24 +224,38 @@ governance question rather than a version-bump question: **the connector
 programme cannot ship a connector on the fixed control plane until the fixed
 control plane is released.**
 
-## 6. Open — needs a ruling
+## 6. Rulings, 2026-08-15
 
-1. **`dotmac-imports` has never been published.** It is release-allowlisted with
-   `kernel_floor` `0.1.0a56` and has no tag in any version, so the ADR-0025
-   import-run ledger is installable by nobody and no assembly can pin it. Either
-   dispatch a release run or move the entry out of the allowlist. Leaving it is
-   the state that makes an allowlist row read as availability.
-2. **`dotmac-integration` 0.1.0a2.** Recorded, not fixed, per this task's
-   instruction. It blocks any connector that needs the fix, per § 5.
-3. **Does the connector lane get its own workflow?** There is deliberately none
-   while `connectors` is empty: a lane whose gate exists and whose workflow does
-   not cannot publish at all, which is a stronger closure than an empty
-   allowlist behind a live workflow. The guard is two-directional — a workflow
-   becomes *required* the moment an entry is added — so opening the lane is one
-   complete, reviewable diff. The alternative (mirror `release-adapter.yml` now,
-   shut) matches PR #180's precedent; this file takes the other option and the
-   choice is worth confirming.
-4. **Where do connector distributions live?** Nothing here assumes they are in
-   `packages/`. If they are separate repositories, the classification and
-   conformance checks move with them and this lane governs only the ones this
-   repository builds.
+| Question | Ruling | Where it lives now |
+|---|---|---|
+| Is `connector-plugin` a classification? | **No** — a release profile only. Dossiers stay `stateless-protocol-adapter`; ADR-0006 and the global validator are not amended. The stricter checks are what distinguish the lane. | § 1, `release-connectors.json` `conformance.classification` |
+| `dotmac-imports` | **Remove the allowlist row, do not publish.** Its dossier gates release on ERP's first-adopter cutover; the row was the wrong half. | § 4, `release-modules.json` header |
+| Connector workflow | **Land it now, shut**, per PR #180. Free-text input while the allowlist is empty; every dispatch fails in `resolve`; the input becomes an exact choice list on the first entry. | § 7 |
+| Where connectors live | **Starter `packages/dotmac-connector-<provider>/`**, enforced by the gate. Third-party connectors may later live in their own repositories under the same profile. | § 2.1 |
+
+`dotmac-integration` `0.1.0a2` remains as recorded unpublished evidence — not
+published, not renumbered — and the floor guard stays exactly as strict: the
+first connector must floor on a *verified tag*, which today means neither `a1`
+by preference nor unpublished `a2` at all.
+
+## 7. The workflow is not the lock
+
+`.github/workflows/release-connector.yml` is merged and **shut**. The lock is the
+empty `connectors` object in `release-connectors.json`; the workflow's existence
+is not authorization and must not be read as any.
+
+It lands early on purpose. Publish permissions, freshness checks and artifact
+handling are a different review from the first provider implementation — different
+reviewers, different failure modes — and bundling them means whichever is more
+urgent carries the other through. The one that gets waved past in that trade is
+the security sequence, the half nobody can see working until it is too late.
+
+While the allowlist is empty the `connector` input is **free text**, because a
+`workflow_dispatch` choice must offer at least one option and there is nothing to
+offer. The enforced layer was never the input: it is `resolve`, re-run on the
+publish side after the approval wait.
+`test_the_allowlist_is_the_lock_and_every_dispatch_fails_today` drives the gate
+with four plausible values — including two real packages — and requires all four
+to be refused. When the first connector is authorized, the input becomes an exact
+`choice` list matching the allowlist, enforced two-directionally so neither a
+missing option nor a stale one can survive.

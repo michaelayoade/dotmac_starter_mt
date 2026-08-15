@@ -20,6 +20,17 @@ package. That is deliberate: absence is the safety mechanism, and a guard tested
 only against the entries that happen to exist stops being a guard the moment the
 first one is added. It also means these tests cannot rot into "the lane is
 empty, so everything passes".
+
+**The classification is a shared floor, not the separator.** A connector's
+`EXTRACTION.toml` declares `stateless-protocol-adapter` — the same as an
+adapter's, because the four properties that classification governs are exactly
+the four a connector has, and `connector-plugin` is the name of a release
+PROFILE rather than a fourth ADR-0006 classification. So the classification
+check cannot be what keeps a connector out of the adapter lane or an adapter out
+of this one. What does that work is the strictness this lane adds, and
+`test_a_real_adapter_with_the_same_classification_is_still_refused` is the proof
+— it drives the gate with `dotmac-auth-oidc`, a genuine
+`stateless-protocol-adapter` in the tree, and requires a refusal.
 """
 
 from __future__ import annotations
@@ -30,6 +41,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = PROJECT_ROOT / ".github" / "release-connectors.json"
@@ -87,7 +99,7 @@ def lane(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         encoding="utf-8",
     )
     (package / "EXTRACTION.toml").write_text(
-        'classification = "connector-plugin"\n', encoding="utf-8"
+        'classification = "stateless-protocol-adapter"\n', encoding="utf-8"
     )
     monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
     # The synthetic repository has no tags of its own. Publication is supplied
@@ -174,7 +186,9 @@ def test_an_incomplete_entry_is_refused_field_by_field(lane) -> None:
 
 def test_a_wrong_classification_is_refused(lane, tmp_path: Path) -> None:
     """The lane is tied to the governed CLASSIFICATION, read from the package,
-    not to a name chosen in the allowlist."""
+    not to a name chosen in the allowlist. `optional-module` here would be a
+    stateful package trying to reach the index without the namespace, lineage
+    and dual-plane gates the module lane performs."""
     gate, package = lane(_valid_entry())
     (package / "EXTRACTION.toml").write_text(
         'classification = "optional-module"\n', encoding="utf-8"
@@ -182,6 +196,96 @@ def test_a_wrong_classification_is_refused(lane, tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as refusal:
         gate.resolve("dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"})
     assert "classification" in str(refusal.value)
+
+
+def test_the_governed_classification_is_not_a_fourth_one() -> None:
+    """`connector-plugin` names a release PROFILE, never an `EXTRACTION.toml`
+    classification.
+
+    Promoting it would need ADR-0006 and the global validator amended to
+    describe the same four properties twice — no `ModuleManifest`, no lineage,
+    no ledger allocation, no persistence import — which is exactly the set
+    `stateless-protocol-adapter` already governs. Asserted here rather than left
+    to prose because the tempting change is a one-word edit to a JSON file.
+    """
+    conformance = _policy()["conformance"]
+    assert conformance["classification"] == "stateless-protocol-adapter"
+    declared = {
+        tomllib.loads(dossier.read_text(encoding="utf-8")).get("classification")
+        for dossier in (PROJECT_ROOT / "packages").glob("*/EXTRACTION.toml")
+    }
+    assert "connector-plugin" not in declared, (
+        "a package declares `connector-plugin` as its EXTRACTION.toml "
+        "classification. That is a release-profile name; amend ADR-0006 and the "
+        "global validator first, or use `stateless-protocol-adapter`"
+    )
+
+
+def test_a_real_adapter_with_the_same_classification_is_still_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """THE PROOF THE SHARED CLASSIFICATION COSTS NOTHING.
+
+    Since the connector lane and the adapter lane accept the same
+    `EXTRACTION.toml` classification, that check can no longer be what keeps one
+    lane's package out of the other. This drives the connector gate with
+    `dotmac-auth-oidc` — a real `stateless-protocol-adapter` in this tree, with
+    a dossier that satisfies the classification check exactly — and requires a
+    refusal anyway.
+
+    Without this, "the strictness is what separates the lanes" is a claim about
+    checks nobody proved are reached after the classification passes.
+    """
+    gate = _gate()
+    policy = _policy()
+    # Everything a connector entry must carry, pointed at the adapter. The path
+    # prefix is what refuses first, and each later check would refuse in turn —
+    # the assertion below names the reason so a change of order is visible.
+    policy["connectors"] = {
+        "dotmac-auth-oidc": {
+            "package_dir": "packages/dotmac-auth-oidc",
+            "import_name": "dotmac_auth_oidc",
+            "plugin_attr": "PLUGIN",
+            "connector_key": "oidc.v1",
+            "spi_range": ">=1.0,<2.0",
+            "integration_floor": "0.1.0a1",
+            "tag_prefix": "dotmac-auth-oidc-v",
+            "wheel_contents": {"required": [], "forbidden_prefixes": []},
+        }
+    }
+    allowlist = tmp_path / "release-connectors.json"
+    allowlist.write_text(json.dumps(policy), encoding="utf-8")
+    monkeypatch.setattr(gate, "ALLOWLIST", allowlist)
+
+    with pytest.raises(SystemExit) as refusal:
+        gate.resolve("dotmac-auth-oidc", tags={"dotmac-integration-v0.1.0a1"})
+    message = str(refusal.value)
+    assert "packages/dotmac-connector-" in message, message
+    # …and the dossier it carries really would have passed the classification
+    # check, so the refusal above is not an accident of a wrong dossier.
+    dossier = tomllib.loads(
+        (PROJECT_ROOT / "packages" / "dotmac-auth-oidc" / "EXTRACTION.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert dossier["classification"] == _policy()["conformance"]["classification"]
+
+
+def test_a_connector_must_live_under_the_first_party_path(lane) -> None:
+    """First-party connectors are built, tested, versioned and published from
+    Starter `packages/dotmac-connector-<provider>/`. Enforced rather than
+    conventional: a connector released from an arbitrary directory is governed
+    by this lane while looking, to anyone reading the tree, like something else.
+
+    Later third-party connectors may live in their own repositories under the
+    same governance profile — this lane governs only the ones Starter builds.
+    """
+    gate, _ = lane(
+        {**_valid_entry(), "package_dir": "packages/dotmac-example-connector"}
+    )
+    with pytest.raises(SystemExit) as refusal:
+        gate.resolve("dotmac-connector-example", tags={"dotmac-integration-v0.1.0a1"})
+    assert "packages/dotmac-connector-" in str(refusal.value)
 
 
 # ── The floor must be installable, not merely declared ──────────────────────
@@ -325,6 +429,38 @@ def test_static_conformance_refuses_a_floor_the_package_does_not_declare(
     assert "the floor a consumer resolves" in str(refusal.value)
 
 
+def test_static_conformance_refuses_a_private_retry_or_checkpoint_engine(
+    lane,
+) -> None:
+    """Delivery retry and feed checkpoints are two of the six categories
+    `external-connector-sources.md` is ratcheting OUT of products and into the
+    control plane. A connector that rebuilds them locally MOVES the duplication
+    rather than retiring it — and invisibly, because connectors are not in the
+    sweep's `RUNTIME_ROOTS`, so the fleet count would not even register it.
+
+    The check is on OWNERSHIP, not on the word: a connector calling
+    `dotmac_integration.retry` is doing exactly the right thing, and only a
+    module of its own trips this.
+    """
+    import argparse
+
+    gate, package = lane(_valid_entry())
+    source = package / "src" / "dotmac_connector_example"
+    namespace = argparse.Namespace(distribution="dotmac-connector-example")
+
+    # Calling the control plane's engine is correct and must NOT trip it.
+    (source / "client.py").write_text(
+        "from dotmac_integration.retry import Outcome\n", encoding="utf-8"
+    )
+    gate.cmd_conformance(namespace)
+
+    (source / "retry.py").write_text("MAX = 3\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as refusal:
+        gate.cmd_conformance(namespace)
+    assert "its own retry/checkpoint engine" in str(refusal.value)
+    assert "retry.py" in str(refusal.value)
+
+
 def test_static_conformance_refuses_a_secret_shaped_file(lane) -> None:
     """ADR-0024 section 7: a connector holds a REFERENCE to credential material,
     never the value. Uses the module lane's shared name-shape list rather than a
@@ -384,28 +520,95 @@ def test_the_executable_conformance_actually_calls_the_kit() -> None:
 # ── The lane is shut, and opening it is one complete diff ───────────────────
 
 
-def test_the_lane_is_shut_and_has_no_workflow(lane) -> None:
-    """TWO-DIRECTIONAL, and the reason there is no shut workflow to review.
+def test_the_allowlist_is_the_lock_and_every_dispatch_fails_today() -> None:
+    """THE SHUT-LANE PROOF. The workflow exists; the ALLOWLIST is the lock.
 
-    While `connectors` is empty there must be no `release-connector.yml`: a lane
-    whose gate exists and whose workflow does not cannot publish at all, which
-    is a stronger closure than an empty allowlist behind a live workflow. The
-    moment an entry is added the workflow becomes REQUIRED, so opening the lane
-    is one complete, reviewable change rather than a merge that has already
-    half-opened it.
+    A merged workflow is easy to misread as authorization, so this asserts the
+    thing that is actually true: with `connectors` empty, `resolve` — the one
+    enforced layer, re-run on the publish side too — refuses every value a
+    dispatcher could type, including the names of real packages in this tree.
     """
+    assert _policy()["connectors"] == {}, (
+        "the lane is no longer shut; this proof must be replaced by one that "
+        "drives the real entry, not deleted"
+    )
+    gate = _gate()
+    for attempt in (
+        "dotmac-connector-stripe",  # a plausible future name
+        "dotmac-auth-oidc",  # a real package, right classification
+        "dotmac-integration",  # the control plane itself
+        "",
+    ):
+        with pytest.raises(SystemExit) as refusal:
+            gate.resolve(attempt, tags={"dotmac-integration-v0.1.0a1"})
+        assert "the lane is shut" in str(refusal.value), attempt
+
+
+def test_the_workflow_input_is_free_text_only_while_the_lane_is_shut() -> None:
+    """TWO-DIRECTIONAL. A `workflow_dispatch` choice must offer at least one
+    option, and an empty allowlist has none — so the input is free text today.
+    The moment a connector is listed the input must become an exact `choice`
+    list matching the allowlist, so the first entry cannot land without the UI
+    layer following it, and a stale option cannot outlive its entry.
+    """
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    connector_input = workflow[True]["workflow_dispatch"]["inputs"]["connector"]
     connectors = _policy()["connectors"]
     if connectors:
-        assert WORKFLOW.is_file(), (
-            "a connector is allowlisted but .github/workflows/release-connector.yml "
-            "does not exist — the entry claims a publish path that is not there"
-        )
+        assert connector_input["type"] == "choice"
+        assert set(connector_input["options"]) == set(connectors)
     else:
-        assert not WORKFLOW.exists(), (
-            "the connector lane is empty but a release workflow exists. Either "
-            "list a connector or delete the workflow; a live workflow over an "
-            "empty allowlist is a door that only looks shut"
-        )
+        assert connector_input["type"] == "string"
+        assert "options" not in connector_input
+
+
+def test_the_workflow_says_the_allowlist_is_the_lock() -> None:
+    """The failure this lane is most exposed to is a reader taking the merged
+    workflow for permission. The disclaimer is load-bearing, so it is asserted
+    present rather than trusted to survive the next edit — and so is the reason
+    it was merged shut at all."""
+    prose = WORKFLOW.read_text(encoding="utf-8").lower()
+    assert "the allowlist is the lock, not this file" in prose
+    assert "not authorization" in prose
+    # The separation-of-review argument, which is why it lands early.
+    assert "different review from the first provider" in prose
+
+
+def test_the_workflow_matches_the_release_security_sequence() -> None:
+    """The connector path may not be a weaker version of the others. Each of
+    these exists because of a specific failure: publishing from a stale branch,
+    publishing bytes other than the ones inspected, publishing after an approval
+    whose SHA has since moved, and tagging a release nobody verified was
+    installable from the index."""
+    source = "\n".join(
+        line
+        for line in WORKFLOW.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert source.count("assert_current_main.sh") == 2
+    assert "environment: registry-release" in source
+    assert "download-artifact" in source, "publish must use the built bytes"
+    assert source.count("twine upload") == 1
+    assert source.index("poetry build") < source.index("twine upload")
+    # Defence in depth: the gate is re-run after the approval wait.
+    publish = source.split("publish:", 1)[1].split("verify:", 1)[0]
+    assert "release_connector.py resolve" in publish
+    # The tag is written only after registry verification.
+    verify = source.split("verify:", 1)[1]
+    assert "git tag" in verify
+    assert verify.index("verify-wheel") < verify.index("git tag")
+
+
+def test_the_published_bytes_are_conformance_checked_not_just_installed() -> None:
+    """A connector's verification IS its conformance. Installing it and
+    asserting nothing would prove only that pip could resolve it — which is the
+    weakest claim in the sequence and the easiest one to mistake for the
+    strongest."""
+    verify = WORKFLOW.read_text(encoding="utf-8").split("verify:", 1)[1]
+    assert "release_connector.py verify-wheel" in verify
+    # Both index flags: `--index-url` REPLACES the default, so alone it would
+    # see the Dotmac distributions and nothing they depend on.
+    assert "--index-url" in verify and "--extra-index-url" in verify
 
 
 def test_the_policy_states_what_an_entry_does_not_prove() -> None:
@@ -442,17 +645,20 @@ def test_the_three_lanes_do_not_overlap() -> None:
     assert not adapters & connectors
 
 
-def test_a_connector_package_would_declare_the_governed_classification() -> None:
-    """`connector-plugin` is a fourth classification alongside the three
-    ADR-0006 governs today. No package declares it yet — asserted, so that when
-    the first one does, this file is where the reviewer is sent."""
-    declared = {
-        tomllib.loads(dossier.read_text(encoding="utf-8")).get("classification")
-        for dossier in (PROJECT_ROOT / "packages").glob("*/EXTRACTION.toml")
+def test_no_first_party_connector_package_exists_unlisted() -> None:
+    """The path prefix is also a discovery rule. A package under
+    `packages/dotmac-connector-*` that is NOT in the allowlist is either a
+    connector someone forgot to list or one deliberately held back — and the
+    difference has to be written down rather than inferred from an empty
+    object."""
+    on_disk = {
+        path.name
+        for path in (PROJECT_ROOT / "packages").glob("dotmac-connector-*")
+        if path.is_dir()
     }
-    assert _policy()["conformance"]["classification"] == "connector-plugin"
-    assert "connector-plugin" not in declared, (
-        "a package now declares `connector-plugin`; it must be listed in "
-        ".github/release-connectors.json or explicitly held back, and this "
-        "assertion updated to say which"
+    listed = set(_policy()["connectors"])
+    assert on_disk - listed == set(), (
+        f"connector packages exist but are unlisted: {sorted(on_disk - listed)}. "
+        "List them in .github/release-connectors.json with their proof, or "
+        "record why they are held back — absence must be a decision, not a gap"
     )
