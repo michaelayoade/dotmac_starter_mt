@@ -91,23 +91,30 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from types import MappingProxyType
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
+from dotmac_integration.capability_registry import CapabilityRegistry
+from dotmac_integration.destination_binding import resolve_destination
 from dotmac_integration.execution import LostClaim, payload_digest
-from dotmac_integration.retry import Outcome, OutcomeStatus
+from dotmac_integration.models import SCHEMA
+from dotmac_integration.retry import Outcome, OutcomeStatus, next_state
 
 __all__ = [
     "DeliveryError",
     "DeliveryReport",
     "FingerprintConflict",
     "LostClaim",
+    "DEFAULT_LEASE_SECONDS",
+    "claim_statement",
+    "settle_statement",
     "ProductAcceptance",
-    "ProductGateway",
+    "ProductPortClient",
     "ProductOutcome",
     "ProductRequest",
     "ReceiptClaim",
     "ReceiptClaimStore",
+    "ReceiptClaims",
     "TransportFailure",
     "TrustedDestination",
     "TrustedScope",
@@ -180,11 +187,16 @@ class TrustedScope(Protocol):
 
 @runtime_checkable
 class TrustedDestination(Protocol):
-    """Where an observation lands, resolved from an immutable config revision.
+    """Where an observation lands, resolved from durable state.
 
-    `config_revision_id` is provenance: it says WHICH revision established this
-    destination, so an incident can answer "what was this routed to on the 3rd?"
-    from durable state rather than from a guess.
+    `destination_revision_id` is provenance: it names the row in
+    `capability_destination_revisions` that was current when the claim was
+    taken, so an incident can answer "what was this routed to on the 3rd?" from
+    the route history rather than from a guess.
+
+    Structural on purpose. `destination_binding.DestinationBinding` satisfies it
+    without importing anything from here, which keeps the routing authority and
+    the delivery engine independently testable.
     """
 
     @property
@@ -203,7 +215,7 @@ class TrustedDestination(Protocol):
     def contract_version(self) -> int: ...
 
     @property
-    def config_revision_id(self) -> UUID: ...
+    def destination_revision_id(self) -> UUID: ...
 
 
 # ── Value objects ───────────────────────────────────────────────────────────
@@ -493,8 +505,15 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
 # ── The two seams ───────────────────────────────────────────────────────────
 
 
-class ProductGateway(Protocol):
-    """The network. Implemented by a connector; never by this module.
+class ProductPortClient(Protocol):
+    """The product's PORT, spoken to over the network. Never implemented here.
+
+    Named for what it is a client OF. "Gateway" invited the reading that this
+    seam owns the delivery — including the claim and the settle — and an
+    earlier draft did exactly that, leaving the module unable to deliver
+    anything on its own. Claiming and settling are this module's, against its
+    own table; the only thing it cannot do itself is speak the product's
+    protocol, and that is all this is.
 
     Takes a :class:`ProductRequest` and returns a :class:`ProductOutcome`, or
     raises :class:`TransportFailure`. It receives NO session — that is not an
@@ -535,6 +554,232 @@ class ReceiptClaimStore(Protocol):
         ...
 
 
+#: Seconds a claim is held for. Long enough that an ordinary product call
+#: finishes inside it, short enough that a worker killed mid-call frees the
+#: receipt in a time an operator will wait. A knob with a documented default,
+#: not a constant buried in a WHERE clause.
+DEFAULT_LEASE_SECONDS = 300
+
+#: States a delivery can no longer be attempted from — finished, or escalated
+#: out of the automatic path. `retryable` is deliberately absent: a receipt that
+#: backed off is claimable again once `next_attempt_at` passes.
+_TERMINAL_STATES = ("processed", "dead_letter", "reconciliation_required")
+
+#: `retry.next_state` speaks the OUTBOX's vocabulary, where success is
+#: "delivered". The inbox calls the same state `processed`. Mapped rather than
+#: renamed on either side, because the two lifecycles are genuinely different
+#: and collapsing them would make one table's states depend on the other's.
+_DELIVERY_TO_RECEIPT_STATE = {"delivered": "processed"}
+
+
+def _receipt_state_for(outcome: ProductOutcome, *, attempt: int) -> str:
+    """The receipt state this outcome produces.
+
+    Delegates the decision to `retry.next_state`, which already owns attempt
+    exhaustion and backoff. A second classifier here would be a second opinion
+    about when to stop trying — and the one that disagreed would win by being
+    called last.
+    """
+    state = next_state(outcome.as_outcome(), attempt_count=attempt)
+    return _DELIVERY_TO_RECEIPT_STATE.get(state, state)
+
+
+#: The terminal states, ready to be inlined into a predicate. Built from
+#: `_TERMINAL_STATES` so the statement and the tuple cannot disagree; every
+#: element is a literal this module owns, never caller input.
+_TERMINAL_SQL = ", ".join(f"'{state}'" for state in _TERMINAL_STATES)
+
+
+def claim_statement(
+    *, lease_seconds: int = DEFAULT_LEASE_SECONDS, clock: str = "now()"
+) -> Any:
+    """Phase 1's conditional UPDATE, as a statement a test can execute.
+
+    Exposed rather than built inline so the Postgres canaries execute the
+    statement that SHIPS. A test that retypes the SQL proves its own copy
+    races correctly and says nothing about the module — the class of mistake
+    this file's own docstring warns about for fakes.
+
+    `clock` is a SQL expression, not a value: `now()` in production, a bound
+    parameter when a test needs to drive time without waiting for it.
+    """
+    from sqlalchemy import text
+
+    return text(
+        f"UPDATE {SCHEMA}.inbox_receipts SET state = 'processing', "  # noqa: S608 - schema and states are module-owned literals
+        "attempt_count = attempt_count + 1, "
+        f"leased_until = {clock} + make_interval(secs => {lease_seconds:d}) "
+        "WHERE id = :id "
+        f"AND state NOT IN ({_TERMINAL_SQL}) "
+        f"AND (leased_until IS NULL OR leased_until < {clock}) "
+        f"AND (next_attempt_at IS NULL OR next_attempt_at <= {clock}) "
+        "RETURNING attempt_count, leased_until, event_type, payload_json, "
+        "correlation_id, delivery_fingerprint, capability_binding_id"
+    )
+
+
+def settle_statement() -> Any:
+    """Phase 3's conditional UPDATE, guarded by the claim's own identity.
+
+    The WHERE clause is the whole point: this receipt, this attempt, and a
+    lease that has not expired. Exposed for the same reason as
+    :func:`claim_statement`.
+    """
+    from sqlalchemy import text
+
+    return text(
+        f"UPDATE {SCHEMA}.inbox_receipts SET state = :state, "  # noqa: S608 - schema and states are module-owned literals
+        "leased_until = NULL, processed_at = now(), "
+        "product_acceptance = :acceptance, product_ref = :product_ref, "
+        "error_code = :error_code, error_detail = :error_detail, "
+        "delivery_fingerprint = :fingerprint, "
+        "delivery_idempotency_key = :idempotency_key, "
+        "correlation_id = :correlation_id, "
+        "next_attempt_at = CASE WHEN CAST(:backoff AS integer) IS NULL "
+        "  THEN NULL ELSE now() + make_interval(secs => :backoff) END "
+        "WHERE id = :id AND state = 'processing' AND attempt_count = :attempt "
+        "AND leased_until IS NOT NULL AND leased_until >= now()"
+    )
+
+
+class ReceiptClaims:
+    """The real store: conditional UPDATEs against `inbox_receipts`.
+
+    This is the module's OWN persistence, not an injected collaborator. The
+    engine previously had only the :class:`ReceiptClaimStore` protocol, so the
+    shipped package could not claim or settle anything without a caller
+    supplying the very mechanism the design is about — and the SQL defining
+    at-most-once lived outside the package that owns at-most-once.
+
+    Both methods own their transaction and hold it only as long as the
+    statement takes. Neither may be called while the product is being
+    contacted; that is phase 2's contract, and it is why these are two methods
+    rather than one `with` block.
+    """
+
+    def __init__(
+        self,
+        session_factory: Any,
+        *,
+        registry: CapabilityRegistry,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    ) -> None:
+        #: A CALLABLE returning a session, not a session. The two phases are
+        #: separate transactions by design; sharing one session would reduce
+        #: that to the caller remembering to commit in the right places.
+        self._session_factory = session_factory
+        self._registry = registry
+        self._lease_seconds = lease_seconds
+
+    def claim(
+        self, *, receipt_id: UUID, now: datetime | None = None
+    ) -> ReceiptClaim | None:
+        """Phase 1. `rowcount == 1` IS the claim.
+
+        The predicate — not terminal, not held by a live lease, and due — is
+        evaluated BY THE DATABASE inside the UPDATE. The loser of a race sees
+        zero rows and gets `None`. There is no window between the check and the
+        write because there is no separate check.
+
+        The destination is resolved in this same transaction, from durable
+        state, and stamped onto the receipt as provenance. Resolving it later
+        would mean the route could change between the claim and the call;
+        stamping it here is what makes "where did THIS one go?" answerable.
+        """
+        clock = "now()" if now is None else "CAST(:now AS timestamptz)"
+        claim_sql = claim_statement(lease_seconds=self._lease_seconds, clock=clock)
+
+        parameters: dict[str, object] = {"id": receipt_id}
+        if now is not None:
+            parameters["now"] = now
+
+        with self._session_factory() as session:
+            row = session.execute(claim_sql, parameters).first()
+            if row is None:
+                # Nothing was claimed, so there is nothing to roll back — but
+                # the transaction is closed explicitly rather than left to the
+                # context manager's default, which differs between session
+                # configurations.
+                session.rollback()
+                return None
+
+            from sqlalchemy import text
+
+            destination = resolve_destination(
+                session,
+                capability_binding_id=row.capability_binding_id,
+                registry=self._registry,
+            )
+            session.execute(
+                text(
+                    f"UPDATE {SCHEMA}.inbox_receipts SET "  # noqa: S608 - schema and states are module-owned literals
+                    "destination_application = :application, "
+                    "destination_contract_version = :contract_version, "
+                    "destination_revision_id = :revision_id "
+                    "WHERE id = :id"
+                ),
+                {
+                    "id": receipt_id,
+                    "application": destination.application,
+                    "contract_version": destination.contract_version,
+                    "revision_id": destination.destination_revision_id,
+                },
+            )
+            session.commit()
+
+        return ReceiptClaim(
+            receipt_id=receipt_id,
+            attempt=row.attempt_count,
+            leased_until=row.leased_until,
+            destination=destination,
+            event_type=row.event_type,
+            observation=row.payload_json or {},
+            # A receipt with no correlation id of its own is still traceable by
+            # the identity it definitely has.
+            correlation_id=row.correlation_id or str(receipt_id),
+            stored_fingerprint=row.delivery_fingerprint,
+        )
+
+    def settle(self, claim: ReceiptClaim, outcome: ProductOutcome) -> bool:
+        """Phase 3. `False` when this worker was superseded.
+
+        The WHERE clause carries the claim's whole identity — this receipt,
+        this attempt, and a lease that has not expired. A worker whose lease ran
+        out mid-call matches nothing, and `rowcount == 0` is the database saying
+        so. Recording its outcome anyway would overwrite the result of whichever
+        worker legitimately took over.
+
+        The fingerprint and idempotency key are written here rather than at
+        claim time on purpose: they describe the request that was actually
+        sent, and at claim time it has not been built yet.
+        """
+        request = build_product_request(claim)
+        state = _receipt_state_for(outcome, attempt=claim.attempt)
+        backoff = outcome.retry_after_seconds if state == "retryable" else None
+
+        statement = settle_statement()
+        with self._session_factory() as session:
+            result = session.execute(
+                statement,
+                {
+                    "id": claim.receipt_id,
+                    "attempt": claim.attempt,
+                    "state": state,
+                    "acceptance": outcome.acceptance.value,
+                    "product_ref": outcome.product_ref,
+                    "error_code": outcome.error_code,
+                    "error_detail": outcome.error_detail,
+                    "fingerprint": request.request_fingerprint,
+                    "idempotency_key": request.idempotency_key,
+                    "correlation_id": claim.correlation_id,
+                    "backoff": backoff,
+                },
+            )
+            claimed = result.rowcount == 1
+            session.commit()
+        return bool(claimed)
+
+
 # ── The orchestrator ────────────────────────────────────────────────────────
 
 
@@ -542,7 +787,7 @@ def deliver_receipt(
     *,
     receipt_id: UUID,
     store: ReceiptClaimStore,
-    gateway: ProductGateway,
+    gateway: ProductPortClient,
     now: datetime | None = None,
 ) -> DeliveryReport:
     """Claim, call, settle — with no session held across the call.

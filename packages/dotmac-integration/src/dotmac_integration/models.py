@@ -480,6 +480,14 @@ class InboxReceipt(Base):
             name="ck_inbox_receipts_state",
         ),
         Index("ix_inbox_receipts_state_received", "state", "received_at"),
+        # The claim predicate's index. A sweeper scanning for due, unleased
+        # receipts is the hottest read on this table once delivery is running.
+        Index(
+            "ix_inbox_receipts_due",
+            "state",
+            "next_attempt_at",
+            "leased_until",
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -517,6 +525,56 @@ class InboxReceipt(Base):
     #: A CONNECTOR's vocabulary. Stored, never branched on — see `retry`.
     error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Receipt-to-product delivery (ig_0005) ──────────────────────────────
+    # A delivery is a STATE OF THE RECEIPT, not a row in a second table. The
+    # specific failure ADR-0014 records is a parallel ledger: "did this land?"
+    # answered in two places with no tiebreak. Every column below is nullable
+    # because a receipt exists, and is meaningful, before anything has tried to
+    # deliver it.
+    #
+    #: The claim's time bound. A lease, not a boolean flag: a worker that dies
+    #: mid-call releases the receipt by the clock rather than by cleanup that
+    #: may never run.
+    leased_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: When this receipt is next DUE. Honours the retry curve `retry` computes,
+    #: so a backed-off receipt is passed over by the claim predicate itself
+    #: rather than claimed and immediately abandoned.
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: Over the request this engine built. Replay vs conflict: the same
+    #: identity carrying a DIFFERENT request is a conflict, and this is what
+    #: makes that detectable rather than assumed.
+    delivery_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: The key the PRODUCT deduplicates on, recorded so a reconciler can ask the
+    #: product about the same delivery this engine attempted. Without it,
+    #: reconciliation has to reconstruct the key and hope it matches.
+    delivery_idempotency_key: Mapped[str | None] = mapped_column(
+        String(240), nullable=True
+    )
+    correlation_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    #: The product's TYPED answer, not a transport status. Stored as the
+    #: declared vocabulary rather than an enum column (ADR-0008).
+    product_acceptance: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: The product's own identifier for what it created. Reconciliation
+    #: evidence: it is how "the product says it has this" is checkable.
+    product_ref: Mapped[str | None] = mapped_column(String(240), nullable=True)
+
+    #: Where this was actually delivered, as PROVENANCE — deliberately a copy,
+    #: not a join. The live route can change afterwards, and an incident asking
+    #: "where did this one go?" must get the answer for THIS delivery rather
+    #: than for whatever the route says today.
+    destination_application: Mapped[str | None] = mapped_column(
+        String(160), nullable=True
+    )
+    destination_contract_version: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    destination_revision_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
 
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=sa.func.now(), nullable=False

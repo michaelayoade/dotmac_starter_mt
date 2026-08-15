@@ -473,16 +473,16 @@ def test_the_request_carries_the_destinations_contract_version() -> None:
 
 def test_the_protocol_matches_team_3s_binding() -> None:
     """`TrustedDestination` is structural, so a field renamed on either side
-    must be caught. Uses the real type when Team 3's module is present, and
-    says so plainly when it is not yet."""
-    pytest.importorskip(
-        "dotmac_integration.destination_binding",
-        reason="Team 3's destination binding (PR #184) is not merged yet",
-    )
-    from dotmac_integration.destination_binding import (  # type: ignore[import-not-found]
-        DestinationBinding,
-        LocalScope,
-    )
+    must be caught — and it was: this guard is what caught
+    `config_revision_id` becoming `destination_revision_id` when destinations
+    moved out of connector configuration into their own table
+    (`ig_0004_destinations`).
+
+    The `importorskip` it used to carry is gone. It was correct while the two
+    modules were being built in parallel, but a skipped structural check is not
+    evidence of structural agreement, and both halves now ship together.
+    """
+    from dotmac_integration.destination_binding import DestinationBinding, LocalScope
 
     binding = DestinationBinding(
         capability_binding_id=uuid.UUID(int=1),
@@ -490,7 +490,7 @@ def test_the_protocol_matches_team_3s_binding() -> None:
         application="sub",
         scope=LocalScope(kind="inbox", ref="support"),
         contract_version=1,
-        config_revision_id=uuid.UUID(int=2),
+        destination_revision_id=uuid.UUID(int=2),
     )
     assert isinstance(binding, TrustedDestination)
     # and it drives the real derivations

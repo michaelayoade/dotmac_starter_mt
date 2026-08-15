@@ -1,31 +1,22 @@
 """Receipt delivery's concurrency contract, specified against REAL Postgres.
 
-These canaries were written BEFORE the persistence they describe, and they fail
-until it exists. That order is deliberate: a canary written after the code tends
-to describe whatever the code happens to do, whereas a failing canary written
-first is the specification the code has to meet.
+These canaries were written BEFORE the persistence they describe, and were
+merged red — `xfail(strict=True, raises=ProgrammingError)`, a much narrower
+claim than "allowed to fail": they had to fail, and to fail *because the column
+was missing*. `ig_0005_receipt_delivery` landed the columns and
+`receipt_delivery.ReceiptClaims` landed the statements, so the markers are gone
+and every canary below runs for real.
 
-## Why they are RED, and what makes that safe to merge
+The ratchet that guarded the staging is inverted rather than deleted: it
+asserted the columns were ABSENT so the block could not be silently forgotten,
+and now asserts they are PRESENT so a migration cannot silently remove one.
 
-`inbox_receipts` has no `leased_until`, no `next_attempt_at` and no product
-outcome columns yet. Adding them is a receipt-state model change, and this
-programme stages that ownership: Team 2 is still finishing `models.py` and
-`ig_0003`, and Team 3's trusted destination (PR #184) is not merged. Writing
-those columns now would collide with `models.py` mid-edit, and a migration that
-rewrote another team's revision could not be replayed or audited.
+## The statements under test are the ones that ship
 
-So each blocked canary carries `xfail(strict=True, raises=ProgrammingError)`,
-which is a much narrower claim than "this test is allowed to fail":
-
-* it must FAIL — a canary that started passing without the columns would be
-  testing nothing, and `strict=True` turns that into an error;
-* it must fail with `ProgrammingError` — i.e. *because the column is missing*.
-  A typo, a bad fixture or a broken predicate raises something else and the
-  suite goes red, so these cannot rot into green-by-accident.
-
-When the columns land, every one of these XPASSes, `strict=True` fails the
-build, and the marker must be removed. That is the ratchet: the block cannot be
-forgotten, and it cannot be silently extended.
+`CLAIM_SQL` and `SETTLE_SQL` are imported from `receipt_delivery`, not retyped
+here. A canary carrying its own copy of the SQL proves that copy races
+correctly and says nothing about the module — the same mistake as asserting a
+race against a fake, one layer down.
 
 ## What is proved here that a unit test cannot
 
@@ -63,8 +54,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from dotmac_integration.receipt_delivery import claim_statement, settle_statement
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import ProgrammingError
 
 # Reused, not re-declared: a second copy of the scratch-database fixture would
 # drift from the one in the module that owns it, and this suite has no reason to
@@ -99,43 +90,37 @@ REQUIRED_COLUMNS: frozenset[str] = frozenset(
         # the destination this was actually delivered to, as provenance
         "destination_application",
         "destination_contract_version",
-        "destination_config_revision_id",
+        "destination_revision_id",
     }
 )
 
-_BLOCKED = pytest.mark.xfail(
-    strict=True,
-    raises=ProgrammingError,
-    reason=(
-        "BLOCKED on staged ownership: receipt-state columns arrive after Team 2 "
-        "lands models.py/ig_0003 and Team 3 freezes the destination identity "
-        "(PR #184). Written first, on purpose — see this module's docstring. "
-        "Remove this marker in the same change that adds the columns."
-    ),
-)
+#: THE STATEMENTS THAT SHIP. Imported, never retyped — a canary that retyped
+#: the SQL would prove its own copy races correctly and say nothing about the
+#: module, which is the same mistake as asserting a race against a fake.
+CLAIM_SQL = claim_statement()
+SETTLE_SQL = settle_statement()
 
-#: Phase 1. The claim ig_0004 must support: a CONDITIONAL UPDATE where
-#: `rowcount == 1` IS the claim, exactly as `execution.claim_delivery` already
-#: does for the outbox.
-CLAIM_SQL = text(
-    "UPDATE mod_intg.inbox_receipts SET state = 'processing', "
-    "attempt_count = attempt_count + 1, "
-    "leased_until = now() + interval '300 seconds' "
-    "WHERE id = :id "
-    "AND state NOT IN ('processed', 'dead_letter', 'reconciliation_required') "
-    "AND (leased_until IS NULL OR leased_until < now()) "
-    "AND (next_attempt_at IS NULL OR next_attempt_at <= now())"
-)
 
-#: Phase 3. Guarded by the CLAIM's identity: this receipt, this attempt, and a
-#: lease that has not expired.
-SETTLE_SQL = text(
-    "UPDATE mod_intg.inbox_receipts SET state = :state, leased_until = NULL, "
-    "processed_at = now(), product_acceptance = :acceptance, "
-    "product_ref = :product_ref "
-    "WHERE id = :id AND state = 'processing' AND attempt_count = :attempt "
-    "AND leased_until IS NOT NULL AND leased_until >= now()"
-)
+def _settle_params(receipt_id: uuid.UUID, **overrides: object) -> dict[str, object]:
+    """Settle binds, with the columns a given canary does not care about
+    defaulted. The statement writes ten columns; most canaries are about the
+    WHERE clause, and spelling all ten at each call site would bury the one
+    parameter that is actually under test."""
+    params: dict[str, object] = {
+        "id": receipt_id,
+        "attempt": 1,
+        "state": "processed",
+        "acceptance": "accepted",
+        "product_ref": None,
+        "error_code": None,
+        "error_detail": None,
+        "fingerprint": None,
+        "idempotency_key": None,
+        "correlation_id": None,
+        "backoff": None,
+    }
+    params.update(overrides)
+    return params
 
 
 def _receipt(  # type: ignore[no-untyped-def]
@@ -179,16 +164,20 @@ def _receipt(  # type: ignore[no-untyped-def]
 # ── The ratchet ─────────────────────────────────────────────────────────────
 
 
-def test_the_blocker_is_exactly_the_missing_receipt_delivery_columns(
+def test_every_column_the_engine_claims_against_exists(
     migrated_scratch: tuple[str, str],  # noqa: F811
 ) -> None:
-    """Names the handoff this suite is waiting on, and fails when it arrives.
+    """Every column the engine claims against exists, named in one place.
 
-    Without this, the blocked canaries above could stay `xfail` forever and
-    nobody would notice the block had been lifted. This asserts the columns are
-    ABSENT, so the moment the migration lands it goes red and points at the
-    markers that must come off — the two-directional ratchet ADR-0018 asks for,
-    rather than a note in a backlog.
+    This was an ABSENCE ratchet while the columns were staged behind another
+    team: it asserted they were missing so the block could not be forgotten.
+    `ig_0005_receipt_delivery` landed them, so it now asserts the opposite —
+    they are PRESENT, and a migration that dropped or renamed one fails here
+    rather than at the first claim in production.
+
+    `REQUIRED_COLUMNS` is still the single place the set is written, so the
+    statements above and this guard cannot disagree about what the engine
+    needs.
     """
     admin_url, _ = migrated_scratch
     engine = create_engine(admin_url)
@@ -205,23 +194,22 @@ def test_the_blocker_is_exactly_the_missing_receipt_delivery_columns(
         }
     engine.dispose()
 
-    # Not vacuous: the table must actually exist and carry its known columns,
-    # or an empty result would satisfy "none of mine are present" while proving
-    # the lineage never applied.
+    # Not vacuous: the table must carry its pre-existing columns too, or an
+    # empty result would fail the check below for the wrong reason — a lineage
+    # that never applied, rather than a column that went missing.
     assert {"id", "state", "attempt_count", "payload_digest"} <= live
 
-    present = REQUIRED_COLUMNS & live
-    assert not present, (
-        f"receipt delivery columns {sorted(present)} now exist. The staged "
-        "handoff from Teams 2 and 3 has landed: remove the `_BLOCKED` markers "
-        "in this module and implement the store against these columns."
+    missing = REQUIRED_COLUMNS - live
+    assert not missing, (
+        f"receipt delivery columns {sorted(missing)} are gone. The claim and "
+        "settle statements bind them by name, so every delivery would fail at "
+        "the database rather than at review."
     )
 
 
 # ── Two workers cannot both claim ───────────────────────────────────────────
 
 
-@_BLOCKED
 def test_only_one_worker_can_claim_a_receipt(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -361,7 +349,6 @@ def _claim_concurrently(
         return sorted(f.result(timeout=_RACE_TIMEOUT) for f in futures)
 
 
-@_BLOCKED
 def test_two_concurrent_workers_produce_exactly_one_claim(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -406,7 +393,6 @@ def test_two_concurrent_workers_produce_exactly_one_claim(
     )
 
 
-@_BLOCKED
 def test_the_claim_without_its_lease_predicate_lets_both_workers_win(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -448,7 +434,6 @@ def test_the_claim_without_its_lease_predicate_lets_both_workers_win(
 # ── Stale-lease recovery ────────────────────────────────────────────────────
 
 
-@_BLOCKED
 def test_an_expired_lease_returns_the_receipt_to_the_queue(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -478,7 +463,6 @@ def test_an_expired_lease_returns_the_receipt_to_the_queue(
     assert attempts == 2, "recovery must count as a new attempt, not reuse the old one"
 
 
-@_BLOCKED
 def test_a_live_lease_is_not_recoverable(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -502,7 +486,6 @@ def test_a_live_lease_is_not_recoverable(
     engine.dispose()
 
 
-@_BLOCKED
 def test_a_receipt_scheduled_for_a_later_attempt_is_not_due(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -542,7 +525,6 @@ def test_a_receipt_scheduled_for_a_later_attempt_is_not_due(
 # ── Settlement after lease expiry — the LostClaim case ──────────────────────
 
 
-@_BLOCKED
 def test_a_worker_whose_lease_expired_cannot_settle(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -566,13 +548,13 @@ def test_a_worker_whose_lease_expired_cannot_settle(
         )
         settled = conn.execute(
             SETTLE_SQL,
-            {
-                "id": receipt_id,
-                "state": "processed",
-                "acceptance": "accepted",
-                "product_ref": "msg_1",
-                "attempt": 1,
-            },
+            _settle_params(
+                receipt_id,
+                state="processed",
+                acceptance="accepted",
+                product_ref="msg_1",
+                attempt=1,
+            ),
         ).rowcount
         assert settled == 0, "an expired lease settled an attempt it no longer held"
 
@@ -584,7 +566,6 @@ def test_a_worker_whose_lease_expired_cannot_settle(
     assert state == "processing", "the lost settlement still mutated the receipt"
 
 
-@_BLOCKED
 def test_the_settlement_race_after_a_takeover_has_exactly_one_winner(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -618,24 +599,24 @@ def test_the_settlement_race_after_a_takeover_has_exactly_one_winner(
     with late.begin() as a:
         stale = a.execute(
             SETTLE_SQL,
-            {
-                "id": receipt_id,
-                "state": "dead_letter",
-                "acceptance": "rejected",
-                "product_ref": None,
-                "attempt": 1,
-            },
+            _settle_params(
+                receipt_id,
+                state="dead_letter",
+                acceptance="rejected",
+                product_ref=None,
+                attempt=1,
+            ),
         ).rowcount
     with holder.begin() as b:
         won = b.execute(
             SETTLE_SQL,
-            {
-                "id": receipt_id,
-                "state": "processed",
-                "acceptance": "accepted",
-                "product_ref": "msg_1",
-                "attempt": 2,
-            },
+            _settle_params(
+                receipt_id,
+                state="processed",
+                acceptance="accepted",
+                product_ref="msg_1",
+                attempt=2,
+            ),
         ).rowcount
     late.dispose()
     holder.dispose()
@@ -658,7 +639,6 @@ def test_the_settlement_race_after_a_takeover_has_exactly_one_winner(
     )
 
 
-@_BLOCKED
 def test_settlement_without_its_identity_guard_lets_the_stale_worker_win(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -700,7 +680,6 @@ def test_settlement_without_its_identity_guard_lets_the_stale_worker_win(
 # ── Rollback ────────────────────────────────────────────────────────────────
 
 
-@_BLOCKED
 def test_a_rolled_back_claim_leaves_the_receipt_claimable(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -738,7 +717,6 @@ def test_a_rolled_back_claim_leaves_the_receipt_claimable(
     engine.dispose()
 
 
-@_BLOCKED
 def test_a_committed_claim_is_not_claimable_again(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
@@ -766,7 +744,6 @@ def test_a_committed_claim_is_not_claimable_again(
 # ── Replay vs conflict, at the database ─────────────────────────────────────
 
 
-@_BLOCKED
 def test_a_finished_receipt_is_never_reclaimed(
     migrated_scratch: tuple[str, str],  # noqa: F811
     request: pytest.FixtureRequest,
