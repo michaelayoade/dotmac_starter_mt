@@ -29,15 +29,27 @@ not: import from here"). A locator reachable only through a submodule would ask
 their consumers to import from the half those packages reserve the right to
 move.
 
-``dotmac-kernel`` is deliberately exempt from the second part and is NOT debt.
-Its ``migrations`` submodule is itself a documented public entry point — every
-assembly's ``alembic.ini`` composes ``dotmac_kernel.migrations.versions_dir()``
-by that name, and ``dotmac-application-directory``'s own locator docstring cites
-it as the shape to mirror. Adding a top-level alias would create a second
-spelling of a working import for no consumer. Recording that as an exemption
-with a reason, rather than as a debt row, is the ADR-0018 point applied to this
-file: "grandfathered" and "reviewed and correct" are different claims and must
-not share a slot.
+"Installable module" is DERIVED, not listed: a package declaring a
+``ModuleManifest`` is installed INTO an assembly, and one that does not is the
+host the assembly is built on. ``dotmac-kernel`` therefore falls out of the
+second part because of what it IS. Its ``migrations`` submodule is itself a
+documented public entry point — every assembly's ``alembic.ini`` composes
+``dotmac_kernel.migrations.versions_dir()`` by that name, and
+``dotmac-application-directory``'s own locator docstring cites it as the shape
+to mirror — so a top-level alias would be a second spelling of a working import.
+
+That reasoning was previously a named exemption set, which is a claim a reader
+has to trust and which the next host package would have silently failed. A
+derived predicate is a claim the code checks.
+
+## Calling the locator, not just finding it
+
+The static half proves a correctly-shaped function exists. That is not the
+property consumers need, and on its own it is an assertion-shaped no-op: a
+``versions_dir()`` returning ``/tmp`` satisfies every signature check. So the
+locator is also EXECUTED — loaded from its file under a throwaway name so the
+parent package's ``__init__`` never runs — and its answer compared against the
+directory that really holds this distribution's revisions.
 
 One signature, checked rather than assumed: no parameters, returning an absolute
 ``Path`` to the ``versions`` directory that actually exists and actually holds
@@ -67,7 +79,9 @@ map keeps them apart.
 from __future__ import annotations
 
 import ast
+import importlib.util
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -96,34 +110,78 @@ PRE_RULE_DEBT = {
     "dotmac-ticketing": "no locator; lineage `tk`",
 }
 
-#: Ships a lineage and exposes `<pkg>.migrations.versions_dir()`, but is NOT
-#: required to re-export it at the top level — and is therefore not debt.
-#:
-#: The kernel's `migrations` submodule is a documented public entry point in its
-#: own right: every assembly's Alembic config composes
-#: `dotmac_kernel.migrations.versions_dir()` under that exact name, and the
-#: installable modules' locators were written to mirror it. A top-level alias
-#: would be a second spelling of an import that already works.
-#:
-#: Kept as a NAMED exemption with its reason rather than as a `PRE_RULE_DEBT`
-#: row, because the two say different things (ADR-0018). Listing a compliant
-#: package as debt would be the exact conflation this file's ratchet exists to
-#: prevent.
-TOP_LEVEL_REEXPORT_EXEMPT = {"dotmac-kernel"}
+
+def _is_installable_module(root: Path) -> bool:
+    """Does this package declare a `ModuleManifest` — i.e. is it INSTALLED into
+    an assembly, rather than being the host the assembly is built on?
+
+    This is what decides whether the top-level re-export is owed, and it is
+    DERIVED rather than listed. An exemption set naming `dotmac-kernel` was a
+    claim a reader had to trust; this is one the code checks, and it keeps
+    working for the next package without anyone remembering to edit a set.
+
+    The distinction it captures: an installable module documents its top-level
+    namespace as the stable surface ("Submodules are not: import from here"), so
+    a locator reachable only through a submodule points its consumers at the
+    half it reserves the right to move. `dotmac-kernel` ships no manifest — it
+    is the host, and `dotmac_kernel.migrations` is a documented public entry
+    point in its own right, composed by that exact name in every assembly's
+    Alembic config. A top-level alias there would be a second spelling of an
+    import that already works.
+
+    Read statically, for the same reason as `_exports`.
+    """
+    manifest = root / "manifest.py"
+    if not manifest.is_file():
+        return False
+    tree = ast.parse(manifest.read_text(encoding="utf-8"))
+    return any(
+        isinstance(node, ast.Call)
+        and (
+            node.func.id
+            if isinstance(node.func, ast.Name)
+            else getattr(node.func, "attr", "")
+        )
+        == "ModuleManifest"
+        for node in ast.walk(tree)
+    )
 
 
-def _import_root(distribution: Path) -> Path | None:
-    """The single package directory under `src/`, or None if the layout differs.
+class AmbiguousImportRootError(AssertionError):
+    """A distribution's `src/` does not contain exactly one package root."""
 
-    Returns None rather than guessing: a wrong guess would silently drop a
-    distribution out of the sweep, which is the failure `test_discovery_...`
-    below exists to make impossible.
+
+def _import_root(distribution: Path) -> Path:
+    """The single package directory under `src/`.
+
+    RAISES on zero or several roots rather than returning None. Returning None
+    read as "not applicable" and silently removed the distribution from the
+    sweep — so the guard's coverage shrank exactly where the layout was unusual,
+    which is where a locator is most likely to be wrong. Ambiguity is an error
+    to be fixed (here or in the package), never a quiet exclusion.
+
+    A distribution with no `src/` at all is a different shape, not an ambiguous
+    one, and is excluded before this is called.
     """
     src = distribution / "src"
-    if not src.is_dir():
-        return None
     roots = [path for path in sorted(src.iterdir()) if (path / "__init__.py").is_file()]
-    return roots[0] if len(roots) == 1 else None
+    if len(roots) != 1:
+        raise AmbiguousImportRootError(
+            f"{distribution.name}: expected exactly one package root under src/, "
+            f"found {[path.name for path in roots]} — this guard cannot say "
+            "which one owns the lineage, and skipping the distribution would "
+            "hide it from every check in this file"
+        )
+    return roots[0]
+
+
+def _has_src_layout(distribution: Path) -> bool:
+    """Is this a `src/`-layout distribution at all?
+
+    Separate from `_import_root` so "no src/ directory" (not our shape) stays
+    distinguishable from "src/ with an ambiguous number of roots" (an error).
+    """
+    return (distribution / "src").is_dir()
 
 
 def _ships_a_lineage(root: Path) -> bool:
@@ -175,6 +233,70 @@ def _exports(path: Path, name: str) -> bool:
     return defined and exported
 
 
+def _load_locator_module(locator_path: Path) -> ModuleType:
+    """Execute `<pkg>/migrations/__init__.py` ALONE and return the module.
+
+    Loaded by file path under a throwaway name, so the parent package's
+    `__init__` never runs: several of these packages build a database engine at
+    import time, and a guard that needed a live database to check a filesystem
+    convention would be skipped exactly where it matters. The locator itself
+    depends on nothing but `pathlib` and its own `__file__`, so executing it in
+    isolation gives the same answer a consumer gets.
+    """
+    spec = importlib.util.spec_from_file_location(
+        f"_lineage_locator_probe_{locator_path.parent.parent.name}", locator_path
+    )
+    assert spec is not None and spec.loader is not None, locator_path
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _returned_path_violations(module: ModuleType, expected: Path) -> list[str]:
+    """CALL the locator and check what it actually returns.
+
+    Split out as a pure function over a loaded module so the sensitivity proof
+    can drive it with a deliberately wrong locator. Static checks prove a
+    callable of the right shape EXISTS; only calling it proves the path is the
+    one the consumer needs — a `versions_dir()` returning `/tmp`, or the package
+    root, or the parent of the right directory, satisfies every static check in
+    this file and still breaks composition.
+    """
+    problems: list[str] = []
+    locator = getattr(module, LOCATOR, None)
+    if locator is None:
+        return [f"module exposes no `{LOCATOR}`"]
+    if not callable(locator):
+        return [f"`{LOCATOR}` is not callable: {locator!r}"]
+
+    returned = locator()
+    if not isinstance(returned, Path):
+        problems.append(f"`{LOCATOR}()` returned {type(returned).__name__}, not Path")
+        return problems
+    if not returned.is_absolute():
+        problems.append(f"`{LOCATOR}()` returned a relative path: {returned}")
+    if returned != expected.resolve():
+        problems.append(
+            f"`{LOCATOR}()` returned {returned}, but this distribution's "
+            f"revisions live in {expected.resolve()}"
+        )
+        return problems
+    if not returned.is_dir():
+        problems.append(f"`{LOCATOR}()` returned {returned}, which is not a directory")
+        return problems
+    revisions = [
+        path.name
+        for path in returned.iterdir()
+        if path.suffix == ".py" and path.name != "__init__.py"
+    ]
+    if not revisions:
+        problems.append(
+            f"`{LOCATOR}()` returned {returned}, which holds no revisions — the "
+            "directory exists but composing it would contribute nothing"
+        )
+    return problems
+
+
 def _is_compliant(distribution: Path) -> bool:
     """Does this distribution satisfy the rule that applies to IT?
 
@@ -183,23 +305,30 @@ def _is_compliant(distribution: Path) -> bool:
     the debt map be exact about the wrong thing.
     """
     root = _import_root(distribution)
-    if root is None:
-        return False
     if not _exports(root / "migrations" / "__init__.py", LOCATOR):
         return False
-    if distribution.name in TOP_LEVEL_REEXPORT_EXEMPT:
-        return True
-    return _exports(root / "__init__.py", LOCATOR)
+    if _is_installable_module(root) and not _exports(root / "__init__.py", LOCATOR):
+        return False
+    return not _returned_path_violations(
+        _load_locator_module(root / "migrations" / "__init__.py"),
+        root / "migrations" / "versions",
+    )
 
 
 def _lineage_distributions() -> list[Path]:
-    """Every checked-in distribution that ships Alembic revisions."""
+    """Every checked-in distribution that ships Alembic revisions.
+
+    `_import_root` RAISES on an ambiguous layout rather than skipping it, so a
+    package this sweep cannot classify fails collection instead of vanishing
+    from every test in this file.
+    """
     found = []
     for distribution in sorted(PACKAGES_DIR.iterdir()):
         if not (distribution / "pyproject.toml").is_file():
             continue
-        root = _import_root(distribution)
-        if root is not None and _ships_a_lineage(root):
+        if not _has_src_layout(distribution):
+            continue
+        if _ships_a_lineage(_import_root(distribution)):
             found.append(distribution)
     return found
 
@@ -218,14 +347,16 @@ def test_a_module_shipping_a_lineage_exposes_a_public_locator(
     if distribution.name in PRE_RULE_DEBT:
         pytest.skip(f"{distribution.name}: PRE_RULE_DEBT, see the map")
     root = _import_root(distribution)
-    assert root is not None
 
     assert _exports(root / "migrations" / "__init__.py", LOCATOR), (
         f"{distribution.name}: ships a lineage but {root.name}.migrations "
         f"exposes no `{LOCATOR}` — a consumer composing this module into its "
         "`version_locations` would have to reach into `__file__`"
     )
-    if distribution.name in TOP_LEVEL_REEXPORT_EXEMPT:
+    if not _is_installable_module(root):
+        # The host, not an installed module: `<pkg>.migrations` is its own
+        # documented entry point. Derived from the absence of a ModuleManifest
+        # rather than from a name, so it stays true for the next package.
         return
     assert _exports(root / "__init__.py", LOCATOR), (
         f"{distribution.name}: `{LOCATOR}` is not re-exported from {root.name} "
@@ -244,11 +375,15 @@ def test_the_locator_returns_the_directory_that_holds_the_revisions(
     A locator that takes an argument, or returns a string, or points at the
     package root, satisfies "exposes `versions_dir`" and still breaks the
     consumer it exists to serve.
+
+    Two halves, and the second is the one that bites: the signature is read
+    statically, then the function is CALLED and its answer compared against the
+    directory that really holds this distribution's revisions. Checking only the
+    signature proved a callable existed — a locator returning `/tmp` passed.
     """
     if distribution.name in PRE_RULE_DEBT:
         pytest.skip(f"{distribution.name}: PRE_RULE_DEBT, see the map")
     root = _import_root(distribution)
-    assert root is not None
 
     source = (root / "migrations" / "__init__.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -268,13 +403,157 @@ def test_the_locator_returns_the_directory_that_holds_the_revisions(
         "return makes every consumer re-wrap it"
     )
 
-    # And the directory it names must be the one that really holds revisions.
-    versions = root / "migrations" / "versions"
-    assert versions.is_dir(), distribution.name
-    assert _ships_a_lineage(root), distribution.name
+    # Now CALL it. Everything above describes the function; this checks what it
+    # answers, which is the only thing a consumer actually uses.
+    problems = _returned_path_violations(
+        _load_locator_module(root / "migrations" / "__init__.py"),
+        root / "migrations" / "versions",
+    )
+    assert not problems, f"{distribution.name}: " + "; ".join(problems)
 
 
 # ── Sensitivity, in both directions ──────────────────────────────────────────
+
+
+def _write_locator(directory: Path, body: str) -> Path:
+    """A standalone `migrations/__init__.py` returning whatever `body` says."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "__init__.py"
+    path.write_text(
+        "from pathlib import Path\n\n\n"
+        f"def versions_dir() -> Path:\n    return {body}\n\n\n"
+        '__all__ = ["versions_dir"]\n',
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_a_locator_returning_the_wrong_path_is_rejected(tmp_path: Path) -> None:
+    """SENSITIVITY for the returned path — the repair this file most needed.
+
+    The static half of the check is satisfied by ANY correctly-shaped function,
+    so before this proof a `versions_dir()` returning `/tmp` passed the whole
+    file. Each case below is a different way to be plausibly wrong.
+    """
+    package = tmp_path / "pkg"
+    versions = package / "migrations" / "versions"
+    versions.mkdir(parents=True)
+    (versions / "xx_0001_thing.py").write_text("revision = 'x'\n", encoding="utf-8")
+
+    correct = _write_locator(
+        package / "migrations", 'Path(__file__).resolve().parent / "versions"'
+    )
+    assert (
+        _returned_path_violations(_load_locator_module(correct), versions) == []
+    ), "the positive control fails, so the negatives below prove nothing"
+
+    wrong_dir = tmp_path / "elsewhere" / "migrations"
+    cases = {
+        "somewhere else entirely": ('Path("/tmp")', "revisions live in"),
+        "the package root": (
+            "Path(__file__).resolve().parent.parent",
+            "revisions live in",
+        ),
+        "the parent of the right directory": (
+            "Path(__file__).resolve().parent",
+            "revisions live in",
+        ),
+        "a string, not a Path": (
+            'str(Path(__file__).resolve().parent / "versions")',
+            "not Path",
+        ),
+        "a relative path": ('Path("migrations/versions")', "revisions live in"),
+    }
+    for label, (body, expected) in cases.items():
+        module = _load_locator_module(_write_locator(wrong_dir, body))
+        problems = _returned_path_violations(module, versions)
+        assert problems, f"{label} was accepted"
+        assert any(expected in problem for problem in problems), (label, problems)
+
+    # Right path, but the directory holds no revisions: composing it would
+    # contribute nothing, so "the directory exists" is not enough either.
+    empty_package = tmp_path / "empty"
+    (empty_package / "migrations" / "versions").mkdir(parents=True)
+    empty = _write_locator(
+        empty_package / "migrations", 'Path(__file__).resolve().parent / "versions"'
+    )
+    problems = _returned_path_violations(
+        _load_locator_module(empty), empty_package / "migrations" / "versions"
+    )
+    assert problems and "holds no revisions" in problems[0], problems
+
+
+def test_an_ambiguous_or_missing_import_root_fails_rather_than_disappearing(
+    tmp_path: Path,
+) -> None:
+    """SENSITIVITY for discovery coverage.
+
+    `_import_root` used to return None for both shapes, and None meant "skip" —
+    so a package with an unusual layout silently left the sweep. That is the
+    worst possible failure for a guard: coverage shrinks exactly where the
+    layout is most likely to be wrong, and nothing reports it.
+    """
+    two_roots = tmp_path / "dotmac-two"
+    for name in ("pkg_a", "pkg_b"):
+        (two_roots / "src" / name).mkdir(parents=True)
+        (two_roots / "src" / name / "__init__.py").write_text("", encoding="utf-8")
+    with pytest.raises(AmbiguousImportRootError, match="exactly one package root"):
+        _import_root(two_roots)
+
+    no_roots = tmp_path / "dotmac-none"
+    (no_roots / "src").mkdir(parents=True)
+    with pytest.raises(AmbiguousImportRootError, match="exactly one package root"):
+        _import_root(no_roots)
+
+    # Specificity: the ordinary shape still resolves, or the two failures above
+    # are satisfied by a function that never succeeds.
+    one_root = tmp_path / "dotmac-one"
+    (one_root / "src" / "pkg").mkdir(parents=True)
+    (one_root / "src" / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    assert _import_root(one_root) == one_root / "src" / "pkg"
+
+
+def test_installable_is_derived_from_the_manifest_not_from_a_name() -> None:
+    """SENSITIVITY for the scope predicate.
+
+    The top-level re-export is owed by INSTALLABLE MODULES. That used to be an
+    exemption set naming `dotmac-kernel`, which a reader had to take on trust
+    and which the next host package would silently fail. Deriving it from the
+    presence of a `ModuleManifest` makes it a property of the package.
+    """
+    assert _is_installable_module(
+        PACKAGES_DIR / "dotmac-approvals/src/dotmac_approvals"
+    )
+    assert _is_installable_module(
+        PACKAGES_DIR / "dotmac-release-catalog/src/dotmac_release_catalog"
+    )
+    # The host. No manifest, so it is not installed INTO an assembly; it is the
+    # thing an assembly is built on.
+    assert not _is_installable_module(PACKAGES_DIR / "dotmac-kernel/src/dotmac_kernel")
+
+    # And the predicate must be reading the manifest, not the directory name.
+    kernel_root = PACKAGES_DIR / "dotmac-kernel/src/dotmac_kernel"
+    assert not (kernel_root / "manifest.py").is_file()
+
+
+def test_the_kernel_owes_the_submodule_locator_but_not_the_re_export() -> None:
+    """The derived scope, asserted against the real packages.
+
+    Stated as its own test so the intended outcome is visible: the kernel is
+    IN scope for the rule and compliant with it, rather than excused from the
+    file. If it ever stopped exposing `dotmac_kernel.migrations.versions_dir()`,
+    this fails.
+    """
+    kernel = PACKAGES_DIR / "dotmac-kernel"
+    assert kernel in _LINEAGE, "the kernel ships a lineage and must be swept"
+    root = _import_root(kernel)
+    assert _exports(root / "migrations" / "__init__.py", LOCATOR)
+    assert not _exports(root / "__init__.py", LOCATOR), (
+        "the kernel has grown a top-level `versions_dir` alias — harmless, but "
+        "it is a second spelling of a working import; remove it or update this "
+        "test's reasoning deliberately"
+    )
+    assert _is_compliant(kernel)
 
 
 def test_discovery_finds_the_lineage_modules_and_excludes_the_others() -> None:
@@ -430,11 +709,14 @@ def test_grandfathered_is_not_the_same_claim_as_compliant() -> None:
     assert compliant, "every lineage module is in debt; the rule proves nothing"
     assert "dotmac-approvals" in compliant
 
-    # The exemption is a THIRD state, and must not overlap either of the other
-    # two: a package cannot be simultaneously excused and in debt.
-    assert not (TOP_LEVEL_REEXPORT_EXEMPT & set(PRE_RULE_DEBT))
-    for exempt in TOP_LEVEL_REEXPORT_EXEMPT:
-        assert _is_compliant(PACKAGES_DIR / exempt), (
-            f"{exempt} is exempt from the top-level re-export but does not even "
-            "expose the submodule locator — that is debt, not an exemption"
+    # Every debt row must be an INSTALLABLE module. A host package cannot be in
+    # debt to the top-level re-export rule, because that rule does not reach it
+    # — and a row that could mean "excused" would be the ADR-0018 conflation
+    # this map exists to avoid. There is no exemption list to keep disjoint
+    # anymore: scope is derived, so a package is either in scope and compliant,
+    # in scope and in debt, or out of scope for a checkable reason.
+    for distribution in PRE_RULE_DEBT:
+        assert _is_installable_module(_import_root(PACKAGES_DIR / distribution)), (
+            f"{distribution} is listed as debt but declares no ModuleManifest; "
+            "a host package is out of scope, not behind"
         )
