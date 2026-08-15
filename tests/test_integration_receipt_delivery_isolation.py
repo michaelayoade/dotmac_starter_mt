@@ -39,11 +39,28 @@ Each guard also carries a SENSITIVITY PROOF (ADR-0018): the guard is shown to
 FAIL on the shape it forbids, not merely to pass on the shape it allows. A
 predicate that accepted everything would satisfy the happy path of every test
 here, so "it passed" is only evidence once the detector is shown to bite.
+
+## Sequential contention vs a genuine race
+
+Most canaries below issue their two statements SEQUENTIALLY. For a conditional
+UPDATE that is a real proof of the predicate — an already-claimed row must not
+be claimable again — but it is NOT a proof of simultaneity, and a sequential
+"race" that never races is a recurring defect in this fleet. So the central
+claim, that two workers cannot both take one receipt, is ALSO made with two
+genuine threads meeting at a barrier:
+`test_two_concurrent_workers_produce_exactly_one_claim`.
+
+Every rendezvous and worker wait is bounded (`_RACE_TIMEOUT`). An unbounded
+concurrency test is not a usable guard: the same pattern once consumed a CI
+job's full six-hour limit before being cancelled, which is a much worse failure
+than a red test.
 """
 
 from __future__ import annotations
 
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -56,6 +73,10 @@ from tests.test_integration_isolation import (  # noqa: F401
     _installation_and_binding,
     migrated_scratch,
 )
+
+#: Seconds. Short and explicit — a barrier or lock wait that can hang forever
+#: turns a failing guard into a stuck CI job rather than a red one.
+_RACE_TIMEOUT = 20.0
 
 #: Every column receipt delivery needs and does not yet have. Named in ONE place
 #: so the ratchet below and the blocked marker cannot disagree about what the
@@ -236,6 +257,153 @@ def test_only_one_worker_can_claim_a_receipt(
         ).scalar_one()
     check.dispose()
     assert attempts == 1, "the losing claim still incremented the attempt counter"
+
+
+def test_the_race_harness_actually_races(
+    migrated_scratch: tuple[str, str],  # noqa: F811
+    request: pytest.FixtureRequest,
+) -> None:
+    """Proves the THREADING HARNESS before anything relies on it.
+
+    The receipt race below is blocked, so it cannot yet show that
+    `_claim_concurrently` runs at all. A harness nobody has seen succeed is not
+    evidence of anything, so the identical harness is pointed at
+    `delivery_attempts` — which already HAS a lease and the conditional claim it
+    needs — and must produce exactly one winner without hanging.
+
+    **What this does and does not claim.** `[0, 1]` is the correct outcome
+    whether the two statements genuinely collide or merely run in turn, so
+    neither this test nor the receipt race can assert that a collision *did*
+    occur. What the threaded form buys is COVERAGE of a different database path:
+    when the two UPDATEs do overlap, the loser blocks on the winner's row lock
+    and PostgreSQL re-evaluates its predicate against the newly committed row.
+    A sequential test never reaches that path, and a claim can be wrong there
+    while looking right in turn-taking. The barrier makes the overlap likely; it
+    cannot make it certain.
+
+    The load-bearing evidence that the predicate is what decides remains the
+    sensitivity proof below, which removes it and observes both workers win.
+    """
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    delivery_id = uuid.uuid4()
+    with setup.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn, request)
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.delivery_attempts ("
+                "id, installation_id, capability_binding_id, event_type, "
+                "idempotency_key, payload_digest, state) VALUES ("
+                ":id, :inst, :binding, 'e', :key, :digest, 'pending')"
+            ),
+            {
+                "id": delivery_id,
+                "inst": installation_id,
+                "binding": binding_id,
+                "key": f"race-{uuid.uuid4().hex[:8]}",
+                "digest": "b" * 64,
+            },
+        )
+    setup.dispose()
+
+    delivery_claim = text(
+        "UPDATE mod_intg.delivery_attempts SET state = 'in_flight', "
+        "attempt_count = attempt_count + 1, "
+        "leased_until = now() + interval '300 seconds' "
+        "WHERE id = :id AND state NOT IN "
+        "('delivered', 'dead_letter', 'reconciliation_required') "
+        "AND (leased_until IS NULL OR leased_until < now()) "
+        "AND (next_attempt_at IS NULL OR next_attempt_at <= now())"
+    )
+
+    results = _claim_concurrently(admin_url, delivery_claim, delivery_id)
+
+    assert results == [0, 1], (
+        f"the race harness reported {results} against a table that DOES have a "
+        "lease. The harness is not producing contention, so the receipt race "
+        "it is shared with would prove nothing once unblocked"
+    )
+
+
+def _claim_concurrently(
+    admin_url: str, statement: object, row_id: uuid.UUID
+) -> list[int]:
+    """Two threads, two engines, meeting at a barrier immediately before the write.
+
+    Shared by the receipt race and the harness proof above, so the mechanism
+    those two tests rely on is identical rather than merely similar.
+
+    Every wait is bounded: an unbounded concurrency test is not a usable guard,
+    and the same pattern once consumed a CI job's full six-hour limit before
+    being cancelled — a far worse failure than a red test.
+    """
+    start = threading.Barrier(2, timeout=_RACE_TIMEOUT)
+
+    def worker() -> int:
+        engine = create_engine(admin_url)
+        try:
+            with engine.connect() as conn:
+                # Open the transaction BEFORE the rendezvous, so the barrier
+                # separates the two UPDATEs and not the connection setup.
+                transaction = conn.begin()
+                start.wait()
+                rowcount = conn.execute(statement, {"id": row_id}).rowcount  # type: ignore[arg-type]
+                transaction.commit()
+                return int(rowcount)
+        finally:
+            engine.dispose()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(worker), pool.submit(worker)]
+        # `result()` re-raises whatever the worker raised — including the
+        # ProgrammingError the blocked canary is expected to fail with, which is
+        # what keeps `raises=ProgrammingError` honest across a thread boundary.
+        return sorted(f.result(timeout=_RACE_TIMEOUT) for f in futures)
+
+
+@_BLOCKED
+def test_two_concurrent_workers_produce_exactly_one_claim(
+    migrated_scratch: tuple[str, str],  # noqa: F811
+    request: pytest.FixtureRequest,
+) -> None:
+    """The same claim, issued by two real threads instead of in turn.
+
+    The sequential version above proves the predicate excludes an
+    already-claimed row. It never reaches the path that matters most for a
+    lease: two UPDATEs overlapping, where the loser blocks on the winner's row
+    lock and PostgreSQL then re-evaluates its predicate against the newly
+    committed row. A claim can be correct when turn-taking and wrong there.
+
+    Two threads, two engines, a barrier immediately before the UPDATE, every
+    wait bounded, and worker exceptions re-raised on the main thread rather than
+    swallowed into a passing result. See
+    `test_the_race_harness_actually_races` for what this form does and does not
+    let anyone claim.
+    """
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    with setup.begin() as conn:
+        receipt_id = _receipt(conn, request)
+    setup.dispose()
+
+    results = _claim_concurrently(admin_url, CLAIM_SQL, receipt_id)
+
+    assert results == [0, 1], (
+        f"two concurrent workers reported {results}; exactly one must win a "
+        "claim, or both would call the product with one observation"
+    )
+
+    check = create_engine(admin_url)
+    with check.connect() as conn:
+        attempts = conn.execute(
+            text("SELECT attempt_count FROM mod_intg.inbox_receipts WHERE id = :id"),
+            {"id": receipt_id},
+        ).scalar_one()
+    check.dispose()
+    assert attempts == 1, (
+        "the losing worker still incremented the attempt counter — the claim "
+        "was not atomic even though only one caller saw a rowcount"
+    )
 
 
 @_BLOCKED
