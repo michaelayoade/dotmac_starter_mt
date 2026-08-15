@@ -19,6 +19,7 @@ from dotmac_kernel.external_identity import (
     ResolvedExternalIdentity,
     bind_external_identity,
     disable_external_identity_binding,
+    finalize_external_login,
     record_external_authentication,
     resolve_external_identity,
 )
@@ -400,6 +401,236 @@ def test_resolution_does_not_stamp_the_authentication_time(
     )
     db.refresh(binding)
     assert binding.last_authenticated_at is not None
+
+
+# ── Login finalization: the decision and the stamp are one step ─────────────
+
+
+def test_finalizing_returns_the_party_and_stamps_in_the_same_call(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The whole point: a caller never holds a decision it has not recorded.
+
+    `resolve_external_identity` deliberately leaves the stamp to somebody else,
+    which is what created the gap between deciding a login and issuing the
+    session for it. Finalization does both, so there is no moment in which the
+    decision exists un-recorded and un-locked.
+    """
+    party = _person(db, tenant_row, "person@example.com")
+    binding = _bind(db, tenant_row, party)
+
+    finalized = finalize_external_login(
+        db,
+        tenant=tenant_row,
+        provider_binding=PROVIDER,
+        issuer=ISSUER,
+        subject=SUBJECT,
+    )
+
+    assert isinstance(finalized, ResolvedExternalIdentity)
+    assert finalized.party.id == party.id
+    assert finalized.binding_id == binding.id
+    db.refresh(binding)
+    assert binding.last_authenticated_at is not None
+
+
+def test_finalizing_a_disabled_binding_refuses_and_records_nothing(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """A refusal must leave no evidence of an authentication that never
+    happened — the stamp is the only signal that a binding is still live, and a
+    refused login writing one would make a revoked identity look exercised."""
+    party = _person(db, tenant_row, "person@example.com")
+    binding = _bind(db, tenant_row, party)
+    disable_external_identity_binding(db, tenant=tenant_row, binding_id=binding.id)
+
+    assert (
+        finalize_external_login(
+            db,
+            tenant=tenant_row,
+            provider_binding=PROVIDER,
+            issuer=ISSUER,
+            subject=SUBJECT,
+        )
+        is None
+    )
+    db.refresh(binding)
+    assert binding.last_authenticated_at is None
+
+
+def test_finalizing_an_unbound_subject_refuses_and_provisions_nothing(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The login path inherits every refusal the read path has. A locked
+    decision is still a decision to say no."""
+    before = db.query(Party).count()
+
+    assert (
+        finalize_external_login(
+            db,
+            tenant=tenant_row,
+            provider_binding=PROVIDER,
+            issuer=ISSUER,
+            subject="nobody-has-ever-seen-this",
+        )
+        is None
+    )
+    assert db.query(Party).count() == before
+    assert db.query(ExternalIdentityBinding).count() == 0
+
+
+def test_finalizing_refuses_a_deactivated_party_without_stamping(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """The party is re-read inside the call, not trusted from bind time — a
+    leaver whose binding nobody remembered to disable still cannot log in."""
+    party = _person(db, tenant_row, "leaver@example.com")
+    binding = _bind(db, tenant_row, party)
+    party.is_active = False
+    db.flush()
+
+    assert (
+        finalize_external_login(
+            db,
+            tenant=tenant_row,
+            provider_binding=PROVIDER,
+            issuer=ISSUER,
+            subject=SUBJECT,
+        )
+        is None
+    )
+    db.refresh(binding)
+    assert binding.last_authenticated_at is None
+    assert binding.is_active is True  # refusing a login is not unbinding
+
+
+def test_finalizing_refuses_a_party_that_became_an_organization(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Defence in depth against a row `bind_external_identity` would refuse to
+    create today. The check is re-run at login rather than assumed from the
+    bind, because the bind happened at some other time under some other code."""
+    party = _person(db, tenant_row, "person@example.com")
+    binding = _bind(db, tenant_row, party)
+    party.party_type = PartyType.organization
+    db.flush()
+
+    assert (
+        finalize_external_login(
+            db,
+            tenant=tenant_row,
+            provider_binding=PROVIDER,
+            issuer=ISSUER,
+            subject=SUBJECT,
+        )
+        is None
+    )
+    db.refresh(binding)
+    assert binding.last_authenticated_at is None
+
+
+def test_finalizing_keeps_the_trust_direction(db: Session, tenant_row: Tenant) -> None:
+    """Locking changed the concurrency story and nothing else: a binding made
+    for one configured provider is still not satisfied by a different
+    registration presenting the same issuer/subject pair."""
+    party = _person(db, tenant_row, "person@example.com")
+    _bind(db, tenant_row, party)
+
+    assert (
+        finalize_external_login(
+            db,
+            tenant=tenant_row,
+            provider_binding="some-other-registration",
+            issuer=ISSUER,
+            subject=SUBJECT,
+        )
+        is None
+    )
+
+
+def test_finalizing_is_whitespace_insensitive_at_the_edges(
+    db: Session, tenant_row: Tenant
+) -> None:
+    party = _person(db, tenant_row, "person@example.com")
+    _bind(db, tenant_row, party)
+
+    finalized = finalize_external_login(
+        db,
+        tenant=tenant_row,
+        provider_binding=f"  {PROVIDER} ",
+        issuer=f" {ISSUER}",
+        subject=f"{SUBJECT}  ",
+    )
+    assert finalized is not None and finalized.party.id == party.id
+
+
+def test_both_entry_points_answer_with_the_same_shape(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Migrating a caller off the racy pair must be one identifier, not a
+    rewrite — otherwise the safe call is the expensive one and the racy one
+    stays where it is."""
+    party = _person(db, tenant_row, "person@example.com")
+    binding = _bind(db, tenant_row, party)
+    arguments = {
+        "tenant": tenant_row,
+        "provider_binding": PROVIDER,
+        "issuer": ISSUER,
+        "subject": SUBJECT,
+    }
+
+    read = resolve_external_identity(db, **arguments)
+    finalized = finalize_external_login(db, **arguments)
+
+    assert read is not None and finalized is not None
+    assert (read.party.id, read.binding_id) == (finalized.party.id, binding.id)
+
+
+def test_the_locking_read_locks_and_refuses_a_cached_row(
+    db: Session, tenant_row: Tenant
+) -> None:
+    """Source-level, because the unit lane physically cannot observe either
+    half (see the next test for the proof of that).
+
+    Two things have to be true together and each is silently useless alone.
+    `with_for_update` takes the row lock that serializes against the disable
+    path. `populate_existing` is what makes the value tested under that lock the
+    value in the database: without it a session that had already loaded the
+    binding gets the identity map's copy, so the lock would be taken and then a
+    pre-disable `is_active` examined — a lock guarding a stale attribute, which
+    is worse than no lock because it reads as correct.
+    """
+    import inspect
+
+    source = inspect.getsource(finalize_external_login)
+    assert "with_for_update()" in source, "the login path stopped locking the row"
+    # The CALL SITE, not the phrase. Counting `populate_existing=True` counts
+    # the docstring that explains the technique too — the assertion said 2 and
+    # the file has 3, of which one is prose. A source-text pin that counts its
+    # own documentation fails the moment the documentation is good.
+    assert source.count(".execution_options(populate_existing=True)") == 2, (
+        "both the binding and the party must be re-read from the database, "
+        "never served from the session's identity map"
+    )
+
+
+def test_the_unit_lane_cannot_see_the_lock() -> None:
+    """The sensitivity disclosure that justifies the Postgres canary.
+
+    SQLAlchemy's SQLite compiler drops `FOR UPDATE` entirely — sqlite has no
+    such clause — so every test in this file would pass identically against a
+    `finalize_external_login` that never locked anything. Asserting that here,
+    rather than leaving it as folklore, is what stops a future reader concluding
+    the unit lane covers the race. It does not; that is
+    `tests/test_external_identity_login_race.py`.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    statement = select(ExternalIdentityBinding).with_for_update()
+
+    assert "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE" not in str(statement.compile(dialect=sqlite.dialect()))
 
 
 # ── The module holds no protocol and no external authorization ──────────────

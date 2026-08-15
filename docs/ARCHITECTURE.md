@@ -1858,6 +1858,73 @@ than the pre-fix 500/empty-render. This canary was RED against pre-2b.1
 `main` by construction (the bug is invisible on SQLite, where these tests
 cannot even run).
 
+## External-identity login: the decision and the session are one locked step (kernel `0.1.0a64`)
+
+`dotmac_kernel.external_identity` exposes two entry points that answer the same
+question, and only one of them may end in a session.
+
+| Call | What it is | May a session follow? |
+|---|---|---|
+| `resolve_external_identity` | a READ — no lock, no write | **No.** True when it looked; not necessarily when you act. |
+| `finalize_external_login` | the LOGIN path — locks, re-checks, stamps | **Yes**, and only this one. |
+
+The defect this closes: a caller that resolved and then issued its own session
+left two statements with a gap between them, and an administrator could disable
+the binding in the gap. The result is a live session derived from an identity
+revoked before that session existed — and both halves look successful. The
+disable recorded a disable, the row is inactive, every later resolution refuses,
+and the session the disable existed to prevent outlives it. Returning
+`binding_id` from the resolution did not close this; that removed a redundant
+READ, and the window is between a read and the WRITE that depends on it.
+
+`finalize_external_login` takes the binding `SELECT … FOR UPDATE`, re-checks
+`is_active` and the party's own state (`is_active`, `party_type == person`)
+while holding that lock, stamps `last_authenticated_at`, and returns the party
+— so the caller adds its session in the SAME transaction with the row still
+held. `disable_external_identity_binding`'s `UPDATE` needs that same row lock,
+so the two serialize: the login holds it first (session issued, disable commits
+behind it) or the disable does (login blocks, re-reads `is_active = False`,
+refuses). Every refusal is `None`; a typed error per reason would let a caller
+distinguish "no such subject" from "disabled binding", which is a
+subject-enumeration oracle handed to whoever can drive a login.
+
+Two implementation details are load-bearing rather than incidental. The locking
+read matches on the identity tuple alone and re-checks `is_active` in Python, so
+the re-check is visible to a reader and does not silently stop being one under
+an isolation level that raises rather than re-evaluates (the re-read assumes
+READ COMMITTED; REPEATABLE READ raises a serialization failure, which also fails
+closed). And both reads pass `populate_existing=True`: without it a session that
+had already loaded either row would get the identity map's copy, so the lock
+would be taken and then a value cached from BEFORE the concurrent disable
+examined — a lock guarding a stale attribute is worse than no lock, because it
+reads as correct.
+
+**Two gaps, stated rather than implied.** Disabling a binding stops further
+logins; it does not retract sessions already issued, because `auth_sessions`
+does not record which binding produced it. The contract for that column
+(`external_identity_binding_id UUID NULL` with a composite FK,
+`finalize_external_login`'s returned `binding_id` as its only source, revocation
+taking the same row lock in the same transaction as the disable, SELECTIVE scope
+only — never a global logout) is written in the module docstring and is a
+separate slice, because `AuthSession` is minted by the assembly
+(`app/features/auth/service.py`) and the change spans three writers. Likewise
+the login re-reads the party but does not LOCK it: `parties` has many other
+writers, and locking binding-then-party would deadlock against any transaction
+that touches a party before its binding. Both residuals have the same answer —
+revoke the sessions, do not lock the world.
+
+`record_external_authentication` is DEPRECATED: it stamps a decision the caller
+already made, which is the second half of the racy pair. It is retained only for
+a step-up ceremony that mints no session, and removed in the next minor unless
+such a consumer is named.
+
+Proof: `tests/unit/test_external_identity.py` (logic, plus
+`test_the_unit_lane_cannot_see_the_lock` — SQLite compiles `FOR UPDATE` away, so
+the unit lane would pass against an implementation that never locked) and
+`tests/test_external_identity_login_race.py` (bounded two-session Postgres
+canary; the winner takes the row lock BEFORE the barrier, so each direction is
+forced rather than hoped for).
+
 ## Testing model
 
 - **Unit** (`tests/unit/`, `tests/architecture/`) — in-memory SQLite, no
