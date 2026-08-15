@@ -81,7 +81,7 @@ def test_declared_tables_are_exactly_what_the_migration_creates() -> None:
 
 
 def test_every_table_is_declared_on_the_platform_plane() -> None:
-    """The declaration the module shipped `0.1.0a1`–`0.1.0a3` without.
+    """The declaration the module shipped its first three releases without.
 
     `rl_0001` has always created these tables with no row-level security and
     REVOKEd them from `app_user` — the ADR-0023 PLATFORM contract — while the
