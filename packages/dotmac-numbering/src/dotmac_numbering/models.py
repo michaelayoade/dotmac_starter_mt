@@ -1,31 +1,41 @@
-"""Document series and allocation receipts on explicit tenant and platform planes.
+"""Series configuration, per-period counters, receipts and repair evidence.
 
-Four tables, two per plane. Both planes are DECLARED (ADR-0023) because both
-exist: a tenant allocates its own invoice and credit-note series, and the
-control plane allocates vendor-side series that no tenant may read. Neither is
-inferred from the presence or absence of a tenant column.
+Eight tables, four per plane. Both planes are DECLARED (ADR-0023): a tenant
+allocates its own document series, and the control plane allocates vendor-side
+series no tenant may read.
 
-Three rules hold across every table, and each answers a defect the source audit
-found (`docs/inventories/numbering-source-variance.md`):
+## Why the counter is per PERIOD, not per series
 
-- **A series is explicitly configured; nothing is auto-created.** ERP's
-  allocator invents a series on first use with a `DOC-` prefix from a default
-  dictionary, so a typo silently becomes a live document series. There is no
-  auto-create and no default-prefix table here: an unconfigured `series_code`
-  fails closed.
-- **Every allocation leaves an immutable receipt.** ERP's reset/update path
-  rewrites counters with no evidence, which is how a committed number can be
-  handed out twice. A receipt is written in the same transaction as the counter
-  advance and is never updated — repair may advance the counter, never rewrite
-  history.
-- **The reset boundary is decided from a supplied business date.** ERP reads
-  `date.today()` on the dominant caller path, so a backdated invoice takes this
-  year's number. `reference_date` is a required column here precisely so a
-  receipt records the date the decision was actually made against.
+A resetting series does not have one counter — it has one per period, and
+collapsing them is unsound in two separate ways.
 
-`series_code` is an open registered string, never an enum. ERP's `SequenceType`
-is a 27-member PostgreSQL enum, which means a new document kind is a migration
-in a shared module — exactly what ADR-0008 forbids.
+The obvious way: with a single counter, yearly reset hands out `1` again in
+2027, so a receipt unique on `(scope, series, value)` collides with the 2026
+row that already holds `1`.
+
+The subtle way, which survives naively adding the period to that unique key: a
+counter that has already advanced into 2027 still answers a *backdated* 2026
+allocation. The number is formatted `…-2026-…` from the 2027 counter, so it can
+collide with a 2026 number already issued — and no constraint keyed on the
+counter's own period would see it, because the row says 2027 while the printed
+number says 2026.
+
+One counter per `(scope, series_code, period_key)` removes both. A 2026
+allocation reads the 2026 counter whenever it arrives, and the receipt's
+`period_key` is the period the NUMBER belongs to, not the period the clock was
+in.
+
+`period_key` is `NOT NULL` on every table. A non-resetting series uses the
+literal `*`, so there is no nullable column to reason about and every unique
+key is total.
+
+## Why receipts are structurally immutable
+
+`updated_at` is deliberately absent: a column that records a change to an
+immutable row is either dead or a lie. The migration additionally grants only
+`SELECT, INSERT` to the online roles and installs a trigger that refuses
+`UPDATE` and `DELETE`, so immutability is a property of the database rather
+than a convention the service is trusted to keep.
 """
 
 from __future__ import annotations
@@ -51,22 +61,24 @@ from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
 SCHEMA = module_schema("numbering")
 
-#: Reset policies. An open string on the column, validated by the service
-#: against this tuple — a product that needs `weekly` adds it here rather than
-#: altering a PostgreSQL type in a shared schema.
+#: Reset policies, validated by the service. An open tuple rather than a
+#: PostgreSQL enum: a product needing `weekly` adds it here, not in a migration
+#: against a shared schema (ADR-0008).
 RESET_POLICIES: tuple[str, ...] = ("never", "yearly", "monthly")
+
+#: The period key of a series that never resets. A literal, so `period_key` is
+#: NOT NULL everywhere and no unique constraint has a nullable member.
+NO_PERIOD: str = "*"
 
 
 class _SeriesColumns:
-    """Configuration shared by both planes.
+    """Configuration. Supplied by the installing product, never resolved here.
 
-    Every field is supplied by the installing product. The module reads no
-    settings store and no clock: ADR-0009 keeps resolution off the network, and
-    a series that could resolve its own configuration would be a second reader
-    of the product's settings.
+    Note what is absent: `next_value` and `current_period`. Counter state lives
+    on the per-period counter row, so reconfiguring a series cannot move a
+    counter and advancing a counter cannot reconfigure a series.
     """
 
-    #: Open registered vocabulary. NOT an enum — see the module docstring.
     @declared_attr
     def series_code(cls) -> Mapped[str]:
         return mapped_column(String(80), nullable=False)
@@ -88,7 +100,7 @@ class _SeriesColumns:
         return mapped_column(Integer, nullable=False, default=6)
 
     @declared_attr
-    def include_year(cls) -> Mapped[bool]:
+    def include_year(cls) -> Mapped[int]:
         return mapped_column(Integer, nullable=False, default=0)
 
     @declared_attr
@@ -96,32 +108,46 @@ class _SeriesColumns:
         return mapped_column(Integer, nullable=False, default=4)
 
     @declared_attr
-    def include_month(cls) -> Mapped[bool]:
+    def include_month(cls) -> Mapped[int]:
         return mapped_column(Integer, nullable=False, default=0)
 
     @declared_attr
     def reset_policy(cls) -> Mapped[str]:
         return mapped_column(String(16), nullable=False, default="never")
 
-    #: The next value to hand out. Advanced under a row lock, never rewound.
     @declared_attr
-    def next_value(cls) -> Mapped[int]:
+    def start_value(cls) -> Mapped[int]:
         return mapped_column(BigInteger, nullable=False, default=1)
 
-    #: The period the counter currently belongs to, as `YYYY` or `YYYY-MM`.
-    #: Compared by ORDERING, never equality — ERP compares inequality, so a
-    #: backdated allocation rewinds the counter and reissues numbers.
-    @declared_attr
-    def current_period(cls) -> Mapped[str | None]:
-        return mapped_column(String(7))
 
-
-class _ReceiptColumns:
-    """Immutable evidence of one allocation. Never updated, never deleted."""
+class _CounterColumns:
+    """One counter per period. The only mutable state in the module."""
 
     @declared_attr
     def series_code(cls) -> Mapped[str]:
         return mapped_column(String(80), nullable=False)
+
+    @declared_attr
+    def period_key(cls) -> Mapped[str]:
+        return mapped_column(String(7), nullable=False)
+
+    @declared_attr
+    def next_value(cls) -> Mapped[int]:
+        return mapped_column(BigInteger, nullable=False)
+
+
+class _ReceiptColumns:
+    """Immutable evidence of one allocation. No `updated_at` by design."""
+
+    @declared_attr
+    def series_code(cls) -> Mapped[str]:
+        return mapped_column(String(80), nullable=False)
+
+    #: The period the NUMBER belongs to — derived from `reference_date`, never
+    #: from the counter's own state.
+    @declared_attr
+    def period_key(cls) -> Mapped[str]:
+        return mapped_column(String(7), nullable=False)
 
     @declared_attr
     def allocated_value(cls) -> Mapped[int]:
@@ -131,25 +157,16 @@ class _ReceiptColumns:
     def formatted_number(cls) -> Mapped[str]:
         return mapped_column(String(255), nullable=False)
 
-    #: The business date the caller supplied. Required: the reset decision is
-    #: only auditable if the date it was made against is recorded.
     @declared_attr
     def reference_date(cls) -> Mapped[date]:
         return mapped_column(Date, nullable=False)
 
-    @declared_attr
-    def period(cls) -> Mapped[str | None]:
-        return mapped_column(String(7))
-
+    #: Carried for operator traceability only. Replay and conflict are the
+    #: kernel ledger's job (hard rule 23); this is domain evidence, not a
+    #: second idempotency mechanism.
     @declared_attr
     def idempotency_key(cls) -> Mapped[str]:
         return mapped_column(String(255), nullable=False)
-
-    #: Digest of the allocation request. Its own column, per ADR-0014 — not
-    #: packed into the key, where a truncated fingerprint silently collides.
-    @declared_attr
-    def request_fingerprint(cls) -> Mapped[str]:
-        return mapped_column(String(64), nullable=False)
 
     @declared_attr
     def allocated_at(cls) -> Mapped[datetime]:
@@ -159,16 +176,53 @@ class _ReceiptColumns:
     def allocated_by(cls) -> Mapped[str | None]:
         return mapped_column(String(255))
 
+
+class _RepairColumns:
+    """Immutable evidence of one counter repair.
+
+    A repair moves a number that will be printed on a document, so it is a
+    decision and needs the same durability as an allocation: which period, from
+    what, to what, on whose authority and why.
+    """
+
     @declared_attr
-    def note(cls) -> Mapped[str | None]:
-        return mapped_column(Text)
+    def series_code(cls) -> Mapped[str]:
+        return mapped_column(String(80), nullable=False)
+
+    @declared_attr
+    def period_key(cls) -> Mapped[str]:
+        return mapped_column(String(7), nullable=False)
+
+    @declared_attr
+    def previous_next_value(cls) -> Mapped[int]:
+        return mapped_column(BigInteger, nullable=False)
+
+    @declared_attr
+    def new_next_value(cls) -> Mapped[int]:
+        return mapped_column(BigInteger, nullable=False)
+
+    @declared_attr
+    def proven_minimum(cls) -> Mapped[int]:
+        return mapped_column(BigInteger, nullable=False)
+
+    @declared_attr
+    def reason(cls) -> Mapped[str]:
+        return mapped_column(Text, nullable=False)
+
+    @declared_attr
+    def repaired_by(cls) -> Mapped[str]:
+        return mapped_column(String(255), nullable=False)
+
+    @declared_attr
+    def repaired_at(cls) -> Mapped[datetime]:
+        return mapped_column(DateTime(timezone=True), nullable=False)
 
 
 # ── Tenant plane ────────────────────────────────────────────────────────────
 
 
 class NumberSeries(Base, _SeriesColumns, TimestampMixin):
-    """A tenant's configured document series."""
+    """A tenant's configured series. Configuration only — no counter state."""
 
     __tablename__ = "number_series"
     __table_args__ = (
@@ -185,25 +239,42 @@ class NumberSeries(Base, _SeriesColumns, TimestampMixin):
     )
 
 
-class AllocationReceipt(Base, _ReceiptColumns, TimestampMixin):
-    """Immutable evidence of one tenant allocation."""
+class SeriesCounter(Base, _CounterColumns, TimestampMixin):
+    """One counter per (tenant, series, period)."""
+
+    __tablename__ = "series_counters"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "series_code",
+            "period_key",
+            name="uq_series_counters_identity",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+
+
+class AllocationReceipt(Base, _ReceiptColumns):
+    """Immutable evidence of one tenant allocation.
+
+    Not `TimestampMixin`: `allocated_at` is the instant, and an `updated_at` on
+    a row that cannot be updated is either dead or a lie.
+    """
 
     __tablename__ = "allocation_receipts"
     __table_args__ = (
-        # The idempotency identity. A replay of the same key returns this row;
-        # a different fingerprint under the same key is a conflict.
+        # A value is handed out once per (series, PERIOD) — the period is part
+        # of the identity because a resetting series legitimately reuses values
+        # across periods.
         UniqueConstraint(
             "tenant_id",
             "series_code",
-            "idempotency_key",
-            name="uq_allocation_receipts_identity",
-        ),
-        # A value is handed out once per series. This is the constraint that
-        # makes a duplicate impossible rather than merely unlikely — Sub relies
-        # on the consuming table's index and a retry loop instead.
-        UniqueConstraint(
-            "tenant_id",
-            "series_code",
+            "period_key",
             "allocated_value",
             name="uq_allocation_receipts_value",
         ),
@@ -215,13 +286,30 @@ class AllocationReceipt(Base, _ReceiptColumns, TimestampMixin):
     tenant_id: Mapped[UUID] = mapped_column(
         Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class SeriesRepair(Base, _RepairColumns):
+    """Immutable evidence of one tenant counter repair."""
+
+    __tablename__ = "series_repairs"
+    __table_args__ = (
+        Index("ix_series_repairs_tenant_series", "tenant_id", "series_code"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 # ── Platform plane ──────────────────────────────────────────────────────────
-#
-# No tenant column, no RLS, and REVOKEd from the tenant app role — that
-# revocation IS the isolation here (ADR-0023). No foreign key crosses to the
-# tenant plane, so neither plane can be read through the other.
 
 
 class PlatformNumberSeries(Base, _SeriesColumns, TimestampMixin):
@@ -229,8 +317,20 @@ class PlatformNumberSeries(Base, _SeriesColumns, TimestampMixin):
 
     __tablename__ = "platform_number_series"
     __table_args__ = (
+        UniqueConstraint("series_code", name="uq_platform_number_series_code"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+
+
+class PlatformSeriesCounter(Base, _CounterColumns, TimestampMixin):
+    """One control-plane counter per (series, period)."""
+
+    __tablename__ = "platform_series_counters"
+    __table_args__ = (
         UniqueConstraint(
-            "series_code", name="uq_platform_number_series_code"
+            "series_code", "period_key", name="uq_platform_series_counters_identity"
         ),
         schema_table_args(SCHEMA),
     )
@@ -238,18 +338,14 @@ class PlatformNumberSeries(Base, _SeriesColumns, TimestampMixin):
     id: Mapped[UUID] = uuid_pk()
 
 
-class PlatformAllocationReceipt(Base, _ReceiptColumns, TimestampMixin):
+class PlatformAllocationReceipt(Base, _ReceiptColumns):
     """Immutable evidence of one control-plane allocation."""
 
     __tablename__ = "platform_allocation_receipts"
     __table_args__ = (
         UniqueConstraint(
             "series_code",
-            "idempotency_key",
-            name="uq_platform_allocation_receipts_identity",
-        ),
-        UniqueConstraint(
-            "series_code",
+            "period_key",
             "allocated_value",
             name="uq_platform_allocation_receipts_value",
         ),
@@ -258,18 +354,51 @@ class PlatformAllocationReceipt(Base, _ReceiptColumns, TimestampMixin):
     )
 
     id: Mapped[UUID] = uuid_pk()
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class PlatformSeriesRepair(Base, _RepairColumns):
+    """Immutable evidence of one control-plane counter repair."""
+
+    __tablename__ = "platform_series_repairs"
+    __table_args__ = (
+        Index("ix_platform_series_repairs_series", "series_code"),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 TENANT_TABLES: tuple[str, ...] = (
     "number_series",
+    "series_counters",
     "allocation_receipts",
+    "series_repairs",
 )
 PLATFORM_TABLES: tuple[str, ...] = (
     "platform_number_series",
+    "platform_series_counters",
     "platform_allocation_receipts",
+    "platform_series_repairs",
+)
+
+#: The append-only tables. Named once so the migration, the service and the
+#: canaries cannot disagree about which rows may never change.
+IMMUTABLE_TABLES: tuple[str, ...] = (
+    "allocation_receipts",
+    "series_repairs",
+    "platform_allocation_receipts",
+    "platform_series_repairs",
 )
 
 __all__ = [
+    "IMMUTABLE_TABLES",
+    "NO_PERIOD",
     "PLATFORM_TABLES",
     "RESET_POLICIES",
     "SCHEMA",
@@ -278,4 +407,8 @@ __all__ = [
     "NumberSeries",
     "PlatformAllocationReceipt",
     "PlatformNumberSeries",
+    "PlatformSeriesCounter",
+    "PlatformSeriesRepair",
+    "SeriesCounter",
+    "SeriesRepair",
 ]

@@ -1,52 +1,66 @@
-"""Concurrency-safe allocation and formatting of configured document series.
+"""Configure a series, allocate from it, repair it. One engine, both planes.
 
-One engine, both planes. The plane is chosen by the `Scope` value the caller
-passes, and there is no other switch: a `TenantScope` reads and writes the
-tenant tables, a `PlatformScope` the platform ones. Nothing infers a plane from
-a missing tenant column.
+The plane is chosen by the `Scope` value the caller passes and by nothing else.
 
-What this owner does NOT do, because the sources did and it is why they are
-being replaced:
+## At-most-once is the kernel's, not ours
 
-* it never reads a clock. `reference_date` is a required business input, so a
-  backdated document cannot silently take today's period;
-* it never reads a settings store or the environment. Configuration is a row,
-  supplied by the installing product (ADR-0009, ADR-0011);
-* it never invents a series. An unconfigured `series_code` fails closed rather
-  than auto-creating one with a guessed prefix;
-* it never commits. Allocation joins the caller's transaction and rolls back
-  with it, so a failed invoice does not consume a committed number;
-* it never rewinds a counter. Repair advances to proven evidence or refuses.
+Replay, fingerprint comparison and the concurrent-key race belong to
+`dotmac_kernel.idempotency` and to no one else (hard rule 23). This module
+calls `execute_once` / `execute_once_platform` and keeps the allocation receipt
+as DOMAIN evidence — what number was issued, for which period, against which
+business date — never as a second replay mechanism.
 
-The formatter is a single function used by allocation AND preview. ERP has
-three, two of which disagree — its preview hardcodes a four-digit segment, so
-for every series whose width is not four the preview is a lie.
+That is not a formality. A hand-rolled "look up the receipt, then allocate"
+has a hole the kernel does not: two concurrent calls with the same key both
+miss the lookup, both allocate, and the loser raises `IntegrityError` instead
+of replaying the winner. The kernel runs the operation inside a savepoint and
+converts exactly that race into a replay-or-conflict.
+
+## What this owner refuses
+
+* to read a clock for a business decision — `reference_date` is required;
+* to read settings or the environment — configuration is a row;
+* to invent a series — an unconfigured code fails closed;
+* to commit — allocation joins the caller's transaction;
+* to rewind a counter or rewrite a receipt.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Final
+from uuid import uuid4
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
+from dotmac_kernel.idempotency import (
+    execute_once,
+    execute_once_platform,
+    fingerprint_of,
+)
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from dotmac_numbering.models import (
+    NO_PERIOD,
     RESET_POLICIES,
     AllocationReceipt,
     NumberSeries,
     PlatformAllocationReceipt,
     PlatformNumberSeries,
+    PlatformSeriesCounter,
+    PlatformSeriesRepair,
+    SeriesCounter,
+    SeriesRepair,
 )
 
-#: Widest counter this module will format. Beyond it the caller has almost
-#: certainly passed a repair value from the wrong column, and a silently
-#: enormous document number is worse than a refusal.
 MAX_VALUE: Final[int] = 10**15
+MAX_DIGITS: Final[int] = 18
+
+#: Kernel idempotency scope, namespaced to this module so a key spent here can
+#: never collide with a product's own.
+ALLOCATE_SCOPE: Final[str] = "numbering.allocate"
 
 
 class NumberingError(Exception):
@@ -63,19 +77,131 @@ def _error(code: str, message: str, **details: object) -> NumberingError:
     return NumberingError(code, message, **details)
 
 
+# ── Configuration ───────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class SeriesConfiguration:
+    """A validated series definition.
+
+    Typed rather than a dict so a consumer configures a series through this
+    owner instead of writing `mod_numbering` tables directly — which is what
+    the first draft of this module forced them to do.
+    """
+
+    series_code: str
+    prefix: str = ""
+    suffix: str = ""
+    separator: str = "-"
+    min_digits: int = 6
+    include_year: bool = False
+    year_digits: int = 4
+    include_month: bool = False
+    reset_policy: str = "never"
+    start_value: int = 1
+
+    def validate(self) -> None:
+        if not self.series_code or len(self.series_code) > 80:
+            raise _error(
+                "invalid_series_code", "A series code is required, max 80 characters."
+            )
+        if self.reset_policy not in RESET_POLICIES:
+            raise _error(
+                "unknown_reset_policy",
+                "A series must declare a registered reset policy.",
+                reset_policy=self.reset_policy,
+                registered=list(RESET_POLICIES),
+            )
+        if not 1 <= self.min_digits <= MAX_DIGITS:
+            raise _error(
+                "invalid_min_digits",
+                f"Digit width must be between 1 and {MAX_DIGITS}.",
+                min_digits=self.min_digits,
+            )
+        if self.year_digits not in (2, 4):
+            raise _error(
+                "invalid_year_digits",
+                "Year width must be 2 or 4.",
+                year_digits=self.year_digits,
+            )
+        if self.start_value < 1 or self.start_value >= MAX_VALUE:
+            raise _error(
+                "invalid_start_value",
+                "Start value must be positive and below the maximum.",
+                start_value=self.start_value,
+            )
+        # Reset/format coherence. A yearly-resetting series that does not print
+        # the year reuses the same string every January — the number stops
+        # identifying the document, and the receipt's period is the only thing
+        # that still distinguishes them.
+        if self.reset_policy == "yearly" and not self.include_year:
+            raise _error(
+                "incoherent_reset",
+                "A yearly-resetting series must include the year in the "
+                "number, or every year reissues the same strings.",
+            )
+        if self.reset_policy == "monthly" and not (
+            self.include_year and self.include_month
+        ):
+            raise _error(
+                "incoherent_reset",
+                "A monthly-resetting series must include both year and month "
+                "in the number, or every month reissues the same strings.",
+            )
+        if self.include_month and not self.include_year:
+            raise _error(
+                "incoherent_format",
+                "A month without a year is ambiguous across years.",
+            )
+
+
+def configure_series(
+    db: Session, *, scope: Scope, configuration: SeriesConfiguration
+) -> NumberSeries | PlatformNumberSeries:
+    """Create or update a series definition.
+
+    Configuration is deliberately separate from counter state: this can never
+    move a counter, and allocation can never reconfigure a series. Updating a
+    definition does not retro-format any issued number, because a receipt
+    stores the formatted string rather than re-deriving it.
+    """
+    configuration.validate()
+    series_model, *_ = _models(scope)
+    existing = _find_series(db, scope, configuration.series_code)
+    target = existing
+    if target is None:
+        target = series_model(series_code=configuration.series_code)
+        if isinstance(scope, TenantScope):
+            target.tenant_id = scope.tenant_id
+        db.add(target)
+    for field in (
+        "prefix",
+        "suffix",
+        "separator",
+        "min_digits",
+        "year_digits",
+        "reset_policy",
+        "start_value",
+    ):
+        setattr(target, field, getattr(configuration, field))
+    target.include_year = int(configuration.include_year)
+    target.include_month = int(configuration.include_month)
+    db.flush()
+    return target
+
+
 # ── Periods and formatting ──────────────────────────────────────────────────
 
 
-def period_for(reference_date: date, reset_policy: str) -> str | None:
-    """The period a date belongs to under a reset policy.
+def period_for(reference_date: date, reset_policy: str) -> str:
+    """The period key a date belongs to.
 
-    Returned as a ZERO-PADDED, lexically ordered string so `"2026-02" >
-    "2026-01"` and `"2027" > "2026"` are both true. Ordering is the whole point:
-    ERP compares periods for INEQUALITY, so an allocation dated last year looks
-    like a new period and rewinds the counter.
+    Zero-padded and lexically ordered, so `"2026-02" > "2026-01"` and
+    `"2027" > "2026"` both hold. Never null: a non-resetting series uses `*`,
+    so every unique key that includes the period is total.
     """
     if reset_policy == "never":
-        return None
+        return NO_PERIOD
     if reset_policy == "yearly":
         return f"{reference_date.year:04d}"
     if reset_policy == "monthly":
@@ -88,12 +214,10 @@ def period_for(reference_date: date, reset_policy: str) -> str | None:
     )
 
 
-def format_number(series: NumberSeries | PlatformNumberSeries, *, value: int, reference_date: date) -> str:
-    """The one formatter. Used by allocation and preview alike.
-
-    Segments are joined by the configured separator and empty segments are
-    dropped, so a series with no prefix does not produce a leading separator.
-    """
+def format_number(
+    series: NumberSeries | PlatformNumberSeries, *, value: int, reference_date: date
+) -> str:
+    """The one formatter, shared by allocation and preview."""
     if value < 1:
         raise _error("invalid_value", "A formatted value must be positive.", value=value)
     segments: list[str] = []
@@ -112,93 +236,113 @@ def format_number(series: NumberSeries | PlatformNumberSeries, *, value: int, re
     return series.separator.join(segments)
 
 
-def preview(
-    series: NumberSeries | PlatformNumberSeries, *, reference_date: date
-) -> str:
-    """What the NEXT allocation would look like, without allocating.
+def preview(db: Session, *, scope: Scope, series_code: str, reference_date: date) -> str:
+    """What the next allocation for this date would look like.
 
-    Deliberately the same code path as allocation. A preview that disagrees
-    with what is issued is worse than no preview.
+    Reads the counter for the date's OWN period, so a preview for a backdated
+    document shows that period's next number rather than the current one.
     """
-    return format_number(series, value=series.next_value, reference_date=reference_date)
+    series = _require_series(db, scope, series_code)
+    period = period_for(reference_date, series.reset_policy)
+    counter = _find_counter(db, scope, series_code, period)
+    value = counter.next_value if counter is not None else series.start_value
+    return format_number(series, value=value, reference_date=reference_date)
 
 
-def request_fingerprint(
-    *, series_code: str, reference_date: date, scope_segment: str
-) -> str:
-    """Digest of the allocation request.
-
-    Its own value, never packed into the idempotency key (ADR-0014). Covers
-    what the caller asked for; excludes the actor and the wall clock, so a
-    retried request matches while a changed request conflicts.
-    """
-    payload = json.dumps(
-        {
-            "series_code": series_code,
-            "reference_date": reference_date.isoformat(),
-            "scope": scope_segment,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+# ── Plane plumbing ──────────────────────────────────────────────────────────
 
 
-# ── Results ─────────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class Allocation:
-    """One allocated number and the receipt that proves it."""
-
-    formatted_number: str
-    value: int
-    series_code: str
-    reference_date: date
-    replayed: bool
-
-
-def _scope_segment(scope: Scope) -> str:
-    return f"t={scope.tenant_id}" if isinstance(scope, TenantScope) else "platform"
-
-
-def _tables(scope: Scope):
+def _models(scope: Scope):
     if isinstance(scope, TenantScope):
-        return NumberSeries, AllocationReceipt
+        return NumberSeries, SeriesCounter, AllocationReceipt, SeriesRepair
     if isinstance(scope, PlatformScope):
-        return PlatformNumberSeries, PlatformAllocationReceipt
+        return (
+            PlatformNumberSeries,
+            PlatformSeriesCounter,
+            PlatformAllocationReceipt,
+            PlatformSeriesRepair,
+        )
     raise _error(
         "unknown_scope",
-        "Allocation requires an explicit TenantScope or PlatformScope.",
+        "An explicit TenantScope or PlatformScope is required.",
         scope=type(scope).__name__,
     )
 
 
-def _locked_series(db: Session, scope: Scope, series_code: str):
-    """The series row, locked FOR UPDATE.
-
-    The lock is taken before anything is read from it, so two concurrent
-    allocations serialise on the row rather than both reading the same
-    `next_value`. Sub's shape is right here and ERP's is not; neither has ever
-    proven it, because Sub's tests run on SQLite where the lock is a no-op.
-    """
-    series_model, _ = _tables(scope)
-    stmt = select(series_model).where(series_model.series_code == series_code)
+def _tenant_filter(stmt, scope: Scope, model):
     if isinstance(scope, TenantScope):
-        stmt = stmt.where(series_model.tenant_id == scope.tenant_id)
-    row = db.execute(stmt.with_for_update()).scalar_one_or_none()
-    if row is None:
+        return stmt.where(model.tenant_id == scope.tenant_id)
+    return stmt
+
+
+def _find_series(db: Session, scope: Scope, series_code: str):
+    series_model, *_ = _models(scope)
+    stmt = select(series_model).where(series_model.series_code == series_code)
+    return db.execute(_tenant_filter(stmt, scope, series_model)).scalar_one_or_none()
+
+
+def _require_series(db: Session, scope: Scope, series_code: str):
+    series = _find_series(db, scope, series_code)
+    if series is None:
         raise _error(
             "series_not_configured",
             "No configured series for this code. A series is configured "
-            "explicitly; this module never invents one.",
+            "explicitly through configure_series; this module never invents one.",
             series_code=series_code,
-            scope=_scope_segment(scope),
         )
-    return row
+    return series
 
 
-# ── The command ─────────────────────────────────────────────────────────────
+def _find_counter(db: Session, scope: Scope, series_code: str, period_key: str):
+    _, counter_model, *_ = _models(scope)
+    stmt = select(counter_model).where(
+        counter_model.series_code == series_code,
+        counter_model.period_key == period_key,
+    )
+    return db.execute(_tenant_filter(stmt, scope, counter_model)).scalar_one_or_none()
+
+
+def _locked_counter(db: Session, scope: Scope, series, period_key: str):
+    """The counter for this period, created if absent, then locked.
+
+    `INSERT ... ON CONFLICT DO NOTHING` before `SELECT ... FOR UPDATE` is the
+    one shape Sub genuinely contributes. ERP does query-then-insert, so two
+    first allocations race on the unique constraint before either holds a lock.
+    """
+    _, counter_model, *_ = _models(scope)
+    values: dict[str, object] = {
+        "id": uuid4(),
+        "series_code": series.series_code,
+        "period_key": period_key,
+        "next_value": series.start_value,
+    }
+    if isinstance(scope, TenantScope):
+        values["tenant_id"] = scope.tenant_id
+    db.execute(pg_insert(counter_model).values(**values).on_conflict_do_nothing())
+
+    stmt = select(counter_model).where(
+        counter_model.series_code == series.series_code,
+        counter_model.period_key == period_key,
+    )
+    counter = db.execute(
+        _tenant_filter(stmt, scope, counter_model).with_for_update()
+    ).scalar_one()
+    return counter
+
+
+# ── Allocation ──────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class Allocation:
+    """One allocated number and the period it belongs to."""
+
+    formatted_number: str
+    value: int
+    series_code: str
+    period_key: str
+    reference_date: date
+    replayed: bool
 
 
 def allocate(
@@ -210,14 +354,10 @@ def allocate(
     idempotency_key: str,
     allocated_by: str | None = None,
 ) -> Allocation:
-    """Reserve the next value of a configured series.
+    """Reserve the next value of a configured series for its period.
 
-    Joins the caller's transaction: nothing is committed here, so a rolled-back
-    consuming transaction does not consume a number.
-
-    Replaying the same `idempotency_key` returns the original formatted number
-    exactly. Replaying it with a different request is a conflict, never a
-    second allocation and never a silent no-op.
+    At-most-once is delegated to `dotmac_kernel.idempotency`, which owns the
+    replay, the fingerprint conflict and the concurrent-key race.
     """
     if not series_code:
         raise _error("missing_series_code", "A series code is required.")
@@ -226,95 +366,123 @@ def allocate(
             "missing_idempotency_key", "An allocation requires an idempotency identity."
         )
     if not isinstance(reference_date, date) or isinstance(reference_date, datetime):
-        # A datetime would carry a time and, worse, a timezone the caller may
-        # not have thought about — and the reset boundary is a DATE decision.
         raise _error(
             "invalid_reference_date",
-            "reference_date must be a date, and must be supplied explicitly: "
+            "reference_date must be a date and must be supplied explicitly: "
             "this module reads no clock.",
         )
 
-    series_model, receipt_model = _tables(scope)
-    fingerprint = request_fingerprint(
-        series_code=series_code,
-        reference_date=reference_date,
-        scope_segment=_scope_segment(scope),
+    fingerprint = fingerprint_of(
+        {
+            "series_code": series_code,
+            "reference_date": reference_date.isoformat(),
+        }
     )
 
-    replay = _find_receipt(db, scope, receipt_model, series_code, idempotency_key)
-    if replay is not None:
-        if replay.request_fingerprint != fingerprint:
-            raise _error(
-                "idempotency_conflict",
-                "This idempotency key already allocated a different request.",
-                series_code=series_code,
-                idempotency_key=idempotency_key,
-            )
-        return Allocation(
-            formatted_number=replay.formatted_number,
-            value=replay.allocated_value,
+    def operation(session: Session) -> dict[str, object]:
+        return _do_allocate(
+            session,
+            scope=scope,
             series_code=series_code,
-            reference_date=replay.reference_date,
-            replayed=True,
+            reference_date=reference_date,
+            idempotency_key=idempotency_key,
+            allocated_by=allocated_by,
         )
 
-    series = _locked_series(db, scope, series_code)
-    period = period_for(reference_date, series.reset_policy)
+    if isinstance(scope, TenantScope):
+        outcome = execute_once(
+            db,
+            tenant_id=scope.tenant_id,
+            scope=ALLOCATE_SCOPE,
+            key=idempotency_key,
+            operation=operation,
+            operation_name=f"{ALLOCATE_SCOPE}:{series_code}",
+            fingerprint=fingerprint,
+        )
+    else:
+        _models(scope)  # refuse an unknown scope before spending a key
+        outcome = execute_once_platform(
+            db,
+            scope=ALLOCATE_SCOPE,
+            key=idempotency_key,
+            operation=operation,
+            operation_name=f"{ALLOCATE_SCOPE}:{series_code}",
+            fingerprint=fingerprint,
+        )
 
-    # Reset only when the supplied date is in a LATER period than the counter.
-    # Strictly greater, never merely different: a backdated allocation must
-    # continue the current period rather than restart it.
-    if period is not None and (
-        series.current_period is None or period > series.current_period
-    ):
-        series.next_value = 1
-        series.current_period = period
+    result = outcome.result
+    return Allocation(
+        formatted_number=str(result["formatted_number"]),
+        value=int(result["value"]),
+        series_code=series_code,
+        period_key=str(result["period_key"]),
+        reference_date=date.fromisoformat(str(result["reference_date"])),
+        replayed=outcome.replayed,
+    )
 
-    value = int(series.next_value)
+
+def _do_allocate(
+    db: Session,
+    *,
+    scope: Scope,
+    series_code: str,
+    reference_date: date,
+    idempotency_key: str,
+    allocated_by: str | None,
+) -> dict[str, object]:
+    series = _require_series(db, scope, series_code)
+    period_key = period_for(reference_date, series.reset_policy)
+    counter = _locked_counter(db, scope, series, period_key)
+
+    value = int(counter.next_value)
     if value >= MAX_VALUE:
         raise _error(
             "series_exhausted",
-            "This series has reached the maximum supported value.",
+            "This series has reached the maximum supported value for the period.",
             series_code=series_code,
-            value=value,
+            period_key=period_key,
         )
 
     formatted = format_number(series, value=value, reference_date=reference_date)
-    series.next_value = value + 1
+    counter.next_value = value + 1
 
+    _, _, receipt_model, _ = _models(scope)
     receipt = receipt_model(
         series_code=series_code,
+        period_key=period_key,
         allocated_value=value,
         formatted_number=formatted,
         reference_date=reference_date,
-        period=period,
         idempotency_key=idempotency_key,
-        request_fingerprint=fingerprint,
         allocated_at=datetime.now(UTC),
         allocated_by=allocated_by,
+        created_at=datetime.now(UTC),
     )
     if isinstance(scope, TenantScope):
         receipt.tenant_id = scope.tenant_id
     db.add(receipt)
     db.flush()
 
-    return Allocation(
-        formatted_number=formatted,
-        value=value,
-        series_code=series_code,
-        reference_date=reference_date,
-        replayed=False,
-    )
+    return {
+        "formatted_number": formatted,
+        "value": value,
+        "period_key": period_key,
+        "reference_date": reference_date.isoformat(),
+    }
 
 
-def _find_receipt(db: Session, scope: Scope, receipt_model, series_code: str, key: str):
-    stmt = select(receipt_model).where(
-        receipt_model.series_code == series_code,
-        receipt_model.idempotency_key == key,
-    )
-    if isinstance(scope, TenantScope):
-        stmt = stmt.where(receipt_model.tenant_id == scope.tenant_id)
-    return db.execute(stmt).scalar_one_or_none()
+# ── Repair ──────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class Repair:
+    """The outcome of one repair, and the evidence row that records it."""
+
+    series_code: str
+    period_key: str
+    previous_next_value: int
+    new_next_value: int
+    changed: bool
 
 
 def advance_to_at_least(
@@ -322,45 +490,110 @@ def advance_to_at_least(
     *,
     scope: Scope,
     series_code: str,
+    period_key: str,
     proven_minimum: int,
-    note: str | None = None,
-) -> int:
-    """Repair a counter forward to caller-proven evidence.
+    reason: str,
+    repaired_by: str,
+) -> Repair:
+    """Move ONE period's counter forward to caller-proven evidence.
 
-    Advance-only, by construction. A counter behind the numbers already issued
-    hands out a duplicate on its next call, and that is the only condition this
-    exists to fix — so a `proven_minimum` at or below the current value is a
-    no-op, and there is no path here that lowers a counter or removes a
-    receipt. ERP's `reset_sequence` does both, which is how a committed number
-    is reused.
+    Advance-only by construction, and it names the period it repairs: a series
+    has one counter per period, so a repair that could not say which one would
+    be guessing.
+
+    Every attempt that changes a counter writes immutable evidence. A repair
+    moves a number that will be printed on a document; doing it without a
+    durable record of who, why and from what is how the sources lost the
+    ability to explain their own sequences.
     """
-    if proven_minimum < 1:
+    if proven_minimum < 1 or proven_minimum >= MAX_VALUE:
         raise _error(
             "invalid_proven_minimum",
-            "Repair evidence must be a positive value.",
+            "Repair evidence must be positive and below the maximum.",
             proven_minimum=proven_minimum,
         )
-    if proven_minimum >= MAX_VALUE:
+    if not reason:
+        raise _error("missing_reason", "A repair must state why it was made.")
+    if not repaired_by:
+        raise _error("missing_actor", "A repair must name an accountable actor.")
+
+    series = _require_series(db, scope, series_code)
+    _validate_period_key(period_key, series.reset_policy)
+    counter = _locked_counter(db, scope, series, period_key)
+
+    previous = int(counter.next_value)
+    target = proven_minimum + 1
+    changed = target > previous
+    if changed:
+        counter.next_value = target
+
+    _, _, _, repair_model = _models(scope)
+    evidence = repair_model(
+        series_code=series_code,
+        period_key=period_key,
+        previous_next_value=previous,
+        new_next_value=int(counter.next_value),
+        proven_minimum=proven_minimum,
+        reason=reason,
+        repaired_by=repaired_by,
+        repaired_at=datetime.now(UTC),
+        created_at=datetime.now(UTC),
+    )
+    if isinstance(scope, TenantScope):
+        evidence.tenant_id = scope.tenant_id
+    db.add(evidence)
+    db.flush()
+
+    return Repair(
+        series_code=series_code,
+        period_key=period_key,
+        previous_next_value=previous,
+        new_next_value=int(counter.next_value),
+        changed=changed,
+    )
+
+
+def _validate_period_key(period_key: str, reset_policy: str) -> None:
+    """A malformed period key would create a counter nothing ever reads."""
+    if reset_policy == "never":
+        if period_key != NO_PERIOD:
+            raise _error(
+                "invalid_period_key",
+                f"A non-resetting series has one counter, keyed {NO_PERIOD!r}.",
+                period_key=period_key,
+            )
+        return
+    if reset_policy == "yearly":
+        valid = len(period_key) == 4 and period_key.isdigit()
+    else:
+        valid = (
+            len(period_key) == 7
+            and period_key[4] == "-"
+            and period_key[:4].isdigit()
+            and period_key[5:].isdigit()
+            and 1 <= int(period_key[5:]) <= 12
+        )
+    if not valid:
         raise _error(
-            "invalid_proven_minimum",
-            "Repair evidence exceeds the maximum supported value.",
-            proven_minimum=proven_minimum,
+            "invalid_period_key",
+            "The period key does not match the series reset policy.",
+            period_key=period_key,
+            reset_policy=reset_policy,
         )
-    series = _locked_series(db, scope, series_code)
-    if proven_minimum + 1 > series.next_value:
-        series.next_value = proven_minimum + 1
-        db.flush()
-    return int(series.next_value)
 
 
 __all__ = [
+    "ALLOCATE_SCOPE",
+    "MAX_DIGITS",
     "MAX_VALUE",
     "Allocation",
     "NumberingError",
+    "Repair",
+    "SeriesConfiguration",
     "advance_to_at_least",
     "allocate",
+    "configure_series",
     "format_number",
     "period_for",
     "preview",
-    "request_fingerprint",
 ]

@@ -8,12 +8,27 @@ allocation.
 
 Given a `TenantScope` or `PlatformScope`, an open registered `series_code`, an
 explicit business `reference_date` and an idempotency key: reserve the next
-value of a configured series under a row lock, format it from validated
-configuration, and record one immutable allocation receipt.
+value of that date's period under a row lock, format it from validated
+configuration, and record one append-only allocation receipt.
 
-Replaying the same key with the same request returns the original formatted
-number. Replaying it with a different request conflicts. Allocation joins the
-caller's transaction and rolls back with it.
+**One counter per `(scope, series, period)`.** A resetting series does not have
+one counter, and collapsing them is unsound twice over: yearly reset reuses
+value `1`, and — the subtler one — a counter already advanced into 2027 would
+answer a *backdated* 2026 allocation, formatting a 2026 number that can collide
+with one already issued.
+
+**At-most-once belongs to the kernel.** Replay, fingerprint comparison and the
+concurrent-key race are `dotmac_kernel.idempotency`'s (hard rule 23). The
+receipt here is domain evidence, not a second replay mechanism — a hand-rolled
+"look up the receipt, then allocate" lets two concurrent callers with the same
+key both miss the lookup, and the loser then raises instead of replaying.
+
+Allocation joins the caller's transaction and rolls back with it.
+
+Configuration and repair are typed commands: a consumer never writes
+`mod_numbering` tables directly, digit widths and reset/format coherence are
+validated, and a repair names the period it moves and leaves immutable evidence
+of who moved it and why.
 
 ## What it does NOT own
 
@@ -33,7 +48,7 @@ Each refusal below is a defect one of them still has.
 | read a clock | ERP allocates against `date.today()` on 16 of its caller sites, so a backdated invoice takes today's period |
 | invent a series | ERP auto-creates on first use with a guessed `DOC-` prefix, so a typo becomes a live series |
 | rewind a counter | ERP's `should_reset` compares period *inequality*, so a backdated allocation restarts the sequence and reissues numbers |
-| rewrite history | ERP's reset/update path rewrites counters with no allocation evidence |
+| rewrite history | ERP's reset/update path rewrites counters with no allocation evidence. Receipts and repair evidence here are append-only by grant *and* trigger, so even the owning role cannot rewrite them |
 | format twice | ERP has three formatters; its preview hardcodes four digits and disagrees with allocation for every other width |
 
 `series_code` is an open registered string. ERP's `SequenceType` is a 27-member

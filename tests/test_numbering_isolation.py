@@ -1,19 +1,19 @@
-"""The eight PostgreSQL proofs for ``dotmac-numbering``.
+"""The PostgreSQL proofs for ``dotmac-numbering``.
 
 This file is the module's entire correctness evidence base, and it is all new.
 Neither source contributes a real-database numbering test: ERP's thirty-one
 focused tests are `MagicMock` throughout, and Sub's run on SQLite, where
 `with_for_update()` is a no-op and `FORCE ROW LEVEL SECURITY` does not exist.
-That is precisely how an identical locking shape has gone unproven for years,
-and it is why these run on a real migrated PostgreSQL or not at all.
+That is how an identical locking shape went unproven for years.
 
-Each race proof carries a **sensitivity proof** (ADR-0018): a companion that
-removes the guard and asserts the race test then fails. A concurrency test that
-cannot be made to fail is not evidence — it is a test that has never been in a
-position to notice anything.
+Each guard has a **hostile companion** (ADR-0018) that removes the guard and
+asserts the failure it was hiding. For the allocation race that means patching
+the module to select WITHOUT `FOR UPDATE` and showing two concurrent callers
+then take the same value — not merely showing that a hand-inserted duplicate
+trips a unique index, which proves the index and says nothing about the lock.
 
-Two roles, two connections, and a barrier. Sessions must sit on separate DBAPI
-connections or the row lock is trivially satisfied and every race passes
+Sessions sit on separate DBAPI connections and rendezvous on a
+`threading.Barrier`, or the lock is trivially satisfied and every race passes
 vacuously.
 """
 
@@ -27,13 +27,22 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from dotmac_kernel.cache import PlatformScope, TenantScope
+from dotmac_kernel.idempotency import IdempotencyConflict
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from dotmac_numbering import NumberingError, advance_to_at_least, allocate
-from dotmac_numbering.models import AllocationReceipt, NumberSeries
+from dotmac_numbering import (
+    NumberingError,
+    SeriesConfiguration,
+    advance_to_at_least,
+    allocate,
+    configure_series,
+    preview,
+)
+from dotmac_numbering.models import AllocationReceipt, NumberSeries, SeriesRepair
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -44,11 +53,19 @@ NUMBERING_VERSIONS = (
     REPO_ROOT / "packages/dotmac-numbering/src/dotmac_numbering/migrations/versions"
 )
 
-TENANT_TABLES = ("number_series", "allocation_receipts")
-PLATFORM_TABLES = ("platform_number_series", "platform_allocation_receipts")
+TENANT_MUTABLE = ("number_series", "series_counters")
+TENANT_IMMUTABLE = ("allocation_receipts", "series_repairs")
+PLATFORM_TABLES = (
+    "platform_number_series",
+    "platform_series_counters",
+    "platform_allocation_receipts",
+    "platform_series_repairs",
+)
+PLATFORM_IMMUTABLE = ("platform_allocation_receipts", "platform_series_repairs")
 
 JAN = date(2026, 1, 15)
 FEB = date(2026, 2, 15)
+DEC = date(2026, 12, 31)
 NEXT_YEAR = date(2027, 1, 5)
 
 
@@ -66,25 +83,6 @@ def _url_for(base_url: str, dbname: str, *, user: str | None = None) -> str:
         host = userhost.rpartition("@")[2]
         scheme_userhost = f"{scheme}://{user}@{host}"
     return f"{scheme_userhost}/{dbname}"
-
-
-def _migrate(name: str, superuser: str, planes: tuple[ModulePlane, ...]) -> str:
-    from alembic import command
-    from alembic.config import Config
-
-    cfg = Config(str(REPO_ROOT / "alembic.ini"))
-    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
-    cfg.set_main_option(
-        "version_locations",
-        f"{KERNEL_VERSIONS} {ASSEMBLY_VERSIONS} {NUMBERING_VERSIONS}",
-    )
-    cfg.attributes["module_plane_selections"] = (
-        ModulePlaneSelection(module="numbering", planes=planes),
-    )
-    admin_url = _url_for(superuser, name, user="app_admin")
-    os.environ["MIGRATION_DATABASE_URL"] = admin_url
-    command.upgrade(cfg, "heads")
-    return admin_url
 
 
 @pytest.fixture
@@ -106,9 +104,24 @@ def scratch() -> Iterator[tuple[str, str, str]]:
     setup.dispose()
 
     try:
-        admin_url = _migrate(
-            name, superuser, (ModulePlane.TENANT, ModulePlane.PLATFORM)
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config(str(REPO_ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        cfg.set_main_option(
+            "version_locations",
+            f"{KERNEL_VERSIONS} {ASSEMBLY_VERSIONS} {NUMBERING_VERSIONS}",
         )
+        cfg.attributes["module_plane_selections"] = (
+            ModulePlaneSelection(
+                module="numbering",
+                planes=(ModulePlane.TENANT, ModulePlane.PLATFORM),
+            ),
+        )
+        admin_url = _url_for(superuser, name, user="app_admin")
+        os.environ["MIGRATION_DATABASE_URL"] = admin_url
+        command.upgrade(cfg, "heads")
         yield (
             admin_url,
             _url_for(superuser, name, user="app_user"),
@@ -127,16 +140,11 @@ def scratch() -> Iterator[tuple[str, str, str]]:
         server.dispose()
 
 
-def _seed_tenant(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:
-    """Two tenants and one identically-coded series in each.
-
-    Same `series_code` in both on purpose: a cross-tenant leak is only
-    observable when the codes collide.
-    """
-    left, right = uuid.uuid4(), uuid.uuid4()
+def _make_tenants(admin_url: str, count: int = 2) -> list[uuid.UUID]:
+    ids = [uuid.uuid4() for _ in range(count)]
     engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     with engine.connect() as conn:
-        for tenant in (left, right):
+        for tenant in ids:
             conn.execute(
                 text(
                     "INSERT INTO public.tenants (id, name, slug, is_active) "
@@ -144,82 +152,73 @@ def _seed_tenant(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:
                 ),
                 {"id": tenant, "n": f"t-{tenant.hex[:8]}", "s": tenant.hex[:8]},
             )
-            conn.execute(
-                text(
-                    "INSERT INTO mod_numbering.number_series "
-                    "(id, tenant_id, series_code, prefix, separator, min_digits, "
-                    " include_year, year_digits, include_month, reset_policy, "
-                    " next_value) "
-                    "VALUES (:id, :t, 'invoice', 'INV', '-', 6, 0, 4, 0, "
-                    "'never', 1)"
-                ),
-                {"id": uuid.uuid4(), "t": tenant},
-            )
     engine.dispose()
-    return left, right
+    return ids
 
 
-def _tenant_session(url: str, tenant_id: uuid.UUID) -> Session:
-    """A session on its OWN connection, with the RLS GUC set."""
-    engine = create_engine(url, poolclass=None)
-    session = Session(engine)
-    session.execute(
-        text("SELECT set_config('app.current_tenant_id', :t, false)"),
-        {"t": str(tenant_id)},
-    )
+def _session(url: str, tenant_id: uuid.UUID | None = None) -> Session:
+    """A session on its OWN engine, so concurrency is real."""
+    session = Session(create_engine(url))
+    if tenant_id is not None:
+        session.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, false)"),
+            {"t": str(tenant_id)},
+        )
     return session
 
 
-# ── Proof 1 — tenant RLS and cross-tenant allocation isolation ──────────────
+def _configure(session: Session, scope, **kw) -> None:
+    base: dict[str, object] = {"series_code": "invoice", "prefix": "INV"}
+    base.update(kw)
+    configure_series(
+        session, scope=scope, configuration=SeriesConfiguration(**base)  # type: ignore[arg-type]
+    )
+    session.commit()
 
 
-def test_proof_1_a_tenant_cannot_see_another_tenants_series_or_receipts(scratch):
+# ── Proof 1 — tenant RLS ────────────────────────────────────────────────────
+
+
+def test_proof_1_a_tenant_sees_neither_series_counters_nor_receipts_of_another(scratch):
     admin_url, user_url, _ = scratch
-    left, right = _seed_tenant(admin_url)
+    left, right = _make_tenants(admin_url)
 
-    with _tenant_session(user_url, left) as s:
+    with _session(user_url, left) as s:
+        _configure(s, TenantScope(tenant_id=left))
         allocate(
-            s,
-            scope=__import__(
-                "dotmac_kernel.cache", fromlist=["TenantScope"]
-            ).TenantScope(tenant_id=left),
-            series_code="invoice",
-            reference_date=JAN,
-            idempotency_key="left-1",
+            s, scope=TenantScope(tenant_id=left), series_code="invoice",
+            reference_date=JAN, idempotency_key="left-1",
         )
         s.commit()
 
-    with _tenant_session(user_url, right) as s:
-        # The other tenant's series row is invisible, and so is its receipt.
-        assert s.query(NumberSeries).count() == 1
+    with _session(user_url, right) as s:
+        assert s.query(NumberSeries).count() == 0
         assert s.query(AllocationReceipt).count() == 0
 
 
-def test_proof_1_sensitivity_the_policy_is_what_hides_the_row(scratch):
-    """Without the policy the rows ARE visible — so proof 1 measures the policy.
-
-    Dropping the policy is the only honest way to show the assertion above is
-    not passing because the fixture simply created one row.
-    """
+def test_proof_1_hostile_without_the_policy_the_rows_are_visible(scratch):
+    """Removes the guard and asserts the leak, so proof 1 is measuring RLS and
+    not merely an empty table."""
     admin_url, user_url, _ = scratch
-    left, right = _seed_tenant(admin_url)
+    left, right = _make_tenants(admin_url)
+    with _session(user_url, left) as s:
+        _configure(s, TenantScope(tenant_id=left))
+
     engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     with engine.connect() as conn:
-        conn.execute(
-            text("DROP POLICY number_series_tenant_isolation ON mod_numbering.number_series")
-        )
+        conn.execute(text("DROP POLICY number_series_tenant_isolation ON mod_numbering.number_series"))
         conn.execute(text("ALTER TABLE mod_numbering.number_series NO FORCE ROW LEVEL SECURITY"))
         conn.execute(text("ALTER TABLE mod_numbering.number_series DISABLE ROW LEVEL SECURITY"))
     engine.dispose()
 
-    with _tenant_session(user_url, right) as s:
-        assert s.query(NumberSeries).count() == 2, (
-            "with RLS removed both tenants' series are visible; if this is 1 the "
-            "isolation proof is measuring something other than the policy"
+    with _session(user_url, right) as s:
+        assert s.query(NumberSeries).count() == 1, (
+            "with RLS removed the other tenant's series must be visible; if it "
+            "is not, proof 1 is measuring something other than the policy"
         )
 
 
-# ── Proof 2 — platform revocation and control-plane reachability ────────────
+# ── Proof 2 — platform revocation, and control-plane reachability ───────────
 
 
 @pytest.mark.parametrize("table", PLATFORM_TABLES)
@@ -233,9 +232,9 @@ def test_proof_2_the_tenant_role_is_revoked_from_every_platform_table(scratch, t
 
 
 @pytest.mark.parametrize("table", PLATFORM_TABLES)
-def test_proof_2_the_control_plane_role_can_still_work(scratch, table):
-    """The other half. A revocation that also locked out `platform_api` would
-    pass the test above and break the control plane."""
+def test_proof_2_the_control_plane_role_can_still_read(scratch, table):
+    """A revocation that also locked out `platform_api` would pass the test
+    above and break the control plane."""
     _, _, platform_url = scratch
     engine = create_engine(platform_url)
     with engine.connect() as conn:
@@ -243,9 +242,8 @@ def test_proof_2_the_control_plane_role_can_still_work(scratch, table):
     engine.dispose()
 
 
-@pytest.mark.parametrize("table", TENANT_TABLES)
+@pytest.mark.parametrize("table", (*TENANT_MUTABLE, *TENANT_IMMUTABLE))
 def test_proof_2_tenant_tables_force_rls(scratch, table):
-    """FORCE, not merely ENABLE: without it the table owner bypasses the policy."""
     admin_url, _, _ = scratch
     engine = create_engine(admin_url)
     with engine.connect() as conn:
@@ -260,349 +258,446 @@ def test_proof_2_tenant_tables_force_rls(scratch, table):
     engine.dispose()
 
 
-# ── Proof 3 — two concurrent allocations ────────────────────────────────────
+# ── Proof 3 — the allocation race, and a hostile version without the lock ───
 
 
-def test_proof_3_concurrent_allocations_never_duplicate_a_value(scratch):
-    """Both actors inside their transactions before either proceeds.
-
-    Without the row lock both read `next_value = 1` and both format `INV-000001`.
-    """
-    admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    from dotmac_kernel.cache import TenantScope
-
+def _race(url: str, tenant: uuid.UUID, keys: tuple[str, str]) -> tuple[list, list]:
+    """Two allocations, both inside their transactions before either proceeds."""
     barrier = threading.Barrier(2)
-    results: list[str] = []
+    results: list = []
     errors: list[BaseException] = []
 
     def worker(key: str) -> None:
         try:
-            with _tenant_session(user_url, left) as s:
-                s.execute(text("SELECT 1"))  # open the transaction
-                barrier.wait(timeout=10)
+            with _session(url, tenant) as s:
+                s.execute(text("SELECT 1"))
+                barrier.wait(timeout=15)
                 out = allocate(
-                    s,
-                    scope=TenantScope(tenant_id=left),
-                    series_code="invoice",
-                    reference_date=JAN,
-                    idempotency_key=key,
+                    s, scope=TenantScope(tenant_id=tenant), series_code="invoice",
+                    reference_date=JAN, idempotency_key=key,
                 )
                 s.commit()
-                results.append(out.formatted_number)
-        except BaseException as exc:  # noqa: BLE001 - recorded, re-raised below
+                results.append(out)
+        except BaseException as exc:  # noqa: BLE001 - recorded and asserted on
             errors.append(exc)
             try:
                 barrier.abort()
             except Exception:
                 pass
 
-    threads = [threading.Thread(target=worker, args=(f"k{i}",)) for i in (1, 2)]
+    threads = [threading.Thread(target=worker, args=(k,)) for k in keys]
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=30)
+        t.join(timeout=40)
+    return results, errors
 
+
+def test_proof_3_concurrent_allocations_never_take_the_same_value(scratch):
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(s, TenantScope(tenant_id=tenant))
+
+    results, errors = _race(user_url, tenant, ("k1", "k2"))
     assert not errors, errors
-    assert sorted(results) == ["INV-000001", "INV-000002"], results
+    assert sorted(r.formatted_number for r in results) == ["INV-000001", "INV-000002"]
 
 
-def test_proof_3_sensitivity_the_unique_constraint_would_catch_a_duplicate(scratch):
-    """Two receipts with the same value are impossible at the database.
+def test_proof_3_hostile_without_for_update_the_race_takes_the_same_value(
+    scratch, monkeypatch
+):
+    """THE sensitivity proof for the lock.
 
-    Proof 3 asserts the lock serialises. This asserts the backstop is real, so
-    a future refactor that loses the lock fails loudly rather than silently
-    reissuing a number.
+    Patches the module's counter read to drop `FOR UPDATE` and asserts the
+    failure returns: either both callers format the same number, or the second
+    insert trips the receipt unique constraint. A duplicate hand-inserted by
+    the test would prove the index instead, and say nothing about the lock.
     """
-    admin_url, _, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    engine = create_engine(admin_url)
-    insert = text(
-        "INSERT INTO mod_numbering.allocation_receipts "
-        "(id, tenant_id, series_code, allocated_value, formatted_number, "
-        " reference_date, idempotency_key, request_fingerprint, allocated_at) "
-        "VALUES (:id, :t, 'invoice', 7, 'INV-000007', :d, :k, 'fp', now())"
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(s, TenantScope(tenant_id=tenant))
+
+    from dotmac_numbering import service as svc
+
+    def unlocked_counter(db, scope, series, period_key):
+        counter_model = svc._models(scope)[1]
+        stmt = select(counter_model).where(
+            counter_model.series_code == series.series_code,
+            counter_model.period_key == period_key,
+        )
+        stmt = svc._tenant_filter(stmt, scope, counter_model)
+        row = db.execute(stmt).scalar_one_or_none()
+        if row is None:
+            values = {
+                "id": uuid.uuid4(),
+                "series_code": series.series_code,
+                "period_key": period_key,
+                "next_value": series.start_value,
+            }
+            if isinstance(scope, TenantScope):
+                values["tenant_id"] = scope.tenant_id
+            row = counter_model(**values)
+            db.add(row)
+            db.flush()
+        return row
+
+    monkeypatch.setattr(svc, "_locked_counter", unlocked_counter)
+
+    results, errors = _race(user_url, tenant, ("h1", "h2"))
+    numbers = [r.formatted_number for r in results]
+    assert errors or len(set(numbers)) < 2, (
+        "with FOR UPDATE removed the race must either duplicate a value or "
+        f"fail; it produced {numbers} cleanly, so proof 3 is not measuring the "
+        "lock"
     )
-    with Session(engine) as s:
-        s.execute(insert, {"id": uuid.uuid4(), "t": left, "d": JAN, "k": "a"})
-        s.commit()
-        with pytest.raises(IntegrityError):
-            s.execute(insert, {"id": uuid.uuid4(), "t": left, "d": JAN, "k": "b"})
-            s.commit()
-    engine.dispose()
+
+
+def test_proof_3_concurrent_identical_keys_replay_rather_than_conflict(scratch):
+    """The hole a hand-rolled receipt lookup leaves.
+
+    Both callers miss the receipt before locking, so a home-grown
+    implementation has the loser allocate a second number and raise
+    IntegrityError. The kernel ledger converts that race into a replay.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(s, TenantScope(tenant_id=tenant))
+
+    results, errors = _race(user_url, tenant, ("same", "same"))
+    assert not errors, errors
+    assert len({r.formatted_number for r in results}) == 1
+    assert sorted(r.replayed for r in results) == [False, True]
+
+    with _session(user_url, tenant) as s:
+        assert s.query(AllocationReceipt).count() == 1
 
 
 # ── Proof 4 — rollback with the consuming transaction ───────────────────────
 
 
 def test_proof_4_a_rolled_back_caller_consumes_no_number(scratch):
-    """A failed invoice must not burn a number, and must not advance the counter."""
     admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    from dotmac_kernel.cache import TenantScope
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
 
-    with _tenant_session(user_url, left) as s:
+    with _session(user_url, tenant) as s:
         allocate(
-            s,
-            scope=TenantScope(tenant_id=left),
-            series_code="invoice",
-            reference_date=JAN,
+            s, scope=scope, series_code="invoice", reference_date=JAN,
             idempotency_key="doomed",
         )
         s.rollback()
 
-    with _tenant_session(user_url, left) as s:
+    with _session(user_url, tenant) as s:
         assert s.query(AllocationReceipt).count() == 0
-        assert s.query(NumberSeries).one().next_value == 1
         out = allocate(
-            s,
-            scope=TenantScope(tenant_id=left),
-            series_code="invoice",
-            reference_date=JAN,
+            s, scope=scope, series_code="invoice", reference_date=JAN,
             idempotency_key="real",
         )
         s.commit()
     assert out.formatted_number == "INV-000001"
 
 
-# ── Proof 5 — replay and fingerprint conflict ───────────────────────────────
+# ── Proof 5 — replay and conflict, through the kernel ledger ────────────────
 
 
-def test_proof_5_same_key_same_request_replays_the_original_number(scratch):
+def test_proof_5_same_key_same_request_replays(scratch):
     admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    from dotmac_kernel.cache import TenantScope
-
-    with _tenant_session(user_url, left) as s:
-        scope = TenantScope(tenant_id=left)
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
         first = allocate(
             s, scope=scope, series_code="invoice", reference_date=JAN,
-            idempotency_key="retry-me",
+            idempotency_key="retry",
         )
         s.commit()
         second = allocate(
             s, scope=scope, series_code="invoice", reference_date=JAN,
-            idempotency_key="retry-me",
+            idempotency_key="retry",
         )
         s.commit()
-
         assert second.formatted_number == first.formatted_number
         assert second.replayed is True
         assert s.query(AllocationReceipt).count() == 1
-        assert s.query(NumberSeries).one().next_value == 2
 
 
 def test_proof_5_same_key_different_request_conflicts(scratch):
-    """A changed reference date under a reused key is a different allocation.
-
-    Returning the original silently would hand the caller a number formatted
-    for the wrong period.
-    """
+    """The kernel raises its own conflict type — this module does not
+    reimplement the comparison (hard rule 23)."""
     admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    from dotmac_kernel.cache import TenantScope
-
-    with _tenant_session(user_url, left) as s:
-        scope = TenantScope(tenant_id=left)
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
         allocate(
             s, scope=scope, series_code="invoice", reference_date=JAN,
             idempotency_key="reused",
         )
         s.commit()
-        with pytest.raises(NumberingError) as exc:
+        with pytest.raises(IdempotencyConflict):
             allocate(
                 s, scope=scope, series_code="invoice", reference_date=FEB,
                 idempotency_key="reused",
             )
-    assert exc.value.code.endswith("idempotency_conflict")
 
 
-# ── Proof 6 — reset boundaries come from the supplied date ──────────────────
+# ── Proof 6 — per-period counters ───────────────────────────────────────────
 
 
-def _set_reset_policy(admin_url: str, tenant: uuid.UUID, policy: str) -> None:
-    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
-    with engine.connect() as conn:
-        conn.execute(
-            text(
-                "UPDATE mod_numbering.number_series SET reset_policy = :p, "
-                "include_year = 1 WHERE tenant_id = :t"
-            ),
-            {"p": policy, "t": tenant},
-        )
-    engine.dispose()
-
-
-def test_proof_6_the_reset_follows_the_business_date_not_the_clock(scratch):
+def test_proof_6_each_period_has_its_own_counter(scratch):
+    """Yearly reset reuses value 1, which is only sound because the receipt
+    identity includes the period."""
     admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    _set_reset_policy(admin_url, left, "yearly")
-    from dotmac_kernel.cache import TenantScope
-
-    with _tenant_session(user_url, left) as s:
-        scope = TenantScope(tenant_id=left)
-        first = allocate(
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, reset_policy="yearly", include_year=True)
+        this_year = allocate(
             s, scope=scope, series_code="invoice", reference_date=JAN,
             idempotency_key="y1",
         )
         s.commit()
-        rolled = allocate(
+        next_year = allocate(
             s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR,
             idempotency_key="y2",
         )
         s.commit()
 
-    assert first.formatted_number == "INV-2026-000001"
-    # A new year restarts the counter, and the year in the number comes from
-    # the supplied date rather than from today.
-    assert rolled.formatted_number == "INV-2027-000001"
+    assert this_year.formatted_number == "INV-2026-000001"
+    assert next_year.formatted_number == "INV-2027-000001"
+    assert (this_year.period_key, next_year.period_key) == ("2026", "2027")
 
 
-def test_proof_6_a_backdated_allocation_does_not_rewind_the_counter(scratch):
-    """ERP's defect, pinned as a refusal.
+def test_proof_6_a_backdated_allocation_continues_its_own_period(scratch):
+    """The failure a single counter cannot avoid.
 
-    `should_reset` there compares period INEQUALITY, so an allocation dated
-    last year looks like a new period and restarts the sequence — reissuing
-    numbers that are already on issued documents. Ordering is the fix.
+    After rolling into 2027, a backdated 2026 allocation must take the NEXT
+    2026 value — not the current 2027 counter formatted with a 2026 year,
+    which could duplicate a 2026 number already issued.
     """
     admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    _set_reset_policy(admin_url, left, "yearly")
-    from dotmac_kernel.cache import TenantScope
-
-    with _tenant_session(user_url, left) as s:
-        scope = TenantScope(tenant_id=left)
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, reset_policy="yearly", include_year=True)
+        for i in range(3):
+            allocate(
+                s, scope=scope, series_code="invoice", reference_date=DEC,
+                idempotency_key=f"d{i}",
+            )
+            s.commit()
         allocate(
             s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR,
-            idempotency_key="a",
+            idempotency_key="n1",
         )
         s.commit()
         backdated = allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
-            idempotency_key="b",
+            s, scope=scope, series_code="invoice", reference_date=DEC,
+            idempotency_key="late",
         )
         s.commit()
 
-    # The counter continues; only the printed year reflects the older date.
-    assert backdated.formatted_number == "INV-2026-000002"
+    # Three 2026 numbers already issued, so the backdated one is the fourth of
+    # 2026 — not the second of 2027 wearing a 2026 year.
+    assert backdated.formatted_number == "INV-2026-000004"
+    assert backdated.period_key == "2026"
 
 
-# ── Proof 7 — configuration cannot rewrite a receipt or rewind a counter ────
-
-
-def test_proof_7_repair_advances_and_never_rewinds(scratch):
+def test_proof_6_preview_reads_the_period_of_the_date_it_is_given(scratch):
     admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    from dotmac_kernel.cache import TenantScope
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, reset_policy="yearly", include_year=True)
+        allocate(
+            s, scope=scope, series_code="invoice", reference_date=JAN,
+            idempotency_key="p1",
+        )
+        s.commit()
+        assert preview(s, scope=scope, series_code="invoice", reference_date=JAN) == (
+            "INV-2026-000002"
+        )
+        assert preview(
+            s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR
+        ) == "INV-2027-000001"
 
-    with _tenant_session(user_url, left) as s:
-        scope = TenantScope(tenant_id=left)
+
+# ── Proof 7 — structural immutability, and repair evidence ──────────────────
+
+
+@pytest.mark.parametrize("table", TENANT_IMMUTABLE)
+def test_proof_7_raw_update_and_delete_are_refused_on_append_only_tables(
+    scratch, table
+):
+    """Not a service promise — a database property.
+
+    A service-level rule would not survive the first hand-written migration
+    that "fixes up" a number, which is exactly what ERP's reset_sequence does.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
+        allocate(
+            s, scope=scope, series_code="invoice", reference_date=JAN,
+            idempotency_key="k1",
+        )
+        advance_to_at_least(
+            s, scope=scope, series_code="invoice", period_key="*",
+            proven_minimum=50, reason="backfill", repaired_by="ops:ada",
+        )
+        s.commit()
+
+    engine = create_engine(user_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, false)"),
+            {"t": str(tenant)},
+        )
+        with pytest.raises(DBAPIError):
+            conn.execute(text(f"UPDATE mod_numbering.{table} SET series_code = 'x'"))
+    engine.dispose()
+
+    engine = create_engine(user_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, false)"),
+            {"t": str(tenant)},
+        )
+        with pytest.raises(DBAPIError):
+            conn.execute(text(f"DELETE FROM mod_numbering.{table}"))
+    engine.dispose()
+
+
+@pytest.mark.parametrize("table", (*TENANT_IMMUTABLE, *PLATFORM_IMMUTABLE))
+def test_proof_7_even_the_owner_role_cannot_rewrite_history(scratch, table):
+    """The trigger covers roles the grants do not — `app_admin` owns the schema
+    and would otherwise be able to update freely."""
+    admin_url, _, _ = scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn, pytest.raises(DBAPIError) as exc:
+        conn.execute(text(f"UPDATE mod_numbering.{table} SET series_code = 'x'"))
+    assert "append-only" in str(exc.value).lower()
+    engine.dispose()
+
+
+@pytest.mark.parametrize("table", (*TENANT_IMMUTABLE, *PLATFORM_IMMUTABLE))
+def test_proof_7_append_only_tables_have_no_updated_at(scratch, table):
+    """A column recording a change to a row that cannot change is dead or a lie."""
+    admin_url, _, _ = scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        columns = {
+            r[0]
+            for r in conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'mod_numbering' AND table_name = :t"
+                ),
+                {"t": table},
+            )
+        }
+    assert "updated_at" not in columns
+    engine.dispose()
+
+
+def test_proof_7_repair_advances_names_its_period_and_leaves_evidence(scratch):
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, reset_policy="yearly", include_year=True)
         allocate(
             s, scope=scope, series_code="invoice", reference_date=JAN,
             idempotency_key="k1",
         )
         s.commit()
 
-        assert advance_to_at_least(
-            s, scope=scope, series_code="invoice", proven_minimum=500
-        ) == 501
+        repair = advance_to_at_least(
+            s, scope=scope, series_code="invoice", period_key="2026",
+            proven_minimum=500, reason="ledger backfill", repaired_by="ops:ada",
+        )
         s.commit()
+        assert (repair.changed, repair.new_next_value) == (True, 501)
 
-        # Below the current value is a no-op, not a rewind.
-        assert advance_to_at_least(
-            s, scope=scope, series_code="invoice", proven_minimum=3
-        ) == 501
+        # Below the current value is a no-op, and still leaves evidence that it
+        # was attempted.
+        again = advance_to_at_least(
+            s, scope=scope, series_code="invoice", period_key="2026",
+            proven_minimum=3, reason="mistake", repaired_by="ops:ada",
+        )
         s.commit()
+        assert (again.changed, again.new_next_value) == (False, 501)
 
-        out = allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+        rows = s.query(SeriesRepair).order_by(SeriesRepair.repaired_at).all()
+        assert [r.proven_minimum for r in rows] == [500, 3]
+        assert {r.repaired_by for r in rows} == {"ops:ada"}
+        assert [r.period_key for r in rows] == ["2026", "2026"]
+
+        # The other period is untouched: repair names one counter.
+        nxt = allocate(
+            s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR,
             idempotency_key="k2",
         )
         s.commit()
-    assert out.formatted_number == "INV-000501"
+    assert nxt.formatted_number == "INV-2027-000001"
 
 
-def test_proof_7_a_receipt_survives_a_configuration_change(scratch):
-    """Reconfiguring the series must not retro-format issued numbers."""
+def test_proof_7_a_malformed_period_key_is_refused(scratch):
+    """A typo would silently create a counter nothing ever reads."""
     admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    from dotmac_kernel.cache import TenantScope
-
-    with _tenant_session(user_url, left) as s:
-        issued = allocate(
-            s, scope=TenantScope(tenant_id=left), series_code="invoice",
-            reference_date=JAN, idempotency_key="k1",
-        )
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, reset_policy="yearly", include_year=True)
         s.commit()
-
-    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
-    with engine.connect() as conn:
-        conn.execute(
-            text(
-                "UPDATE mod_numbering.number_series SET prefix = 'CHANGED', "
-                "min_digits = 9 WHERE tenant_id = :t"
-            ),
-            {"t": left},
-        )
-    engine.dispose()
-
-    with _tenant_session(user_url, left) as s:
-        stored = s.query(AllocationReceipt).one()
-    assert stored.formatted_number == issued.formatted_number == "INV-000001"
+        for bad in ("*", "26", "2026-13", "2026-1", "nope"):
+            with pytest.raises(NumberingError) as exc:
+                advance_to_at_least(
+                    s, scope=scope, series_code="invoice", period_key=bad,
+                    proven_minimum=5, reason="r", repaired_by="ops:ada",
+                )
+            assert exc.value.code.endswith("invalid_period_key")
 
 
-# ── Proof 8 — the two planes run the same behaviour ─────────────────────────
+# ── Proof 8 — both planes run the same behaviour ────────────────────────────
 
 
 def test_proof_8_both_planes_produce_the_same_number_for_the_same_input(scratch):
-    """One engine, two planes. A divergence here means the plane split leaked
-    into behaviour, which is exactly what a shared implementation is for."""
     admin_url, user_url, platform_url = scratch
-    left, _ = _seed_tenant(admin_url)
-    from dotmac_kernel.cache import PlatformScope, TenantScope
+    (tenant,) = _make_tenants(admin_url, 1)
 
-    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
-    with engine.connect() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO mod_numbering.platform_number_series "
-                "(id, series_code, prefix, separator, min_digits, include_year, "
-                " year_digits, include_month, reset_policy, next_value) "
-                "VALUES (:id, 'invoice', 'INV', '-', 6, 0, 4, 0, 'never', 1)"
-            ),
-            {"id": uuid.uuid4()},
-        )
-    engine.dispose()
-
-    with _tenant_session(user_url, left) as s:
+    with _session(user_url, tenant) as s:
+        _configure(s, TenantScope(tenant_id=tenant))
         tenant_number = allocate(
-            s, scope=TenantScope(tenant_id=left), series_code="invoice",
+            s, scope=TenantScope(tenant_id=tenant), series_code="invoice",
             reference_date=JAN, idempotency_key="same",
         ).formatted_number
         s.commit()
 
-    platform_engine = create_engine(platform_url)
-    with Session(platform_engine) as s:
+    with _session(platform_url) as s:
+        _configure(s, PlatformScope())
         platform_number = allocate(
             s, scope=PlatformScope(), series_code="invoice",
             reference_date=JAN, idempotency_key="same",
         ).formatted_number
         s.commit()
-    platform_engine.dispose()
 
     assert tenant_number == platform_number == "INV-000001"
 
 
 def test_an_unconfigured_series_fails_closed(scratch):
-    """No auto-create. ERP invents a series with a guessed prefix on first use,
-    so a typo silently becomes a live document series."""
     admin_url, user_url, _ = scratch
-    left, _ = _seed_tenant(admin_url)
-    from dotmac_kernel.cache import TenantScope
-
-    with _tenant_session(user_url, left) as s, pytest.raises(NumberingError) as exc:
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s, pytest.raises(NumberingError) as exc:
         allocate(
-            s, scope=TenantScope(tenant_id=left), series_code="typo",
+            s, scope=TenantScope(tenant_id=tenant), series_code="typo",
             reference_date=JAN, idempotency_key="k",
         )
     assert exc.value.code.endswith("series_not_configured")

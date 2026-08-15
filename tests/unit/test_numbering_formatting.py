@@ -1,9 +1,8 @@
-"""Formatting, period ordering and fingerprint logic — the pure half.
+"""Formatting, period identity and configuration validation — the pure half.
 
-These run on the fast lane and prove no tenancy, no locking and no isolation:
-those need real PostgreSQL and live in ``tests/test_numbering_isolation.py``.
-What they do prove is the arithmetic the sources got wrong, where a defect is
-visible without a database at all.
+These prove no tenancy, no locking and no isolation: those need real PostgreSQL
+and live in ``tests/test_numbering_isolation.py``. What they do prove is the
+arithmetic and the validation, where a defect is visible without a database.
 """
 
 from __future__ import annotations
@@ -11,13 +10,21 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
-from dotmac_numbering import NumberingError, format_number, period_for, preview
-from dotmac_numbering.service import request_fingerprint
+from dotmac_numbering import (
+    NO_PERIOD,
+    NumberingError,
+    SeriesConfiguration,
+    format_number,
+    period_for,
+)
 
 
 class _Series:
-    """The configuration surface the formatter reads. Deliberately not the ORM
-    model: the formatter must not need a session to be testable."""
+    """The configuration surface the formatter reads.
+
+    Deliberately not the ORM model: the formatter must be testable without a
+    session, or it will grow a dependency on one.
+    """
 
     def __init__(self, **kw: object) -> None:
         self.prefix = kw.get("prefix", "INV")
@@ -27,24 +34,23 @@ class _Series:
         self.include_year = kw.get("include_year", 0)
         self.year_digits = kw.get("year_digits", 4)
         self.include_month = kw.get("include_month", 0)
-        self.reset_policy = kw.get("reset_policy", "never")
-        self.next_value = kw.get("next_value", 1)
-        self.current_period = kw.get("current_period")
 
 
 JAN = date(2026, 1, 15)
 
 
-# ── Periods are ORDERED, not merely compared ────────────────────────────────
+# ── Period identity ─────────────────────────────────────────────────────────
 
 
-def test_periods_are_lexically_ordered_so_later_sorts_higher():
-    """The whole reset decision rests on this.
+def test_a_non_resetting_series_has_a_total_period_key():
+    """`*`, not null. Every unique key including the period stays total."""
+    assert period_for(JAN, "never") == NO_PERIOD
 
-    ERP compares periods for inequality, so a backdated allocation looks like a
-    new period and rewinds the counter. Ordering only works if the strings are
-    zero-padded — `"2026-9" > "2026-10"` is lexically true and wrong.
-    """
+
+def test_periods_are_zero_padded_so_ordering_is_lexical():
+    """Ordering is what stops a backdated allocation restarting a sequence, and
+    it only holds if the strings are padded — `"2026-9" > "2026-10"` is
+    lexically true and wrong."""
     assert period_for(date(2026, 2, 1), "monthly") > period_for(
         date(2026, 1, 31), "monthly"
     )
@@ -56,8 +62,11 @@ def test_periods_are_lexically_ordered_so_later_sorts_higher():
     )
 
 
-def test_a_never_reset_series_has_no_period():
-    assert period_for(JAN, "never") is None
+def test_the_period_identifies_the_number_not_the_clock():
+    """A 2026 date yields the 2026 period whenever it is presented. This is the
+    property that lets a backdated allocation read its own counter."""
+    assert period_for(date(2026, 3, 4), "yearly") == "2026"
+    assert period_for(date(2026, 3, 4), "monthly") == "2026-03"
 
 
 def test_an_unregistered_reset_policy_fails_closed():
@@ -88,8 +97,6 @@ def test_format_number_covers_the_configuration_surface(kwargs, value, expected)
 
 
 def test_an_empty_prefix_produces_no_leading_separator():
-    """A dropped empty segment, not an empty one — `-000007` is a different
-    number to a human and to a unique index."""
     assert not format_number(
         _Series(prefix=""), value=7, reference_date=JAN
     ).startswith("-")
@@ -101,30 +108,64 @@ def test_a_value_below_one_is_refused():
     assert exc.value.code.endswith("invalid_value")
 
 
-def test_preview_agrees_with_what_allocation_would_format():
-    """ERP's preview hardcodes a four-digit segment, so for every series whose
-    width is not four it shows a number that will never be issued."""
-    series = _Series(min_digits=9, next_value=77)
-    assert preview(series, reference_date=JAN) == format_number(
-        series, value=77, reference_date=JAN
-    )
-    assert preview(series, reference_date=JAN) == "INV-000000077"
+# ── Configuration validation ────────────────────────────────────────────────
 
 
-# ── Fingerprints ────────────────────────────────────────────────────────────
+def _config(**kw: object) -> SeriesConfiguration:
+    base: dict[str, object] = {"series_code": "invoice"}
+    base.update(kw)
+    return SeriesConfiguration(**base)  # type: ignore[arg-type]
 
 
-def test_the_fingerprint_covers_the_request_and_nothing_else():
-    base = {"series_code": "invoice", "reference_date": JAN, "scope_segment": "t=1"}
-    assert request_fingerprint(**base) == request_fingerprint(**base)
-    assert request_fingerprint(**{**base, "reference_date": date(2026, 2, 1)}) != (
-        request_fingerprint(**base)
-    )
-    assert request_fingerprint(**{**base, "series_code": "credit"}) != (
-        request_fingerprint(**base)
-    )
-    # Scope is part of the identity: the same key in two tenants is two
-    # different requests, not a replay.
-    assert request_fingerprint(**{**base, "scope_segment": "t=2"}) != (
-        request_fingerprint(**base)
-    )
+def test_a_valid_configuration_passes():
+    _config().validate()
+    _config(reset_policy="yearly", include_year=True).validate()
+    _config(reset_policy="monthly", include_year=True, include_month=True).validate()
+
+
+def test_a_yearly_reset_must_print_the_year():
+    """Otherwise every January reissues the strings of the year before, and the
+    number stops identifying the document."""
+    with pytest.raises(NumberingError) as exc:
+        _config(reset_policy="yearly").validate()
+    assert exc.value.code.endswith("incoherent_reset")
+
+
+def test_a_monthly_reset_must_print_year_and_month():
+    with pytest.raises(NumberingError) as exc:
+        _config(reset_policy="monthly", include_year=True).validate()
+    assert exc.value.code.endswith("incoherent_reset")
+
+
+def test_a_month_without_a_year_is_refused():
+    with pytest.raises(NumberingError) as exc:
+        _config(include_month=True).validate()
+    assert exc.value.code.endswith("incoherent_format")
+
+
+@pytest.mark.parametrize("width", [0, -1, 19, 100])
+def test_an_impossible_digit_width_is_refused(width):
+    with pytest.raises(NumberingError) as exc:
+        _config(min_digits=width).validate()
+    assert exc.value.code.endswith("invalid_min_digits")
+
+
+@pytest.mark.parametrize("digits", [1, 3, 5])
+def test_an_unsupported_year_width_is_refused(digits):
+    with pytest.raises(NumberingError) as exc:
+        _config(year_digits=digits).validate()
+    assert exc.value.code.endswith("invalid_year_digits")
+
+
+@pytest.mark.parametrize("start", [0, -5])
+def test_a_non_positive_start_value_is_refused(start):
+    with pytest.raises(NumberingError) as exc:
+        _config(start_value=start).validate()
+    assert exc.value.code.endswith("invalid_start_value")
+
+
+def test_an_empty_or_oversized_series_code_is_refused():
+    with pytest.raises(NumberingError):
+        _config(series_code="").validate()
+    with pytest.raises(NumberingError):
+        _config(series_code="x" * 81).validate()

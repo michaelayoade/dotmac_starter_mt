@@ -48,7 +48,12 @@ def test_both_planes_are_declared_and_disjoint() -> None:
 
 
 def test_platform_tables_carry_no_tenant_column() -> None:
-    for model in (models.PlatformNumberSeries, models.PlatformAllocationReceipt):
+    for model in (
+        models.PlatformNumberSeries,
+        models.PlatformSeriesCounter,
+        models.PlatformAllocationReceipt,
+        models.PlatformSeriesRepair,
+    ):
         assert "tenant_id" not in model.__table__.c, (
             f"{model.__name__} has a tenant column; the platform plane is "
             "isolated by REVOKE, and a tenant column there invites RLS that "
@@ -57,7 +62,12 @@ def test_platform_tables_carry_no_tenant_column() -> None:
 
 
 def test_every_tenant_table_has_a_not_null_tenant_and_composite_identity() -> None:
-    for model in (models.NumberSeries, models.AllocationReceipt):
+    for model in (
+        models.NumberSeries,
+        models.SeriesCounter,
+        models.AllocationReceipt,
+        models.SeriesRepair,
+    ):
         column = model.__table__.c["tenant_id"]
         assert column.nullable is False
         constraints = {
@@ -71,9 +81,13 @@ def test_every_tenant_table_has_a_not_null_tenant_and_composite_identity() -> No
 def test_no_foreign_key_crosses_the_planes() -> None:
     for model in (
         models.NumberSeries,
+        models.SeriesCounter,
         models.AllocationReceipt,
+        models.SeriesRepair,
         models.PlatformNumberSeries,
+        models.PlatformSeriesCounter,
         models.PlatformAllocationReceipt,
+        models.PlatformSeriesRepair,
     ):
         for fk in model.__table__.foreign_keys:
             target = str(fk.target_fullname)
@@ -109,7 +123,9 @@ def test_the_module_reads_no_clock_for_a_business_decision() -> None:
     assert "date.today()" not in source
     assert "datetime.today()" not in source
     # The one permitted clock read, and it must stay in the receipt only.
-    assert source.count("datetime.now(") == 1
+    # Receipts, repair evidence and their created_at stamps — evidence, never
+    # a decision input.
+    assert source.count("datetime.now(") <= 6
 
 
 def test_the_module_reads_no_settings_and_no_environment() -> None:
@@ -134,6 +150,78 @@ def test_there_is_exactly_one_formatter() -> None:
     assert "format_number(" in preview_src
 
 
+def test_at_most_once_is_delegated_to_the_kernel() -> None:
+    """Hard rule 23: `dotmac_kernel.idempotency` owns replay, fingerprint
+    comparison and the concurrent-key race, and nothing else may.
+
+    A hand-rolled receipt lookup has a hole the kernel does not — two
+    concurrent calls with the same key both miss it, both allocate, and the
+    loser raises IntegrityError instead of replaying.
+    """
+    source = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
+    assert "execute_once" in source and "execute_once_platform" in source
+    # No second ledger, and no local replay decision.
+    for reimplementation in (
+        "class IdempotencyRecord",
+        "request_fingerprint",
+        "idempotency_conflict",
+    ):
+        assert reimplementation not in source, (
+            f"{reimplementation} reimplements kernel idempotency mechanics"
+        )
+
+
+def test_every_counter_is_scoped_to_a_period() -> None:
+    """A resetting series has one counter per period.
+
+    With a single counter, yearly reset reuses value 1 and collides with the
+    prior year's receipt; and a backdated allocation formats an old-period
+    number from the current counter, which can duplicate an issued one.
+    """
+    for model in (models.SeriesCounter, models.PlatformSeriesCounter):
+        assert "period_key" in model.__table__.c
+        assert model.__table__.c["period_key"].nullable is False
+    for model in (models.AllocationReceipt, models.PlatformAllocationReceipt):
+        uniques = {
+            tuple(sorted(c.columns.keys()))
+            for c in model.__table__.constraints
+            if type(c).__name__ == "UniqueConstraint"
+        }
+        assert any("period_key" in cols and "allocated_value" in cols for cols in uniques), (
+            f"{model.__name__} must key value uniqueness on the period too"
+        )
+
+
+def test_append_only_tables_carry_no_updated_at() -> None:
+    for model in (
+        models.AllocationReceipt,
+        models.SeriesRepair,
+        models.PlatformAllocationReceipt,
+        models.PlatformSeriesRepair,
+    ):
+        assert "updated_at" not in model.__table__.c, (
+            f"{model.__name__} is append-only; an updated_at there is dead or a lie"
+        )
+
+
+def test_the_migration_makes_append_only_structural() -> None:
+    """Grants and a trigger, not a service promise."""
+    migration = MIGRATION.read_text(encoding="utf-8")
+    assert "BEFORE UPDATE OR DELETE" in migration
+    assert "refuse_mutation" in migration
+    for table in models.IMMUTABLE_TABLES:
+        assert f"GRANT SELECT, INSERT ON mod_numbering.{table}" in migration
+
+
+def test_configuration_and_repair_are_typed_commands() -> None:
+    """A consumer must not have to write module tables directly."""
+    assert hasattr(service, "configure_series")
+    assert hasattr(service, "SeriesConfiguration")
+    repair = inspect.signature(service.advance_to_at_least).parameters
+    for required in ("period_key", "reason", "repaired_by"):
+        assert required in repair, f"repair cannot omit {required}"
+
+
 def test_no_path_lowers_a_counter_or_deletes_a_receipt() -> None:
     """Repair is advance-only. ERP's `reset_sequence` rewinds and rewrites, and
     that is how a committed number gets reissued."""
@@ -141,8 +229,8 @@ def test_no_path_lowers_a_counter_or_deletes_a_receipt() -> None:
     assert "db.delete" not in source
     assert ".delete()" not in source
     repair = inspect.getsource(service.advance_to_at_least)
-    # The only assignment to next_value in repair is guarded by a > comparison.
-    assert "if proven_minimum + 1 > series.next_value:" in repair
+    # The counter only moves when the target is strictly higher.
+    assert "changed = target > previous" in repair
 
 
 def test_the_series_vocabulary_is_open() -> None:
