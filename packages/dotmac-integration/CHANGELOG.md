@@ -152,6 +152,38 @@ absent, so the moment the handoff lands the suite goes red and names the markers
 that must come off. The trusted destination is consumed through structural
 protocols (`TrustedDestination`, `TrustedScope`) that Team 3's frozen
 `DestinationBinding` already satisfies, so adopting it is a one-line import.
+## Unreleased
+
+Payload retention. No version bump here on purpose: the release lane decides
+when this ships, and a bump in the same change as the behaviour makes the two
+decisions one.
+
+### Added
+
+- **`dotmac_integration.retention`** — a receipt's CONTENT ages out; its
+  identity never does. Redaction rewrites `payload_json`, `headers_json` and
+  the values inside `consequence_json`, and touches no column deduplication,
+  ordering or outcome comparison reads. A provider redelivering a
+  months-old event still gets "already received" rather than being processed a
+  second time, and one event id arriving with different content is still a
+  `ProviderEventIdentityCollision`.
+- **No default retention period and no default legal-policy owner.**
+  `resolve_retention_policy` refuses until `INTEGRATION_PAYLOAD_RETENTION_DAYS`
+  and `INTEGRATION_RETENTION_LEGAL_POLICY_OWNER` are both set, in every
+  environment. A period baked into a library becomes the deployment's
+  data-retention posture without anyone deciding it.
+- **`receipt_legal_holds`** (migration `ig_0004_retention`) — a held receipt is
+  never redacted, and the refusal is named and counted. Platform plane, with a
+  PARTIAL unique index enforcing at most one ACTIVE hold per receipt while
+  keeping released holds as the record that they existed.
+- **Four refusals, four ways to destroy in-flight work**: `legal_hold`,
+  `leased` (a worker's claim), `unresolved` (including `dead_letter` and
+  `retryable`, which `replay_receipt` may still move) and
+  `reconciliation_required`. Enforced twice — a named Python refusal, and a
+  conditional UPDATE that repeats every condition so a hold or a claim arriving
+  mid-sweep still wins.
+- `retention_backlog`, counted from the ledger at read time. No stored status
+  column, for the same reason `health_report` has none.
 
 ## 0.1.0a2 — 2026-08-14
 
