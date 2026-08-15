@@ -155,28 +155,55 @@ def test_an_exempt_package_still_actually_needs_the_database(
 
 @pytest.mark.parametrize("import_name", sorted(_IMPORT_REQUIRES_DB))
 def test_the_exemptions_premise_holds(import_name: str) -> None:
-    """The premise is that the package's import surface needs a FastAPI router,
-    whose `Depends(get_db)` default forces `dotmac_kernel.deps` at module scope.
+    """The premise, asserted rather than asserted-in-prose.
 
-    Asserted, not asserted-in-prose: if the package stops exporting a router, the
-    stated reason has evaporated and the exemption must be re-argued rather than
-    inherited.
+    Two halves, and BOTH must hold or the exemption is inherited rather than
+    earned:
+
+    1. importing the package pulls `dotmac_kernel.deps` into `sys.modules` —
+       that is the actual mechanism, since `deps` imports `dotmac_kernel.db` at
+       module scope and `db` builds the engine;
+    2. the package's own import surface includes a FastAPI router, which is WHY
+       it needs `deps` at all: a router's `Depends(get_db)` defaults are
+       evaluated when the function is defined.
+
+    The chain is `__init__` -> `manifest` -> `router` -> `dotmac_kernel.deps` ->
+    `dotmac_kernel.db`, and the first hop is what makes it structural: a
+    `ModuleManifest` that declares `api_routers` must import the router to
+    reference it.
+
+    The first version of this test looked for an `APIRouter` attribute on the
+    package itself and failed — the router lives in a SUBMODULE
+    (`<pkg>.router`), not re-exported on `__init__`. The guard caught the
+    imprecision in the premise, which is the point of asserting one.
     """
     probe = (
         "import os, sys\n"
-        "os.environ.setdefault('DATABASE_URL', 'postgresql+psycopg://u:p@h/d')\n"
-        f"import {import_name}\n"
+        # Set unconditionally: `setdefault` would keep an unparseable value
+        # the caller already had, and the probe would fail for the wrong
+        # reason.
+        "os.environ['DATABASE_URL'] = 'postgresql+psycopg://u:p@h/d'\n"
         "import fastapi\n"
-        f"mod = sys.modules['{import_name}']\n"
-        "found = any(isinstance(getattr(mod, n, None), fastapi.APIRouter)\n"
-        "            for n in dir(mod))\n"
-        "raise SystemExit(0 if found else 1)\n"
+        f"import {import_name}\n"
+        "\n"
+        "# Half 1 — the mechanism.\n"
+        "assert 'dotmac_kernel.deps' in sys.modules, 'deps was never imported'\n"
+        "\n"
+        "# Half 2 — the reason. A router anywhere in this package's own graph.\n"
+        "routers = [\n"
+        "    name\n"
+        "    for name, mod in list(sys.modules.items())\n"
+        f"    if name.startswith('{import_name}') and mod is not None\n"
+        "    for attr in dir(mod)\n"
+        "    if isinstance(getattr(mod, attr, None), fastapi.APIRouter)\n"
+        "]\n"
+        "assert routers, 'no FastAPI router in this package'\n"
     )
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-c", probe], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, (
-        f"{import_name} no longer exports a FastAPI router, so the premise for "
-        "its exemption is gone. Re-argue it or fix the import.\n"
+        f"the stated premise for exempting {import_name} no longer holds, so the "
+        "exemption must be re-argued rather than inherited:\n"
         f"{result.stderr}"
     )
