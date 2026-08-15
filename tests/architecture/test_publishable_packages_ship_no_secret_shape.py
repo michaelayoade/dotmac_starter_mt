@@ -70,17 +70,29 @@ def _shipped_files(package_dir: Path) -> list[str]:
 
 
 def _publishable_packages() -> list[tuple[str, Path]]:
-    """Every package the release workflow may publish, read from the allowlist
-    rather than from a glob — a package absent from that file cannot be
-    published, so scanning it here would be scanning something this test has no
-    claim over."""
-    allowlist = json.loads(
-        (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
-    )
-    return [
-        (name, REPO_ROOT / entry["package_dir"])
-        for name, entry in allowlist["modules"].items()
-    ]
+    """Every package a release workflow may publish, read from the allowlists
+    rather than from a glob — so the parametrized failure names the lane that
+    would have published the offending wheel.
+
+    BOTH lanes. `.github/release-modules.json` is the stateful one;
+    `.github/release-adapters.json` is the stateless-protocol-adapter lane added
+    for `dotmac-auth-oidc` (ADR-0006, 2026-08-14 amendment). A second allowlist
+    that this scan did not read would be a second way to publish a wheel nobody
+    checked — and the adapter lane runs the very same `secret_shaped` predicate
+    at release time, so leaving it out here would recreate exactly the
+    fails-only-after-merge gap this file exists to close.
+    """
+    packages: list[tuple[str, Path]] = []
+    for allowlist_file, key in (
+        (".github/release-modules.json", "modules"),
+        (".github/release-adapters.json", "adapters"),
+    ):
+        allowlist = json.loads((REPO_ROOT / allowlist_file).read_text(encoding="utf-8"))
+        packages += [
+            (name, REPO_ROOT / entry["package_dir"])
+            for name, entry in allowlist[key].items()
+        ]
+    return packages
 
 
 @pytest.mark.parametrize(
@@ -101,15 +113,63 @@ def test_no_publishable_package_contains_a_secret_shaped_name(
     )
 
 
-def test_the_kernel_and_ui_are_covered_too() -> None:
-    """They publish through their own workflows and so are absent from the
-    module allowlist, which would leave them unscanned by the parametrization
-    above — the exact 'unmonitored rather than exempt' gap ADR-0018 names."""
-    for package in ("dotmac-kernel", "dotmac-ui"):
-        directory = REPO_ROOT / "packages" / package
-        names = _shipped_files(directory)
-        assert names, package
-        assert not secret_shaped(names), (package, secret_shaped(names))
+def _every_package() -> list[Path]:
+    return sorted(
+        directory
+        for directory in (REPO_ROOT / "packages").iterdir()
+        if (directory / "pyproject.toml").is_file()
+    )
+
+
+@pytest.mark.parametrize("directory", _every_package(), ids=lambda p: p.name)
+def test_every_package_is_covered_not_only_the_allowlisted_ones(
+    directory: Path,
+) -> None:
+    """No package in this repository escapes the scan, whatever its lane.
+
+    This test used to enumerate `("dotmac-kernel", "dotmac-ui")` — the two that
+    publish through their own workflows and are therefore absent from the module
+    allowlist. An enumeration closes yesterday's hole and reopens tomorrow's: it
+    is a list somebody must remember to extend, and the packages that most need
+    scanning are precisely the NEW ones nobody has thought about yet.
+
+    `dotmac-auth-oidc` proved the point. It is a fourth shape — a stateless
+    protocol adapter — deliberately absent from BOTH allowlists while its pilot
+    is unproven, and it would have sat unscanned under the old enumeration:
+    unmonitored rather than exempt, the gap ADR-0018 names.
+
+    So the scan is now the COMPLEMENT: every directory under `packages/` with a
+    `pyproject.toml`. A package added tomorrow is covered on the commit that
+    adds it, in whichever lane it eventually joins or none at all.
+    """
+    names = _shipped_files(directory)
+    assert names, f"{directory.name}: no files found under {directory}"
+    problems = secret_shaped(names)
+    assert not problems, (
+        f"{directory.name} would be refused at publish time:\n  "
+        + "\n  ".join(problems)
+        + "\n\nRENAME the file. Do not add an exemption — see this module's "
+        "docstring for why the false positive is the intended bias."
+    )
+
+
+def test_the_complement_reaches_the_packages_the_allowlists_do_not() -> None:
+    """Sensitivity proof for the generalisation above (ADR-0018).
+
+    "Every package is covered" is only meaningful if the complement is actually
+    non-empty — otherwise the parametrization is just the allowlist again under
+    a broader name, and the gap would be back the moment a package left a lane.
+    """
+    scanned = {directory.name for directory in _every_package()}
+    allowlisted = {name for name, _ in _publishable_packages()}
+    unlisted = scanned - allowlisted
+    assert {"dotmac-kernel", "dotmac-ui"} <= scanned
+    assert "dotmac-auth-oidc" in unlisted, (
+        "dotmac-auth-oidc joined a release allowlist — confirm the pilot that "
+        "earns it actually ran; the complement proof needs another unlisted "
+        "package or it stops proving anything"
+    )
+    assert len(unlisted) >= 3, sorted(unlisted)
 
 
 # ── Sensitivity proof (ADR-0018) ────────────────────────────────────────────
