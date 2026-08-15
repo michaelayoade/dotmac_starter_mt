@@ -1,0 +1,80 @@
+schema_version = 1
+subject = "dotmac-integration payload retention"
+as_of = "2026-08-15"
+
+# WHAT THIS FILE IS
+#
+# `ig_0006_retention` destroys provider payload content on a schedule. The
+# period, its anchor, who owns the policy and what survives redaction are
+# operational decisions with a legal consequence: the Nigeria Data Protection
+# Act requires a STATED retention period and storage no longer than necessary,
+# so the period has to appear in Dotmac's privacy notice / record of processing
+# before content is destroyed under it.
+#
+# Merging the code does not do that, and no test can. What a test CAN do is
+# refuse to call the module adopted until the accepted notice revision is
+# recorded here — which is what `tests/architecture/
+# test_retention_adoption_gate.py` does.
+#
+# This is deliberately NOT a prose-grep over a notice document. Grepping a legal
+# text for "30 days" passes on a sentence that says the opposite, breaks when a
+# lawyer rewords a clause that means the same thing, and tempts an author to
+# write for the regex. The gate keys on a REVISION IDENTIFIER a human accepted.
+
+[decision]
+# Ruled by Michael, 2026-08-15.
+status = "accepted"
+period_days = 30
+# From RECEIPT, not from processing. Anchoring on processing would make a
+# permanently stuck receipt immortal — the row most likely to hold a message
+# body.
+period_anchor = "received_at"
+legal_policy_owner = "Dotmac Data Protection Officer (role, never a person)"
+recording_rule_seconds = 2592000
+
+[behaviour]
+# The facts the notice has to describe, listed here so the person updating it
+# is not reading source to find them.
+legal_hold = "An active hold on a receipt refuses redaction regardless of age, until released."
+refused_states = [
+  "processing",
+  "retryable",
+  "reconciliation_required",
+  "dead_letter",
+]
+refused_states_reason = "Age alone never authorises destroying content that still has an open question against it. These are alerted separately rather than silently retained."
+# The approved fleet standard: content and replay identity have separate
+# lifetimes. Redaction keeps enough to recognise a replay or a collision.
+replay_evidence_retained = [
+  "provider_event_id",
+  "payload_digest",
+  "capability_binding_id",
+  "delivery outcome and product_ref",
+  "a redaction tombstone (never NULL, which also means 'the provider sent no content')",
+]
+replay_evidence_period = "UNSET"
+replay_evidence_period_note = "The standard requires replay evidence to carry its OWN explicit, justified period. It does not have one yet. This is a separate decision from the 30-day content period and is not covered by it."
+
+[notice]
+# The adoption gate. `revision` stays "PENDING" until Michael accepts a privacy
+# notice / ROPA revision that states the period, the anchor, the owner, the
+# legal-hold behaviour and the retained replay evidence above.
+#
+# While it is PENDING, `adopted` below MUST be false: the module may be
+# installed, released and exercised, but a deployment must not run the sweep
+# against real provider content.
+revision = "PENDING"
+accepted_on = ""
+accepted_by = ""
+document = "Dotmac privacy notice / record of processing (owner: DPO role)"
+
+[adoption]
+# Two independent things, deliberately not collapsed. The code shipped; the
+# authority to destroy content under it has not.
+code_released = true
+code_released_as = "dotmac-integration 0.1.0a3"
+adopted = false
+blocked_on = [
+  "notice.revision is PENDING",
+  "behaviour.replay_evidence_period is UNSET",
+]
