@@ -52,9 +52,9 @@ declares any prerequisite at all. The tenant plane (`public.audit_events`) has
 `dotmac-template-studio`, which has never been released.
 
 Outside the module scope, one foreign ADOPTER already depends on the platform
-audit table at request time — the vendor control plane, 12 call sites across 7
-modules — and it reaches that table through a **hand-authored physical Alembic
-edge naming a foreign kernel revision**
+audit table at request time — the vendor control plane, **18 invocations across
+10 files** — and it reaches that table through a **hand-authored physical
+Alembic edge naming a foreign kernel revision**
 (`depends_on = "0009_platform_audit_inbox"`,
 `dotmac_vendor_control_plane/alembic/versions/v001_vendor_accounts.py:30`). That
 is precisely the instrument `dotmac_kernel/prerequisites.py:1-30` was written to
@@ -676,18 +676,22 @@ VCP defines **neither** table family. Its 18 tables are all vendor-domain. It
 (`alembic.ini:5-7`; `src/vendor_cp/migrations.py` composes the kernel package
 versions directory).
 
-And it calls the platform audit writer at request time, in production code, 12
-times across 7 modules:
+And it calls the platform audit writer at request time, in production code,
+**18 invocations across 10 files** (imports excluded — these are call sites,
+counted by direct read at `c3a0d1bf`):
 
-| File:line |
-| --- |
-| `src/vendor_cp/accounts/service.py:22` (import), `:100` |
-| `src/vendor_cp/allocations/service.py:27`, `:135` |
-| `src/vendor_cp/approvals/service.py:25`, `:96`, `:154` |
-| `src/vendor_cp/contracts/service.py:37`, `:214` |
-| `src/vendor_cp/licensing/projection.py:41`, `:177`, `:233`, `:346`, `:411` |
-| `src/vendor_cp/licensing/revocation.py:31`, `:118` |
-| `src/vendor_cp/licensing/service.py:36` |
+| File | Invocation lines | Count |
+| --- | --- | --- |
+| `src/vendor_cp/accounts/service.py` | 100 | 1 |
+| `src/vendor_cp/allocations/service.py` | 135 | 1 |
+| `src/vendor_cp/approvals/service.py` | 96, 154 | 2 |
+| `src/vendor_cp/contracts/service.py` | 214 | 1 |
+| `src/vendor_cp/offers/service.py` | 123 | 1 |
+| `src/vendor_cp/release_evidence/service.py` | 398 | 1 |
+| `src/vendor_cp/licensing/projection.py` | 177, 233, 346, 411 | 4 |
+| `src/vendor_cp/licensing/revocation.py` | 118, 227 | 2 |
+| `src/vendor_cp/licensing/service.py` | 390 | 1 |
+| `src/vendor_cp/licensing/transport.py` | 369, 410, 495, 582 | 4 |
 
 `src/vendor_cp/contracts/service.py:5` records the transaction rule: the state
 change, the `write_platform_audit_event` and the outbox enqueue share one
