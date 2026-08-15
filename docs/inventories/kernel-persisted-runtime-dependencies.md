@@ -995,7 +995,7 @@ Evidence for the platform plane, in ascending order of force:
    `depends_on = "0009_platform_audit_inbox"`
    (`dotmac_vendor_control_plane/alembic/versions/v001_vendor_accounts.py:30`),
    with a docstring naming the tables it is reaching for, and writes to that
-   table 12 times across 7 production modules inside the unit of work. The
+   table 18 times across 10 production files, inside the unit of work. The
    physical-edge-naming-a-foreign-revision is the construct
    `prerequisites.py:1-30` opens by calling "a lie in every assembly that does
    not run the named lineage". `idempotency_ledger.v1` was justified by a
