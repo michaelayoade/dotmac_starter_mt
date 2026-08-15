@@ -5,6 +5,37 @@ package follows [Semantic Versioning](https://semver.org). Pre-1.0 (`0.x`, incl.
 this alpha) the surface is still settling — a `0.MINOR` bump may carry breaking
 changes, each called out here.
 
+## 0.1.0a3 — 2026-08-15
+
+Importing this module no longer requires a database.
+
+### Fixed
+
+- `service.py` imported `conflict_savepoint` from `dotmac_kernel.db` at MODULE
+  scope. That module builds `create_engine(settings.database_url)` on import, so
+  `import dotmac_application_directory` required a parseable `DATABASE_URL` —
+  failing with an opaque `sqlalchemy.exc.ArgumentError` raised nowhere near its
+  cause. The import is now function-local, the pattern `dotmac_kernel.errors`
+  already used for `WebAuthRedirect`.
+
+  **Found by the release wheel smoke on this module's first-ever publish
+  attempt**, one step before the artifact would have been uploaded: that smoke
+  installs the wheel into a clean venv and imports it with no database
+  configured. Nothing had caught it in the weeks since the module was written,
+  because the repository's own lanes always have `DATABASE_URL` set and this
+  module had never been published.
+
+  `0.1.0a2` is superseded and was never published — no tag, no index release.
+  The version is bumped rather than reused so two different artifacts can never
+  both claim to be a2.
+
+### Also
+
+- A repo-wide guard now imports EVERY distribution under `packages/` with
+  `DATABASE_URL` removed (`tests/architecture/test_packages_import_without_a_database.py`),
+  so the next instance fails on an ordinary pull request rather than in a release
+  dispatch. It found a third case immediately.
+
 ## 0.1.0a2 — 2026-08-13
 
 Declares the database EFFECTS this lineage needs instead of naming a foreign
