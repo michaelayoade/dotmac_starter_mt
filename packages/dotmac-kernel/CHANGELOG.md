@@ -6,6 +6,89 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a64 — 2026-08-15
+
+Closes the window between deciding an external login and issuing the session it
+produces. Additive — one new function, no schema change, no existing behaviour
+changed.
+
+### Added
+
+- `dotmac_kernel.external_identity.finalize_external_login(db, *, tenant,
+  provider_binding, issuer, subject) -> ResolvedExternalIdentity | None`. The
+  ONE operation a caller may end a session on: it takes the binding `SELECT …
+  FOR UPDATE`, re-checks `is_active` and the party's own state (`is_active`,
+  `party_type == person`) while holding that lock, stamps
+  `last_authenticated_at`, and returns the party — so the caller mints its
+  session in the same transaction with the row still held. Same parameters and
+  same return shape as `resolve_external_identity`, so moving a caller off the
+  racy pair is one identifier.
+
+### The defect it fixes
+
+`resolve_external_identity` then issue-your-own-session is two statements, and
+an administrator can disable the binding between them. The result is a live
+session derived from an identity revoked before that session existed — and both
+halves look successful: the row is inactive, every later resolution refuses, and
+the session the disable existed to prevent outlives it.
+
+Returning `binding_id` from a resolution did NOT close this, and 0.1.0a63's note
+that it did was wrong on that point. It removed a redundant READ; the window is
+between a read and the write that depends on it, and a value carried across the
+window is still a value read before it.
+
+The lock closes it because the disable path's own `UPDATE` needs the same row
+lock. Either the login holds it first (a session is issued; the disable commits
+behind it) or the disable holds it first (the login blocks, re-reads
+`is_active = False` under the lock, and refuses). No interleaving mints a
+session from a binding that was already inactive when the login took the lock.
+
+Two details are load-bearing: the locking read matches on the identity tuple
+alone and re-checks `is_active` in Python, so the re-check is visible and does
+not silently stop being one under an isolation level that raises rather than
+re-evaluates; and both reads use `populate_existing=True`, because a lock that
+guards an attribute cached from before the concurrent disable is worse than no
+lock — it looks correct.
+
+### Deprecated
+
+- `record_external_authentication`. It stamps a decision the caller already
+  made, which is exactly the second half of the racy pair. It is NOT deleted:
+  recording that an already-authenticated principal exercised a binding again
+  (a step-up ceremony that mints no session) is a real use with nothing to
+  linearize. No consumer in the fleet has that shape today, so it is REMOVED in
+  the next minor unless one appears and is named in its docstring.
+
+### Not included, and why
+
+- **Session provenance and selective revocation.** Retracting a session issued
+  BEFORE a disable needs the session to record which binding produced it. That
+  spans a kernel migration, a new kernel revocation operation and the
+  assembly's own issuance path (`AuthSession` is minted by the assembly), so
+  the contract is written down in the module docstring — nullable
+  `auth_sessions.external_identity_binding_id` with a composite FK,
+  `finalize_external_login`'s `binding_id` as its only source, revocation
+  taking the same row lock in the same transaction as the disable, selective
+  scope only — and left to its own slice. Global logout is explicitly out of
+  scope.
+- **A lock on `parties`.** `finalize_external_login` re-reads the party under
+  the binding's lock, so it sees every deactivation committed before that
+  point, but it does not lock the party row: that row has many other writers,
+  and a login locking binding-then-party would deadlock against any transaction
+  touching a party before its binding. The residual window has the same answer
+  as the one above — revoke the sessions, do not lock the world.
+
+### Proof
+
+`tests/unit/test_external_identity.py` covers the logic and discloses that the
+unit lane cannot see the lock at all (SQLite compiles `FOR UPDATE` away).
+`tests/test_external_identity_login_race.py` is the bounded two-session Postgres
+canary: a disable that holds the lock first forces the login to refuse even
+though the login had already read the binding as active, and a login that holds
+it first forces the disable to commit behind it. Every wait is bounded
+(`lock_timeout`, `statement_timeout`, `Barrier.wait(timeout=)`,
+`Future.result(timeout=)`).
+
 ## 0.1.0a63 — 2026-08-15
 
 Adds the external-identity binding contract: the LOCAL half of federated login.

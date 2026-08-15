@@ -488,3 +488,28 @@ display-settings plan merges). Evidence from a dual sweep of this repo + dotmac_
   so timing doesn't distinguish "no account" from "wrong password" (2b1-T3 review).
 - Migration round-trip (upgrade→downgrade→upgrade) has no automated enforcement; consider
   a CI/integration step exercising the last migration's cycle.
+
+## Kernel — external identity (added 2026-08-15, kernel `0.1.0a64`)
+
+- **Session provenance + selective revocation — DEFERRED, contract written.**
+  `finalize_external_login` (kernel `0.1.0a64`) closes the window between deciding
+  an external login and issuing the session for it, by holding the binding's row
+  lock across both. It cannot retract a session issued BEFORE a disable, because
+  `auth_sessions` does not record which binding produced it. The contract is in
+  `dotmac_kernel/external_identity.py`'s module docstring: nullable
+  `auth_sessions.external_identity_binding_id` with a composite FK to
+  `(tenant_id, id)`; `finalize_external_login`'s returned `binding_id` as its ONLY
+  source; revocation as a kernel operation beside
+  `disable_external_identity_binding`, taking the same row lock in the same
+  transaction so disabling and revoking cannot be done half of; SELECTIVE scope
+  only — global logout is explicitly out of scope. Spans a kernel migration, a new
+  kernel operation and the assembly's issuance path (`app/features/auth/service.py`
+  mints `AuthSession`), which is why it is its own slice.
+- **`record_external_authentication` — DEPRECATED, removal condition stated.**
+  Removed in the next kernel minor unless a step-up/re-authentication consumer
+  that mints no session is found and named in its docstring.
+- **A concurrently deactivated party is not locked out mid-login.**
+  `finalize_external_login` re-reads the party under the binding's lock but does
+  not lock `parties` (many other writers; binding-then-party ordering would
+  deadlock against any transaction touching a party first). Same residual shape as
+  the item above and the same answer: revoke the sessions.

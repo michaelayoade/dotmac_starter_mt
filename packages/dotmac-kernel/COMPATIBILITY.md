@@ -112,7 +112,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.delivery_providers` | `DeliveryProvider`, `OutboundMessage`, `ProviderResult`, `Sent`, `Suppressed`, `send` |
 | `dotmac_kernel.tenancy` | `bind_single_tenant`, `single_tenant_binding`, `clear_single_tenant_binding` (which tenant, if any, this deployment is bound to) |
 | `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `permission_guard`, `authorize_party`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
-| `dotmac_kernel.external_identity` | `resolve_external_identity`, `bind_external_identity`, `disable_external_identity_binding`, `record_external_authentication`, `ResolvedExternalIdentity` |
+| `dotmac_kernel.external_identity` | `finalize_external_login`, `resolve_external_identity`, `bind_external_identity`, `disable_external_identity_binding`, `record_external_authentication` (DEPRECATED — see "External identity" below), `ResolvedExternalIdentity` |
 | `dotmac_kernel.errors` | `register_error_handlers` |
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |
 | `dotmac_kernel.features` | `FeatureManifest`, `NavItem`, `load_manifests`, `mount_features` |
@@ -916,6 +916,42 @@ acknowledges the applied `(licence_id, licence_version, digest)`.
   ephemeral in-memory test key, never a real issuer key), no storage/tables,
   no delivery transport, no entitlement writes, no interpretation of the
   document's `constraints`.
+
+### External identity: the login path is the locked one (`dotmac_kernel.external_identity`)
+
+Two entry points answer the same question and only one may end in a session.
+
+| Call | What it is | Ends in a session? |
+|---|---|---|
+| `resolve_external_identity(db, *, tenant, provider_binding, issuer, subject)` | a READ — no lock, no write | **No.** Everything it returns was true when it looked. |
+| `finalize_external_login(db, *, tenant, provider_binding, issuer, subject)` | the LOGIN path — locks the binding, re-checks under the lock, stamps `last_authenticated_at` | **Yes**, and only this one. |
+
+Both return `ResolvedExternalIdentity | None` with identical parameters, so
+moving a caller from the first to the second is one identifier.
+
+- **The contract `finalize_external_login` adds** (kernel `0.1.0a64`) is that
+  the decision and the write that depends on it are one locked step. It takes
+  the binding `SELECT … FOR UPDATE`, re-checks `is_active` and the party's own
+  state (`is_active`, `party_type == person`) while holding the lock, stamps,
+  and returns — so the caller adds its session in the SAME transaction, with
+  the row still held. The disable path's `UPDATE` needs that same lock, so a
+  concurrent disable cannot land between the decision and the session.
+- **`None` is every refusal**, deliberately: a typed error per reason would let
+  a caller distinguish "no such subject" from "disabled binding", which is a
+  subject-enumeration oracle handed to whoever can drive a login.
+- **The commit is yours** (hard rule 8 — `dotmac_kernel.db` owns transactions),
+  and that is load-bearing: your commit releases the lock, so the session you
+  mint and the stamp made for you become visible together or not at all.
+- **DEPRECATED: `record_external_authentication`.** It stamps a decision the
+  caller already made — the second half of the racy pair this release exists to
+  retire. Retained only for a step-up ceremony that mints no session; removed in
+  the next minor unless such a consumer is named in its docstring. Never use it
+  to complete a login.
+- **Not provided: session revocation.** Disabling a binding stops further
+  logins; it does not retract sessions already issued, because a session does
+  not yet record which binding produced it. The contract for that column and
+  its revocation operation is written in the module docstring and is a separate
+  slice. Global logout is out of scope by design.
 
 ## Internal modules and names (do not import)
 
