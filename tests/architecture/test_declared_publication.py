@@ -47,11 +47,30 @@ def _ledger() -> dict[str, dict]:
 
 
 def _survey():
+    """The sweep, or a FAILURE — never a skip.
+
+    This used to `pytest.skip` when the sweep refused, which reads as caution
+    and behaved as a hole. `actions/checkout` fetches no tags by default, so on
+    CI the refusal fired on every run and every test in this module skipped
+    silently: the gate reported green while checking nothing.
+
+    It was not theoretical. `dotmac-numbering` was merged (#193) declaring
+    `0.1.0a1`, allowlisted for release, with no ledger row — exactly what this
+    module exists to catch — and CI passed. The stale `dotmac-integration` row
+    left by publishing a2 would have gone the same way.
+
+    An unavailable oracle is not a pass. The refusal message names the fix
+    (`fetch-depth: 0`), so failing here costs one workflow line and buys a gate
+    that is actually running.
+    """
     sweep = _sweep()
     try:
         return sweep, sweep.survey(PROJECT_ROOT)
-    except SystemExit as refusal:  # a tagless or shallow clone
-        pytest.skip(str(refusal))
+    except SystemExit as refusal:
+        pytest.fail(
+            "the publication oracle is incomplete, so this gate cannot answer "
+            f"and must not pass: {refusal}"
+        )
 
 
 # ── The live state ──────────────────────────────────────────────────────────
@@ -285,8 +304,14 @@ def test_an_unusable_oracle_refuses_rather_than_reporting_nine_defects(
     tmp_path: Path,
 ) -> None:
     """A shallow, tagless or non-git checkout would make every distribution read
-    as unpublished. That is a property of the clone, not of the releases, and a
-    guard that cries wolf on a fresh CI checkout is one somebody disables. An
+    as unpublished — and the shallow case is now probed FIRST, so a non-git
+    directory refuses on `git rev-parse` rather than on `git tag`. All three
+    reasons are accepted here because the assertion is about refusing with a
+    named cause, not about which probe happened to run first.
+
+    An unpublished-looking sweep is a property of the clone, not of the
+    releases, and a guard that cries wolf on a fresh CI checkout is one
+    somebody disables. An
     unavailable oracle is never a pass — both the "not a repository" and the
     "no such directory" cases refuse, rather than one refusing and the other
     raising something the caller has to interpret."""
@@ -294,7 +319,11 @@ def test_an_unusable_oracle_refuses_rather_than_reporting_nine_defects(
     for root in (tmp_path, tmp_path / "nonexistent"):
         with pytest.raises(SystemExit) as refusal:
             sweep.survey(root)
-        assert "git tag" in str(refusal.value) or "no tags" in str(refusal.value)
+        message = str(refusal.value)
+        assert any(
+            reason in message
+            for reason in ("git tag", "no tags", "git rev-parse", "SHALLOW")
+        ), f"a refusal must name the oracle problem it hit, got: {message}"
 
 
 def test_versions_are_ordered_naturally_not_lexically() -> None:
@@ -319,3 +348,39 @@ def test_the_ledger_covers_every_package_and_nothing_else() -> None:
     }
     assert len(survey["distributions"]) == len(packages)
     assert set(_ledger()) <= set(survey["distributions"])
+
+
+def test_the_gate_fails_closed_rather_than_skipping_on_a_bad_oracle() -> None:
+    """The regression that matters most here, pinned at the source level.
+
+    A future edit restoring `pytest.skip` on the refusal path would take this
+    whole module back to silently green, and every behavioural test above would
+    keep passing while checking nothing — the failure mode is invisible by
+    construction, so it is asserted structurally instead.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    survey_source = source[
+        source.index("def _survey()") : source.index("# ── The live state")
+    ]
+    assert "pytest.fail(" in survey_source
+    # The CALL, not the word: the docstring above legitimately explains why
+    # `pytest.skip` was wrong, and a guard that cannot tell prose from code is
+    # the same class of defect as a word-boundary scanner blind to identifiers.
+    assert "pytest.skip(" not in survey_source, (
+        "a refused oracle must FAIL. Skipping is how this gate spent its life "
+        "green on CI without ever running"
+    )
+
+
+def test_a_shallow_checkout_is_refused() -> None:
+    """Sensitivity proof for the new half of the refusal.
+
+    `git tag` returning nothing was already refused; a shallow checkout that
+    happens to carry SOME tags was not, and a partial tag set is the worse
+    case — it produces confident, wrong answers rather than none.
+    """
+    sweep = _sweep()
+    assert hasattr(sweep, "is_shallow"), "the shallow check was removed"
+    assert (
+        sweep.is_shallow(PROJECT_ROOT) is False
+    ), "this checkout is shallow, so the suite itself cannot trust its tags"

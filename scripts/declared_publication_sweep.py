@@ -124,6 +124,38 @@ def git_tags(repo_root: pathlib.Path = REPO_ROOT) -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def is_shallow(repo_root: pathlib.Path = REPO_ROOT) -> bool:
+    """Is this checkout shallow?
+
+    A shallow clone is not merely smaller — by default it carries NO tags, and
+    a partial tag set is worse than none, because the sweep cannot tell an
+    unreleased distribution from one whose tag simply was not fetched. It would
+    then report a real-looking defect, or (having been made lenient to avoid
+    that) report nothing at all.
+
+    Treated as an incomplete oracle rather than as "probably fine": a checkout
+    that fetched tags explicitly is not shallow in CI's default configuration,
+    and the cost of refusing is one workflow line.
+    """
+    try:
+        result = subprocess.run(  # nosec B603 — fixed argv, no shell
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        # Names the probe, like `git_tags` does. A refusal a reader cannot
+        # attribute to a specific check is one they cannot act on.
+        raise SweepRefused(
+            f"cannot run `git rev-parse` in {repo_root}: {exc}"
+        ) from None
+    if result.returncode != 0:
+        raise SweepRefused(f"`git rev-parse` failed: {result.stderr.strip()}")
+    return result.stdout.strip() == "true"
+
+
 def version_key(version: str) -> tuple:
     """Natural-order sort key, so `0.1.0a9` does not outrank `0.1.0a64`.
 
@@ -182,6 +214,16 @@ def _declared_versions(repo_root: pathlib.Path) -> dict[str, str]:
 
 def survey(repo_root: pathlib.Path = REPO_ROOT) -> dict:
     """Every package's declared version against the tags that prove publication."""
+    if is_shallow(repo_root):
+        raise SweepRefused(
+            "the checkout is SHALLOW, so its tag set cannot be trusted to be "
+            "complete. A missing tag is indistinguishable from an unreleased "
+            "version here, and guessing in either direction is wrong: guessing "
+            "'published' hides a version promised to nobody, guessing "
+            "'unpublished' reports defects that are artefacts of the clone. "
+            "Check out with full history and tags "
+            "(`actions/checkout` with `fetch-depth: 0`) and re-run."
+        )
     tags = set(git_tags(repo_root))
     if not tags:
         raise SweepRefused(

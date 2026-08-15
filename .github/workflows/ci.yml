@@ -63,6 +63,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # TAG EVIDENCE, not convenience. `tests/architecture/
+          # test_declared_publication.py` decides whether a declared version was
+          # ever published by asking for this repository's release TAGS, which a
+          # default checkout does not fetch. Without them the sweep refuses and
+          # the whole module used to skip — so the gate ran green, on every PR,
+          # while checking nothing. The gate now FAILS on a refusal, which makes
+          # this line load-bearing rather than optional.
+          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
