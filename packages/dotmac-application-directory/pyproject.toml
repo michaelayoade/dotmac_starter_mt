@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-application-directory"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
 authors = ["DotMac"]
 readme = "README.md"
