@@ -91,7 +91,9 @@ def test_no_foreign_key_crosses_the_planes() -> None:
     ):
         for fk in model.__table__.foreign_keys:
             target = str(fk.target_fullname)
-            assert target.startswith("public.tenants."), (
+            # SQLAlchemy renders this unqualified: `tenants.id`, not
+            # `public.tenants.id`.
+            assert target.startswith("tenants."), (
                 f"{model.__name__} points at {target}; the only permitted edge "
                 "is the tenant catalogue, and no edge may cross the planes"
             )
@@ -277,8 +279,16 @@ def test_the_migration_makes_append_only_structural() -> None:
     migration = MIGRATION.read_text(encoding="utf-8")
     assert "BEFORE UPDATE OR DELETE" in migration
     assert "refuse_mutation" in migration
+    # The grant is emitted from a template over the append-only tuples, so
+    # assert the template and the membership rather than a rendered string
+    # that never appears in the source.
+    assert "GRANT SELECT, INSERT ON mod_numbering.{table}" in migration
+    for group in ("_TENANT_IMMUTABLE", "_PLATFORM_IMMUTABLE"):
+        assert group in migration
     for table in models.IMMUTABLE_TABLES:
-        assert f"GRANT SELECT, INSERT ON mod_numbering.{table}" in migration
+        assert (
+            f'"{table}"' in migration
+        ), f"{table} is declared append-only but the migration never names it"
 
 
 def test_configuration_and_repair_are_typed_commands() -> None:

@@ -33,11 +33,6 @@ from typing import Final
 from uuid import uuid4
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
-from dotmac_kernel.idempotency import (
-    execute_once,
-    execute_once_platform,
-    fingerprint_of,
-)
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -443,6 +438,16 @@ def allocate(
             "reference_date must be a date and must be supplied explicitly: "
             "this module reads no clock.",
         )
+
+    # Imported here, not at module scope: `dotmac_kernel.idempotency` pulls
+    # `dotmac_kernel.db`, which builds an engine on import, and this package
+    # must import without a DATABASE_URL (a wheel is inspected before any
+    # deployment configures one).
+    from dotmac_kernel.idempotency import (
+        execute_once,
+        execute_once_platform,
+        fingerprint_of,
+    )
 
     fingerprint = fingerprint_of(
         {

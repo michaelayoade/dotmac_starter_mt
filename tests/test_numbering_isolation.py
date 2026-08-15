@@ -161,7 +161,7 @@ def _tenant_engine(url: str, tenant_id: uuid.UUID | None = None):
 
     Setting the GUC once on a session is not enough: `commit()` returns the
     connection to the pool, and the next statement can arrive on a different
-    one with no `app.current_tenant_id` set — at which point the RLS policy
+    one with no `app.current_tenant` set — at which point the RLS policy
     refuses the write and the failure looks like a module bug rather than a
     harness bug.
     """
@@ -172,7 +172,7 @@ def _tenant_engine(url: str, tenant_id: uuid.UUID | None = None):
         def _set_tenant(dbapi_connection, _record):
             with dbapi_connection.cursor() as cur:
                 cur.execute(
-                    "SELECT set_config('app.current_tenant_id', %s, false)",
+                    "SELECT set_config('app.current_tenant', %s, false)",
                     (str(tenant_id),),
                 )
 
@@ -193,6 +193,44 @@ def _configure(session: Session, scope, **kw) -> None:
         configuration=SeriesConfiguration(**base),  # type: ignore[arg-type]
     )
     session.commit()
+
+
+def _seed_one_row(admin_url: str, table: str) -> None:
+    """Insert one row into an append-only table, as the owning role.
+
+    Needed because a `BEFORE UPDATE OR DELETE ... FOR EACH ROW` trigger does
+    not fire when the statement matches no rows — an UPDATE against an empty
+    table succeeds trivially and would make the refusal proof vacuous.
+    """
+    tenant_cols, tenant_vals = "", ""
+    if not table.startswith("platform_"):
+        (tenant,) = _make_tenants(admin_url, 1)
+        tenant_cols, tenant_vals = "tenant_id, ", f"'{tenant}', "
+
+    if table.endswith("allocation_receipts"):
+        columns = (
+            "series_code, period_key, allocated_value, formatted_number, "
+            "reference_date, idempotency_key"
+        )
+        values = "'seed', '*', 1, 'SEED-000001', DATE '2026-01-15', 'seed-key'"
+    else:
+        columns = (
+            "series_code, period_key, previous_next_value, new_next_value, "
+            "proven_minimum, reason, repaired_by"
+        )
+        values = "'seed', '*', 1, 2, 1, 'seed', 'ops:seed'"
+
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                # Every interpolated part is a literal chosen above, not input.
+                f"INSERT INTO mod_numbering.{table} "  # noqa: S608
+                f"(id, {tenant_cols}{columns}) "
+                f"VALUES (gen_random_uuid(), {tenant_vals}{values})"
+            )
+        )
+    engine.dispose()
 
 
 # ── Proof 1 — tenant RLS ────────────────────────────────────────────────────
@@ -697,6 +735,11 @@ def test_proof_7_even_the_owner_role_cannot_rewrite_history(scratch, table):
     """The trigger covers roles the grants do not — `app_admin` owns the schema
     and would otherwise be able to update freely."""
     admin_url, _, _ = scratch
+    # A row must exist: `BEFORE UPDATE ... FOR EACH ROW` never fires on an
+    # empty table, so an UPDATE affecting nothing would "pass" this test while
+    # proving nothing at all.
+    _seed_one_row(admin_url, table)
+
     engine = create_engine(admin_url)
     with engine.connect() as conn, pytest.raises(DBAPIError) as exc:
         conn.execute(

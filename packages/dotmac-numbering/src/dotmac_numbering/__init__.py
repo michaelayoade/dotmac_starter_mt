@@ -10,6 +10,7 @@ was issued, for which period, against which business date.
 """
 
 from dotmac_numbering.manifest import module
+from dotmac_numbering.migrations import versions_dir
 from dotmac_numbering.models import (
     IMMUTABLE_TABLES,
     NO_PERIOD,
@@ -74,4 +75,5 @@ __all__ = [
     "module",
     "period_for",
     "preview",
+    "versions_dir",
 ]
