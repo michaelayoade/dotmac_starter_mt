@@ -26,6 +26,7 @@ from typing import Final
 from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
+    OUTBOX_RELAY_V1,
     TENANT_SCOPE_CATALOG_V1,
     PrerequisiteBinding,
 )
@@ -55,6 +56,21 @@ ASSEMBLY_PREREQUISITE_BINDINGS: Final[tuple[PrerequisiteBinding, ...]] = (
     PrerequisiteBinding(
         prerequisite=IDEMPOTENCY_LEDGER_V1.name,
         provider_revision="0018_idempotency_one_owner",
+        provider_owner="kernel",
+    ),
+    # The relay is assembled across THREE kernel revisions and the binding names
+    # the last of them, for the same reason the ledger names `0018` rather than
+    # the lineage root: `0008` created `outbox_events`, `0011` added the lease
+    # columns, the reclaim index, the `outbox_dispatcher` role and the tenant
+    # SECURITY DEFINER pair, and `0012` added the entire platform peer — table,
+    # indexes, `platform_outbox_dispatcher` and its own function pair. Only
+    # after `0012` is the effect whole. Bound to `0011`, a database stopped
+    # there would pass the order canary with no platform plane at all, which is
+    # precisely the half `verify_outbox_relay` would then refuse — loudly, but
+    # one layer later than it should.
+    PrerequisiteBinding(
+        prerequisite=OUTBOX_RELAY_V1.name,
+        provider_revision="0012_platform_outbox",
         provider_owner="kernel",
     ),
 )

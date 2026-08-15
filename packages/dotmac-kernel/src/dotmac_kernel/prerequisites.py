@@ -218,10 +218,59 @@ IDEMPOTENCY_LEDGER_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     ),
 )
 
+#: The relay `dotmac_kernel.messaging` claims, leases, retries and dead-letters
+#: through — the machinery a module reuses instead of writing a second claim
+#: loop.
+#:
+#: ADR-0030 § 4a rules that `dotmac-durable-timers` REUSES this relay rather
+#: than shipping its own leasing. That ruling is unimplementable while the
+#: facility has no name: a module cannot declare a dependency on something the
+#: kernel has never named, which is the identical defect
+#: `idempotency_ledger.v1` closed one release earlier. Same runtime shape too —
+#: nothing in a consuming lineage's DDL touches these tables or functions, so an
+#: undeclared consumer migrates cleanly and dies on the first claim.
+#:
+#: Both planes are named in one spec on the same structural grounds as the
+#: ledger: `dotmac_kernel.messaging`'s `__init__` publishes `enqueue_event` and
+#: `enqueue_platform_event`, `claim_batch` and `claim_platform_batch` from ONE
+#: module, and `platform_relay` imports `RelayPolicy`/`FailureOutcome`/
+#: `_backoff_seconds` from `relay` — so a consumer cannot take the tenant half
+#: without linking code that references the platform table and functions.
+#:
+#: The privilege posture is part of the effect, not decoration. The claim is
+#: cross-tenant by design, so it is reachable only through `SECURITY DEFINER`
+#: functions the dispatcher may EXECUTE and nothing else; a provider that
+#: supplies the tables and lets the dispatcher read them directly has handed a
+#: NOBYPASSRLS role the whole outbox.
+OUTBOX_RELAY_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
+    name="outbox_relay.v1",
+    summary=(
+        "public.outbox_events and public.platform_outbox_events with the relay "
+        "contract: the lease columns (leased_by, leased_at), the retry columns "
+        "(attempts, available_at defaulted to now(), last_error) and the status "
+        "column the dead-letter outcome is recorded in, plus the "
+        "(status, available_at) claim index and the (status, leased_at) "
+        "stale-lease reclaim index on each plane. The claim/settle pair per "
+        "plane — claim_outbox_batch(text, integer, integer) / "
+        "settle_outbox_event(uuid, text, text, timestamptz, integer, text) and "
+        "their claim_platform_outbox_batch / settle_platform_outbox_event peers "
+        "— exists, is SECURITY DEFINER owned by app_admin, and carries an EMPTY "
+        "search_path. Plane posture: the tenant table has FORCEd row-level "
+        "security under a policy keyed on app_current_tenant_id(); the platform "
+        "table carries no policy at all and is isolated by a revoked app_user "
+        "grant. Roles outbox_dispatcher and platform_outbox_dispatcher exist "
+        "NOBYPASSRLS and NOSUPERUSER, hold EXECUTE on their own pair, hold no "
+        "table or column privilege on either relay table, and EXECUTE is not "
+        "held by PUBLIC. Supplies the machinery dotmac_kernel.messaging drains; "
+        "it does not decide what any event means or when it is delivered."
+    ),
+)
+
 KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     TENANT_SCOPE_CATALOG_V1,
     MODULE_DATABASE_ROLES_V1,
     IDEMPOTENCY_LEDGER_V1,
+    OUTBOX_RELAY_V1,
 )
 
 
@@ -508,6 +557,7 @@ __all__ = [
     "autoload_bindings",
     "IDEMPOTENCY_LEDGER_V1",
     "MODULE_DATABASE_ROLES_V1",
+    "OUTBOX_RELAY_V1",
     "TENANT_SCOPE_CATALOG_V1",
     "DuplicateBindingError",
     "DuplicatePrerequisiteError",

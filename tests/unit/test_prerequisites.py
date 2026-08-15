@@ -67,11 +67,20 @@ def test_the_kernel_ships_exactly_the_effects_modules_need() -> None:
     `idempotency_ledger.v1` earned its place by the opposite failure —
     `dotmac-numbering` consumed the ledger at request time with no name to
     declare, so an adopter missing it passed every gate and failed in
-    production instead (`docs/inventories/numbering-erp-adoption-slice.md`)."""
+    production instead (`docs/inventories/numbering-erp-adoption-slice.md`).
+
+    `outbox_relay.v1` earned its place BEFORE its first consumer, which is the
+    unusual case and the reason to say so here. ADR-0030 § 4a rules that
+    `dotmac-durable-timers` reuses the kernel relay for claim, lease, retry and
+    dead-letter rather than shipping a second claim loop — and a module cannot
+    declare a dependency on a facility the kernel has never named. Publishing
+    the name is what unblocks that module; shipping the module first would
+    repeat the numbering defect deliberately."""
     assert {spec.name for spec in KERNEL_PREREQUISITES} == {
         "tenant_scope_catalog.v1",
         "module_database_roles.v1",
         "idempotency_ledger.v1",
+        "outbox_relay.v1",
     }
 
 
@@ -372,6 +381,40 @@ def test_a_missing_role_is_reported_rather_than_skipped() -> None:
 
     observed = {k: v for k, v in GOOD_ROLES.items() if k != "platform_api"}
     assert any("do not exist" in p for p in role_violations(observed))
+
+
+# ── An unpinned search_path is a refusal, not a warning ─────────────────────
+
+
+@pytest.mark.parametrize(
+    ("proconfig", "empty"),
+    [
+        pytest.param(["search_path="], True, id="bare-empty"),
+        pytest.param(['search_path=""'], True, id="double-quoted-empty"),
+        pytest.param(["search_path=''"], True, id="single-quoted-empty"),
+        pytest.param(["log_min_duration_statement=0", "search_path="], True, id="tail"),
+        pytest.param(None, False, id="no-proconfig-at-all"),
+        pytest.param([], False, id="empty-proconfig"),
+        pytest.param(["statement_timeout=5s"], False, id="other-guc-only"),
+        pytest.param(["search_path=public"], False, id="public"),
+        pytest.param(['search_path="$user", public'], False, id="the-default"),
+        pytest.param(["search_path=pg_temp"], False, id="pg-temp"),
+    ],
+)
+def test_only_a_genuinely_empty_search_path_is_accepted(proconfig, empty) -> None:
+    """A `SECURITY DEFINER` function with a mutable `search_path` resolves
+    unqualified names through the CALLER's path, so any role that can create a
+    schema on it shadows a function the body uses and has it run as the definer.
+
+    The two rows that matter most are the ones a looser check gets wrong in
+    opposite directions: absence (`None`) must be refused rather than read as
+    "nothing to worry about", and `"$user", public` — the PostgreSQL default,
+    which is what `RESET search_path` leaves behind — must not pass merely
+    because it is normal.
+    """
+    from dotmac_kernel.migrations.verify import _search_path_is_empty
+
+    assert _search_path_is_empty(proconfig) is empty
 
 
 # ── Declaration sites ───────────────────────────────────────────────────────

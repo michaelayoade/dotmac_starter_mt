@@ -529,8 +529,19 @@ display-settings plan merges). Evidence from a dual sweep of this repo + dotmac_
   entry moves to `CAPABILITY_RAISED_FLOORS`. Must not be bundled into the
   kernel-`a66` change (PR #198), and lands after `a66` is published.
 - **Sweep the other kernel facilities with persistence.** `idempotency` is the
-  first named; `messaging.relay`/outbox is the next and is already required by
-  ADR-0030 § 4a as `outbox_relay.v1` with a structural verifier, before
-  `dotmac-durable-timers` writes any behaviour. Audit is not started for kernel
+  first named; `messaging.relay`/outbox is the second — **DONE in kernel
+  `0.1.0a67`**, which publishes `outbox_relay.v1` and `verify_outbox_relay`,
+  satisfying ADR-0030 § 4a gate 2 and unblocking `dotmac-durable-timers`
+  (behaviour still gated on § 4a gates 1 and 3). Audit is not started for kernel
   `audit` or settings storage: a module consuming either at request time has the
   same undeclarable dependency today.
+- **The relay prerequisite has no consumer yet, by design.** `outbox_relay.v1`
+  is bound by this assembly and proven against the migrated catalogue, but no
+  manifest declares it until `dotmac-durable-timers` exists. That is the
+  deliberate inversion of the numbering defect — the name lands before the
+  module rather than after the incident — and it means the DECLARATION side
+  (`ModuleManifest.requires` -> `resolve_depends_on` -> `require_prerequisites`
+  in a real module lineage) is exercised for this name only by the kernel's own
+  unit tests until the first consumer ships. Nothing here is unmonitored: the
+  live verifier is proven end to end. It is the module-side wiring that has no
+  first user yet.
