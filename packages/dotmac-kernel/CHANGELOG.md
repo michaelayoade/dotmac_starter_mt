@@ -6,7 +6,14 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a68 — 2026-08-16
+## 0.1.0a67 — 2026-08-16
+
+Two changes, because the version was still unpublished when the second
+landed. Publishing them separately was not available: the release lane
+publishes the version the repository currently declares, so bumping past an
+unreleased a67 would have left it declared by nothing.
+
+### Part 1 — the outbox relay is a declarable prerequisite
 
 Names the outbox relay as a declarable prerequisite: `outbox_relay.v1`
 (`dotmac_kernel.prerequisites`), with its live verifier
@@ -85,7 +92,7 @@ root migration verifies; an assembly binds it to the revision that supplies the
 relay (kernel `0012_platform_outbox` here). Existing modules are unaffected
 until they declare it.
 
-## 0.1.0a67 — 2026-08-16
+### Part 2 — session provenance and selective revocation
 
 Session provenance and selective revocation. `auth_sessions` gains
 `external_identity_binding_id UUID NULL`: WHICH external identity binding
