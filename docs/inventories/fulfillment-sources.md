@@ -8,8 +8,14 @@
 **CRM:** `c64b5aa0f790`
 **Integrator:** `d014116e63ad`
 **Decision:** [ADR-0030](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
-§1 (owner matrix), §5.7 (build order — fulfillment is last), §7 (Sub adopts the
-generic engine only).
+§1 (owner matrix), §5d (Fulfillment is greenfield on the kernel participant
+contract; build-order step 12), §7 (Sub replaces its synchronous executor and
+reaper, not a generic saga engine), §8.1 (a business saga never owns
+connector-delivery retry state).
+
+The 2026-08-15 amendment to ADR-0030 was written FROM this audit: the decision
+originally said to port Sub's run/step/readiness patterns, and this dossier is
+the evidence that refuted it.
 
 This audit settles two things: which production code the saga engine may start
 from, and where Sub's engine stops being an engine and starts being an ISP
@@ -18,44 +24,60 @@ installation. Read under this directory's standing cautions
 
 ## Verdict
 
-`dotmac-fulfillment` is **product-first with a mandatory port delta**, and the
-delta is larger than any other Cloud owner audited so far.
+`dotmac-fulfillment` is **greenfield-after-inventory**.
 
-Three named sources qualify, none of them the one ADR-0030 §5.7 implies:
+**No saga engine exists anywhere in the fleet to port.** Sub's
+`saga_executions` and `provisioning_step_executions` tables exist in migrations
+`037` and `047` and have **zero references anywhere else in the tracked tree** —
+`git grep -i saga 27c76aaeebb7` outside `alembic/` returns nothing at all. No
+model, no service, no test, no caller. Worse, `saga_executions` carries foreign
+keys to `ont_units` and `olt_devices`, so the one table that looks generic is
+bound to ISP hardware at the schema level. What actually executes provisioning
+in Sub is a synchronous `for` loop with no step rows, no attempts, no retries
+and no compensation (`ProvisioningRuns.run`, below), recovered by a 30-minute
+wall-clock reaper that marks runs failed without re-observing the participant.
 
-- **Sub supplies the command/receipt spine, not a saga.** `owner_commands.py`,
-  `events/owner_outputs.py` and `provisioning_lifecycle.py` are real,
-  heavily-used, production-proven idempotency, correlation, append-only-evidence
-  and sole-writer code. They are the mandatory source.
-- **The kernel already owns the participant port shape.**
+The saga aggregate, ordered business steps, append-only step attempts, retry
+classification, compensation decisions and partial-success derivation are
+therefore **fresh design**. Nothing below is permission to copy an
+implementation.
+
+What the inventory DID find is three **reference constraints** — things the new
+module must satisfy, extend or beat, not code it starts from:
+
+- **The kernel participant contract is the mandatory foundation.**
   `dotmac_kernel.providers.provisioning` is a product-neutral
   plan/apply/observe/cancel contract with `PARTIAL` resumption, `operation_id`
   idempotency and a retryable/terminal error hierarchy, plus a shipped
-  conformance kit. It is not a saga, but it is the participant seam, and the
-  saga must extend it rather than invent a second one.
-- **ERP supplies the run/step/compensation ledger requirements** —
+  conformance kit. It is not a saga. It IS the participant seam, and ADR-0030
+  §5d requires the module to extend it rather than invent a second one — with
+  `participant_code`, explicit `TenantScope`/`PlatformScope`, typed
+  asynchronous outcome envelopes, and compensation that may answer
+  `not_supported` or `manual_required`.
+- **Sub constrains the cutover, and proves the idempotency and correlation
+  shapes are achievable.** `owner_commands.py`, `events/owner_outputs.py` and
+  `provisioning_lifecycle.py` are real, heavily-used, production-proven
+  idempotency, correlation, append-only-evidence and sole-writer code. They are
+  a design reference and the definition of what Sub's cutover must preserve —
+  not a saga to lift. Two of their behaviours are defects the module must NOT
+  reproduce: `consume_owner_output` cannot replay an outcome and never compares
+  its stored fingerprint, while `provisioning_lifecycle` correctly fails closed.
+- **ERP states the ledger requirements and demonstrates the failure mode.**
   `platform.saga_execution` + `platform.saga_step` is the only durable step
-  graph with compensation in the fleet. It is finance-schema-bound and
-  effectively dead code, so it is a requirements source, not a code source.
+  graph with compensation in the fleet, and it is dead: `use_saga` defaults
+  `False`, no tracked file passes `True`, and `SagaRecoveryService` has zero
+  callers. It is a requirements source and a warning, never a code source.
 
-**Sub has no saga engine to port.** Sub's `saga_executions` and
-`provisioning_step_executions` tables exist in migrations `037` and `047` and
-have **zero references anywhere else in the tracked tree** — `git grep -i saga
-27c76aaeebb7` outside `alembic/` returns nothing at all. No model, no service,
-no test, no caller. What actually executes provisioning in Sub is a synchronous
-`for` loop with no step rows, no attempts, no retries and no compensation
-(`ProvisioningRuns.run`, below). Anyone reading ADR-0030 §5.7 as "port Sub's
-saga" will find there is not one.
-
-Attempts, retry classification, compensation requests and partial-success
-derivation therefore have **no qualifying source in Sub** and are fresh design
-constrained by ERP's requirements and the kernel's existing vocabulary.
+A greenfield verdict here is not a licence to design in the abstract. The
+participant port, the ISP seam mapped below, and Sub's retirement inventory are
+binding inputs; ADR-0006's extraction rule simply has nothing to act on because
+there is no qualifying implementation to extract.
 
 ## Sub source
 
-### What genuinely qualifies
+### What constrains the design (reference, not a code source)
 
-**Mandatory paths:**
+**Paths that bind the cutover:**
 
 - `app/services/owner_commands.py` (427 lines) — `CommandContext`
   (`command_id`, `correlation_id`, `actor`, `scope`, `reason`,
@@ -214,7 +236,7 @@ with a participant readiness port is a bounded, mechanical change.
 
 **The ISP participants found, and the surface each occupies:**
 
-| Participant | Where it enters | Excluded by ADR-0030 §5.7 |
+| Participant | Where it enters | Excluded by ADR-0030 §5d |
 |---|---|---|
 | Field appointment | `InstallAppointment` model; `install_appointments` manager | yes |
 | Installation project / project task | `Project`, `InstallationProject`, `ProjectTask`; `sales_fulfillment.ensure_implementation_scope` | yes |
@@ -582,8 +604,12 @@ Version one does **NOT** own:
 
 ### The participant port, version one
 
-This is the deliverable ADR-0030 §5.7 asks for: a shape Domains, Hosting and
-Sub can each implement without the engine importing any of them.
+This is the deliverable ADR-0030 §5d asks for: a shape Domains, Hosting and
+Sub can each implement without the engine importing any of them. §5d fixes the
+four extensions to the kernel contract — `participant_code`, explicit
+`TenantScope`/`PlatformScope`, typed asynchronous outcome envelopes, and
+compensation that may answer `not_supported` or `manual_required` — and §8.1
+fixes what the saga may not carry.
 
 Start from `dotmac_kernel.providers.provisioning.ProvisioningProvider`, which
 already gives plan/apply/observe/cancel, `operation_id` idempotency, `PARTIAL`
@@ -710,9 +736,9 @@ tenant-plane only, with an empty `platform_tables`, declared on the manifest.
 ## Adoption and retirement
 
 **First adopter is Dotmac Cloud, not Sub**, and that inverts the usual order for
-a good reason: ADR-0030 §7 gives Sub only "the generic engine of
-`dotmac-fulfillment`", while §5.5 requires Domains' and Hosting's command
-surfaces to stabilise before the saga can depend on them. Cloud is where those
+a good reason: ADR-0030 §7 has Sub replacing its synchronous executor and
+reaper rather than adopting an engine it never had, while §5c requires Domains'
+and Hosting's command surfaces to stabilise before the saga can depend on them. Cloud is where those
 participants exist. Sub's cutover is second and is the harder one, because Sub
 must retire live writers rather than adopt into empty tables.
 

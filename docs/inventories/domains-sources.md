@@ -14,7 +14,7 @@ is at `f9ca367c1161` and is stated as such.
 `dotmac-integration-client` `4714d94`, `dotmac-academy` `71b87b2`
 **Decision:** [ADR-0030](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
 § 1 names `dotmac-domains` the sole owner of the Dotmac domain-service lifecycle;
-§ 5.5 sequences it after Orders; § 6 carries the ADR-0017 exception that
+§ 5c rules it, and build-order step 10 sequences it after Subscriptions; § 6 carries the ADR-0017 exception that
 authorizes the package; § 7 makes it Cloud-only at first.
 
 This audit settles two things and nothing else: whether the
@@ -412,7 +412,7 @@ sufficient and necessary. Kernel head at the revisions read is `0.1.0a63`
 | Settings | `dotmac_kernel.settings_resolver` + a declared `SettingDomain` | operator-tunable reconcile cadence, grace windows and drift thresholds; every registered spec needs a real reader (hard rule 10) |
 | Secret references | `dotmac_kernel.secret_sources` / `dotmac_integration.secret_refs` | a transfer auth code and a registrar credential are *held or referenced*, never dereferenced on a request path (ADR-0009) |
 | Money | `dotmac_kernel.money` | only if a monetary value proves unavoidable; the contract's intent is that it is not (§ 6 defect 6) |
-| Durable timers | `dotmac_kernel.durable_timers` — **does not exist** | renewal-due and redemption-end wake-ups; ADR-0030 § 4 and § 5.1 make this a prerequisite, and § 6 defect 1 records that the module is unbuilt |
+| Durable timers | `dotmac_kernel.durable_timers` — **does not exist** | renewal-due and redemption-end wake-ups; ADR-0030 § 4 and build-order step 6 make this a prerequisite, and § 6 defect 1 records that the module is unbuilt |
 
 The floor is a *consumption* claim. Each row must later be shown to be both used
 (necessary) and enough (sufficient) — a row nothing calls is a false floor.
@@ -498,7 +498,7 @@ own gate:
    invariant 6.
 
 The command surface must stabilize before `dotmac-fulfillment` is allowed to
-depend on it (ADR-0030 § 5.5); a saga wired against a moving surface hardcodes
+depend on it (ADR-0030 § 5c); a saga wired against a moving surface hardcodes
 guesses about it.
 
 **Gates before any code.** ADR-0030 § 6 removes the moratorium for this name

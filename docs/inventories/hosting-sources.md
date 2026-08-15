@@ -13,10 +13,10 @@ pin, not a worktree read)
 **Decision:** [ADR-0030](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
 names `dotmac-hosting` as the sole owner of the Dotmac hosting-service lifecycle
 and of the interpretation of panel observations (§1), authorizes it as the fifth
-business owner in the build order (§5.5, §6), and scopes it Cloud-only at first
+business owner in the build order (§5c, §6), and scopes it Cloud-only at first
 (§7).
 
-This audit settles one question: whether ADR-0030 §5.5's `greenfield-after-inventory`
+This audit settles one question: whether ADR-0030 §5c's `greenfield-after-inventory`
 ruling survives a search that was actually performed rather than assumed.
 
 ## Verdict
@@ -263,7 +263,7 @@ Integrator: nil, and that is the expected answer. At `d014116e63ad` the reposito
 is 24 tracked files — `assembly.py`, `lineage.py`, `migrate.py`, `worker.py`,
 `operations.py`, `health.py`, `settings.py` and three test packages. It pins and
 runs `dotmac-integration`; it ships no connector distribution. The hosting-panel
-connector ADR-0030 §5.8 requires does not exist and must not be invented inside
+connector ADR-0030 sequences at build-order step 15 does not exist and must not be invented inside
 `dotmac-hosting`.
 
 ## Do not port
@@ -436,7 +436,7 @@ Two floor gaps are real and must be named now so the "sufficient and necessary"
 proof is possible later:
 
 - **`dotmac_kernel.durable_timers` does not exist yet.** It is authorized by
-  ADR-0017 P3 and ADR-0030 §4 and is a prerequisite of the build order (§5.1).
+  ADR-0017 P3 and ADR-0030 §4 and is a prerequisite of the build order (step 6).
   Hosting needs generation-safe wake-ups for retention-window expiry, reconcile
   scheduling and consequence retry. It must not invent a second scheduler ledger,
   and it must not schedule inside its own schema.

@@ -8,14 +8,17 @@
 | `dotmac_sub` | `27c76aaeebb7` | clean |
 | `dotmac_erp` | `0f4b1698ddbf` | 67 local paths present; every conclusion below is from `git grep`/`git show` at the pinned revision |
 | `dotmac_crm` | `c64b5aa0f790` | 3 local paths present; revision-pinned reads only |
-| `dotmac_vendor_control_plane` | `89848017d6b8` | the pin is an ancestor of HEAD `f9ca367`; all VCP greps were run at the pin |
+| `dotmac_vendor_control_plane` | `89848017d6b8` | the pin is a **descendant** of the checked-out `f9ca367c1161` — unmerged vendor-module adoption work, not a divergent branch; all VCP greps were run at the pin |
 | `dotmac_integrator` | `d014116e63ad` | clean |
 
 **Decision:** [ADR-0030](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
 § 1 (registrar/panel facts are external observations), § 3 (provider names stay
-in Integrator connector distributions), § 5.8 (connector plugins are built and
-certified against stable owner ports) and § 2.6 (a provider-free fake/conformance
-kit is part of the OWNING module's completion gate). Under
+in Integrator connector distributions), § 6 (connector distributions are **NOT
+yet authorized** — § 5 merely sequences them at build-order step 15, after the
+Integrator secret resolver and an explicit amendment naming them), § 2.6 (a
+provider-free fake/conformance kit is part of the OWNING module's completion
+gate), and § 8.2–8.3 (capability-ID ownership is split; capabilities are not
+split per lifecycle verb). Under
 [ADR-0024](../adr/0024-apps-compose-by-synchronizing-data.md) §§ 6–7,
 [ADR-0023](../adr/0023-dual-plane-modules-declare-both-persistence-planes.md),
 [ADR-0014](../adr/0014-at-most-once-execution-has-one-owner.md),
@@ -57,7 +60,7 @@ Five rulings, because "provider capabilities" is not one thing.
 
 **The gate is not open.** ADR-0030 § 6 lifts the ADR-0017 moratorium for ten
 named packages — three enabling owners and seven business owners. Connector
-plugin distributions are **not** among them: § 5.8 sequences them, § 6 does not
+plugin distributions are **not** among them: § 5 sequences them, § 6 does not
 authorize them. ADR-0017's 2026-08-12 amendment separately keeps an inbound
 receiver for payment-provider events under the moratorium. So this dossier
 specifies contracts; it does not permit a package.
@@ -379,13 +382,29 @@ established by 20+ live ids in Sub's registry (`payments.intent.v1`,
 `crm.ticket_observation.v1`, `erp.status.read.v1`, `messaging.receive.v1`,
 `events.deliver.v1`) and by ADR-0024 § 7's own examples.
 
-**A gap, recorded rather than solved here:** there is no capability-id
+**A gap, and the ownership that resolves it.** There is no capability-id
 *registry* anywhere in the fleet. The id is an open string checked by a regex,
 with no declaration, no owner and no collision check across distributions.
 Nothing today stops two owners minting `domains.registration.v1` with different
 shapes. ADR-0008 says a new vocabulary is a declaration registry; this
-vocabulary is open but unregistered. Owned by `dotmac-integration`, not by this
-dossier.
+vocabulary is open but unregistered.
+
+ADR-0030 § 8.2 settles who owns what, and the answer is a **split** — the
+capability id names a business contract, so the connector layer cannot own its
+meaning:
+
+| Concern | Owner |
+|---|---|
+| The capability ID and its typed semantic contract | the **business domain owner**. `dotmac-domains` owns the meaning of a domain-registration capability |
+| Registry mechanics, installed-plugin declarations, binding validation, collision refusal | **`dotmac-integration`** |
+| Fleet-wide uniqueness and declaration/consumer completeness | **Governance CI** |
+| Implementing a declared capability at an accepted version | the **connector plugin**, which never mints authoritative meaning |
+
+What remains open is mechanism, not ownership: whether registration is a
+declaration on the owning module's `ModuleManifest` (the shape that already
+exists and is already CI-checked in both directions) or a separate artefact, and
+whether a connector declaring an unregistered id is refused at discovery, at
+binding, or merely warned.
 
 ---
 
@@ -395,7 +414,23 @@ Shapes and semantics only. Each surface is **published by the owning business
 module** under ADR-0030 § 2.3 and § 2.6; a connector implements it. Nothing
 below authors a port — § 8.7 is explicit about that boundary.
 
-Three conventions apply to all four and are not repeated per surface:
+**One capability per independently bindable lifecycle boundary** — ADR-0030
+§ 8.3. Per-verb capabilities are explicitly NOT the fleet convention: making
+create, suspend, restore and terminate separately bindable would permit an
+incoherent installation in which different providers claim different verbs for
+one hosting account. A capability therefore declares its supported
+**operations** internally, and a provider that cannot perform one reports that
+operation unsupported.
+
+The four families below are exactly the four ADR-0030 § 8.3 names: PSP
+settlement/payment lifecycle, domain registrar lifecycle, DNS zone/record
+lifecycle, and hosting account lifecycle. Each table that follows lists the
+operations WITHIN one capability, not a set of separately bindable ids. Split a
+family further only where there is a real reason to select different providers,
+credentials, release cycles or failure domains — which is why DNS is its own
+family rather than a registrar operation (§ 8.3).
+
+Three further conventions apply to all four and are not repeated per surface:
 
 - **Command capabilities** (mode `DELIVERY`) accept exactly one typed command
   carrying an **owner-minted opaque `operation_reference`**, and return one
@@ -419,9 +454,19 @@ Three conventions apply to all four and are not repeated per surface:
 ### 8.1 PSP
 
 Already specified. `docs/superpowers/specs/2026-08-14-payment-connector-and-settlement-contracts.md`
-§§ 1–5 defines four capabilities, and this dossier ratifies them unchanged:
+§§ 1–5 defines the four shapes below and this dossier ratifies their SEMANTICS
+unchanged.
 
-| Capability | Modes | Carries |
+**One reconciliation is outstanding.** That spec predates ADR-0030 § 8.3 and
+declares its four shapes as four separately bindable capability ids. Under the
+family rule they are four **operations** of one `payments.psp.v1` lifecycle
+capability. This dossier does not unilaterally rewrite an accepted spec; the
+reconciliation must land before a PSP connector distribution is authorized,
+which § 6 of ADR-0030 already blocks. Nothing else in the spec changes — the
+shapes, the modes and the "an acknowledgement is not a settlement" rule all
+survive the regrouping.
+
+| Operation | Modes | Carries |
 |---|---|---|
 | `payments.settlement.observation.v1` | INGRESS, POLL | verify signature over raw bytes; normalise one HTTP body into a **tuple** of `SettlementObservationV1` — exact `amount` + required `currency`, `provider_fee` as its own exact Money never netted, `provider_status` verbatim, a declared open `observation_kind` (`capture`, `capture_failed`, `refund`, `chargeback`, `chargeback_reversed`, `fee_adjustment`, `provider_correction`) |
 | `payments.intent.v1` | DELIVERY | carry `PaymentIntentCommandV1` (`intent_reference`, amount, currency, opaque `payer_contact`, `return_url`, opaque `merchant_reference`, opaque `mandate_ref`) and return `PaymentIntentAcknowledgementV1` |
@@ -435,20 +480,26 @@ them is how an invoice is marked paid on a pending checkout.
 
 ### 8.2 Registrar
 
+**Capability: `domains.registrar.v1`** — one lifecycle boundary, eight declared
+operations. A registrar that cannot serve one of them declares that operation
+unsupported; the binding still covers the family, because a domain whose
+registration and whose renewal came from different providers is not a coherent
+installation.
+
 A domain name is the only one of these four assets that a mistake makes
 *unrecoverable* — a lapsed renewal enters redemption, a completed transfer-out
 is gone, and both are visible to the customer within hours.
 
-| Capability | Modes | Command / fact | Must never |
+| Operation | Modes | Command / fact | Must never |
 |---|---|---|---|
-| `domains.registrar.availability.v1` | DELIVERY (read) | in: labels + TLD. out: `DomainAvailabilityFactV1{name, available: yes\|no\|unknown, provider_status verbatim, premium indicator, provider_quote: Money\|None, observed_at}` | reserve anything; decide a price; decide the customer may have it. `unknown` is a first-class answer — a registrar timeout is not "available" |
-| `domains.registrar.registration.v1` | DELIVERY | in: `operation_reference`, name, term, `contact_set_ref`, `nameserver_set_ref`, privacy flag. out: acknowledgement + `provider_order_ref` + `provider_charge: Money` verbatim | report the domain as registered. Registration is confirmed by an observation, not by an acknowledgement |
-| `domains.registrar.renewal.v1` | DELIVERY | in: `operation_reference`, name, term, the **currently observed expiry** the owner is renewing from | renew on its own initiative, or on a schedule of its own. Renewal is a decision the lifecycle owner makes against its own facts |
-| `domains.registrar.transfer.v1` | DELIVERY | in: `operation_reference`, name, direction (`in`/`approve_out`/`cancel`), `auth_code_ref` — a **secret reference, never a literal** | approve a transfer-out. Only the lifecycle owner decides that, and only after checking non-financial holds |
-| `domains.registrar.contacts.v1` | DELIVERY | in: `operation_reference`, name, desired contact set (opaque to the connector). out: acknowledgement | interpret a contact; store one; decide a jurisdiction |
-| `domains.registrar.nameservers.v1` | DELIVERY | in: `operation_reference`, name, desired ordered nameserver set. out: acknowledgement | derive nameservers from a DNS provider it happens to also implement. § 8.3 |
-| `domains.registrar.observation.v1` | INGRESS, POLL | `DomainObservationV1` — name; the registrar's own status tokens verbatim and unmapped (`clientTransferProhibited`, `pendingDelete`, …); `expires_at`; nameservers as seen; a digest of the contact set as seen; and an `observation_kind` from an open registry seeded with `registered`, `renewed`, `expiry_observed`, `transfer_requested`, `transfer_completed`, `transfer_rejected`, `redemption_observed`, `deleted`, `provider_correction` | map a status token to a Dotmac state; say the domain "is" anything |
-| `domains.registrar.reconcile.v1` | POLL, DELIVERY | one name, or a paged portfolio window from a checkpoint | decide that a discrepancy is drift, or repair one |
+| `availability` | DELIVERY (read) | in: labels + TLD. out: `DomainAvailabilityFactV1{name, available: yes\|no\|unknown, provider_status verbatim, premium indicator, provider_quote: Money\|None, observed_at}` | reserve anything; decide a price; decide the customer may have it. `unknown` is a first-class answer — a registrar timeout is not "available" |
+| `registration` | DELIVERY | in: `operation_reference`, name, term, `contact_set_ref`, `nameserver_set_ref`, privacy flag. out: acknowledgement + `provider_order_ref` + `provider_charge: Money` verbatim | report the domain as registered. Registration is confirmed by an observation, not by an acknowledgement |
+| `renewal` | DELIVERY | in: `operation_reference`, name, term, the **currently observed expiry** the owner is renewing from | renew on its own initiative, or on a schedule of its own. Renewal is a decision the lifecycle owner makes against its own facts |
+| `transfer` | DELIVERY | in: `operation_reference`, name, direction (`in`/`approve_out`/`cancel`), `auth_code_ref` — a **secret reference, never a literal** | approve a transfer-out. Only the lifecycle owner decides that, and only after checking non-financial holds |
+| `contacts` | DELIVERY | in: `operation_reference`, name, desired contact set (opaque to the connector). out: acknowledgement | interpret a contact; store one; decide a jurisdiction |
+| `nameservers` | DELIVERY | in: `operation_reference`, name, desired ordered nameserver set. out: acknowledgement | derive nameservers from a DNS provider it happens to also implement. § 8.3 |
+| `observation` | INGRESS, POLL | `DomainObservationV1` — name; the registrar's own status tokens verbatim and unmapped (`clientTransferProhibited`, `pendingDelete`, …); `expires_at`; nameservers as seen; a digest of the contact set as seen; and an `observation_kind` from an open registry seeded with `registered`, `renewed`, `expiry_observed`, `transfer_requested`, `transfer_completed`, `transfer_rejected`, `redemption_observed`, `deleted`, `provider_correction` | map a status token to a Dotmac state; say the domain "is" anything |
+| `reconcile` | POLL, DELIVERY | one name, or a paged portfolio window from a checkpoint | decide that a discrepancy is drift, or repair one |
 
 **Two obligations specific to this surface.**
 
@@ -467,19 +518,24 @@ is gone, and both are visible to the customer within hours.
 
 ### 8.3 DNS
 
-Separate from the registrar, and the separation is the point. Most registrars
-also run nameservers, so the first implementation of both may legitimately be
-one distribution — but a distribution declaring two capabilities is still two
-independently bindable capabilities, and that is what lets DNS later move to a
-dedicated provider with **no change in any business module**.
+**Capability: `dns.authoritative.v1`** — three declared operations.
+
+Separate from the registrar **family**, and the separation is the point. This
+is the one place ADR-0030 § 8.3's "split only where there is a real reason to
+select different providers" bites: registrar and authoritative-DNS providers
+are commonly replaced independently, so they are two families even though most
+registrars also run nameservers. The first implementation of both may
+legitimately be one distribution — a distribution declaring two capabilities is
+still two independently bindable capabilities, and that is what lets DNS later
+move to a dedicated provider with **no change in any business module**.
 
 DNS is the one surface that is genuinely **desired-state**, not command/event.
 
-| Capability | Modes | Shape |
+| Operation | Modes | Shape |
 |---|---|---|
-| `dns.zone.v1` | DELIVERY | create/delete a zone. out: `provider_zone_ref` + the nameservers the provider assigned, as a fact |
-| `dns.recordset.v1` | DELIVERY | apply a desired record set for one zone. **plan / apply / observe**, with a stable `plan_hash` over the canonicalised desired state, an `operation_reference` that is the resume token, and a `PARTIAL` result naming exactly the outstanding records |
-| `dns.observation.v1` | INGRESS, POLL | the zone and records as the provider currently holds them, so a resolver can derive drift |
+| `zone` | DELIVERY | create/delete a zone. out: `provider_zone_ref` + the nameservers the provider assigned, as a fact |
+| `recordset` | DELIVERY | apply a desired record set for one zone. **plan / apply / observe**, with a stable `plan_hash` over the canonicalised desired state, an `operation_reference` that is the resume token, and a `PARTIAL` result naming exactly the outstanding records |
+| `observation` | INGRESS, POLL | the zone and records as the provider currently holds them, so a resolver can derive drift |
 
 **Reuse the shape, not the seam.** `dotmac_kernel.providers.provisioning`
 already encodes precisely this contract —
@@ -498,20 +554,27 @@ never deletes a record it did not plan.
 
 ### 8.4 Hosting panel
 
-Split per lifecycle verb, deliberately. A panel that can create accounts but
-cannot terminate them declares only what it implements, and
-`ConnectorManifest.require_declares` refuses a binding for the rest **at the
-write** (`lifecycle.add_binding`) rather than at the first call. That refusal
-already exists and is tested; splitting the verbs is what makes it useful.
+**Capability: `hosting.account.v1`** — one lifecycle boundary, six declared
+operations.
 
-| Capability | Modes | Shape | Note |
+An earlier draft of this dossier split these six into six separately bindable
+capabilities. ADR-0030 § 8.3 rejects that: separately bindable verbs would
+permit an installation where one provider creates the account and another
+suspends it, which is not a coherent hosting account. A panel that can create
+accounts but cannot terminate them declares `termination` **unsupported within
+the capability**, and `ConnectorManifest.require_declares` still refuses a
+binding that does not cover the family **at the write** (`lifecycle.add_binding`)
+rather than at the first call. That refusal already exists and is tested; what
+changes is its unit — the family, not the verb.
+
+| Operation | Modes | Shape | Note |
 |---|---|---|---|
-| `hosting.account.provision.v1` | DELIVERY | in: `operation_reference`, opaque `package_ref`, primary domain, opaque owner contact. out: acknowledgement + `provider_account_ref` | never chooses a package; never generates or returns a password in a fact — a credential handoff is a secret channel, not an observation field |
-| `hosting.account.package.v1` | DELIVERY | in: `operation_reference`, account ref, target `package_ref` | never decides that an upgrade is warranted or affordable |
-| `hosting.account.suspension.v1` | DELIVERY | in: `operation_reference`, account ref, action (`suspend`/`restore`), opaque `reason_ref` | never suspends on its own signal — usage, non-payment and abuse are all owner decisions. ADR-0030 § 1: Collections may only *request*; the lifecycle owner locks, revalidates and decides |
-| `hosting.account.termination.v1` | DELIVERY | in: `operation_reference`, account ref, opaque `approval_ref` | **the one irreversible operation.** It must never be auto-retried, must never be enqueued without an approval reference the owner minted, and a lost acknowledgement resolves through `reconcile`, never through a second attempt |
-| `hosting.account.observation.v1` | INGRESS, POLL | account state as the panel holds it, plus resource usage: disk, bandwidth, mailbox and database counts, each with its unit and the provider's own period boundary verbatim | never converts a usage number into an overage, a charge or a threshold breach |
-| `hosting.account.reconcile.v1` | POLL, DELIVERY | one account, or a paged account list from a checkpoint | never repairs |
+| `provision` | DELIVERY | in: `operation_reference`, opaque `package_ref`, primary domain, opaque owner contact. out: acknowledgement + `provider_account_ref` | never chooses a package; never generates or returns a password in a fact — a credential handoff is a secret channel, not an observation field |
+| `package` | DELIVERY | in: `operation_reference`, account ref, target `package_ref` | never decides that an upgrade is warranted or affordable |
+| `suspension` | DELIVERY | in: `operation_reference`, account ref, action (`suspend`/`restore`), opaque `reason_ref` | never suspends on its own signal — usage, non-payment and abuse are all owner decisions. ADR-0030 § 1: Collections may only *request*; the lifecycle owner locks, revalidates and decides |
+| `termination` | DELIVERY | in: `operation_reference`, account ref, opaque `approval_ref` | **the one irreversible operation.** It must never be auto-retried, must never be enqueued without an approval reference the owner minted, and a lost acknowledgement resolves through `reconcile`, never through a second attempt |
+| `observation` | INGRESS, POLL | account state as the panel holds it, plus resource usage: disk, bandwidth, mailbox and database counts, each with its unit and the provider's own period boundary verbatim | never converts a usage number into an overage, a charge or a threshold breach |
+| `reconcile` | POLL, DELIVERY | one account, or a paged account list from a checkpoint | never repairs |
 
 **Usage observations are facts with a period, not meters.** Metering, rating and
 overage are `dotmac-subscriptions` and `dotmac-billing` decisions under ADR-0030
@@ -524,14 +587,20 @@ direct registrar and a direct PSP, with no code change in any business module.
 This is not a new mechanism; it is the existing schema read correctly.
 
 Concretely, four rows in `mod_intg.connector_installations`, each with its own
-config revision and secret references, and one enabled binding per capability:
+config revision and secret references, and **one enabled binding per lifecycle
+family** — which under ADR-0030 § 8.3 is one binding each, not one per verb:
 
-| `connector_key` | installation | enabled bindings |
+| `connector_key` | installation | enabled binding |
 |---|---|---|
-| `psp_direct_a` | `psp-live` | `payments.settlement.observation.v1`, `payments.intent.v1`, `payments.refund.v1`, `payments.reconcile.v1` |
-| `registrar_direct_b` | `registrar-live` | the seven `domains.registrar.*` capabilities |
-| `panel_bridge_c` (a Blesta profile) | `hosting-live` | the six `hosting.account.*` capabilities |
-| `dns_direct_d` | `dns-live` | `dns.zone.v1`, `dns.recordset.v1`, `dns.observation.v1` |
+| `psp_direct_a` | `psp-live` | `payments.psp.v1` (operations: settlement observation, intent, refund, reconcile — pending the § 8.1 reconciliation) |
+| `registrar_direct_b` | `registrar-live` | `domains.registrar.v1` (eight operations) |
+| `panel_bridge_c` (a Blesta profile) | `hosting-live` | `hosting.account.v1` (six operations) |
+| `dns_direct_d` | `dns-live` | `dns.authoritative.v1` (three operations) |
+
+The family model makes this demonstration stronger, not weaker: because a
+binding covers a whole lifecycle, there is no way to express the incoherent
+installation in which Blesta creates a hosting account and a direct panel
+suspends it.
 
 Why this works with what is already built:
 
@@ -544,12 +613,12 @@ Why this works with what is already built:
    by `connector_key`, or requires exactly one `policy_json.default` — and
    refuses otherwise, naming the colliding installations.
 3. Moving hosting from the Blesta profile to a direct panel is: draft a new
-   installation, add a config revision, bind the six capabilities, enable, flip
-   the destination binding, disable the old one. Six rows. **No import changes,
-   no migration, no release of any business module.**
-4. If the registrar distribution also implements `dns.*`, binding DNS to it is
-   one more row — and unbinding it later is one row back. The capability stays
-   separate precisely so that swap is a row and not a refactor.
+   installation, add a config revision, bind `hosting.account.v1`, enable, flip
+   the destination binding, disable the old one. **No import changes, no
+   migration, no release of any business module.**
+4. If the registrar distribution also implements `dns.authoritative.v1`,
+   binding DNS to it is one more row — and unbinding it later is one row back.
+   The family stays separate precisely so that swap is a row and not a refactor.
 
 The one thing missing is the row that says *which application and scope this
 installation delivers to* (§ 2.2). Until that exists, "zero code change" is true

@@ -12,7 +12,7 @@
 | `dotmac_integrator` | `d014116e63ad` | clean; zero collections/dunning matches |
 
 **Decision:** [ADR-0030](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
-§ 1 (the deliberately narrow Collections row), § 5.6 (build order), § 6 (the
+§ 1 (the deliberately narrow Collections row), build-order step 11, § 6 (the
 owner-directed implementation exception naming `dotmac-collections`) and § 7 (the
 application adoption matrix). **Extends** ADR-0020 § 4 and its 2026-08-14
 amendment (A1, A2, A6), which remain the ownership boundary.
@@ -1376,7 +1376,7 @@ This is what § 5.15 and R9 retire the postpaid path into.
 
 1. **P3 durable timers is missing from the kernel and gap-listed**
    (`billing-sources.md` P3; ADR-0020 A5; ADR-0030 § 4 names
-   `dotmac_kernel.durable_timers` as an enabling owner and § 5.1 sequences it
+   `dotmac_kernel.durable_timers` as an enabling owner and build-order step 6 sequences it
    *before* the business modules). Correction to the 2026-08-14 text: Sub's
    reference implementation is not merely present, it is **production-proven by
    eight other owners** — `access_invitations.py:103,125`,
@@ -1630,7 +1630,7 @@ both sufficient and necessary. Each is a consumption, not a restatement.
 | Consent | `consent.may_send` / `suppression_reason` | eligibility before a notice intent; consent is not a preference and never loses |
 | Channel policy | `channel_policy.resolve_channels` | which channels a notice class uses; a policy step's `channel_preference` is a preference, and a disagreement is recorded on the step attempt |
 | Delivery receipts and the send path | `delivery.record_receipt`, `delivery_providers.send` | consumed by the product's communication adapter, **not** by this module (§ 10.1) — named here so "collections does not send" is checkable against a real API |
-| Durable timers | `dotmac_kernel.durable_timers` — **does not exist** | the escalation wake-up. ADR-0030 § 4 names it an enabling owner and § 5.1 sequences it before the business modules; until it exists Collections declares a `Timer` port, ships a fake and a parametrized contract suite, and **must not invent a second scheduler ledger** in its own schema |
+| Durable timers | `dotmac_kernel.durable_timers` — **does not exist** | the escalation wake-up. ADR-0030 § 4 names it an enabling owner and build-order step 6 sequences it before the business modules; until it exists Collections declares a `Timer` port, ships a fake and a parametrized contract suite, and **must not invent a second scheduler ledger** in its own schema |
 
 Two floor facts that are easy to get wrong. The kernel's platform-plane
 `messaging` and `idempotency` variants exist, so the platform plane needs no

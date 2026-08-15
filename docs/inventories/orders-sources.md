@@ -8,7 +8,7 @@
 **Vendor CP:** `89848017d6b8`
 **Integrator:** `d014116e63ad`
 **Decision:** [ADR-0030](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
-§5.4 authorizes `dotmac-orders` and rules Sub the starting point; §7 keeps ERP's
+§5b authorizes `dotmac-orders` and rules Sub the starting point; §7 keeps ERP's
 physical sales order ERP-owned and retires CRM's parallel writer.
 
 This audit resolves which implementation the order aggregate and its line

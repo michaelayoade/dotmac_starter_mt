@@ -11,9 +11,18 @@ ADR-0030 branch.
 citation is `git show 89848017d6b8:<path>`
 **ERP:** `0f4b1698ddbf` (revision-pinned; worktree had 67 local paths)
 **CRM:** `c64b5aa0f790` (revision-pinned; worktree had 3 local paths)
-**Decision:** ADR-0030 §5.3 authorizes `dotmac-subscriptions` as the third
-business owner and names Sub the cadence/contract/recurrence source and Vendor
-CP the immutable-publication delta.
+**Decision:** ADR-0030 §5a authorizes `dotmac-subscriptions` as the fourth
+business owner (build-order step 9, after Orders) and names Sub the
+cadence/contract/recurrence source.
+
+**Vendor CP is NOT the immutable-publication source.** The 2026-08-15 amendment
+corrected that claim on this dossier's own evidence: `v002_offer_versions.py`
+grants `UPDATE, DELETE` on `offer_versions` to the online API role, versions are
+caller-asserted, and there is no digest or previous-version link. Vendor CP
+remains evidence for exact money, platform-plane operation, `(offer_code,
+version)` uniqueness and declared capability membership. Structural
+immutability is **built** — the eight requirements are listed in ADR-0030 §5a
+and in the shared-contract section below.
 
 This supersedes the 2026-08-14 A2b offer-catalogue audit at this path, which
 compared tables and writers but did not count callers, characterize the live
@@ -359,7 +368,7 @@ and a billing-document writer.
    permits the mutation whenever `_live_version_subscription_count(...) == 0`.
    A published price with no *currently* live subscription can be rewritten,
    silently changing what the historical record says was offered. `OfferVersion`
-   and `OfferPrice` have the same shape. This is the ADR-0030 §5.3 mandatory
+   and `OfferPrice` have the same shape. This is the ADR-0030 §5a mandatory
    delta.
 2. **That guard is a read-then-write race.** The count is an unlocked `SELECT`
    followed by `setattr` and `commit`. A subscription created concurrently
@@ -487,8 +496,19 @@ Version one **owns**:
 
 - a stable `Offer` identity distinct from its versions, keyed by a registered
   open `offer_code`;
-- immutable, effective-dated `OfferVersion` rows with server-allocated,
-  contiguous version numbers and a content digest;
+- immutable, effective-dated `OfferVersion` rows. ADR-0030 §5a fixes what
+  "immutable" has to mean structurally, because no source supplies it — all
+  eight are BUILT:
+  1. database refusal of `UPDATE` and `DELETE` for published versions;
+  2. an immutable-row trigger or equivalent structural guard;
+  3. module-assigned version numbers taken under a lock, contiguous, never
+     caller-asserted;
+  4. `previous_version_id`;
+  5. a canonical content digest;
+  6. same-key/same-fingerprint replay returning the original result;
+  7. conflict on changed publication input for a reused key; and
+  8. append-only publication history, with no meaningful `updated_at` on an
+     immutable version;
 - immutable `OfferVersionPrice` children carrying exact money, a registered
   charge model, and the cadence offered for that charge;
 - saleability — whether a version may be *sold* now, on declared dimensions the
@@ -637,7 +657,7 @@ the defects:
 
 Sequence-blocked: step 4 cannot land before `dotmac_kernel.durable_timers`
 exists, and the occurrence's output contract cannot freeze before Billing's
-accepted-obligation input does (ADR-0030 §5.2). Sub's Phase-2 shadow machinery
+accepted-obligation input does (ADR-0030 build-order step 7). Sub's Phase-2 shadow machinery
 (`billing/shadow_verification.py`, 3644 lines, and
 `tests/test_billing_phase2_shadow.py`) is the measurement instrument for every
 slice — used, not ported.
