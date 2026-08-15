@@ -621,7 +621,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a64"
+version = "0.1.0a65"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -645,6 +645,24 @@ testing = ["httpx (>=0.27,<0.28)"]
 [package.source]
 type = "directory"
 url = "packages/dotmac-kernel"
+
+[[package]]
+name = "dotmac-numbering"
+version = "0.1.0a1"
+description = "DotMac dual-plane document-series allocation with immutable receipts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a65"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-numbering"
 
 [[package]]
 name = "dotmac-release-catalog"
@@ -2699,4 +2717,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "af9fcbb97bc7d9ef822b32553facfb2d493249d48129e963b62e638ccc99b711"
+content-hash = "ea33d96969b0f9012db28a9f8a71bbd57d7d14ce4d959abd1e8eea3361269793"
