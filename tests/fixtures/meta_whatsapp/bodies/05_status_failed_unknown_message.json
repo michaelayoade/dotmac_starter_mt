@@ -1,0 +1,28 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "waba-1",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "statuses": [
+              {
+                "id": "wamid.missing",
+                "status": "failed",
+                "timestamp": "1783670600",
+                "recipient_id": "2348035550114",
+                "errors": [
+                  {
+                    "code": 131026
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

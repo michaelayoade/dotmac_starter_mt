@@ -1,0 +1,365 @@
+{
+  "schema_version": 1,
+  "title": "Meta/WhatsApp Cloud API ingress conformance fixtures",
+  "spec": "docs/superpowers/specs/2026-08-15-meta-whatsapp-ingress-conformance.md",
+  "dossier": "docs/inventories/whatsapp-connector-dossier.md",
+  "status": "specification-only",
+  "notice": [
+    "This is a CONFORMANCE SPECIFICATION expressed as data. No connector exists,",
+    "and ADR-0030 section 6 does not authorize one. The assertions here describe",
+    "what a future ingress connector must satisfy; tests/unit/",
+    "test_meta_whatsapp_ingress_conformance.py proves the corpus is internally",
+    "consistent and that the identity rules are computable from the bytes."
+  ],
+  "capability_id": "messaging.inbound.v1",
+  "signing_keys": {
+    "_notice": "TEST KEYS. Generated for this corpus, never used by any deployment, and deliberately self-describing so a scanner that finds one knows it is inert. A real signing secret must never appear in this repository.",
+    "active": [
+      "meta-conformance-test-signing-key-NOT-A-SECRET-current",
+      "meta-conformance-test-signing-key-NOT-A-SECRET-previous"
+    ],
+    "primary": "meta-conformance-test-signing-key-NOT-A-SECRET-current",
+    "previous": "meta-conformance-test-signing-key-NOT-A-SECRET-previous",
+    "retired": "meta-conformance-test-signing-key-NOT-A-SECRET-retired"
+  },
+  "signature_header": {
+    "name": "X-Hub-Signature-256",
+    "value_pattern": "^sha256=[0-9a-f]{64}$",
+    "algorithm": "HMAC-SHA256 over the exact request body bytes",
+    "comparison": "constant-time over the whole header value, including the 'sha256=' prefix"
+  },
+  "common_headers": {
+    "content-type": "application/json",
+    "user-agent": "facebookexternalua"
+  },
+  "handshake": {
+    "method": "GET",
+    "query": {
+      "hub.mode": "subscribe",
+      "hub.verify_token": "meta-conformance-test-verify-token-NOT-A-SECRET",
+      "hub.challenge": "challenge-123"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "text/plain",
+      "body": "challenge-123",
+      "body_rule": "the value of hub.challenge, echoed verbatim, with no JSON wrapper"
+    },
+    "comparison": "constant-time on hub.verify_token; a mismatch and a missing token produce the identical refusal",
+    "installation_states": {
+      "_rule": "The handshake is what PRECEDES activation, so it must be answerable before the binding is enabled. Requiring an enabled binding is circular: Meta will not deliver an event, and the Cloud API will not save the callback URL, until the GET is answered.",
+      "answers_challenge": [
+        "disabled",
+        "enabled"
+      ],
+      "refuses": [
+        "draft",
+        "retired",
+        "config_revision_invalid",
+        "absent"
+      ]
+    },
+    "grants": {
+      "_rule": "Answering the challenge grants nothing.",
+      "creates_receipt": false,
+      "enables_binding": false,
+      "reveals_enablement_state": false
+    },
+    "refusals": [
+      {
+        "case": "wrong_verify_token",
+        "query": {
+          "hub.mode": "subscribe",
+          "hub.verify_token": "wrong",
+          "hub.challenge": "challenge-123"
+        },
+        "outcome": "refused",
+        "reason_code": "handshake_token_mismatch"
+      },
+      {
+        "case": "missing_verify_token",
+        "query": {
+          "hub.mode": "subscribe",
+          "hub.challenge": "challenge-123"
+        },
+        "outcome": "refused",
+        "reason_code": "handshake_token_mismatch"
+      },
+      {
+        "case": "wrong_mode",
+        "query": {
+          "hub.mode": "unsubscribe",
+          "hub.verify_token": "meta-conformance-test-verify-token-NOT-A-SECRET",
+          "hub.challenge": "challenge-123"
+        },
+        "outcome": "refused",
+        "reason_code": "handshake_mode_unsupported"
+      }
+    ]
+  },
+  "identity_rules": {
+    "message": {
+      "template": "wa:msg:{message.id}",
+      "identity_source": "provider",
+      "note": "The wamid is provider-assigned and stable across redelivery and across regrouping into a different batch."
+    },
+    "status": {
+      "template": "wa:status:{status.id}:{status.status}:{status.timestamp}",
+      "identity_source": "provider",
+      "note": "One outbound message yields several status callbacks. The message id alone is NOT an event identity: sent, delivered and read would collapse into one row."
+    },
+    "error": {
+      "template": "wa:error:{scope}:{sha256(canonical_json(item))[:32]}",
+      "identity_source": "derived",
+      "scope": "value.metadata.phone_number_id, else entry.id",
+      "canonical_json": "json.dumps(item, sort_keys=True, separators=(',', ':')) encoded UTF-8",
+      "note": "Meta assigns no identity to a change-level error. The identity is derived from the ITEM, never from the request body, so the same error redelivered inside a differently grouped batch still deduplicates."
+    },
+    "forbidden": {
+      "request_digest": "sha256 of the raw request body",
+      "reason": "Sub uses `meta:{sha256(raw_body)}` as the single provider_event_id for a whole request. That is one identity per REQUEST, not per event: two batches that share a message are two identities, so the shared message is recorded twice, and twenty good events inherit the fate of the one bad entry beside them."
+    }
+  },
+  "fixtures": [
+    {
+      "file": "bodies/01_text_message.json",
+      "description": "One inbound text message with a contact profile name.",
+      "provenance": {
+        "repo": "dotmac_sub",
+        "path": "tests/test_team_inbox_whatsapp_webhook.py",
+        "symbol": "test_meta_whatsapp_webhook_creates_native_inbox_message",
+        "lines": "235-269",
+        "commit": "638c7f8bb",
+        "blob": "73f16f03fb92eb10b027addbacf25e00c39c55c8",
+        "verbatim": true
+      },
+      "expected_observations": [
+        {
+          "locator": "/entry/0/changes/0/value/messages/0",
+          "provider_event_id": "wa:msg:wamid.meta-1",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.received.v1"
+        }
+      ]
+    },
+    {
+      "file": "bodies/02_media_image_message.json",
+      "description": "An image message: media is referenced by provider media id, never fetched during normalisation.",
+      "provenance": {
+        "repo": "dotmac_sub",
+        "path": "tests/test_team_inbox_whatsapp_webhook.py",
+        "symbol": "test_meta_whatsapp_webhook_preserves_media_message",
+        "lines": "302-330",
+        "commit": "638c7f8bb",
+        "blob": "73f16f03fb92eb10b027addbacf25e00c39c55c8",
+        "verbatim": true
+      },
+      "expected_observations": [
+        {
+          "locator": "/entry/0/changes/0/value/messages/0",
+          "provider_event_id": "wa:msg:wamid.media-1",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.received.v1"
+        }
+      ]
+    },
+    {
+      "file": "bodies/03_location_message.json",
+      "description": "A location message. Float coordinates must survive normalisation unrounded.",
+      "provenance": {
+        "repo": "dotmac_sub",
+        "path": "tests/test_team_inbox_whatsapp_webhook.py",
+        "symbol": "test_meta_whatsapp_webhook_renders_location_as_google_maps_link",
+        "lines": "351-381",
+        "commit": "638c7f8bb",
+        "blob": "73f16f03fb92eb10b027addbacf25e00c39c55c8",
+        "verbatim": true
+      },
+      "expected_observations": [
+        {
+          "locator": "/entry/0/changes/0/value/messages/0",
+          "provider_event_id": "wa:msg:wamid.location-1",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.received.v1"
+        }
+      ]
+    },
+    {
+      "file": "bodies/04_status_delivered.json",
+      "description": "A delivery status callback for an outbound message.",
+      "provenance": {
+        "repo": "dotmac_sub",
+        "path": "tests/test_team_inbox_whatsapp_webhook.py",
+        "symbol": "test_meta_whatsapp_webhook_updates_outbound_delivery_status",
+        "lines": "491-515",
+        "commit": "638c7f8bb",
+        "blob": "73f16f03fb92eb10b027addbacf25e00c39c55c8",
+        "verbatim": true
+      },
+      "expected_observations": [
+        {
+          "locator": "/entry/0/changes/0/value/statuses/0",
+          "provider_event_id": "wa:status:wamid.outbound-1:delivered:1783670500",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.status.v1"
+        }
+      ]
+    },
+    {
+      "file": "bodies/05_status_failed_unknown_message.json",
+      "description": "A failed status for a message this deployment never sent, with a provider error code and no value-level metadata.",
+      "provenance": {
+        "repo": "dotmac_sub",
+        "path": "tests/test_team_inbox_whatsapp_webhook.py",
+        "symbol": "test_meta_whatsapp_webhook_acknowledges_unknown_status",
+        "lines": "537-560",
+        "commit": "638c7f8bb",
+        "blob": "73f16f03fb92eb10b027addbacf25e00c39c55c8",
+        "verbatim": true
+      },
+      "expected_observations": [
+        {
+          "locator": "/entry/0/changes/0/value/statuses/0",
+          "provider_event_id": "wa:status:wamid.missing:failed:1783670600",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.status.v1"
+        }
+      ]
+    },
+    {
+      "file": "bodies/06_batch_mixed.json",
+      "description": "The batch case: three entries carrying two messages, two statuses for one outbound message, one structurally bad message and one change-level error. wamid.meta-1 is deliberately the same message as fixture 01, regrouped into a different batch.",
+      "provenance": {
+        "repo": "dotmac_sub",
+        "path": "tests/test_team_inbox_whatsapp_webhook.py",
+        "symbol": "composed from test_meta_whatsapp_webhook_creates_native_inbox_message and test_meta_whatsapp_webhook_updates_outbound_delivery_status",
+        "lines": "235-269, 491-515",
+        "commit": "638c7f8bb",
+        "blob": "73f16f03fb92eb10b027addbacf25e00c39c55c8",
+        "verbatim": false,
+        "composed_because": "Sub has no multi-entry, partly-malformed fixture. Its receiver silently drops what it cannot parse, so the case it fails on was never captured."
+      },
+      "expected_observations": [
+        {
+          "locator": "/entry/0/changes/0/value/messages/0",
+          "provider_event_id": "wa:msg:wamid.meta-1",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.received.v1"
+        },
+        {
+          "locator": "/entry/0/changes/0/value/messages/1",
+          "provider_event_id": "wa:msg:wamid.batch-2",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.received.v1"
+        },
+        {
+          "locator": "/entry/0/changes/0/value/statuses/0",
+          "provider_event_id": "wa:status:wamid.outbound-1:delivered:1783670500",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.status.v1"
+        },
+        {
+          "locator": "/entry/0/changes/0/value/statuses/1",
+          "provider_event_id": "wa:status:wamid.outbound-1:read:1783670600",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.status.v1"
+        },
+        {
+          "locator": "/entry/1/changes/0/value/messages/0",
+          "provider_event_id": "wa:msg:wamid.bad-1",
+          "identity_source": "provider",
+          "event_type": "whatsapp.entry.malformed.v1",
+          "reason_code": "message_sender_missing"
+        },
+        {
+          "locator": "/entry/2/changes/0/value/errors/0",
+          "provider_event_id": "wa:error:waba-1:25ddc68545fc84a96e548d6f52f291a6",
+          "identity_source": "derived",
+          "event_type": "whatsapp.error.v1"
+        }
+      ]
+    },
+    {
+      "file": "bodies/07_empty_entry.json",
+      "description": "An empty batch. Meta sends these. Zero observations is a valid, acknowledged outcome and not an error.",
+      "provenance": {
+        "repo": "dotmac_sub",
+        "path": "tests/test_team_inbox_whatsapp_webhook.py",
+        "symbol": "test_meta_whatsapp_webhook_rejects_bad_signature",
+        "lines": "223",
+        "commit": "638c7f8bb",
+        "blob": "73f16f03fb92eb10b027addbacf25e00c39c55c8",
+        "verbatim": false,
+        "composed_because": "Sub's literal is the compact b'{\"entry\":[]}'; the bytes here are the same document pretty-printed, and the recorded signature is over THESE bytes."
+      },
+      "expected_observations": []
+    },
+    {
+      "file": "bodies/08_unsupported_message_type.json",
+      "description": "A reaction — a message type the first connector will not interpret. It must still be observed, with a reason code; it must never be silently dropped.",
+      "provenance": {
+        "repo": "dotmac_sub",
+        "path": "app/api/inbox_webhooks.py",
+        "symbol": "_WHATSAPP_QUALIFYING_MESSAGE_TYPES / _text_body",
+        "lines": "31-45, 74-98",
+        "commit": "6ba45f701",
+        "blob": "dd9e5f9d3d75d85ef6f5fe1d51ce2e6281bf77eb",
+        "verbatim": false,
+        "composed_because": "Sub has no fixture for this because it produces no output: `reaction` is outside the qualifying set, `_text_body` returns '', and `if not sender or not body: continue` drops the message with no record. The fixture exists to make the drop visible."
+      },
+      "expected_observations": [
+        {
+          "locator": "/entry/0/changes/0/value/messages/0",
+          "provider_event_id": "wa:msg:wamid.reaction-1",
+          "identity_source": "provider",
+          "event_type": "whatsapp.message.received.v1",
+          "reason_code": "message_type_unsupported"
+        }
+      ]
+    }
+  ],
+  "shared_events": {
+    "_rule": "Two fixtures share an event identity. A connector keyed on the request digest cannot see that; a connector keyed on the provider's own ids must.",
+    "wa:msg:wamid.meta-1": [
+      "bodies/01_text_message.json",
+      "bodies/06_batch_mixed.json"
+    ],
+    "wa:status:wamid.outbound-1:delivered:1783670500": [
+      "bodies/04_status_delivered.json",
+      "bodies/06_batch_mixed.json"
+    ]
+  },
+  "tamper_cases": [
+    {
+      "case": "one_byte_changed",
+      "file": "bodies/04_status_delivered.json",
+      "replace": "delivered",
+      "with": "read",
+      "outcome": "signature_invalid"
+    },
+    {
+      "case": "whitespace_only_change",
+      "file": "bodies/01_text_message.json",
+      "transform": "reserialise_compact",
+      "outcome": "signature_invalid",
+      "note": "Same JSON document, different bytes. This is why verification is over the bytes received and never over a re-serialised body."
+    },
+    {
+      "case": "signed_with_retired_key",
+      "file": "bodies/01_text_message.json",
+      "key": "retired",
+      "outcome": "signature_invalid"
+    },
+    {
+      "case": "signature_header_absent",
+      "file": "bodies/01_text_message.json",
+      "outcome": "signature_invalid"
+    },
+    {
+      "case": "signature_header_malformed",
+      "file": "bodies/01_text_message.json",
+      "header_value": "sha256=bad",
+      "outcome": "signature_invalid"
+    }
+  ]
+}
