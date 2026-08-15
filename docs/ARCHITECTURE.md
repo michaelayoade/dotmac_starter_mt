@@ -256,6 +256,19 @@ cannot produce. The evidence index is
 `tests/architecture/test_product_first_extraction.py` prevents a new package
 from entering with the same unresolved status.
 
+The generated [`MODULE_CATALOG.md`](MODULE_CATALOG.md) is the as-built discovery
+view over those independent owners; it owns no facts of its own. Package
+`pyproject.toml` files own declared versions and kernel requirements,
+`EXTRACTION.toml` owns contract/evidence/consumer state, `ModuleManifest` owns
+runtime persistence-plane and schema declarations, and
+`.github/release-modules.json` owns eligibility for the general module release
+workflow. `scripts/module_catalog.py` joins those inputs deterministically, and
+`tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
+refuse drift or an undiscoverable new distribution. An application still owns
+its exact installed pins: `ModuleRegistry.inventory_payload()` reports that
+deployment-local composition, while the repository catalogue only answers what
+reusable distributions exist here and what their evidence currently proves.
+
 ERP and ISP subscriber management remain separate product assemblies/data planes
 even when they consume the same kernel. ERP `Organization` is the natural tenant
 mapping candidate; in the ISP product, the ISP operator—not each subscriber—is
