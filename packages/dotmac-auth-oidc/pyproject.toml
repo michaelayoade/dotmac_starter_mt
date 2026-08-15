@@ -1,0 +1,49 @@
+[tool.poetry]
+name = "dotmac-auth-oidc"
+version = "0.1.0a1"
+description = "DotMac OIDC relying-party client — discovery, JWKS, Authorization Code + PKCE, single-use server-side state, and ID-token validation. Returns a verified external subject and nothing else."
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_auth_oidc", from = "src" }]
+include = [
+    # PEP 561 marker — the package's contracts are annotated; ship the hints so
+    # a consumer's type-checker sees dotmac_auth_oidc as a TYPED package.
+    { path = "src/dotmac_auth_oidc/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+# STATELESS by construction: no database, no ORM, no web framework, no kernel.
+# The package holds no rows, so it declares no `short_code`/`migration_prefix`
+# and allocates no namespace (hard rule 14 — stateless and stateful are the only
+# two coherent shapes). It is not dependency-FREE the way `dotmac-ui` is — it
+# speaks a network protocol and verifies signatures, and neither can be faked —
+# but the dependency set is exactly those two concerns and nothing else.
+python = ">=3.11,<3.14"
+
+# Signature verification. Deliberately NOT `python-jose`: the objection is not
+# that the PROJECT is abandoned — it still publishes releases — but that ERP,
+# CRM and Sub all pin `3.3.0` from 2021, which is what a drop-in port would have
+# inherited, and which pulls the pure-Python `ecdsa`. Carrying a four-year-old
+# pin into a NEW shared security library is the wrong starting point; see
+# `docs/inventories/external-identity-sources.md` § D4. PyJWT additionally gives
+# `leeway` for clock skew and audience handling that ERP lacks entirely.
+#
+# FLOOR 2.13 IS A SECURITY FLOOR, not a convenience. PyJWT's own advisory
+# GHSA-jq35-7prp-9v3f reports an ALGORITHM ALLOW-LIST BYPASS affecting versions
+# through 2.12.1 — the precise control this package leans on hardest
+# (`ALLOWED_ALGORITHMS` + a single pinned `algorithms=[...]`). A lower floor
+# would leave the allowlist bypassable by the library enforcing it, so this
+# must not be relaxed to widen compatibility.
+pyjwt = { version = ">=2.13,<3.0", extras = ["crypto"] }
+
+# Discovery and JWKS retrieval. The range deliberately spans the fleet's two
+# existing pins — ERP/CRM/Sub are on 0.27, `dotmac_academy_app` on 0.28 — so
+# adopting this package never forces an httpx bump on a product. The transport
+# is injectable (`Transport` in `transport.py`), so a consumer that wants its
+# own pooled client, timeouts or proxy config supplies one and this dependency
+# is only the default.
+httpx = ">=0.27,<0.29"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
