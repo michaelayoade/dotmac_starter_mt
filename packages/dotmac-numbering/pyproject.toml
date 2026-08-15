@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-numbering"
+version = "0.1.0a1"
+description = "DotMac dual-plane document-series allocation with immutable receipts"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_numbering", from = "src" }]
+include = [
+    { path = "src/dotmac_numbering/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_numbering/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a65"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,57 @@
+# dotmac-numbering
+
+Concurrency-safe allocation and formatting of **explicitly configured** document
+series, on separate tenant and platform planes, with one immutable receipt per
+allocation.
+
+## What it owns
+
+Given a `TenantScope` or `PlatformScope`, an open registered `series_code`, an
+explicit business `reference_date` and an idempotency key: reserve the next
+value of a configured series under a row lock, format it from validated
+configuration, and record one immutable allocation receipt.
+
+Replaying the same key with the same request returns the original formatted
+number. Replaying it with a different request conflicts. Allocation joins the
+caller's transaction and rolls back with it.
+
+## What it does NOT own
+
+What a number *means*, which documents require one, legal gaplessness policy,
+fiscal periods, invoice issuance, document rendering, or any product's series
+vocabulary. Those belong to the owner issuing the document.
+
+## Five refusals, and the defect behind each
+
+The sources are ERP and Sub; the audit is
+[`numbering-sources.md`](../../docs/inventories/numbering-sources.md) with its
+[2026-08-15 revalidation](../../docs/inventories/numbering-source-variance.md).
+Each refusal below is a defect one of them still has.
+
+| This module refuses to… | Because the source… |
+|---|---|
+| read a clock | ERP allocates against `date.today()` on 16 of its caller sites, so a backdated invoice takes today's period |
+| invent a series | ERP auto-creates on first use with a guessed `DOC-` prefix, so a typo becomes a live series |
+| rewind a counter | ERP's `should_reset` compares period *inequality*, so a backdated allocation restarts the sequence and reissues numbers |
+| rewrite history | ERP's reset/update path rewrites counters with no allocation evidence |
+| format twice | ERP has three formatters; its preview hardcodes four digits and disagrees with allocation for every other width |
+
+`series_code` is an open registered string. ERP's `SequenceType` is a 27-member
+PostgreSQL enum, so a new document kind is a migration in a shared module —
+which ADR-0008 forbids.
+
+## Planes
+
+Both are declared, never inferred (ADR-0023). Tenant tables carry
+`tenant_id NOT NULL` with FORCEd RLS; platform tables carry no tenant column and
+are `REVOKE`d from the tenant app role, which is the isolation there. No foreign
+key crosses the planes.
+
+## Correctness evidence
+
+Neither source contributes a single real-database test: ERP's are `MagicMock`
+and Sub's run on SQLite, where `with_for_update()` is a no-op — which is how an
+identical locking shape has gone unproven for years. This module's evidence is
+therefore entirely new and lives in `tests/test_numbering_isolation.py`, on real
+migrated PostgreSQL. Each race test carries a sensitivity proof (ADR-0018): a
+companion that removes the guard and asserts the race test then fails.

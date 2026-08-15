@@ -1,0 +1,203 @@
+"""Structural canaries for ``dotmac-numbering`` (ADR-0030 step 5).
+
+These guard the boundary, not the behaviour — the behaviour is proven on real
+PostgreSQL in ``tests/test_numbering_isolation.py``.
+
+Several exist because the SOURCE has the defect and a comment alone would not
+stop it coming back through a port. `numbering-source-variance.md` records each
+one at file and line in ERP or Sub.
+"""
+
+from __future__ import annotations
+
+import ast
+import inspect
+import json
+import tomllib
+from pathlib import Path
+
+from dotmac_kernel.namespaces import MIGRATION_OWNER_LEDGER, NUMBERING_MIGRATION_OWNER
+from dotmac_numbering import models, service
+from dotmac_numbering.manifest import module
+
+MODULE_ROOT = Path(inspect.getfile(service)).parent
+MIGRATION = MODULE_ROOT / "migrations/versions/nu_0001_numbering.py"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-numbering"
+
+
+def _module_source() -> str:
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(MODULE_ROOT.rglob("*.py"))
+    )
+
+
+def test_manifest_matches_the_immutable_namespace_allocation() -> None:
+    assert NUMBERING_MIGRATION_OWNER in MIGRATION_OWNER_LEDGER
+    assert module.short_code == NUMBERING_MIGRATION_OWNER.owner
+    assert module.migration_prefix == NUMBERING_MIGRATION_OWNER.prefix
+    assert module.migration_branch == NUMBERING_MIGRATION_OWNER.branch_label
+    assert models.SCHEMA == NUMBERING_MIGRATION_OWNER.db_schema == "mod_numbering"
+
+
+def test_both_planes_are_declared_and_disjoint() -> None:
+    assert module.tables == models.TENANT_TABLES
+    assert module.platform_tables == models.PLATFORM_TABLES
+    assert module.tables and module.platform_tables
+    assert not set(module.tables) & set(module.platform_tables)
+
+
+def test_platform_tables_carry_no_tenant_column() -> None:
+    for model in (models.PlatformNumberSeries, models.PlatformAllocationReceipt):
+        assert "tenant_id" not in model.__table__.c, (
+            f"{model.__name__} has a tenant column; the platform plane is "
+            "isolated by REVOKE, and a tenant column there invites RLS that "
+            "does not exist"
+        )
+
+
+def test_every_tenant_table_has_a_not_null_tenant_and_composite_identity() -> None:
+    for model in (models.NumberSeries, models.AllocationReceipt):
+        column = model.__table__.c["tenant_id"]
+        assert column.nullable is False
+        constraints = {
+            tuple(c.columns.keys())
+            for c in model.__table__.constraints
+            if hasattr(c, "columns")
+        }
+        assert any("tenant_id" in cols for cols in constraints)
+
+
+def test_no_foreign_key_crosses_the_planes() -> None:
+    for model in (
+        models.NumberSeries,
+        models.AllocationReceipt,
+        models.PlatformNumberSeries,
+        models.PlatformAllocationReceipt,
+    ):
+        for fk in model.__table__.foreign_keys:
+            target = str(fk.target_fullname)
+            assert target.startswith("public.tenants."), (
+                f"{model.__name__} points at {target}; the only permitted edge "
+                "is the tenant catalogue, and no edge may cross the planes"
+            )
+
+
+def test_the_migration_declares_the_same_prerequisites_as_the_manifest() -> None:
+    tree = ast.parse(MIGRATION.read_text(encoding="utf-8"))
+    literals: dict[str, tuple[str, ...]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            if name in {"COMMON_REQUIRES", "TENANT_REQUIRES", "PLATFORM_REQUIRES"}:
+                literals[name] = tuple(ast.literal_eval(node.value))
+    assert literals["COMMON_REQUIRES"] == module.requires
+    assert literals["TENANT_REQUIRES"] == module.tenant_requires
+
+
+# ── The five refusals the sources make necessary ────────────────────────────
+
+
+def test_the_module_reads_no_clock_for_a_business_decision() -> None:
+    """`reference_date` is an input, never `date.today()`.
+
+    ERP allocates against `date.today()` on sixteen caller sites, so a
+    backdated invoice takes today's period. `allocated_at` is the only time the
+    module takes from the system, and it is evidence rather than a decision.
+    """
+    source = _module_source()
+    assert "date.today()" not in source
+    assert "datetime.today()" not in source
+    # The one permitted clock read, and it must stay in the receipt only.
+    assert source.count("datetime.now(") == 1
+
+
+def test_the_module_reads_no_settings_and_no_environment() -> None:
+    """Configuration is a row supplied by the product (ADR-0009, ADR-0011)."""
+    source = _module_source()
+    for forbidden in ("os.environ", "getenv", "settings_resolver", "resolve_value"):
+        assert forbidden not in source, f"{forbidden} on the allocation path"
+
+
+def test_there_is_exactly_one_formatter() -> None:
+    """ERP has three and two disagree — its preview hardcodes four digits, so
+    for every other width the preview is a lie. Preview must call allocation's
+    own formatter."""
+    tree = ast.parse((MODULE_ROOT / "service.py").read_text(encoding="utf-8"))
+    formatters = [
+        n.name
+        for n in tree.body
+        if isinstance(n, ast.FunctionDef) and "format" in n.name
+    ]
+    assert formatters == ["format_number"], formatters
+    preview_src = inspect.getsource(service.preview)
+    assert "format_number(" in preview_src
+
+
+def test_no_path_lowers_a_counter_or_deletes_a_receipt() -> None:
+    """Repair is advance-only. ERP's `reset_sequence` rewinds and rewrites, and
+    that is how a committed number gets reissued."""
+    source = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
+    assert "db.delete" not in source
+    assert ".delete()" not in source
+    repair = inspect.getsource(service.advance_to_at_least)
+    # The only assignment to next_value in repair is guarded by a > comparison.
+    assert "if proven_minimum + 1 > series.next_value:" in repair
+
+
+def test_the_series_vocabulary_is_open() -> None:
+    """`series_code` is a registered string. ERP's `SequenceType` is a
+    27-member PostgreSQL enum, so a new document kind is a migration in a
+    shared module — ADR-0008 forbids exactly that."""
+    source = _module_source()
+    assert "class SequenceType" not in source
+    for product_term in ("invoice_number", "project_number", "credit_note_number"):
+        assert product_term not in source, f"product vocabulary {product_term} leaked"
+    assert isinstance(models.NumberSeries.__table__.c["series_code"].type.length, int)
+
+
+def test_the_module_declares_no_permission_audit_or_setting_vocabulary() -> None:
+    """It decides nothing a product would authorise."""
+    assert not getattr(module, "permissions", ())
+    assert not getattr(module, "audit_actions", ())
+    assert not getattr(module, "setting_domains", ())
+
+
+def test_the_service_never_commits_or_builds_a_session() -> None:
+    """Allocation joins the caller's transaction so a failed document does not
+    consume a committed number (hard rule 8)."""
+    source = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
+    for forbidden in ("db.commit()", "db.rollback()", "sessionmaker", "create_engine"):
+        assert forbidden not in source, forbidden
+
+
+def test_importing_the_package_never_builds_a_database_engine() -> None:
+    source = _module_source()
+    assert "create_engine" not in source
+
+
+# ── Release registration ────────────────────────────────────────────────────
+
+
+def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
+    entry = json.loads(
+        (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
+    )["modules"]["dotmac-numbering"]
+    assert entry["db_schema"] == models.SCHEMA
+    assert entry["import_name"] == "dotmac_numbering"
+    assert entry["kernel_floor"] == "0.1.0a65"
+    assert MIGRATION.name in " ".join(entry["wheel_contents"]["required"])
+
+
+def test_the_pinned_kernel_floor_is_the_release_that_allocated_the_schema() -> None:
+    manifest = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))
+    assert (
+        manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a65"
+    )
+
+
+def test_the_dossier_records_no_adoption_yet() -> None:
+    """Complete is not adopted (ADR-0030 § 2). A green suite is not a cutover."""
+    dossier = tomllib.loads((PACKAGE_ROOT / "EXTRACTION.toml").read_text("utf-8"))
+    assert dossier["contract_consumers"] == []
+    assert dossier["candidate_consumers"]

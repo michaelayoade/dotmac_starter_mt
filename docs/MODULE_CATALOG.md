@@ -45,6 +45,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | Distribution | Classification | Evidence | Module capability | Supported installation sets | This assembly installs | Release policy | Declared version | Kernel requirement | Proven consumers | Candidate consumers |
 |---|---|---|---|---|---|---|---:|---|---|---|
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`audit-complete`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | — | `dotmac_workspace` |
+| [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a65` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`audit-complete`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_workspace` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`audit-complete`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | — | `dotmac_vendor_control_plane` |
@@ -70,6 +71,28 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-application-directory/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_workspace`.
+
+### [`dotmac-numbering`](../packages/dotmac-numbering/README.md)
+
+- **Owns:** concurrency-safe allocation and formatting of explicitly configured
+  document series, with one immutable receipt per allocation.
+- **Does not own:** what a number means, which documents need one, gaplessness
+  policy, fiscal periods, issuance, rendering, or any product's series
+  vocabulary.
+- **Evidence:** `audit-complete` from
+  [`EXTRACTION.toml`](../packages/dotmac-numbering/EXTRACTION.toml); source mode
+  `product-first`, ERP for the configurable date-aware model and Sub for the
+  conflict-safe row establishment. The
+  [2026-08-15 revalidation](../inventories/numbering-source-variance.md)
+  withdrew Sub's "monotonic reconciliation" credit — that function is dead code
+  — so monotonic repair is greenfield here.
+- **Planes:** both declared. A tenant allocates its own series; the control
+  plane allocates vendor-side series no tenant may read.
+- **Correctness evidence:** entirely new. Neither source has a real-database
+  numbering test, so `tests/test_numbering_isolation.py` is the whole base, and
+  each race proof carries an ADR-0018 sensitivity companion.
+- **Adoption:** none yet. ERP is the intended first tenant-plane cutover,
+  ordered by which callers can name a business date rather than by volume.
 
 ### [`dotmac-approvals`](../packages/dotmac-approvals/README.md)
 
