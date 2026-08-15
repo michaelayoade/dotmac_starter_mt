@@ -228,6 +228,9 @@ Two facility owners were named at the same time and are recorded in ADR-0017's
 decisions: **P3 durable timers** become `dotmac_kernel.durable_timers`, extracted
 product-first from Sub; **P4 document numbering** becomes a new stateful,
 dual-plane `dotmac-numbering` module, extracted product-first from ERP.
+(P3's owner was corrected on 2026-08-15 to the `dotmac-durable-timers` MODULE,
+reusing the kernel outbox/relay for claiming — ADR-0017's 2026-08-15 amendment
+and ADR-0030 § 4a. P4 shipped as described.)
 
 ### What this amendment does not do
 

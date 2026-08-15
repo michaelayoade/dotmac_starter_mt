@@ -45,6 +45,25 @@ the sections that follow; this note records what changed and why.
 The build order in §5 was reordered as a consequence: Orders now precedes
 Subscriptions, and Fulfillment moves after Collections.
 
+## Amendment 2026-08-15 (second) — the step 6/7 revalidations
+
+The two revalidation reports commissioned after `dotmac-numbering` reached its
+completion gate moved two rulings. Both were reached through code that is
+BYTE-IDENTICAL to its pin, so a diff-based recheck would have confirmed the
+old text; what changed is what the unchanged code turns out to do. Michael
+ruled on both on 2026-08-15.
+
+5. **Durable timers become a selectable dual-plane MODULE, not kernel code.**
+   `dotmac_kernel.durable_timers` is replaced everywhere in this decision by
+   `dotmac-durable-timers`. The module owns timer identity, generation,
+   supersession, cancellation and staleness verification, and REUSES the kernel
+   outbox/relay for claim, lease, retry and dead-letter. A second claim loop is
+   forbidden — see §4a.
+6. **Billing's sourcing is reclassified from product-first to
+   greenfield-after-inventory**, on the same evidence standard that reclassified
+   Fulfillment. Its contract contradictions must be resolved before any
+   behaviour code — see §5e.
+
 ## Context
 
 Dotmac Cloud must not become a Blesta-shaped application with Dotmac names. It
@@ -159,7 +178,7 @@ without being absorbed into a business owner:
 
 | Enabling capability | Owner | Why it is separate |
 |---|---|---|
-| Generation-safe due work and wake-up | `dotmac_kernel.durable_timers` | subscriptions and collections must not each invent a scheduler ledger |
+| Generation-safe due work and wake-up | `dotmac-durable-timers` (selectable dual-plane module) | subscriptions and collections must not each invent a scheduler ledger — and neither may the kernel, which is why this is a module: see §4a |
 | Concurrency-safe document series | `dotmac-numbering` | billing owns what an invoice number means, not the reusable allocation engine |
 | Deterministic issued-document bytes | `dotmac-document-rendering` | billing emits immutable facts; rendering produces bytes; `dotmac-files` stores bytes |
 
@@ -167,6 +186,53 @@ ADR-0017 already names the first two owners, and the rendering dossier names the
 third. This ADR records them as prerequisites of the directed Cloud commerce
 programme. It does not move invoice meaning out of Billing or timers into
 Collections.
+
+### 4a. Durable timers is a module, and it reuses the claiming engine
+
+Ruled 2026-08-15 on `docs/inventories/durable-timers-sources.md`.
+
+**Why not the kernel.** ADR-0028 plane selection applies to modules, not to the
+kernel: the kernel has one unconditional lineage, so a capability placed there
+adds its tables, policies, indexes, grants and possibly a third database role to
+EVERY composed database — including adopters that never schedule anything — and
+raises the kernel floor for all of them. That floor is already the binding
+constraint on two cutovers (Vendor CP at `a45`, Sub at `a50`). Two tables and a
+floor is the wrong price for a capability two owners use.
+
+**What it owns.** Timer identity, generation, supersession, cancellation, and
+staleness verification — the half the audit found genuinely product-first in
+Sub (`app/models/durable_timer.py`,
+`app/services/runtime_durable_timers.py`).
+
+**What it must NOT build.** A claim loop. The kernel already owns claiming:
+`claim_outbox_batch` / `settle_outbox_event` (`SECURITY DEFINER`, `FOR UPDATE
+SKIP LOCKED`, stale-lease reclaim), `RelayPolicy` backoff and dead-letter, on
+both planes, behind least-privilege roles, proven on real PostgreSQL in
+`tests/test_outbox_relay.py`. `available_at` IS a due time. A module that ships
+its own claim loop puts a second scheduler ledger inside one deployment, which
+is the precise failure this ADR names owners to prevent.
+
+**Gates before the first behaviour commit.**
+
+1. This amendment and the matching ADR-0017 amendment are merged.
+2. The kernel publishes `outbox_relay.v1` — a `PrerequisiteSpec` with a
+   STRUCTURAL verifier, so a module declaring reuse is checked against the live
+   catalogue rather than trusted. This is the same defect class kernel
+   `0.1.0a66` closed for `idempotency_ledger.v1`: a facility consumed at
+   runtime needs a name a module can declare.
+3. The ten PostgreSQL proofs in the report are written FIRST. Sub's suite runs
+   on SQLite behind a single-connection fixture, so every claim, lease and
+   generation guarantee it appears to prove is unproven.
+
+**Known source defects that must not be ported:** the 200-timer fire batch as
+one transaction (one poison emission rolls back all 200, reselected first
+forever, no attempts and no dead-letter); `ORDER BY generation DESC LIMIT 1 FOR
+UPDATE`, which takes no lock on an empty predicate; a native enum; an
+unvalidated event-type string; and no `tenant_id`, RLS or retention anywhere.
+Sub's own SOT registry declares the facility `SHADOWING`, and
+`collections.case_action_due` is scheduled with no consumer — so ADR-0017's
+"complete and tested" characterisation of this source is wrong on both
+adjectives.
 
 ### 5. Build order
 
@@ -198,12 +264,20 @@ cutover, and because a module inherits a defect it was never told about.
    then the fix lands with the extraction, because there is no live data to
    protect and no cutover to sequence.
 5. **Build `dotmac-numbering`.**
-6. **Build `dotmac_kernel.durable_timers`.**
-7. **Build `dotmac-billing`.** It is the commercial spine and already has the
-   deepest source audit, extraction dossier, parity ledger and first-adopter
-   plan. Freeze its obligation, settlement, allocation, receivable, coverage
-   and document-fact contracts before downstream assembly wiring.
-   `dotmac-document-rendering` follows once `InvoiceDocumentFactV1` is frozen.
+6. **Build `dotmac-durable-timers`** — a selectable dual-plane module, on the
+   gates in §4a, which must all be met before its first behaviour commit.
+7. **Build `dotmac-billing`** — greenfield-after-inventory, see §5e. It is the
+   commercial spine and has the deepest source audit, extraction dossier,
+   parity ledger and first-adopter plan, but its two flagship capabilities are
+   shadow or dead code in their own repositories, so the audit specifies the
+   behaviour rather than supplying it. Resolve the contract contradictions in
+   §5e before any behaviour code: `AcceptSettlementV1` and
+   `InvoiceDocumentFactV1` freeze now, `ReceivablePositionV1` and the
+   obligation output must first be reconciled, and `allocation`/`coverage` are
+   not published at this stage.
+   **`dotmac-document-rendering` is unblocked independently** once
+   `InvoiceDocumentFactV1` is frozen — it does not wait for the rest of
+   Billing.
 8. **Build `dotmac-orders`, including structurally immutable accepted lines**
    — see §5b. Orders now precedes Subscriptions because the funding-authority
    defect it closes is live in Sub today.
@@ -359,13 +433,61 @@ The kernel participant contract is extended by exactly four things:
    able to return `not_supported` or `manual_required`. Compensation must never
    mean "guess the inverse operation."
 
+### 5e. Billing is greenfield-after-inventory, and its contracts block it
+
+Ruled 2026-08-15 on `docs/inventories/billing-source-variance.md`. The ownership
+ruling in §1 is unchanged; only the SOURCING classification moves, from
+product-first to **greenfield-after-inventory** — the same standard applied to
+Fulfillment in the first amendment.
+
+Both capabilities the port plan rested on turn out not to be the live path in
+their own repository:
+
+- Sub's ADR-0007 obligation stack is `SHADOWING` **by its own declaration**, and
+  every row carries `BillingRecordAuthority.shadow` — "nothing may read it as
+  money". The live invoice path contains zero occurrences of `obligation`.
+  Obligation acceptance in Sub has never raised an invoice.
+- ERP's `coverage.py` — called "the single highest-value port in the programme"
+  by the parity ledger — has zero references under `app/`. The only production
+  import is a constant, taken by two modules that then re-implement the rule.
+
+Scenarios port; owners largely do not. The parity suite remains the acceptance
+target, but as a specification of required behaviour, not as evidence that
+behaviour exists.
+
+**Contract contradictions block behaviour code.** Freezing the six contracts in
+§5 was already the stated gate; the revalidation shows two are freezable now and
+three cannot be:
+
+- freezable: `AcceptSettlementV1`, and `InvoiceDocumentFactV1` after a
+  `document_profile_code`/`template_profile_code` rename. That is enough to
+  unblock `dotmac-document-rendering` independently of the rest of Billing.
+- contradictory: `ReceivablePositionV1` is specified twice incompatibly and
+  omits the service-period field `prepaid_policy.py:57` consumes; the obligation
+  output carries three competing names; the artifact relation's key composition
+  is contested (`commercial-composition-and-conformance.md:551` — "the key
+  compositions cannot both ship").
+- not to be published at all yet: `allocation` and `coverage` have no agreed
+  shape, and §5's sentence listing them among the contracts to freeze is
+  amended accordingly.
+
+`InvoiceArtifactReconciler` still has no module owner, and `cadence.py` must be
+struck from Billing's `source_paths` — it is recurrence, which §1 assigns to
+Subscriptions, and it is the only candidate path that breaches a not-owned
+category.
+
+Money is a data project, not a type choice: Sub carries six precisions and none
+is `NUMERIC(20,6)`; `Invoice` has no `amount_paid` column at all, so the
+coverage operand must be reconstructed from settlement history; and there are
+125 float-on-money casts across 33 files where the dossier recorded one.
+
 ### 6. Implementation authorization and gates
 
 Michael's direction to start the composable Cloud modules is the named
 owner-directed exception required by ADR-0017 for the three prerequisites:
 
 - `dotmac-numbering`;
-- `dotmac_kernel.durable_timers`; and
+- `dotmac-durable-timers`; and
 - `dotmac-document-rendering`;
 
 and the seven business owners:
@@ -460,7 +582,7 @@ dead-letter state, or connector health state. Those belong to
 
 Fulfillment may record `attempt_id`, participant outcome, error class, reason
 and timestamps. Any count is DERIVED from append-only attempts. A business
-redrive is scheduled through `dotmac_kernel.durable_timers`, never a connector
+redrive is scheduled through `dotmac-durable-timers`, never a connector
 lease column.
 
 #### 8.2 Capability-ID ownership is split
