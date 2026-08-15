@@ -38,7 +38,12 @@ creating two writers for one counter. Slice 1 is correct.
 new here.** In descending order of cost:
 
 1. **The module and ERP do not share a format grammar, so "compare the
-   formatted string" is an unsatisfiable shadow assertion.** ERP concatenates
+   formatted string" is an unsatisfiable shadow assertion.** *(RESOLVED
+   2026-08-15 — Michael ruled option (A): `STMT-2026-00001` is accepted, the
+   counter continues without reset, historical numbers are untouched, and ERP
+   readers accept both grammars permanently. The shadow assertion becomes the
+   normalized comparison in §2. The remaining work is an ERP-side ADR or
+   release note recording the cutover date and the format change.)* ERP concatenates
    prefix+year+month with *no* separator and then places exactly one separator
    before the sequence segment (`sequence_utils.format_number:48-54`); the
    module joins *every* segment with the separator
@@ -46,7 +51,11 @@ new here.** In descending order of cost:
    `SeriesConfiguration` in the module's current surface can produce that
    string.** See §2 and §4/D1 — this is the finding that changes the slice.
 2. **`allocate` has an undeclared database prerequisite that ERP does not
-   satisfy.** `service.py:457-499` delegates at-most-once to
+   satisfy.** *(FIXED in kernel `0.1.0a66` + numbering `0.1.0a2`, PR #198 —
+   `idempotency_ledger.v1` is now a declared, live-verified prerequisite. ERP
+   must still SUPPLY the effect and bind it; what changed is that the
+   requirement is now stated and checked at migration time rather than
+   discovered at the first allocation.)* `service.py:457-499` delegates at-most-once to
    `dotmac_kernel.idempotency.execute_once`, which writes
    `public.idempotency_records`. That table is created by kernel migration
    `20260810_0018_idempotency_one_owner`, and ERP deliberately does not run the
@@ -263,8 +272,32 @@ Exhaust the alternatives, because this is the decision the slice turns on:
   (`sequence_utils.py:57`), the module joins it with one (`service.py:299-300`).
   Immaterial for BANK_STATEMENT (`suffix=""`), material for six other series.
 
-**There is no exact-reproduction configuration. Choose one of two, and record
-the choice as an ADR before shadowing:**
+**RULED 2026-08-15 (Michael): option (A). `STMT-2026-00001` is accepted.**
+
+The shared formatter is not to be complicated to preserve one legacy grammar,
+so option (B) is closed. The cutover terms are:
+
+- historical numbers stay exactly as issued — nothing is reformatted or
+  reissued;
+- the counter CONTINUES from its current value; there is no reset at cutover,
+  so the shape changes mid-series and that is intended;
+- **ERP readers accept both grammars permanently.** Not a transition window —
+  the old shape stays in the data forever, so any parser, search, export or
+  reconciliation path that reads a statement number must accept both for good.
+  A reader that is "temporarily" tolerant becomes a defect the day someone
+  removes the tolerance;
+- the cutover date and the format change are recorded in an ERP ADR or release
+  note, in the ERP repository, as customer-visible history.
+
+The two grammars are disjoint strings, so a new-shape number can never collide
+with a historical one, and the duplicate check at
+`bank_statement.py:843-857` is per `(organization, bank_account,
+statement_number)` and is unaffected.
+
+The shadow comparison consequence below therefore APPLIES: the invariant is the
+normalized-string comparison, not string equality.
+
+The original options, for the record:
 
 - **(A) Accept the shape change** — `STMT2026-00001` → `STMT-2026-00001` at
   cutover. Cheap, honest, and safe: the two grammars are disjoint strings, so a
@@ -272,7 +305,7 @@ the choice as an ADR before shadowing:**
   check at `bank_statement.py:843-857` is per
   `(organization, bank_account, statement_number)` and is unaffected. Cost is
   cosmetic discontinuity in a customer-visible identifier.
-  **Recommended.**
+  **Recommended — and ruled, see above.**
 - **(B) Teach the module ERP's grammar.** This is a new identity-shaping field
   on `number_series`, which means a second migration, a new column in
   `_IDENTITY_COLUMNS` and the freeze trigger, a new check constraint, a version
@@ -280,7 +313,7 @@ the choice as an ADR before shadowing:**
   gate and has not been published. Out of slice-1 scope, and it re-opens a
   closed package to serve one adopter's legacy cosmetics.
 
-If (A) is chosen, **the shadow comparison in `EXTRACTION.toml`'s
+Under (A), **the shadow comparison in `EXTRACTION.toml`'s
 `shadow_and_drift` is wrong as written** ("compare the formatted string"). The
 invariant that actually holds is:
 
