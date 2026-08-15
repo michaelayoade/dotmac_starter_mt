@@ -49,7 +49,10 @@ this ADR exists to prevent.
 - **P3 durable timers → `dotmac_kernel.durable_timers`**, extracted
   product-first from Sub. Sub's facility (`runtime_durable_timers.py` +
   `models/durable_timer.py` + its tests) is complete and tested, and neither
-  production collections path uses it. A sweep is not a substitute: it rescans,
+  production collections path uses it. **[Superseded 2026-08-15 — the owner is
+  the `dotmac-durable-timers` MODULE, and neither "complete" nor "tested"
+  survived revalidation. See the 2026-08-15 amendment above.]** A sweep is not
+  a substitute: it rescans,
   it cannot be cancelled by identity, and it turns ordering into business state.
 - **P4 document numbering → a new stateful, dual-plane `dotmac-numbering`
   module**, extracted product-first from ERP. **This is an extraction, not
@@ -60,6 +63,50 @@ this ADR exists to prevent.
 Naming an owner is not an implementation start. Both remain behind the gate
 above; what changes is that each now has a named owner and a source ruling, so
 the work is no longer unassignable when the gate opens.
+
+## Amendment, 2026-08-15: P3 durable timers is a MODULE, and its source characterization was wrong
+
+Michael ruled on 2026-08-15, on `docs/inventories/durable-timers-sources.md`.
+Two corrections to the P3 entry below, which the amendment supersedes where they
+conflict.
+
+**1. The owner is `dotmac-durable-timers`, a selectable dual-plane module — not
+`dotmac_kernel.durable_timers`.** ADR-0028 plane selection applies to modules,
+not to the kernel: the kernel has one unconditional lineage, so kernel residency
+would add two tables, an RLS policy, a grant set, four indexes and possibly a
+third database role to EVERY composed database, and raise the floor for every
+adopter — including the ones that never schedule anything. This ADR's own
+finding is that the floor is already the binding constraint on both cutover-1
+products (Vendor at `a45`, Sub at `a50`, module floors `a56+`). Adding to it for
+a capability two owners use is the cost this decision exists to weigh.
+
+**2. "Complete and tested" is wrong on both adjectives.** The facility is real —
+eight distinct owners, ten callsites in nine files, a dispatcher running
+`enabled=True` at 60s — but:
+
+- Sub's own SOT registry declares it `SHADOWING`, and `dunning_runner` /
+  `prepaid_balance_sweep` still run;
+- `collections.case_action_due` is scheduled with **no consumer anywhere**, and
+  `CollectionsLifecycle` is called only by a shadow script and tests — so "neither
+  production collections path uses it" understated the position: collections IS a
+  scheduler, and the timer it schedules is dead;
+- the declared `event_types=("runtime.timer_due",)` exists nowhere in the code,
+  which emits `EventType.custom` and string-matches the payload to route;
+- generation staleness rejection is implemented exactly ONCE
+  (`unwall_paid_accounts.py:431`) and is untested; and
+- the whole suite runs on SQLite behind a single-connection fixture, so every
+  claim, lease and generation guarantee is unproven.
+
+**3. The claiming half is not extracted at all — it is REUSED.** The kernel
+already owns `claim_outbox_batch` / `settle_outbox_event` (`SECURITY DEFINER`,
+`FOR UPDATE SKIP LOCKED`, stale-lease reclaim), `RelayPolicy` backoff and
+dead-letter, on both planes, proven on real PostgreSQL. Sub contributes identity,
+generation, supersede/cancel and decision-free firing; that is the entire delta.
+A second claim loop is forbidden.
+
+Gates before the first behaviour commit are in ADR-0030 § 4a: this amendment
+merged, a kernel `outbox_relay.v1` prerequisite with a structural verifier
+published, and the ten PostgreSQL proofs written first.
 
 ## Amendment, 2026-08-14: owner-directed exception for the identity seams and `dotmac-auth-oidc`
 

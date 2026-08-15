@@ -191,9 +191,37 @@ MODULE_DATABASE_ROLES_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     ),
 )
 
+#: The at-most-once ledger `dotmac_kernel.idempotency` reads and writes.
+#:
+#: A module that calls `execute_once` or `execute_once_platform` depends on
+#: these tables at RUNTIME, not at migration time — so without this spec the
+#: lineage migrates cleanly and the first guarded call dies on `UndefinedTable`
+#: against any adopter that never ran the kernel's own migrations. That is
+#: exactly the state ADR-0027 exists to make impossible, and it was reachable
+#: because there was no name for a module to declare.
+#:
+#: Both planes are named in one spec because `dotmac_kernel.idempotency`
+#: publishes both entry points from one module: a consumer cannot take the
+#: tenant half without linking code that references the platform table.
+IDEMPOTENCY_LEDGER_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
+    name="idempotency_ledger.v1",
+    summary=(
+        "public.idempotency_records and public.platform_idempotency_records "
+        "with the kernel at-most-once contract: a unique key over "
+        "(tenant_id, scope, key) and (scope, key) respectively, a nullable "
+        "fingerprint column distinct from the key, a JSON result column, "
+        "an expires_at index, and the plane posture of ADR-0014: the tenant "
+        "ledger carries FORCEd row-level security, the platform ledger carries "
+        "no tenant column and no policy. Supplies the storage "
+        "dotmac_kernel.idempotency reads and writes; it does not decide what "
+        "any scope means."
+    ),
+)
+
 KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     TENANT_SCOPE_CATALOG_V1,
     MODULE_DATABASE_ROLES_V1,
+    IDEMPOTENCY_LEDGER_V1,
 )
 
 
@@ -478,6 +506,7 @@ __all__ = [
     "KERNEL_PREREQUISITES",
     "all_bound",
     "autoload_bindings",
+    "IDEMPOTENCY_LEDGER_V1",
     "MODULE_DATABASE_ROLES_V1",
     "TENANT_SCOPE_CATALOG_V1",
     "DuplicateBindingError",

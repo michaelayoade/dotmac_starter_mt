@@ -63,6 +63,20 @@ A binding names the application, the local scope and the contract version; it is
 resolved from an immutable config revision BEFORE any provider I/O; and the
 destination application must be the one that DECLARED the capability, so neither
 a payload nor a lone edited configuration can redirect a stream.
+## And payload retention (slice 3)
+
+A receipt is evidence and it is content, and the first must outlive the second.
+:mod:`dotmac_integration.retention` ages out `payload_json`, `headers_json` and
+the values inside `consequence_json` while touching NOTHING deduplication reads
+— so a provider's redelivery months later is still recognised as the event it
+is, rather than processed a second time as a new one.
+
+Two refusals define it. There is no default retention period and no default
+legal-policy owner: :func:`resolve_retention_policy` refuses rather than guess,
+because a period baked into a library becomes a deployment's data-retention
+posture without anyone deciding it. And a receipt under legal hold, claimed by
+a worker, unresolved, or awaiting reconciliation is refused BY NAME and counted,
+never quietly skipped.
 
 ## enabled is not selected
 
@@ -249,6 +263,27 @@ from dotmac_integration.receipt_delivery import (
     request_fingerprint_for,
     require_stable_fingerprint,
 )
+from dotmac_integration.retention import (
+    REDACTION_MARKER,
+    RETENTION_DAYS_VAR,
+    RETENTION_LEGAL_POLICY_OWNER_VAR,
+    ReceiptLegalHold,
+    RetentionBacklog,
+    RetentionNotConfigured,
+    RetentionPolicy,
+    RetentionRefusal,
+    RetentionRefused,
+    RetentionSweep,
+    active_hold_for,
+    classify_receipt,
+    is_redacted,
+    place_legal_hold,
+    purge_expired_payloads,
+    redact_receipt,
+    release_legal_hold,
+    resolve_retention_policy,
+    retention_backlog,
+)
 from dotmac_integration.retry import (
     Outcome,
     OutcomeStatus,
@@ -397,6 +432,25 @@ __all__ = [
     "idempotency_key_for",
     "request_fingerprint_for",
     "require_stable_fingerprint",
+    "REDACTION_MARKER",
+    "RETENTION_DAYS_VAR",
+    "RETENTION_LEGAL_POLICY_OWNER_VAR",
+    "ReceiptLegalHold",
+    "RetentionBacklog",
+    "RetentionNotConfigured",
+    "RetentionPolicy",
+    "RetentionRefusal",
+    "RetentionRefused",
+    "RetentionSweep",
+    "active_hold_for",
+    "classify_receipt",
+    "is_redacted",
+    "place_legal_hold",
+    "purge_expired_payloads",
+    "redact_receipt",
+    "release_legal_hold",
+    "resolve_retention_policy",
+    "retention_backlog",
     "DispatchUnavailable",
     "settle",
     "set_binding_enabled",

@@ -513,3 +513,24 @@ display-settings plan merges). Evidence from a dual sweep of this repo + dotmac_
   not lock `parties` (many other writers; binding-then-party ordering would
   deadlock against any transaction touching a party first). Same residual shape as
   the item above and the same answer: revoke the sessions.
+
+## Prerequisite declarations (added 2026-08-15, kernel `0.1.0a66`)
+
+- **`dotmac-integration` declares `idempotency_ledger.v1` — ITS OWN release,
+  ruled 2026-08-15.** Same defect kernel `a66` closed for `dotmac-numbering`:
+  `dotmac_integration` calls the kernel at-most-once ledger at request time
+  while declaring only the effects its own DDL needs, so an adopter that never
+  ran the kernel's lineage migrates cleanly and fails on the first guarded
+  call. The difference that makes it a separate change: **integration `0.1.0a2`
+  is PUBLISHED and adopted.** The declaration therefore lands in a NEW
+  migration that calls `require_prerequisites`, never by rewriting the released
+  base migration; the manifest gains the name; the assembly binds it to kernel
+  revision `0018_idempotency_one_owner`; the floor moves to `>=0.1.0a66` and the
+  entry moves to `CAPABILITY_RAISED_FLOORS`. Must not be bundled into the
+  kernel-`a66` change (PR #198), and lands after `a66` is published.
+- **Sweep the other kernel facilities with persistence.** `idempotency` is the
+  first named; `messaging.relay`/outbox is the next and is already required by
+  ADR-0030 § 4a as `outbox_relay.v1` with a structural verifier, before
+  `dotmac-durable-timers` writes any behaviour. Audit is not started for kernel
+  `audit` or settings storage: a module consuming either at request time has the
+  same undeclarable dependency today.

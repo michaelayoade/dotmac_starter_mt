@@ -60,13 +60,36 @@ def _bind_kernel() -> None:
 # ── Vocabulary ──────────────────────────────────────────────────────────────
 
 
-def test_the_kernel_ships_exactly_the_two_effects_files_needs() -> None:
+def test_the_kernel_ships_exactly_the_effects_modules_need() -> None:
     """Not a style assertion: every extra shipped prerequisite is one more
-    thing a blocked adopter must supply before it can install anything."""
+    thing a blocked adopter must supply before it can install anything.
+
+    `idempotency_ledger.v1` earned its place by the opposite failure —
+    `dotmac-numbering` consumed the ledger at request time with no name to
+    declare, so an adopter missing it passed every gate and failed in
+    production instead (`docs/inventories/numbering-erp-adoption-slice.md`)."""
     assert {spec.name for spec in KERNEL_PREREQUISITES} == {
         "tenant_scope_catalog.v1",
         "module_database_roles.v1",
+        "idempotency_ledger.v1",
     }
+
+
+def test_every_shipped_prerequisite_has_a_verifier() -> None:
+    """The kernel holds itself to the rule it imposes on products.
+
+    `register_verifier` refuses a product prerequisite with no proof; a kernel
+    spec with no entry in `_VERIFIERS` fails the same way, but only at
+    `alembic upgrade`, in the adopter's deploy. Checking it here means the
+    release that adds a spec cannot forget the half that enforces it."""
+    from dotmac_kernel.migrations.verify import registered_verifiers
+
+    covered = set(registered_verifiers())
+    missing = sorted({spec.name for spec in KERNEL_PREREQUISITES} - covered)
+    assert not missing, (
+        f"shipped prerequisite(s) {missing} have no verifier — a module can "
+        "declare them and nothing can prove them against a database"
+    )
 
 
 @pytest.mark.parametrize(

@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Final
 
 from dotmac_kernel.prerequisites import (
+    IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
     PrerequisiteBinding,
@@ -43,6 +44,17 @@ ASSEMBLY_PREREQUISITE_BINDINGS: Final[tuple[PrerequisiteBinding, ...]] = (
     PrerequisiteBinding(
         prerequisite=MODULE_DATABASE_ROLES_V1.name,
         provider_revision="0001_initial_tenant_schema",
+        provider_owner="kernel",
+    ),
+    # The at-most-once ledger arrives later in the same lineage — kernel `0018`
+    # created `idempotency_records`/`platform_idempotency_records` (ADR-0014),
+    # replacing the WS3 inbox tables. A binding names the revision that
+    # SUPPLIES the effect, not the lineage's root, so this one is `0018`: bind
+    # it to `0001` and the order canary would pass against a database stopped
+    # at `0017`, where the tables do not exist.
+    PrerequisiteBinding(
+        prerequisite=IDEMPOTENCY_LEDGER_V1.name,
+        provider_revision="0018_idempotency_one_owner",
         provider_owner="kernel",
     ),
 )
