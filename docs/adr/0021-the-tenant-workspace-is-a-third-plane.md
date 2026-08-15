@@ -173,12 +173,26 @@ product catalogue, the entitlement or the remote application; each of those
 stays a reference to its owner.
 
 `dotmac-application-access` owns the tenant-admin workflow for cross-app
-access: request and approval, the member-to-binding-to-role-codes allocation,
-delegation policy and role allowlist, the versioned content-bound grant set,
-delivery, acknowledgement, refusal and revocation, desired-versus-applied
-drift, idempotent reconciliation and the official timeline. It records desired
-allocation and acknowledgement. It is **not** runtime authorization, and the
-target application remains the only writer of its effective role grants.
+access: ~~request and approval~~ **the access request as a content-bound
+subject** (see the amendment below), the member-to-binding-to-role-codes
+allocation, delegation policy and role allowlist, the versioned content-bound
+grant set, delivery, acknowledgement, refusal and revocation,
+desired-versus-applied drift, idempotent reconciliation and the official
+timeline. It records desired allocation and acknowledgement. It is **not**
+runtime authorization, and the target application remains the only writer of its
+effective role grants.
+
+> **Amended 2026-08-14 by [ADR-0029](0029-access-is-requested-approved-and-issued-by-three-owners.md).**
+> The words "and approval" are superseded. This section was written on
+> 2026-08-12, before `dotmac-approvals` existed; ADR-0026 then took sole
+> fleet-wide ownership of whether a set of eligible actors has approved exact
+> content under an exact policy revision. `dotmac-application-access` owns the
+> access SUBJECT and the issuance that follows a decision; it owns no part of
+> the decision itself, and holds no approver, quorum, policy version or decision
+> history. The two modules never import each other — the Workspace assembly
+> selects the policy revision and reacts to the approval event. Everything else
+> in this section, including § 3's rule that directory visibility is not
+> authorization, stands unchanged.
 
 ### 5. This wave lands the directory only
 
