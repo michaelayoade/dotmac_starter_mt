@@ -9,6 +9,7 @@ At-most-once execution is `dotmac_kernel.idempotency`'s, not this module's
 was issued, for which period, against which business date.
 """
 
+from dotmac_numbering.manifest import module
 from dotmac_numbering.models import (
     IMMUTABLE_TABLES,
     NO_PERIOD,
@@ -70,6 +71,7 @@ __all__ = [
     "allocate",
     "configure_series",
     "format_number",
+    "module",
     "period_for",
     "preview",
 ]

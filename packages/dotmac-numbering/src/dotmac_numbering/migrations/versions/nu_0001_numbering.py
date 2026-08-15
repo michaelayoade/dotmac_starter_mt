@@ -424,6 +424,11 @@ def _upgrade_platform_plane() -> None:
 
 
 def downgrade() -> None:
-    for table in (*_PLATFORM_IMMUTABLE, *_PLATFORM_MUTABLE, *_TENANT_IMMUTABLE, *_TENANT_MUTABLE):
+    for table in (
+        *_PLATFORM_IMMUTABLE,
+        *_PLATFORM_MUTABLE,
+        *_TENANT_IMMUTABLE,
+        *_TENANT_MUTABLE,
+    ):
         op.execute(f"DROP TABLE IF EXISTS mod_numbering.{table} CASCADE;")
     op.execute(f"DROP FUNCTION IF EXISTS {_REFUSE_FUNCTION}() CASCADE;")

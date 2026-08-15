@@ -45,14 +45,14 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | Distribution | Classification | Evidence | Module capability | Supported installation sets | This assembly installs | Release policy | Declared version | Kernel requirement | Proven consumers | Candidate consumers |
 |---|---|---|---|---|---|---|---:|---|---|---|
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`audit-complete`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | — | `dotmac_workspace` |
-| [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a65` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`audit-complete`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_workspace` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`audit-complete`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`audit-complete`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a58` | — | `dotmac_integrator`, `dotmac_sub` |
-| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a64` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a65` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a65` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`audit-complete`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
@@ -71,28 +71,6 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-application-directory/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_workspace`.
-
-### [`dotmac-numbering`](../packages/dotmac-numbering/README.md)
-
-- **Owns:** concurrency-safe allocation and formatting of explicitly configured
-  document series, with one immutable receipt per allocation.
-- **Does not own:** what a number means, which documents need one, gaplessness
-  policy, fiscal periods, issuance, rendering, or any product's series
-  vocabulary.
-- **Evidence:** `audit-complete` from
-  [`EXTRACTION.toml`](../packages/dotmac-numbering/EXTRACTION.toml); source mode
-  `product-first`, ERP for the configurable date-aware model and Sub for the
-  conflict-safe row establishment. The
-  [2026-08-15 revalidation](../inventories/numbering-source-variance.md)
-  withdrew Sub's "monotonic reconciliation" credit — that function is dead code
-  — so monotonic repair is greenfield here.
-- **Planes:** both declared. A tenant allocates its own series; the control
-  plane allocates vendor-side series no tenant may read.
-- **Correctness evidence:** entirely new. Neither source has a real-database
-  numbering test, so `tests/test_numbering_isolation.py` is the whole base, and
-  each race proof carries an ADR-0018 sensitivity companion.
-- **Adoption:** none yet. ERP is the intended first tenant-plane cutover,
-  ordered by which callers can name a business date rather than by volume.
 
 ### [`dotmac-approvals`](../packages/dotmac-approvals/README.md)
 
@@ -149,6 +127,14 @@ and the next gate.
 - **Evidence:** `historical-pre-rule` from [`EXTRACTION.toml`](../packages/dotmac-kernel/EXTRACTION.toml); source mode `historical-mixed`.
 - **Proven consumers:** `dotmac_starter_mt`.
 - **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-numbering`](../packages/dotmac-numbering/README.md)
+
+- **Owner:** Concurrency-safe allocation and formatting of explicitly configured document series on separate tenant and platform planes, with one counter per (scope, series, period) and one append-only receipt per allocation
+- **Contract:** Given a required TenantScope or PlatformScope, an open registered series_code, an explicit business reference_date and an idempotency key, reserve the next value of a configured series under a row lock, format it from validated configuration, and record one immutable allocation receipt. Replay, fingerprint comparison and the concurrent-key race are delegated to dotmac_kernel.idempotency (hard rule 23), which returns the original formatted number on replay and conflicts on a reused key carrying a different request; the receipt is domain evidence, never a second replay mechanism. A resetting series has one counter per period, so a backdated allocation reads its own period's counter rather than the period the series last advanced into. Allocation participates in the caller's transaction and rolls back with it. Repair names the period it advances, moves that counter to caller-supplied proven evidence, records immutable repair evidence naming actor and reason, and may never rewind or delete committed allocation history — receipts and repair evidence are append-only at the database, by grant and by trigger. NOT what a number means, which documents require one, legal gaplessness policy, fiscal periods, invoice issuance, document rendering, or any product's series vocabulary.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-numbering/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
 
 ### [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md)
 

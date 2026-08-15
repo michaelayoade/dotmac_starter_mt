@@ -19,6 +19,7 @@ vacuously.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 import uuid
@@ -30,10 +31,6 @@ import pytest
 from dotmac_kernel.cache import PlatformScope, TenantScope
 from dotmac_kernel.idempotency import IdempotencyConflict
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
-from sqlalchemy import create_engine, select, text
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session
-
 from dotmac_numbering import (
     NumberingError,
     SeriesConfiguration,
@@ -43,6 +40,9 @@ from dotmac_numbering import (
     preview,
 )
 from dotmac_numbering.models import AllocationReceipt, NumberSeries, SeriesRepair
+from sqlalchemy import create_engine, event, select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -156,22 +156,41 @@ def _make_tenants(admin_url: str, count: int = 2) -> list[uuid.UUID]:
     return ids
 
 
+def _tenant_engine(url: str, tenant_id: uuid.UUID | None = None):
+    """An engine whose every connection carries the tenant GUC.
+
+    Setting the GUC once on a session is not enough: `commit()` returns the
+    connection to the pool, and the next statement can arrive on a different
+    one with no `app.current_tenant_id` set — at which point the RLS policy
+    refuses the write and the failure looks like a module bug rather than a
+    harness bug.
+    """
+    engine = create_engine(url)
+    if tenant_id is not None:
+
+        @event.listens_for(engine, "connect")
+        def _set_tenant(dbapi_connection, _record):
+            with dbapi_connection.cursor() as cur:
+                cur.execute(
+                    "SELECT set_config('app.current_tenant_id', %s, false)",
+                    (str(tenant_id),),
+                )
+
+    return engine
+
+
 def _session(url: str, tenant_id: uuid.UUID | None = None) -> Session:
     """A session on its OWN engine, so concurrency is real."""
-    session = Session(create_engine(url))
-    if tenant_id is not None:
-        session.execute(
-            text("SELECT set_config('app.current_tenant_id', :t, false)"),
-            {"t": str(tenant_id)},
-        )
-    return session
+    return Session(_tenant_engine(url, tenant_id))
 
 
 def _configure(session: Session, scope, **kw) -> None:
     base: dict[str, object] = {"series_code": "invoice", "prefix": "INV"}
     base.update(kw)
     configure_series(
-        session, scope=scope, configuration=SeriesConfiguration(**base)  # type: ignore[arg-type]
+        session,
+        scope=scope,
+        configuration=SeriesConfiguration(**base),  # type: ignore[arg-type]
     )
     session.commit()
 
@@ -186,8 +205,11 @@ def test_proof_1_a_tenant_sees_neither_series_counters_nor_receipts_of_another(s
     with _session(user_url, left) as s:
         _configure(s, TenantScope(tenant_id=left))
         allocate(
-            s, scope=TenantScope(tenant_id=left), series_code="invoice",
-            reference_date=JAN, idempotency_key="left-1",
+            s,
+            scope=TenantScope(tenant_id=left),
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="left-1",
         )
         s.commit()
 
@@ -206,9 +228,10 @@ def test_proof_1_hostile_without_the_policy_the_rows_are_visible(scratch):
 
     engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     with engine.connect() as conn:
-        conn.execute(text("DROP POLICY number_series_tenant_isolation ON mod_numbering.number_series"))
-        conn.execute(text("ALTER TABLE mod_numbering.number_series NO FORCE ROW LEVEL SECURITY"))
-        conn.execute(text("ALTER TABLE mod_numbering.number_series DISABLE ROW LEVEL SECURITY"))
+        table = "mod_numbering.number_series"
+        conn.execute(text(f"DROP POLICY number_series_tenant_isolation ON {table}"))
+        conn.execute(text(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY"))
+        conn.execute(text(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY"))
     engine.dispose()
 
     with _session(user_url, right) as s:
@@ -226,7 +249,11 @@ def test_proof_2_the_tenant_role_is_revoked_from_every_platform_table(scratch, t
     _, user_url, _ = scratch
     engine = create_engine(user_url)
     with engine.connect() as conn, pytest.raises(DBAPIError) as exc:
-        conn.execute(text(f"SELECT 1 FROM mod_numbering.{table} LIMIT 1"))
+        # Table name is a module-level literal, not input. noqa: the
+        # check cannot see that.
+        conn.execute(
+            text(f"SELECT 1 FROM mod_numbering.{table} LIMIT 1")  # noqa: S608
+        )
     assert "permission denied" in str(exc.value).lower()
     engine.dispose()
 
@@ -238,7 +265,11 @@ def test_proof_2_the_control_plane_role_can_still_read(scratch, table):
     _, _, platform_url = scratch
     engine = create_engine(platform_url)
     with engine.connect() as conn:
-        conn.execute(text(f"SELECT 1 FROM mod_numbering.{table} LIMIT 1"))
+        # Table name is a module-level literal, not input. noqa: the
+        # check cannot see that.
+        conn.execute(
+            text(f"SELECT 1 FROM mod_numbering.{table} LIMIT 1")  # noqa: S608
+        )
     engine.dispose()
 
 
@@ -250,7 +281,7 @@ def test_proof_2_tenant_tables_force_rls(scratch, table):
         row = conn.execute(
             text(
                 "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
-                "WHERE oid = :t::regclass"
+                "WHERE oid = CAST(:t AS regclass)"
             ),
             {"t": f"mod_numbering.{table}"},
         ).one()
@@ -288,20 +319,24 @@ def _race(
                 if barrier_before:
                     barrier.wait(timeout=15)
                 out = allocate(
-                    s, scope=TenantScope(tenant_id=tenant), series_code="invoice",
-                    reference_date=JAN, idempotency_key=key,
+                    s,
+                    scope=TenantScope(tenant_id=tenant),
+                    series_code="invoice",
+                    reference_date=JAN,
+                    idempotency_key=key,
                 )
                 s.commit()
                 results.append(out)
-        except BaseException as exc:  # noqa: BLE001 - recorded and asserted on
+        except BaseException as exc:
             errors.append(exc)
             # Release a peer that may be waiting, on either barrier, so a
             # failure surfaces as an error rather than a 40-second hang.
             for b in (barrier, *also_abort):
-                try:
+                # A barrier already broken by the peer raises here; the point
+                # is only to release anyone still waiting, so there is nothing
+                # to handle and nothing to log.
+                with contextlib.suppress(Exception):
                     b.abort()
-                except Exception:
-                    pass
 
     threads = [threading.Thread(target=worker, args=(k,)) for k in keys]
     for t in threads:
@@ -378,7 +413,9 @@ def test_proof_3_hostile_without_for_update_the_race_takes_the_same_value(
     monkeypatch.setattr(svc, "_locked_counter", unlocked_counter)
 
     results, errors = _race(
-        user_url, tenant, ("h1", "h2"),
+        user_url,
+        tenant,
+        ("h1", "h2"),
         barrier_before=False,
         also_abort=(read_barrier,),
     )
@@ -423,7 +460,10 @@ def test_proof_4_a_rolled_back_caller_consumes_no_number(scratch):
 
     with _session(user_url, tenant) as s:
         allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="doomed",
         )
         s.rollback()
@@ -431,7 +471,10 @@ def test_proof_4_a_rolled_back_caller_consumes_no_number(scratch):
     with _session(user_url, tenant) as s:
         assert s.query(AllocationReceipt).count() == 0
         out = allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="real",
         )
         s.commit()
@@ -448,12 +491,18 @@ def test_proof_5_same_key_same_request_replays(scratch):
     with _session(user_url, tenant) as s:
         _configure(s, scope)
         first = allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="retry",
         )
         s.commit()
         second = allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="retry",
         )
         s.commit()
@@ -471,13 +520,19 @@ def test_proof_5_same_key_different_request_conflicts(scratch):
     with _session(user_url, tenant) as s:
         _configure(s, scope)
         allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="reused",
         )
         s.commit()
         with pytest.raises(IdempotencyConflict):
             allocate(
-                s, scope=scope, series_code="invoice", reference_date=FEB,
+                s,
+                scope=scope,
+                series_code="invoice",
+                reference_date=FEB,
                 idempotency_key="reused",
             )
 
@@ -494,12 +549,18 @@ def test_proof_6_each_period_has_its_own_counter(scratch):
     with _session(user_url, tenant) as s:
         _configure(s, scope, reset_policy="yearly", include_year=True)
         this_year = allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="y1",
         )
         s.commit()
         next_year = allocate(
-            s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=NEXT_YEAR,
             idempotency_key="y2",
         )
         s.commit()
@@ -523,17 +584,26 @@ def test_proof_6_a_backdated_allocation_continues_its_own_period(scratch):
         _configure(s, scope, reset_policy="yearly", include_year=True)
         for i in range(3):
             allocate(
-                s, scope=scope, series_code="invoice", reference_date=DEC,
+                s,
+                scope=scope,
+                series_code="invoice",
+                reference_date=DEC,
                 idempotency_key=f"d{i}",
             )
             s.commit()
         allocate(
-            s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=NEXT_YEAR,
             idempotency_key="n1",
         )
         s.commit()
         backdated = allocate(
-            s, scope=scope, series_code="invoice", reference_date=DEC,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=DEC,
             idempotency_key="late",
         )
         s.commit()
@@ -551,16 +621,20 @@ def test_proof_6_preview_reads_the_period_of_the_date_it_is_given(scratch):
     with _session(user_url, tenant) as s:
         _configure(s, scope, reset_policy="yearly", include_year=True)
         allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="p1",
         )
         s.commit()
         assert preview(s, scope=scope, series_code="invoice", reference_date=JAN) == (
             "INV-2026-000002"
         )
-        assert preview(
-            s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR
-        ) == "INV-2027-000001"
+        assert (
+            preview(s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR)
+            == "INV-2027-000001"
+        )
 
 
 # ── Proof 7 — structural immutability, and repair evidence ──────────────────
@@ -581,33 +655,40 @@ def test_proof_7_raw_update_and_delete_are_refused_on_append_only_tables(
     with _session(user_url, tenant) as s:
         _configure(s, scope)
         allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="k1",
         )
         advance_to_at_least(
-            s, scope=scope, series_code="invoice", period_key="*",
-            proven_minimum=50, reason="backfill", repaired_by="ops:ada",
+            s,
+            scope=scope,
+            series_code="invoice",
+            period_key="*",
+            proven_minimum=50,
+            reason="backfill",
+            repaired_by="ops:ada",
         )
         s.commit()
 
-    engine = create_engine(user_url)
+    engine = _tenant_engine(user_url, tenant)
     with engine.connect() as conn:
-        conn.execute(
-            text("SELECT set_config('app.current_tenant_id', :t, false)"),
-            {"t": str(tenant)},
-        )
         with pytest.raises(DBAPIError):
-            conn.execute(text(f"UPDATE mod_numbering.{table} SET series_code = 'x'"))
+            conn.execute(
+                text(
+                    # Table name is a literal from a fixed tuple, not input.
+                    f"UPDATE mod_numbering.{table} SET series_code = 'x'"  # noqa: S608
+                )
+            )
     engine.dispose()
 
-    engine = create_engine(user_url)
+    engine = _tenant_engine(user_url, tenant)
     with engine.connect() as conn:
-        conn.execute(
-            text("SELECT set_config('app.current_tenant_id', :t, false)"),
-            {"t": str(tenant)},
-        )
         with pytest.raises(DBAPIError):
-            conn.execute(text(f"DELETE FROM mod_numbering.{table}"))
+            conn.execute(
+                text(f"DELETE FROM mod_numbering.{table}")  # noqa: S608
+            )
     engine.dispose()
 
 
@@ -618,7 +699,12 @@ def test_proof_7_even_the_owner_role_cannot_rewrite_history(scratch, table):
     admin_url, _, _ = scratch
     engine = create_engine(admin_url)
     with engine.connect() as conn, pytest.raises(DBAPIError) as exc:
-        conn.execute(text(f"UPDATE mod_numbering.{table} SET series_code = 'x'"))
+        conn.execute(
+            text(
+                # Table name is a literal from a fixed tuple, not input.
+                f"UPDATE mod_numbering.{table} SET series_code = 'x'"  # noqa: S608
+            )
+        )
     assert "append-only" in str(exc.value).lower()
     engine.dispose()
 
@@ -650,14 +736,22 @@ def test_proof_7_repair_advances_names_its_period_and_leaves_evidence(scratch):
     with _session(user_url, tenant) as s:
         _configure(s, scope, reset_policy="yearly", include_year=True)
         allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="k1",
         )
         s.commit()
 
         repair = advance_to_at_least(
-            s, scope=scope, series_code="invoice", period_key="2026",
-            proven_minimum=500, reason="ledger backfill", repaired_by="ops:ada",
+            s,
+            scope=scope,
+            series_code="invoice",
+            period_key="2026",
+            proven_minimum=500,
+            reason="ledger backfill",
+            repaired_by="ops:ada",
         )
         s.commit()
         assert (repair.changed, repair.new_next_value) == (True, 501)
@@ -665,8 +759,13 @@ def test_proof_7_repair_advances_names_its_period_and_leaves_evidence(scratch):
         # Below the current value is a no-op, and still leaves evidence that it
         # was attempted.
         again = advance_to_at_least(
-            s, scope=scope, series_code="invoice", period_key="2026",
-            proven_minimum=3, reason="mistake", repaired_by="ops:ada",
+            s,
+            scope=scope,
+            series_code="invoice",
+            period_key="2026",
+            proven_minimum=3,
+            reason="mistake",
+            repaired_by="ops:ada",
         )
         s.commit()
         assert (again.changed, again.new_next_value) == (False, 501)
@@ -678,7 +777,10 @@ def test_proof_7_repair_advances_names_its_period_and_leaves_evidence(scratch):
 
         # The other period is untouched: repair names one counter.
         nxt = allocate(
-            s, scope=scope, series_code="invoice", reference_date=NEXT_YEAR,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=NEXT_YEAR,
             idempotency_key="k2",
         )
         s.commit()
@@ -696,8 +798,13 @@ def test_proof_7_a_malformed_period_key_is_refused(scratch):
         for bad in ("*", "26", "2026-13", "2026-1", "nope"):
             with pytest.raises(NumberingError) as exc:
                 advance_to_at_least(
-                    s, scope=scope, series_code="invoice", period_key=bad,
-                    proven_minimum=5, reason="r", repaired_by="ops:ada",
+                    s,
+                    scope=scope,
+                    series_code="invoice",
+                    period_key=bad,
+                    proven_minimum=5,
+                    reason="r",
+                    repaired_by="ops:ada",
                 )
             assert exc.value.code.endswith("invalid_period_key")
 
@@ -712,16 +819,22 @@ def test_proof_8_both_planes_produce_the_same_number_for_the_same_input(scratch)
     with _session(user_url, tenant) as s:
         _configure(s, TenantScope(tenant_id=tenant))
         tenant_number = allocate(
-            s, scope=TenantScope(tenant_id=tenant), series_code="invoice",
-            reference_date=JAN, idempotency_key="same",
+            s,
+            scope=TenantScope(tenant_id=tenant),
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="same",
         ).formatted_number
         s.commit()
 
     with _session(platform_url) as s:
         _configure(s, PlatformScope())
         platform_number = allocate(
-            s, scope=PlatformScope(), series_code="invoice",
-            reference_date=JAN, idempotency_key="same",
+            s,
+            scope=PlatformScope(),
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="same",
         ).formatted_number
         s.commit()
 
@@ -733,8 +846,11 @@ def test_an_unconfigured_series_fails_closed(scratch):
     (tenant,) = _make_tenants(admin_url, 1)
     with _session(user_url, tenant) as s, pytest.raises(NumberingError) as exc:
         allocate(
-            s, scope=TenantScope(tenant_id=tenant), series_code="typo",
-            reference_date=JAN, idempotency_key="k",
+            s,
+            scope=TenantScope(tenant_id=tenant),
+            series_code="typo",
+            reference_date=JAN,
+            idempotency_key="k",
         )
     assert exc.value.code.endswith("series_not_configured")
 
@@ -755,7 +871,10 @@ def test_reconfiguring_a_series_that_has_allocated_is_refused(scratch):
     with _session(user_url, tenant) as s:
         _configure(s, scope)
         allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="k1",
         )
         s.commit()
@@ -774,7 +893,10 @@ def test_reconfiguring_before_any_allocation_is_allowed(scratch):
         _configure(s, scope)
         _configure(s, scope, reset_policy="yearly", include_year=True, min_digits=4)
         out = allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="k1",
         )
         s.commit()
@@ -793,17 +915,16 @@ def test_the_rendered_number_is_unique_even_if_a_transition_slips(scratch):
     with _session(user_url, tenant) as s:
         _configure(s, scope)
         allocate(
-            s, scope=scope, series_code="invoice", reference_date=JAN,
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
             idempotency_key="k1",
         )
         s.commit()
 
-    engine = create_engine(user_url)
+    engine = _tenant_engine(user_url, tenant)
     with engine.connect() as conn:
-        conn.execute(
-            text("SELECT set_config('app.current_tenant_id', :t, false)"),
-            {"t": str(tenant)},
-        )
         with pytest.raises(DBAPIError) as exc:
             conn.execute(
                 text(
@@ -838,16 +959,13 @@ def test_check_constraints_refuse_a_bad_configuration_written_directly(
     with _session(user_url, tenant) as s:
         _configure(s, TenantScope(tenant_id=tenant))
 
-    engine = create_engine(user_url)
+    engine = _tenant_engine(user_url, tenant)
     with engine.connect() as conn:
-        conn.execute(
-            text("SELECT set_config('app.current_tenant_id', :t, false)"),
-            {"t": str(tenant)},
-        )
         with pytest.raises(DBAPIError) as exc:
             conn.execute(
                 text(
-                    f"UPDATE mod_numbering.number_series SET {column} = :v "
+                    # Column name is a parametrize literal, not input.
+                    f"UPDATE mod_numbering.number_series SET {column} = :v "  # noqa: S608
                     "WHERE tenant_id = :t"
                 ),
                 {"v": value, "t": tenant},
@@ -862,12 +980,8 @@ def test_a_resetting_series_must_print_its_period_at_the_database(scratch):
     with _session(user_url, tenant) as s:
         _configure(s, TenantScope(tenant_id=tenant))
 
-    engine = create_engine(user_url)
+    engine = _tenant_engine(user_url, tenant)
     with engine.connect() as conn:
-        conn.execute(
-            text("SELECT set_config('app.current_tenant_id', :t, false)"),
-            {"t": str(tenant)},
-        )
         with pytest.raises(DBAPIError) as exc:
             conn.execute(
                 text(

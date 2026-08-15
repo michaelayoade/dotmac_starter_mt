@@ -170,9 +170,9 @@ def test_at_most_once_is_delegated_to_the_kernel() -> None:
         "request_fingerprint",
         "idempotency_conflict",
     ):
-        assert reimplementation not in source, (
-            f"{reimplementation} reimplements kernel idempotency mechanics"
-        )
+        assert (
+            reimplementation not in source
+        ), f"{reimplementation} reimplements kernel idempotency mechanics"
 
 
 def test_every_counter_is_scoped_to_a_period() -> None:
@@ -191,9 +191,10 @@ def test_every_counter_is_scoped_to_a_period() -> None:
             for c in model.__table__.constraints
             if type(c).__name__ == "UniqueConstraint"
         }
-        assert any("period_key" in cols and "allocated_value" in cols for cols in uniques), (
-            f"{model.__name__} must key value uniqueness on the period too"
+        keyed = any(
+            "period_key" in cols and "allocated_value" in cols for cols in uniques
         )
+        assert keyed, f"{model.__name__} must key value uniqueness on the period too"
 
 
 def test_evidence_instants_are_server_defaults() -> None:
@@ -223,9 +224,9 @@ def test_the_rendered_number_is_unique_per_series() -> None:
             for c in model.__table__.constraints
             if type(c).__name__ == "UniqueConstraint"
         }
-        assert any("formatted_number" in cols for cols in uniques), (
-            f"{model.__name__} must make the rendered string unique per series"
-        )
+        assert any(
+            "formatted_number" in cols for cols in uniques
+        ), f"{model.__name__} must make the rendered string unique per series"
 
 
 def test_identity_shaping_configuration_freezes_once_a_series_has_history() -> None:
@@ -261,9 +262,9 @@ def test_append_only_tables_carry_no_updated_at() -> None:
         models.PlatformAllocationReceipt,
         models.PlatformSeriesRepair,
     ):
-        assert "updated_at" not in model.__table__.c, (
-            f"{model.__name__} is append-only; an updated_at there is dead or a lie"
-        )
+        assert (
+            "updated_at" not in model.__table__.c
+        ), f"{model.__name__} is append-only; an updated_at there is dead or a lie"
         # One domain timestamp per evidence row, not a second redundant one.
         assert "created_at" not in model.__table__.c, (
             f"{model.__name__} carries created_at beside its domain instant; "
@@ -346,9 +347,7 @@ def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
 
 def test_the_pinned_kernel_floor_is_the_release_that_allocated_the_schema() -> None:
     manifest = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))
-    assert (
-        manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a65"
-    )
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a65"
 
 
 def test_the_dossier_records_no_adoption_yet() -> None:

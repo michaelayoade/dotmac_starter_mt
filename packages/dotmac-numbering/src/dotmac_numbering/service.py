@@ -239,9 +239,8 @@ def _assert_safe_transition(
     changed = [
         field
         for field in IDENTITY_SHAPING_FIELDS
-        if _normalise(getattr(existing, field)) != _normalise(
-            getattr(configuration, field)
-        )
+        if _normalise(getattr(existing, field))
+        != _normalise(getattr(configuration, field))
     ]
     if changed and _series_has_history(db, scope, configuration.series_code):
         raise _error(
@@ -288,7 +287,9 @@ def format_number(
 ) -> str:
     """The one formatter, shared by allocation and preview."""
     if value < 1:
-        raise _error("invalid_value", "A formatted value must be positive.", value=value)
+        raise _error(
+            "invalid_value", "A formatted value must be positive.", value=value
+        )
     segments: list[str] = []
     if series.prefix:
         segments.append(series.prefix)
@@ -305,7 +306,9 @@ def format_number(
     return series.separator.join(segments)
 
 
-def preview(db: Session, *, scope: Scope, series_code: str, reference_date: date) -> str:
+def preview(
+    db: Session, *, scope: Scope, series_code: str, reference_date: date
+) -> str:
     """What the next allocation for this date would look like.
 
     Reads the counter for the date's OWN period, so a preview for a backdated
