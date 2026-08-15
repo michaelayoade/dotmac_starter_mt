@@ -6,6 +6,97 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a62 — 2026-08-15
+
+Adds the authentication-neutral permission seam. Additive: no signature, status
+code or response body changes on any existing surface.
+
+### Added
+
+- `dotmac_kernel.deps.authorize_party(db, *, tenant, party, code)` — the ONE
+  permission decision, with the authentication removed. Resolves a declared code
+  to its `default_roles` and asks the membership query; raises
+  `UndeclaredPermissionError` for an undeclared code rather than returning
+  `False`, so a typo cannot masquerade as a routine refusal.
+- `dotmac_kernel.deps.permission_guard(code, *, authenticated_party, denied)` —
+  a route dependency over `authorize_party` for ANY authentication. The two
+  parameters are the only things the surfaces genuinely disagree about: how the
+  actor is proved, and what a refusal looks like. Guards built here carry the
+  same `PERMISSION_CODE_ATTR` stamp `create_app` validates at boot.
+  `denied` answers the authorization question and must not redirect to login —
+  it runs only after authentication succeeded, so a redirect loops against a
+  login page that finds a valid session.
+
+### Changed
+
+- `require_permission(code)` is now `permission_guard` bound to the bearer flow
+  and holds no decision of its own. Behaviour is unchanged — same 403, same
+  boot-time stamp, same fail-closed `UndeclaredPermissionError` — and it stays
+  the right guard for a JSON API route.
+
+### Why
+
+`dotmac_workspace` (ADR-0021's third plane) authenticates with its own
+`dmws_session` cookie, deliberately not the `access_token` a product portal
+reads. Its adoption blocker B1 recorded that neither existing seam fit:
+`require_permission` was welded to the bearer header and answered a browser with
+a bare 401, while `web_deps.require_web_auth` read the wrong cookie and
+hardcoded the `"admin"` role instead of consulting a declared permission. The
+only move left was for the assembly to hand-roll the role query — a private copy
+of an authorization check, which is how a plane falls behind a kernel security
+fix (the failure ADR-0015 recorded against academy).
+
+The seam is the same shape `authenticate_request` already has one layer down:
+one implementation, reached by every surface, with the transport-specific parts
+passed in. `tests/architecture/test_permission_seam_is_single.py` holds it to
+one code→roles binding; `tests/unit/test_permission_seam.py` proves a foreign
+cookie name reaches the decision a bearer header reaches.
+
+This release adds no table, no migration and no namespace allocation.
+Replaces a60's implicit plane selector with the explicit assembly contract in
+ADR-0028. **a60 was published**, so this is a breaking change to a released
+surface rather than a pre-publication correction — see "Migrating from a60". A prerequisite binding names a provider; it never chooses
+which tables a product intends to install.
+
+### Added
+
+- `ModulePlane`, `ModulePlaneSelection` and
+  `ProductAssemblySpec.module_planes`: a selectable module requires one
+  explicit per-assembly choice.
+- `ModuleManifest.platform_requires` and `supported_plane_sets`: the module
+  declares common/tenant/platform effects plus every plane combination its one
+  lineage can actually build. An empty declaration preserves atomic behaviour.
+- Static and live-catalog gates derive mandatory bindings and expected tables
+  from that explicit selection. The static gate also proves a selectable
+  lineage's reachable upgrade path consumes its own selection.
+
+### Changed
+
+- `resolve_depends_on(..., module=..., tenant=..., platform=...)` emits edges
+  for the selected planes and fails when any selected requirement is unbound.
+- Provider availability no longer controls migration DDL. This is the Vendor CP
+  canary: kernel 0001 truthfully supplies a tenant catalogue, while the product
+  can explicitly install only a module's platform plane.
+
+### Migrating from a60
+
+`tenant_requires` still exists and still means the same thing, so a manifest
+needs no edit to keep compiling. What changed is who decides: a60 built the
+tenant plane whenever its prerequisite happened to be bound, and a61 builds it
+only when the assembly SELECTS it.
+
+A consumer on a60 must, in one change:
+
+1. add `supported_plane_sets` to each dual-plane manifest it owns;
+2. add a `ModulePlaneSelection` to its `ProductAssemblySpec` for every selectable
+   module — a missing one is a hard error, deliberately, because silence is what
+   a60 mistook for intent; and
+3. replace any `all_bound(...)` plane test in its lineages with
+   `selected_module_planes(...)`.
+
+`is_bound` / `all_bound` remain for asking whether a provider exists, which is a
+legitimate question. They are no longer a legitimate way to choose DDL.
+
 ## 0.1.0a61 — 2026-08-14
 
 Replaces a60's implicit plane selector with the explicit assembly contract in

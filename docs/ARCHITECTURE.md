@@ -1239,7 +1239,7 @@ made concrete — every model has exactly one declared owner.
 | `CommunicationDelivery` | `communication_deliveries` | core | dotmac_sub (`app/models/notification.py::NotificationDelivery`) for the receipt shape; stable dispatch identity and the bounce/complaint→consent feedback loop are native kernel behavior |
 | `UserCredential` | `user_credentials` | core | dotmac_sub (`app/models/auth.py`, tenant-adapted; `email` column dropped 2b.1-T3 — see "Auth credentials" ownership row and the F2 resolution note below). PORT-DELTA (control-plane security Task 2): moved from the `auth` feature to core — atomic tenant provisioning (`tenants` feature) must create the owner credential and features never import each other, so the model joined the other identity models under ADR-0002's placement rule; hashing/verification stays in `dotmac_kernel.security` |
 | `PlatformAdmin` | `platform_admins` | core | native (control-plane security Task 1, ADR-0004) — platform catalog table: no `tenant_id`, no RLS, GRANT `platform_api`/`app_admin` only, REVOKEd from `app_user` |
-| `PlatformSession` | `platform_sessions` | core | native (control-plane security Task 1, ADR-0004) — same grant model as `platform_admins` |
+| `PlatformSession` | `platform_sessions` | core | same grant model as `platform_admins` (control-plane security Task 1, ADR-0004) |
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
 | `TenantAppliedLicence` | `tenant_applied_licences` | licensing | native (WS8 reference receiver, assembly migration `a002`) — the receiver-owned durable replay record the kernel verifier deliberately does not store; one row per `(tenant_id, licence_id)` lineage, upserted on each applied version |
 | `TenantRevocationList` | `tenant_revocation_lists` | licensing | native (WS8 revocation import, assembly migration `a003`) — the last imported list version + the revoked set, one row per tenant. Persisted (not just applied) because the set is fed into every subsequent `verify_licence` offline; accepted imports must be a SUPERSET of the stored set, since a well-ordered newer list that omits an id is silent un-revocation |
@@ -1580,6 +1580,45 @@ the same relation to a future tenant-configurable role→permission grant that a
 supported as the raw role check; both share one `_holds_any_role` query. The
 `rbac` feature's JSON routes are migrated to `require_permission`; every other
 feature still uses `require_role` and migrates one at a time.
+
+#### The permission seam is authentication-neutral (kernel `0.1.0a62`)
+
+`dotmac_kernel.deps.authorize_party(db, *, tenant, party, code)` is the ONE
+place a permission code becomes a role check — the authorization counterpart to
+`authenticate_request` one layer down (see "Auth flow: cookie + bearer share one
+seam"). It takes an ALREADY-established party and returns a bool; it reads no
+header, no cookie and no session.
+
+| Surface | Authenticated by | Refusal | Guard |
+|---|---|---|---|
+| JSON API | `require_user_auth` (bearer) | 403 | `require_permission(code)` |
+| A separate assembly's portal | its own cookie guard | 403 (branded if it likes) | `permission_guard(code, authenticated_party=…, denied=…)` |
+
+`permission_guard` is the route-level factory both go through; `require_permission`
+is now that factory bound to the bearer flow and holds no decision of its own.
+
+`denied` answers the AUTHORIZATION question and must never redirect to login: it
+runs only once `authenticated_party` has succeeded, so the actor is signed in,
+and a redirect would loop against a login page that finds a valid session.
+Unauthenticated is `authenticated_party`'s own refusal (a `WebAuthRedirect` on a
+cookie surface). "Who are you?" redirects; "may you?" refuses.
+Guards built by an ASSEMBLY carry the same `PERMISSION_CODE_ATTR` stamp, so they
+keep `create_app`'s boot-time declaration check instead of degrading a typo'd
+code into a runtime 500.
+
+Why it exists: `dotmac_workspace` (ADR-0021's third plane) authenticates with
+its own `dmws_session` cookie, deliberately not the `access_token` a product
+portal reads. Its blocker B1 recorded that `require_permission` was welded to the
+bearer header and `require_web_auth` read the wrong cookie while hardcoding
+`"admin"` — leaving the assembly to hand-roll the role query, which is how a
+plane falls behind a kernel security fix (ADR-0015's academy failure). Enforced
+by `tests/architecture/test_permission_seam_is_single.py` (exactly one
+code→roles binding) and `tests/unit/test_permission_seam.py` (a foreign cookie
+reaches the decision a bearer header reaches).
+
+`web_deps.require_web_auth`'s hardcoded `"admin"` role is UNCHANGED and remains
+the phase-3 item its docstring records — this seam is what a fix will be built
+on, not the fix itself.
 
 ### Release-bound product manifests
 
