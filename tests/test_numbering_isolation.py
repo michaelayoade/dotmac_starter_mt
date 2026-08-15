@@ -1302,19 +1302,31 @@ def test_start_value_does_not_move_an_existing_non_resetting_counter(scratch):
     assert nxt.formatted_number == "INV-000002"
 
 
-def _reseed_while_a_period_opens(
-    user_url: str, tenant: uuid.UUID, *, hold_seconds: float
-) -> dict[str, object]:
-    """Open a new period and hold the transaction; reconfigure concurrently.
+#: PostgreSQL `lock_not_available`. Raised when `lock_timeout` expires waiting
+#: for a row lock — the specific, unambiguous evidence that a statement reached
+#: the server and blocked there, rather than merely being slow to arrive.
+_LOCK_NOT_AVAILABLE = "55P03"
 
-    Returns what the reconfiguration was able to do WHILE the allocation still
-    held its transaction. That is the observable that distinguishes a lock from
-    no lock — checking only the final seed cannot, because 1 and 700 are both
-    reachable either way.
+
+def _sqlstate(exc: BaseException) -> str | None:
+    return getattr(getattr(exc, "orig", None), "sqlstate", None)
+
+
+def _reseed_while_a_period_opens(user_url: str, tenant: uuid.UUID) -> dict[str, object]:
+    """Hold a new period open, then attempt a reseed under a short lock timeout.
+
+    The allocation opens a period and keeps its transaction — and therefore the
+    series row — until the reseed has been attempted. The reseeder sets a
+    transaction-local `lock_timeout` and tries to reconfigure.
+
+    Timing is not the observable. Either the reseeder waits on the row and
+    PostgreSQL raises `lock_not_available`, or it does not wait at all. A
+    thread that is merely slow produces neither, so it cannot be mistaken for
+    a lock wait the way a `join(timeout=...)` check can.
     """
     scope = TenantScope(tenant_id=tenant)
     allocation_open = threading.Event()
-    release_allocation = threading.Event()
+    reseed_attempted = threading.Event()
     observed: dict[str, object] = {}
     errors: list[BaseException] = []
 
@@ -1328,9 +1340,9 @@ def _reseed_while_a_period_opens(
                     reference_date=NEXT_YEAR,
                     idempotency_key="new-period",
                 )
-                # Transaction still open, series row still held (when locked).
+                # Transaction still open: the series row stays held.
                 allocation_open.set()
-                release_allocation.wait(timeout=20)
+                reseed_attempted.wait(timeout=30)
                 s.commit()
                 observed["value"] = out.value
         except BaseException as exc:
@@ -1339,90 +1351,90 @@ def _reseed_while_a_period_opens(
 
     def reseeder() -> None:
         try:
-            assert allocation_open.wait(timeout=20)
+            assert allocation_open.wait(timeout=20), "allocation never opened"
             with _session(user_url, tenant) as s:
-                _configure(
-                    s,
-                    scope,
-                    reset_policy="yearly",
-                    include_year=True,
-                    start_value=700,
-                )
-                observed["reconfigured"] = True
-        except NumberingError as exc:
-            observed["refused"] = exc.code
+                s.execute(text("SET LOCAL lock_timeout = '750ms'"))
+                try:
+                    _configure(
+                        s,
+                        scope,
+                        reset_policy="yearly",
+                        include_year=True,
+                        start_value=700,
+                    )
+                    observed["succeeded"] = True
+                except Exception as exc:
+                    observed["error"] = exc
         except BaseException as exc:
             errors.append(exc)
+        finally:
+            reseed_attempted.set()
 
     threads = [threading.Thread(target=opener), threading.Thread(target=reseeder)]
-    threads[0].start()
-    threads[1].start()
-
-    # Give the reseeder a real chance to finish while the allocation is held.
-    # If it can, there is no lock.
-    threads[1].join(timeout=hold_seconds)
-    observed["completed_while_held"] = not threads[1].is_alive()
-    release_allocation.set()
     for t in threads:
-        t.join(timeout=40)
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
 
     observed["errors"] = errors
     return observed
 
 
-def test_start_value_reconfiguration_blocks_while_a_period_is_opening(scratch):
-    """The lock is observed by BLOCKING, not by the final value.
+def test_start_value_reconfiguration_waits_on_the_series_row(scratch):
+    """The lock is observed by PostgreSQL refusing to wait any longer.
 
-    A previous version of this test asserted only that the new period seeded
-    from 1 or 700. Both are reachable without any lock at all, so it proved
-    nothing about linearization — it was an allowed-outcomes smoke test.
+    Two earlier versions of this test were weaker. The first asserted only that
+    the new period seeded from 1 or 700 — both reachable with no lock at all.
+    The second asserted that a thread was still alive after a two-second join,
+    which a merely-delayed thread satisfies without ever reaching the server.
 
-    Here the allocation opens a new period and holds its transaction. The
-    reconfiguration must not be able to complete during that window, because
-    it needs the same series row.
+    A transaction-local `lock_timeout` removes timing from the question: the
+    reseeder must fail with SQLSTATE 55P03, which PostgreSQL raises only after
+    actually waiting on a lock it could not take.
     """
     admin_url, user_url, _ = scratch
     (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
     with _session(user_url, tenant) as s:
-        _configure(
-            s,
-            TenantScope(tenant_id=tenant),
-            reset_policy="yearly",
-            include_year=True,
-            start_value=1,
-        )
+        _configure(s, scope, reset_policy="yearly", include_year=True, start_value=1)
         allocate(
             s,
-            scope=TenantScope(tenant_id=tenant),
+            scope=scope,
             series_code="invoice",
             reference_date=JAN,
             idempotency_key="seed",
         )
         s.commit()
 
-    observed = _reseed_while_a_period_opens(user_url, tenant, hold_seconds=2.0)
+    observed = _reseed_while_a_period_opens(user_url, tenant)
 
     assert not observed["errors"], observed["errors"]
-    assert observed["completed_while_held"] is False, (
+    assert "succeeded" not in observed, (
         "the reconfiguration completed while the allocation still held the "
         "series row — the series lock is not being taken"
     )
-    # Once the allocation commits, the reconfiguration proceeds and SUCCEEDS:
-    # it changes only `start_value`, which is a prospective seed and therefore
-    # deliberately mutable after history. It is the blocking above that the
-    # lock is responsible for, not a refusal.
-    assert observed.get("reconfigured") is True, (
-        "changing only start_value must be permitted after history; a refusal "
-        "here would mean the freeze is over-broad"
+    failure = observed.get("error")
+    assert failure is not None, "the reseed neither blocked nor completed"
+    assert _sqlstate(failure) == _LOCK_NOT_AVAILABLE, (
+        f"expected PostgreSQL {_LOCK_NOT_AVAILABLE} (lock_not_available) from "
+        f"waiting on the series row; got {type(failure).__name__} with "
+        f"sqlstate {_sqlstate(failure)!r}. Any other failure means the reseed "
+        "did not reach the row lock, so this proves nothing about the lock."
     )
+
     # The period that opened first seeded from the value in force at the time.
     assert observed["value"] == 1
 
-    # And the new seed governs the next period that has not opened yet.
+    # Once nothing holds the row, the same change is permitted: `start_value`
+    # is a prospective seed, not part of the rendered identity.
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, reset_policy="yearly", include_year=True, start_value=700)
+
+    # And it governs the next period that has not opened yet.
     with _session(user_url, tenant) as s:
         later = allocate(
             s,
-            scope=TenantScope(tenant_id=tenant),
+            scope=scope,
             series_code="invoice",
             reference_date=date(2028, 3, 1),
             idempotency_key="later",
@@ -1431,28 +1443,22 @@ def test_start_value_reconfiguration_blocks_while_a_period_is_opening(scratch):
     assert later.value == 700
 
 
-def test_hostile_without_the_series_lock_the_reseed_does_not_block(
-    scratch, monkeypatch
-):
-    """Guard-removal companion for the blocking proof.
+def test_hostile_without_the_series_lock_the_reseed_never_waits(scratch, monkeypatch):
+    """Guard-removal companion.
 
-    With `FOR UPDATE` dropped, the reconfiguration sails past an allocation
-    that is still holding its transaction. If this test ever fails, the proof
-    above is measuring something other than the lock.
+    With `FOR UPDATE` dropped the reseed takes no row lock, so it completes
+    while the allocation is still holding its transaction — no timeout, no
+    waiting. If this ever fails, the proof above is attributing to the lock
+    something the lock does not cause.
     """
     admin_url, user_url, _ = scratch
     (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
     with _session(user_url, tenant) as s:
-        _configure(
-            s,
-            TenantScope(tenant_id=tenant),
-            reset_policy="yearly",
-            include_year=True,
-            start_value=1,
-        )
+        _configure(s, scope, reset_policy="yearly", include_year=True, start_value=1)
         allocate(
             s,
-            scope=TenantScope(tenant_id=tenant),
+            scope=scope,
             series_code="invoice",
             reference_date=JAN,
             idempotency_key="seed",
@@ -1468,13 +1474,14 @@ def test_hostile_without_the_series_lock_the_reseed_does_not_block(
 
     monkeypatch.setattr(svc, "_find_series", unlocked)
 
-    observed = _reseed_while_a_period_opens(user_url, tenant, hold_seconds=5.0)
+    observed = _reseed_while_a_period_opens(user_url, tenant)
 
     assert not observed["errors"], observed["errors"]
-    assert observed["completed_while_held"] is True, (
-        "with the series lock removed the reconfiguration must NOT block on an "
-        "allocation that is still holding its transaction; it blocked anyway, "
-        "so the blocking proof is not attributable to the lock"
+    assert observed.get("succeeded") is True, (
+        "with the series lock removed the reconfiguration must complete while "
+        "the allocation still holds its transaction; instead it failed with "
+        f"{observed.get('error')!r}, so the wait in the proof above is not "
+        "caused by the lock"
     )
 
 
