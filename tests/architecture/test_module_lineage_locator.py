@@ -298,7 +298,9 @@ def test_discovery_finds_the_lineage_modules_and_excludes_the_others() -> None:
             assert excluded not in discovered, excluded
 
     all_packages = {
-        path.name for path in PACKAGES_DIR.iterdir() if (path / "pyproject.toml").is_file()
+        path.name
+        for path in PACKAGES_DIR.iterdir()
+        if (path / "pyproject.toml").is_file()
     }
     assert discovered < all_packages, "discovery matched every package"
 
@@ -338,8 +340,7 @@ def test_the_reader_detects_a_present_and_an_absent_locator(tmp_path: Path) -> N
     # publishes it.
     reexported = tmp_path / "reexported.py"
     reexported.write_text(
-        "from pkg.migrations import versions_dir\n\n"
-        '__all__ = ["versions_dir"]\n',
+        "from pkg.migrations import versions_dir\n\n" '__all__ = ["versions_dir"]\n',
         encoding="utf-8",
     )
     assert _exports(reexported, LOCATOR) is True
