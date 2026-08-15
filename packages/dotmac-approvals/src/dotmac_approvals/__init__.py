@@ -50,7 +50,7 @@ from dotmac_approvals.contracts import (
 )
 from dotmac_approvals.manifest import module
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "Actor",

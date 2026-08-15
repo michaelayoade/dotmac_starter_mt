@@ -22,11 +22,18 @@ import pytest
 from dotmac_kernel.namespaces import (
     MIGRATION_OWNER_LEDGER,
     RELEASE_CATALOG_MIGRATION_OWNER,
+    NamespaceRegistry,
     module_schema,
+)
+from dotmac_kernel.planes import (
+    ModulePlane,
+    ModulePlaneSelection,
+    ModulePlaneSelectionError,
 )
 from dotmac_release_catalog import identity, models
 from dotmac_release_catalog.manifest import module
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = Path(inspect.getfile(identity)).parent
 PACKAGE_ROOT = MODULE_ROOT.parents[1]
 MIGRATIONS = MODULE_ROOT / "migrations" / "versions"
@@ -76,7 +83,7 @@ def test_declared_tables_are_exactly_what_the_migration_creates() -> None:
     for call in calls:
         assert isinstance(call.args[0], ast.Constant), ast.unparse(call.func)
     created = {call.args[0].value for call in calls}
-    assert created == set(module.tables)
+    assert created == set(module.platform_tables)
     assert created == {"release_artifacts", "artifact_attestations"}
 
 
@@ -331,3 +338,87 @@ def test_the_extraction_dossier_records_a_greenfield_inventory() -> None:
     # `audit-complete`, and one concrete candidate is enough to be a module.
     assert dossier["status"] == "audit-complete"
     assert len(dossier["candidate_consumers"]) >= 1
+
+
+def test_the_module_declares_the_platform_plane_and_owns_no_tenant_tables() -> None:
+    """ADR-0023: the plane is DECLARED, never inferred from a missing column.
+
+    The DDL was always control-plane shaped, but the manifest declared these
+    tables under `tables=` — the TENANT slot. A declaration that disagrees with
+    what the migration builds is a real defect, because the live-catalog gate
+    holds each plane to its own contract and would have audited these against
+    the wrong one.
+    """
+    assert module.tables == ()
+    assert set(module.platform_tables) == {"release_artifacts", "artifact_attestations"}
+
+
+def test_the_plane_contract_is_atomic_so_an_assembly_makes_no_choice() -> None:
+    """A singleton plane set is not selectability; it is ceremony.
+
+    `supported_plane_sets=()` keeps the historical atomic contract: the one
+    declared plane installs with the lineage and there is nothing to select.
+    """
+    assert module.supported_plane_sets == ()
+
+
+def test_composition_succeeds_without_any_plane_selection() -> None:
+    """An atomic module must compose with no `module_planes` entry at all."""
+    registry = NamespaceRegistry.from_manifests([module])
+    schema = module_schema(module.short_code)
+    assert schema in registry.module_schemas()
+    assert registry.platform_plane_installed(schema) is True
+    assert registry.tenant_plane_installed(schema) is False
+
+
+def test_an_explicit_plane_selection_is_rejected_for_an_atomic_module() -> None:
+    """Offering a choice that does not exist must fail loudly, not be ignored.
+
+    Silently accepting a selection would let an assembly believe it had chosen
+    something, which is the omission-reads-as-intent failure ADR-0028 removes.
+    """
+    with pytest.raises(ModulePlaneSelectionError) as excinfo:
+        NamespaceRegistry.from_manifests(
+            [module],
+            module_planes=[
+                ModulePlaneSelection(
+                    module="release_catalog", planes=(ModulePlane.PLATFORM,)
+                )
+            ],
+        )
+    assert "atomic" in str(excinfo.value)
+
+
+def test_the_migration_creates_no_tenant_column_rls_or_policy() -> None:
+    """Static proof that the DDL matches the declared plane.
+
+    A platform table with a `tenant_id`, RLS, or a policy would mean the plane
+    declaration and the migration disagree — and the declaration is what the
+    gate trusts.
+    """
+    source = (
+        PROJECT_ROOT
+        / "packages/dotmac-release-catalog/src"
+        / "dotmac_release_catalog/migrations/versions/rl_0001_release_artifacts.py"
+    ).read_text(encoding="utf-8")
+    assert '"tenant_id"' not in source
+    assert "ROW LEVEL SECURITY" not in source
+    assert "CREATE POLICY" not in source
+    assert "REVOKE ALL" in source, "the revoke IS the isolation on this plane"
+
+
+def test_the_catalogue_renders_it_as_platform_and_atomic() -> None:
+    """The generated catalogue must show the corrected plane, not the old one."""
+    catalog = (PROJECT_ROOT / "docs" / "MODULE_CATALOG.md").read_text(encoding="utf-8")
+    row = next(
+        line
+        for line in catalog.splitlines()
+        if line.startswith("| [`dotmac-release-catalog`]")
+    )
+    cells = [cell.strip() for cell in row.split("|")]
+    capability = next(cell for cell in cells if "mod_" in cell)
+    assert "platform" in capability, capability
+    assert (
+        "tenant" not in capability
+    ), f"catalogue still shows a tenant capability for this module: {capability}"
+    assert any(cell.startswith("atomic") for cell in cells), cells

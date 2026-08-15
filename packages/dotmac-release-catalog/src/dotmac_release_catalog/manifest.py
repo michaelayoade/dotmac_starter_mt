@@ -8,8 +8,36 @@ refuses the composition at boot:
 - `short_code="rel"` → the derived, read-only schema `mod_rel`
 - `migration_prefix="rl"` → revision ids `rl_0001_…`
 - `migration_branch="release_catalog"` → how an `alembic_version` row is attributed
-- `tables=(...)` → the composed gate rejects a migration creating anything
-  outside this declaration, in both directions
+- `platform_tables=(...)` → the composed gate rejects a migration creating
+  anything outside this declaration, in both directions
+
+## Why the platform plane, declared and atomic
+
+The DDL was always control-plane shaped — no `tenant_id`, no RLS, grants to
+`platform_api`/`app_admin` and `REVOKE ALL` from `app_user`. Until ADR-0028 the
+manifest still declared those tables under `tables=`, which is the tenant slot.
+The declaration was simply wrong about what the migration builds, and ADR-0023
+is explicit that the plane is DECLARED and never inferred — so a mismatch here
+is a real defect, not a formality.
+
+This module is ATOMIC, and says so by saying nothing. `supported_plane_sets`
+is deliberately OMITTED rather than written as an explicit `()`: absence already
+means atomic, and the generated catalogue renders it that way.
+
+Omitting it is not only tidier — it is the honest compatibility floor. The
+keyword is a constructor field that only exists from kernel `0.1.0a61`, so
+writing it would force this module's floor up to `a61` for a value the default
+already supplies. Omitted, the floor stays at `0.1.0a56`, the earliest published
+kernel that has `platform_tables` at all — which is the real requirement.
+
+A singleton `((ModulePlane.PLATFORM,),)` would not make the module selectable
+either: the current implementation treats one combination as atomic and rejects
+an assembly selection anyway. It would be ceremony without a choice.
+
+There is no tenant consumer, and speculative selectability is the ADR-0006 § 5
+speculative extraction wearing different clothes. If a real tenant consumer ever
+appears, that is a capability EXPANSION needing product-first evidence, tenant
+models and migrations, RLS canaries and a new release.
 
 ## Why `core=False`
 
@@ -38,13 +66,14 @@ from dotmac_kernel.modules import ModuleManifest
 
 module = ModuleManifest(
     code="release_catalog",
-    version="0.1.0a2",
+    version="0.1.0a4",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="rel",
     migration_prefix="rl",
     migration_branch="release_catalog",
-    tables=("release_artifacts", "artifact_attestations"),
+    tables=(),
+    platform_tables=("release_artifacts", "artifact_attestations"),
 )
 
 __all__ = ["module"]

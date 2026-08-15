@@ -33,7 +33,7 @@
       "package_dir": "packages/dotmac-release-catalog",
       "import_name": "dotmac_release_catalog",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a44",
+      "kernel_floor": "0.1.0a56",
       "db_schema": "mod_rel",
       "tag_prefix": "dotmac-release-catalog-v",
       "wheel_contents": {
@@ -60,7 +60,7 @@
       "package_dir": "packages/dotmac-entitlement-allocation",
       "import_name": "dotmac_entitlement_allocation",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a45",
+      "kernel_floor": "0.1.0a56",
       "db_schema": "mod_ealloc",
       "tag_prefix": "dotmac-entitlement-allocation-v",
       "wheel_contents": {

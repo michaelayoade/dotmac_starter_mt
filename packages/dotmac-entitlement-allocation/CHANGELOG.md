@@ -1,5 +1,25 @@
 # Changelog — dotmac-entitlement-allocation
 
+## 0.1.0a4 — 2026-08-15
+
+**The persistence plane is now declared correctly.** This module always built
+control-plane tables — no `tenant_id`, no RLS, grants to `platform_api` and
+`app_admin`, `REVOKE ALL` from `app_user` — but the manifest declared them under
+`tables=`, the TENANT slot. No DDL changed; the declaration did.
+
+The mismatch mattered: ADR-0023 § 2 makes the plane declared and never inferred,
+and the live-catalog gate holds each plane to its own contract, so these tables
+were being audited against the tenant contract they can never satisfy.
+
+The module is ATOMIC and says so by saying nothing — `supported_plane_sets` is
+omitted rather than written as an explicit `()`. That keeps the kernel floor at
+`0.1.0a56`, the earliest published kernel with `platform_tables`; writing the
+keyword would raise the floor to `a61` where that constructor field first
+appears, for a value the default already supplies.
+
+**Kernel floor raised to `>=0.1.0a56`**, which is the honest minimum for a
+module that declares `platform_tables` at all.
+
 ## 0.1.0a3 — 2026-08-13
 
 Allow the independent module's ORM models to coexist with same-named models in

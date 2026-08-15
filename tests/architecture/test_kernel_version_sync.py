@@ -73,8 +73,6 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 LEDGER_ALLOCATION_RELEASES = {
-    "dotmac-release-catalog": "0.1.0a44",
-    "dotmac-entitlement-allocation": "0.1.0a45",
     # Listed here though the module is not release-registered yet: this map
     # gates the FLOOR, not publication. An unenforced floor is how the same
     # allocation drifted across a56 twice before landing on a58.
@@ -118,6 +116,22 @@ CAPABILITY_RAISED_FLOORS = {
     # Ticketing passed through a56 (`requires`) and a60 (`tenant_requires`) on
     # the way here. The floor is always the highest capability the module
     # actually consumes, not the first one that moved it.
+    # ADR-0023: both declare `platform_tables` and own no tenant tables.
+    # The field was INTRODUCED in a53, but a53 was never published — the tags
+    # jump a50 to a56 — so a56 is the earliest kernel a consumer can actually
+    # install with it. A floor naming an unpublished version is unresolvable,
+    # which is why "earliest PUBLISHED" is the operative test, not "earliest".
+    #
+    # Neither declares `requires` nor calls the prerequisite helpers, so a56
+    # is set by `platform_tables` alone and not by the a56 prerequisite
+    # contract that raised the modules above.
+    #
+    # `supported_plane_sets` is deliberately OMITTED rather than written as an
+    # explicit `()`. Writing it would consume an a61 constructor field for a
+    # value the default already supplies, raising both floors to a61 for
+    # nothing. Absence already means atomic.
+    "dotmac-release-catalog": ("0.1.0a56", "0.1.0a44"),
+    "dotmac-entitlement-allocation": ("0.1.0a56", "0.1.0a45"),
     "dotmac-ticketing": ("0.1.0a61", "0.1.0a39"),
     "dotmac-approvals": ("0.1.0a61", "0.1.0a59"),
 }

@@ -82,7 +82,7 @@ from dotmac_release_catalog.vocabulary import (
     AttestationKind,
 )
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 __all__ = [
     "ARTIFACT_KINDS",
