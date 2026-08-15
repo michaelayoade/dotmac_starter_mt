@@ -1130,12 +1130,22 @@ def test_configuration_and_first_allocation_linearize(scratch):
 def test_hostile_without_the_series_lock_configuration_and_allocation_tear(
     scratch, monkeypatch
 ):
-    """Sensitivity proof for the series lock.
+    """Sensitivity proof for the series lock, driven rather than raced.
 
-    Removing it lets the allocation read the old configuration while the
-    reconfiguration commits, producing exactly the state the test above
-    forbids. The barrier sits inside the patched series read, after both
-    transactions have seen the same row.
+    A shared release barrier is not enough here: after it, either thread may
+    win, and an allocation that wins legitimately causes the configuration to
+    be refused. That outcome is correct, so the test would fail on it — the
+    assertion could only be salvaged with an `or errors` escape that accepts
+    almost anything.
+
+    Directed events force the one interleaving that exposes the missing lock:
+
+        allocation takes a STALE read  ->  configuration commits  ->  allocation resumes
+
+    With the lock present that ordering cannot occur, because the
+    configuration would block on the series row. With it removed the
+    allocation renders from configuration that no longer exists, and the exact
+    torn state is asserted — no disjunction, no error escape.
     """
     admin_url, user_url, _ = scratch
     (tenant,) = _make_tenants(admin_url, 1)
@@ -1144,24 +1154,70 @@ def test_hostile_without_the_series_lock_configuration_and_allocation_tear(
 
     from dotmac_numbering import service as svc
 
-    read_barrier = threading.Barrier(2)
+    allocation_has_read = threading.Event()
+    configuration_committed = threading.Event()
     original = svc._find_series
 
-    def unlocked_series(db, scope, series_code, *, lock=False):
+    def unlocked_and_directed(db, scope, series_code, *, lock=False):
+        # The guard under test: the FOR UPDATE is dropped.
         row = original(db, scope, series_code, lock=False)
-        # Both actors have now read the SAME series row; only then proceed.
-        with contextlib.suppress(threading.BrokenBarrierError):
-            read_barrier.wait(timeout=15)
+        if threading.current_thread().name == "allocator":
+            allocation_has_read.set()
+            # Hold the stale read until the reconfiguration has committed.
+            configuration_committed.wait(timeout=20)
         return row
 
-    monkeypatch.setattr(svc, "_find_series", unlocked_series)
+    monkeypatch.setattr(svc, "_find_series", unlocked_and_directed)
 
-    (results,), errors = _configure_vs_allocate(user_url, tenant)
-    torn = bool(results.get("configured")) and results.get("number") == "INV-000001"
-    assert torn or errors, (
-        "with the series lock removed the reconfiguration and the first "
-        f"allocation must tear or fail; got {results} cleanly, so the "
-        "linearization proof is not measuring the lock"
+    results: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def allocator() -> None:
+        try:
+            with _session(user_url, tenant) as s:
+                out = allocate(
+                    s,
+                    scope=TenantScope(tenant_id=tenant),
+                    series_code="invoice",
+                    reference_date=JAN,
+                    idempotency_key="torn",
+                )
+                s.commit()
+                results["number"] = out.formatted_number
+        except BaseException as exc:
+            errors.append(exc)
+            configuration_committed.set()
+
+    def configurer() -> None:
+        try:
+            assert allocation_has_read.wait(timeout=20), "allocator never read"
+            with _session(user_url, tenant) as s:
+                _configure(s, TenantScope(tenant_id=tenant), min_digits=3)
+                results["configured"] = True
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            configuration_committed.set()
+
+    threads = [
+        threading.Thread(target=allocator, name="allocator"),
+        threading.Thread(target=configurer, name="configurer"),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=40)
+
+    assert not errors, errors
+    assert results.get("configured") is True, (
+        "the reconfiguration must commit while the allocation holds its stale "
+        "read — it is what makes the read stale"
+    )
+    assert results.get("number") == "INV-000001", (
+        "with FOR UPDATE removed the allocation must render from the "
+        f"superseded six-digit configuration; got {results.get('number')!r}. "
+        "If this is 'INV-001' the allocation somehow saw the new value and the "
+        "linearization proof is not measuring the series lock."
     )
 
 
@@ -1246,36 +1302,25 @@ def test_start_value_does_not_move_an_existing_non_resetting_counter(scratch):
     assert nxt.formatted_number == "INV-000002"
 
 
-def test_start_value_and_new_period_creation_linearize(scratch):
-    """Race a `start_value` change against the creation of a new period.
+def _reseed_while_a_period_opens(
+    user_url: str, tenant: uuid.UUID, *, hold_seconds: float
+) -> dict[str, object]:
+    """Open a new period and hold the transaction; reconfigure concurrently.
 
-    Both orders are legitimate — the new counter seeds from whichever value the
-    series row held when it was created — so the invariant is that the seed is
-    one of the two, never a value from neither and never an error.
+    Returns what the reconfiguration was able to do WHILE the allocation still
+    held its transaction. That is the observable that distinguishes a lock from
+    no lock — checking only the final seed cannot, because 1 and 700 are both
+    reachable either way.
     """
-    admin_url, user_url, _ = scratch
-    (tenant,) = _make_tenants(admin_url, 1)
     scope = TenantScope(tenant_id=tenant)
-    with _session(user_url, tenant) as s:
-        _configure(s, scope, reset_policy="yearly", include_year=True, start_value=1)
-        allocate(
-            s,
-            scope=scope,
-            series_code="invoice",
-            reference_date=JAN,
-            idempotency_key="seed",
-        )
-        s.commit()
-
-    barrier = threading.Barrier(2)
-    seen: dict[str, object] = {}
+    allocation_open = threading.Event()
+    release_allocation = threading.Event()
+    observed: dict[str, object] = {}
     errors: list[BaseException] = []
 
-    def open_new_period() -> None:
+    def opener() -> None:
         try:
             with _session(user_url, tenant) as s:
-                s.execute(text("SELECT 1"))
-                barrier.wait(timeout=15)
                 out = allocate(
                     s,
                     scope=scope,
@@ -1283,18 +1328,19 @@ def test_start_value_and_new_period_creation_linearize(scratch):
                     reference_date=NEXT_YEAR,
                     idempotency_key="new-period",
                 )
+                # Transaction still open, series row still held (when locked).
+                allocation_open.set()
+                release_allocation.wait(timeout=20)
                 s.commit()
-                seen["value"] = out.value
+                observed["value"] = out.value
         except BaseException as exc:
             errors.append(exc)
-            with contextlib.suppress(Exception):
-                barrier.abort()
+            allocation_open.set()
 
-    def reseed() -> None:
+    def reseeder() -> None:
         try:
+            assert allocation_open.wait(timeout=20)
             with _session(user_url, tenant) as s:
-                s.execute(text("SELECT 1"))
-                barrier.wait(timeout=15)
                 _configure(
                     s,
                     scope,
@@ -1302,21 +1348,115 @@ def test_start_value_and_new_period_creation_linearize(scratch):
                     include_year=True,
                     start_value=700,
                 )
+                observed["reconfigured_while_held"] = True
+        except NumberingError as exc:
+            observed["refused"] = exc.code
         except BaseException as exc:
             errors.append(exc)
-            with contextlib.suppress(Exception):
-                barrier.abort()
 
-    threads = [threading.Thread(target=t) for t in (open_new_period, reseed)]
-    for t in threads:
-        t.start()
+    threads = [threading.Thread(target=opener), threading.Thread(target=reseeder)]
+    threads[0].start()
+    threads[1].start()
+
+    # Give the reseeder a real chance to finish while the allocation is held.
+    # If it can, there is no lock.
+    threads[1].join(timeout=hold_seconds)
+    observed["completed_while_held"] = not threads[1].is_alive()
+    release_allocation.set()
     for t in threads:
         t.join(timeout=40)
 
-    assert not errors, errors
-    assert seen["value"] in (1, 700), (
-        f"the new period seeded from {seen['value']}, which is neither the old "
-        "start value nor the new one — the series row was read torn"
+    observed["errors"] = errors
+    return observed
+
+
+def test_start_value_reconfiguration_blocks_while_a_period_is_opening(scratch):
+    """The lock is observed by BLOCKING, not by the final value.
+
+    A previous version of this test asserted only that the new period seeded
+    from 1 or 700. Both are reachable without any lock at all, so it proved
+    nothing about linearization — it was an allowed-outcomes smoke test.
+
+    Here the allocation opens a new period and holds its transaction. The
+    reconfiguration must not be able to complete during that window, because
+    it needs the same series row.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(
+            s,
+            TenantScope(tenant_id=tenant),
+            reset_policy="yearly",
+            include_year=True,
+            start_value=1,
+        )
+        allocate(
+            s,
+            scope=TenantScope(tenant_id=tenant),
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="seed",
+        )
+        s.commit()
+
+    observed = _reseed_while_a_period_opens(user_url, tenant, hold_seconds=2.0)
+
+    assert not observed["errors"], observed["errors"]
+    assert observed["completed_while_held"] is False, (
+        "the reconfiguration completed while the allocation still held the "
+        "series row — the series lock is not being taken"
+    )
+    # Serialised behind the allocation, it then finds history and is refused.
+    assert str(observed.get("refused", "")).endswith("unsafe_configuration_change")
+    # The period that opened first seeded from the value in force at the time.
+    assert observed["value"] == 1
+
+
+def test_hostile_without_the_series_lock_the_reseed_does_not_block(
+    scratch, monkeypatch
+):
+    """Guard-removal companion for the blocking proof.
+
+    With `FOR UPDATE` dropped, the reconfiguration sails past an allocation
+    that is still holding its transaction. If this test ever fails, the proof
+    above is measuring something other than the lock.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(
+            s,
+            TenantScope(tenant_id=tenant),
+            reset_policy="yearly",
+            include_year=True,
+            start_value=1,
+        )
+        allocate(
+            s,
+            scope=TenantScope(tenant_id=tenant),
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="seed",
+        )
+        s.commit()
+
+    from dotmac_numbering import service as svc
+
+    original = svc._find_series
+
+    def unlocked(db, scope, series_code, *, lock=False):
+        return original(db, scope, series_code, lock=False)
+
+    monkeypatch.setattr(svc, "_find_series", unlocked)
+
+    observed = _reseed_while_a_period_opens(user_url, tenant, hold_seconds=5.0)
+
+    assert not observed["errors"], observed["errors"]
+    assert observed["completed_while_held"] is True, (
+        "with the series lock removed the reconfiguration must NOT block on an "
+        "allocation that is still holding its transaction; it blocked anyway, "
+        "so the blocking proof is not attributable to the lock"
     )
 
 
