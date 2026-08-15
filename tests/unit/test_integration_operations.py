@@ -440,8 +440,9 @@ def test_every_written_action_is_declared_on_the_manifest() -> None:
     could silently orphan every declaration while every test still passed.
     This pins the composed names to the manifest.
 
-    The `ingress_endpoint.*` codes are written by
-    `dotmac_integration.lifecycle`, not by this module, and are pinned to their
+    The `ingress_endpoint.*` and `retention.*` codes are written by
+    `dotmac_integration.lifecycle` and `dotmac_integration.retention`
+    respectively, not by this module, and are pinned to their
     own writers in `test_integration_ingress.py`. They are listed here too
     because the declaration is one set: an equality that named only this
     module's half would fail the moment another writer declared a code, which
@@ -451,13 +452,17 @@ def test_every_written_action_is_declared_on_the_manifest() -> None:
     from dotmac_integration import module
     from dotmac_integration.lifecycle import ENDPOINT_AUDIT_ACTIONS
     from dotmac_integration.operations import AUDIT_ACTION_PREFIX
+    from dotmac_integration.retention import RETENTION_AUDIT_ACTIONS
 
     declared = set(module.audit_actions)
     assert declared == {
         f"{AUDIT_ACTION_PREFIX}.delivery.replayed",
         f"{AUDIT_ACTION_PREFIX}.receipt.replayed",
         f"{AUDIT_ACTION_PREFIX}.leases.released",
-    } | {f"{AUDIT_ACTION_PREFIX}.{action}" for action in ENDPOINT_AUDIT_ACTIONS}
+    } | {
+        f"{AUDIT_ACTION_PREFIX}.{action}"
+        for action in (*ENDPOINT_AUDIT_ACTIONS, *RETENTION_AUDIT_ACTIONS)
+    }
     assert all(a.startswith(f"{AUDIT_ACTION_PREFIX}.") for a in declared)
     assert len(declared) == len(module.audit_actions), "a code is declared twice"
 

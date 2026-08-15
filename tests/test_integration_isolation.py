@@ -139,7 +139,7 @@ def test_the_live_schema_holds_exactly_what_the_manifest_declares(
     # the declaration's own length, so adding a table does not edit this test,
     # but a manifest that declares NOTHING fails it.
     assert live, "mod_intg holds no table — the ig lineage did not apply"
-    assert len(module.platform_tables) == len(set(module.platform_tables)) >= 8
+    assert len(module.platform_tables) == len(set(module.platform_tables)) >= 9
     assert live == set(module.platform_tables)
     assert module.tables == (), "this module owns no tenant-plane table"
 
@@ -687,12 +687,13 @@ def test_app_user_holds_nothing_on_the_new_column(
 def test_the_ig_lineage_added_exactly_what_it_declared(
     migrated_scratch: tuple[str, str],
 ) -> None:
-    """Two migrations, two different kinds of change, both accounted for.
+    """Every kind of change the lineage makes, accounted for.
 
-    `ig_0003` adds a COLUMN to an existing table; `ig_0004` adds exactly ONE
-    table. Asserted from both sides — the declaration says eight and the live
-    schema holds exactly those eight — plus the ADR-0023 contract, which either
-    a new column or a new table could break by carrying a tenant scope.
+    `ig_0003` and `ig_0005` add COLUMNS to existing tables; `ig_0004` and
+    `ig_0006` add exactly one table each. Asserted from both sides — the
+    declaration says nine and the live schema holds exactly those nine — plus
+    the ADR-0023 contract, which either a new column or a new table could break
+    by carrying a tenant scope.
 
     The count is stated rather than derived on purpose: a table arriving in a
     migration without arriving in `platform_tables` is precisely the drift this
@@ -703,8 +704,9 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     from dotmac_kernel.migrations.catalog import audit_live_schemas
     from dotmac_kernel.namespaces import NamespaceRegistry
 
-    assert len(module.platform_tables) == 8
+    assert len(module.platform_tables) == 9
     assert "capability_destination_revisions" in module.platform_tables
+    assert "receipt_legal_holds" in module.platform_tables
     assert module.tables == ()
 
     admin_url, _ = migrated_scratch

@@ -32,6 +32,7 @@ from __future__ import annotations
 from dotmac_kernel.modules import ModuleManifest
 
 from dotmac_integration.models import PLATFORM_TABLES, TENANT_TABLES
+from dotmac_integration.retention import RETENTION_PLATFORM_TABLES
 
 module = ModuleManifest(
     code="integration",
@@ -42,7 +43,12 @@ module = ModuleManifest(
     migration_prefix="ig",
     migration_branch="integration",
     tables=TENANT_TABLES,
-    platform_tables=PLATFORM_TABLES,
+    # COMPOSED from the areas that own the tables, not one hand-maintained
+    # list. `models.PLATFORM_TABLES` is the control-plane and execution
+    # machinery; `retention.RETENTION_PLATFORM_TABLES` is the legal-hold
+    # ledger. Declaring each beside the code that owns it keeps the declaration
+    # honest — and keeps two concurrent slices from editing one tuple.
+    platform_tables=PLATFORM_TABLES + RETENTION_PLATFORM_TABLES,
     # ── Declared audit actions ──────────────────────────────────────────────
     # The FIXED set this module writes, declared rather than left as string
     # literals scattered through `operations`. ADR-0008's rule applied to an
@@ -65,6 +71,13 @@ module = ModuleManifest(
         "integration.ingress_endpoint.minted",
         "integration.ingress_endpoint.rotated",
         "integration.ingress_endpoint.revoked",
+        # Retention. A sweep that destroys content leaves a record of what it
+        # destroyed and under whose retention period; a hold leaves a record of
+        # who forbade it. None of these details carries a payload or a
+        # `provider_event_id` — see `retention.py`.
+        "integration.retention.payloads.redacted",
+        "integration.retention.hold.placed",
+        "integration.retention.hold.released",
     ),
     # ── No capabilities or permissions YET ──────────────────────────────────
     # Both exist to gate a ROUTE, and this slice ships none. A declared code

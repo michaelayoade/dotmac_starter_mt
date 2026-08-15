@@ -135,6 +135,20 @@ binding_multiplicity = "Unique on (installation_id, capability_id). Many install
 # the plugin did not change but the host did.
 open_questions = []
 
+# PAYLOAD RETENTION IS NEW BEHAVIOUR, NOT A PORT — recorded so the product-first
+# rule is answered rather than skipped. Sub keeps every `integration_inbox_event`
+# payload forever: there is no purge job, no legal-hold table and no retention
+# setting in any of the eleven engine modules or seven tables inventoried above.
+# So there was no qualifying production implementation to start from, and this
+# slice is written fresh against the constraint the source's absence creates —
+# a payload that ages out must not take the deduplication key with it.
+#
+# The two values this module refuses to invent stay UNSET here as well: the
+# retention period and the legal-policy owner are Michael's decisions, and a
+# dossier that named an example number would be the same smuggled default as a
+# dataclass field with a value in it.
+payload_retention = "NEW behaviour, not ported: Sub retains inbound payloads indefinitely and has no purge, hold or retention setting to port. Redaction rewrites payload/headers/consequence VALUES only; the deduplication key, payload digest, state and processed_at are never touched, so a provider redelivery months later is still recognised rather than processed as a new event. The retention period and the legal-policy owner have no defaults in code or in this dossier."
+
 local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
 
 next_action = "Released-eligible: dotmac-integration is in release-modules.json and both workflow choice lists, with kernel floor 0.1.0a58 and a wheel inspection requiring both migrations plus the manifest/SPI/discovery surface. Kernel 0.1.0a58 is published. REMAINING: (1) publish dotmac-integration 0.1.0a1 and verify the published registry composition; (2) create the dotmac_integrator thin assembly, which only pins, composes, configures and exposes health/operations; (3) build the first real connector - a read-only or ingress-only Meta/WhatsApp messaging capability, NOT payments, CRM or ERPNext; (4) shadow-cut one capability and lower the external-connector ratchet baseline in the same change."
