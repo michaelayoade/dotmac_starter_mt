@@ -14,6 +14,11 @@ else.
 * **An SPI range that excludes this module.** Checked here so an incompatible
   connector is visible at boot, not at the first dispatch.
 * **A malformed manifest.** Refused before any of its values are trusted.
+* **A mode declaration the plugin does not keep** — in both directions, and
+  including the SHAPE of what each declared mode's factory hands back. See
+  :func:`dotmac_integration.spi.verify_plugin_modes`; the rule lives there
+  because the conformance kit runs the same function, so an author's suite and
+  this boot check cannot drift apart.
 
 Discovery is FAIL-CLOSED as a set: one bad distribution refuses the whole
 registry rather than silently offering the rest. A registry that quietly drops
@@ -22,11 +27,13 @@ that connector for a reason and would be told, by silence, that it is running.
 
 ## Loading is separate from RUNNING
 
-:func:`discover` resolves each entry point to a :class:`ConnectorPlugin` and
-reads its manifest. It does not build handlers, materialize secrets or contact a
-provider, so a connector can be inspected — and refused — before any of its call
-paths execute. That ordering is the point: a connector that fails its SPI check
-must never have reached a provider from this process.
+:func:`discover` resolves each entry point to a :class:`ConnectorPlugin`, reads
+its manifest, and calls each declared mode's handler factory to check what comes
+back. A factory is an in-process lookup that returns a callable; it materializes
+no secrets and contacts no provider, so a connector is still fully inspected —
+and refused — before any of its call paths execute. That ordering is the point:
+a connector that fails its SPI check must never have reached a provider from
+this process.
 """
 
 from __future__ import annotations
@@ -42,6 +49,7 @@ from dotmac_integration.spi import (
     ConnectorPlugin,
     InvalidManifestError,
     SpiVersion,
+    verify_plugin_modes,
 )
 
 __all__ = [
@@ -168,5 +176,8 @@ def discover(
         # be visible at boot, when someone is watching, rather than at the first
         # dispatch, when nobody is.
         plugin.manifest.spi_range.require(spi_version)
+        # Same reasoning, one layer in: the SPI range says which contract the
+        # plugin was built against, this says whether it actually keeps it.
+        verify_plugin_modes(plugin)
         plugins.append(plugin)
     return ConnectorRegistry(tuple(plugins))

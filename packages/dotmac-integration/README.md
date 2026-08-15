@@ -1,4 +1,76 @@
 # dotmac-integration
 
-The external connector control plane (ADR-0024). See the module docstring in
-`src/dotmac_integration/__init__.py` and the dossier in `EXTRACTION.toml`.
+The external connector control plane (ADR-0024): installations, immutable
+configuration revisions, capability bindings, secret references, and a versioned
+connector SPI.
+
+The module holds no provider knowledge. It contains no provider enum, no import
+list and no `if provider == ...` branch (ADR-0024 § 7) — a connector is an
+independently released distribution the module discovers through entry points,
+and everything the module knows about one it learned from a declaration it
+verified.
+
+## Release state
+
+**Released: `0.1.0a1` only** (tag `dotmac-integration-v0.1.0a1`), implementing
+SPI 1.0. `0.1.0a2` and the **SPI 1.1** it carries are on `main` and
+**unreleased** — no tag, nothing on the index. See `CHANGELOG.md`, which is the
+authority on what has and has not shipped.
+
+## Where to read what
+
+| | |
+|---|---|
+| The SPI, and what it promises | `COMPATIBILITY.md` |
+| What has shipped | `CHANGELOG.md` |
+| The as-built module | the docstring in `src/dotmac_integration/__init__.py` |
+| Extraction provenance | `EXTRACTION.toml` |
+
+## The SPI in one page
+
+A connector distribution registers one entry point in the
+`dotmac_integration.connectors` group, resolving to a plugin that satisfies
+`ConnectorPlugin` — identity, metadata, `validate_connection` — plus one
+protocol per mode it declares:
+
+| Mode | Protocol | Factory | Returns |
+|---|---|---|---|
+| `DELIVERY` | `DeliveryPlugin` | `handler_for` | `CapabilityHandler` |
+| `INGRESS` | `IngressPlugin` | `ingress_handler_for` | `IngressHandler` |
+| `POLL` | `PollPlugin` | `poll_handler_for` | `PollHandler` |
+
+A declared mode is a promise the module verifies at discovery, in both
+directions and including the shape of the handler that comes back. A mode
+declared and not implemented fails at the first dispatch; one implemented and
+not declared never gets its workers started. Both used to pass.
+
+Ingress connectors receive one immutable `IngressRequest` — the raw bytes, the
+headers and the query params, preserved exactly and handed to all three hooks as
+the same object, so what was authenticated and what was interpreted are provably
+the same bytes. They hand back an `Acknowledgement`, which carries the response
+**body** and **media type** and deliberately cannot carry a **status code**: a
+connector must be able to satisfy a provider's exact handshake format without
+being able to lie about whether the engine accepted the request.
+
+## Certifying a connector
+
+```python
+from dotmac_integration.conformance import (
+    assert_connector_conforms,
+    assert_plugin_conforms,
+)
+from my_connector import MANIFEST, PLUGIN
+
+
+def test_manifest_conforms() -> None:
+    assert_connector_conforms(MANIFEST)
+
+
+def test_plugin_conforms() -> None:
+    assert_plugin_conforms(PLUGIN)
+```
+
+The conformance kit is shipped as library code rather than left in this repo's
+test tree, because a kit that lives in the host's tests cannot be imported by the
+distribution it is meant to certify. It reaches no network and needs no
+credentials.
