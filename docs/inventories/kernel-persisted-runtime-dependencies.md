@@ -122,6 +122,13 @@ runtime dependency only bites a FOREIGN adopter that installs a wheel and runs
 its own lineage. A module nobody can pin cannot reach one. Template Studio is
 therefore counted, cited and then set aside — see § 3 bucket 1 and § 9.
 
+Not set aside because it is dormant: `dotmac-template-studio` IS composed into
+the reference assembly (`app/assembly.py:40,98`) and its lineage IS in
+`alembic.ini`'s `version_locations`. Its audit writes and its settings-warming
+routes execute in every starter deployment. They execute correctly, because the
+starter runs the kernel lineage and has the tables. Set aside because **no
+foreign adopter can pin it**, which is the only place the dependency bites.
+
 ---
 
 ## 3. `dotmac_kernel.audit` — the three-bucket classification
