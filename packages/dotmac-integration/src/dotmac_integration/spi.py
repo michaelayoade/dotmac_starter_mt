@@ -877,10 +877,30 @@ def verify_plugin_modes(plugin: ConnectorPlugin) -> None:
             try:
                 handler = factory(capability.capability_id)
             except Exception as exc:
+                # The ONLY place this module invokes plugin code and has to
+                # decide what to do with what came back out. A connector's
+                # exception message is built from whatever the connector knows,
+                # which at this point may include MATERIALIZED SECRETS — the
+                # factory is called during discovery, after configuration has
+                # been resolved. So the type name travels and nothing else:
+                # not the message, and not the exception itself.
+                #
+                # `from None` is the second half. Without it the original is
+                # chained as `__cause__`, and every traceback, `logging`
+                # call with `exc_info`, and error reporter renders it in full —
+                # which would leak exactly what dropping `{exc}` was for.
+                #
+                # This is the same invariant `ingress.HandlerUnavailable` holds
+                # one layer down for the request path; discovery had the
+                # inverse. See `test_a_connector_exception_never_reaches_the_
+                # mode_contract_error`.
                 raise ModeContractError(
                     f"connector {key!r} declares {capability.capability_id!r} "
-                    f"for mode {mode.value!r} but returns no handler: {exc}"
-                ) from exc
+                    f"for mode {mode.value!r} but its {contract.factory!r} "
+                    f"raised {type(exc).__name__} instead of returning a "
+                    "handler. The connector's own logs carry the detail; it is "
+                    "deliberately not repeated here"
+                ) from None
             if not isinstance(handler, contract.handler_protocol):
                 raise ModeContractError(
                     f"connector {key!r} returned a "

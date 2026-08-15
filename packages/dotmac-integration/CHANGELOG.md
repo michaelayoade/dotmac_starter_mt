@@ -2,20 +2,51 @@
 
 ## Release state — read this before pinning
 
-**One version of this package has ever been released: `0.1.0a1`** (tag
-`dotmac-integration-v0.1.0a1`), which implements **SPI 1.0**.
+**Two versions have been released: `0.1.0a1` (SPI 1.0) and `0.1.0a2` (SPI 1.1),
+tagged `dotmac-integration-v0.1.0a1` and `dotmac-integration-v0.1.0a2`.**
 
-`0.1.0a2` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
-is **not released**: no tag, nothing on the index. Everything below its heading
-is on `main` and awaiting the programme's single alpha, which is cut after
-destination binding and receipt delivery land. This section exists because the
-`0.1.0a2` heading previously carried a date and read exactly like a release
-entry — and a changelog that describes an unreleased version as released is how
-a consumer comes to pin something that does not exist.
+**Do not pin `0.1.0a2`.** Its discovery path renders a connector's own exception
+message into `ModeContractError` and chains it as `__cause__`, so any secret a
+connector interpolates into its error reaches the operator's boot log, the
+traceback and any handler using `exc_info`. `0.1.0a3` fixes it. Prefer a3.
+
+`0.1.0a3` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
+is released immediately after the change that declares it; until that run
+completes it is recorded in `docs/inventories/declared-publication-baseline.json`
+as declared-unpublished.
+
+This section exists because the `0.1.0a2` heading previously carried a date and
+read exactly like a release entry while being unreleased — and a changelog that
+misdescribes what is installable is how a consumer comes to pin something that
+does not exist, or something it should not.
 
 Nothing in this file is a publication claim except this paragraph.
 
-## 0.1.0a2 — UNRELEASED (on `main`; no tag, not on the index)
+## 0.1.0a3
+
+### `ModeContractError` no longer repeats what a connector threw
+
+`verify_plugin_modes` calls each declared mode's handler factory at DISCOVERY,
+which happens after configuration has been resolved — so a plugin that
+interpolates a resolved credential into its own exception (an ordinary connector
+bug) handed that credential to this module, which put it in the error message
+and chained the original as `__cause__`.
+
+The type name now travels and nothing else, and the raise is `from None`.
+Dropping `{exc}` alone would not have been enough: the chained cause renders in
+every traceback and every `logging` call with `exc_info`, which is where an
+operator would actually have read it.
+
+This is the invariant `ingress.HandlerUnavailable` already held one layer down
+for the REQUEST path. Discovery held the inverse. Proven on all four surfaces —
+message, `repr`, rendered traceback and a log record — with a sensitivity proof
+that the same value DOES reach all four when interpolated and chained the way
+the defect did it.
+
+An operator keeps what they need to act: the connector key, the capability, the
+mode, the failing hook and the exception TYPE.
+
+## 0.1.0a2 — released 2026-08-15 (see the warning above)
 
 ### SPI 1.1 — one frozen contract, mode-specific protocols
 

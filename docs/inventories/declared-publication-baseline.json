@@ -10,7 +10,7 @@
     "`test_module_version_sync.py` proves a module's three version surfaces",
     "AGREE. It cannot prove the agreed version EXISTS. `dotmac-integration`",
     "reads 0.1.0a2 on all three surfaces and the version-identity guard passes,",
-    "while the newest tag is dotmac-integration-v0.1.0a1 — internal consistency",
+    "while the newest tag is dotmac-integration-v0.1.0a1 \u2014 internal consistency",
     "and publication are different questions, and only the first one had a",
     "guard. A consumer reading the repository, the changelog or",
     "docs/MODULE_CATALOG.md and pinning ==0.1.0a2 gets a resolver error.",
@@ -29,10 +29,10 @@
     "was that the allowlist row was the wrong half, and it was removed rather",
     "than the module published. Two states this file must keep distinct:",
     "",
-    "  * INTENDED — the distribution is meant to be unpublished right now",
+    "  * INTENDED \u2014 the distribution is meant to be unpublished right now",
     "    (`dotmac-auth-oidc`, `dotmac-imports`). The row records the decision so",
     "    the next reader does not undo it by dispatching a release.",
-    "  * OUTSTANDING — a version is genuinely owed to consumers",
+    "  * OUTSTANDING \u2014 a version is genuinely owed to consumers",
     "    (`dotmac-integration` 0.1.0a2). The row records evidence a decision",
     "    still needs.",
     "",
@@ -42,7 +42,7 @@
     "",
     "## Two directions, both failures",
     "",
-    "A distribution entering this state without a row fails — that is a version",
+    "A distribution entering this state without a row fails \u2014 that is a version",
     "silently promised to consumers. A row whose distribution has since been",
     "published ALSO fails and must be removed in the same change as the release,",
     "because a ledger that only grows stops describing anything (ADR-0018).",
@@ -52,27 +52,27 @@
     "The release workflows write a tag only after `verify-registry` has",
     "installed the exact published version from the private index and registered",
     "its manifest, so a tag is this repository's own assertion that a version is",
-    "installable — stronger than 'an upload succeeded'. The index is not queried",
+    "installable \u2014 stronger than 'an upload succeeded'. The index is not queried",
     "directly: that needs an authenticated URL, which makes the check",
     "un-runnable at PR time and offline, and a gate that cannot run is not a",
     "gate. The stated cost is that a publication whose tag step failed reads",
-    "here as unpublished — which is exactly the state",
+    "here as unpublished \u2014 which is exactly the state",
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
     "dotmac-imports": {
       "declared": "0.1.0a2",
-      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
+      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
       "state": "never-published"
     },
     "dotmac-integration": {
-      "declared": "0.1.0a2",
-      "reason": "OPEN, and owned by the release step of the Integrator programme rather than by this guard. 0.1.0a2 is the 2026-08-14 strictness fix (run_effect_once could never have run; 42 type errors ship in the published 0.1.0a1). The published 0.1.0a1 is therefore the only installable version and it carries a known-broken public function, while the repository, the changelog and the module catalogue all read 0.1.0a2. `dotmac_integrator` cannot pin the fix. Recorded as evidence; NOT to be repaired by editing the version.",
-      "state": "declared-unpublished"
+      "declared": "0.1.0a3",
+      "state": "declared-unpublished",
+      "reason": "OPEN, and short-lived by design. 0.1.0a2 WAS published and tagged on 2026-08-15 (dotmac-integration-v0.1.0a2), which retired the previous statement here. 0.1.0a3 is declared in the same change that sanitises ModeContractError, because a2 renders a connector's exception message \u2014 including any materialized secret it carries \u2014 into the discovery error, its chained traceback, and any log written with exc_info. Leaving a2 as the newest installable version is therefore not acceptable, and this gap is NOT to be repaired by editing the version: the repair is the a3 release run, immediately after this change merges. Remove this entry in the same change as that release."
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
-      "reason": "Not in any release lane — absent from release-modules.json and release-adapters.json alike — so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
       "state": "never-published"
     }
   }

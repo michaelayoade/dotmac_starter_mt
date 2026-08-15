@@ -10,6 +10,12 @@ dist/
 # Virtual envs
 .venv/
 venv/
+# Without the slash-less forms these patterns match a DIRECTORY only, so a
+# `.venv` SYMLINK into another worktree's environment — an ordinary way to
+# share one install across git worktrees — is not ignored and gets swept up
+# by `git add -A`.
+.venv
+venv
 .env
 
 # Tooling caches

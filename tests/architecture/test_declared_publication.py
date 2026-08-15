@@ -97,11 +97,15 @@ def test_no_ledger_entry_is_a_bare_label() -> None:
 
 def test_the_integration_gap_is_recorded_as_evidence() -> None:
     """The programme's live example, pinned so it cannot be closed by editing a
-    version. `0.1.0a2` is the 2026-08-14 strictness fix; the only INSTALLABLE
-    release is `0.1.0a1`, which ships a `run_effect_once` that raises on its
-    first call. Recording that is the point — the release decision belongs to
-    the release step, and a guard that "fixed" it by bumping would delete the
-    evidence the decision needs."""
+    version.
+
+    Updated 2026-08-15: `0.1.0a2` was published and tagged, so the gap this
+    test pins is now `0.1.0a3` — declared alongside the `ModeContractError`
+    sanitisation, because a2 renders a connector's exception (and any secret it
+    carries) into the discovery error and its chained traceback. The shape of
+    the assertion is unchanged and is the reason it survives a version moving
+    under it: the ledger must still say the repair is a RELEASE, never an edit
+    of the declared number, which would delete the evidence the decision needs."""
     sweep, survey = _survey()
     finding = survey["distributions"]["dotmac-integration"]
     assert finding["state"] == sweep.DECLARED_UNPUBLISHED
