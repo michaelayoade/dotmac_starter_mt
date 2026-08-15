@@ -72,7 +72,13 @@ from dotmac_integration import (
     verify_and_normalize,
 )
 from dotmac_integration.conformance import FAKE_CAPABILITY, fake_plugin, fake_registry
-from dotmac_integration.spi import ConnectorMode, InboundEvent
+from dotmac_integration.spi import (
+    Acknowledgement,
+    ConnectorMode,
+    InboundEvent,
+    IngressRequest,
+    InvalidAcknowledgementError,
+)
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
@@ -375,8 +381,7 @@ def test_rotation_retires_the_old_endpoint_and_keeps_the_receipts(
     accepted = receive(
         uow,
         endpoint_id=original,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -650,8 +655,7 @@ def test_the_plugin_never_receives_a_session(db: Session) -> None:
     receive(
         uow,
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -698,8 +702,7 @@ def test_the_session_sweep_catches_one_smuggled_through_a_config_value(
 
     verify_and_normalize(
         smuggled,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -727,8 +730,7 @@ def test_verify_receives_the_exact_bytes(db: Session) -> None:
 
     verify_and_normalize(
         prepared,
-        raw_body=raw,
-        headers=_headers(),
+        request=IngressRequest(raw_body=raw, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -748,8 +750,7 @@ def test_normalize_is_never_called_on_an_unverified_body(db: Session) -> None:
     with pytest.raises(SignatureRejected):
         verify_and_normalize(
             prepared,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=registry,
             resolve_secrets=_resolver(),
         )
@@ -775,8 +776,7 @@ def test_a_rejected_signature_persists_nothing_anywhere(db: Session) -> None:
     outcome = receive(
         uow,
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -792,8 +792,7 @@ def test_a_rejected_signature_persists_nothing_anywhere(db: Session) -> None:
     ok = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=accepting_registry,
         resolve_secrets=_resolver(),
     )
@@ -813,8 +812,7 @@ def test_a_raising_normalize_records_nothing_and_is_retryable(db: Session) -> No
     outcome = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -833,11 +831,98 @@ def test_a_normalize_returning_a_list_is_a_contract_refusal(db: Session) -> None
     with pytest.raises(ConnectorContract):
         verify_and_normalize(
             prepared,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=registry,
             resolve_secrets=_resolver(),
         )
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_a_normalize_returning_the_old_bare_tuple_is_a_contract_refusal(
+    db: Session, batch_size: int
+) -> None:
+    """The SPI 1.1 shape must be REFUSED, not shrugged off.
+
+    This is the dangerous near-miss: a bare `tuple[InboundEvent, ...]` is still
+    a tuple, so a length-blind check would index it and the connector's FIRST
+    EVENT would become the acknowledgement written back to the provider.
+
+    Parametrized over batch sizes because a single size does not exercise the
+    whole guard. A one- or three-event batch is caught ONLY by the length
+    check — blinding that check makes exactly `[1]` and `[3]` fail, and `[2]`
+    still pass. A two-event batch satisfies `len(...) == 2` and gets past it,
+    and is caught downstream because its first element is an `InboundEvent`
+    rather than a tuple.
+
+    Refusing outright is the only honest answer: the engine cannot tell an
+    upgraded connector's pair from an old connector's two-event batch, and
+    guessing is the difference between recording a message and echoing it.
+    """
+    plugin = fake_plugin(
+        inbound=_events(*[f"old-shape-{i}" for i in range(batch_size)]),
+        ingress_returns_bare_events=True,
+    )
+    registry = fake_registry(plugins=[plugin])
+    _, binding, key = _endpoint(db, registry)
+
+    outcome = receive(
+        RecordingUnitOfWork(db),
+        endpoint_id=key,
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
+        registry=registry,
+        resolve_secrets=_resolver(),
+    )
+
+    assert (outcome.status_code, outcome.code) == (
+        503,
+        IngressCode.CONNECTOR_CONTRACT,
+    )
+    assert outcome.acknowledgement is None
+    stored = db.execute(
+        select(func.count())
+        .select_from(InboxReceipt)
+        .where(InboxReceipt.capability_binding_id == binding.id)
+    ).scalar_one()
+    assert stored == 0, "a refused contract still recorded events"
+
+
+def test_a_second_element_that_is_not_an_acknowledgement_is_refused(
+    db: Session,
+) -> None:
+    """The pair's SECOND half has its own check, and its own reason.
+
+    The events half is caught by shape; this half would otherwise reach a
+    response writer as a body of an unknown type. Driven directly rather than
+    through the bare-tuple case, because there the element check fires first and
+    this one would never be reached — a guard only reachable behind another
+    guard is a guard nothing proves.
+    """
+    plugin = fake_plugin(
+        inbound=_events("ack-type-1"),
+        acknowledgement="not an acknowledgement",  # type: ignore[arg-type]
+    )
+    registry = fake_registry(plugins=[plugin])
+    _, binding, key = _endpoint(db, registry)
+
+    outcome = receive(
+        RecordingUnitOfWork(db),
+        endpoint_id=key,
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
+        registry=registry,
+        resolve_secrets=_resolver(),
+    )
+
+    assert (outcome.status_code, outcome.code) == (
+        503,
+        IngressCode.CONNECTOR_CONTRACT,
+    )
+    assert outcome.acknowledgement is None
+    stored = db.execute(
+        select(func.count())
+        .select_from(InboxReceipt)
+        .where(InboxReceipt.capability_binding_id == binding.id)
+    ).scalar_one()
+    assert stored == 0
 
 
 def test_secrets_reach_verify_materialized_and_normalize_gets_config_without_them(
@@ -854,8 +939,7 @@ def test_secrets_reach_verify_materialized_and_normalize_gets_config_without_the
 
     verify_and_normalize(
         prepared,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=resolve,
     )
@@ -888,8 +972,7 @@ def test_the_whole_normalized_tuple_is_recorded_in_one_unit_of_work(
     outcome = receive(
         uow,
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -918,8 +1001,7 @@ def test_an_empty_normalized_tuple_is_accepted_and_writes_nothing(
     outcome = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -975,8 +1057,7 @@ def test_a_collision_mid_batch_rolls_back_the_events_before_it(db: Session) -> N
     outcome = receive(
         uow,
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=colliding,
         resolve_secrets=_resolver(),
     )
@@ -997,8 +1078,7 @@ def test_a_collision_mid_batch_rolls_back_the_events_before_it(db: Session) -> N
     clean = receive(
         RecordingUnitOfWork(db),
         endpoint_id=other_key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=colliding,
         resolve_secrets=_resolver(),
     )
@@ -1035,8 +1115,7 @@ def test_the_collision_outcome_is_produced_after_the_unit_of_work_unwound(
     receive(
         uow,
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=fake_registry(plugins=[plugin]),
         resolve_secrets=_resolver(),
     )
@@ -1074,8 +1153,7 @@ def test_a_whole_batch_retry_after_a_collision_is_repaired(db: Session) -> None:
     first = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=ingress_registry,
         resolve_secrets=_resolver(),
     )
@@ -1088,8 +1166,7 @@ def test_a_whole_batch_retry_after_a_collision_is_repaired(db: Session) -> None:
     replayed = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=ingress_registry,
         resolve_secrets=_resolver(),
     )
@@ -1110,16 +1187,14 @@ def test_a_redelivered_batch_is_idempotent_and_reports_duplicates(
     first = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
     second = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -1144,8 +1219,7 @@ def test_a_partially_redelivered_batch_records_only_the_new_events(
     receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -1154,8 +1228,7 @@ def test_a_partially_redelivered_batch_records_only_the_new_events(
     outcome = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=fake_registry(plugins=[fake_plugin(inbound=grown)]),
         resolve_secrets=_resolver(),
     )
@@ -1183,8 +1256,7 @@ def test_no_receipt_stores_request_headers(db: Session) -> None:
     receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=headers,
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=headers),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -1236,8 +1308,7 @@ def test_no_refusal_message_contains_any_request_material(db: Session) -> None:
         yield _refusal(
             verify_and_normalize,
             good,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=rejecting,
             resolve_secrets=_resolver(),
         )
@@ -1248,8 +1319,7 @@ def test_no_refusal_message_contains_any_request_material(db: Session) -> None:
         yield _refusal(
             verify_and_normalize,
             good,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=raising,
             resolve_secrets=_resolver(),
         )
@@ -1260,8 +1330,7 @@ def test_no_refusal_message_contains_any_request_material(db: Session) -> None:
         yield _refusal(
             verify_and_normalize,
             good,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=broken,
             resolve_secrets=_resolver(),
         )
@@ -1272,7 +1341,7 @@ def test_no_refusal_message_contains_any_request_material(db: Session) -> None:
                 "dotmac_integration.ingress", fromlist=["challenge_response"]
             ).challenge_response,
             good,
-            params={"not-the-key": PARAM_SENTINEL},
+            request=IngressRequest(params={"not-the-key": PARAM_SENTINEL}),
             registry=silent,
             resolve_secrets=_resolver(),
         )
@@ -1328,8 +1397,7 @@ def test_a_raising_ingress_plugin_loses_its_message_and_its_cause(
     with pytest.raises(ConnectorRaised) as caught:
         verify_and_normalize(
             prepared,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=registry,
             resolve_secrets=_resolver(),
         )
@@ -1352,6 +1420,12 @@ def test_the_outcome_has_no_field_that_can_hold_request_material() -> None:
 
     Adding `raw_body` or `endpoint_key` "for debugging" would put it in an HTTP
     response with no allowlist standing in the way.
+
+    `acknowledgement` is the ONE field carrying bytes, and it is the exception
+    that proves the rule: a connector built those bytes deliberately, for the
+    provider that sent the request, which is the opposite direction from a leak.
+    Its TYPE is asserted, not only its name — a bare `bytes` field would satisfy
+    a name check while erasing that distinction at every call site.
     """
     expected = {
         "status_code": "int",
@@ -1362,10 +1436,89 @@ def test_the_outcome_has_no_field_that_can_hold_request_material() -> None:
         "recorded": "int",
         "duplicates": "int",
         "receipt_ids": "tuple[UUID, ...]",
-        "challenge_body": "str | None",
-        "media_type": "str",
+        "acknowledgement": "Acknowledgement | None",
     }
     assert {f.name: f.type for f in fields(IngressOutcome)} == expected
+
+
+def test_neither_the_envelope_nor_the_acknowledgement_renders_its_contents(
+    db: Session,
+) -> None:
+    """`repr=False` on both, because both are frame locals in every traceback.
+
+    The envelope holds the raw body and every header — including an
+    authorization header a misconfigured proxy passed through. The
+    acknowledgement is assumed to hold request material too, because an echo
+    handshake is DEFINED as returning a slice of the request. A generated
+    `repr` on either puts that into any log line, error report or debugger frame
+    that renders it.
+
+    Driven through the ENGINE, so the outcome's own default `repr` — the object
+    an assembly is most likely to log — is covered by the same assertion.
+    """
+    plugin = fake_plugin(
+        inbound=_events("evt-repr-1"),
+        acknowledgement=Acknowledgement(body=BODY_SENTINEL),
+    )
+    registry = fake_registry(plugins=[plugin])
+    _, _, key = _endpoint(db, registry)
+
+    request = IngressRequest(
+        raw_body=BODY_SENTINEL,
+        headers={"x-signature": HEADER_SENTINEL},
+        params={"q": PARAM_SENTINEL},
+    )
+    outcome = receive(
+        RecordingUnitOfWork(db),
+        endpoint_id=key,
+        request=request,
+        registry=registry,
+        resolve_secrets=_resolver(),
+    )
+    assert outcome.code is IngressCode.ACCEPTED
+
+    rendered = f"{request!r} {outcome.acknowledgement!r} {outcome!r}"
+    for sentinel in (BODY_SENTINEL.decode("latin-1"), HEADER_SENTINEL, PARAM_SENTINEL):
+        assert sentinel not in rendered
+
+    # Vacuity guard: every sentinel IS reachable on those objects, so the
+    # assertion above is about RENDERING rather than about empty containers.
+    assert request.raw_body == BODY_SENTINEL
+    assert request.headers["x-signature"] == HEADER_SENTINEL
+    assert request.params["q"] == PARAM_SENTINEL
+    assert outcome.acknowledgement is not None
+    assert outcome.acknowledgement.body == BODY_SENTINEL
+
+
+def test_the_envelope_cannot_be_mutated_by_the_hook_that_receives_it() -> None:
+    """Frozen, slotted, and its mappings proxied.
+
+    `verify` and `normalize` receive the SAME object; a hook able to edit it
+    could change what a later hook sees, and `slots` is what stops a plugin
+    smuggling a database session on as an ad-hoc attribute.
+    """
+    request = IngressRequest(raw_body=b"body", headers={"a": "b"}, params={"c": "d"})
+
+    with pytest.raises(AttributeError):
+        request.raw_body = b"replaced"  # type: ignore[misc]
+    # `slots=True` leaves no instance `__dict__` to grow, so there is nowhere to
+    # put one. The exception TYPE is not pinned: `frozen` intercepts before the
+    # slot lookup, and which of the two complains is a CPython implementation
+    # detail rather than the property being asserted.
+    assert not hasattr(request, "__dict__")
+    with pytest.raises((AttributeError, TypeError)):
+        request.session = object()  # type: ignore[attr-defined]
+    with pytest.raises(TypeError):
+        request.headers["a"] = "replaced"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        request.params["c"] = "replaced"  # type: ignore[index]
+
+    # The caller's own dict cannot reach in after construction either: the
+    # envelope COPIED it before proxying.
+    supplied = {"a": "b"}
+    envelope = IngressRequest(headers=supplied)
+    supplied["a"] = "changed after construction"
+    assert envelope.headers["a"] == "b"
 
 
 def test_the_outcome_does_not_echo_the_endpoint_key(db: Session) -> None:
@@ -1380,16 +1533,14 @@ def test_the_outcome_does_not_echo_the_endpoint_key(db: Session) -> None:
     accepted = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
     missing = receive(
         RecordingUnitOfWork(db),
         endpoint_id="f" * 48,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -1444,19 +1595,17 @@ def test_the_engine_opens_two_units_of_work_and_none_spans_the_plugin_call(
             uow = self._uow
 
             class _Timed:
-                def challenge(self, params, *, config, secrets):  # type: ignore[no-untyped-def]
+                def challenge(self, request, *, config, secrets):  # type: ignore[no-untyped-def]
                     uow.timeline.append("challenge")
-                    return inner.challenge(params, config=config, secrets=secrets)
+                    return inner.challenge(request, config=config, secrets=secrets)
 
-                def verify(self, raw_body, headers, *, config, secrets):  # type: ignore[no-untyped-def]
+                def verify(self, request, *, config, secrets):  # type: ignore[no-untyped-def]
                     uow.timeline.append("verify")
-                    return inner.verify(
-                        raw_body, headers, config=config, secrets=secrets
-                    )
+                    return inner.verify(request, config=config, secrets=secrets)
 
-                def normalize(self, raw_body, headers, *, config):  # type: ignore[no-untyped-def]
+                def normalize(self, request, *, config):  # type: ignore[no-untyped-def]
                     uow.timeline.append("normalize")
-                    return inner.normalize(raw_body, headers, config=config)
+                    return inner.normalize(request, config=config)
 
             return _Timed()
 
@@ -1470,8 +1619,7 @@ def test_the_engine_opens_two_units_of_work_and_none_spans_the_plugin_call(
     receive(
         uow,
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=timed,
         resolve_secrets=_resolver(),
     )
@@ -1508,18 +1656,23 @@ def test_prepare_ingress_writes_nothing(db: Session) -> None:
 # ── Challenge ───────────────────────────────────────────────────────────────
 
 
-def test_a_handshake_answers_with_the_exact_string_and_a_plain_media_type(
-    db: Session,
-) -> None:
-    """Providers compare the RAW echoed body. Wrapping it in JSON fails the
-    handshake, and a failed handshake means the subscription is never created."""
+def test_a_handshake_answers_with_the_connectors_own_bytes(db: Session) -> None:
+    """Providers compare the RAW echoed body.
+
+    Wrapping it in JSON fails the handshake, and a failed handshake means the
+    subscription is never created — so the BODY is the connector's, as bytes,
+    and the engine does not shape it. The engine still owns the status code and
+    supplies `text/plain` as the default media type the connector left unset.
+    """
     registry = fake_registry()
     _, _, key = _endpoint(db, registry)
 
     outcome = answer_challenge(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        params={"challenge": "echo-me-1234", "mode": "subscribe"},
+        request=IngressRequest(
+            params={"challenge": "echo-me-1234", "mode": "subscribe"}
+        ),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -1528,8 +1681,74 @@ def test_a_handshake_answers_with_the_exact_string_and_a_plain_media_type(
         200,
         IngressCode.CHALLENGE_ANSWERED,
     )
-    assert outcome.challenge_body == "echo-me-1234"
-    assert outcome.media_type == "text/plain"
+    assert outcome.acknowledgement == Acknowledgement(
+        body=b"echo-me-1234", media_type="text/plain"
+    )
+
+
+def test_a_connector_may_choose_the_media_type_but_never_the_status(
+    db: Session,
+) -> None:
+    """The whole authority split, in one test.
+
+    A connector's `Acknowledgement` carries a body and, at most, a media type.
+    It has no status field to set — `dataclasses.fields` is the assertion,
+    because "the connector cannot choose a status" is a property of the TYPE
+    rather than of any one call — and the engine's 200 stands whatever the
+    connector returned.
+    """
+    plugin = fake_plugin(
+        challenge_acknowledgement=Acknowledgement(
+            body=b"<ok/>", media_type="application/xml"
+        )
+    )
+    registry = fake_registry(plugins=[plugin])
+    _, _, key = _endpoint(db, registry)
+
+    outcome = answer_challenge(
+        RecordingUnitOfWork(db),
+        endpoint_id=key,
+        request=IngressRequest(params={"challenge": "ignored-by-this-connector"}),
+        registry=registry,
+        resolve_secrets=_resolver(),
+    )
+
+    assert outcome.acknowledgement == Acknowledgement(
+        body=b"<ok/>", media_type="application/xml"
+    )
+    assert outcome.status_code == 200
+
+    assert {f.name for f in fields(Acknowledgement)} == {"body", "media_type"}
+
+
+def test_an_acknowledgement_media_type_cannot_carry_a_header_injection() -> None:
+    """It IS a response header value, so it is validated as one.
+
+    An unvalidated media type carrying CRLF is header injection with extra
+    steps, and one carrying arbitrary parameters is a connector shaping the
+    response beyond the single knob it was granted. The refusal is in the
+    CONSTRUCTOR, so a malformed acknowledgement cannot exist long enough to
+    reach a response writer.
+    """
+    for rejected in (
+        "text/plain\r\nX-Injected: yes",
+        "text/plain\nSet-Cookie: a=b",
+        "not-a-media-type",
+        "text/plain; boundary=--x",
+        "",
+    ):
+        with pytest.raises(InvalidAcknowledgementError):
+            Acknowledgement(body=b"", media_type=rejected)
+
+    # Vacuity guard: the honest shapes still pass, so the rejections above are
+    # about those strings rather than about a regex that refuses everything.
+    for accepted in ("text/plain", "application/json", "text/plain; charset=utf-8"):
+        assert Acknowledgement(body=b"", media_type=accepted).media_type == accepted
+
+    # And a body must be BYTES: the engine writes it back verbatim and will not
+    # guess an encoding on a provider's behalf.
+    with pytest.raises(InvalidAcknowledgementError):
+        Acknowledgement(body="a string")  # type: ignore[arg-type]
 
 
 def test_a_handshake_writes_nothing(db: Session) -> None:
@@ -1542,7 +1761,7 @@ def test_a_handshake_writes_nothing(db: Session) -> None:
     answer_challenge(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        params={"challenge": "echo"},
+        request=IngressRequest(params={"challenge": "echo"}),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -1559,88 +1778,147 @@ def test_a_non_handshake_is_a_stated_refusal(db: Session) -> None:
     outcome = answer_challenge(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        params={"unrelated": PARAM_SENTINEL},
+        request=IngressRequest(params={"unrelated": PARAM_SENTINEL}),
         registry=registry,
         resolve_secrets=_resolver(),
     )
 
     assert (outcome.status_code, outcome.code) == (400, IngressCode.NOT_A_CHALLENGE)
-    assert outcome.challenge_body is None
+    assert outcome.acknowledgement is None
     assert refusal_outcome(NotAChallenge()).status_code == 400
 
 
-def test_a_none_from_challenge_refuses_and_does_not_fall_through_to_delivery(
+def test_a_challenge_returning_a_non_acknowledgement_is_a_contract_refusal(
     db: Session,
 ) -> None:
-    """`IngressHandler`'s docstring and the engine must say the same thing.
+    """The engine does not write back whatever it is handed.
 
-    The SPI used to describe `None` as "not a handshake for me — the caller then
-    treats the request as a delivery", which the engine has never done: it
-    answers 400 and `verify` is never reached. A connector author reading the
-    protocol would have built for a fall-through that does not exist, and would
-    have found out from a provider's failed subscription. The behaviour is the
-    deliberate one — offering a bodied delivery to `challenge` lets a plugin
-    that returns non-`None` by accident swallow a batch — so the docstring was
-    corrected to match, and this pins the half a docstring cannot.
+    A `str` from an SPI 1.1-era plugin is the realistic case, and it would
+    otherwise reach a response writer as a body of an unknown type.
     """
-    plugin = fake_plugin(inbound=_events("a"))
+    plugin = fake_plugin(challenge_contract_broken=True)
     registry = fake_registry(plugins=[plugin])
     _, _, key = _endpoint(db, registry)
+
+    outcome = answer_challenge(
+        RecordingUnitOfWork(db),
+        endpoint_id=key,
+        request=IngressRequest(params={"challenge": "echo"}),
+        registry=registry,
+        resolve_secrets=_resolver(),
+    )
+
+    assert (outcome.status_code, outcome.code) == (
+        503,
+        IngressCode.CONNECTOR_CONTRACT,
+    )
+    assert outcome.acknowledgement is None
+
+
+def test_a_bodyless_post_is_a_delivery_and_never_a_handshake(db: Session) -> None:
+    """THE SPI 1.2 CHANGE, and the defect it removes.
+
+    SPI 1.1 inferred a handshake from an empty body. A provider that signs an
+    empty body — a "nothing changed" ping, a delete notification whose whole
+    content is in its headers — then had its DELIVERY answered as a handshake:
+    `verify` was never called, nothing was recorded, and the 400 it received
+    said "not a handshake" about a request that was never one. The events were
+    dropped and the endpoint looked healthy.
+
+    Handshake and delivery are now distinct operations with distinct routes, so
+    a bodyless POST reaches `verify` like any other delivery.
+    """
+    plugin = fake_plugin(inbound=_events("bodyless-1"))
+    registry = fake_registry(plugins=[plugin])
+    _, binding, key = _endpoint(db, registry)
 
     outcome = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        # No bytes, so the handshake branch is taken; no `challenge` param, so
-        # the fake's `params.get("challenge")` returns `None`.
-        raw_body=b"",
-        headers=_headers(),
-        params={"unrelated": PARAM_SENTINEL},
+        # A `challenge` parameter is present AND the body is empty — every
+        # condition the old inference used. It is still a delivery.
+        request=IngressRequest(
+            raw_body=b"",
+            headers=_headers(),
+            params={"challenge": "would-have-swallowed-the-delivery"},
+        ),
         registry=registry,
         resolve_secrets=_resolver(),
     )
 
-    assert (outcome.status_code, outcome.code) == (400, IngressCode.NOT_A_CHALLENGE)
-    assert len(plugin.challenged) == 1
-    assert plugin.verified == [], "a refused handshake fell through to delivery"
-    assert plugin.normalized == []
+    assert outcome.code is IngressCode.ACCEPTED
+    assert plugin.verified == [b""], "the bodyless delivery never reached verify"
+    assert plugin.challenged == [], "a delivery was offered to challenge"
+    assert_every_event_recorded(db, binding, plugin.inbound)
 
 
-def test_a_bodyless_post_reaches_challenge_and_a_bodied_one_does_not(
+def test_delivery_never_calls_challenge_and_a_handshake_never_verifies(
     db: Session,
 ) -> None:
-    """Asking `challenge` on every delivery lets a plugin that returns
-    non-`None` by accident silently swallow a whole batch of real events.
+    """Neither façade falls through to the other, in EITHER direction.
 
-    "A request with no bytes cannot carry a signed payload" is a protocol fact,
-    not a guess from the HTTP verb and not provider knowledge.
+    One direction alone would not have caught the SPI 1.1 defect: `receive`
+    reaching `challenge` is how a delivery got swallowed, and `answer_challenge`
+    reaching `verify` would be a handshake recorded as an event.
     """
-    plugin = fake_plugin(inbound=_events("a"))
+    plugin = fake_plugin(inbound=_events("both-ways-1"))
     registry = fake_registry(plugins=[plugin])
     _, _, key = _endpoint(db, registry)
 
-    bodied = receive(
+    delivered = receive(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
-        params={"challenge": "would-have-swallowed-the-batch"},
+        request=IngressRequest(
+            raw_body=BODY_SENTINEL, headers=_headers(), params={"challenge": "echo"}
+        ),
         registry=registry,
         resolve_secrets=_resolver(),
     )
-    assert bodied.code is IngressCode.ACCEPTED
-    assert plugin.challenged == [], "a delivery was offered to challenge first"
+    assert delivered.code is IngressCode.ACCEPTED
+    assert plugin.challenged == []
 
-    bodyless = receive(
+    before = _row_counts(db)
+    handshook = answer_challenge(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        raw_body=b"",
-        headers=_headers(),
-        params={"challenge": "echo"},
+        request=IngressRequest(params={"challenge": "echo"}),
         registry=registry,
         resolve_secrets=_resolver(),
     )
-    assert bodyless.code is IngressCode.CHALLENGE_ANSWERED
-    assert plugin.challenged == [{"challenge": "echo"}]
+    assert handshook.code is IngressCode.CHALLENGE_ANSWERED
+    assert plugin.verified == [BODY_SENTINEL], "the handshake reached verify"
+    assert plugin.normalized == [BODY_SENTINEL], "the handshake reached normalize"
+    assert _row_counts(db) == before
+
+
+def test_the_handshake_sees_the_headers_the_engine_used_to_withhold(
+    db: Session,
+) -> None:
+    """SPI 1.1 gave `challenge` query parameters ONLY.
+
+    A provider that identifies its handshake by a header — or signs it — could
+    not be served at all, and widening one hook at a time is how a contract
+    acquires four overloads. The envelope carries everything that arrived, and
+    the connector decides what identifies a handshake.
+    """
+    plugin = fake_plugin()
+    registry = fake_registry(plugins=[plugin])
+    _, _, key = _endpoint(db, registry)
+
+    request = IngressRequest(
+        headers={"x-hub-signature": HEADER_SENTINEL},
+        params={"challenge": "echo"},
+    )
+    answer_challenge(
+        RecordingUnitOfWork(db),
+        endpoint_id=key,
+        request=request,
+        registry=registry,
+        resolve_secrets=_resolver(),
+    )
+
+    assert plugin.requests_seen == [request]
+    assert plugin.requests_seen[0].headers["x-hub-signature"] == HEADER_SENTINEL
 
 
 def test_the_whole_params_mapping_crosses_the_boundary(db: Session) -> None:
@@ -1654,7 +1932,7 @@ def test_the_whole_params_mapping_crosses_the_boundary(db: Session) -> None:
     answer_challenge(
         RecordingUnitOfWork(db),
         endpoint_id=key,
-        params=params,
+        request=IngressRequest(params=params),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -1908,8 +2186,7 @@ def test_the_accepted_outcome_is_built_from_values_not_from_detached_rows(
     outcome = receive(
         SessionPerUnitOfWork(engine),
         endpoint_id=key,
-        raw_body=BODY_SENTINEL,
-        headers=_headers(),
+        request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
         registry=registry,
         resolve_secrets=_resolver(),
     )
@@ -1943,8 +2220,7 @@ def test_a_redelivery_of_a_committed_batch_still_answers_two_hundred(
         return receive(
             SessionPerUnitOfWork(engine),
             endpoint_id=key,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=registry,
             resolve_secrets=_resolver(),
         )

@@ -55,7 +55,7 @@ from dotmac_integration import (
     set_binding_enabled,
 )
 from dotmac_integration.conformance import FAKE_CAPABILITY, fake_plugin, fake_registry
-from dotmac_integration.spi import InboundEvent
+from dotmac_integration.spi import InboundEvent, IngressRequest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -149,8 +149,7 @@ def _deliver(registry, db: Session, key: str):  # type: ignore[no-untyped-def]
         return receive(
             Uow(db),
             endpoint_id=key,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=registry,
             resolve_secrets=_resolver(),
         )
@@ -312,8 +311,7 @@ def test_a_failed_write_reaches_no_error_log_with_provider_content(
             receive(
                 Uow(db),
                 endpoint_id=key,
-                raw_body=BODY_SENTINEL,
-                headers=_headers(),
+                request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
                 registry=registry,
                 resolve_secrets=_resolver(),
             )
@@ -401,8 +399,7 @@ def test_a_raising_connector_leaves_no_secret_in_the_refusal_traceback(
     try:
         verify_and_normalize(
             prepared,
-            raw_body=BODY_SENTINEL,
-            headers=_headers(),
+            request=IngressRequest(raw_body=BODY_SENTINEL, headers=_headers()),
             registry=registry,
             resolve_secrets=_resolver(),
         )
@@ -424,7 +421,7 @@ def test_the_handshake_phase_clears_its_secret_too(db: Session) -> None:
     try:
         challenge_response(
             prepared,
-            params={"challenge": "x"},
+            request=IngressRequest(params={"challenge": "x"}),
             registry=registry,
             resolve_secrets=_resolver(),
         )

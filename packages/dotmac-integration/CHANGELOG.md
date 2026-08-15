@@ -7,8 +7,97 @@ changes, each called out here.
 
 Version numbering note: `0.1.0a2` is #164's gate fix, which landed on `main`
 while this train was in flight. The SPI and ingress work below was written as
-`a2`/`a3` and renumbered to `a3`/`a4` on rebase rather than reusing a number
-main had already published against.
+`a2`/`a3`/`a4` and renumbered to `a3`/`a4`/`a5` on rebase rather than reusing a
+number main had already published against.
+
+## 0.1.0a5 — 2026-08-14
+
+**SPI 1.2.** The ingress contract closes the two limitations `0.1.0a4` recorded
+as open — a handshake could not see request headers, and the engine hardcoded
+the acknowledgement — and removes a third that the second one exposed.
+
+Neither `0.1.0a3` nor `0.1.0a4` was ever published, so **no plugin anywhere was
+built against SPI 1.1's ingress signatures**. The releases on the index are
+`0.1.0a1` and `0.1.0a2`, both SPI 1.0 with no ingress contract at all. That is
+why this is a MINOR bump rather than a major: a `2.0` would have excluded every
+honest `>=1.0,<2.0` delivery connector to protect a compatibility promise
+nothing ever consumed. The DELIVERY and POLL contracts are untouched.
+
+### Added
+
+- **`IngressRequest`** — one immutable envelope carrying the raw body, the
+  request headers and the query parameters, handed UNCHANGED to `challenge`,
+  `verify` and `normalize`. `frozen`, `slots=True`, `repr=False`.
+
+  The same OBJECT reaches `verify` and `normalize`, which is the load-bearing
+  part: what was authenticated is provably what was interpreted. Two separately
+  derived copies could drift, and a signature check guarding a different byte
+  string guards nothing. `slots` also means no hook can smuggle a database
+  session on as an ad-hoc attribute, and the mappings are copied into
+  `MappingProxyType`, so immutability is real rather than annotated.
+
+  SPI 1.1 gave each hook its own slice — `challenge` saw query parameters only,
+  so a provider identifying its handshake by a header could not be served at
+  all. Widening one hook at a time is how a contract acquires four overloads;
+  the envelope widens once.
+
+- **`Acknowledgement`** — `body: bytes` plus an optional, validated
+  `media_type`, and NOTHING else. `repr=False`, because an echo handshake is
+  defined as returning a slice of the request.
+
+  This is the whole response surface a connector gets. There is deliberately no
+  connector-selected status code — a status is a retry instruction, and only the
+  engine knows whether the batch committed — and no arbitrary response headers,
+  which would be a response-splitting surface and a route for request material
+  to leave the module's sight. `media_type` IS a header value, so it is
+  validated against a bare `type/subtype` shape: an unvalidated one carrying
+  CRLF is header injection with extra steps.
+
+### Changed — BREAKING for the ingress SPI
+
+- `challenge(request, *, config, secrets) -> Acknowledgement | None`
+- `verify(request, *, config, secrets) -> bool`
+- `normalize(request, *, config) -> tuple[tuple[InboundEvent, ...], Acknowledgement | None]`
+- `receive(...)` and `answer_challenge(...)` take `request=IngressRequest(...)`
+  in place of `raw_body`/`headers`/`params`.
+- `IngressOutcome.challenge_body` and `.media_type` are replaced by one
+  `acknowledgement: Acknowledgement | None`, present on both success paths with
+  its media type resolved and `None` on every refusal.
+- `ConnectorContract` now also refuses `normalize` returning anything other than
+  the pair, and `challenge` returning a non-`Acknowledgement`. The bare
+  SPI 1.1 tuple is the dangerous near-miss: it is still a tuple, so a
+  length-blind engine would index it and the connector's FIRST EVENT would
+  become the body written back to the provider.
+
+### Removed — the empty-body handshake inference
+
+`receive` no longer treats a bodyless request as a handshake. That inference was
+wrong in BOTH directions:
+
+- a **bodyless POST is still a delivery**. A provider that signs an empty body —
+  a "nothing changed" ping, a deletion whose whole content is in its headers —
+  had `verify` skipped, nothing recorded, and got a 400 saying "not a handshake"
+  about a request that never was. The events were dropped and the endpoint
+  looked healthy;
+- a provider that confirms a subscription with a **bodied** request could not
+  handshake at all.
+
+Handshake and delivery are now explicit operations. The assembly mounts GET on
+`answer_challenge` and POST on `receive`, so the operation is stated by the
+request line rather than guessed from a byte count.
+
+### Ordering — the acknowledgement is built before persistence, emitted after it
+
+`normalize` returns the acknowledgement, so it exists BEFORE `record_batch`
+runs; the engine emits it only once the whole batch has committed; and **no
+connector code runs after the commit**. A plugin call there would put a raise on
+the far side of a durable write — the events stored, the provider told 5xx, and
+redelivery forever into a handler that keeps raising. `_accepted` reaches
+neither the registry nor a handler, and a static guard in
+`tests/architecture/test_integration_ingress_hygiene.py` keeps it that way.
+
+Two-way mode conformance and the delivery-mode refusal are unchanged.
+
 
 The distribution version, `__version__` and `ModuleManifest.version` are in
 step, and a gate keeps them there. #164 is the reason it exists: it bumped

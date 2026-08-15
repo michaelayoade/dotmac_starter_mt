@@ -30,6 +30,7 @@ from dotmac_integration.retry import Outcome, OutcomeStatus
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     MODE_PROTOCOLS,
+    Acknowledgement,
     CapabilityDeclaration,
     CapabilityHandler,
     ConnectorManifest,
@@ -39,6 +40,7 @@ from dotmac_integration.spi import (
     DispatchRequest,
     InboundEvent,
     IngressHandler,
+    IngressRequest,
     SpiRange,
 )
 
@@ -127,6 +129,12 @@ class FakePlugin:
     #: entire mapping crossed rather than a key the module selected, because
     #: selecting one would be provider knowledge in a module that may hold none.
     challenged: list[Mapping[str, str]] = field(default_factory=list)
+    #: Every `IngressRequest` OBJECT each hook received, in call order. Recorded
+    #: BY IDENTITY rather than by value, because the property that matters is
+    #: that `verify` and `normalize` were handed the SAME envelope: two equal
+    #: copies would satisfy a value comparison while still allowing an engine to
+    #: authenticate one byte string and normalize another.
+    requests_seen: list[IngressRequest] = field(default_factory=list)
     #: Every `config` mapping an ingress call was handed, and every `secrets`
     #: one. Recorded because "no database session reached the plugin" is
     #: otherwise asserted about the raw bodies — where it reduces to "bytes are
@@ -142,10 +150,26 @@ class FakePlugin:
     #: The same for `normalize`, separately: a throw AFTER a good signature is
     #: the case where a partial batch would otherwise be tempting.
     normalize_raises: BaseException | None = None
-    #: Return a `list` instead of a `tuple`, driving `ConnectorContract`. A
-    #: plugin that hands back the wrong container is not a plugin whose output
-    #: the engine may iterate.
+    #: Return a `list` of events instead of the `(tuple, acknowledgement)` pair,
+    #: driving `ConnectorContract`. A plugin that hands back the wrong container
+    #: is not a plugin whose output the engine may iterate.
     ingress_contract_broken: bool = False
+    #: Return the SPI 1.1 shape — a bare tuple of events with no acknowledgement
+    #: beside it. Its own knob because the failure is different in kind: the
+    #: container is right and the engine would index it, making the first
+    #: `InboundEvent` the body written back to the provider.
+    ingress_returns_bare_events: bool = False
+    #: The acknowledgement `normalize` prepares. `None` by default, so the
+    #: engine's default is what a test gets unless it opts into one — and so
+    #: "the connector's bytes were written back" cannot pass by accident.
+    acknowledgement: Acknowledgement | None = None
+    #: What `challenge` answers when the neutral handshake parameter is present.
+    #: Separate from `acknowledgement` because the two operations are separate;
+    #: sharing one knob would let a delivery test pass on a handshake's body.
+    challenge_acknowledgement: Acknowledgement | None = None
+    #: Make `challenge` hand back something that is not an `Acknowledgement`,
+    #: driving the same refusal from the handshake side.
+    challenge_contract_broken: bool = False
 
     @property
     def manifest(self) -> ConnectorManifest:
@@ -185,31 +209,40 @@ class FakePlugin:
         class _Ingress:
             def challenge(
                 self,
-                params: Mapping[str, str],
+                request: IngressRequest,
                 *,
                 config: dict[str, object],
                 secrets: dict[str, str],
-            ) -> str | None:
-                fake.challenged.append(dict(params))
+            ) -> Acknowledgement | None:
+                fake.requests_seen.append(request)
+                fake.challenged.append(dict(request.params))
                 fake.configs_seen.append(config)
                 fake.secrets_seen.append(secrets)
                 if fake.ingress_raises is not None:
                     raise fake.ingress_raises
+                if fake.challenge_contract_broken:
+                    return "not an acknowledgement"  # type: ignore[return-value]
                 # A NEUTRAL key. The kit ships inside a module that may not name
                 # a provider, and a real provider's handshake parameter is that
-                # provider's business — the engine hands over the whole mapping
-                # precisely so the connector, not this module, picks the key.
-                return params.get("challenge")
+                # provider's business — the engine hands over the whole envelope
+                # precisely so the connector, not this module, picks what
+                # identifies a handshake.
+                echo = request.params.get("challenge")
+                if echo is None:
+                    return None
+                if fake.challenge_acknowledgement is not None:
+                    return fake.challenge_acknowledgement
+                return Acknowledgement(body=echo.encode("utf-8"))
 
             def verify(
                 self,
-                raw_body: bytes,
-                headers: Mapping[str, str],
+                request: IngressRequest,
                 *,
                 config: dict[str, object],
                 secrets: dict[str, str],
             ) -> bool:
-                fake.verified.append(raw_body)
+                fake.requests_seen.append(request)
+                fake.verified.append(request.raw_body)
                 fake.configs_seen.append(config)
                 fake.secrets_seen.append(secrets)
                 if fake.ingress_raises is not None:
@@ -217,19 +250,18 @@ class FakePlugin:
                 return fake.signature_valid
 
             def normalize(
-                self,
-                raw_body: bytes,
-                headers: Mapping[str, str],
-                *,
-                config: dict[str, object],
-            ) -> tuple[InboundEvent, ...]:
-                fake.normalized.append(raw_body)
+                self, request: IngressRequest, *, config: dict[str, object]
+            ) -> tuple[tuple[InboundEvent, ...], Acknowledgement | None]:
+                fake.requests_seen.append(request)
+                fake.normalized.append(request.raw_body)
                 fake.configs_seen.append(config)
                 if fake.normalize_raises is not None:
                     raise fake.normalize_raises
+                if fake.ingress_returns_bare_events:
+                    return fake.inbound  # type: ignore[return-value]
                 if fake.ingress_contract_broken:
-                    return list(fake.inbound)  # type: ignore[return-value]
-                return fake.inbound
+                    return (list(fake.inbound), fake.acknowledgement)  # type: ignore[return-value]
+                return fake.inbound, fake.acknowledgement
 
         return _Ingress()
 

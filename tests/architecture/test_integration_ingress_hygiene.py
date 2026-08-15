@@ -21,6 +21,7 @@ files, or swallowed an exception, would look exactly like a clean pass.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import inspect
 import re
 from pathlib import Path
@@ -272,6 +273,9 @@ def test_the_ingress_surface_is_exported_from_the_top_level_namespace() -> None:
         "refusal_outcome",
         "IngressOutcome",
         "IngressCode",
+        "IngressRequest",
+        "Acknowledgement",
+        "InvalidAcknowledgementError",
         "PayloadTooLarge",
         "mint_ingress_endpoint",
         "rotate_ingress_endpoint",
@@ -279,3 +283,61 @@ def test_the_ingress_surface_is_exported_from_the_top_level_namespace() -> None:
     ):
         assert name in package.__all__, name
         assert hasattr(package, name), name
+
+
+def test_no_connector_code_runs_after_the_batch_commits() -> None:
+    """The acknowledgement is BUILT before persistence and EMITTED after it.
+
+    `_accepted` is the function that runs once `record_batch`'s unit of work has
+    exited, and it must reach neither the registry nor a handler. A plugin call
+    there would put a raise on the far side of a durable write: the events are
+    stored, the provider is told 5xx, and it redelivers forever into a handler
+    that keeps raising. The acknowledgement is therefore carried through as a
+    VALUE from `verify_and_normalize`.
+
+    Static rather than behavioural on purpose — a behavioural test proves this
+    build does not call back, while the shape is what keeps the next one from
+    reintroducing it.
+    """
+    source = _without_docstrings((PACKAGE / "ingress.py").read_text(encoding="utf-8"))
+    start = source.index("def _accepted(")
+    end = source.index("def receive(", start)
+    body = source[start:end]
+
+    for forbidden in ("registry", "_handler(", "resolve_secrets", "plugin"):
+        assert (
+            forbidden not in body
+        ), f"_accepted reaches {forbidden!r} — connector code after the commit"
+
+    # Sensitivity (ADR-0018): the slice must actually contain `_accepted`'s
+    # code. A rename, a reorder or a `_without_docstrings` refactor would make
+    # the assertions above scan an empty or wrong region and pass for the wrong
+    # reason — so the region is proved to hold the one call it SHOULD make.
+    assert "IngressOutcome(" in body
+    assert "acknowledgement=" in body
+    assert 200 < len(body) < 2000, len(body)
+
+
+def test_the_engine_defines_the_default_media_types_and_the_connector_may_not() -> None:
+    """A media type is a response HEADER VALUE, so the shape is validated and
+    the DEFAULT is the engine's.
+
+    Both halves matter. Without validation an unvalidated `media_type` carrying
+    CRLF is header injection; without an engine-owned default every connector
+    would have to know that a handshake echo must not be answered as JSON, and
+    the one that forgot would fail its subscription with a 200.
+    """
+    from dotmac_integration.ingress import (
+        _DELIVERY_MEDIA_TYPE,
+        _HANDSHAKE_MEDIA_TYPE,
+    )
+    from dotmac_integration.spi import Acknowledgement
+
+    assert (_HANDSHAKE_MEDIA_TYPE, _DELIVERY_MEDIA_TYPE) == (
+        "text/plain",
+        "application/json",
+    )
+    assert {f.name for f in dataclasses.fields(Acknowledgement)} == {
+        "body",
+        "media_type",
+    }, "an acknowledgement grew a field beyond body and media type"

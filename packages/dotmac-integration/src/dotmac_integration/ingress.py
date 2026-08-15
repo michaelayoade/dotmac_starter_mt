@@ -11,10 +11,34 @@ it against).
                            the active config revision. Database. Short. Writes
                            nothing.
 **verify_and_normalize**   materialize secrets, verify the RAW bytes, then
-                           shape them into events. NO session, NO transaction.
+                           shape them into events AND the acknowledgement. NO
+                           session, NO transaction.
 **record_batch**           record the WHOLE normalized tuple, atomically.
                            Database. Short.
 =========================  ===================================================
+
+## Handshake and delivery are two operations, not one with an inference
+
+`receive` serves deliveries and `answer_challenge` serves handshakes, and
+neither falls through to the other. SPI 1.1 inferred a handshake from an empty
+body; that was wrong in both directions — a bodyless POST is still a DELIVERY,
+and a provider that confirms a subscription with a bodied request could not
+handshake at all. The assembly mounts GET on one and POST on the other, so the
+operation is stated by the request line rather than guessed from a byte count.
+
+## The connector writes the BODY; the engine decides the STATUS
+
+An ingress status code is a retry instruction — 200 means "never send this
+again" — so it stays with the engine, which is the only party that knows whether
+the batch committed. A connector supplies only an `Acknowledgement`: body bytes
+and, at most, a validated media type. No connector-chosen status, no arbitrary
+response headers.
+
+That acknowledgement is built by `normalize`, BEFORE anything is persisted, and
+emitted only after the whole batch has committed. `_accepted` therefore runs no
+plugin code at all — a plugin call after the commit would put a raise on the far
+side of a durable write, answering 5xx for events that are safely stored and
+inviting the provider to redeliver them forever.
 
 ## The URL addresses ONE minted endpoint, never a pair
 
@@ -41,12 +65,12 @@ let the block exit cleanly, persisting the events recorded before the collision
 
 ## Nothing here logs, and nothing here can
 
-The raw body, the signature headers and the materialized secrets are ephemeral.
-Eight structural mechanisms keep them that way, none of which relies on care:
-`IngressRefused.__init__` takes no arguments so there is nothing to interpolate;
-`ConnectorRaised` carries a validated TYPE NAME and is raised `from None`;
-`IngressOutcome` has no field able to hold request material; `record_batch`
-passes `headers=None`; and this module installs no logger.
+The raw body, the signature headers, the query parameters and the materialized
+secrets are ephemeral. Structural mechanisms keep them that way, none of which
+relies on care: `IngressRefused.__init__` takes no arguments so there is nothing
+to interpolate; `ConnectorRaised` carries a validated TYPE NAME and is raised
+`from None`; `IngressOutcome` has no SCALAR field able to hold request material;
+`record_batch` passes `headers=None`; and this module installs no logger.
 
 The last three are about what an exception carries out rather than what a field
 holds, because that is the route the first four leave open. Every database
@@ -56,6 +80,15 @@ materialized-secrets local is cleared in a `finally` — an escaping exception
 pins the frame that holds it, and a reporter capturing frame locals uploads it.
 And `PreparedIngress.endpoint_key` is `repr=False`, because the carrier is a
 frame local in every one of those tracebacks and the key is a bearer secret.
+
+`IngressRequest` and `Acknowledgement` are `repr=False` for exactly that last
+reason. The envelope holds the raw body and every header — including an
+authorization header or cookie a misconfigured proxy passed through — and it is
+a frame local in every traceback that leaves the plugin phase. The
+acknowledgement is assumed to hold request material too, because an echo
+handshake is *defined* as returning a slice of the request. Neither is ever
+persisted: `record_batch` writes the normalized payload a connector chose, and
+nothing else.
 """
 
 from __future__ import annotations
@@ -65,7 +98,6 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import Enum
-from types import MappingProxyType
 from typing import Any, Final, cast
 from uuid import UUID
 
@@ -83,16 +115,19 @@ from dotmac_integration.models import (
 )
 from dotmac_integration.selection import _usable
 from dotmac_integration.spi import (
+    Acknowledgement,
     ConnectorMode,
     InboundEvent,
     IngressHandler,
     IngressPlugin,
+    IngressRequest,
     ModeNotDeclaredError,
     accepts_manifest_digest,
     require_mode,
 )
 
 __all__ = [
+    "Acknowledgement",
     "ConnectorContract",
     "ConnectorRaised",
     "ConnectorUnavailable",
@@ -104,6 +139,7 @@ __all__ = [
     "IngressError",
     "IngressOutcome",
     "IngressRefused",
+    "IngressRequest",
     "ManifestPinUnhonoured",
     "ModeNotAvailable",
     "NotAChallenge",
@@ -135,7 +171,12 @@ SecretResolver = Callable[[Mapping[str, str]], Mapping[str, str]]
 #: caller getting it right.
 UnitOfWork = Callable[[], AbstractContextManager[Any]]
 
-_NO_PARAMS: Final[Mapping[str, str]] = MappingProxyType({})
+#: The engine's defaults, used when a connector leaves `media_type` unset.
+#: `text/plain` for a handshake because providers compare the RAW echoed body;
+#: JSON for a delivery acknowledgement because that is what an assembly's other
+#: routes answer.
+_HANDSHAKE_MEDIA_TYPE: Final[str] = "text/plain"
+_DELIVERY_MEDIA_TYPE: Final[str] = "application/json"
 
 #: 48 lowercase hex characters — 192 bits, as produced by `secrets.token_hex`.
 _ENDPOINT_KEY_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{48}$")
@@ -172,12 +213,29 @@ class IngressCode(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class IngressOutcome:
-    """THE REDACTION BOUNDARY.
+    """THE REDACTION BOUNDARY, and the ENGINE'S HALF of the response.
 
-    A consuming assembly serializes this whole object into the HTTP response
-    with no field allowlist, so a field able to hold a body, a header, a query
-    parameter, a secret or the endpoint key would leak it by construction.
-    There is no such field, and that is checked rather than intended.
+    A consuming assembly serializes the scalar fields of this object into an
+    HTTP response with no field allowlist, so a field able to hold a body, a
+    header, a query parameter, a secret or the endpoint key would leak it by
+    construction. There is no such field among them, and that is checked rather
+    than intended.
+
+    ## The one field that DOES carry material, and why it is safe
+
+    `acknowledgement` holds bytes a CONNECTOR built, on purpose, to be written
+    back to the provider that sent the request. That is the opposite direction
+    from a leak: an echo handshake is *defined* as returning a slice of the
+    request to its own sender. It is a typed `Acknowledgement` rather than a
+    loose `bytes` so the distinction is visible at every call site, and that
+    type is `repr=False` so it still cannot spill into a log line rendered from
+    this object.
+
+    The split of authority is the point. The connector owns the BODY and, at
+    most, the media type. The engine owns `status_code` and `code` — the retry
+    instruction and the failure classification — because only the engine knows
+    whether the batch committed, and a status invented anywhere else silently
+    destroys events.
 
     Note the contrast with `dispatch.invoke`, which interpolates
     `f"{type(exc).__name__}: {exc}"` into `error_detail`. On this path that
@@ -196,10 +254,12 @@ class IngressOutcome:
     recorded: int = 0
     duplicates: int = 0
     receipt_ids: tuple[UUID, ...] = ()
-    #: Set ONLY on a handshake. The exact string the provider expects echoed
-    #: back — never wrapped in JSON, because providers compare the raw body.
-    challenge_body: str | None = None
-    media_type: str = "application/json"
+    #: What to write back. Present on both SUCCESS paths and `None` on every
+    #: refusal — a refusal body is the engine's classification, not something a
+    #: connector that may never have run gets to shape. When present its
+    #: `media_type` is always resolved, so no assembly has to decide what an
+    #: unset one means.
+    acknowledgement: Acknowledgement | None = None
 
 
 # ── Refusals ────────────────────────────────────────────────────────────────
@@ -315,7 +375,8 @@ class SignatureRejected(IngressRefused):
 
 
 class NotAChallenge(IngressRefused):
-    """`challenge` returned `None` for a request carrying no bytes."""
+    """`challenge` returned `None`: the connector does not recognise the
+    request its own handshake route was given."""
 
     MESSAGE = "the connector does not recognise this request as a handshake"
     CODE = IngressCode.NOT_A_CHALLENGE
@@ -323,13 +384,18 @@ class NotAChallenge(IngressRefused):
 
 
 class ConnectorContract(IngressRefused):
-    """`normalize` returned something that is not a `tuple[InboundEvent, ...]`.
+    """A plugin returned a shape the engine will not act on.
 
-    Same reasoning as `dispatch.invoke`'s `connector_contract`: the engine does
-    not iterate whatever it is handed.
+    `normalize` owes `(tuple[InboundEvent, ...], Acknowledgement | None)` and
+    `challenge` owes `Acknowledgement | None`. Same reasoning as
+    `dispatch.invoke`'s `connector_contract`: the engine does not iterate, index
+    or write back whatever it is handed. It matters more here than it reads,
+    because the second element of that pair goes into an HTTP response body — a
+    plugin returning a bare tuple of events would otherwise have its first event
+    written back to the provider.
     """
 
-    MESSAGE = "the connector returned something that is not a tuple of events"
+    MESSAGE = "the connector returned a shape this engine will not act on"
     CODE = IngressCode.CONNECTOR_CONTRACT
     STATUS = 503
 
@@ -575,14 +641,36 @@ def _handler(prepared: PreparedIngress, registry: ConnectorRegistry) -> IngressH
     return plugin.ingress_handler_for(prepared.capability_id)
 
 
+def _events_and_acknowledgement(
+    returned: object,
+) -> tuple[tuple[InboundEvent, ...], Acknowledgement | None]:
+    """Validate `normalize`'s pair before anything is done with either half.
+
+    Checked as a whole rather than element by element on use, because the two
+    halves have very different destinations: the first is iterated into the
+    database, the second is written into an HTTP response. A plugin that
+    returned a bare tuple of events — the SPI 1.1 shape — would otherwise be
+    indexed, and its first `InboundEvent` would become the acknowledgement.
+    """
+    if not isinstance(returned, tuple) or len(returned) != 2:
+        raise ConnectorContract()
+    events, acknowledgement = returned
+    if not isinstance(events, tuple) or not all(
+        isinstance(event, InboundEvent) for event in events
+    ):
+        raise ConnectorContract()
+    if acknowledgement is not None and not isinstance(acknowledgement, Acknowledgement):
+        raise ConnectorContract()
+    return events, acknowledgement
+
+
 def verify_and_normalize(
     prepared: PreparedIngress,
     *,
-    raw_body: bytes,
-    headers: Mapping[str, str],
+    request: IngressRequest,
     registry: ConnectorRegistry,
     resolve_secrets: SecretResolver,
-) -> tuple[InboundEvent, ...]:
+) -> tuple[tuple[InboundEvent, ...], Acknowledgement | None]:
     """Verify the RAW bytes, then shape them. NO session, NO transaction.
 
     `db` is deliberately absent from this function's parameters — the boundary
@@ -590,9 +678,17 @@ def verify_and_normalize(
     to. Secrets are materialized here and only here, bound to a local that goes
     out of scope on return.
 
-    The bytes cross UNTOUCHED. Every provider worth verifying signs the bytes
-    and not a re-serialization of them, so a decode-and-re-encode anywhere on
-    this path would invalidate a correct HMAC.
+    ONE `request` object reaches both hooks, and it is the same object. The
+    bytes therefore cross UNTOUCHED and — more importantly — what `verify`
+    authenticated is provably what `normalize` interpreted. Every provider worth
+    verifying signs the bytes and not a re-serialization of them, so a
+    decode-and-re-encode anywhere on this path would invalidate a correct HMAC;
+    passing two separately-derived copies would let the two hooks disagree
+    without anything noticing.
+
+    Returns the events AND the acknowledgement the connector prepared, so the
+    caller can commit the batch and only then write a response it already holds.
+    Nothing calls back into the plugin afterwards.
 
     DIVERGES from `dispatch.invoke`, which never raises: there a typed `Outcome`
     is recorded against a pre-existing `DeliveryAttempt` row. Here there is no
@@ -601,8 +697,8 @@ def verify_and_normalize(
     :raises SignatureRejected: `verify` returned False. `normalize` is never
         reached, and nothing is written anywhere.
     :raises ConnectorRaised: the plugin threw. Only its type name survives.
-    :raises ConnectorContract: `normalize` returned a non-tuple, or a tuple
-        holding something other than `InboundEvent`.
+    :raises ConnectorContract: `normalize` returned something other than
+        `(tuple[InboundEvent, ...], Acknowledgement | None)`.
     """
     handler = _handler(prepared, registry)
     # ONE call, ONE local. `prepared` carries references and never values, and
@@ -619,9 +715,7 @@ def verify_and_normalize(
     # is worse than the leak. So the binding is cleared on every exit instead.
     try:
         try:
-            verified = handler.verify(
-                raw_body, headers, config=prepared.config, secrets=secrets
-            )
+            verified = handler.verify(request, config=prepared.config, secrets=secrets)
         except Exception as exc:
             # `from None` is load-bearing: the plugin's message is built from
             # provider-controlled bytes, and `__cause__` would carry it into any
@@ -631,34 +725,34 @@ def verify_and_normalize(
             raise SignatureRejected()
 
         try:
-            events = handler.normalize(raw_body, headers, config=prepared.config)
+            returned = handler.normalize(request, config=prepared.config)
         except Exception as exc:
             raise ConnectorRaised(type(exc).__name__) from None
     finally:
         secrets = None  # type: ignore[assignment]
 
-    if not isinstance(events, tuple) or not all(
-        isinstance(event, InboundEvent) for event in events
-    ):
-        raise ConnectorContract()
-    return events
+    return _events_and_acknowledgement(returned)
 
 
 def challenge_response(
     prepared: PreparedIngress,
     *,
-    params: Mapping[str, str],
+    request: IngressRequest,
     registry: ConnectorRegistry,
     resolve_secrets: SecretResolver,
-) -> str:
+) -> Acknowledgement:
     """Answer the provider's subscription handshake. NO session.
 
-    The WHOLE parameter mapping crosses the boundary. Selecting a key here would
-    be provider knowledge in a module that may hold none — which key carries the
-    echo is the connector's business.
+    The WHOLE envelope crosses the boundary — headers as well as query
+    parameters, which SPI 1.1 withheld. Selecting a key here would be provider
+    knowledge in a module that may hold none: which part of the request carries
+    the echo, and which part identifies it as a handshake at all, is the
+    connector's business.
 
     :raises NotAChallenge: the connector returned `None`.
     :raises ConnectorRaised: the connector threw.
+    :raises ConnectorContract: the connector returned something that is not an
+        `Acknowledgement`.
     """
     handler = _handler(prepared, registry)
     secrets = dict(resolve_secrets(prepared.secret_refs))
@@ -667,13 +761,15 @@ def challenge_response(
     # error reporter uploads. A handshake is exactly when a freshly configured
     # connector throws.
     try:
-        answer = handler.challenge(params, config=prepared.config, secrets=secrets)
+        answer = handler.challenge(request, config=prepared.config, secrets=secrets)
     except Exception as exc:
         raise ConnectorRaised(type(exc).__name__) from None
     finally:
         secrets = None  # type: ignore[assignment]
     if answer is None:
         raise NotAChallenge()
+    if not isinstance(answer, Acknowledgement):
+        raise ConnectorContract()
     return answer
 
 
@@ -780,12 +876,18 @@ def _accepted(
     prepared: PreparedIngress,
     events: tuple[InboundEvent, ...],
     receipts: tuple[tuple[UUID, bool], ...],
+    acknowledgement: Acknowledgement | None,
 ) -> IngressOutcome:
-    """Built entirely from values `record_batch` already materialized.
+    """Built entirely from values that already exist. NO PLUGIN CODE RUNS HERE.
 
-    Nothing here touches a session, and nothing here CAN: the receipts are
-    `(UUID, bool)` pairs by the time they arrive, so the accept path cannot
-    fail after the batch was committed.
+    That is the rule this function exists to make structural. The batch has
+    COMMITTED by the time this is called, and asking the connector anything now
+    would put a plugin exception on the far side of a durable write: the events
+    are stored, the provider is told 5xx, and it redelivers forever into a
+    handler that keeps raising. So the acknowledgement is one the connector
+    built during `normalize`, carried here as a value, and the receipts are
+    `(UUID, bool)` pairs rather than ORM rows — nothing on this path can touch a
+    session or a plugin, so nothing on this path can fail.
     """
     return IngressOutcome(
         status_code=200,
@@ -796,6 +898,9 @@ def _accepted(
         recorded=sum(1 for _, is_new in receipts if is_new),
         duplicates=sum(1 for _, is_new in receipts if not is_new),
         receipt_ids=tuple(receipt_id for receipt_id, _ in receipts),
+        acknowledgement=(acknowledgement or Acknowledgement()).resolved(
+            _DELIVERY_MEDIA_TYPE
+        ),
     )
 
 
@@ -803,33 +908,29 @@ def receive(
     open_unit_of_work: UnitOfWork,
     *,
     endpoint_id: str,
-    raw_body: bytes,
-    headers: Mapping[str, str],
-    params: Mapping[str, str] = _NO_PARAMS,
+    request: IngressRequest,
     registry: ConnectorRegistry,
     resolve_secrets: SecretResolver,
 ) -> IngressOutcome:
-    """The delivery façade. Two units of work, neither spanning the plugin call.
+    """The DELIVERY façade. Two units of work, neither spanning the plugin call.
 
     Takes no session. The deployment's context manager decides what a unit of
     work is and unwinds it on the way out; this function decides that there are
     two of them and where they end.
 
-    A request carrying NO BYTES is answered as a handshake instead. That is a
-    protocol fact — a request with no body cannot carry a signed payload — not a
-    guess from the HTTP verb, and not provider knowledge. Offering every
-    delivery to `challenge` first would let a plugin that returns non-`None` by
-    accident silently swallow a whole batch of real events.
-    """
-    if not raw_body:
-        return answer_challenge(
-            open_unit_of_work,
-            endpoint_id=endpoint_id,
-            params=params,
-            registry=registry,
-            resolve_secrets=resolve_secrets,
-        )
+    ## Delivery and handshake are separate operations
 
+    This function NEVER answers a handshake. SPI 1.1 inferred one from an empty
+    body, and that inference was wrong in both directions. A bodyless POST is
+    still a delivery — a provider that signs an empty body and expects the event
+    recorded got a handshake attempt and a 400, and its events were dropped
+    while it was told the endpoint worked. And a provider that confirms a
+    subscription with a BODIED request could not handshake at all.
+
+    The assembly mounts a GET route on `answer_challenge` and a POST route on
+    this function, so the operation is decided by the request line — which is
+    where a protocol states it — rather than guessed from a byte count.
+    """
     try:
         with open_unit_of_work() as db:
             prepared = prepare_ingress(db, endpoint_id=endpoint_id, registry=registry)
@@ -837,12 +938,12 @@ def receive(
         return refusal_outcome(exc)
 
     # NO SESSION IS LIVE HERE. `verify_and_normalize` has no `db` parameter, so
-    # there is nothing to pass even by mistake.
+    # there is nothing to pass even by mistake. It returns the acknowledgement
+    # ALREADY BUILT — the last connector code that runs on this path.
     try:
-        events = verify_and_normalize(
+        events, acknowledgement = verify_and_normalize(
             prepared,
-            raw_body=raw_body,
-            headers=headers,
+            request=request,
             registry=registry,
             resolve_secrets=resolve_secrets,
         )
@@ -858,23 +959,32 @@ def receive(
     except IngressRefused as exc:
         return refusal_outcome(exc, prepared=prepared)
 
-    return _accepted(prepared, events, receipts)
+    # Only now, and from values only. A refusal above returns without the
+    # acknowledgement ever being emitted, which is correct: a batch that did not
+    # commit must not be acknowledged as if it had.
+    return _accepted(prepared, events, receipts, acknowledgement)
 
 
 def answer_challenge(
     open_unit_of_work: UnitOfWork,
     *,
     endpoint_id: str,
-    params: Mapping[str, str],
+    request: IngressRequest,
     registry: ConnectorRegistry,
     resolve_secrets: SecretResolver,
 ) -> IngressOutcome:
-    """The handshake façade. Writes nothing, ever.
+    """The HANDSHAKE façade. Writes nothing, ever.
+
+    An explicit operation with its own route, never something `receive` falls
+    through to. It takes the same `IngressRequest` as delivery, so a connector
+    whose provider identifies the handshake by a header — not only by a query
+    parameter — can see it.
 
     Returns the same type as `receive`, so an assembly's two route handlers are
-    byte-for-byte identical apart from which one they call. `media_type` is
-    `text/plain` because providers compare the RAW echoed body — wrapping it in
-    JSON fails the handshake.
+    byte-for-byte identical apart from which one they call. The default media
+    type is `text/plain` because providers compare the RAW echoed body, and
+    wrapping it in JSON fails the handshake; a connector that needs otherwise
+    says so on its own `Acknowledgement`.
     """
     try:
         with open_unit_of_work() as db:
@@ -883,9 +993,9 @@ def answer_challenge(
         return refusal_outcome(exc)
 
     try:
-        body = challenge_response(
+        acknowledgement = challenge_response(
             prepared,
-            params=params,
+            request=request,
             registry=registry,
             resolve_secrets=resolve_secrets,
         )
@@ -897,6 +1007,5 @@ def answer_challenge(
         code=IngressCode.CHALLENGE_ANSWERED,
         installation_id=prepared.installation_id,
         binding_id=prepared.binding_id,
-        challenge_body=body,
-        media_type="text/plain",
+        acknowledgement=acknowledgement.resolved(_HANDSHAKE_MEDIA_TYPE),
     )

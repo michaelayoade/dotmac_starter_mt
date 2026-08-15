@@ -26,11 +26,13 @@ from dotmac_integration.conformance import (
 )
 from dotmac_integration.spi import (
     MODE_PROTOCOLS,
+    Acknowledgement,
     ConnectorMode,
     ConnectorPlugin,
     DeliveryPlugin,
     InboundEvent,
     IngressPlugin,
+    IngressRequest,
     ModeNotDeclaredError,
     PollPlugin,
     require_mode,
@@ -161,21 +163,51 @@ def test_the_refusal_names_the_connector() -> None:
 # ── The ingress contract ────────────────────────────────────────────────────
 
 
-def test_normalize_returns_a_tuple_not_a_single_event() -> None:
+def test_normalize_returns_a_tuple_of_events_and_an_acknowledgement() -> None:
     """One Meta POST batches `entry[].changes[].value.messages[]`.
 
     A single-event signature would silently drop every message after the first,
     and the loss would be invisible: the provider gets a 200 and never resends.
+
+    SPI 1.2 pairs that tuple with the acknowledgement the provider should
+    receive, built HERE — before anything is persisted — because this is the
+    last connector code that runs on the delivery path.
     """
     events = (
         InboundEvent(provider_event_id="wamid.1", event_type="message", payload={}),
         InboundEvent(provider_event_id="wamid.2", event_type="message", payload={}),
     )
-    plugin = fake_plugin(inbound=events)
+    ack = Acknowledgement(body=b"received")
+    plugin = fake_plugin(inbound=events, acknowledgement=ack)
     handler = plugin.ingress_handler_for("conformance.echo.v1")
-    got = handler.normalize(b"{}", {}, config={})
-    assert isinstance(got, tuple)
-    assert len(got) == 2
+
+    got_events, got_ack = handler.normalize(IngressRequest(raw_body=b"{}"), config={})
+
+    assert isinstance(got_events, tuple)
+    assert len(got_events) == 2
+    assert got_ack == ack
+
+
+def test_all_three_hooks_receive_the_same_envelope_object() -> None:
+    """Identity, not equality.
+
+    What `verify` authenticated and what `normalize` interpreted must be the
+    same bytes. Two equal copies would satisfy a value comparison while still
+    letting an engine re-read or re-decode the body between the calls — and a
+    signature check that guards a different byte string guards nothing.
+    """
+    plugin = fake_plugin()
+    handler = plugin.ingress_handler_for("conformance.echo.v1")
+    request = IngressRequest(
+        raw_body=b'{"a":1}', headers={"h": "v"}, params={"challenge": "c"}
+    )
+
+    handler.challenge(request, config={}, secrets={})
+    handler.verify(request, config={}, secrets={})
+    handler.normalize(request, config={})
+
+    assert len(plugin.requests_seen) == 3
+    assert all(seen is request for seen in plugin.requests_seen)
 
 
 def test_verify_receives_the_exact_bytes_it_was_given() -> None:
@@ -189,7 +221,11 @@ def test_verify_receives_the_exact_bytes_it_was_given() -> None:
     plugin = fake_plugin()
     handler = plugin.ingress_handler_for("conformance.echo.v1")
     handler.verify(
-        raw, {"X-Hub-Signature-256": "sha256=deadbeef"}, config={}, secrets={}
+        IngressRequest(
+            raw_body=raw, headers={"X-Hub-Signature-256": "sha256=deadbeef"}
+        ),
+        config={},
+        secrets={},
     )
     assert plugin.verified == [raw]
 
@@ -197,20 +233,28 @@ def test_verify_receives_the_exact_bytes_it_was_given() -> None:
 def test_an_ingress_handler_can_reject() -> None:
     plugin = fake_plugin(signature_valid=False)
     handler = plugin.ingress_handler_for("conformance.echo.v1")
-    assert handler.verify(b"{}", {}, config={}, secrets={}) is False
+    assert (
+        handler.verify(IngressRequest(raw_body=b"{}"), config={}, secrets={}) is False
+    )
 
 
-def test_challenge_returns_none_when_it_is_not_a_handshake() -> None:
-    """`None` means "not mine", so the caller never has to guess from the HTTP
-    verb which kind of request it is holding.
+def test_challenge_returns_an_acknowledgement_or_none() -> None:
+    """`None` means "not mine", and the engine turns it into a stated 400
+    rather than falling through to the delivery path.
 
-    The kit's fake reads a NEUTRAL `"challenge"` parameter. Which parameter
-    carries a real handshake echo is the connector's business, and naming a
-    particular provider's would breach ADR-0024 § 7 inside the module itself.
+    The kit's fake reads a NEUTRAL `"challenge"` parameter. Which part of the
+    request identifies a real handshake is the connector's business, and naming
+    a particular provider's would breach ADR-0024 § 7 inside the module itself.
     """
     handler = fake_plugin().ingress_handler_for("conformance.echo.v1")
-    assert handler.challenge({}, config={}, secrets={}) is None
-    assert handler.challenge({"challenge": "abc"}, config={}, secrets={}) == "abc"
+    assert handler.challenge(IngressRequest(), config={}, secrets={}) is None
+    answered = handler.challenge(
+        IngressRequest(params={"challenge": "abc"}), config={}, secrets={}
+    )
+    assert answered == Acknowledgement(body=b"abc")
+    # The media type is left unset, so the ENGINE decides it. A connector that
+    # picked one here would be choosing part of the response it was not granted.
+    assert answered is not None and answered.media_type is None
 
 
 def test_an_undeclared_capability_has_no_ingress_handler() -> None:

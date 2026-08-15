@@ -16,7 +16,7 @@ lives in a connector distribution, behind the SPI.
 | phase | session | job |
 |---|---|---|
 | `prepare_ingress` | yes, short | resolve the minted endpoint, the manifest pin and the active config revision. **Writes nothing.** |
-| `verify_and_normalize` | **none, by signature** | materialize secrets, verify the RAW bytes, then shape them into `InboundEvent`s. |
+| `verify_and_normalize` | **none, by signature** | materialize secrets, verify the RAW bytes, then shape them into `InboundEvent`s **and the `Acknowledgement`**. |
 | `record_batch` | yes, short | record the **whole** normalized tuple, atomically. Hands back `(receipt_id, is_new)` **values**, never ORM rows. |
 
 `verify_and_normalize` has no `db` parameter, so "a plugin never receives a
@@ -31,10 +31,12 @@ same `IngressOutcome` — so a consuming assembly's two route handlers differ
 only in which one they call:
 
 ```python
-receive(open_unit_of_work, endpoint_id=…, raw_body=…, headers=…, params=…,
-        registry=…, resolve_secrets=…)          # a delivery
-answer_challenge(open_unit_of_work, endpoint_id=…, params=…,
-                 registry=…, resolve_secrets=…)  # a subscription handshake
+request = IngressRequest(raw_body=…, headers=…, params=…)   # one immutable envelope
+
+receive(open_unit_of_work, endpoint_id=…, request=request,
+        registry=…, resolve_secrets=…)           # a delivery   (assembly: POST)
+answer_challenge(open_unit_of_work, endpoint_id=…, request=request,
+                 registry=…, resolve_secrets=…)  # a handshake  (assembly: GET)
 ```
 
 The deployment decides what a unit of work **is** (engine, pool, isolation
@@ -44,13 +46,44 @@ preference: *one collision must roll back the whole provider batch* is a
 correctness property of ingress, and hand-composed by a caller it would hold
 only as long as that caller got it right.
 
-`receive` treats a request carrying **no bytes** as a handshake. That is a
-protocol fact — a request with no body cannot carry a signed payload — not a
-guess from the HTTP verb. Offering every delivery to `challenge` first would
-let a plugin that returns non-`None` by accident silently swallow a batch of
-real events. A `challenge` returning `None` is therefore a
-**refusal** (400), not a fall-through to the delivery path — so a provider that
-confirms a subscription with a *bodied* request is not yet serviceable.
+### Handshake and delivery are separate operations (SPI 1.2)
+
+`receive` **never** answers a handshake, and `answer_challenge` never verifies
+or records. SPI 1.1 inferred a handshake from an empty body; that inference was
+wrong in both directions:
+
+* a **bodyless POST is still a delivery** — a provider that signs an empty body
+  (a "nothing changed" ping, a deletion whose content is in its headers) had its
+  events dropped and was told "not a handshake" about a request that never was;
+* a provider that confirms a subscription with a **bodied** request could not
+  handshake at all.
+
+The assembly mounts GET on `answer_challenge` and POST on `receive`, so the
+operation is stated by the request line rather than guessed from a byte count. A
+`challenge` returning `None` is a **refusal** (400), never a fall-through.
+
+### One immutable envelope, and a typed acknowledgement (SPI 1.2)
+
+`IngressRequest` is `frozen`, `slots=True`, `repr=False`, and carries the raw
+body, the request headers and the query parameters. The **same object** reaches
+`challenge`, `verify` and `normalize` — so what was authenticated is provably
+what was interpreted, and no hook can edit what a later one sees. SPI 1.1 gave
+each hook its own slice, which meant a provider identifying its handshake by a
+header could not be served at all.
+
+`Acknowledgement` is what the connector wants written back: `body: bytes` and an
+optional, validated `media_type`. That is the **whole** response surface a
+connector gets. There is deliberately no connector-selected status code — a
+status is a retry instruction and only the engine knows whether the batch
+committed — and no arbitrary response headers, which would be a
+response-splitting surface and a route for request material to leave the
+module's sight.
+
+`normalize` returns `(events, acknowledgement)`, so the acknowledgement is built
+**before** anything is persisted. The engine emits it only **after** the whole
+batch commits, and calls **no** connector code after the commit: a plugin raise
+on the far side of a durable write would answer 5xx for events that are safely
+stored, and the provider would redeliver them forever.
 
 ### One collision rolls back the whole batch
 
@@ -81,15 +114,19 @@ status silently destroys events.
 | `SignatureRejected` | 401 | `signature_rejected` | Providers do not retry 401, correctly: redelivering an unverifiable body fails identically. **Nothing is persisted.** |
 | `NotAChallenge` | 400 | `not_a_challenge` | The connector does not recognise the handshake. |
 | `ConnectorRaised` | 503 | `connector_raised` | A throw says nothing about what was normalized, so nothing may be written. |
-| `ConnectorContract` | 503 | `connector_contract` | `normalize` returned something that is not a `tuple[InboundEvent, …]`. |
+| `ConnectorContract` | 503 | `connector_contract` | `normalize` returned something other than `(tuple[InboundEvent, …], Acknowledgement \| None)`, or `challenge` returned a non-`Acknowledgement`. The second half of that pair goes into a response body, so a bare tuple of events would otherwise be indexed and its first event written back. |
 | `EventIdentityCollision` | 503 | `event_identity_collision` | Whole batch rolled back; recurs until an operator acts — the intended page. |
 | `ReceiptWriteRaced` | 503 | `receipt_write_raced` | Whole batch rolled back; the retry finds the rows and answers 200 with `duplicates`. |
 | `ReceiptWriteFailed` | 503 | `receipt_write_failed` | Any other write failure. Typed here because a driver error's `str` embeds `[parameters: …]` — the normalized payload and the provider event id — into whatever the edge logs. |
 | `PayloadTooLarge` | 413 | `payload_too_large` | **Defined here, raised at the edge** (see below). |
 
 Success is `ACCEPTED` (200, including a normalized count of zero) or
-`CHALLENGE_ANSWERED` (200, `media_type="text/plain"` — providers compare the
-raw echoed body, so wrapping it in JSON fails the handshake).
+`CHALLENGE_ANSWERED` (200). Both carry a resolved `Acknowledgement`; every
+refusal carries `None`, because a refusal body is the engine's classification
+rather than something a connector that may never have run gets to shape. The
+engine fills an unset `media_type` with `text/plain` for a handshake — providers
+compare the raw echoed body, so wrapping it in JSON fails the handshake — and
+`application/json` for a delivery.
 
 ### The request-size cap belongs to the edge
 
@@ -103,17 +140,20 @@ authoring either.
 
 ### Nothing here logs, and nothing here can
 
-The raw body, the signature headers and the materialized secrets are ephemeral.
-Eight structural mechanisms keep them that way, none relying on care:
+The raw body, the signature headers, the query parameters and the materialized
+secrets are ephemeral. Nine structural mechanisms keep them that way, none
+relying on care:
 
 1. `IngressRefused.__init__` takes **no arguments** — the message is a class
    constant, so there is nothing to interpolate a request fragment into.
 2. `ConnectorRaised` is the one exception; it carries a
    `.isidentifier()`-validated **type name** and is raised `from None`, so a
    plugin's provider-built message cannot reach a traceback.
-3. `IngressOutcome` has no field able to hold request material — and
+3. `IngressOutcome` has no **scalar** field able to hold request material — and
    deliberately does not echo the endpoint key, since whoever holds it can
-   drive a connector's `verify`.
+   drive a connector's `verify`. Its one byte-carrying field is the typed
+   `Acknowledgement`, which travels in the opposite direction: a connector built
+   it deliberately for the provider that sent the request.
 4. `record_batch` passes `headers=None` unconditionally. `headers_json` ends up
    in every backup; forwarding request headers would put the signature header —
    and any `authorization` or `cookie` a misconfigured proxy passed through —
@@ -135,6 +175,11 @@ Eight structural mechanisms keep them that way, none relying on care:
 8. `PreparedIngress.endpoint_key` is `repr=False`. The carrier is a frame local
    in every such traceback, and the key is a bearer secret for the same reason
    `IngressOutcome` refuses to echo it.
+9. `IngressRequest` and `Acknowledgement` are `repr=False` for that same reason.
+   The envelope holds the raw body and every header, including an
+   `authorization` or `cookie` a misconfigured proxy passed through; the
+   acknowledgement is assumed to hold request material because an echo handshake
+   is *defined* as returning a slice of the request. Neither is ever persisted.
 
 ## The endpoint is minted, not implied
 

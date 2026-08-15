@@ -40,11 +40,15 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Final, Protocol, runtime_checkable
 
 __all__ = [
+    "Acknowledgement",
     "InboundEvent",
     "IngressHandler",
+    "IngressRequest",
+    "InvalidAcknowledgementError",
     "PollHandler",
     "DeliveryPlugin",
     "IngressPlugin",
@@ -75,6 +79,16 @@ class InvalidManifestError(ValueError):
     """A connector manifest is malformed — refused before it is ever trusted."""
 
 
+class InvalidAcknowledgementError(ValueError):
+    """A connector built an acknowledgement the engine will not emit.
+
+    Raised by the CONSTRUCTOR, so a malformed acknowledgement cannot exist long
+    enough to reach a response writer. The engine converts it, like any other
+    exception a plugin raises, into a typed refusal that carries only the type
+    name.
+    """
+
+
 _KEY_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{1,118}$")
 #: `domain.noun.vN` — e.g. `ticket.observation.v1`. A capability id is a
 #: CONTRACT name, so the version is part of the identity rather than a
@@ -83,6 +97,17 @@ _KEY_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{1,118}$")
 _CAPABILITY_RE: Final[re.Pattern[str]] = re.compile(
     r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+\.v[1-9][0-9]*$"
 )
+#: `type/subtype`, optionally with a charset. Anchored and character-restricted
+#: because this string is written into a RESPONSE HEADER: an unvalidated one
+#: carrying CRLF is header injection, and one carrying arbitrary parameters is a
+#: connector shaping the response beyond the one knob it was granted.
+_MEDIA_TYPE_RE: Final[re.Pattern[str]] = re.compile(
+    r"[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}"
+    r"(; ?charset=[a-zA-Z0-9._-]{1,64})?"
+)
+#: The empty mapping every envelope defaults to. A shared frozen proxy rather
+#: than a `default_factory`: it can be neither mutated nor accumulated into.
+_NO_MATERIAL: Final[Mapping[str, str]] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -116,12 +141,18 @@ class SpiVersion:
 
 #: The SPI this module implements. A connector declaring a range that excludes
 #: it is refused — at discovery, at startup and at activation.
-# 1.1, not 2.0. The change is ADDITIVE: the base protocol lost `handler_for`,
-# but a delivery connector implementing all five original members still
-# satisfies both `ConnectorPlugin` and `DeliveryPlugin`, so every plugin that
-# worked against 1.0 still resolves. What is new is that ingress and poll became
-# expressible, and that declaring a mode is now checked.
-CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 1)
+# 1.2. The DELIVERY and POLL contracts are untouched, so 1.0's delivery
+# connectors still resolve; what changed is INGRESS, whose three hooks now take
+# one immutable `IngressRequest` and hand back a typed `Acknowledgement`.
+#
+# A signature change would normally deserve a major bump. It is honest as a
+# minor here because SPI 1.1 shipped in `dotmac-integration` 0.1.0a3/a4, NEITHER
+# of which was ever published: the releases on the index are 0.1.0a1 and
+# 0.1.0a2, both SPI 1.0 with no ingress contract at all. There is therefore no
+# plugin anywhere built against 1.1's ingress signatures, and a 2.0 would have
+# excluded every honest `>=1.0,<2.0` delivery connector to protect a
+# compatibility promise nothing ever consumed.
+CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,28 +355,161 @@ class InboundEvent:
     payload: dict[str, object]
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class IngressRequest:
+    """ONE immutable envelope for everything that arrived, handed to all three
+    ingress hooks unchanged.
+
+    ## Why one object, and why the SAME one
+
+    SPI 1.1 gave each hook its own slice — `challenge` saw query parameters,
+    `verify` saw bytes and headers, `normalize` saw bytes and headers. Every
+    real provider then wanted a piece it had not been given: Meta's handshake is
+    identified by headers as well as `hub.*` parameters, and a connector whose
+    `verify` needs a query-string signature could not reach one. Widening one
+    hook at a time is how a contract acquires four overloads, so the envelope
+    widens once and all three hooks take it.
+
+    Handing the SAME object to `verify` and `normalize` is the load-bearing
+    part: what was authenticated and what was interpreted are then provably the
+    same bytes. Two parameters can drift — an engine that re-read, re-decoded or
+    re-assembled the body between the two calls would authenticate one thing and
+    normalize another, and a signature check that guards a different byte string
+    guards nothing.
+
+    ## What makes it safe to pass around
+
+    `frozen` and `slots` together: no hook can mutate what a later hook sees,
+    and none can smuggle a database session on as an ad-hoc attribute. The
+    mappings are copied into `MappingProxyType`, so immutability is real rather
+    than promised by the type annotation — a plugin holding `request.headers`
+    cannot edit the engine's view.
+
+    `repr=False` is the disclosure rule, and it is the same one
+    `PreparedIngress` states: this object is a frame local in every traceback
+    that leaves the plugin phase, and it holds the raw body, the signature
+    header, and any authorization header or cookie a misconfigured proxy passed
+    through. A generated `repr` would render all of it into any log line, error
+    report or debugger frame that touched the frame. The values are still THERE
+    — this is a rendering rule, not a removal.
+    """
+
+    raw_body: bytes = b""
+    headers: Mapping[str, str] = _NO_MATERIAL
+    params: Mapping[str, str] = _NO_MATERIAL
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.raw_body, bytes):
+            raise InvalidAcknowledgementError(
+                "an ingress request body must be the RAW bytes as received; "
+                f"got {type(self.raw_body).__name__}"
+            )
+        # Copy, then freeze. Copying stops a caller mutating the engine's view
+        # after construction; the proxy stops a plugin mutating it at all.
+        object.__setattr__(self, "headers", MappingProxyType(dict(self.headers)))
+        object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class Acknowledgement:
+    """What a connector wants written back, and NOTHING about how.
+
+    A provider's handshake is a raw echo, another's delivery reply must be
+    `{"status":"ok"}`, and a third rejects anything but an empty 200 body. That
+    is provider knowledge, which this module may not hold (ADR-0024 § 7) — so
+    the BODY is the connector's, and it is `bytes` rather than `str` for the
+    same reason `verify` takes bytes: a provider comparing an exact response
+    body is comparing bytes, and an engine-chosen encoding would be a guess.
+
+    ## The line this type draws
+
+    `media_type` is optional and is the ONLY response shaping a connector gets.
+    There is deliberately no status code and no header mapping:
+
+    * a **status code** is a retry instruction. 200 means "never send this
+      again", 5xx means "send it again", 4xx means "stop and page someone". A
+      connector choosing it could discard events the engine believes are safely
+      persisted, and that decision belongs to the engine, which is the only
+      party that knows whether the batch committed.
+    * **arbitrary headers** are a response-splitting surface and a place for
+      request material to be echoed back out of the module's sight. Neither is
+      needed by any handshake the requirement record describes, so the
+      capability is not granted yet rather than granted and policed.
+
+    `media_type` is validated against a strict `type/subtype` shape precisely
+    because it IS a header value: an unvalidated one carrying CRLF is header
+    injection with extra steps.
+
+    `repr=False`, like `IngressRequest`: a connector is free to echo a slice of
+    the request into its acknowledgement — that is what an echo handshake IS —
+    so this object must be assumed to hold request material.
+    """
+
+    body: bytes = b""
+    #: `None` means "the engine picks", and the engine's default depends on the
+    #: operation: a handshake is `text/plain` because providers compare the raw
+    #: echoed body, a delivery acknowledgement is `application/json`.
+    media_type: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.body, bytes):
+            raise InvalidAcknowledgementError(
+                "an acknowledgement body must be bytes — the engine writes it "
+                f"back verbatim and will not guess an encoding; got "
+                f"{type(self.body).__name__}"
+            )
+        if self.media_type is None:
+            return
+        if not _MEDIA_TYPE_RE.fullmatch(self.media_type):
+            raise InvalidAcknowledgementError(
+                f"media type {self.media_type!r} is not a bare `type/subtype` "
+                "with an optional charset — a response header value is not a "
+                "free-text field"
+            )
+
+    def resolved(self, default_media_type: str) -> Acknowledgement:
+        """This acknowledgement with the engine's default filled in.
+
+        The engine calls it once, on the way out, so an assembly never has to
+        decide what an unset media type means.
+        """
+        if self.media_type is not None:
+            return self
+        return Acknowledgement(body=self.body, media_type=default_media_type)
+
+
 @runtime_checkable
 class IngressHandler(Protocol):
     """What an INGRESS plugin returns for one capability.
 
     Three separable jobs, kept separate because they have different inputs and
-    different failure meanings:
+    different failure meanings. All three receive the same immutable
+    :class:`IngressRequest`:
 
-    * `challenge` answers the provider's subscription handshake. It is consulted
-      for a request carrying NO BYTES — a protocol fact, since a bodyless
-      request cannot carry a signed payload, rather than a guess from the HTTP
-      verb. Returning `None` there is a REFUSAL, not a fall-through to the
-      delivery path: the engine answers 400 and `verify` is never reached.
-      Offering every bodied delivery to `challenge` first would let a plugin
-      that returns non-`None` by accident silently swallow a batch of real
-      events, so the engine does not. A connector whose provider confirms a
-      subscription with a BODIED request is therefore not yet serviceable —
-      stated here rather than discovered at integration time.
-    * `verify` decides authenticity from the RAW bytes. It receives the body
-      exactly as received, because every provider worth verifying signs the
+    * `challenge` answers the provider's subscription handshake. It is an
+      EXPLICIT operation — the engine reaches it only through
+      `ingress.answer_challenge`, which an assembly wires to its own handshake
+      route. SPI 1.1 inferred a handshake from an empty body instead, and that
+      inference was wrong in both directions: a bodyless POST is still a
+      DELIVERY (a provider that signs an empty body and expects it recorded got
+      a handshake attempt), and a provider that confirms a subscription with a
+      BODIED request could not handshake at all. Returning `None` is a REFUSAL:
+      the engine answers 400 and `verify` is never reached.
+    * `verify` decides authenticity from `request.raw_body`. It receives the
+      body exactly as received, because every provider worth verifying signs the
       bytes and not a re-serialization of them.
-    * `normalize` shapes verified bytes into events. It is never called on an
-      unverified body.
+    * `normalize` shapes a verified request into events AND the acknowledgement
+      the provider should receive. It is never called on an unverified body.
+
+    ## Why `normalize` builds the acknowledgement
+
+    Because it is the last connector code that runs. The engine records the
+    batch after `normalize` returns and emits the acknowledgement only once that
+    batch has committed — so the acknowledgement must already exist before
+    persistence begins. Calling back into the plugin after the commit would put
+    provider I/O and plugin exceptions on the far side of a durable write, where
+    a raise would answer 5xx for a batch that is safely stored and the provider
+    would redeliver it forever.
 
     `config` reaches `normalize` because the qualifying source needs it: Sub's
     `normalize_inbound_webhook` selects its shape from the provider variant,
@@ -355,24 +519,23 @@ class IngressHandler(Protocol):
 
     def challenge(
         self,
-        params: Mapping[str, str],
+        request: IngressRequest,
         *,
         config: dict[str, object],
         secrets: dict[str, str],
-    ) -> str | None: ...
+    ) -> Acknowledgement | None: ...
 
     def verify(
         self,
-        raw_body: bytes,
-        headers: Mapping[str, str],
+        request: IngressRequest,
         *,
         config: dict[str, object],
         secrets: dict[str, str],
     ) -> bool: ...
 
     def normalize(
-        self, raw_body: bytes, headers: Mapping[str, str], *, config: dict[str, object]
-    ) -> tuple[InboundEvent, ...]: ...
+        self, request: IngressRequest, *, config: dict[str, object]
+    ) -> tuple[tuple[InboundEvent, ...], Acknowledgement | None]: ...
 
 
 @runtime_checkable

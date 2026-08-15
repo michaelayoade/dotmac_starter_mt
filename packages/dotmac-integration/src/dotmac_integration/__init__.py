@@ -186,6 +186,7 @@ from dotmac_integration.selection import (
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     MODE_PROTOCOLS,
+    Acknowledgement,
     CapabilityDeclaration,
     CapabilityHandler,
     ConnectorManifest,
@@ -197,6 +198,8 @@ from dotmac_integration.spi import (
     InboundEvent,
     IngressHandler,
     IngressPlugin,
+    IngressRequest,
+    InvalidAcknowledgementError,
     InvalidManifestError,
     ModeContract,
     ModeNotDeclaredError,
@@ -209,10 +212,13 @@ from dotmac_integration.spi import (
     require_mode,
 )
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 __all__ = [
-    # ── The ingress engine (SPI 1.1) ────────────────────────────────────────
+    # ── The ingress engine (SPI 1.2) ────────────────────────────────────────
+    "IngressRequest",
+    "Acknowledgement",
+    "InvalidAcknowledgementError",
     "IngressCode",
     "IngressOutcome",
     "IngressError",
