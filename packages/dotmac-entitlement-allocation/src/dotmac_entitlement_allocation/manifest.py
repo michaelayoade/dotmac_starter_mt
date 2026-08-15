@@ -39,7 +39,9 @@ module = ModuleManifest(
     short_code="ealloc",
     migration_prefix="ea",
     migration_branch="entitlement_allocation",
-    tables=("allocations", "allocation_entries"),
+    tables=(),
+    platform_tables=("allocations", "allocation_entries"),
+    supported_plane_sets=(),
     audit_actions=("entitlement_allocation.staged",),
 )
 

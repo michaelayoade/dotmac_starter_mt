@@ -8,8 +8,26 @@ refuses the composition at boot:
 - `short_code="rel"` → the derived, read-only schema `mod_rel`
 - `migration_prefix="rl"` → revision ids `rl_0001_…`
 - `migration_branch="release_catalog"` → how an `alembic_version` row is attributed
-- `tables=(...)` → the composed gate rejects a migration creating anything
-  outside this declaration, in both directions
+- `platform_tables=(...)` → the composed gate rejects a migration creating
+  anything outside this declaration, in both directions
+
+## Why the platform plane, declared and atomic
+
+The DDL was always control-plane shaped — no `tenant_id`, no RLS, grants to
+`platform_api`/`app_admin` and `REVOKE ALL` from `app_user`. Until ADR-0028 the
+manifest still declared those tables under `tables=`, which is the tenant slot.
+The declaration was simply wrong about what the migration builds, and ADR-0023
+is explicit that the plane is DECLARED and never inferred — so a mismatch here
+is a real defect, not a formality.
+
+`supported_plane_sets=()` keeps the module ATOMIC. A singleton
+`((ModulePlane.PLATFORM,),)` would not make it selectable — the current
+implementation treats one combination as atomic and rejects an assembly
+selection anyway — so it would add ceremony without expressing a choice.
+There is no tenant consumer, and speculative selectability is the ADR-0006 § 5
+speculative extraction wearing different clothes. If a real tenant consumer
+ever appears, that is a capability EXPANSION needing product-first evidence,
+tenant models and migrations, RLS canaries and a new release.
 
 ## Why `core=False`
 
@@ -44,7 +62,9 @@ module = ModuleManifest(
     short_code="rel",
     migration_prefix="rl",
     migration_branch="release_catalog",
-    tables=("release_artifacts", "artifact_attestations"),
+    tables=(),
+    platform_tables=("release_artifacts", "artifact_attestations"),
+    supported_plane_sets=(),
 )
 
 __all__ = ["module"]
