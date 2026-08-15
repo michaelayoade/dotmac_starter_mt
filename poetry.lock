@@ -630,7 +630,7 @@ url = "packages/dotmac-kernel"
 
 [[package]]
 name = "dotmac-release-catalog"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -639,7 +639,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a44"
+dotmac-kernel = ">=0.1.0a53"
 sqlalchemy = "^2.0"
 
 [package.source]
