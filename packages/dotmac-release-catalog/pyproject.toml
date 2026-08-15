@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-release-catalog"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -36,7 +36,7 @@ python = ">=3.11,<3.14"
 # Application Directory / Workspace). Two branches minting the same kernel
 # version collide in the changelog and leave consumers unable to say which a42
 # they pinned, so the vendor modules renumber rather than the foundations.
-dotmac-kernel = ">=0.1.0a44"
+dotmac-kernel = ">=0.1.0a56"
 sqlalchemy = "^2.0"
 
 # No `alembic` runtime dependency: unlike `dotmac_ticketing.linking`, nothing

@@ -20,14 +20,24 @@ The declaration was simply wrong about what the migration builds, and ADR-0023
 is explicit that the plane is DECLARED and never inferred — so a mismatch here
 is a real defect, not a formality.
 
-`supported_plane_sets=()` keeps the module ATOMIC. A singleton
-`((ModulePlane.PLATFORM,),)` would not make it selectable — the current
-implementation treats one combination as atomic and rejects an assembly
-selection anyway — so it would add ceremony without expressing a choice.
+This module is ATOMIC, and says so by saying nothing. `supported_plane_sets`
+is deliberately OMITTED rather than written as an explicit `()`: absence already
+means atomic, and the generated catalogue renders it that way.
+
+Omitting it is not only tidier — it is the honest compatibility floor. The
+keyword is a constructor field that only exists from kernel `0.1.0a61`, so
+writing it would force this module's floor up to `a61` for a value the default
+already supplies. Omitted, the floor stays at `0.1.0a56`, the earliest published
+kernel that has `platform_tables` at all — which is the real requirement.
+
+A singleton `((ModulePlane.PLATFORM,),)` would not make the module selectable
+either: the current implementation treats one combination as atomic and rejects
+an assembly selection anyway. It would be ceremony without a choice.
+
 There is no tenant consumer, and speculative selectability is the ADR-0006 § 5
-speculative extraction wearing different clothes. If a real tenant consumer
-ever appears, that is a capability EXPANSION needing product-first evidence,
-tenant models and migrations, RLS canaries and a new release.
+speculative extraction wearing different clothes. If a real tenant consumer ever
+appears, that is a capability EXPANSION needing product-first evidence, tenant
+models and migrations, RLS canaries and a new release.
 
 ## Why `core=False`
 
@@ -56,7 +66,7 @@ from dotmac_kernel.modules import ModuleManifest
 
 module = ModuleManifest(
     code="release_catalog",
-    version="0.1.0a2",
+    version="0.1.0a4",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="rel",
@@ -64,7 +74,6 @@ module = ModuleManifest(
     migration_branch="release_catalog",
     tables=(),
     platform_tables=("release_artifacts", "artifact_attestations"),
-    supported_plane_sets=(),
 )
 
 __all__ = ["module"]

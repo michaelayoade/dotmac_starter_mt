@@ -223,7 +223,18 @@ def test_the_tenant_role_has_no_schema_access_and_no_table_privilege(
 
         for table in tables:
             qualified = f"{schema}.{table}"
-            for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "REFERENCES"):
+            # All SEVEN PostgreSQL table privileges. Proving five leaves
+            # TRUNCATE and TRIGGER unproven, and on this plane the revoke IS
+            # the isolation — a partial check reads as safe while a gap stands.
+            for privilege in (
+                "SELECT",
+                "INSERT",
+                "UPDATE",
+                "DELETE",
+                "TRUNCATE",
+                "REFERENCES",
+                "TRIGGER",
+            ):
                 assert not conn.execute(
                     text("SELECT has_table_privilege(:r, :t, :p)"),
                     {"r": "app_user", "t": qualified, "p": privilege},

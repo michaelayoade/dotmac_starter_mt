@@ -34,14 +34,13 @@ from dotmac_kernel.modules import ModuleManifest
 
 module = ModuleManifest(
     code="entitlement_allocation",
-    version="0.1.0a3",
+    version="0.1.0a4",
     core=False,
     short_code="ealloc",
     migration_prefix="ea",
     migration_branch="entitlement_allocation",
     tables=(),
     platform_tables=("allocations", "allocation_entries"),
-    supported_plane_sets=(),
     audit_actions=("entitlement_allocation.staged",),
 )
 

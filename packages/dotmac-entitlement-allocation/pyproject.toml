@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-entitlement-allocation"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -25,7 +25,7 @@ python = ">=3.11,<3.14"
 # a45, not a43: a42/a43 belong to the upstream train (Audit R1, Application
 # Directory / Workspace). The vendor modules renumber so no two branches mint
 # the same kernel version.
-dotmac-kernel = ">=0.1.0a45"
+dotmac-kernel = ">=0.1.0a56"
 sqlalchemy = "^2.0"
 
 [build-system]
