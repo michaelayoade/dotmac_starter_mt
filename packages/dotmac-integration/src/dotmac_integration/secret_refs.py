@@ -63,7 +63,10 @@ SECRET_REFERENCE_SCHEMES: Final[frozenset[str]] = frozenset(
 _REFERENCE_RE: Final[re.Pattern[str]] = re.compile(r"^([a-z][a-z0-9-]*)://(\S+)$")
 
 #: Config key names that imply secret material. Substring match, because
-#: `stripe_api_key` and `apiKey` must both be caught.
+#: `vendor_api_key` and `apiKey` must both be caught. (The illustration is
+#: deliberately provider-neutral: `tests/architecture/
+#: test_integration_ingress_hygiene.py` scans this package for provider names,
+#: and a name in a comment is a name in the module — ADR-0024 § 7.)
 _SECRET_NAME_HINTS: Final[tuple[str, ...]] = (
     "secret",
     "password",
