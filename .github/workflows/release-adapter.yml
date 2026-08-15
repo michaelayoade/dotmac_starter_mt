@@ -43,20 +43,20 @@ name: Release adapter
 # ONE ADAPTER PER RUN, on purpose — the same reasoning as the module lane.
 # Releasing two in a single dispatch would read as transactional when it is not.
 #
-# THE LANE IS CLOSED AND CURRENTLY SHUT. The target is resolved from
-# `.github/release-adapters.json`, whose `adapters` object is EMPTY, so a
-# dispatch today fails at the gate. `dotmac-auth-oidc` is merged and
-# deliberately unlisted: absence is the safety mechanism until the
-# `dotmac_workspace` pilot is green (see that file's header, and
-# `packages/dotmac-auth-oidc/README.md` for how the pilot tests an EXACT-SHA
-# local wheel before anything is published).
+# THE LANE IS CLOSED, AND NOW OPEN FOR EXACTLY ONE ADAPTER. The target is
+# resolved from `.github/release-adapters.json`, which lists `dotmac-auth-oidc`
+# as of 2026-08-15 and nothing else; every other dispatch value fails at the
+# gate. It was empty until the `dotmac_workspace` pilot ran a real login
+# against an exact-SHA local wheel with a shared, atomic `StateStore` — see
+# that file's header for what the pilot had to prove and what it changed in the
+# package on the way.
 #
-# `adapter` is a free-text input rather than a `choice` for one reason only: a
-# `workflow_dispatch` choice must offer at least one option, and there is
-# nothing to offer. The enforced layer was never the input anyway — it is
-# `resolve`. `tests/architecture/test_adapter_release_lane.py` requires a
-# `choice` list matching the allowlist exactly once the allowlist is non-empty,
-# so the first entry cannot land without the UI layer following it.
+# `adapter` became a `choice` in the same diff that listed the first adapter: a
+# `workflow_dispatch` choice must offer at least one option, so the input could
+# not be one while there was nothing to offer. The enforced layer was never the
+# input anyway — it is `resolve`, and
+# `tests/architecture/test_adapter_release_lane.py` requires the `choice` list
+# to match the allowlist EXACTLY, so neither half can drift from the other.
 #
 # Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release`
 # environment secret whose canonical source is OpenBao
@@ -68,11 +68,13 @@ on:
     inputs:
       adapter:
         description: >-
-          Which allowlisted stateless protocol adapter to publish. The lane is
-          currently SHUT — `.github/release-adapters.json` lists none, so every
-          value fails at the gate.
+          Which allowlisted stateless protocol adapter to publish. The list
+          below is a convenience; the enforced layer is `resolve`, which reads
+          `.github/release-adapters.json` and fails closed.
         required: true
-        type: string
+        type: choice
+        options:
+          - dotmac-auth-oidc
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true

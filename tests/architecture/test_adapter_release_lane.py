@@ -135,29 +135,35 @@ def _auth_oidc_entry() -> dict:
 # ── The door is shut ─────────────────────────────────────────────────────────
 
 
-def test_the_adapter_allowlist_lists_nothing_today() -> None:
-    """Absence is the safety mechanism, not an oversight.
+def test_the_lane_is_open_for_exactly_the_adapter_the_pilot_earned() -> None:
+    """This test used to assert the allowlist was EMPTY, and its docstring said
+    to delete that assertion deliberately when an adapter was legitimately
+    added. This is that deliberate replacement, 2026-08-15.
 
-    `dotmac-auth-oidc 0.1.0a1` is merged, dossier-complete and unpublishable on
-    purpose. The proof owed before it is listed is a real pilot consumer wiring
-    `start_login`/`complete_login` against an EXACT-SHA local wheel with a
-    shared, atomic `StateStore` — not a green CI run.
+    What earned it: `dotmac_workspace` PR #2 ran the ceremony against a shared,
+    atomic PostgreSQL store, bound the callback to the browser, and drove a
+    change back into the package (starter PR #194) so a request-bound store
+    could be supplied at all. A green CI run was never the bar; a real consumer
+    was.
 
-    If this test fails because an adapter was legitimately added, the failure is
-    the reminder to add its `choice` option and its dossier expectations in the
-    same diff; delete this assertion then, deliberately.
+    The assertion inverts rather than disappears. An empty allowlist is now
+    also a failure: it would mean the entry was reverted without the decision
+    being re-argued, and this lane's whole doctrine is that listing and
+    de-listing are both reviewed diffs.
     """
-    assert _adapters() == {}, (
-        "an adapter was listed — confirm the pilot that earns it actually ran, "
-        "then update this test in the same reviewed diff"
+    assert set(_adapters()) == {"dotmac-auth-oidc"}, (
+        "the adapter allowlist changed. Adding one requires a pilot consumer "
+        "that actually ran; removing one requires saying why the published "
+        "artifact should stop being reproducible from this repository."
     )
 
 
 @pytest.mark.parametrize(
     "impostor",
     [
-        # THE one this lane was built for, and deliberately still refused.
-        "dotmac-auth-oidc",
+        # `dotmac-auth-oidc` is NOT here any more — it is the one listed adapter,
+        # and `test_the_listed_adapter_resolves` covers it. Everything below is
+        # still refused, which is what makes that resolution mean something.
         # Real, but released by their OWN workflows with their own rules.
         "dotmac-kernel",
         "dotmac-ui",
@@ -172,24 +178,47 @@ def test_the_adapter_allowlist_lists_nothing_today() -> None:
         "",  # empty
     ],
 )
-def test_the_gate_refuses_every_dispatch_while_the_lane_is_shut(impostor: str) -> None:
+def test_the_gate_refuses_every_dispatch_it_does_not_list(impostor: str) -> None:
     """SENSITIVITY PROOF for "the lane is closed".
 
     Every downstream step — build, inspect, smoke, publish — takes its target
     from `resolve`. A non-zero exit here is what stops the workflow before
-    `poetry build` ever runs.
+    `poetry build` ever runs. Listing one adapter must not have opened the lane
+    to anything else, and in particular must not have made a STATEFUL module
+    publishable through the path that skips the namespace, lineage and
+    dual-plane checks.
     """
     result = _resolve(impostor)
     assert result.returncode != 0, f"{impostor!r} was resolved"
     assert "not an allowlisted stateless protocol adapter" in result.stderr, impostor
 
 
-def test_the_refusal_says_the_lane_is_shut_rather_than_naming_nothing() -> None:
-    """An operator reading "publishable adapters are: " with an empty list would
-    reasonably conclude the file is broken. It is not — it is shut."""
-    result = _resolve("dotmac-auth-oidc")
-    assert "the lane is shut" in result.stderr
+def test_a_refusal_names_what_IS_publishable() -> None:
+    """The refusal has to be actionable.
+
+    While the lane was shut it said "(none — the lane is shut)", because an
+    operator reading "publishable adapters are: " with an empty list would
+    reasonably conclude the file was broken. Now that something is listed, the
+    same sentence must name it — otherwise an operator who mistyped has no way
+    to see what the right spelling was.
+    """
+    result = _resolve("dotmac-auth-oidk")  # a plausible typo
+    assert result.returncode != 0
+    assert "dotmac-auth-oidc" in result.stderr
     assert "release-adapters.json" in result.stderr
+
+
+def test_the_listed_adapter_resolves() -> None:
+    """SPECIFICITY for every refusal above, against the REAL allowlist.
+
+    `test_a_well_formed_adapter_entry_resolves` proves the gate's reasoning
+    against a synthetic file. This proves the file that ships actually works —
+    a lane whose one entry did not resolve would fail at dispatch, which is the
+    worst moment to discover it.
+    """
+    result = _resolve("dotmac-auth-oidc", version="0.1.0a1")
+    assert result.returncode == 0, result.stderr
+    assert "tag=dotmac-auth-oidc-v0.1.0a1" in result.stdout
 
 
 # ── The gate is not merely refusing everything ───────────────────────────────
