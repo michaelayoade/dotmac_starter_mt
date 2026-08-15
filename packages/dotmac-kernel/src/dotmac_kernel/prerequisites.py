@@ -506,6 +506,7 @@ __all__ = [
     "KERNEL_PREREQUISITES",
     "all_bound",
     "autoload_bindings",
+    "IDEMPOTENCY_LEDGER_V1",
     "MODULE_DATABASE_ROLES_V1",
     "TENANT_SCOPE_CATALOG_V1",
     "DuplicateBindingError",
