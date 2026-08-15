@@ -139,7 +139,7 @@ def test_the_live_schema_holds_exactly_what_the_manifest_declares(
     # the declaration's own length, so adding a table does not edit this test,
     # but a manifest that declares NOTHING fails it.
     assert live, "mod_intg holds no table — the ig lineage did not apply"
-    assert len(module.platform_tables) == len(set(module.platform_tables)) >= 7
+    assert len(module.platform_tables) == len(set(module.platform_tables)) >= 8
     assert live == set(module.platform_tables)
     assert module.tables == (), "this module owns no tenant-plane table"
 
@@ -684,20 +684,27 @@ def test_app_user_holds_nothing_on_the_new_column(
     )
 
 
-def test_ig_0003_adds_no_table_and_keeps_the_plane_platform_only(
+def test_the_ig_lineage_added_exactly_what_it_declared(
     migrated_scratch: tuple[str, str],
 ) -> None:
-    """The migration adds a COLUMN. A table would need an ADR, not a diff.
+    """Two migrations, two different kinds of change, both accounted for.
 
-    Asserted from both sides — the declaration still says seven and the live
-    schema still holds exactly those seven — plus the ADR-0023 contract, which a
-    new column on a platform table could break by carrying a tenant scope.
+    `ig_0003` adds a COLUMN to an existing table; `ig_0004` adds exactly ONE
+    table. Asserted from both sides — the declaration says eight and the live
+    schema holds exactly those eight — plus the ADR-0023 contract, which either
+    a new column or a new table could break by carrying a tenant scope.
+
+    The count is stated rather than derived on purpose: a table arriving in a
+    migration without arriving in `platform_tables` is precisely the drift this
+    catches, and comparing the schema only to the declaration would let both
+    move together silently.
     """
     from dotmac_integration import module
     from dotmac_kernel.migrations.catalog import audit_live_schemas
     from dotmac_kernel.namespaces import NamespaceRegistry
 
-    assert len(module.platform_tables) == 7
+    assert len(module.platform_tables) == 8
+    assert "capability_destination_revisions" in module.platform_tables
     assert module.tables == ()
 
     admin_url, _ = migrated_scratch
@@ -724,6 +731,39 @@ def test_ig_0003_adds_no_table_and_keeps_the_plane_platform_only(
     assert live == set(module.platform_tables)
     assert column.is_nullable == "YES", "an unminted binding must stay unminted"
     assert not violations, "platform-plane violations:\n" + "\n".join(violations)
+
+
+@pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "DELETE"])
+def test_a_route_is_not_reachable_by_the_tenant_application_role(
+    migrated_scratch: tuple[str, str], privilege: str
+) -> None:
+    """`ig_0004` REVOKEs, and this proves the REVOKE took.
+
+    The destination table is where routing decisions live, so `app_user`
+    holding anything on it would be the most consequential privilege on this
+    plane — a tenant-facing role able to read, or rewrite, where another
+    application's traffic lands. On the platform plane there is no RLS to fall
+    back on: the revoke IS the isolation (ADR-0023).
+
+    Asked at the TABLE grain via `has_table_privilege`, which accounts for
+    privileges held directly, by role membership, or through PUBLIC — a
+    `pg_class.relacl` inspection would miss all three.
+    """
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        held = conn.execute(
+            text(
+                "SELECT has_table_privilege('app_user', "
+                "  'mod_intg.capability_destination_revisions', CAST(:p AS text))"
+            ),
+            {"p": privilege},
+        ).scalar_one()
+    engine.dispose()
+    assert not held, (
+        f"app_user holds {privilege} on capability_destination_revisions — a "
+        "tenant-facing role can reach the table that decides where traffic goes"
+    )
 
 
 def test_the_unique_index_is_the_one_the_mint_retry_depends_on(

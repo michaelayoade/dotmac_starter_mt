@@ -46,6 +46,24 @@ through :class:`dotmac_integration.policy.ExecutionPolicy` rather than as
 hardcoded defaults: a webhook fan-out and a nightly bulk poll do not want the
 same backoff.
 
+## Ownership and routing (slice 3)
+
+Two registries that together answer "whose contract is this, and where does it
+land?" — and answer it from trusted state only.
+
+`capability_registry` closes the gap `provider-capability-sources.md` § 7.2
+records: a capability id was an open string with no declaration, no owner and no
+collision check. Now the OWNING business application declares it, this module
+validates and binds it, and a connector merely implements it. Three refusals,
+three messages: declared twice, named-but-undeclared, declared-but-unimplemented.
+
+`destination_binding` makes the fleet's destination-scope invariant executable:
+**provider metadata is corroboration only and can never select a destination.**
+A binding names the application, the local scope and the contract version; it is
+resolved from an immutable config revision BEFORE any provider I/O; and the
+destination application must be the one that DECLARED the capability, so neither
+a payload nor a lone edited configuration can redirect a stream.
+
 ## enabled is not selected
 
 Many installations may be ENABLED for one capability; exactly one is SELECTED
@@ -65,6 +83,43 @@ from dotmac_integration.activation import (
     ActivationRefused,
     check_activation,
     require_activatable,
+)
+from dotmac_integration.capability_registry import (
+    EMPTY_REGISTRY,
+    CapabilityContract,
+    CapabilityOwner,
+    CapabilityRegistry,
+    CapabilityRegistryError,
+    CapabilityRegistryNotInstalled,
+    DuplicateCapabilityDeclaration,
+    OrphanCapabilityError,
+    UnknownCapabilityError,
+    capability_registry,
+    contract_from_declaration,
+    install_capability_registry,
+    require_declared_for_binding,
+    require_governable,
+    require_implements_only_declared,
+    require_no_orphans,
+)
+from dotmac_integration.destination_binding import (
+    Corroboration,
+    DestinationBinding,
+    DestinationBindingError,
+    DestinationClient,
+    DestinationDisagreement,
+    DestinationNotBound,
+    DestinationProfile,
+    DestinationProfileMissing,
+    LocalScope,
+    UntrustedDestination,
+    corroborate,
+    destination_client,
+    establish_destination,
+    install_destination_profiles,
+    require_corroborated,
+    require_profile,
+    resolve_destination,
 )
 from dotmac_integration.discovery import (
     ENTRY_POINT_GROUP,
@@ -266,6 +321,40 @@ __all__ = [
     "revoke_ingress_endpoint",
     "rotate_ingress_endpoint",
     "verify_and_normalize",
+    # ── Capability ownership + the trusted destination binding ─────────────
+    "EMPTY_REGISTRY",
+    "CapabilityContract",
+    "CapabilityOwner",
+    "CapabilityRegistry",
+    "CapabilityRegistryError",
+    "CapabilityRegistryNotInstalled",
+    "Corroboration",
+    "DestinationBinding",
+    "DestinationBindingError",
+    "DestinationClient",
+    "DestinationDisagreement",
+    "DestinationNotBound",
+    "DestinationProfile",
+    "DestinationProfileMissing",
+    "DuplicateCapabilityDeclaration",
+    "LocalScope",
+    "OrphanCapabilityError",
+    "UnknownCapabilityError",
+    "UntrustedDestination",
+    "capability_registry",
+    "contract_from_declaration",
+    "corroborate",
+    "destination_client",
+    "install_capability_registry",
+    "install_destination_profiles",
+    "require_corroborated",
+    "require_declared_for_binding",
+    "require_governable",
+    "require_implements_only_declared",
+    "require_no_orphans",
+    "require_profile",
+    "establish_destination",
+    "resolve_destination",
     "DispatchUnavailable",
     "settle",
     "set_binding_enabled",
