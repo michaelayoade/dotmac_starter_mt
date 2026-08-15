@@ -140,7 +140,7 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Final, Protocol, runtime_checkable
+from typing import Any, Final
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
@@ -156,7 +156,16 @@ from dotmac_integration.models import (
     InboxReceipt,
 )
 from dotmac_integration.selection import _usable
-from dotmac_integration.spi import ConnectorMode, accepts_manifest_digest
+from dotmac_integration.spi import (
+    Acknowledgement,
+    ConnectorMode,
+    InboundEvent,
+    IngressHandler,
+    IngressPlugin,
+    IngressRequest,
+    InvalidAcknowledgementError,
+    accepts_manifest_digest,
+)
 
 __all__ = [
     "HANDSHAKE_INSTALLATION_STATES",
@@ -251,130 +260,6 @@ HANDSHAKE_INSTALLATION_STATES: Final[frozenset[str]] = frozenset(
 
 
 # ── The plugin-side ingress contract ────────────────────────────────────────
-
-
-class InvalidAcknowledgementError(ValueError):
-    """A connector built a response body the engine will not write back."""
-
-
-@dataclass(frozen=True, slots=True, repr=False)
-class IngressRequest:
-    """The provider's request, UNTOUCHED.
-
-    The WHOLE envelope crosses the boundary. Selecting a header or a query
-    parameter here would be provider knowledge in a module that may hold none
-    (ADR-0024 § 7): which entry carries the signature, and which identifies the
-    request as a handshake at all, is the connector's business.
-
-    `repr`-less because it holds the raw body and every header, including an
-    authorization header or a cookie a misconfigured proxy passed through — and
-    it is a frame local in every traceback that leaves the plugin phase.
-    """
-
-    raw_body: bytes = b""
-    headers: Mapping[str, str] = field(default_factory=dict)
-    params: Mapping[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True, repr=False)
-class InboundEvent:
-    """One event a connector shaped out of the raw request.
-
-    Deliberately unvalidated: the database is the authority on what a receipt
-    row may hold, and a second copy of those rules here would drift from it.
-    `record_batch` turns whatever the column refuses into a typed refusal.
-
-    `repr`-less because `payload` is provider content.
-    """
-
-    provider_event_id: str
-    event_type: str
-    payload: dict[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True, repr=False)
-class Acknowledgement:
-    """The connector's HALF of the response: a body, and at most a media type.
-
-    No status code, and that omission is the design. An ingress status is a
-    retry instruction to the provider — 200 means "never send this again" — and
-    only the engine knows whether the batch committed. A connector-chosen status
-    would let a plugin acknowledge events that were rolled back.
-
-    `repr`-less because an echo handshake is *defined* as returning a slice of
-    the request, so this is assumed to hold request material.
-    """
-
-    body: bytes = b""
-    media_type: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.media_type is not None and not _MEDIA_TYPE_RE.fullmatch(
-            self.media_type
-        ):
-            raise InvalidAcknowledgementError(
-                "media type is not a `type/subtype` token; a response header "
-                "value is validated rather than trusted"
-            )
-
-    def resolved(self, default: str) -> Acknowledgement:
-        """This acknowledgement with the media type the ENGINE decided.
-
-        The default is the engine's because a connector that forgot one would
-        otherwise have its handshake echo answered as JSON — which fails the
-        subscription with a 200, the least debuggable outcome there is.
-        """
-        if self.media_type is not None:
-            return self
-        return Acknowledgement(body=self.body, media_type=default)
-
-
-@runtime_checkable
-class IngressHandler(Protocol):
-    """What a plugin returns for one capability's RECEIVING half.
-
-    Three hooks, and the split between the first two is load-bearing: `verify`
-    authenticates the RAW bytes, `normalize` interprets them, and both are
-    handed the same object so what was authenticated is provably what was
-    interpreted. Every provider worth verifying signs the bytes rather than a
-    re-serialization of them.
-
-    Neither is given a database session. Both run outside the transaction.
-    """
-
-    def verify(
-        self,
-        request: IngressRequest,
-        *,
-        config: dict[str, object],
-        secrets: dict[str, object],
-    ) -> bool: ...
-
-    def normalize(
-        self, request: IngressRequest, *, config: dict[str, object]
-    ) -> tuple[tuple[InboundEvent, ...], Acknowledgement | None]: ...
-
-    def challenge(
-        self,
-        request: IngressRequest,
-        *,
-        config: dict[str, object],
-        secrets: dict[str, object],
-    ) -> Acknowledgement | None: ...
-
-
-@runtime_checkable
-class IngressPlugin(Protocol):
-    """A connector that also RECEIVES.
-
-    Structural rather than an addition to `ConnectorPlugin`: a connector
-    satisfies this by having the method, so declaring `ConnectorMode.INGRESS`
-    and actually implementing it are two claims the engine can check
-    separately — which is what turns "this connector receives" from an
-    assumption into a refusal rather than an `AttributeError`.
-    """
-
-    def ingress_handler_for(self, capability_id: str) -> IngressHandler: ...
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -969,7 +854,7 @@ def _handler(prepared: PreparedIngress, registry: ConnectorRegistry) -> IngressH
 
 def _materialize(
     prepared: PreparedIngress, resolve_secrets: SecretResolver
-) -> dict[str, object]:
+) -> dict[str, str]:
     """Dereference the references, converting a resolver failure to a refusal.
 
     A secret store's own error text routinely names the path it failed on, the

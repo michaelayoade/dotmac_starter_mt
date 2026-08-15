@@ -85,7 +85,7 @@ from dotmac_integration import (
     set_binding_enabled,
     verify_and_normalize,
 )
-from dotmac_integration.conformance import FAKE_CAPABILITY, fake_manifest, fake_plugin
+from dotmac_integration.conformance import FAKE_CAPABILITY, fake_manifest
 from dotmac_integration.conformance import fake_registry as _fake_registry
 from dotmac_integration.ingress import (
     HANDSHAKE_INSTALLATION_STATES,
@@ -135,7 +135,14 @@ class IngressFake:
         *,
         manifest: ConnectorManifest | None = None,
         historical: tuple[ConnectorManifest, ...] = (),
-        modes: frozenset[ConnectorMode] = frozenset({ConnectorMode.INGRESS}),
+        # Declares BOTH because it implements both `handler_for` and
+        # `ingress_handler_for`. SPI 1.1's mode conformance is two-way, so a
+        # fake that implements a hook it does not declare is refused at
+        # discovery — which is the guard working, not a fixture problem.
+        # Tests that need a dishonest plugin still pass `modes=` explicitly.
+        modes: frozenset[ConnectorMode] = frozenset(
+            {ConnectorMode.INGRESS, ConnectorMode.DELIVERY}
+        ),
         verified: bool = True,
         events: tuple[InboundEvent, ...] = (),
         acknowledgement: Acknowledgement | None = None,
@@ -188,6 +195,43 @@ class IngressFake:
         if self.handler_returns is not _UNSET:
             return self.handler_returns
         return _Handler(self)
+
+
+class DeliveryOnlySpi:
+    """Declares ingress, but genuinely does not implement the receiving hook.
+
+    `IngressFake` can no longer express this: it always defines
+    `ingress_handler_for`, and the engine's refusal is a STRUCTURAL check
+    (`isinstance(plugin, IngressPlugin)`), not a behavioural one. The shipped
+    conformance fake used to serve this role — it declared `INGRESS` and served
+    no handler — but under SPI 1.1 it implements all three hooks, so the case
+    needs a plugin written for it.
+    """
+
+    def __init__(self, *, modes: frozenset[ConnectorMode]) -> None:
+        self.manifest_ = fake_manifest()
+        self.modes_ = modes
+
+    @property
+    def manifest(self) -> ConnectorManifest:
+        return self.manifest_
+
+    @property
+    def historical_manifests(self) -> tuple[ConnectorManifest, ...]:
+        return ()
+
+    @property
+    def modes(self) -> frozenset[ConnectorMode]:
+        return self.modes_
+
+    def handler_for(self, capability_id: str) -> Any:
+        self.manifest_.require_declares(capability_id)
+        return lambda request: None
+
+    def validate_connection(
+        self, *, config: dict[str, object], secrets: dict[str, object]
+    ) -> tuple[Diagnostic, ...]:
+        return (Diagnostic(ok=True, code="reachable"),)
 
 
 class _Handler:
@@ -461,7 +505,9 @@ def test_minting_refuses_a_connector_that_does_not_declare_ingress(
     db: Session,
 ) -> None:
     """A delivery-only connector has no receiving address to publish."""
-    registry = registry_for(IngressFake(modes=frozenset({ConnectorMode.DELIVERY})))
+    registry = installed_after_discovery(
+        IngressFake(modes=frozenset({ConnectorMode.DELIVERY}))
+    )
     _, binding, _ = build(db, registry, mint=False)
 
     with pytest.raises(LifecycleError, match="does not declare ingress"):
@@ -474,13 +520,18 @@ def test_minting_refuses_a_connector_that_declares_ingress_without_implementing_
 ) -> None:
     """BOTH halves of the claim are checked.
 
-    The shipped conformance fake declares `INGRESS` in its modes and serves no
-    `ingress_handler_for` — so it is not a contrived case, it is the default
-    delivery fake. Without this half, minting would succeed and the provider's
-    first request would surface an `AttributeError` from inside the plugin
-    phase, where there is no row to record it against.
+    SPI 1.1 refuses this shape at discovery, so the registry can only hold one
+    the way a real deployment would: the distribution was installed, or
+    upgraded, after discovery ran. The engine check is therefore defence in
+    depth rather than dead code — without it, minting would succeed and the
+    provider's first request would surface an `AttributeError` from inside the
+    plugin phase, where there is no row to record it against.
     """
-    registry = registry_for(fake_plugin())
+    registry = installed_after_discovery(
+        DeliveryOnlySpi(
+            modes=frozenset({ConnectorMode.INGRESS, ConnectorMode.DELIVERY})
+        )
+    )
     assert ConnectorMode.INGRESS in registry.plugin("conformance_fake").modes
     _, binding, _ = build(db, registry, mint=False)
 
@@ -952,8 +1003,14 @@ def test_prepare_refuses_a_connector_that_stopped_receiving(db: Session) -> None
     _, _, key = build(db, registry)
 
     for changed in (
-        registry_for(IngressFake(modes=frozenset({ConnectorMode.DELIVERY}))),
-        registry_for(fake_plugin()),  # declares INGRESS, serves no handler
+        installed_after_discovery(
+            IngressFake(modes=frozenset({ConnectorMode.DELIVERY}))
+        ),
+        installed_after_discovery(  # declares INGRESS, serves no handler
+            DeliveryOnlySpi(
+                modes=frozenset({ConnectorMode.INGRESS, ConnectorMode.DELIVERY})
+            )
+        ),
     ):
         with pytest.raises(ModeNotAvailable):
             prepare_ingress(db, endpoint=address(key), registry=changed)
@@ -1142,8 +1199,10 @@ def test_a_failed_handler_lookup_is_typed_and_sanitised(db: Session) -> None:
     prepared = prepare_ingress(db, endpoint=address(key), registry=registry)
 
     for broken in (
-        registry_for(IngressFake(handler_raises=KeyError(SECRET_SENTINEL))),
-        registry_for(IngressFake(handler_returns=object())),
+        installed_after_discovery(
+            IngressFake(handler_raises=KeyError(SECRET_SENTINEL))
+        ),
+        installed_after_discovery(IngressFake(handler_returns=object())),
     ):
         refusal = _refusal(
             lambda registry=broken: verify_and_normalize(
@@ -1161,8 +1220,8 @@ def test_a_failed_handler_lookup_is_typed_and_sanitised(db: Session) -> None:
 @pytest.mark.parametrize(
     "returned",
     [
-        (InboundEvent(provider_event_id="a", event_type="e"),),
-        ((InboundEvent(provider_event_id="a", event_type="e"),),),
+        (InboundEvent(provider_event_id="a", event_type="e", payload={}),),
+        ((InboundEvent(provider_event_id="a", event_type="e", payload={}),),),
         ((), b"raw bytes"),
         ("not a tuple at all"),
         ((["not a tuple"], None)),
@@ -1444,14 +1503,18 @@ def test_a_blank_provider_event_id_is_a_typed_refusal(db: Session) -> None:
     a constant, so nothing leaks along it — but untyped it leaves the edge
     inventing a status for a case the module already decided."""
     registry = registry_for(
-        IngressFake(events=(InboundEvent(provider_event_id="   ", event_type="e"),))
+        IngressFake(
+            events=(InboundEvent(provider_event_id="   ", event_type="e", payload={}),)
+        )
     )
     _, _, key = build(db, registry)
     prepared = prepare_ingress(db, endpoint=address(key), registry=registry)
 
     with pytest.raises(ReceiptWriteFailed):
         record_batch(
-            db, prepared, (InboundEvent(provider_event_id="  ", event_type="e"),)
+            db,
+            prepared,
+            (InboundEvent(provider_event_id="  ", event_type="e", payload={}),),
         )
 
 
