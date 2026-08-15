@@ -46,17 +46,42 @@ from dotmac_auth_oidc import (
     StateError,
     StateStore,
 )
-from dotmac_auth_oidc.discovery import ProviderMetadata
 
 ISSUER = "https://idp.example.com"
 REDIRECT = "https://app.example.com/auth/callback"
 
-METADATA = ProviderMetadata(
-    issuer=ISSUER,
-    authorization_endpoint=f"{ISSUER}/authorize",
-    token_endpoint=f"{ISSUER}/token",
-    jwks_uri=f"{ISSUER}/jwks",
-)
+
+class CountingTransport:
+    """Serves discovery, and counts how often it is asked.
+
+    The transport is the package's own injection seam, so the client's cache is
+    exercised for real rather than replaced. That matters here: whether the
+    cache survives a per-call store is one of the properties under test, and a
+    monkeypatched cache could not show it. (`ProviderCache` uses `__slots__`, so
+    patching an instance attribute is not available either — the design says
+    inject the transport, and it means it.)
+    """
+
+    def __init__(self) -> None:
+        self.discovery_fetches = 0
+
+    def get_json(self, url: str, *, timeout: float) -> dict[str, object]:
+        if url.endswith("/.well-known/openid-configuration"):
+            self.discovery_fetches += 1
+            return {
+                "issuer": ISSUER,
+                "authorization_endpoint": f"{ISSUER}/authorize",
+                "token_endpoint": f"{ISSUER}/token",
+                "jwks_uri": f"{ISSUER}/jwks",
+            }
+        raise AssertionError(f"unexpected GET {url}")
+
+    def post_form(
+        self, url: str, *, data: dict[str, str], auth: Any, timeout: float
+    ) -> dict[str, object]:
+        # No id_token: the exchange is not what this file is about, and
+        # reaching it at all is the assertion in the tests that get this far.
+        return {"access_token": "irrelevant"}
 
 
 def _config() -> RelyingPartyConfig:
@@ -69,13 +94,10 @@ def _config() -> RelyingPartyConfig:
     )
 
 
-def _client(store: Any, monkeypatch: pytest.MonkeyPatch) -> OIDCClient:
-    client = OIDCClient(_config(), state_store=store)
-    # Discovery is a network call and is not what this file is about. Patched on
-    # the INSTANCE's cache, so the client's ownership of that cache — the thing
-    # that makes it worth reusing — is still the shape under test.
-    monkeypatch.setattr(client._cache, "metadata", lambda: METADATA)
-    return client
+def _client(store: Any, transport: CountingTransport | None = None) -> OIDCClient:
+    return OIDCClient(
+        _config(), state_store=store, transport=transport or CountingTransport()
+    )
 
 
 class RecordingStore:
@@ -119,12 +141,10 @@ def test_the_sentinel_is_not_a_store_and_cannot_be_mistaken_for_one() -> None:
     assert isinstance(PER_REQUEST_STATE_STORE, PerRequestStateStore)
 
 
-def test_declaring_per_request_and_then_forgetting_it_is_an_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_declaring_per_request_and_then_forgetting_it_is_an_error() -> None:
     """The whole point of the declaration: the mistake is loud, and it names the
     argument that is missing."""
-    client = _client(PER_REQUEST_STATE_STORE, monkeypatch)
+    client = _client(PER_REQUEST_STATE_STORE)
 
     with pytest.raises(ConfigurationError, match="state_store must be passed"):
         client.start_login(return_to="/")
@@ -137,10 +157,8 @@ def test_declaring_per_request_and_then_forgetting_it_is_an_error(
 # ── The store that is actually used ─────────────────────────────────────────
 
 
-def test_the_per_call_store_is_the_one_the_ceremony_lands_in(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = _client(PER_REQUEST_STATE_STORE, monkeypatch)
+def test_the_per_call_store_is_the_one_the_ceremony_lands_in() -> None:
+    client = _client(PER_REQUEST_STATE_STORE)
     request_store = RecordingStore("request-1")
 
     redirect = client.start_login(return_to="/here", state_store=request_store)
@@ -150,16 +168,14 @@ def test_the_per_call_store_is_the_one_the_ceremony_lands_in(
     assert request_store.held[redirect.state].return_to == "/here"
 
 
-def test_two_requests_use_their_own_stores_and_never_each_others(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_two_requests_use_their_own_stores_and_never_each_others() -> None:
     """The property a request-bound store exists for.
 
     One client, two in-flight logins, two transactions. A client that had
     latched onto the first store would write the second ceremony into the first
     request's transaction — which by then may have committed, or rolled back.
     """
-    client = _client(PER_REQUEST_STATE_STORE, monkeypatch)
+    client = _client(PER_REQUEST_STATE_STORE)
     first, second = RecordingStore("request-1"), RecordingStore("request-2")
 
     a = client.start_login(return_to="/a", state_store=first)
@@ -169,14 +185,12 @@ def test_two_requests_use_their_own_stores_and_never_each_others(
     assert list(second.held) == [b.state]
 
 
-def test_a_per_call_store_overrides_a_held_one(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_per_call_store_overrides_a_held_one() -> None:
     """A consumer holding a process-lifetime store can still redirect a single
     ceremony elsewhere without a second client — and so without a second
     provider cache."""
     held = InMemoryStateStore()
-    client = _client(held, monkeypatch)
+    client = _client(held)
     per_call = RecordingStore("just-this-one")
 
     redirect = client.start_login(return_to="/", state_store=per_call)
@@ -188,13 +202,11 @@ def test_a_per_call_store_overrides_a_held_one(
     )
 
 
-def test_a_held_store_still_works_with_no_per_call_argument(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_held_store_still_works_with_no_per_call_argument() -> None:
     """The existing shape is unchanged. This seam adds an option; it does not
     make every consumer thread a store through every call."""
     held = InMemoryStateStore()
-    client = _client(held, monkeypatch)
+    client = _client(held)
 
     redirect = client.start_login(return_to="/")
 
@@ -204,15 +216,13 @@ def test_a_held_store_still_works_with_no_per_call_argument(
 # ── The callback half ───────────────────────────────────────────────────────
 
 
-def test_the_callback_claims_from_the_store_it_was_given(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_the_callback_claims_from_the_store_it_was_given() -> None:
     """A login started in one request is finished in another, so the two stores
     are DIFFERENT objects over the same shared rows. Here the second store is
     seeded with what the first wrote, which is what a database does for free and
     what a per-worker store cannot do at all.
     """
-    client = _client(PER_REQUEST_STATE_STORE, monkeypatch)
+    client = _client(PER_REQUEST_STATE_STORE)
     starting = RecordingStore("request-1")
     redirect = client.start_login(return_to="/", state_store=starting)
 
@@ -234,16 +244,14 @@ def test_the_callback_claims_from_the_store_it_was_given(
     assert redirect.state not in finishing.held, "the ceremony was not consumed"
 
 
-def test_the_state_pair_is_checked_before_the_ceremony_is_claimed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_the_state_pair_is_checked_before_the_ceremony_is_claimed() -> None:
     """Ordering, and it is load-bearing.
 
     If claiming came first, anyone able to reach the callback with a valid state
     and a wrong cookie could destroy somebody else's in-flight login. Refusing
     an attacker must not cost the legitimate user their sign-in.
     """
-    client = _client(PER_REQUEST_STATE_STORE, monkeypatch)
+    client = _client(PER_REQUEST_STATE_STORE)
     store = RecordingStore("request-1")
     redirect = client.start_login(return_to="/", state_store=store)
 
@@ -265,21 +273,23 @@ def test_the_state_pair_is_checked_before_the_ceremony_is_claimed(
 # ── The cache the client keeps ──────────────────────────────────────────────
 
 
-def test_the_provider_cache_is_not_rebuilt_per_ceremony(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The reason the store moved rather than the client.
+def test_the_provider_cache_is_not_rebuilt_per_ceremony() -> None:
+    """The reason the STORE moved rather than the client.
 
-    A per-request client would refetch discovery on every login. The cache is
-    the client's, and passing a store per call must not disturb it.
+    Counted at the transport, which is the only place a refetch would show. A
+    client rebuilt per request would fetch discovery on every login; here three
+    ceremonies through three different stores cost exactly one fetch.
     """
-    client = _client(PER_REQUEST_STATE_STORE, monkeypatch)
-    cache = client._cache
+    transport = CountingTransport()
+    client = _client(PER_REQUEST_STATE_STORE, transport)
 
-    client.start_login(return_to="/", state_store=RecordingStore("r1"))
-    client.start_login(return_to="/", state_store=RecordingStore("r2"))
+    for index in range(3):
+        client.start_login(return_to="/", state_store=RecordingStore(f"r{index}"))
 
-    assert client._cache is cache
+    assert transport.discovery_fetches == 1, (
+        f"{transport.discovery_fetches} discovery fetches for 3 ceremonies — "
+        "the per-call store disturbed the cache the client exists to keep"
+    )
 
 
 def test_a_protocol_conforming_store_needs_no_base_class() -> None:
