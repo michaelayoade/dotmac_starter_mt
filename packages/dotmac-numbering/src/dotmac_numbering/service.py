@@ -193,7 +193,7 @@ def configure_series(
     """
     configuration.validate()
     series_model, *_ = _models(scope)
-    existing = _find_series(db, scope, configuration.series_code)
+    existing = _find_series(db, scope, configuration.series_code, lock=True)
     if existing is not None:
         _assert_safe_transition(db, scope, existing, configuration)
     target = existing
@@ -309,6 +309,8 @@ def preview(
     Reads the counter for the date's OWN period, so a preview for a backdated
     document shows that period's next number rather than the current one.
     """
+    # No lock: preview decides nothing and writes nothing, so a concurrent
+    # reconfiguration merely means the preview was a moment stale.
     series = _require_series(db, scope, series_code)
     period = period_for(reference_date, series.reset_policy)
     counter = _find_counter(db, scope, series_code, period)
@@ -342,14 +344,23 @@ def _tenant_filter(stmt, scope: Scope, model):
     return stmt
 
 
-def _find_series(db: Session, scope: Scope, series_code: str):
+def _find_series(db: Session, scope: Scope, series_code: str, *, lock: bool = False):
+    """The series row, optionally locked FOR UPDATE.
+
+    LOCK ORDER IS SERIES, THEN PERIOD COUNTER — everywhere, without exception.
+    Taking them in the other order anywhere would deadlock against every path
+    that takes them in this one.
+    """
     series_model, *_ = _models(scope)
     stmt = select(series_model).where(series_model.series_code == series_code)
-    return db.execute(_tenant_filter(stmt, scope, series_model)).scalar_one_or_none()
+    stmt = _tenant_filter(stmt, scope, series_model)
+    if lock:
+        stmt = stmt.with_for_update()
+    return db.execute(stmt).scalar_one_or_none()
 
 
-def _require_series(db: Session, scope: Scope, series_code: str):
-    series = _find_series(db, scope, series_code)
+def _require_series(db: Session, scope: Scope, series_code: str, *, lock: bool = False):
+    series = _find_series(db, scope, series_code, lock=lock)
     if series is None:
         raise _error(
             "series_not_configured",
@@ -507,7 +518,11 @@ def _do_allocate(
     idempotency_key: str,
     allocated_by: str | None,
 ) -> dict[str, object]:
-    series = _require_series(db, scope, series_code)
+    # Series first, then the period counter. Without the series lock a first
+    # allocation can read old configuration while a concurrent
+    # `configure_series` commits new values, and the number is then formatted
+    # from a configuration that no longer exists.
+    series = _require_series(db, scope, series_code, lock=True)
     period_key = period_for(reference_date, series.reset_policy)
     counter = _locked_counter(db, scope, series, period_key)
 
@@ -594,7 +609,7 @@ def advance_to_at_least(
     if not repaired_by:
         raise _error("missing_actor", "A repair must name an accountable actor.")
 
-    series = _require_series(db, scope, series_code)
+    series = _require_series(db, scope, series_code, lock=True)
     _validate_period_key(period_key, series.reset_policy)
     counter = _locked_counter(db, scope, series, period_key)
 

@@ -74,6 +74,61 @@ _PLATFORM_MUTABLE = ("platform_number_series", "platform_series_counters")
 _PLATFORM_IMMUTABLE = ("platform_allocation_receipts", "platform_series_repairs")
 
 _REFUSE_FUNCTION = "mod_numbering.refuse_mutation"
+_FREEZE_TENANT_FUNCTION = "mod_numbering.refuse_tenant_identity_change"
+_FREEZE_PLATFORM_FUNCTION = "mod_numbering.refuse_platform_identity_change"
+
+# The fields that shape what a rendered number looks like, or which period it
+# belongs to. `start_value` is deliberately absent: it is a PROSPECTIVE SEED
+# for periods that have not opened yet, never part of the rendered identity,
+# so changing it can reissue nothing.
+_IDENTITY_COLUMNS = (
+    "prefix",
+    "suffix",
+    "separator",
+    "min_digits",
+    "include_year",
+    "year_digits",
+    "include_month",
+    "reset_policy",
+)
+
+
+def _identity_tuple(alias: str) -> str:
+    return ", ".join(f"{alias}.{column}" for column in _IDENTITY_COLUMNS)
+
+
+def _freeze_function_sql(name: str, counters: str, receipts: str, scope: str) -> str:
+    """The identity-freeze trigger body for one plane.
+
+    Every interpolated value is a module-level literal — the column names above
+    and the two table names for this plane. noqa: the check cannot see that.
+    """
+    tenant_predicate = "c.tenant_id = NEW.tenant_id AND " if scope == "tenant" else ""
+    receipt_predicate = "r.tenant_id = NEW.tenant_id AND " if scope == "tenant" else ""
+    table = "number_series" if scope == "tenant" else "platform_number_series"
+    return f"""
+        CREATE OR REPLACE FUNCTION {name}() RETURNS trigger AS $$
+        BEGIN
+            IF ({_identity_tuple("NEW")})
+               IS NOT DISTINCT FROM ({_identity_tuple("OLD")}) THEN
+                RETURN NEW;
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM mod_numbering.{counters} c
+                 WHERE {tenant_predicate}c.series_code = NEW.series_code
+                UNION ALL
+                SELECT 1 FROM mod_numbering.{receipts} r
+                 WHERE {receipt_predicate}r.series_code = NEW.series_code
+            ) THEN
+                RAISE EXCEPTION
+                    'mod_numbering.{table} identity fields are frozen once the '
+                    'series has allocated (series_code=%)', NEW.series_code
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """  # noqa: S608
 
 
 def _series_columns() -> list[sa.Column[Any]]:
@@ -234,6 +289,28 @@ def upgrade() -> None:
         """
     )
 
+    # The identity freeze, enforced by the database rather than by the service.
+    # `configure_series` refuses the transition first and gives a better error;
+    # this exists because the online roles can write the configuration tables
+    # directly, and a migration or a psql session would otherwise walk straight
+    # past a rule that lives only in Python.
+    op.execute(
+        _freeze_function_sql(
+            _FREEZE_TENANT_FUNCTION,
+            "series_counters",
+            "allocation_receipts",
+            "tenant",
+        )
+    )
+    op.execute(
+        _freeze_function_sql(
+            _FREEZE_PLATFORM_FUNCTION,
+            "platform_series_counters",
+            "platform_allocation_receipts",
+            "platform",
+        )
+    )
+
     if ModulePlane.TENANT in planes:
         _upgrade_tenant_plane()
     if ModulePlane.PLATFORM in planes:
@@ -343,6 +420,14 @@ def _upgrade_tenant_plane() -> None:
                 f"ON mod_numbering.{table} TO {role};"
             )
 
+    op.execute(
+        f"""
+        CREATE TRIGGER number_series_identity_freeze
+            BEFORE UPDATE ON mod_numbering.number_series
+            FOR EACH ROW EXECUTE FUNCTION {_FREEZE_TENANT_FUNCTION}();
+        """
+    )
+
     for table in _TENANT_IMMUTABLE:
         # Append-only: no UPDATE, no DELETE, for anyone online.
         for role in ("app_user", "platform_api"):
@@ -415,6 +500,14 @@ def _upgrade_platform_plane() -> None:
             )
         op.execute(f"REVOKE ALL ON mod_numbering.{table} FROM app_user;")
 
+    op.execute(
+        f"""
+        CREATE TRIGGER platform_number_series_identity_freeze
+            BEFORE UPDATE ON mod_numbering.platform_number_series
+            FOR EACH ROW EXECUTE FUNCTION {_FREEZE_PLATFORM_FUNCTION}();
+        """
+    )
+
     for table in _PLATFORM_IMMUTABLE:
         for role in ("platform_api", "app_admin"):
             op.execute(f"GRANT SELECT, INSERT ON mod_numbering.{table} TO {role};")
@@ -432,3 +525,5 @@ def downgrade() -> None:
     ):
         op.execute(f"DROP TABLE IF EXISTS mod_numbering.{table} CASCADE;")
     op.execute(f"DROP FUNCTION IF EXISTS {_REFUSE_FUNCTION}() CASCADE;")
+    op.execute(f"DROP FUNCTION IF EXISTS {_FREEZE_TENANT_FUNCTION}() CASCADE;")
+    op.execute(f"DROP FUNCTION IF EXISTS {_FREEZE_PLATFORM_FUNCTION}() CASCADE;")

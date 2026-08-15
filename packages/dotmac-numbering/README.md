@@ -30,6 +30,38 @@ Configuration and repair are typed commands: a consumer never writes
 validated, and a repair names the period it moves and leaves immutable evidence
 of who moved it and why.
 
+## Locking, and what linearizes
+
+**Lock order is series, then period counter — everywhere.** Configuration,
+allocation and repair all take the series row `FOR UPDATE` before deciding
+anything; allocation and repair then take the counter. Taking them in the other
+order anywhere would deadlock against every path that takes them in this one.
+
+Without the series lock a first allocation can read old configuration while a
+concurrent `configure_series` commits new values, and the number is rendered
+from a configuration that no longer exists. With it, exactly two orders are
+possible and both are coherent: allocate-then-configure (history now exists, so
+the reconfiguration is refused) or configure-then-allocate (the number uses the
+new format).
+
+## What may change after a series has allocated
+
+**Identity-shaping fields freeze**: prefix, suffix, separator, digit width,
+year and month inclusion, year width, reset policy. Changing one could
+re-render a number already issued, so the service refuses the transition and a
+database trigger refuses it again — the online roles can write the
+configuration tables directly, so a rule living only in Python is one a psql
+session walks straight past.
+
+**`start_value` stays mutable, because it is a prospective seed and not part of
+the rendered identity.** It seeds the counter of a period when that period
+first opens, and it can never move a counter that already exists. So raising it:
+
+- leaves an already-open period exactly where it is;
+- seeds a period that has not opened yet;
+- changes nothing at all for a non-resetting series, whose single `*` counter is
+  always already open.
+
 ## What it does NOT own
 
 What a number *means*, which documents require one, legal gaplessness policy,

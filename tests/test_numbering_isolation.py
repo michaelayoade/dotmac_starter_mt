@@ -1036,3 +1036,359 @@ def test_a_resetting_series_must_print_its_period_at_the_database(scratch):
             )
     assert "violates check constraint" in str(exc.value).lower()
     engine.dispose()
+
+
+# ── Configuration and allocation linearize on the series row ────────────────
+
+
+def _configure_vs_allocate(
+    user_url: str, tenant: uuid.UUID, *, lock_removed: bool = False
+) -> tuple[list, list]:
+    """Race a reconfiguration against the series' FIRST allocation.
+
+    Both threads open a transaction, rendezvous, then proceed. With the series
+    lock exactly two serial orders are possible:
+
+    * allocate first — the counter and receipt exist, so the later
+      `configure_series` sees history and refuses;
+    * configure first — the allocation reads the NEW configuration and formats
+      with it.
+
+    The state that must never occur is the torn one: the configuration commits
+    AND the allocation renders from the old configuration.
+    """
+    barrier = threading.Barrier(2)
+    results: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def allocator() -> None:
+        try:
+            with _session(user_url, tenant) as s:
+                s.execute(text("SELECT 1"))
+                barrier.wait(timeout=15)
+                out = allocate(
+                    s,
+                    scope=TenantScope(tenant_id=tenant),
+                    series_code="invoice",
+                    reference_date=JAN,
+                    idempotency_key="race",
+                )
+                s.commit()
+                results["number"] = out.formatted_number
+        except BaseException as exc:
+            errors.append(exc)
+            with contextlib.suppress(Exception):
+                barrier.abort()
+
+    def configurer() -> None:
+        try:
+            with _session(user_url, tenant) as s:
+                s.execute(text("SELECT 1"))
+                barrier.wait(timeout=15)
+                _configure(s, TenantScope(tenant_id=tenant), min_digits=3)
+                results["configured"] = True
+        except NumberingError as exc:
+            results["configure_refused"] = exc.code
+        except BaseException as exc:
+            errors.append(exc)
+            with contextlib.suppress(Exception):
+                barrier.abort()
+
+    threads = [threading.Thread(target=t) for t in (allocator, configurer)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=40)
+    return [results], errors
+
+
+def test_configuration_and_first_allocation_linearize(scratch):
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(s, TenantScope(tenant_id=tenant), min_digits=6)
+
+    (results,), errors = _configure_vs_allocate(user_url, tenant)
+    assert not errors, errors
+
+    number = results.get("number")
+    assert number is not None, "the allocation must complete under either order"
+    if results.get("configured"):
+        # Configure won the row: the allocation must have used the new width.
+        assert number == "INV-001", (
+            f"configuration committed but the number is {number!r} — that is a "
+            "torn read of the series row"
+        )
+    else:
+        # Allocate won: history now exists, so the configuration is refused.
+        assert number == "INV-000001"
+        assert results.get("configure_refused", "").endswith(
+            "unsafe_configuration_change"
+        )
+
+
+def test_hostile_without_the_series_lock_configuration_and_allocation_tear(
+    scratch, monkeypatch
+):
+    """Sensitivity proof for the series lock.
+
+    Removing it lets the allocation read the old configuration while the
+    reconfiguration commits, producing exactly the state the test above
+    forbids. The barrier sits inside the patched series read, after both
+    transactions have seen the same row.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(s, TenantScope(tenant_id=tenant), min_digits=6)
+
+    from dotmac_numbering import service as svc
+
+    read_barrier = threading.Barrier(2)
+    original = svc._find_series
+
+    def unlocked_series(db, scope, series_code, *, lock=False):
+        row = original(db, scope, series_code, lock=False)
+        # Both actors have now read the SAME series row; only then proceed.
+        with contextlib.suppress(threading.BrokenBarrierError):
+            read_barrier.wait(timeout=15)
+        return row
+
+    monkeypatch.setattr(svc, "_find_series", unlocked_series)
+
+    (results,), errors = _configure_vs_allocate(user_url, tenant)
+    torn = bool(results.get("configured")) and results.get("number") == "INV-000001"
+    assert torn or errors, (
+        "with the series lock removed the reconfiguration and the first "
+        f"allocation must tear or fail; got {results} cleanly, so the "
+        "linearization proof is not measuring the lock"
+    )
+
+
+# ── start_value is a prospective seed, never part of the identity ───────────
+
+
+def test_start_value_only_seeds_periods_that_have_not_opened(scratch):
+    """Three claims in one, because they are one rule.
+
+    Raising `start_value` must leave an already-open period's counter exactly
+    where it is, seed a period that has not opened yet, and — for a
+    non-resetting series, whose single `*` counter is always already open —
+    change nothing at all.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, reset_policy="yearly", include_year=True, start_value=1)
+        first = allocate(
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="a",
+        )
+        s.commit()
+        assert first.formatted_number == "INV-2026-000001"
+
+        # Permitted after history: start_value is not an identity field.
+        _configure(s, scope, reset_policy="yearly", include_year=True, start_value=500)
+
+        # The OPEN period is untouched — its counter already exists.
+        same_period = allocate(
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=FEB,
+            idempotency_key="b",
+        )
+        s.commit()
+        assert same_period.formatted_number == "INV-2026-000002"
+
+        # A period that has not opened yet inherits the new seed.
+        future = allocate(
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=NEXT_YEAR,
+            idempotency_key="c",
+        )
+        s.commit()
+        assert future.formatted_number == "INV-2027-000500"
+
+
+def test_start_value_does_not_move_an_existing_non_resetting_counter(scratch):
+    """The `*` counter is always already open, so nothing can reseed it."""
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, start_value=1)
+        allocate(
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="a",
+        )
+        s.commit()
+        _configure(s, scope, start_value=9000)
+        nxt = allocate(
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="b",
+        )
+        s.commit()
+    assert nxt.formatted_number == "INV-000002"
+
+
+def test_start_value_and_new_period_creation_linearize(scratch):
+    """Race a `start_value` change against the creation of a new period.
+
+    Both orders are legitimate — the new counter seeds from whichever value the
+    series row held when it was created — so the invariant is that the seed is
+    one of the two, never a value from neither and never an error.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope, reset_policy="yearly", include_year=True, start_value=1)
+        allocate(
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="seed",
+        )
+        s.commit()
+
+    barrier = threading.Barrier(2)
+    seen: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def open_new_period() -> None:
+        try:
+            with _session(user_url, tenant) as s:
+                s.execute(text("SELECT 1"))
+                barrier.wait(timeout=15)
+                out = allocate(
+                    s,
+                    scope=scope,
+                    series_code="invoice",
+                    reference_date=NEXT_YEAR,
+                    idempotency_key="new-period",
+                )
+                s.commit()
+                seen["value"] = out.value
+        except BaseException as exc:
+            errors.append(exc)
+            with contextlib.suppress(Exception):
+                barrier.abort()
+
+    def reseed() -> None:
+        try:
+            with _session(user_url, tenant) as s:
+                s.execute(text("SELECT 1"))
+                barrier.wait(timeout=15)
+                _configure(
+                    s,
+                    scope,
+                    reset_policy="yearly",
+                    include_year=True,
+                    start_value=700,
+                )
+        except BaseException as exc:
+            errors.append(exc)
+            with contextlib.suppress(Exception):
+                barrier.abort()
+
+    threads = [threading.Thread(target=t) for t in (open_new_period, reseed)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=40)
+
+    assert not errors, errors
+    assert seen["value"] in (1, 700), (
+        f"the new period seeded from {seen['value']}, which is neither the old "
+        "start value nor the new one — the series row was read torn"
+    )
+
+
+# ── The freeze is enforced by the database, not only by the service ─────────
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [("prefix", "'XX'"), ("min_digits", "3"), ("reset_policy", "'yearly'")],
+)
+def test_raw_sql_cannot_change_an_identity_field_after_history(scratch, column, value):
+    """`configure_series` refuses first and explains better, but the online
+    roles can write this table directly, so the rule has to live in the
+    database too."""
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
+        allocate(
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="k1",
+        )
+        s.commit()
+
+    engine = _tenant_engine(user_url, tenant)
+    with engine.connect() as conn, pytest.raises(DBAPIError) as exc:
+        conn.execute(
+            text(
+                # Column and value are parametrize literals, not input.
+                f"UPDATE mod_numbering.number_series SET {column} = {value} "  # noqa: S608
+                "WHERE tenant_id = :t"
+            ),
+            {"t": tenant},
+        )
+    assert "frozen" in str(exc.value).lower()
+    engine.dispose()
+
+
+def test_raw_sql_may_still_change_start_value_after_history(scratch):
+    """Sensitivity proof for the freeze trigger: it must not refuse everything.
+
+    `start_value` is a prospective seed, not part of the rendered identity, so
+    the trigger has to let it through.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
+        allocate(
+            s,
+            scope=scope,
+            series_code="invoice",
+            reference_date=JAN,
+            idempotency_key="k1",
+        )
+        s.commit()
+
+    engine = _tenant_engine(user_url, tenant)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE mod_numbering.number_series SET start_value = 42 "
+                "WHERE tenant_id = :t"
+            ),
+            {"t": tenant},
+        )
+    engine.dispose()
+
+    with _session(user_url, tenant) as s:
+        assert s.query(NumberSeries).one().start_value == 42

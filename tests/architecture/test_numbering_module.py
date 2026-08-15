@@ -241,6 +241,38 @@ def test_identity_shaping_configuration_freezes_once_a_series_has_history() -> N
     assert "_assert_safe_transition" in inspect.getsource(service.configure_series)
 
 
+def test_every_deciding_path_locks_the_series_first() -> None:
+    """Series, then counter — everywhere.
+
+    Without the series lock a first allocation can render from configuration a
+    concurrent update has already replaced. Preview is exempt: it decides
+    nothing and writes nothing.
+    """
+    for func in (
+        service.configure_series,
+        service.allocate,
+        service.advance_to_at_least,
+    ):
+        source = inspect.getsource(func)
+        if func is service.allocate:
+            # allocate() delegates to _do_allocate inside the kernel ledger.
+            source = inspect.getsource(service._do_allocate)
+        assert (
+            "lock=True" in source
+        ), f"{func.__name__} reads the series without locking it"
+
+
+def test_the_freeze_is_also_a_database_trigger() -> None:
+    """The service refuses first and explains better, but the online roles can
+    write the configuration tables directly."""
+    migration = MIGRATION.read_text(encoding="utf-8")
+    assert "identity_freeze" in migration
+    assert "BEFORE UPDATE ON mod_numbering.number_series" in migration
+    assert "BEFORE UPDATE ON mod_numbering.platform_number_series" in migration
+    # start_value is a prospective seed, so the trigger must not freeze it.
+    assert "start_value" not in migration.split("_IDENTITY_COLUMNS")[1].split(")")[0]
+
+
 def test_the_migration_mirrors_the_critical_validation_in_check_constraints() -> None:
     """The online roles can write the configuration tables directly, so a rule
     that lives only in Python is one a psql session walks straight past."""
