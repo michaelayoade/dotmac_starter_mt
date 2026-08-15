@@ -478,7 +478,7 @@ def test_a_module_entry_missing_a_stateful_fact_does_not_resolve(
     with pytest.raises((KeyError, SystemExit)):
         module.cmd_resolve(
             argparse.Namespace(
-                distribution="dotmac-application-directory", version="0.1.0a2"
+                distribution="dotmac-application-directory", version="0.1.0a3"
             )
         )
 
