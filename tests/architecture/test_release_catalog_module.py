@@ -76,8 +76,44 @@ def test_declared_tables_are_exactly_what_the_migration_creates() -> None:
     for call in calls:
         assert isinstance(call.args[0], ast.Constant), ast.unparse(call.func)
     created = {call.args[0].value for call in calls}
-    assert created == set(module.tables)
+    assert created == set(module.tables) | set(module.platform_tables)
     assert created == {"release_artifacts", "artifact_attestations"}
+
+
+def test_every_table_is_declared_on_the_platform_plane() -> None:
+    """The declaration the module shipped `0.1.0a1`–`0.1.0a3` without.
+
+    `rl_0001` has always created these tables with no row-level security and
+    REVOKEd them from `app_user` — the ADR-0023 PLATFORM contract — while the
+    manifest declared them TENANT. Nothing caught it because this repository
+    composes the module in no assembly, so `audit_snapshot` never walked
+    `mod_rel`; the first failure would have been an adopting control plane's,
+    against a migration that was right.
+
+    `tables=()` is asserted rather than tolerated: the empty tuple is the
+    STATEMENT that this module owns no tenant data, which a reader and the gate
+    can both see. An omission reads as an oversight.
+    """
+    assert module.tables == ()
+    assert set(module.platform_tables) == {
+        "release_artifacts",
+        "artifact_attestations",
+    }
+
+
+def test_the_module_is_not_selectable_because_it_has_one_plane() -> None:
+    """ADR-0028 gives INSTALLATION INTENT its own declaration, for a module that
+    genuinely offers a choice. This one does not: platform-only is the single
+    supported combination, so the contract stays atomic, `supported_plane_sets`
+    is derived rather than declared, and a composing assembly makes no
+    selection. Declaring a one-element set would ask every consumer to restate
+    the only possibility — and would raise the kernel floor to a61 for a field
+    the manifest never passes.
+    """
+    from dotmac_kernel.planes import ModulePlane, supported_plane_sets
+
+    assert module.supported_plane_sets == ()
+    assert supported_plane_sets(module) == ((ModulePlane.PLATFORM,),)
 
 
 def test_the_lineage_is_a_root_with_no_false_dependency() -> None:
@@ -178,7 +214,8 @@ def test_the_migration_revokes_the_data_plane_role_from_every_table() -> None:
     around.
     """
     source = _migration_source()
-    for table in module.tables:
+    assert module.platform_tables, "the loop below would pass over nothing"
+    for table in module.platform_tables:
         assert f"REVOKE ALL ON mod_rel.{table} FROM app_user;" in source
 
 
@@ -192,7 +229,8 @@ def test_the_online_role_holds_no_privilege_that_can_rewrite_history() -> None:
     refuses; this proves the migration never asks.
     """
     source = _migration_source()
-    for table in module.tables:
+    assert module.platform_tables, "the loop below would pass over nothing"
+    for table in module.platform_tables:
         assert f"GRANT SELECT, INSERT ON mod_rel.{table} TO platform_api;" in source
     for verb in ("UPDATE", "DELETE"):
         assert f"{verb} ON mod_rel.release_artifacts TO platform_api" not in source
@@ -207,7 +245,8 @@ def test_the_offline_role_keeps_a_repair_path() -> None:
     what makes it deliberate rather than accidental.
     """
     source = _migration_source()
-    for table in module.tables:
+    assert module.platform_tables, "the loop below would pass over nothing"
+    for table in module.platform_tables:
         assert (
             f"GRANT SELECT, INSERT, UPDATE, DELETE ON mod_rel.{table} TO app_admin;"
             in source
@@ -244,7 +283,8 @@ def test_channels_and_pins_are_not_in_this_release() -> None:
     production, by a deployment that moved when nobody approved it.
     """
     deferred = {"release_channels", "channel_pins", "artifact_selections"}
-    assert set(module.tables) & deferred == set()
+    declared = set(module.tables) | set(module.platform_tables)
+    assert declared & deferred == set()
     assert deferred & {p.stem for p in MODULE_ROOT.glob("*.py")} == set()
 
 
