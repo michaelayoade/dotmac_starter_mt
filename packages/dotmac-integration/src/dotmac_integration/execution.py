@@ -55,6 +55,7 @@ from dotmac_integration.retry import Outcome, next_state, retry_delay_seconds
 __all__ = [
     "CheckpointConflict",
     "ExecutionError",
+    "LostClaim",
     "ProviderEventIdentityCollision",
     "advance_checkpoint",
     "claim_delivery",
@@ -81,6 +82,21 @@ class ProviderEventIdentityCollision(ExecutionError):
 
 class CheckpointConflict(ExecutionError):
     """Another worker advanced this cursor first."""
+
+
+class LostClaim(ExecutionError):
+    """The lease expired and another worker took over before settle.
+
+    ONE class for both planes. It began in `dispatch` for the outbox and moved
+    here when the inbox grew the same lease discipline, because two classes
+    sharing this name would make `except LostClaim` catch a delivery's lost
+    claim but not a receipt's — decided by nothing more than which module the
+    caller happened to import from. `dispatch.LostClaim` still resolves, so no
+    existing import changed.
+
+    Typed and raised rather than returned as a falsy value: a worker that
+    silently failed to settle looks exactly like one that succeeded.
+    """
 
 
 def payload_digest(payload: Any) -> str:

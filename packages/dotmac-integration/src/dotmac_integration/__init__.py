@@ -226,6 +226,29 @@ from dotmac_integration.operations import (
     replay_receipt,
 )
 from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
+from dotmac_integration.receipt_delivery import (
+    DeliveryError,
+    DeliveryReport,
+    FingerprintConflict,
+    # `LostClaim` is deliberately absent: it is ONE class, imported above via
+    # `dispatch`, and re-importing it here would be a redefinition of the same
+    # name at this module's surface.
+    ProductAcceptance,
+    ProductOutcome,
+    ProductPortClient,
+    ProductRequest,
+    ReceiptClaim,
+    ReceiptClaims,
+    ReceiptClaimStore,
+    TransportFailure,
+    TrustedDestination,
+    TrustedScope,
+    build_product_request,
+    deliver_receipt,
+    idempotency_key_for,
+    request_fingerprint_for,
+    require_stable_fingerprint,
+)
 from dotmac_integration.retry import (
     Outcome,
     OutcomeStatus,
@@ -355,6 +378,25 @@ __all__ = [
     "require_profile",
     "establish_destination",
     "resolve_destination",
+    # ── Receipt-to-product delivery ─────────────────────────────────────────
+    "DeliveryError",
+    "DeliveryReport",
+    "FingerprintConflict",
+    "ProductAcceptance",
+    "ProductPortClient",
+    "ProductOutcome",
+    "ProductRequest",
+    "ReceiptClaim",
+    "ReceiptClaimStore",
+    "ReceiptClaims",
+    "TransportFailure",
+    "TrustedDestination",
+    "TrustedScope",
+    "build_product_request",
+    "deliver_receipt",
+    "idempotency_key_for",
+    "request_fingerprint_for",
+    "require_stable_fingerprint",
     "DispatchUnavailable",
     "settle",
     "set_binding_enabled",
