@@ -103,8 +103,29 @@ platform-role reachability, tenant-role revocation and no cross-plane FK.
 
 ## Consequences
 
-- Kernel a60 and `dotmac-approvals` a2 are withdrawn, never published. The
-  corrected public surfaces are kernel a61 and approvals a3.
+- Kernel a60 and `dotmac-approvals` a2 are superseded. The corrected public
+  surfaces are kernel a61 and approvals a3.
+
+  > **Amendment, 2026-08-15 — they were published, then superseded.** This line
+  > originally read "withdrawn, never published", and that is not what happened.
+  > `dotmac-kernel-v0.1.0a60` and `dotmac-approvals-v0.1.0a2` both exist as tags
+  > on origin, and the release workflow writes a tag only AFTER `verify-registry`
+  > succeeds — so each tag is evidence of a completed publish, not an intention.
+  > `packages/dotmac-kernel/CHANGELOG.md` says so directly for a60: *"Published,
+  > then superseded by a61."*
+  >
+  > The distinction is not pedantic. A published artifact cannot be
+  > un-published: it stays resolvable on the index and installable by anything
+  > that pins it. So any reasoning about **what a consumer could already be
+  > running** — a floor, a compatibility claim, an incident timeline, a
+  > "corrected public surface" statement — must treat a60 and approvals a2 as
+  > REACHABLE. "Never published" invites precisely the opposite conclusion, and
+  > it was the durable document carrying the wrong version of events while the
+  > changelog carried the right one.
+  >
+  > "Withdrawn" was accurate as INTENT — both surfaces were superseded quickly,
+  > and nobody should adopt them. The original wording recorded the intent as
+  > though it were the outcome.
 - Vendor CP can adopt only the approvals platform plane while continuing to run
   the kernel lineage it already composes.
 - A future module may support only a subset of the three combinations; the
