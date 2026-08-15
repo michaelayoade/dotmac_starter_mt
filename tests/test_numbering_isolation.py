@@ -1348,7 +1348,7 @@ def _reseed_while_a_period_opens(
                     include_year=True,
                     start_value=700,
                 )
-                observed["reconfigured_while_held"] = True
+                observed["reconfigured"] = True
         except NumberingError as exc:
             observed["refused"] = exc.code
         except BaseException as exc:
@@ -1407,10 +1407,28 @@ def test_start_value_reconfiguration_blocks_while_a_period_is_opening(scratch):
         "the reconfiguration completed while the allocation still held the "
         "series row — the series lock is not being taken"
     )
-    # Serialised behind the allocation, it then finds history and is refused.
-    assert str(observed.get("refused", "")).endswith("unsafe_configuration_change")
+    # Once the allocation commits, the reconfiguration proceeds and SUCCEEDS:
+    # it changes only `start_value`, which is a prospective seed and therefore
+    # deliberately mutable after history. It is the blocking above that the
+    # lock is responsible for, not a refusal.
+    assert observed.get("reconfigured") is True, (
+        "changing only start_value must be permitted after history; a refusal "
+        "here would mean the freeze is over-broad"
+    )
     # The period that opened first seeded from the value in force at the time.
     assert observed["value"] == 1
+
+    # And the new seed governs the next period that has not opened yet.
+    with _session(user_url, tenant) as s:
+        later = allocate(
+            s,
+            scope=TenantScope(tenant_id=tenant),
+            series_code="invoice",
+            reference_date=date(2028, 3, 1),
+            idempotency_key="later",
+        )
+        s.commit()
+    assert later.value == 700
 
 
 def test_hostile_without_the_series_lock_the_reseed_does_not_block(
