@@ -17,7 +17,9 @@ Public surface, by file:
 - `policy` — the rules, pure and shared by both planes;
 - `service` — the two explicitly named plane surfaces;
 - `outbox` — the optional adapter onto the kernel's transactional outbox;
-- `models`, `manifest` — persistence and registration.
+- `models`, `manifest` — persistence and registration;
+- `migrations` — `versions_dir()`, where a consuming assembly finds the `ap`
+  lineage to compose into its `version_locations`.
 
 What this package deliberately does not contain: Money, currency or FX (routing
 is the domain's — ADR-0026 § 7a), a subject-type vocabulary (the consuming
@@ -49,8 +51,9 @@ from dotmac_approvals.contracts import (
     SoDViolation,
 )
 from dotmac_approvals.manifest import module
+from dotmac_approvals.migrations import versions_dir
 
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 __all__ = [
     "Actor",
@@ -77,4 +80,5 @@ __all__ = [
     "SoDViolation",
     "__version__",
     "module",
+    "versions_dir",
 ]

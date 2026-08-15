@@ -22,7 +22,7 @@ from dotmac_approvals.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="approvals",
-    version="0.1.0a3",
+    version="0.1.0a4",
     core=False,
     short_code="approvals",
     migration_prefix="ap",

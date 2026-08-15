@@ -5,6 +5,34 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 entry landed once the live Postgres migration and catalog gate passed; `0.1.0a1`
 and `0.1.0a2` have since been published.
 
+## 0.1.0a4 — 2026-08-15
+
+**Adds the public lineage locator `versions_dir()`.** The `ap` lineage has
+shipped as package data since `0.1.0a1`, but nothing exposed WHERE it is. The
+Starter could hard-code `packages/dotmac-approvals/...` because the package sits
+in its checkout; a cross-repository consumer cannot, and the vendor control
+plane hit exactly that composing the module and had to write a private shim
+reaching into `__file__`. That shim made this package's filesystem layout part
+of its contract, in the consumer's code, where this package cannot see it break.
+
+`dotmac_approvals.versions_dir()` returns the installed directory holding the
+revisions, for composition into a consuming assembly's Alembic
+`version_locations`. Same signature and semantics as
+`dotmac_release_catalog.versions_dir()`,
+`dotmac_entitlement_allocation.versions_dir()` and
+`dotmac_application_directory.versions_dir()` — a consumer composing several
+modules should not meet four spellings of one idea. Re-exported from the
+top-level namespace, which is the stable surface this package documents;
+submodules are not.
+
+No schema change, no migration, no model change, and no kernel-floor change:
+still `>= 0.1.0a61` for ADR-0028 plane selection. `migrations/__init__.py` was
+already a required wheel content, so the locator ships with the lineage it
+locates.
+
+A new architecture guard now requires every module shipping a lineage to expose
+this locator, so the gap cannot reopen here or appear in the next module.
+
 ## 0.1.0a3 — 2026-08-14
 
 Corrects a2's plane selector (ADR-0028). **a2 was published**, so an assembly
