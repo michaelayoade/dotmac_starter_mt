@@ -101,7 +101,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from dotmac_integration.capability_registry import (
     CapabilityContract,
@@ -110,6 +110,7 @@ from dotmac_integration.capability_registry import (
 )
 from dotmac_integration.models import (
     CapabilityBinding,
+    CapabilityDestinationRevision,
     ConnectorConfigRevision,
     ConnectorInstallation,
 )
@@ -130,15 +131,16 @@ __all__ = [
     "install_destination_profiles",
     "require_corroborated",
     "require_profile",
+    "establish_destination",
     "resolve_destination",
 ]
 
-#: The key an immutable config revision holds its destination bindings under.
-#: One block, keyed by capability id, so a single installation serving several
-#: capabilities binds each to its own application and scope — which is exactly
-#: the topology `models.CapabilityBinding` already supports and the reason a
-#: per-installation destination would have been wrong.
-DESTINATIONS_KEY: str = "destinations"
+#: Destinations used to live under this key inside an immutable config
+#: revision's `config_json`. They now have their own append-only table
+#: (`ig_0004_destinations`). The name is kept ONLY so a deployment carrying a
+#: stale block gets told what happened rather than silently routing nowhere:
+#: `resolve_destination` refuses, naming this constant, if it finds one.
+LEGACY_DESTINATIONS_KEY: str = "destinations"
 
 
 class DestinationBindingError(ValueError):
@@ -197,9 +199,10 @@ class DestinationBinding:
     window this module exists to close — resolve from trusted state, then have
     something later overwrite the answer.
 
-    `config_revision_id` is provenance, not decoration. It says WHICH immutable
-    revision established this destination, so an incident can answer "what was
-    this routed to on the 3rd?" the same way the rest of the control plane does.
+    `destination_revision_id` is provenance, not decoration. It says WHICH
+    immutable row established this destination, so an incident can answer "what
+    was this routed to on the 3rd?" by reading one row rather than diffing JSON
+    across config revisions.
     """
 
     capability_binding_id: UUID
@@ -207,7 +210,7 @@ class DestinationBinding:
     application: str
     scope: LocalScope
     contract_version: int
-    config_revision_id: UUID
+    destination_revision_id: UUID
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"{self.application}/{self.scope} @{self.capability_id}"
@@ -216,44 +219,136 @@ class DestinationBinding:
 # ── Resolution: durable state in, destination out. No payload anywhere. ─────
 
 
-def _destination_block(
-    revision: ConnectorConfigRevision, capability_id: str
-) -> Mapping[str, object]:
+def _legacy_block_check(revision: ConnectorConfigRevision | None) -> None:
+    """A stale destination block must be LOUD, never ignored.
+
+    Silently ignoring one would be the worst available behaviour: an operator
+    who wrote a destination the old way would see a configuration that says
+    where the traffic goes, and traffic that goes nowhere. Refusing names the
+    move and the fix.
+    """
+    if revision is None:
+        return
     config = revision.config_json or {}
-    block = config.get(DESTINATIONS_KEY)
-    if not isinstance(block, Mapping):
+    if isinstance(config, Mapping) and LEGACY_DESTINATIONS_KEY in config:
         raise DestinationNotBound(
-            f"config revision {revision.id} declares no {DESTINATIONS_KEY!r} "
-            f"block, so capability {capability_id!r} has no trusted destination. "
-            "A destination is established by an operator on an immutable "
-            "revision BEFORE any provider is contacted — it is never derived "
-            "from what arrives"
+            f"config revision {revision.id} still carries a "
+            f"{LEGACY_DESTINATIONS_KEY!r} block. Destinations moved out of "
+            "connector configuration into their own append-only table "
+            "(`ig_0004_destinations`) — a routing authority must not share a "
+            "lifecycle with endpoint and tuning config. Establish the route "
+            "with `establish_destination` and remove the block"
         )
-    entry = block.get(capability_id)
-    if not isinstance(entry, Mapping):
-        raise DestinationNotBound(
-            f"config revision {revision.id} binds no destination for capability "
-            f"{capability_id!r}; bound: {sorted(str(k) for k in block)}"
-        )
-    return entry
 
 
-def _scope_from(entry: Mapping[str, object], capability_id: str) -> LocalScope:
-    raw = entry.get("scope")
-    if not isinstance(raw, Mapping):
-        raise DestinationNotBound(
-            f"destination for {capability_id!r} declares no scope. A binding "
-            "names the application AND the local scope; an application alone "
-            "does not say where inside it an observation belongs"
+def _current_destination(
+    db: Any, capability_binding_id: UUID
+) -> CapabilityDestinationRevision:
+    """The highest revision for this binding, or a refusal.
+
+    `MAX(revision)` IS the current route: there is no `is_current` flag and no
+    pointer column to drift out of agreement with the history.
+    """
+    from sqlalchemy import select
+
+    row: CapabilityDestinationRevision | None = db.execute(
+        select(CapabilityDestinationRevision)
+        .where(
+            CapabilityDestinationRevision.capability_binding_id == capability_binding_id
         )
-    kind = raw.get("kind")
-    ref = raw.get("ref")
-    if not isinstance(kind, str) or not isinstance(ref, str):
+        .order_by(CapabilityDestinationRevision.revision.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
         raise DestinationNotBound(
-            f"destination scope for {capability_id!r} must declare string "
-            f"`kind` and `ref`; got {raw!r}"
+            f"capability binding {capability_binding_id} has no destination "
+            "revision, so nothing has established where its traffic lands. A "
+            "destination is written by an operator BEFORE any provider is "
+            "contacted — it is never derived from what arrives"
         )
-    return LocalScope(kind=kind, ref=ref)
+    return row
+
+
+def establish_destination(
+    db: Any,
+    *,
+    capability_binding_id: UUID,
+    scope: LocalScope,
+    registry: CapabilityRegistry,
+    established_by: str | None = None,
+    reason: str | None = None,
+) -> DestinationBinding:
+    """Append a new destination revision, or refuse.
+
+    **There is deliberately no `application` parameter.** The destination is the
+    application that DECLARED the capability, so a name passed in could only be
+    redundant or wrong — and accepting one would make this the single function
+    in the module that turns an application name into a routing decision, which
+    is precisely the shape its guards exist to keep absent. The operator chooses
+    the SCOPE, a decision only they can make; who receives the stream is settled
+    by the declaration.
+
+    The owner check still runs on READ, and deriving the value here does not
+    make it redundant: a row can arrive by paths that never ran this function (a
+    restore, a manual INSERT by a platform operator, a future importer), and a
+    capability's declared owner can change after a route was written. Both leave
+    a stored application that no longer matches the declaration, and both must
+    refuse rather than deliver.
+
+    Appends rather than updates. Re-establishing the SAME destination still
+    writes a revision: "an operator reconfirmed this route on the 3rd" is a
+    fact worth keeping, and collapsing it would make the history a function of
+    what changed rather than of what was decided.
+    """
+    from sqlalchemy import func, select
+
+    binding = db.get(CapabilityBinding, capability_binding_id)
+    if binding is None:
+        raise DestinationNotBound(
+            f"capability binding {capability_binding_id} does not exist; there "
+            "is nothing to route"
+        )
+    installation = db.get(ConnectorInstallation, binding.installation_id)
+    if installation is None:  # pragma: no cover - FK makes this unreachable
+        raise DestinationNotBound(
+            f"capability binding {capability_binding_id} has no installation"
+        )
+
+    contract = require_declared_for_binding(
+        registry,
+        capability_id=binding.capability_id,
+        connector_key=installation.connector_key,
+    )
+    application = contract.owner.application
+
+    highest = db.execute(
+        select(func.max(CapabilityDestinationRevision.revision)).where(
+            CapabilityDestinationRevision.capability_binding_id == binding.id
+        )
+    ).scalar()
+
+    row = CapabilityDestinationRevision(
+        id=uuid4(),
+        capability_binding_id=binding.id,
+        revision=(highest or 0) + 1,
+        application=application,
+        scope_kind=scope.kind,
+        scope_ref=scope.ref,
+        contract_version=contract.contract_version,
+        established_by=established_by,
+        reason=reason,
+    )
+    db.add(row)
+    db.flush()
+
+    return DestinationBinding(
+        capability_binding_id=binding.id,
+        capability_id=binding.capability_id,
+        application=application,
+        scope=scope,
+        contract_version=contract.contract_version,
+        destination_revision_id=row.id,
+    )
 
 
 def resolve_destination(
@@ -273,13 +368,15 @@ def resolve_destination(
 
     1. the binding and its installation, joined — a destination for a binding
        that does not exist is not a routing question;
-    2. the installation's CURRENT config revision — immutable and digested, so
-       what is read is what an operator wrote;
-    3. the destination block for this capability id;
-    4. the capability's DECLARED owner from the registry, cross-checked against
-       the configured application. This is the step that makes an operator
-       typo — or a tampered configuration — a refusal rather than a delivery to
-       the wrong application.
+    2. the binding's CURRENT destination revision — the highest, from an
+       append-only table an operator writes;
+    3. the capability's DECLARED owner from the registry, cross-checked against
+       the established application. This is the step that makes an operator
+       typo — or a tampered row — a refusal rather than a delivery to the wrong
+       application.
+
+    A stale `destinations` block in the connector's configuration is refused
+    rather than ignored, so a deployment that missed the move is told.
     """
     from sqlalchemy import select
 
@@ -299,38 +396,24 @@ def resolve_destination(
     binding, installation = row
 
     revision_id = installation.current_config_revision_id
-    if revision_id is None:
-        raise DestinationNotBound(
-            f"installation {installation.connector_key}/{installation.name} has "
-            "no current config revision, so no destination has been established"
-        )
-    revision = db.get(ConnectorConfigRevision, revision_id)
-    if revision is None:
-        raise DestinationNotBound(
-            f"installation {installation.connector_key}/{installation.name} "
-            f"points at config revision {revision_id}, which does not exist"
-        )
+    if revision_id is not None:
+        _legacy_block_check(db.get(ConnectorConfigRevision, revision_id))
 
     contract = require_declared_for_binding(
         registry,
         capability_id=binding.capability_id,
         connector_key=installation.connector_key,
     )
-    entry = _destination_block(revision, binding.capability_id)
-    application = entry.get("application")
-    if not isinstance(application, str) or not application:
-        raise DestinationNotBound(
-            f"destination for {binding.capability_id!r} names no application"
-        )
-    _require_declared_owner(contract, application)
+    established = _current_destination(db, binding.id)
+    _require_declared_owner(contract, established.application)
 
     return DestinationBinding(
         capability_binding_id=binding.id,
         capability_id=binding.capability_id,
-        application=application,
-        scope=_scope_from(entry, binding.capability_id),
+        application=established.application,
+        scope=LocalScope(kind=established.scope_kind, ref=established.scope_ref),
         contract_version=contract.contract_version,
-        config_revision_id=revision.id,
+        destination_revision_id=established.id,
     )
 
 

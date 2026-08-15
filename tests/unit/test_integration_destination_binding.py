@@ -51,6 +51,7 @@ from dotmac_integration import (
     UntrustedDestination,
     corroborate,
     destination_client,
+    establish_destination,
     install_destination_profiles,
     require_corroborated,
     require_profile,
@@ -58,7 +59,9 @@ from dotmac_integration import (
 )
 from dotmac_integration import destination_binding as module_under_test
 from dotmac_integration.destination_binding import _reset_destination_profiles
+from dotmac_integration.models import CapabilityDestinationRevision
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 #: Synthetic throughout. This module must be provable without naming a real
@@ -84,6 +87,7 @@ def db() -> Iterator[Session]:
     ConnectorInstallation.__table__.create(engine)
     ConnectorConfigRevision.__table__.create(engine)
     CapabilityBinding.__table__.create(engine)
+    CapabilityDestinationRevision.__table__.create(engine)
     with Session(engine) as session:
         yield session
 
@@ -108,37 +112,43 @@ class _RecordingClient:
         return None
 
 
+#: (application, scope_kind, scope_ref) — the ordinary, fully-routed case.
+_DEFAULT_DESTINATION = (OWNER_APP, "inbox", "support")
+
+
 def _bound(
     db: Session,
     *,
-    destinations: object | None = "default",
+    destination: tuple[str, str, str] | None = _DEFAULT_DESTINATION,
+    legacy_block: object | None = None,
     scope_json: dict[str, object] | None = None,
     capability: str = CAPABILITY,
+    contract_version: int = 1,
 ) -> CapabilityBinding:
-    """An installation + immutable revision + binding, wired the normal way."""
+    """An installation + config revision + binding + established destination.
+
+    The destination row is written directly rather than through
+    `establish_destination`, for the same reason the config revision is: this
+    builds STATE, and a fixture that could only produce state the writer allows
+    could not express the rows a restore or a manual platform INSERT can
+    produce — which are exactly the rows the read-side owner check exists for.
+    """
     installation = ConnectorInstallation(
         id=uuid.uuid4(),
         connector_key="fake_connector",
         connector_version="1.0.0",
         spi_range=">=1.0,<2.0",
         manifest_digest="d" * 64,
-        name="primary",
+        name=f"primary-{uuid.uuid4().hex[:8]}",
         environment="production",
         state="enabled",
     )
     db.add(installation)
     db.flush()
 
-    if destinations == "default":
-        destinations = {
-            capability: {
-                "application": OWNER_APP,
-                "scope": {"kind": "inbox", "ref": "support"},
-            }
-        }
     config: dict[str, object] = {"endpoint": "https://provider.example"}
-    if destinations is not None:
-        config["destinations"] = destinations
+    if legacy_block is not None:
+        config["destinations"] = legacy_block
 
     revision = ConnectorConfigRevision(
         id=uuid.uuid4(),
@@ -164,6 +174,21 @@ def _bound(
     )
     db.add(binding)
     db.flush()
+
+    if destination is not None:
+        application, scope_kind, scope_ref = destination
+        db.add(
+            CapabilityDestinationRevision(
+                id=uuid.uuid4(),
+                capability_binding_id=binding.id,
+                revision=1,
+                application=application,
+                scope_kind=scope_kind,
+                scope_ref=scope_ref,
+                contract_version=contract_version,
+            )
+        )
+        db.flush()
     return binding
 
 
@@ -180,8 +205,8 @@ def test_a_binding_names_the_application_the_scope_and_the_contract_version(
     assert destination.application == OWNER_APP
     assert destination.scope == LocalScope(kind="inbox", ref="support")
     assert destination.contract_version == 1
-    # Provenance: WHICH immutable revision established this destination.
-    assert destination.config_revision_id is not None
+    # Provenance: WHICH immutable row established this destination.
+    assert destination.destination_revision_id is not None
 
 
 def test_the_contract_version_comes_from_the_id_so_it_cannot_disagree(
@@ -197,16 +222,7 @@ def test_the_contract_version_comes_from_the_id_so_it_cannot_disagree(
             )
         ]
     )
-    binding = _bound(
-        db,
-        capability=versioned,
-        destinations={
-            versioned: {
-                "application": OWNER_APP,
-                "scope": {"kind": "inbox", "ref": "support"},
-            }
-        },
-    )
+    binding = _bound(db, capability=versioned)
     destination = resolve_destination(
         db, capability_binding_id=binding.id, registry=registry
     )
@@ -226,32 +242,52 @@ def test_a_destination_binding_is_deeply_immutable(db: Session) -> None:
 # ── 2. Fail closed in every direction ──────────────────────────────────────
 
 
-def test_no_destination_block_is_a_refusal_not_a_default(db: Session) -> None:
-    binding = _bound(db, destinations=None)
+def test_no_established_destination_is_a_refusal_not_a_default(db: Session) -> None:
+    binding = _bound(db, destination=None)
     with pytest.raises(DestinationNotBound, match="BEFORE any provider"):
         resolve_destination(db, capability_binding_id=binding.id, registry=REGISTRY)
 
 
-def test_a_destination_bound_for_another_capability_does_not_serve_this_one(
+def test_a_destination_established_for_another_binding_does_not_serve_this_one(
     db: Session,
 ) -> None:
-    binding = _bound(
-        db,
-        destinations={
-            "alpha_domain.emit.v1": {
-                "application": OWNER_APP,
-                "scope": {"kind": "inbox", "ref": "support"},
-            }
-        },
+    """Stronger than the config-block version it replaces.
+
+    A destination now hangs off the BINDING by foreign key. Two installations
+    may implement the SAME capability — a production and a test provider
+    account is the ordinary case — and routing one must not route the other.
+    Under the old config-block scheme both read their own installation's blob,
+    which happened to be correct; here it is structural, and the neighbouring
+    route is not merely ignored but unreachable from this binding.
+    """
+    _bound(db)  # a fully routed neighbour, same capability
+    unrouted = _bound(db, destination=None)
+    with pytest.raises(DestinationNotBound, match="no destination revision"):
+        resolve_destination(db, capability_binding_id=unrouted.id, registry=REGISTRY)
+
+
+def test_an_application_without_a_scope_cannot_be_WRITTEN(db: Session) -> None:
+    """The refusal moved from resolution time to write time, which is the point.
+
+    As a JSON block a missing scope was well-formed storage and surfaced only
+    when a live delivery tried to resolve it. As columns it is `NOT NULL`, so
+    the operator who omitted it is the one who sees the failure.
+    """
+    binding = _bound(db, destination=None)
+    db.add(
+        CapabilityDestinationRevision(
+            id=uuid.uuid4(),
+            capability_binding_id=binding.id,
+            revision=1,
+            application=OWNER_APP,
+            scope_kind=None,  # type: ignore[arg-type]
+            scope_ref=None,  # type: ignore[arg-type]
+            contract_version=1,
+        )
     )
-    with pytest.raises(DestinationNotBound, match="binds no destination"):
-        resolve_destination(db, capability_binding_id=binding.id, registry=REGISTRY)
-
-
-def test_an_application_without_a_scope_is_refused(db: Session) -> None:
-    binding = _bound(db, destinations={CAPABILITY: {"application": OWNER_APP}})
-    with pytest.raises(DestinationNotBound, match="declares no scope"):
-        resolve_destination(db, capability_binding_id=binding.id, registry=REGISTRY)
+    with pytest.raises(IntegrityError):
+        db.flush()
+    db.rollback()
 
 
 def test_an_unknown_binding_id_is_a_refusal(db: Session) -> None:
@@ -259,16 +295,27 @@ def test_an_unknown_binding_id_is_a_refusal(db: Session) -> None:
         resolve_destination(db, capability_binding_id=uuid.uuid4(), registry=REGISTRY)
 
 
-def test_an_installation_with_no_current_revision_has_no_destination(
+def test_a_route_does_not_depend_on_the_connectors_configuration(
     db: Session,
 ) -> None:
+    """The separation, stated as behaviour rather than as schema.
+
+    Before `ig_0004_destinations` a destination WAS a config block, so an
+    installation with no current revision had no destination — connector
+    configuration and routing failed together because they were one object.
+    They are now independent authorities, and this asserts it in the direction
+    that would regress if someone reintroduced the coupling.
+    """
     binding = _bound(db)
     installation = db.get(ConnectorInstallation, binding.installation_id)
     assert installation is not None
     installation.current_config_revision_id = None
     db.flush()
-    with pytest.raises(DestinationNotBound, match="no current config revision"):
-        resolve_destination(db, capability_binding_id=binding.id, registry=REGISTRY)
+
+    destination = resolve_destination(
+        db, capability_binding_id=binding.id, registry=REGISTRY
+    )
+    assert destination.application == OWNER_APP
 
 
 # ── 3. The declared owner is the only permitted destination ────────────────
@@ -278,15 +325,7 @@ def test_a_configuration_cannot_reassign_a_capabilitys_owner(db: Session) -> Non
     # The strongest single property here: even an operator-written, immutable,
     # digested configuration cannot route a capability to an application that
     # did not declare it. Two independent authorities must agree.
-    binding = _bound(
-        db,
-        destinations={
-            CAPABILITY: {
-                "application": HOSTILE_APP,
-                "scope": {"kind": "inbox", "ref": "support"},
-            }
-        },
-    )
+    binding = _bound(db, destination=(HOSTILE_APP, "inbox", "support"))
     with pytest.raises(UntrustedDestination) as exc:
         resolve_destination(db, capability_binding_id=binding.id, registry=REGISTRY)
     message = str(exc.value)
@@ -647,7 +686,7 @@ def test_installing_profiles_replaces_rather_than_merges() -> None:
         application=OWNER_APP,
         scope=LocalScope(kind="inbox", ref="support"),
         contract_version=1,
-        config_revision_id=uuid.uuid4(),
+        destination_revision_id=uuid.uuid4(),
     )
     with pytest.raises(DestinationProfileMissing):
         require_profile(binding)
@@ -660,3 +699,144 @@ def test_a_profile_accepting_no_version_is_not_a_destination() -> None:
             contract_versions=frozenset(),
             client=_RecordingClient(),
         )
+
+
+# ── 9. Establishing a route: append-only, owner-checked at the write ───────
+
+
+def test_establishing_a_destination_appends_a_revision(db: Session) -> None:
+    binding = _bound(db, destination=None)
+
+    first = establish_destination(
+        db,
+        capability_binding_id=binding.id,
+        scope=LocalScope(kind="inbox", ref="support"),
+        registry=REGISTRY,
+        established_by="operator@example",
+    )
+    second = establish_destination(
+        db,
+        capability_binding_id=binding.id,
+        scope=LocalScope(kind="inbox", ref="billing"),
+        registry=REGISTRY,
+        reason="support queue split",
+    )
+
+    assert first.destination_revision_id != second.destination_revision_id
+    rows = (
+        db.query(CapabilityDestinationRevision)
+        .filter_by(capability_binding_id=binding.id)
+        .order_by(CapabilityDestinationRevision.revision)
+        .all()
+    )
+    assert [row.revision for row in rows] == [1, 2]
+    assert [row.scope_ref for row in rows] == ["support", "billing"]
+    # The earlier answer is still readable — that is what append-only buys.
+    assert rows[0].established_by == "operator@example"
+    assert rows[1].reason == "support queue split"
+
+
+def test_the_current_destination_is_the_highest_revision(db: Session) -> None:
+    binding = _bound(db, destination=None)
+    for ref in ("support", "billing", "escalations"):
+        establish_destination(
+            db,
+            capability_binding_id=binding.id,
+            scope=LocalScope(kind="inbox", ref=ref),
+            registry=REGISTRY,
+        )
+    destination = resolve_destination(
+        db, capability_binding_id=binding.id, registry=REGISTRY
+    )
+    assert destination.scope == LocalScope(kind="inbox", ref="escalations")
+
+
+def test_re_establishing_the_same_route_still_records_a_revision(
+    db: Session,
+) -> None:
+    """A reconfirmation is a fact about what an operator decided, not a no-op.
+
+    Deliberately unlike `connector_config_revisions`, which dedupes on digest
+    because a reconcile re-submitting identical config would otherwise inflate
+    the history. Nothing reconciles routes: every row here is a person deciding
+    where traffic goes, and collapsing "reconfirmed on the 3rd" would make the
+    history a record of changes rather than of decisions.
+    """
+    binding = _bound(db, destination=None)
+    scope = LocalScope(kind="inbox", ref="support")
+    for _ in range(2):
+        establish_destination(
+            db,
+            capability_binding_id=binding.id,
+            scope=scope,
+            registry=REGISTRY,
+        )
+    assert (
+        db.query(CapabilityDestinationRevision)
+        .filter_by(capability_binding_id=binding.id)
+        .count()
+        == 2
+    )
+
+
+def test_the_writer_cannot_be_ASKED_to_route_to_a_non_owner(db: Session) -> None:
+    """The strongest form this property can take: unrepresentable, not refused.
+
+    An earlier draft of `establish_destination` took an `application` and
+    refused one that had not declared the capability. That reads as defence in
+    depth and is actually a hole: it made this the one function in the module
+    that turns an application NAME into a routing decision, which is the exact
+    shape `_selects_from_provider_input` exists to keep absent. Deriving the
+    owner from the declaration removes the parameter, so there is no longer an
+    input to get wrong.
+    """
+    assert "application" not in inspect.signature(establish_destination).parameters
+
+    binding = _bound(db, destination=None)
+    established = establish_destination(
+        db,
+        capability_binding_id=binding.id,
+        scope=LocalScope(kind="inbox", ref="support"),
+        registry=REGISTRY,
+    )
+    assert established.application == OWNER_APP
+
+
+def test_a_stale_destinations_block_is_refused_rather_than_ignored(
+    db: Session,
+) -> None:
+    """A deployment that missed the move must be told, not quietly unrouted.
+
+    Ignoring the block is the worst option available: the operator reads a
+    configuration that says where traffic goes and watches traffic go nowhere.
+    """
+    binding = _bound(
+        db,
+        legacy_block={
+            CAPABILITY: {
+                "application": OWNER_APP,
+                "scope": {"kind": "inbox", "ref": "support"},
+            }
+        },
+    )
+    with pytest.raises(DestinationNotBound, match="ig_0004_destinations"):
+        resolve_destination(db, capability_binding_id=binding.id, registry=REGISTRY)
+
+
+def test_the_writer_accepts_no_provider_influenced_parameter() -> None:
+    """`establish_destination` is the one function here that takes an
+    application NAME, so it is the one place a provider value could be laundered
+    into a route. Two things stop it, and both are asserted: no parameter
+    through which provider data conventionally arrives, and the declared-owner
+    check, which admits exactly one application regardless of what is passed.
+    """
+    parameters = set(inspect.signature(establish_destination).parameters)
+    assert not parameters & PROVIDER_INPUT_NAMES
+    assert parameters == {
+        "db",
+        "capability_binding_id",
+        "scope",
+        "registry",
+        "established_by",
+        "reason",
+    }

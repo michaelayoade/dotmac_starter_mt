@@ -293,6 +293,75 @@ class CapabilityBinding(Base, TimestampMixin):
     updated_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
 
+class CapabilityDestinationRevision(Base):
+    """WHERE a capability's traffic lands. Appended, never updated.
+
+    Split out of the connector's `config_json` deliberately. A destination is a
+    ROUTING authority — it decides which application receives a stream — while a
+    config revision holds endpoints, tuning and secret references. Keeping the
+    two in one blob gave them one lifecycle and one set of writers, so an
+    operator editing a timeout touched the same immutable object that decides
+    where a customer's messages go, and "when did this route change?" could only
+    be answered by diffing JSON across revisions.
+
+    Append-only, like `connector_config_revisions` and for the same reason: the
+    CURRENT destination is the highest `revision` for the binding, and every
+    prior answer stays readable. An incident asking "what was this routed to on
+    the 3rd?" reads a row rather than reconstructing a blob.
+
+    The owner check is applied at BOTH ends — `establish_destination` refuses to
+    write a row naming an application that did not declare the capability, and
+    `resolve_destination` re-checks on read. The write-side check is the useful
+    one for operators (the mistake is refused where it is made); the read-side
+    check is the load-bearing one, because a row can also arrive by a route that
+    never ran the writer.
+    """
+
+    __tablename__ = "capability_destination_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "capability_binding_id",
+            "revision",
+            name="uq_capability_destination_revisions_number",
+        ),
+        CheckConstraint(
+            "revision >= 1", name="ck_capability_destination_revisions_revision"
+        ),
+        Index(
+            "ix_capability_destination_revisions_current",
+            "capability_binding_id",
+            "revision",
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    capability_binding_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey(f"{SCHEMA}.capability_bindings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    #: The destination application. Checked against the capability's DECLARED
+    #: owner; never taken from a payload.
+    application: Mapped[str] = mapped_column(String(160), nullable=False)
+    #: The destination's OWN vocabulary for the stream, carried opaquely. Two
+    #: columns rather than a JSON blob so the shape is a schema statement and a
+    #: malformed scope is a write failure, not a resolution-time surprise.
+    scope_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope_ref: Mapped[str] = mapped_column(String(320), nullable=False)
+    #: The contract version in force when the route was established.
+    contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    established_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    #: Why the route changed. Free text, operator-supplied, never parsed.
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
+
+
 #: This module owns no tenant-plane table. Declared as an explicit empty tuple
 #: rather than omitted, so "tenant-plane: none" is a statement in the manifest
 #: rather than an absence a reader has to infer (ADR-0023).
@@ -301,6 +370,7 @@ PLATFORM_TABLES: tuple[str, ...] = (
     "connector_installations",
     "connector_config_revisions",
     "capability_bindings",
+    "capability_destination_revisions",
     "event_subscriptions",
     "inbox_receipts",
     "delivery_attempts",
@@ -314,6 +384,7 @@ __all__ = [
     "SCHEMA",
     "TENANT_TABLES",
     "CapabilityBinding",
+    "CapabilityDestinationRevision",
     "ConnectorConfigRevision",
     "ConnectorInstallation",
     "DeliveryAttempt",
