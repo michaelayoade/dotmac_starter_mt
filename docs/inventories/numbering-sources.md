@@ -24,6 +24,23 @@ ERP remains the primary initial code source named by ADR-0017. Sub's creation
 and reconciliation behavior is a mandatory port delta, not an optional
 enhancement. Neither product supplies the complete shared contract.
 
+> **Corrected 2026-08-15 — Sub's "monotonic reconciliation" credit is wrong.**
+> The 2026-08-15 revalidation
+> ([`numbering-source-variance.md`](numbering-source-variance.md)) found
+> `reconcile_next_value` is dead code: `git grep` at Sub's current head returns
+> exactly one line, its own definition. What Sub actually runs is hand-
+> duplicated in three consuming services that lock the sequence row and write
+> `next_value` directly, with uniqueness enforced by the consuming table's index
+> behind collision-retry loops. **Sub is a source for the
+> `INSERT ... ON CONFLICT DO NOTHING` + `SELECT FOR UPDATE` establishment SQL
+> only.** Monotonic repair is greenfield.
+>
+> Note the failure mode, because it is not the usual one. Every mandatory path
+> below is byte-identical to its pin — the diff is empty. The dossier's
+> *description* of that unchanged code was wrong when written, so an empty diff
+> reads as reassurance while the error survives. Where this file and the
+> variance report disagree, **the variance report wins**.
+
 ## ERP source
 
 Mandatory paths:
@@ -72,8 +89,11 @@ Mandatory paths:
 - `tests/test_numbering_defaults.py`.
 
 Sub's service establishes a sequence with `INSERT ... ON CONFLICT DO NOTHING`,
-then takes `SELECT FOR UPDATE`. It can advance a sequence to a proven minimum
-without rewinding it. The output tests prove configured start values and
+then takes `SELECT FOR UPDATE`. ~~It can advance a sequence to a proven minimum
+without rewinding it.~~ **Corrected 2026-08-15:** the advance-to-minimum
+function (`reconcile_next_value`) has no caller anywhere in Sub — it is dead
+code, and the behaviour that actually ships is hand-duplicated in three
+consuming services. The output tests prove configured start values and
 formatting reach real invoice and credit-note records.
 
 Do not port:
