@@ -22,6 +22,7 @@ permissions would be claiming an authority it does not have.
 from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.planes import ModulePlane
 from dotmac_kernel.prerequisites import (
+    IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
@@ -30,7 +31,7 @@ from dotmac_numbering.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="numbering",
-    version="0.1.0a1",
+    version="0.1.0a2",
     core=False,
     short_code="numbering",
     migration_prefix="nu",
@@ -44,7 +45,16 @@ module = ModuleManifest(
     # The tenant catalogue is a TENANT-plane prerequisite only. A control plane
     # that selects PLATFORM alone installs this module without a `tenants`
     # table, which is exactly the vendor-side case.
-    requires=(MODULE_DATABASE_ROLES_V1.name,),
+    #
+    # The at-most-once ledger is a COMMON requirement, and it is the one
+    # prerequisite here that nothing in this module's own DDL touches:
+    # `allocate` delegates to `execute_once` / `execute_once_platform`, so the
+    # tables are read at REQUEST time. Undeclared (0.1.0a1), an adopter that
+    # has not run the kernel's own migrations passes every gate this module
+    # has, migrates cleanly, and fails on its first allocation instead — the
+    # `docs/inventories/numbering-erp-adoption-slice.md` finding. A runtime
+    # dependency is still a dependency, and both planes call one of the pair.
+    requires=(MODULE_DATABASE_ROLES_V1.name, IDEMPOTENCY_LEDGER_V1.name),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
     supported_plane_sets=(
         (ModulePlane.TENANT,),

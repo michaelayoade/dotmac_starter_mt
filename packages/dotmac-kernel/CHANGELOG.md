@@ -6,6 +6,53 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a66 — 2026-08-15
+
+Names the at-most-once ledger as a declarable prerequisite:
+`idempotency_ledger.v1` (`dotmac_kernel.prerequisites`), with its live verifier
+(`dotmac_kernel.migrations.verify.verify_idempotency_ledger`). Additive — one
+new spec, one new verifier, no schema change, no existing behaviour changed.
+
+The gap it closes: `dotmac_kernel.idempotency` writes
+`public.idempotency_records` / `public.platform_idempotency_records` at REQUEST
+time, and nothing in a consuming module's DDL touches them. There was therefore
+no name for a module to declare, so `dotmac-numbering` (`0.1.0a1`) consumed the
+ledger while declaring only the two effects its own DDL needed. Against an
+adopter that runs its own tenant lineage and never ran the kernel's, that
+module passes every gate, migrates cleanly, and raises `UndefinedTable` on its
+first allocation — found by the ERP adoption dossier
+(`docs/inventories/numbering-erp-adoption-slice.md`), not by any test.
+
+ADR-0027 says a plane declares its own prerequisites. A runtime dependency is
+still a dependency; it was undeclarable, which is a kernel defect rather than a
+module one.
+
+### Added
+
+- `IDEMPOTENCY_LEDGER_V1` in `KERNEL_PREREQUISITES`. Both planes in one spec:
+  `dotmac_kernel.idempotency` publishes `execute_once` and
+  `execute_once_platform` from one module, so a consumer cannot take the tenant
+  half without linking code that references the platform table.
+- `verify_idempotency_ledger`, checking existence, the full column contract
+  (including `fingerprint` as its own nullable column — ADR-0014 § 3's rejected
+  overloaded-`ref_id` shape), the unique key on each plane, the `expires_at`
+  index, and the plane posture: FORCEd RLS on the tenant ledger, none on the
+  platform peer.
+
+### Changed
+
+- `_assert_columns` takes the prerequisite name instead of hard-coding
+  `tenant_scope_catalog.v1`. Two specs now describe table shapes, and a shared
+  helper naming the wrong one sends a reviewer to the wrong provider.
+
+### Adopting
+
+A module that calls `execute_once` / `execute_once_platform` adds
+`"idempotency_ledger.v1"` to its manifest `requires` and to the requires tuple
+its root migration verifies; an assembly binds it to the revision that supplies
+the tables (kernel `0018_idempotency_one_owner` here). Existing modules are
+unaffected until they declare it.
+
 ## 0.1.0a65 — 2026-08-15
 
 Allocates the `numbering` migration owner: schema `mod_numbering`, revision

@@ -1557,3 +1557,139 @@ def test_raw_sql_may_still_change_start_value_after_history(scratch):
 
     with _session(user_url, tenant) as s:
         assert s.query(NumberSeries).one().start_value == 42
+
+
+# ── The at-most-once ledger is a DECLARED and VERIFIED prerequisite ─────────
+#
+# `allocate` writes the kernel ledger at request time, and nothing in `nu_0001`
+# creates those tables. At 0.1.0a1 that dependency was undeclared: an adopter
+# running its own tenant lineage migrated this module cleanly and raised
+# `UndefinedTable` on its first allocation instead
+# (`docs/inventories/numbering-erp-adoption-slice.md`). The declaration is only
+# worth anything if it is checked against the database, so these run the real
+# verifier against the migrated catalogue, then break one observable at a time.
+
+
+@contextlib.contextmanager
+def _bound_prerequisites() -> Iterator[None]:
+    """Install this assembly's bindings, and put back whatever was there.
+
+    Bindings are process state. A test that installs and walks away makes the
+    NEXT test's result depend on file order, which is the failure mode a
+    green suite hides best.
+    """
+    from dotmac_kernel.prerequisites import (
+        install_prerequisite_bindings,
+        installed_bindings,
+    )
+
+    from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
+    previous = tuple(installed_bindings())
+    install_prerequisite_bindings(ASSEMBLY_PREREQUISITE_BINDINGS)
+    try:
+        yield
+    finally:
+        install_prerequisite_bindings(previous)
+
+
+@contextlib.contextmanager
+def _broken(admin_url: str, statement: str) -> Iterator[object]:
+    """Apply one DDL break, hand back the connection, roll it back.
+
+    The break happens in an open transaction on the SAME connection the
+    verifier reads, so the damage is visible to the check and invisible to
+    everything else — no second migrated database per hostile case.
+    """
+    engine = create_engine(admin_url)
+    conn = engine.connect()
+    transaction = conn.begin()
+    try:
+        conn.execute(text(statement))
+        yield conn
+    finally:
+        transaction.rollback()
+        conn.close()
+        engine.dispose()
+
+
+def test_the_ledger_prerequisite_is_satisfied_by_the_migrated_database(
+    scratch: tuple[str, str, str],
+) -> None:
+    admin_url, _, _ = scratch
+    from dotmac_kernel.migrations.verify import require_prerequisites
+
+    engine = create_engine(admin_url)
+    with _bound_prerequisites(), engine.connect() as conn:
+        require_prerequisites(conn, ("idempotency_ledger.v1",))
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        pytest.param(
+            "DROP TABLE public.idempotency_records",
+            "does not exist",
+            id="tenant-ledger-absent",
+        ),
+        pytest.param(
+            "DROP TABLE public.platform_idempotency_records",
+            "does not exist",
+            id="platform-ledger-absent",
+        ),
+        pytest.param(
+            "ALTER TABLE public.idempotency_records "
+            "DROP CONSTRAINT uq_idempotency_records_tenant_scope_key",
+            "no unique constraint",
+            id="tenant-key-widened",
+        ),
+        pytest.param(
+            "ALTER TABLE public.platform_idempotency_records "
+            "DROP CONSTRAINT uq_platform_idempotency_records_scope_key",
+            "no unique constraint",
+            id="platform-key-widened",
+        ),
+        pytest.param(
+            "ALTER TABLE public.idempotency_records DROP COLUMN fingerprint",
+            "columns differ",
+            id="fingerprint-overloaded-away",
+        ),
+        pytest.param(
+            "ALTER TABLE public.idempotency_records NO FORCE ROW LEVEL SECURITY",
+            "FORCEd row-level security",
+            id="tenant-ledger-unforced",
+        ),
+        pytest.param(
+            "ALTER TABLE public.platform_idempotency_records "
+            "ENABLE ROW LEVEL SECURITY",
+            "must carry no",
+            id="platform-ledger-policied",
+        ),
+        pytest.param(
+            "DROP INDEX public.ix_idempotency_records_expires_at",
+            "no index on",
+            id="retention-unindexed",
+        ),
+    ],
+)
+def test_the_ledger_prerequisite_refuses_a_provider_missing_one_effect(
+    scratch: tuple[str, str, str], statement: str, expected: str
+) -> None:
+    """The sensitivity proof for every clause of the summary.
+
+    A verifier that only checked `has_table` would pass six of these eight, and
+    the two it caught are the two an adopter is least likely to get wrong. Each
+    case asserts the SPECIFIC refusal text, not merely that something raised —
+    a verifier failing for the wrong reason is a verifier that will pass for
+    the wrong reason later.
+    """
+    from dotmac_kernel.migrations.verify import (
+        PrerequisiteNotSatisfiedError,
+        verify_idempotency_ledger,
+    )
+
+    admin_url, _, _ = scratch
+    with _bound_prerequisites(), _broken(admin_url, statement) as conn:
+        with pytest.raises(PrerequisiteNotSatisfiedError, match=expected):
+            verify_idempotency_ledger(conn)

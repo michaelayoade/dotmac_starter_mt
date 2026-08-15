@@ -43,6 +43,7 @@ from sqlalchemy.engine import Connection
 
 from dotmac_kernel.namespaces import HOST_SCHEMA
 from dotmac_kernel.prerequisites import (
+    IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     TENANT_SCOPE_CATALOG_V1,
     binding_for,
@@ -112,8 +113,17 @@ def _fail(prerequisite_name: str, detail: str) -> None:
 
 
 def _assert_columns(
-    bind: Connection, table: str, contracts: dict[str, _ColumnContract]
+    bind: Connection,
+    name: str,
+    table: str,
+    contracts: dict[str, _ColumnContract],
 ) -> None:
+    """Prove one table's columns match `contracts`, or fail `name`.
+
+    `name` is a parameter rather than a constant because two prerequisites now
+    describe table shapes, and a shared helper that hard-codes one of them
+    reports the wrong binding — which sends a reviewer to a provider that is
+    not the one at fault."""
     inspector = sa.inspect(bind)
     columns = {
         column["name"]: column
@@ -123,7 +133,7 @@ def _assert_columns(
         missing = sorted(set(contracts) - set(columns))
         extra = sorted(set(columns) - set(contracts))
         _fail(
-            TENANT_SCOPE_CATALOG_V1.name,
+            name,
             f"{HOST_SCHEMA}.{table} columns differ (missing={missing}, "
             f"unexpected={extra})",
         )
@@ -138,19 +148,19 @@ def _assert_columns(
         actual = column["type"]
         if not isinstance(actual, expected):
             _fail(
-                TENANT_SCOPE_CATALOG_V1.name,
+                name,
                 f"{HOST_SCHEMA}.{table}.{name} is {actual!s}, expected "
                 f"{expected.__name__}",
             )
         if bool(column["nullable"]) is not nullable:
             _fail(
-                TENANT_SCOPE_CATALOG_V1.name,
+                name,
                 f"{HOST_SCHEMA}.{table}.{name} nullable={column['nullable']!r}, "
                 f"expected {nullable!r}",
             )
         if length is not None and getattr(actual, "length", None) != length:
             _fail(
-                TENANT_SCOPE_CATALOG_V1.name,
+                name,
                 f"{HOST_SCHEMA}.{table}.{name} length="
                 f"{getattr(actual, 'length', None)!r}, expected {length}",
             )
@@ -159,13 +169,13 @@ def _assert_columns(
             and bool(getattr(actual, "timezone", False)) is not timezone
         ):
             _fail(
-                TENANT_SCOPE_CATALOG_V1.name,
+                name,
                 f"{HOST_SCHEMA}.{table}.{name} timezone="
                 f"{getattr(actual, 'timezone', None)!r}, expected {timezone!r}",
             )
         if needs_default and column.get("default") is None:
             _fail(
-                TENANT_SCOPE_CATALOG_V1.name,
+                name,
                 f"{HOST_SCHEMA}.{table}.{name} has no server default",
             )
 
@@ -179,8 +189,8 @@ def verify_tenant_scope_catalog(bind: Connection) -> None:
         if not inspector.has_table(table, schema=HOST_SCHEMA):
             _fail(name, f"{HOST_SCHEMA}.{table} does not exist")
 
-    _assert_columns(bind, "tenants", _TENANT_COLUMNS)
-    _assert_columns(bind, "tenant_domains", _TENANT_DOMAIN_COLUMNS)
+    _assert_columns(bind, name, "tenants", _TENANT_COLUMNS)
+    _assert_columns(bind, name, "tenant_domains", _TENANT_DOMAIN_COLUMNS)
 
     for table in ("tenants", "tenant_domains"):
         pk = tuple(
@@ -350,6 +360,120 @@ def verify_module_database_roles(bind: Connection) -> None:
         _fail(name, "; ".join(problems))
 
 
+# ── idempotency_ledger.v1 ───────────────────────────────────────────────────
+
+# The at-most-once ledger's shape, in the form the inspector reports it. This
+# is a RUNTIME prerequisite, unlike the two above: nothing in a requiring
+# lineage's DDL touches these tables, so a module that omitted the declaration
+# migrated cleanly and then died on the first guarded call — `UndefinedTable`
+# from `execute_once`, in the adopter's application, not in its deploy.
+#
+# `fingerprint` is checked as its OWN nullable column because the defect
+# ADR-0014 § 3 exists to prevent is a provider that supplies a table of this
+# name with one overloaded reference column (Sub's `ref_id`, meaning a
+# fingerprint in two services and a result id in five others). Such a table
+# satisfies "has the right name" and silently breaks replay.
+_LEDGER_COLUMNS: Final[dict[str, _ColumnContract]] = {
+    "id": (sa.Uuid, False, None, None, False),
+    "scope": (sa.String, False, 120, None, False),
+    "key": (sa.String, False, 200, None, False),
+    "fingerprint": (sa.String, True, 64, None, False),
+    "operation": (sa.String, False, 120, None, False),
+    "status": (sa.String, False, 20, None, False),
+    "result": (sa.JSON, False, None, None, True),
+    "correlation_id": (sa.String, True, 200, None, False),
+    "expires_at": (sa.DateTime, True, None, True, False),
+    "created_at": (sa.DateTime, False, None, True, True),
+    "updated_at": (sa.DateTime, False, None, True, True),
+}
+
+_TENANT_LEDGER_COLUMNS: Final[dict[str, _ColumnContract]] = {
+    "tenant_id": (sa.Uuid, False, None, None, False),
+    **_LEDGER_COLUMNS,
+}
+
+#: table -> (required unique key, RLS required?)
+_LEDGER_CONTRACT: Final[dict[str, tuple[tuple[str, ...], bool]]] = {
+    "idempotency_records": (("tenant_id", "scope", "key"), True),
+    "platform_idempotency_records": (("scope", "key"), False),
+}
+
+
+def verify_idempotency_ledger(bind: Connection) -> None:
+    """Prove both at-most-once ledgers exist here, with their plane posture.
+
+    The unique key is the load-bearing check: `execute_once` reserves nothing
+    ahead of the effect (ADR-0014 § 5), so a second concurrent attempt is
+    stopped by the constraint or it is not stopped at all. A table of the right
+    name with the key missing — or widened by a sixth column — turns
+    at-most-once into at-least-once without any error at any layer.
+    """
+    name = IDEMPOTENCY_LEDGER_V1.name
+    inspector = sa.inspect(bind)
+
+    for table, (unique_key, _) in _LEDGER_CONTRACT.items():
+        if not inspector.has_table(table, schema=HOST_SCHEMA):
+            _fail(name, f"{HOST_SCHEMA}.{table} does not exist")
+
+        contracts = (
+            _TENANT_LEDGER_COLUMNS if "tenant_id" in unique_key else _LEDGER_COLUMNS
+        )
+        _assert_columns(bind, name, table, contracts)
+
+        uniques = {
+            tuple(c.get("column_names") or ())
+            for c in inspector.get_unique_constraints(table, schema=HOST_SCHEMA)
+        }
+        if unique_key not in uniques:
+            _fail(
+                name,
+                f"{HOST_SCHEMA}.{table} has no unique constraint on "
+                f"{unique_key!r} (found {sorted(uniques)!r}) — without it a "
+                "concurrent second attempt executes the effect twice",
+            )
+
+        indexed = {
+            tuple(i.get("column_names") or ())
+            for i in inspector.get_indexes(table, schema=HOST_SCHEMA)
+        }
+        if ("expires_at",) not in indexed:
+            _fail(
+                name,
+                f"{HOST_SCHEMA}.{table} has no index on ('expires_at',) — "
+                "retention (`purge_expired`) would scan the whole ledger",
+            )
+
+    if bind.dialect.name != "postgresql":
+        return
+
+    for table, (_, needs_rls) in _LEDGER_CONTRACT.items():
+        row = bind.execute(
+            sa.text(
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = :schema AND c.relname = :table"
+            ),
+            {"schema": HOST_SCHEMA, "table": table},
+        ).one()
+        enabled, forced = bool(row[0]), bool(row[1])
+        if needs_rls and not (enabled and forced):
+            _fail(
+                name,
+                f"{HOST_SCHEMA}.{table} must have FORCEd row-level security "
+                f"(enabled={enabled}, forced={forced}). Every guarded call in "
+                "every composed module writes here, so a ledger without it "
+                "leaks one tenant's keys and results to another",
+            )
+        if not needs_rls and (enabled or forced):
+            _fail(
+                name,
+                f"{HOST_SCHEMA}.{table} is the platform plane and must carry no "
+                f"RLS (enabled={enabled}, forced={forced}); its isolation is "
+                "the revoked grant, and a policy here evaluates "
+                "app_current_tenant_id() where there is no tenant",
+            )
+
+
 # ── Dispatch ────────────────────────────────────────────────────────────────
 
 #: A prerequisite's verifier. Takes the migration's bind; raises to refuse.
@@ -363,6 +487,7 @@ class PrerequisiteVerifierMissingError(RuntimeError):
 _VERIFIERS: dict[str, Verifier] = {
     TENANT_SCOPE_CATALOG_V1.name: verify_tenant_scope_catalog,
     MODULE_DATABASE_ROLES_V1.name: verify_module_database_roles,
+    IDEMPOTENCY_LEDGER_V1.name: verify_idempotency_ledger,
 }
 
 
@@ -447,6 +572,7 @@ __all__ = [
     "registered_verifiers",
     "require_prerequisites",
     "role_violations",
+    "verify_idempotency_ledger",
     "verify_module_database_roles",
     "verify_tenant_scope_catalog",
 ]
