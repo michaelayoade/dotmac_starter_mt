@@ -408,7 +408,7 @@
       "package_dir": "packages/dotmac-numbering",
       "import_name": "dotmac_numbering",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a65",
+      "kernel_floor": "0.1.0a66",
       "db_schema": "mod_numbering",
       "tag_prefix": "dotmac-numbering-v",
       "wheel_contents": {

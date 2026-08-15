@@ -52,7 +52,11 @@ down_revision = None
 branch_labels = ("numbering",)
 
 MODULE_CODE = "numbering"
-COMMON_REQUIRES = ("module_database_roles.v1",)
+# `idempotency_ledger.v1` is verified here even though no statement below
+# touches it: `allocate` writes that ledger at REQUEST time, and deploy is the
+# last moment at which a missing ledger is a failed migration rather than a
+# failed allocation in production.
+COMMON_REQUIRES = ("module_database_roles.v1", "idempotency_ledger.v1")
 TENANT_REQUIRES = ("tenant_scope_catalog.v1",)
 PLATFORM_REQUIRES: tuple[str, ...] = ()
 REQUIRES = COMMON_REQUIRES + TENANT_REQUIRES + PLATFORM_REQUIRES

@@ -17,6 +17,7 @@ import tomllib
 from pathlib import Path
 
 from dotmac_kernel.namespaces import MIGRATION_OWNER_LEDGER, NUMBERING_MIGRATION_OWNER
+from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1
 from dotmac_numbering import models, service
 from dotmac_numbering.manifest import module
 
@@ -377,19 +378,53 @@ def test_importing_the_package_never_builds_a_database_engine() -> None:
 # ── Release registration ────────────────────────────────────────────────────
 
 
+def test_every_kernel_facility_the_service_calls_is_a_declared_prerequisite() -> None:
+    """The defect this module shipped with, made unrepeatable.
+
+    `allocate` writes the kernel's at-most-once ledger through `execute_once` /
+    `execute_once_platform`. Nothing in `nu_0001` creates those tables, so at
+    0.1.0a1 the dependency existed only in the call — an adopter that had not
+    run the kernel's own lineage migrated cleanly and failed on its first
+    allocation instead.
+
+    Asserted from the CALL, not from the declaration: reading `module.requires`
+    twice would pass with the requirement deleted."""
+    source = (PACKAGE_ROOT / "src/dotmac_numbering/service.py").read_text("utf-8")
+    assert "execute_once" in source, (
+        "the ledger call moved; this canary now proves nothing — re-derive the "
+        "prerequisite from wherever at-most-once is now delegated"
+    )
+    assert IDEMPOTENCY_LEDGER_V1.name in module.requires, (
+        "service.py calls the kernel idempotency ledger but the manifest does "
+        f"not declare {IDEMPOTENCY_LEDGER_V1.name!r} — an adopter without those "
+        "tables would migrate cleanly and fail at the first allocation"
+    )
+
+
+def test_the_ledger_prerequisite_is_common_not_plane_specific() -> None:
+    """Both planes call one of the pair, so neither plane list may hold it —
+    a PLATFORM-only control plane needs `platform_idempotency_records` just as
+    a tenant deployment needs the tenant table."""
+    assert IDEMPOTENCY_LEDGER_V1.name not in module.tenant_requires
+    assert IDEMPOTENCY_LEDGER_V1.name not in module.platform_requires
+
+
 def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     entry = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]["dotmac-numbering"]
     assert entry["db_schema"] == models.SCHEMA
     assert entry["import_name"] == "dotmac_numbering"
-    assert entry["kernel_floor"] == "0.1.0a65"
+    assert entry["kernel_floor"] == "0.1.0a66"
     assert MIGRATION.name in " ".join(entry["wheel_contents"]["required"])
 
 
-def test_the_pinned_kernel_floor_is_the_release_that_allocated_the_schema() -> None:
+def test_the_pinned_kernel_floor_is_the_release_that_named_the_ledger() -> None:
+    """a65 allocated `mod_numbering`; a66 published `idempotency_ledger.v1`.
+    The floor is the higher, because a65 cannot even import this manifest —
+    `validate_prerequisites` does not know the name."""
     manifest = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))
-    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a65"
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a66"
 
 
 def test_the_dossier_records_no_adoption_yet() -> None:
