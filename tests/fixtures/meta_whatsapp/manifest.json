@@ -11,7 +11,14 @@
     "test_meta_whatsapp_ingress_conformance.py proves the corpus is internally",
     "consistent and that the identity rules are computable from the bytes."
   ],
-  "capability_id": "messaging.inbound.v1",
+  "capability_id": "messaging.receive.v1",
+  "distribution": "dotmac-connector-whatsapp",
+  "import_package": "dotmac_connector_whatsapp",
+  "connector_key": "meta_whatsapp",
+  "spi_range": ">=1.1,<2.0",
+  "modes": [
+    "ingress"
+  ],
   "signing_keys": {
     "_notice": "TEST KEYS. Generated for this corpus, never used by any deployment, and deliberately self-describing so a scanner that finds one knows it is inert. A real signing secret must never appear in this repository.",
     "active": [
@@ -46,18 +53,29 @@
       "body_rule": "the value of hub.challenge, echoed verbatim, with no JSON wrapper"
     },
     "comparison": "constant-time on hub.verify_token; a mismatch and a missing token produce the identical refusal",
-    "installation_states": {
+    "eligibility": {
       "_rule": "The handshake is what PRECEDES activation, so it must be answerable before the binding is enabled. Requiring an enabled binding is circular: Meta will not deliver an event, and the Cloud API will not save the callback URL, until the GET is answered.",
-      "answers_challenge": [
-        "disabled",
+      "_owner": "dotmac-integration. HANDSHAKE_INSTALLATION_STATES in dotmac_integration.ingress (PR #188, OPEN at the time of writing). These values track the module; the connector never decides its own eligibility.",
+      "grain": "installation",
+      "binding_state_consulted": false,
+      "_binding_grain_note": "A handshake asks only about the INSTALLATION. A configured-but-disabled BINDING answers the challenge and refuses a delivery — module test `test_a_configured_but_disabled_binding_answers_a_handshake_and_refuses_a_delivery`.",
+      "installation_answers_challenge": [
+        "draft",
+        "validating",
         "enabled"
       ],
-      "refuses": [
-        "draft",
+      "installation_refuses": [
+        "disabled",
+        "quarantined",
         "retired",
-        "config_revision_invalid",
         "absent"
-      ]
+      ],
+      "_allowlist_not_negation": "An allowlist, not `!= retired`, so a state added later is a deliberate decision rather than a silent admission.",
+      "_vocabulary_warning": "Sub's `disabled` is NOT the Integrator's `disabled`, and porting the constant would invert this rule. Sub has no `validating` state, so its installations sit at `disabled` while an operator configures the callback — which is why `verify_whatsapp_webhook_challenge` admits {disabled, enabled}. The Integrator has `validating`, so the pre-activation position is `draft`/`validating` and `disabled` means an operator deliberately took a working integration DOWN. The PROPERTY is identical in both: the challenge is answerable before enablement. The state NAME is not.",
+      "also_refuses": [
+        "config_revision_invalid"
+      ],
+      "_also_refuses_note": "In Sub this is a state check inside the challenge handler. In the Integrator it is a mint-time gate (compatibility, manifest pin, ingress mode) rather than a handshake-time one, so an endpoint that should not serve never acquires an address to serve on."
     },
     "grants": {
       "_rule": "Answering the challenge grants nothing.",

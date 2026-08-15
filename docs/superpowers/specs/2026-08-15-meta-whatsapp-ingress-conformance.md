@@ -27,12 +27,41 @@ it. A requirement with no test is a preference; this document has none of those.
 
 ---
 
-## 0. Scope
+## 0. Scope and coordinates
 
-**Ingress only.** `messaging.inbound.v1`. The connector receives Meta's HTTP
-callbacks, proves they came from Meta, and turns each batch into typed
-observations. It does not send, does not call the Graph API, does not resolve a
-contact profile, and does not decide what any message means.
+Michael authorized the exact distribution on 2026-08-15. These are not
+placeholders, and the fixture manifest binds every one of them
+(`test_the_authorized_coordinates_are_exact`):
+
+| | |
+|---|---|
+| distribution | `dotmac-connector-whatsapp` |
+| import package | `dotmac_connector_whatsapp` |
+| connector key | `meta_whatsapp` |
+| capability | `messaging.receive.v1` |
+| mode | `INGRESS` only |
+| SPI range | `>=1.1,<2.0` |
+| extraction classification | `stateless-protocol-adapter` |
+| release profile | `connector-plugin` |
+| path | `packages/dotmac-connector-whatsapp/` |
+
+`messaging.receive.v1` is **not** a name chosen here. Sub already declares it —
+`app/services/integrations/registry.py:417` and `:579`, bound by both
+`whatsapp_runtime` and `meta_social_runtime` — and under ADR-0030 § 8.2 the
+capability id and its typed semantic contract belong to the **declaring
+application**, while `dotmac-integration` owns only registry mechanics and a
+connector merely implements what it is handed. An earlier draft of this
+specification invented `messaging.inbound.v1`, which would have created a second
+vocabulary for one meaning; that is exactly the collision the split-ownership
+rule exists to prevent.
+
+`connector-plugin` is the **release profile and architectural role**, not an
+`EXTRACTION.toml` classification — see § 9.
+
+**Ingress only.** The connector receives Meta's HTTP callbacks, proves they came
+from Meta, and turns each batch into typed observations. It does not send, does
+not call the Graph API, does not resolve a contact profile, and does not decide
+what any message means.
 
 Send-side — `build_text_payload`, `build_template_payload`,
 `build_media_payload`, media upload, template read, `WhatsAppRuntimeRunner` —
@@ -40,10 +69,25 @@ is explicitly out of scope, roughly two-thirds of Sub's `whatsapp_runtime.py`.
 Outbound is where a mistake reaches a customer, and an ingress-only connector
 cannot make that mistake at all.
 
-**What the connector is given:** the raw request bytes, the request headers,
-the resolved configuration of one binding, and materialised secrets.
-**What it returns:** a tuple of observations, or a typed verification failure.
-**What it never receives:** a database session, a product model, or an ORM.
+**The seam is now real.** SPI 1.1 (#185, merged) froze it, and this
+specification is written against the merged names rather than against a
+proposal:
+
+* `IngressHandler` is `challenge` / `verify` / `normalize`, all three receiving
+  the **same** immutable `IngressRequest` — which is what makes "what was
+  authenticated" and "what was interpreted" provably the same bytes;
+* `IngressRequest.raw_body` is the body exactly as received, and its own
+  docstring states the rule this document's WAI-7 tests: a body through
+  `json.loads`/`json.dumps` "fails a signature check that should have passed —
+  or, worse, passes one it should have failed";
+* `normalize` returns `InboundEvent` triples **and** the `Acknowledgement`,
+  because it is the last connector code that runs before the batch commits;
+* `challenge` returning `None` is a refusal, and the handshake is an explicit
+  engine operation — never inferred from a bodyless request.
+
+**What it never receives:** a database session, a product model, or an ORM. The
+`IngressRequest` is `frozen` + `slots`, so a session cannot be smuggled on as an
+ad-hoc attribute.
 
 ---
 
@@ -56,7 +100,7 @@ Meta verifies a callback URL with a `GET` carrying `hub.mode`,
 | Id | Requirement | Bound by |
 |---|---|---|
 | **WAI-1** | `hub.mode` MUST be `subscribe`; anything else is refused. | `test_the_handshake_echoes_the_challenge_verbatim` |
-| **WAI-2** | The challenge MUST be answerable while the binding is **configured but disabled**, as well as enabled. | `test_the_handshake_is_answerable_while_configured_but_disabled` |
+| **WAI-2** | The challenge MUST be answerable **before enablement**, on the module's own installation-state allowlist. | `test_the_handshake_is_answerable_before_the_binding_is_enabled`, `test_the_handshake_tracks_the_modules_allowlist_not_subs_vocabulary` |
 | **WAI-3** | Answering it MUST NOT create a receipt, MUST NOT enable anything, and MUST NOT reveal whether the binding is enabled. | `test_answering_the_handshake_grants_nothing` |
 | **WAI-4** | `hub.verify_token` MUST be compared in constant time. | `test_the_verify_token_is_compared_in_constant_time` |
 | **WAI-5** | A wrong token and a missing token MUST produce the identical refusal. | `test_a_wrong_and_a_missing_verify_token_are_indistinguishable` |
@@ -71,24 +115,58 @@ is delivered until the URL is saved. An implementation that demands enablement
 to answer the challenge can therefore never be enabled — the state it requires
 is downstream of the request it refuses.
 
-**Team 2 is correcting this in the module.** This specification states the
-target behaviour so the two agree rather than being reconciled later:
+### The module owns the allowlist, and it is NOT Sub's
 
-* **answers the challenge:** `disabled`, `enabled`
-* **refuses:** `draft`, `retired`, invalid current config revision, no such
-  binding
+Team 2 built this in PR #188 (open at the time of writing), and the module is
+the authority — a connector never decides its own eligibility. The eligibility
+predicate splits by `IngressOperation`:
 
-`disabled` here means *configured and statically validated, not yet enabled* —
-which is precisely the state an operator is in while pasting the URL into Meta's
-console. `draft` is refused because nothing has been validated yet, and
-`retired` because the operator deliberately ended it.
+* **handshake** ignores `binding.state` entirely and asks only whether the
+  **installation** is in `HANDSHAKE_INSTALLATION_STATES` = `{draft, validating,
+  enabled}` — an allowlist, not `!= retired`, so a state added later is a
+  deliberate decision;
+* **delivery** keeps the existing `selection._usable` (binding **and**
+  installation enabled), reused rather than restated.
 
-Sub already resolved this once, and its resolution is the precedent:
+So `disabled`, `quarantined` and `retired` answer neither: a handshake is a step
+in bringing an integration *up*.
+
+An earlier revision of this specification said the opposite — `disabled` answers
+and `draft` refuses. **That was wrong, and the reason it was wrong is worth
+keeping**, because it is the trap the next port will walk into:
+
+> **Sub's `disabled` is not the Integrator's `disabled`.** Sub has no
+> `validating` state, so an installation being configured *sits at* `disabled` —
+> which is why `verify_whatsapp_webhook_challenge` admits `{disabled, enabled}`,
+> and why Sub's own test literally calls
+> `disable_installation(reason="webhook_setup")` before answering the challenge.
+> The Integrator **has** `validating`, so the pre-activation position is
+> `draft`/`validating`, and `disabled` there means an operator deliberately took
+> a working integration *down*.
+
+The **property** is identical in both systems: the challenge is answerable
+before enablement. Only the state *name* differs. Porting Sub's constant would
+have inverted the rule while looking like a faithful port — which is precisely
+why `test_the_handshake_tracks_the_modules_allowlist_not_subs_vocabulary`
+asserts the module's exact list rather than a paraphrase of the property.
+
+**The binding grain is where the two documents always agreed.** A handshake asks
+only about the installation, so a *configured-but-disabled binding* answers the
+challenge and refuses a delivery — Team 2's
+`test_a_configured_but_disabled_binding_answers_a_handshake_and_refuses_a_delivery`
+drives exactly that case in both directions, with nothing recorded.
+
+An invalid config revision is refused in both designs, but at different moments:
+a state check inside Sub's challenge handler, and a **mint-time** gate in the
+Integrator (compatibility, manifest pin, ingress mode), so an endpoint that
+could not serve never acquires an address to serve on.
+
+Sub resolved the *property* first, and that remains the precedent:
 `verify_whatsapp_webhook_challenge`
 (`dotmac_sub/app/services/integrations/whatsapp_installation.py`, commit
-`8b11635ad`, "fix WhatsApp pre-activation webhook verification") admits exactly
-`{disabled, enabled}`, and its docstring states the rule outright — *"Compare a
-setup challenge without granting inbound runtime capability."* Sub's **social**
+`8b11635ad`, "fix WhatsApp pre-activation webhook verification"), whose
+docstring states the rule outright — *"Compare a setup challenge without
+granting inbound runtime capability."* Sub's **social**
 receiver (`meta_inbox_webhooks._verify_token` → `inbound_secret_material` →
 `require_binding`, which requires an *enabled* binding) still has the
 circularity. Inherit the WhatsApp path; do not inherit the social one.
@@ -389,8 +467,66 @@ a fixture that needs a signature gets one from the committed test key.
 
 ### When the gate opens
 
-When ADR-0030 § 6 is amended with a named connector distribution, that
+When ADR-0030 § 6 is amended with `dotmac-connector-whatsapp`, that
 distribution's `normalize` runs against this same `manifest.json` and must
 produce exactly the declared observations. Nothing in the corpus changes for
 that to happen — which is the point of writing it before the implementation
 exists.
+
+---
+
+## 9. Release lane — and why this connector cannot ship yet
+
+The lane landed in #187 and is **shut**: `.github/release-connectors.json` has
+`"connectors": {}`, and that empty object is the lock, not the workflow's
+existence. Five requirements are enforced by `scripts/release_connector.py`
+rather than asserted in review:
+
+1. **Classification and location.** `EXTRACTION.toml` says
+   `stateless-protocol-adapter`, read from the package and never trusted from
+   the policy file, and `package_dir` must start with
+   `packages/dotmac-connector-`.
+2. **Discovery.** Exactly one entry point in the `dotmac_integration.connectors`
+   group, and the `connector_key` it declares must equal the manifest's —
+   `meta_whatsapp` in both places. A key mismatch is invisible until two
+   connectors collide in a live registry.
+3. **Conformance.** `assert_plugin_conforms` against the **installed bytes**,
+   not the source tree, because only one of the two gets published.
+4. **An installable floor.** `integration_floor` must name a **published**
+   `dotmac-integration`.
+5. **No secret value, no persistence, no private retry/checkpoint engine.**
+
+### `connector-plugin` is a release profile, not a classification
+
+The dossier says `classification = "stateless-protocol-adapter"` like any other
+distribution a product does not install. Adding a fourth classification would
+amend ADR-0006's vocabulary through a dossier, and the four properties that
+classification governs — no `ModuleManifest`, no lineage declaration, no
+`MIGRATION_OWNER_LEDGER` allocation, no persistence import — are exactly the
+four a connector has. `tests/architecture/test_product_first_extraction.py`
+checks all four generically against whatever package claims the word.
+
+The consequence must be stated rather than left implicit: **the classification
+no longer separates the connector lane from the adapter lane.** It is a floor
+both share. What separates them is requirement set above —
+`tests/architecture/test_connector_release_policy.py` proves it the hard way, by
+showing `dotmac-auth-oidc` carries the identical classification and is still
+refused by this gate.
+
+### The floor arithmetic, which blocks release today
+
+SPI 1.1 arrived in `dotmac-integration` **source** 0.1.0a2. That version is
+declared and **unpublished**; the only published release is 0.1.0a1, which
+implements SPI 1.0. A declared range of `>=1.1,<2.0` therefore admits **no
+published release**, so there is no floor to name — and requirement 4 refuses an
+`integration_floor` with no release tag.
+
+`release-connectors.json` states the same fact from the module side: "a
+connector may currently floor at a1 or wait, and may not floor at a2." This
+connector needs 1.1, so it **waits**. The single final `dotmac-integration`
+alpha comes after the whole module train lands; the connector's release entry
+follows that publication, and the entry lands *with* the conformance proof,
+never ahead of it.
+
+That ordering is a property of the programme, not of this specification, and
+nothing here can shorten it.

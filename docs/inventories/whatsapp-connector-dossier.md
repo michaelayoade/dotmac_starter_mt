@@ -26,15 +26,20 @@ over the corpus in `tests/fixtures/meta_whatsapp/`.
 
 | Gate | State on 2026-08-15 |
 |---|---|
-| ADR-0030 § 6 names the distribution | **NO.** No connector appears in the ten authorized names. |
-| Integrator secret resolver complete | **NO.** Under construction. Until an installation passes connection validation with materialised secrets, no connector is operationally complete. |
-| Michael has named the exact provider/package | **NO.** |
-| SPI carries an ingress hook | **NO.** `modes` is decorative; `handler_for` is the only data-movement factory and `DispatchRequest` carries neither raw body nor headers. Being corrected. |
+| Michael has named the exact provider/package | **YES.** `dotmac-connector-whatsapp`, connector key `meta_whatsapp`, capability `messaging.receive.v1`, ingress-only, SPI `>=1.1,<2.0`. Recorded in § 1. |
+| SPI carries an ingress hook | **YES.** SPI 1.1 froze it (#185, merged): `IngressHandler` = `challenge`/`verify`/`normalize` over one immutable `IngressRequest` carrying `raw_body`, headers and params unnormalised. |
+| ADR-0030 § 6 names the distribution | **NO.** § 6 remains the controlling text and lists ten names, none of them a connector. Naming the coordinates is not amending the ADR. |
+| Integrator secret resolver complete | **NO.** Team 4's PR is open and CI is billing-blocked. Until an installation passes connection validation with materialised secrets, no connector is operationally complete regardless of test coverage. |
+| A published Integration floor exists for SPI 1.1 | **NO.** SPI 1.1 landed in source 0.1.0a2, which is unpublished; the only published release is 0.1.0a1 at SPI 1.0. See § 6. |
 
-Four gates, four negatives. This dossier, the specification and the fixture
-corpus are the permitted work. **Nothing in this document authorizes a
-connector**, and its existence is not a step toward authorization — it is the
-evidence that must exist *before* authorization can be considered.
+Two gates closed, three open — and the two that closed are the two that were
+never the blocker. **Nothing in this document authorizes a connector.** Naming
+the coordinates makes the eventual package unambiguous; it does not amend
+ADR-0030 § 6, which is the text that would.
+
+What remains permitted is unchanged: this dossier, the conformance
+specification and the fixture corpus. No package directory under `packages/`,
+no provider client, no connector code.
 
 ---
 
@@ -42,8 +47,26 @@ evidence that must exist *before* authorization can be considered.
 
 ```toml
 schema_version = 1
-package = "PENDING — ADR-0030 § 6 must name the exact distribution"
-classification = "connector-plugin"
+package = "dotmac-connector-whatsapp"
+# Import package `dotmac_connector_whatsapp`; connector key `meta_whatsapp`;
+# path `packages/dotmac-connector-whatsapp/`. The release gate reads the PATH
+# PREFIX (`packages/dotmac-connector-`) rather than the distribution name, so
+# the three are recorded together and must not drift apart.
+
+# `stateless-protocol-adapter`, NOT `connector-plugin`. That word is the name of
+# the RELEASE PROFILE and of the architectural role; it is deliberately not an
+# `EXTRACTION.toml` classification, and making it one would amend ADR-0006's
+# vocabulary through a dossier. The four properties this classification governs
+# — no ModuleManifest, no `short_code`/`migration_prefix`, no
+# MIGRATION_OWNER_LEDGER allocation, no sqlalchemy/alembic/psycopg/asyncpg
+# import — are exactly the four a connector has.
+#
+# The consequence, stated because it is the one thing a reader could get wrong:
+# THIS CLASSIFICATION NO LONGER SEPARATES THE CONNECTOR LANE FROM THE ADAPTER
+# LANE. It is a floor both share. The five stricter connector requirements are
+# what separate them (§ 6).
+classification = "stateless-protocol-adapter"
+release_profile = "connector-plugin"
 status = "specification-only"
 source_mode = "product-first"
 owner = "Meta/WhatsApp Cloud API wire format and provider I/O — nothing else"
@@ -62,7 +85,29 @@ contract = "Verify a Meta webhook signature over the exact bytes received; answe
 planes = "none"
 
 modes = ["INGRESS"]
-capabilities = ["messaging.inbound.v1"]
+spi_range = ">=1.1,<2.0"
+connector_key = "meta_whatsapp"
+entry_point_group = "dotmac_integration.connectors"
+
+# `messaging.receive.v1` is NOT a name minted here. Sub already declares it —
+# `app/services/integrations/registry.py:417` and `:579`, bound by both
+# `whatsapp_runtime` and `meta_social_runtime` — and ADR-0030 § 8.2 gives the
+# capability id and its typed semantic contract to the DECLARING APPLICATION,
+# leaves registry mechanics with dotmac-integration, and lets a connector only
+# IMPLEMENT what it is handed. An earlier revision of this dossier invented
+# `messaging.inbound.v1`, which would have been a second vocabulary for one
+# meaning: exactly the collision the split-ownership rule exists to prevent.
+capabilities = ["messaging.receive.v1"]
+
+# NO FLOOR IS NAMEABLE TODAY, and this is the release blocker rather than a
+# formality. The connector lane refuses an `integration_floor` that names an
+# unpublished release. SPI 1.1 landed in dotmac-integration SOURCE 0.1.0a2,
+# which is declared and unpublished; the only published release is 0.1.0a1 at
+# SPI 1.0, which `>=1.1,<2.0` excludes. `release-connectors.json` states the
+# same fact from the module side: a connector may currently floor at a1 or
+# wait, and may not floor at a2. This one needs 1.1, so it WAITS — the single
+# final alpha comes after the whole module train lands.
+integration_floor = "UNSET — no published dotmac-integration implements SPI 1.1"
 
 source_repositories = ["dotmac_sub", "dotmac_crm"]
 
@@ -110,7 +155,7 @@ shadow_and_drift = "An ingress-edge MIRROR, not dual subscription. Meta document
 
 local_copy_retirement = "Sub retires `app/api/inbox_webhooks.py`, `_verify_meta_signature`, `_iter_meta_whatsapp_messages`, `_iter_meta_whatsapp_statuses` and the WhatsApp verify-token/signing-secret handling once the connector is composed and the callback URL is repointed. Sub KEEPS `whatsapp_capability.py` and everything under team_inbox — what a message means to Sub was never the connector's. The external-connector ratchet baseline is lowered in the SAME change as the retirement, so it is reviewable as a diff rather than asserted."
 
-next_action = "BLOCKED on four gates (§ 0). The permitted next artefacts are: the social-channel sibling dossier, and re-running the fixture corpus against Sub's receiver as a parity harness once the SPI carries an ingress hook. No package directory is created until ADR-0030 § 6 names the distribution."
+next_action = "BLOCKED on three gates (§ 0): the ADR-0030 § 6 amendment naming this distribution, Team 4's secret resolver, and a PUBLISHED dotmac-integration implementing SPI 1.1. The coordinates are settled; the authorization is not. Permitted next artefacts: the social-channel sibling dossier, and running the fixture corpus against Sub's receiver as a parity harness now that SPI 1.1 gives the shape to run it in. No package directory under packages/ until ADR-0030 § 6 is amended."
 
 # PARITY DISPOSITIONS — one per source suite, and the reason.
 [parity]
@@ -164,8 +209,14 @@ live system, not a hypothetical.
 `require_binding(db)` → `require_enabled_capability_binding`. The **GET**
 handshake therefore needs an *enabled* binding — which cannot exist until the
 handshake succeeds. Sub's **WhatsApp** path fixed this in commit `8b11635ad` by
-resolving the installation directly and admitting `{disabled, enabled}`. Inherit
-the WhatsApp path. → spec **WAI-2**
+resolving the installation directly and admitting `{disabled, enabled}`.
+
+**Inherit the property, NOT the constant.** The Integrator's allowlist is
+`{draft, validating, enabled}` (Team 2, PR #188) and its `disabled` means an
+operator took a working integration *down* — the opposite of Sub's, where
+`disabled` is where an installation sits *while being configured*, because Sub
+has no `validating` state. Copying `{disabled, enabled}` across would invert the
+rule while looking like a faithful port. → spec **WAI-2**
 
 ### 3.2 Request-digest event identity
 
@@ -299,18 +350,83 @@ under the fixture root.
 
 ## 5. Open items this dossier does not close
 
-1. **The SPI has no ingress hook.** `modes` is decorative; `DispatchRequest`
-   carries no raw body and no headers. Owned elsewhere; tracked in
-   `whatsapp-connector-sources.md`.
-2. **The Integrator secret resolver.** ADR-0030 § 6 completion work. Until an
-   installation reaches `enabled` with materialised secrets, no connector is
-   operationally complete regardless of test coverage.
-3. **The fleet ratchet is unmonitored in CI.** `test_external_connector_ratchet`
+1. ~~The SPI has no ingress hook.~~ **CLOSED by #185.** SPI 1.1 is frozen:
+   `IngressHandler` = `challenge`/`verify`/`normalize` over one immutable
+   `IngressRequest`. `IngressRequest.raw_body`'s own docstring now states the
+   rule this dossier's § 3 findings are about.
+2. **The Integrator secret resolver.** ADR-0030 § 6 completion work; Team 4's PR
+   is open and CI is billing-blocked. Until an installation reaches `enabled`
+   with materialised secrets, no connector is operationally complete regardless
+   of test coverage.
+3. **No published `dotmac-integration` implements SPI 1.1**, so no
+   `integration_floor` is nameable and the connector lane refuses the entry.
+   Resolved by the final module-train alpha, not by anything here.
+4. **The ADR-0030 § 6 amendment.** The coordinates are settled; § 6 still lists
+   ten names and none is a connector. This is the authorization gate.
+5. **The fleet ratchet is unmonitored in CI.** `test_external_connector_ratchet`
    skips when the fleet is not checked out beside the Starter, which is always
-   true in CI. Per ADR-0018 that is *unmonitored rather than exempt*. Not
-   closed here.
-4. **The social channels (Messenger, Instagram, comments) need their own
+   true in CI. Per ADR-0018 that is *unmonitored rather than exempt*. #187
+   made the ratchet honest about four silent caps and ran it green against the
+   live fleet; the CI abstention itself is unchanged.
+6. **Does a `disabled` installation need to answer a re-verification?** Team 2's
+   allowlist is `{draft, validating, enabled}`, so an operator who disables a
+   live integration and is then asked by Meta to re-verify the callback URL
+   cannot answer it until they re-enable. Re-enabling does not itself require
+   the handshake — connection validation runs against the provider's API, not
+   its webhook — so this is not a new circularity. It is a real operator path
+   with a plausible surprise in it, and it belongs to the module rather than to
+   this specification. Flagged, not decided.
+7. **The social channels (Messenger, Instagram, comments) need their own
    dossier.** They are a separate capability with a different payload shape
    (`messaging[]` rather than `changes[].value.messages[]`), a different time
    unit, and a receiver that still carries the circular handshake and a
    mid-webhook Graph call.
+
+---
+
+## 6. The release lane, and the ordering it imposes
+
+`.github/release-connectors.json` (#187) is the third release shape, beside
+modules and stateless adapters. It exists because a connector is neither: it
+owns no `mod_*` schema, lineage or ledger allocation, so the module lane's
+questions do not apply; and unlike an adapter — a library a product *calls*,
+verified by its public surface — a connector is **discovered and executed** by a
+control plane, registering in `dotmac_integration.connectors` and loaded by a
+`discover` that is fail-closed *as a set*: one malformed connector refuses the
+whole registry rather than silently offering the rest. That is a question only
+this lane asks, and its answer is a function call rather than a review comment.
+
+Five requirements, each enforced by `scripts/release_connector.py`:
+
+| # | Requirement | This connector |
+|---|---|---|
+| 1 | `classification = "stateless-protocol-adapter"`, read from the package; `package_dir` starts with `packages/dotmac-connector-` | recorded in § 1; path `packages/dotmac-connector-whatsapp/` |
+| 2 | exactly one entry point in `dotmac_integration.connectors`, whose `connector_key` equals the manifest's | `meta_whatsapp` in both places |
+| 3 | `assert_plugin_conforms` against the **installed bytes**, not the source tree | pending the package |
+| 4 | `integration_floor` names a **published** `dotmac-integration` | **UNSATISFIABLE TODAY** — see below |
+| 5 | no secret value, no persistence, no private retry/checkpoint engine | asserted by § 1's `planes = "none"` and § 3's findings |
+
+### Requirement 4 is the binding constraint
+
+SPI 1.1 landed in `dotmac-integration` **source** 0.1.0a2. That version is
+declared and unpublished; the only published release is 0.1.0a1, at SPI 1.0.
+A declared range of `>=1.1,<2.0` admits no published release, and `resolve`
+refuses an `integration_floor` with no release tag.
+
+`release-connectors.json` states the same thing from the module side — "a
+connector may currently floor at a1 or wait, and may not floor at a2." This
+connector needs 1.1, so it waits. **The single final `dotmac-integration` alpha
+comes after the whole module train lands**, and the connector's release entry
+follows that publication.
+
+### Absence is the safety mechanism
+
+`"connectors": {}` is the lock — not the workflow's existence, which is merged
+and shut on PR #180's precedent so that review of publish permissions and
+artifact handling happens separately from review of the first provider
+implementation. Those are different questions with different reviewers, and
+bundling them means whichever is more urgent carries the other through.
+
+The entry lands **with** the conformance proof, never ahead of it. And an entry
+would prove only that the workflow may publish — not that a version was
+published, not that anything adopted it, and not that the provider works.

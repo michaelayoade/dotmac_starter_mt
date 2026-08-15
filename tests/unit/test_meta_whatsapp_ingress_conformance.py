@@ -194,6 +194,45 @@ def test_the_capability_id_matches_the_spi_grammar():
     assert CAPABILITY_ID_RE.fullmatch(MANIFEST["capability_id"])
 
 
+def test_the_authorized_coordinates_are_exact():
+    """Michael authorized these on 2026-08-15. They are not placeholders.
+
+    `messaging.receive.v1` in particular is NOT a name chosen here: Sub already
+    declares it (`app/services/integrations/registry.py:417` and `:579`, bound
+    by both `whatsapp_runtime` and `meta_social_runtime`), and the capability's
+    meaning is owned by the declaring application (ADR-0030 § 8.2). Minting a
+    second id for one meaning is the thing the split ownership rule exists to
+    prevent.
+    """
+    assert MANIFEST["capability_id"] == "messaging.receive.v1"
+    assert MANIFEST["distribution"] == "dotmac-connector-whatsapp"
+    assert MANIFEST["import_package"] == "dotmac_connector_whatsapp"
+    assert MANIFEST["connector_key"] == "meta_whatsapp"
+    assert MANIFEST["spi_range"] == ">=1.1,<2.0"
+    assert MANIFEST["modes"] == ["ingress"]
+    # The release gate reads the path prefix, not the distribution name, so the
+    # two must agree before the package is ever created.
+    assert MANIFEST["distribution"].startswith("dotmac-connector-")
+    assert MANIFEST["import_package"] == MANIFEST["distribution"].replace("-", "_")
+
+
+def test_the_declared_spi_range_excludes_every_published_integration():
+    """Why this connector cannot be released yet, as arithmetic.
+
+    The connector lane requires an `integration_floor` naming a PUBLISHED
+    `dotmac-integration`. SPI 1.1 arrived in source 0.1.0a2, which is declared
+    and unpublished; the only published release is 0.1.0a1, which implements
+    SPI 1.0. A range of `>=1.1,<2.0` therefore admits no published release, so
+    there is no floor to name — the connector waits for the final alpha rather
+    than flooring on a1.
+    """
+    minimum, below = MANIFEST["spi_range"].lstrip(">=").split(",<")
+    assert tuple(int(p) for p in minimum.split(".")) == (1, 1)
+    assert tuple(int(p) for p in below.split(".")) == (2, 0)
+    # SPI 1.0 — what the one published release implements — is excluded.
+    assert (1, 0) < (1, 1), "a1's SPI is below the declared minimum"
+
+
 def test_no_fixture_carries_credential_shaped_material():
     """The corpus must stay safe to publish, forever."""
     forbidden = ("bao://", "env://", "Bearer ", "access_token", "EAAG", "app_secret")
@@ -518,24 +557,53 @@ def test_a_request_digest_identity_cannot_deduplicate_a_regrouped_event():
 # ── the subscription handshake ───────────────────────────────────────────────
 
 
-def test_the_handshake_is_answerable_while_configured_but_disabled():
+def test_the_handshake_is_answerable_before_the_binding_is_enabled():
     """The circularity, stated as a requirement.
 
     Meta performs the GET **before** any event is delivered, and the Cloud API
     will not save a callback URL whose challenge is unanswered. An
-    implementation that demands an ENABLED binding to answer it can therefore
-    never be enabled: the handshake is what precedes activation. Sub already
-    resolves this — `verify_whatsapp_webhook_challenge` admits `disabled` and
-    `enabled` — and its docstring is the rule: "Compare a setup challenge
-    without granting inbound runtime capability."
+    implementation that demands an enabled binding to answer it can therefore
+    never be enabled: the handshake is what precedes activation.
+
+    The property is "answerable before enablement". The STATE NAMES that carry
+    it differ between the two systems, which is the trap this test exists to
+    keep shut — see `_vocabulary_warning` in the manifest.
     """
-    states = MANIFEST["handshake"]["installation_states"]
-    assert "disabled" in states["answers_challenge"]
-    assert "enabled" in states["answers_challenge"]
-    assert {"draft", "retired", "config_revision_invalid", "absent"} <= set(
-        states["refuses"]
+    eligibility = MANIFEST["handshake"]["eligibility"]
+    answers = set(eligibility["installation_answers_challenge"])
+    refuses = set(eligibility["installation_refuses"])
+
+    # At least one PRE-enablement state answers, or the circularity is back.
+    assert answers - {"enabled"}, (
+        "if only `enabled` answers the challenge, the endpoint refuses the one "
+        "request that would let it become enabled"
     )
-    assert not set(states["answers_challenge"]) & set(states["refuses"])
+    assert "enabled" in answers
+    assert {"retired", "absent"} <= refuses
+    assert not answers & refuses, "a state cannot both answer and refuse"
+
+
+def test_the_handshake_tracks_the_modules_allowlist_not_subs_vocabulary():
+    """`disabled` means opposite things in the two systems.
+
+    Sub has no `validating` state, so an installation being configured sits at
+    `disabled` — which is why `verify_whatsapp_webhook_challenge` admits
+    `{disabled, enabled}`. The Integrator HAS `validating`, so the
+    pre-activation position is `draft`/`validating` and `disabled` means an
+    operator deliberately took a working integration down. Porting Sub's
+    constant would invert the rule while looking like a faithful port.
+    """
+    eligibility = MANIFEST["handshake"]["eligibility"]
+    assert eligibility["installation_answers_challenge"] == [
+        "draft",
+        "validating",
+        "enabled",
+    ], "must equal dotmac_integration.ingress.HANDSHAKE_INSTALLATION_STATES"
+    assert "disabled" in eligibility["installation_refuses"]
+    assert "quarantined" in eligibility["installation_refuses"]
+    assert eligibility["grain"] == "installation"
+    assert eligibility["binding_state_consulted"] is False
+    assert "validating" in eligibility["_vocabulary_warning"]
 
 
 def test_answering_the_handshake_grants_nothing():
