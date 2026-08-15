@@ -378,9 +378,134 @@ class AuthSession(Base, TimestampMixin):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ExternalIdentityBinding(Base, TimestampMixin):
+    """A verified external subject, bound to one local `Party`.
+
+    The answer to exactly one question: *this identity provider says it
+    authenticated subject S at issuer I — which local party is that, here?*
+    Nothing else. It holds no roles, no groups, no claims and no provider
+    metadata, and it never creates a party (see
+    `dotmac_kernel.external_identity` for why resolution refuses rather than
+    provisions).
+
+    ## Two products, two halves, neither one whole
+
+    The 2026-08-14 inventory
+    (`docs/inventories/external-identity-sources.md`) measured both:
+
+    - **ERP** owns the external-subject half — `federated_identities`
+      (`issuer`, `subject` → `person_id`), a written contract, an
+      architecture test forbidding external roles, and an explicit
+      no-auto-provision refusal. It has NO local provider record (the issuer
+      is echoed from one global config value), NO tenant column, and NO RLS —
+      so its `(issuer, subject)` uniqueness is GLOBAL across every ERP
+      organization, with the org boundary enforced only transitively through
+      the person FK.
+    - **Sub** owns the provider-registration half —
+      `authentication_bindings`: an installed, configured way of proving you
+      are a party, keyed by an immutable deployment-global `binding_key`,
+      tagged with an open declared `mechanism_code`. It has no `issuer` and
+      no `subject` column anywhere.
+
+    Neither is a superset, so this table is ERP's shape with Sub's
+    discriminator and the isolation neither has.
+
+    ## `provider_binding` is a LOCAL fact, never provider metadata
+
+    The load-bearing column. It names WHICH configured provider registration
+    the caller just completed a ceremony against — the caller's own trusted
+    configuration, not a string parsed out of a token. `issuer` is corroborating
+    evidence recorded alongside it; it does not select anything on its own,
+    because a value that arrives inside the credential being verified cannot be
+    the thing that decides which credential is trusted.
+
+    Concretely, that is why resolution keys on the whole tuple. Sub's design
+    note is the reason the discriminator is the BINDING rather than a mechanism
+    code: *"two OIDC issuers or two RADIUS verifiers are two bindings of one
+    code, and a code-keyed constraint would forbid a party holding a credential
+    against each."*
+
+    It is a plain string, deliberately NOT an ADR-0008 declaration. Same line
+    ADR-0026 §4 draws for `policy_code`: a subject type is code-owned and
+    therefore declared, but a provider registration is created by an OPERATOR
+    configuring an IdP, and requiring a manifest entry would put a software
+    release between an operator and their own identity provider. Fail-closed
+    resolution is what protects a typo — an unknown binding resolves to nothing.
+
+    ## What is deliberately NOT here
+
+    No provider-registration TABLE. Sub has one and this kernel does not yet:
+    a first-class row carrying discovery URLs, client ids and key material is a
+    second contract with its own lifecycle, and ADR-0009 governs where its
+    secret half may live. Until it exists, `provider_binding` is a string whose
+    trust the CALLER asserts, and the caller is the product's identity facet
+    that owns the provider configuration. That is a real limitation, recorded
+    rather than papered over.
+
+    No `email` column. `Party.email` is the single email authority (F2), and
+    ERP's contract is explicit that provider email is *"display evidence only
+    and is never used for automatic account linking"*.
+    """
+
+    __tablename__ = "external_identity_bindings"
+    __table_args__ = (
+        # Tenant-partitioned, unlike ERP's global pair. One external identity
+        # at one configured provider means one party WITHIN a tenant; the same
+        # subject may legitimately be a different person in a different tenant.
+        UniqueConstraint(
+            "tenant_id",
+            "provider_binding",
+            "issuer",
+            "subject",
+            name="uq_external_identity_bindings_tenant_provider_subject",
+        ),
+        # ERP's `(person_id, issuer)`, tenant- and provider-partitioned: a party
+        # holds at most ONE identity per configured provider, so a person cannot
+        # quietly accumulate several logins into the same account.
+        UniqueConstraint(
+            "tenant_id",
+            "provider_binding",
+            "party_id",
+            name="uq_external_identity_bindings_tenant_provider_party",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "party_id"],
+            ["parties.tenant_id", "parties.id"],
+            ondelete="CASCADE",
+            name="fk_external_identity_bindings_tenant_party",
+        ),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    party_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False, index=True)
+    provider_binding: Mapped[str] = mapped_column(String(80), nullable=False)
+    issuer: Mapped[str] = mapped_column(String(512), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Sub's evidence quartet, which ERP has no analogue for: a binding grants a
+    # login, so who made it and why are part of the record, not a side note in
+    # an audit table that may be pruned on a different schedule.
+    bound_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    bound_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    bind_reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    # ERP's, and worth keeping: the only evidence a binding is still live.
+    last_authenticated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
+
 __all__ = [
     "AuthSession",
     "Base",
+    "ExternalIdentityBinding",
     "Party",
     "PartyOrganization",
     "PartyPerson",

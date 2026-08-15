@@ -80,6 +80,40 @@ the ERP host, not in git.
 the ERP production environment. This requires Michael to name the host; no
 inference from historical environment mappings.
 
+### Update, 2026-08-14: the gate no longer decides the question
+
+The 2026-08-14 sweep
+([`external-identity-sources.md`](external-identity-sources.md)) re-ran this
+audit across all six repositories and found a SECOND disqualifier that does not
+depend on the host at all:
+
+> ERP's `_validate_id_token` and `_exchange_code` are monkeypatched out in
+> **every** existing test. Signature verification, the algorithm allowlist,
+> `kid` handling, nonce mismatch and every claim-validation failure path have
+> zero real coverage.
+
+Rule 24 requires a qualifying source to be production-used **and tested**. The
+second half fails on repository evidence alone, so the host reading — still
+unperformed, and still requiring Michael to name the host — can no longer change
+the ruling on its own. Repository-side evidence also now leans hard against
+deployment: `.env.example` default `false`, no OIDC key in `docker-compose.yml`,
+none in `deploy/systemd/`, a single commit (`bded8aa9`), and
+`docs/oidc_identity_contract.md` written as a future cutover gate. That is
+evidence of absence in the artifacts a deployment would touch — it is **not** the
+same as having read the running environment, and this document does not claim it
+is.
+
+Consequence: `dotmac-auth-oidc` ships `source_mode = "greenfield-after-inventory"`
+under rule 24's own escape (checked-in evidence that no qualifying implementation
+exists). The DESIGN and the written contract are ported from ERP with confidence;
+the crypto and HTTP internals are not ported as trusted code. See
+`packages/dotmac-auth-oidc/EXTRACTION.toml`.
+
+**Still worth doing:** reading the host. Not because it changes the source
+ruling, but because if ERP *is* authenticating users through this code today,
+that changes the retirement plan from "delete an unshipped module" to "migrate
+live logins", which is a different and much more careful piece of work.
+
 Why the answer changes the plan:
 
 - **Enabled in production** → ERP is the mandatory product-first source. The
