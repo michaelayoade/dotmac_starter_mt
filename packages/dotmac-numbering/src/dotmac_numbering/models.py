@@ -56,6 +56,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    func,
 )
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
@@ -168,9 +169,16 @@ class _ReceiptColumns:
     def idempotency_key(cls) -> Mapped[str]:
         return mapped_column(String(255), nullable=False)
 
+    #: Populated by PostgreSQL. Transaction time records evidence; it never
+    #: influences the period, the formatting, or any allocation decision — all
+    #: of those come from the caller's `reference_date`. Keeping it a server
+    #: default is what makes "this module reads no clock" checkable rather
+    #: than merely intended.
     @declared_attr
     def allocated_at(cls) -> Mapped[datetime]:
-        return mapped_column(DateTime(timezone=True), nullable=False)
+        return mapped_column(
+            DateTime(timezone=True), nullable=False, server_default=func.now()
+        )
 
     @declared_attr
     def allocated_by(cls) -> Mapped[str | None]:
@@ -213,9 +221,12 @@ class _RepairColumns:
     def repaired_by(cls) -> Mapped[str]:
         return mapped_column(String(255), nullable=False)
 
+    #: Server-populated, for the same reason as `allocated_at`.
     @declared_attr
     def repaired_at(cls) -> Mapped[datetime]:
-        return mapped_column(DateTime(timezone=True), nullable=False)
+        return mapped_column(
+            DateTime(timezone=True), nullable=False, server_default=func.now()
+        )
 
 
 # ── Tenant plane ────────────────────────────────────────────────────────────
@@ -278,6 +289,16 @@ class AllocationReceipt(Base, _ReceiptColumns):
             "allocated_value",
             name="uq_allocation_receipts_value",
         ),
+        # The rendered string itself, not just the counter value. A
+        # configuration change can alter the period scheme or the format and
+        # restart at 1, which would reproduce a number already issued — the
+        # value-and-period key cannot see that, and this can.
+        UniqueConstraint(
+            "tenant_id",
+            "series_code",
+            "formatted_number",
+            name="uq_allocation_receipts_rendered",
+        ),
         Index("ix_allocation_receipts_tenant_series", "tenant_id", "series_code"),
         schema_table_args(SCHEMA),
     )
@@ -285,9 +306,6 @@ class AllocationReceipt(Base, _ReceiptColumns):
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
         Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
     )
 
 
@@ -303,9 +321,6 @@ class SeriesRepair(Base, _RepairColumns):
     id: Mapped[UUID] = uuid_pk()
     tenant_id: Mapped[UUID] = mapped_column(
         Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
     )
 
 
@@ -349,14 +364,16 @@ class PlatformAllocationReceipt(Base, _ReceiptColumns):
             "allocated_value",
             name="uq_platform_allocation_receipts_value",
         ),
+        UniqueConstraint(
+            "series_code",
+            "formatted_number",
+            name="uq_platform_allocation_receipts_rendered",
+        ),
         Index("ix_platform_allocation_receipts_series", "series_code"),
         schema_table_args(SCHEMA),
     )
 
     id: Mapped[UUID] = uuid_pk()
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
 
 
 class PlatformSeriesRepair(Base, _RepairColumns):
@@ -369,9 +386,6 @@ class PlatformSeriesRepair(Base, _RepairColumns):
     )
 
     id: Mapped[UUID] = uuid_pk()
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
 
 
 TENANT_TABLES: tuple[str, ...] = (

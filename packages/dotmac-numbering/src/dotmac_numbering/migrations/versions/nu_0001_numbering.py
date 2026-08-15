@@ -111,7 +111,14 @@ def _receipt_columns() -> list[sa.Column[Any]]:
         sa.Column("formatted_number", sa.String(255), nullable=False),
         sa.Column("reference_date", sa.Date(), nullable=False),
         sa.Column("idempotency_key", sa.String(255), nullable=False),
-        sa.Column("allocated_at", sa.DateTime(timezone=True), nullable=False),
+        # Server default: transaction time records evidence and never feeds a
+        # decision, so the module has no reason to read a clock at all.
+        sa.Column(
+            "allocated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.Column("allocated_by", sa.String(255), nullable=True),
     ]
 
@@ -125,7 +132,12 @@ def _repair_columns() -> list[sa.Column[Any]]:
         sa.Column("proven_minimum", sa.BigInteger(), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("repaired_by", sa.String(255), nullable=False),
-        sa.Column("repaired_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "repaired_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
     ]
 
 
@@ -146,15 +158,44 @@ def _timestamps() -> list[sa.Column[Any]]:
     ]
 
 
-def _created_only() -> list[sa.Column[Any]]:
-    """Append-only tables get a creation instant and no `updated_at`."""
+def _series_checks(prefix: str) -> list[sa.CheckConstraint]:
+    """Mirror the service validation in the database.
+
+    The online roles can write the configuration tables directly, so a rule
+    enforced only in Python is a rule a migration or a psql session can walk
+    straight past — and a bad configuration here reissues numbers.
+    """
     return [
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        )
+        sa.CheckConstraint(
+            "min_digits BETWEEN 1 AND 18", name=f"ck_{prefix}_min_digits"
+        ),
+        sa.CheckConstraint("year_digits IN (2, 4)", name=f"ck_{prefix}_year_digits"),
+        sa.CheckConstraint("start_value >= 1", name=f"ck_{prefix}_start_value"),
+        sa.CheckConstraint(
+            "reset_policy IN ('never', 'yearly', 'monthly')",
+            name=f"ck_{prefix}_reset_policy",
+        ),
+        # Reset/format coherence: a resetting series that does not print its
+        # period reissues the same strings every period.
+        sa.CheckConstraint(
+            "reset_policy <> 'yearly' OR include_year = 1",
+            name=f"ck_{prefix}_yearly_prints_year",
+        ),
+        sa.CheckConstraint(
+            "reset_policy <> 'monthly' OR (include_year = 1 AND include_month = 1)",
+            name=f"ck_{prefix}_monthly_prints_month",
+        ),
+        sa.CheckConstraint(
+            "include_month = 0 OR include_year = 1",
+            name=f"ck_{prefix}_month_needs_year",
+        ),
+    ]
+
+
+def _counter_checks(prefix: str) -> list[sa.CheckConstraint]:
+    return [
+        sa.CheckConstraint("next_value >= 1", name=f"ck_{prefix}_next_value"),
+        sa.CheckConstraint("period_key <> ''", name=f"ck_{prefix}_period_key"),
     ]
 
 
@@ -217,6 +258,7 @@ def _upgrade_tenant_plane() -> None:
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
         *_series_columns(),
         *_timestamps(),
+        *_series_checks("number_series"),
         _tenant_fk("fk_number_series_tenant"),
         sa.UniqueConstraint("tenant_id", "id", name="uq_number_series_tenant_id_id"),
         sa.UniqueConstraint(
@@ -230,6 +272,7 @@ def _upgrade_tenant_plane() -> None:
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
         *_counter_columns(),
         *_timestamps(),
+        *_counter_checks("series_counters"),
         _tenant_fk("fk_series_counters_tenant"),
         sa.UniqueConstraint(
             "tenant_id", "series_code", "period_key", name="uq_series_counters_identity"
@@ -241,7 +284,6 @@ def _upgrade_tenant_plane() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
         *_receipt_columns(),
-        *_created_only(),
         _tenant_fk("fk_allocation_receipts_tenant"),
         sa.UniqueConstraint(
             "tenant_id",
@@ -250,6 +292,15 @@ def _upgrade_tenant_plane() -> None:
             "allocated_value",
             name="uq_allocation_receipts_value",
         ),
+        # The rendered string itself. A configuration change could restart a
+        # new period scheme at 1 and reproduce an issued number; the
+        # value-and-period key cannot see that collision and this can.
+        sa.UniqueConstraint(
+            "tenant_id",
+            "series_code",
+            "formatted_number",
+            name="uq_allocation_receipts_rendered",
+        ),
         schema=_SCHEMA,
     )
     op.create_table(
@@ -257,7 +308,6 @@ def _upgrade_tenant_plane() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
         *_repair_columns(),
-        *_created_only(),
         _tenant_fk("fk_series_repairs_tenant"),
         schema=_SCHEMA,
     )
@@ -306,6 +356,7 @@ def _upgrade_platform_plane() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         *_series_columns(),
         *_timestamps(),
+        *_series_checks("platform_number_series"),
         sa.UniqueConstraint("series_code", name="uq_platform_number_series_code"),
         schema=_SCHEMA,
     )
@@ -314,6 +365,7 @@ def _upgrade_platform_plane() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         *_counter_columns(),
         *_timestamps(),
+        *_counter_checks("platform_series_counters"),
         sa.UniqueConstraint(
             "series_code", "period_key", name="uq_platform_series_counters_identity"
         ),
@@ -323,12 +375,16 @@ def _upgrade_platform_plane() -> None:
         "platform_allocation_receipts",
         sa.Column("id", sa.Uuid(), primary_key=True),
         *_receipt_columns(),
-        *_created_only(),
         sa.UniqueConstraint(
             "series_code",
             "period_key",
             "allocated_value",
             name="uq_platform_allocation_receipts_value",
+        ),
+        sa.UniqueConstraint(
+            "series_code",
+            "formatted_number",
+            name="uq_platform_allocation_receipts_rendered",
         ),
         schema=_SCHEMA,
     )
@@ -336,7 +392,6 @@ def _upgrade_platform_plane() -> None:
         "platform_series_repairs",
         sa.Column("id", sa.Uuid(), primary_key=True),
         *_repair_columns(),
-        *_created_only(),
         schema=_SCHEMA,
     )
     op.create_index(

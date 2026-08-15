@@ -28,7 +28,7 @@ converts exactly that race into a replay-or-conflict.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Final
 from uuid import uuid4
 
@@ -155,6 +155,37 @@ class SeriesConfiguration:
             )
 
 
+#: Fields that shape what a rendered number LOOKS like, or which period it
+#: belongs to. Once a series has a counter or a receipt, changing one of these
+#: can reproduce a number already issued — a new period scheme restarts at the
+#: start value, and the value-and-period unique key cannot see that the string
+#: collides. They freeze; `uq_..._rendered` is the backstop if one ever slips.
+IDENTITY_SHAPING_FIELDS: Final[tuple[str, ...]] = (
+    "prefix",
+    "suffix",
+    "separator",
+    "min_digits",
+    "include_year",
+    "year_digits",
+    "include_month",
+    "reset_policy",
+)
+
+
+def _series_has_history(db: Session, scope: Scope, series_code: str) -> bool:
+    """True once the series has a counter or a receipt.
+
+    Either is enough: a counter means a number may already have been rendered
+    even if the receipt was rolled back with its caller.
+    """
+    _, counter_model, receipt_model, _ = _models(scope)
+    for model in (counter_model, receipt_model):
+        stmt = select(model.id).where(model.series_code == series_code).limit(1)
+        if db.execute(_tenant_filter(stmt, scope, model)).first() is not None:
+            return True
+    return False
+
+
 def configure_series(
     db: Session, *, scope: Scope, configuration: SeriesConfiguration
 ) -> NumberSeries | PlatformNumberSeries:
@@ -168,6 +199,8 @@ def configure_series(
     configuration.validate()
     series_model, *_ = _models(scope)
     existing = _find_series(db, scope, configuration.series_code)
+    if existing is not None:
+        _assert_safe_transition(db, scope, existing, configuration)
     target = existing
     if target is None:
         target = series_model(series_code=configuration.series_code)
@@ -188,6 +221,42 @@ def configure_series(
     target.include_month = int(configuration.include_month)
     db.flush()
     return target
+
+
+def _assert_safe_transition(
+    db: Session, scope: Scope, existing, configuration: SeriesConfiguration
+) -> None:
+    """Refuse a reconfiguration that could reissue an existing number.
+
+    Before the series has handed anything out, any change is safe. Afterwards
+    the identity-shaping fields are frozen: retiring the series and configuring
+    a new code is the honest way to change how its numbers look, because it
+    leaves the issued ones addressable under the code that issued them.
+
+    `start_value` is deliberately NOT frozen — it seeds counters for periods
+    that have not begun, and cannot move one that has.
+    """
+    changed = [
+        field
+        for field in IDENTITY_SHAPING_FIELDS
+        if _normalise(getattr(existing, field)) != _normalise(
+            getattr(configuration, field)
+        )
+    ]
+    if changed and _series_has_history(db, scope, configuration.series_code):
+        raise _error(
+            "unsafe_configuration_change",
+            "This series has already allocated, so the fields that shape its "
+            "numbers are frozen. Changing them could reproduce a number "
+            "already issued. Configure a new series_code instead.",
+            series_code=configuration.series_code,
+            frozen_fields=changed,
+        )
+
+
+def _normalise(value: object) -> object:
+    """`include_year` is an int column and a bool on the configuration."""
+    return int(value) if isinstance(value, bool) else value
 
 
 # ── Periods and formatting ──────────────────────────────────────────────────
@@ -454,9 +523,9 @@ def _do_allocate(
         formatted_number=formatted,
         reference_date=reference_date,
         idempotency_key=idempotency_key,
-        allocated_at=datetime.now(UTC),
+        # `allocated_at` is a server default. Transaction time records
+        # evidence; it never influences the period, the format or the value.
         allocated_by=allocated_by,
-        created_at=datetime.now(UTC),
     )
     if isinstance(scope, TenantScope):
         receipt.tenant_id = scope.tenant_id
@@ -536,8 +605,6 @@ def advance_to_at_least(
         proven_minimum=proven_minimum,
         reason=reason,
         repaired_by=repaired_by,
-        repaired_at=datetime.now(UTC),
-        created_at=datetime.now(UTC),
     )
     if isinstance(scope, TenantScope):
         evidence.tenant_id = scope.tenant_id

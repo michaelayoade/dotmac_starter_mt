@@ -120,12 +120,16 @@ def test_the_module_reads_no_clock_for_a_business_decision() -> None:
     module takes from the system, and it is evidence rather than a decision.
     """
     source = _module_source()
-    assert "date.today()" not in source
-    assert "datetime.today()" not in source
-    # The one permitted clock read, and it must stay in the receipt only.
-    # Receipts, repair evidence and their created_at stamps — evidence, never
-    # a decision input.
-    assert source.count("datetime.now(") <= 6
+    # ZERO, not a budget. An allowance of N is not an invariant — it is a
+    # licence to add the N+1st read and lower the bar. Evidence instants are
+    # PostgreSQL server defaults, so the module has no reason to read a clock
+    # at all, and any reappearance is a real change in behaviour.
+    for reader in ("date.today", "datetime.today", "datetime.now", "utcnow"):
+        assert reader not in source, (
+            f"{reader} in the numbering module. Transaction time records "
+            "evidence and never influences a period, a format, an allocation "
+            "or a repair — evidence instants are server defaults."
+        )
 
 
 def test_the_module_reads_no_settings_and_no_environment() -> None:
@@ -192,6 +196,64 @@ def test_every_counter_is_scoped_to_a_period() -> None:
         )
 
 
+def test_evidence_instants_are_server_defaults() -> None:
+    """The other half of "reads no clock": the column has to fill itself."""
+    for model, column in (
+        (models.AllocationReceipt, "allocated_at"),
+        (models.PlatformAllocationReceipt, "allocated_at"),
+        (models.SeriesRepair, "repaired_at"),
+        (models.PlatformSeriesRepair, "repaired_at"),
+    ):
+        assert model.__table__.c[column].server_default is not None, (
+            f"{model.__name__}.{column} must be server-populated, or the "
+            "module needs a clock read to fill it"
+        )
+
+
+def test_the_rendered_number_is_unique_per_series() -> None:
+    """Value-and-period uniqueness cannot see a re-rendered string.
+
+    A configuration change could move to a new period scheme, restart at the
+    start value and reproduce a number already issued; the counter-value key
+    would allow it because the period differs.
+    """
+    for model in (models.AllocationReceipt, models.PlatformAllocationReceipt):
+        uniques = {
+            tuple(sorted(c.columns.keys()))
+            for c in model.__table__.constraints
+            if type(c).__name__ == "UniqueConstraint"
+        }
+        assert any("formatted_number" in cols for cols in uniques), (
+            f"{model.__name__} must make the rendered string unique per series"
+        )
+
+
+def test_identity_shaping_configuration_freezes_once_a_series_has_history() -> None:
+    assert service.IDENTITY_SHAPING_FIELDS
+    assert "reset_policy" in service.IDENTITY_SHAPING_FIELDS
+    assert "min_digits" in service.IDENTITY_SHAPING_FIELDS
+    # start_value seeds periods that have not begun and cannot move one that
+    # has, so freezing it would refuse a safe change.
+    assert "start_value" not in service.IDENTITY_SHAPING_FIELDS
+    assert "_assert_safe_transition" in inspect.getsource(service.configure_series)
+
+
+def test_the_migration_mirrors_the_critical_validation_in_check_constraints() -> None:
+    """The online roles can write the configuration tables directly, so a rule
+    that lives only in Python is one a psql session walks straight past."""
+    migration = MIGRATION.read_text(encoding="utf-8")
+    for check in (
+        "min_digits BETWEEN 1 AND 18",
+        "year_digits IN (2, 4)",
+        "start_value >= 1",
+        "reset_policy IN ('never', 'yearly', 'monthly')",
+        "reset_policy <> 'yearly' OR include_year = 1",
+        "reset_policy <> 'monthly' OR (include_year = 1 AND include_month = 1)",
+        "next_value >= 1",
+    ):
+        assert check in migration, f"missing CHECK: {check}"
+
+
 def test_append_only_tables_carry_no_updated_at() -> None:
     for model in (
         models.AllocationReceipt,
@@ -201,6 +263,11 @@ def test_append_only_tables_carry_no_updated_at() -> None:
     ):
         assert "updated_at" not in model.__table__.c, (
             f"{model.__name__} is append-only; an updated_at there is dead or a lie"
+        )
+        # One domain timestamp per evidence row, not a second redundant one.
+        assert "created_at" not in model.__table__.c, (
+            f"{model.__name__} carries created_at beside its domain instant; "
+            "two timestamps for one event invite them to disagree"
         )
 
 

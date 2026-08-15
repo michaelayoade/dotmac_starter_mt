@@ -261,8 +261,22 @@ def test_proof_2_tenant_tables_force_rls(scratch, table):
 # ── Proof 3 — the allocation race, and a hostile version without the lock ───
 
 
-def _race(url: str, tenant: uuid.UUID, keys: tuple[str, str]) -> tuple[list, list]:
-    """Two allocations, both inside their transactions before either proceeds."""
+def _race(
+    url: str,
+    tenant: uuid.UUID,
+    keys: tuple[str, str],
+    *,
+    barrier_before: bool = True,
+    also_abort: tuple[threading.Barrier, ...] = (),
+) -> tuple[list, list]:
+    """Two allocations in parallel.
+
+    `barrier_before` rendezvouses before `allocate()`, which is right when the
+    lock is present: it proves both transactions are open. The hostile variant
+    passes False and rendezvouses INSIDE the counter read instead — waiting
+    twice would deadlock, and waiting only before the call is exactly the weak
+    version this replaced.
+    """
     barrier = threading.Barrier(2)
     results: list = []
     errors: list[BaseException] = []
@@ -271,7 +285,8 @@ def _race(url: str, tenant: uuid.UUID, keys: tuple[str, str]) -> tuple[list, lis
         try:
             with _session(url, tenant) as s:
                 s.execute(text("SELECT 1"))
-                barrier.wait(timeout=15)
+                if barrier_before:
+                    barrier.wait(timeout=15)
                 out = allocate(
                     s, scope=TenantScope(tenant_id=tenant), series_code="invoice",
                     reference_date=JAN, idempotency_key=key,
@@ -280,10 +295,13 @@ def _race(url: str, tenant: uuid.UUID, keys: tuple[str, str]) -> tuple[list, lis
                 results.append(out)
         except BaseException as exc:  # noqa: BLE001 - recorded and asserted on
             errors.append(exc)
-            try:
-                barrier.abort()
-            except Exception:
-                pass
+            # Release a peer that may be waiting, on either barrier, so a
+            # failure surfaces as an error rather than a 40-second hang.
+            for b in (barrier, *also_abort):
+                try:
+                    b.abort()
+                except Exception:
+                    pass
 
     threads = [threading.Thread(target=worker, args=(k,)) for k in keys]
     for t in threads:
@@ -307,12 +325,19 @@ def test_proof_3_concurrent_allocations_never_take_the_same_value(scratch):
 def test_proof_3_hostile_without_for_update_the_race_takes_the_same_value(
     scratch, monkeypatch
 ):
-    """THE sensitivity proof for the lock.
+    """THE sensitivity proof for the lock, made deterministic.
 
-    Patches the module's counter read to drop `FOR UPDATE` and asserts the
-    failure returns: either both callers format the same number, or the second
-    insert trips the receipt unique constraint. A duplicate hand-inserted by
-    the test would prove the index instead, and say nothing about the lock.
+    The barrier sits INSIDE the patched counter read, after both transactions
+    have observed the same counter state, so neither can finish before the
+    other looks. A barrier placed before `allocate()` only guarantees both
+    threads *started*; one can still complete the whole allocation before the
+    other reads, and the test then sees two valid numbers and passes for the
+    wrong reason.
+
+    Removing `FOR UPDATE` must make the race fail: either both format the same
+    number, or the second insert trips a receipt unique constraint. A duplicate
+    hand-inserted by the test would prove the index and say nothing about the
+    lock.
     """
     admin_url, user_url, _ = scratch
     (tenant,) = _make_tenants(admin_url, 1)
@@ -320,6 +345,8 @@ def test_proof_3_hostile_without_for_update_the_race_takes_the_same_value(
         _configure(s, TenantScope(tenant_id=tenant))
 
     from dotmac_numbering import service as svc
+
+    read_barrier = threading.Barrier(2)
 
     def unlocked_counter(db, scope, series, period_key):
         counter_model = svc._models(scope)[1]
@@ -329,6 +356,11 @@ def test_proof_3_hostile_without_for_update_the_race_takes_the_same_value(
         )
         stmt = svc._tenant_filter(stmt, scope, counter_model)
         row = db.execute(stmt).scalar_one_or_none()
+
+        # Both actors have now read the SAME counter state — or both observed
+        # its absence. Only then may either proceed.
+        read_barrier.wait(timeout=15)
+
         if row is None:
             values = {
                 "id": uuid.uuid4(),
@@ -345,12 +377,16 @@ def test_proof_3_hostile_without_for_update_the_race_takes_the_same_value(
 
     monkeypatch.setattr(svc, "_locked_counter", unlocked_counter)
 
-    results, errors = _race(user_url, tenant, ("h1", "h2"))
+    results, errors = _race(
+        user_url, tenant, ("h1", "h2"),
+        barrier_before=False,
+        also_abort=(read_barrier,),
+    )
     numbers = [r.formatted_number for r in results]
     assert errors or len(set(numbers)) < 2, (
-        "with FOR UPDATE removed the race must either duplicate a value or "
-        f"fail; it produced {numbers} cleanly, so proof 3 is not measuring the "
-        "lock"
+        "with FOR UPDATE removed and both readers held at the same counter "
+        f"state, the race must duplicate a value or fail; it produced {numbers} "
+        "cleanly, so proof 3 is not measuring the lock"
     )
 
 
@@ -701,3 +737,145 @@ def test_an_unconfigured_series_fails_closed(scratch):
             reference_date=JAN, idempotency_key="k",
         )
     assert exc.value.code.endswith("series_not_configured")
+
+
+# ── Configuration cannot reissue a rendered number ──────────────────────────
+
+
+def test_reconfiguring_a_series_that_has_allocated_is_refused(scratch):
+    """The gap the value-and-period key cannot close.
+
+    Switching an allocated series to a new period scheme would restart at the
+    start value and re-render a string already issued, and the counter-value
+    unique would permit it because the period differs.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
+        allocate(
+            s, scope=scope, series_code="invoice", reference_date=JAN,
+            idempotency_key="k1",
+        )
+        s.commit()
+
+        with pytest.raises(NumberingError) as exc:
+            _configure(s, scope, reset_policy="yearly", include_year=True)
+    assert exc.value.code.endswith("unsafe_configuration_change")
+
+
+def test_reconfiguring_before_any_allocation_is_allowed(scratch):
+    """Sensitivity proof for the freeze: it must not refuse everything."""
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
+        _configure(s, scope, reset_policy="yearly", include_year=True, min_digits=4)
+        out = allocate(
+            s, scope=scope, series_code="invoice", reference_date=JAN,
+            idempotency_key="k1",
+        )
+        s.commit()
+    assert out.formatted_number == "INV-2026-0001"
+
+
+def test_the_rendered_number_is_unique_even_if_a_transition_slips(scratch):
+    """The database backstop behind the service rule.
+
+    Written raw, as a migration or a psql session would, so the constraint is
+    proven rather than the service path that avoids it.
+    """
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    scope = TenantScope(tenant_id=tenant)
+    with _session(user_url, tenant) as s:
+        _configure(s, scope)
+        allocate(
+            s, scope=scope, series_code="invoice", reference_date=JAN,
+            idempotency_key="k1",
+        )
+        s.commit()
+
+    engine = create_engine(user_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, false)"),
+            {"t": str(tenant)},
+        )
+        with pytest.raises(DBAPIError) as exc:
+            conn.execute(
+                text(
+                    "INSERT INTO mod_numbering.allocation_receipts "
+                    "(id, tenant_id, series_code, period_key, allocated_value, "
+                    " formatted_number, reference_date, idempotency_key) "
+                    "VALUES (:id, :t, 'invoice', '2099', 1, 'INV-000001', "
+                    " :d, 'other')"
+                ),
+                {"id": uuid.uuid4(), "t": tenant, "d": JAN},
+            )
+    assert "uq_allocation_receipts_rendered" in str(exc.value)
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("min_digits", 0),
+        ("min_digits", 19),
+        ("year_digits", 3),
+        ("start_value", 0),
+    ],
+)
+def test_check_constraints_refuse_a_bad_configuration_written_directly(
+    scratch, column, value
+):
+    """The online role can write this table, so Python validation alone is not
+    enforcement."""
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(s, TenantScope(tenant_id=tenant))
+
+    engine = create_engine(user_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, false)"),
+            {"t": str(tenant)},
+        )
+        with pytest.raises(DBAPIError) as exc:
+            conn.execute(
+                text(
+                    f"UPDATE mod_numbering.number_series SET {column} = :v "
+                    "WHERE tenant_id = :t"
+                ),
+                {"v": value, "t": tenant},
+            )
+    assert "violates check constraint" in str(exc.value).lower()
+    engine.dispose()
+
+
+def test_a_resetting_series_must_print_its_period_at_the_database(scratch):
+    admin_url, user_url, _ = scratch
+    (tenant,) = _make_tenants(admin_url, 1)
+    with _session(user_url, tenant) as s:
+        _configure(s, TenantScope(tenant_id=tenant))
+
+    engine = create_engine(user_url)
+    with engine.connect() as conn:
+        conn.execute(
+            text("SELECT set_config('app.current_tenant_id', :t, false)"),
+            {"t": str(tenant)},
+        )
+        with pytest.raises(DBAPIError) as exc:
+            conn.execute(
+                text(
+                    "UPDATE mod_numbering.number_series "
+                    "SET reset_policy = 'yearly', include_year = 0 "
+                    "WHERE tenant_id = :t"
+                ),
+                {"t": tenant},
+            )
+    assert "violates check constraint" in str(exc.value).lower()
+    engine.dispose()
