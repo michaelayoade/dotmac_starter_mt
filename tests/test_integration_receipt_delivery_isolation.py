@@ -711,6 +711,12 @@ def test_a_rolled_back_claim_leaves_the_receipt_claimable(
         ).one()
         assert row == ("verified", 0, None), "the rolled-back claim persisted"
 
+        # The SELECT above AUTOBEGAN a transaction the moment it ran, so this
+        # connection is already in one. Ending it explicitly is not tidying:
+        # without it the `begin()` below raises `InvalidRequestError` and the
+        # canary fails for a reason that has nothing to do with claiming.
+        conn.rollback()
+
         # and the receipt is genuinely available again
         with conn.begin():
             assert conn.execute(CLAIM_SQL, {"id": receipt_id}).rowcount == 1
