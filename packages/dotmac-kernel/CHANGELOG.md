@@ -6,6 +6,57 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a67 — 2026-08-16
+
+Session provenance and selective revocation. `auth_sessions` gains
+`external_identity_binding_id UUID NULL`: WHICH external identity binding
+produced this session. This closes the contract `external_identity`'s module
+docstring has carried as "deferred" since a63, and that docstring now records
+what shipped against what was promised.
+
+Before this, `disable_external_identity_binding` stopped FURTHER logins but left
+every session already issued from the binding working until it expired.
+
+### Changed
+
+- `disable_external_identity_binding` REVOKES those sessions itself, in the same
+  transaction. There is no opt-out flag: the contract's wording was *disabling
+  and revoking must not be two calls a caller can do half of*, and a flag whose
+  off position leaves live sessions for a disabled identity is not flexibility.
+- Its read is now an explicit `SELECT … FOR UPDATE`. **This is a correction, not
+  a tidy-up.** The previous implementation used `db.get`, which takes no lock,
+  while its docstring claimed the eventual `UPDATE` serialised it. It did not: a
+  login already inside `finalize_external_login` could commit its session AFTER
+  this transaction scanned for sessions to revoke, and that session would
+  survive its own binding's disablement.
+
+### Added
+
+- `auth_sessions.external_identity_binding_id`, migration
+  `0025_session_provenance`. NULL means provenance ABSENT (a password login),
+  never provenance unknown — which is why the FK is `ON DELETE RESTRICT` and not
+  `SET NULL`; the latter would convert known provenance into the shape of
+  absent provenance while leaving the session live.
+- The FK carries `party_id`:
+  `(tenant_id, party_id, external_identity_binding_id)` →
+  `(tenant_id, party_id, id)`, with a matching unique on the binding side. A
+  `(tenant_id, binding_id)` FK would permit a session for one party to cite
+  another party's binding in the same tenant, and selective revocation would
+  then revoke the wrong person.
+
+### Not added
+
+`revoke_sessions_for_binding` is PRIVATE (`_revoke_sessions_for_binding`).
+Nothing outside `disable_external_identity_binding` needs it, and revoking
+without disabling would leave the binding free to mint a replacement session
+immediately — an operation nobody has asked for and a footgun if offered.
+
+Additive and backward compatible: the column is nullable with no default, every
+existing session reads as a password login, and an assembly that does not stamp
+it keeps working — it simply cannot benefit from selective revocation. Stamping
+is the assembly's job because the assembly mints the session; the kernel can make
+the correct thing easy and say what skipping it costs, and cannot enforce it.
+
 ## 0.1.0a66 — 2026-08-15
 
 Names the at-most-once ledger as a declarable prerequisite:

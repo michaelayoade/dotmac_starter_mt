@@ -1899,18 +1899,38 @@ would be taken and then a value cached from BEFORE the concurrent disable
 examined — a lock guarding a stale attribute is worse than no lock, because it
 reads as correct.
 
-**Two gaps, stated rather than implied.** Disabling a binding stops further
-logins; it does not retract sessions already issued, because `auth_sessions`
-does not record which binding produced it. The contract for that column
-(`external_identity_binding_id UUID NULL` with a composite FK,
-`finalize_external_login`'s returned `binding_id` as its only source, revocation
-taking the same row lock in the same transaction as the disable, SELECTIVE scope
-only — never a global logout) is written in the module docstring and is a
-separate slice, because `AuthSession` is minted by the assembly
-(`app/features/auth/service.py`) and the change spans three writers. Likewise
-the login re-reads the party but does not LOCK it: `parties` has many other
-writers, and locking binding-then-party would deadlock against any transaction
-that touches a party before its binding. Both residuals have the same answer —
+**One gap closed in a67, one stated and still open.**
+
+Disabling a binding now RETRACTS the sessions it produced.
+`auth_sessions.external_identity_binding_id` records which binding minted a
+session, and `disable_external_identity_binding` revokes on that column in the
+same transaction, under an explicit `SELECT … FOR UPDATE` on the binding row.
+
+Ownership, since three writers touch this and only one owns each fact:
+
+| fact | owner |
+|---|---|
+| whether a binding is active | `dotmac_kernel.external_identity` |
+| whether a session is revoked | `dotmac_kernel.external_identity` (one writer) |
+| that a session EXISTS at all | the assembly that mints it |
+| which binding a session came from | the assembly, stamping the kernel's answer |
+
+The assembly mints sessions and therefore stamps the column, using the
+`binding_id` `finalize_external_login` returned and nothing else. The kernel
+cannot enforce that — it does not mint sessions — so the rule is stated in the
+module docstring and the cost of ignoring it (an unattributable session) is
+stated with it. What the kernel DOES own is revocation: a product that revoked
+sessions itself would be a second writer of `revoked_at`, so the helper is
+private to the disable path.
+
+The FK carries `party_id` deliberately —
+`(tenant_id, party_id, external_identity_binding_id)` → `(tenant_id, party_id,
+id)`. Without it a session could cite a binding belonging to a different party
+in the same tenant, and selective revocation would revoke the wrong person.
+
+**Still open:** the login re-reads the party but does not LOCK it. `parties` has
+many other writers, and locking binding-then-party would deadlock against any
+transaction that touches a party before its binding. The answer is unchanged —
 revoke the sessions, do not lock the world.
 
 `record_external_authentication` is DEPRECATED: it stamps a decision the caller

@@ -357,6 +357,21 @@ class AuthSession(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_auth_sessions_tenant_party",
         ),
+        # `party_id` is IN this FK deliberately. Without it a session for one
+        # party could cite a binding belonging to another party in the same
+        # tenant, and selective revocation would then revoke the wrong person's
+        # sessions. RESTRICT, not SET NULL: see migration 0025 — NULL here means
+        # provenance ABSENT (a password login), never provenance unknown.
+        ForeignKeyConstraint(
+            ["tenant_id", "party_id", "external_identity_binding_id"],
+            [
+                "external_identity_bindings.tenant_id",
+                "external_identity_bindings.party_id",
+                "external_identity_bindings.id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_auth_sessions_tenant_party_external_identity_binding",
+        ),
     )
 
     id: Mapped[UUID] = uuid_pk()
@@ -376,6 +391,17 @@ class AuthSession(Base, TimestampMixin):
         DateTime(timezone=True), nullable=False
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: WHICH external identity binding produced this session, or NULL for a
+    #: password login. Its only legitimate source is `binding_id` from
+    #: `dotmac_kernel.external_identity.finalize_external_login`; a session
+    #: minted from that call without this stamped is unattributable, and a value
+    #: from anywhere else is a claim nobody verified.
+    #:
+    #: Read by `disable_external_identity_binding`, which is what lets disabling
+    #: a binding end exactly the sessions it produced.
+    external_identity_binding_id: Mapped[UUID | None] = mapped_column(
+        Uuid(), nullable=True
+    )
 
 
 class ExternalIdentityBinding(Base, TimestampMixin):
@@ -467,6 +493,15 @@ class ExternalIdentityBinding(Base, TimestampMixin):
             "provider_binding",
             "party_id",
             name="uq_external_identity_bindings_tenant_provider_party",
+        ),
+        # The target of `auth_sessions`' provenance FK. A composite FK must
+        # reference a unique over exactly its columns, and carrying `party_id`
+        # is what makes a session unable to cite another party's binding.
+        UniqueConstraint(
+            "tenant_id",
+            "party_id",
+            "id",
+            name="uq_external_identity_bindings_tenant_party_id",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "party_id"],
