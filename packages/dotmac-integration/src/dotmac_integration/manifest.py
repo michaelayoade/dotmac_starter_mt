@@ -50,13 +50,21 @@ module = ModuleManifest(
     # deprecated, and `write_audit_event` refusing an undeclared action is what
     # makes the declaration load-bearing rather than documentation.
     #
-    # Every one of these has a real caller in `dotmac_integration.operations`;
-    # a declared action with no writer is dead vocabulary that reads as a
-    # working trail.
+    # Every one of these has a real caller in `dotmac_integration.operations`
+    # or `dotmac_integration.lifecycle`; a declared action with no writer is
+    # dead vocabulary that reads as a working trail.
+    #
+    # The three `ingress_endpoint.*` codes are the security-relevant ones: an
+    # ingress endpoint key is a BEARER credential, so who minted, rotated or
+    # revoked one — and when — is the trail an incident actually reads. The
+    # KEY is never in the event; see `lifecycle._endpoint_audit`.
     audit_actions=(
         "integration.delivery.replayed",
         "integration.receipt.replayed",
         "integration.leases.released",
+        "integration.ingress_endpoint.minted",
+        "integration.ingress_endpoint.rotated",
+        "integration.ingress_endpoint.revoked",
     ),
     # ── No capabilities or permissions YET ──────────────────────────────────
     # Both exist to gate a ROUTE, and this slice ships none. A declared code

@@ -580,3 +580,417 @@ def test_a_delivery_scheduled_for_the_future_is_not_claimable(
         )
         assert conn.execute(claim, {"id": delivery_id}).rowcount == 0
     setup.dispose()
+
+
+# ── The minted ingress endpoint (ig_0003) ───────────────────────────────────
+#
+# SQLite treats a unique index over NULLs the same way Postgres does, so the
+# unit tests appear to cover this. What they cannot cover is the migration
+# actually applying, the column-privilege assumption `ig_0003` relies on, the
+# savepoint the mint retry depends on, and the concurrent-insert path that turns
+# a raw driver error into a typed refusal.
+
+
+def test_the_ingress_endpoint_column_is_unique_and_nullable(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """A unique INDEX, not a UniqueConstraint.
+
+    Every UNMINTED binding must coexist — Postgres treats NULLs as distinct in a
+    unique index, which is exactly the property that lets "an endpoint is a
+    deliberate act" be expressed as a nullable column rather than a second
+    table. And a minted key must never be claimable twice, or one provider's
+    traffic would resolve to another operator's configuration.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.begin() as conn:
+        installation_id, first = _installation_and_binding(conn, request)
+        second = uuid.uuid4()
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.capability_bindings ("
+                "id, installation_id, capability_id, state) VALUES ("
+                ":id, :installation, 'conformance.other.v1', 'enabled')"
+            ),
+            {"id": second, "installation": installation_id},
+        )
+        # Two unminted bindings coexist: both keys are NULL.
+        assert (
+            conn.execute(
+                text(
+                    "SELECT count(*) FROM mod_intg.capability_bindings "
+                    "WHERE ingress_endpoint_key IS NULL AND id IN (:a, :b)"
+                ),
+                {"a": first, "b": second},
+            ).scalar_one()
+            == 2
+        )
+
+        key = "a" * 48
+        conn.execute(
+            text(
+                "UPDATE mod_intg.capability_bindings SET ingress_endpoint_key = :k "
+                "WHERE id = :id"
+            ),
+            {"k": key, "id": first},
+        )
+        with pytest.raises(IntegrityError):
+            conn.execute(
+                text(
+                    "UPDATE mod_intg.capability_bindings "
+                    "SET ingress_endpoint_key = :k WHERE id = :id"
+                ),
+                {"k": key, "id": second},
+            )
+    engine.dispose()
+
+
+@pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "REFERENCES"])
+def test_app_user_holds_nothing_on_the_new_column(
+    migrated_scratch: tuple[str, str], privilege: str
+) -> None:
+    """`ig_0003` issues no GRANT and no REVOKE, and this is why that is safe.
+
+    Table-level privileges cover columns added later, and column-level
+    privileges exist only where an explicit per-column GRANT created one.
+    `app_user` holds nothing on `capability_bindings` (revoked in `ig_0001`), so
+    it acquires nothing here. Re-issuing the REVOKE would read as load-bearing
+    when it is not — so the assumption is ASSERTED instead, at the column grain
+    a table-level check would miss.
+
+    This matters more for this column than for any other in the schema: it holds
+    a BEARER credential, and a tenant role that could read it could drive every
+    connector the fleet receives through.
+    """
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        held = conn.execute(
+            text(
+                "SELECT has_column_privilege('app_user', "
+                "  'mod_intg.capability_bindings', 'ingress_endpoint_key', "
+                "  CAST(:p AS text))"
+            ),
+            {"p": privilege},
+        ).scalar_one()
+    engine.dispose()
+    assert not held, (
+        f"app_user holds {privilege} on the ingress endpoint column — the "
+        "table-level-covers-new-columns assumption in ig_0003 is wrong"
+    )
+
+
+def test_ig_0003_adds_no_table_and_keeps_the_plane_platform_only(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """The migration adds a COLUMN. A table would need an ADR, not a diff.
+
+    Asserted from both sides — the declaration still says seven and the live
+    schema still holds exactly those seven — plus the ADR-0023 contract, which a
+    new column on a platform table could break by carrying a tenant scope.
+    """
+    from dotmac_integration import module
+    from dotmac_kernel.migrations.catalog import audit_live_schemas
+    from dotmac_kernel.namespaces import NamespaceRegistry
+
+    assert len(module.platform_tables) == 7
+    assert module.tables == ()
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        live = {
+            row[0]
+            for row in conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = 'mod_intg'")
+            )
+        }
+        column = conn.execute(
+            text(
+                "SELECT is_nullable, data_type FROM information_schema.columns "
+                "WHERE table_schema='mod_intg' AND table_name='capability_bindings' "
+                "AND column_name='ingress_endpoint_key'"
+            )
+        ).one()
+        violations = audit_live_schemas(
+            conn, NamespaceRegistry.from_manifests([module])
+        )
+    engine.dispose()
+
+    assert live == set(module.platform_tables)
+    assert column.is_nullable == "YES", "an unminted binding must stay unminted"
+    assert not violations, "platform-plane violations:\n" + "\n".join(violations)
+
+
+def test_the_unique_index_is_the_one_the_mint_retry_depends_on(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """`_fresh_endpoint_key` catches `IntegrityError` and tries once more.
+
+    That is only a retry if the database actually refuses the duplicate — an
+    index created non-unique, or on the wrong column, would make the retry
+    unreachable and every "192 bits makes a collision fictional" claim
+    unenforced.
+    """
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        rows = {
+            row[0]: row[1]
+            for row in conn.execute(
+                text(
+                    "SELECT indexname, indexdef FROM pg_indexes "
+                    "WHERE schemaname='mod_intg' AND tablename='capability_bindings'"
+                )
+            )
+        }
+    engine.dispose()
+    definition = rows.get("uq_capability_bindings_ingress_endpoint")
+    assert definition, sorted(rows)
+    assert "UNIQUE" in definition
+    assert "ingress_endpoint_key" in definition
+
+
+def test_a_colliding_mint_leaves_the_session_usable(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The SAVEPOINT, proved against a database that really aborts.
+
+    `_fresh_endpoint_key` assigns inside `db.begin_nested()` rather than
+    flushing bare. The reason only exists on a real transactional database:
+    Postgres aborts the whole transaction on a failed statement, so a bare flush
+    that violated the unique index would leave the caller's session unusable —
+    and this module never rolls back a caller's unit of work, so it would have
+    no way to recover. A savepoint scopes the failure to the attempt.
+
+    Staged here at the mechanism grain, which is what a caller's session
+    actually experiences. SQLite cannot show it: it does not abort the
+    surrounding transaction, so the bare-flush version passes there.
+    """
+    from dotmac_integration import CapabilityBinding
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    taken = "b" * 48
+    setup = create_engine(admin_url)
+    with setup.begin() as conn:
+        _, other = _installation_and_binding(conn, request)
+        _, mine = _installation_and_binding(conn, request)
+        conn.execute(
+            text(
+                "UPDATE mod_intg.capability_bindings "
+                "SET ingress_endpoint_key = :k WHERE id = :id"
+            ),
+            {"k": taken, "id": other},
+        )
+    setup.dispose()
+
+    engine = create_engine(admin_url)
+    session = Session(engine)
+    binding = session.get(CapabilityBinding, mine)
+    assert binding is not None
+
+    with pytest.raises(IntegrityError):
+        with session.begin_nested():
+            binding.ingress_endpoint_key = taken
+            session.flush()
+
+    # THE POINT: the session still works. Without the savepoint the transaction
+    # would be aborted and every statement below would raise
+    # `InFailedSqlTransaction`.
+    binding.ingress_endpoint_key = "c" * 48
+    session.flush()
+    session.commit()
+    session.close()
+
+    check = create_engine(admin_url)
+    with check.connect() as conn:
+        stored = conn.execute(
+            text(
+                "SELECT ingress_endpoint_key FROM mod_intg.capability_bindings "
+                "WHERE id = :id"
+            ),
+            {"id": mine},
+        ).scalar_one()
+    check.dispose()
+    engine.dispose()
+    assert stored == "c" * 48
+
+
+def test_two_sessions_racing_one_provider_event_produce_one_typed_refusal(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """`receive_verified` is SELECT-then-INSERT with no upsert.
+
+    Two workers racing one redelivery therefore reach the unique index, and the
+    loser would otherwise surface a raw `IntegrityError` — which reaches a route
+    handler as a 500 whose driver message embeds the bound parameters: the
+    normalized payload and the provider event id, verbatim. Whole-batch rollback
+    was already correct under that; it just was not typed, and an untyped
+    refusal is one nobody can answer deliberately.
+
+    SQLite cannot stage this: it needs two real sessions holding two real
+    transactions against one index.
+
+    ## The interleaving is staged, not raced
+
+    The obvious script — insert on session one, insert on session two, THEN
+    commit session one — cannot work in one thread. Session two's INSERT blocks
+    on session one's uncommitted index entry, and session one's `commit()` is
+    the next statement, which never runs: the job hangs until the runner's
+    wall-clock kill rather than failing.
+
+    So the interleaving is staged instead. Session two takes its snapshot under
+    REPEATABLE READ BEFORE session one commits: its SELECT sees no receipt, and
+    by the time it inserts, the winner's row is committed — a unique violation
+    raised immediately with nothing to wait on. That is exactly the state a real
+    loser is in, and it is deterministic. `lock_timeout` is set as well, so a
+    future edit that reintroduces the blocking version FAILS rather than hangs.
+    """
+    from dotmac_integration import (
+        InboundEvent,
+        PreparedIngress,
+        ReceiptWriteRaced,
+        record_batch,
+    )
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    with setup.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn, request)
+    setup.dispose()
+
+    prepared = PreparedIngress(
+        installation_id=installation_id,
+        binding_id=binding_id,
+        connector_key="fake",
+        capability_id="conformance.echo.v1",
+    )
+    events = (
+        InboundEvent(
+            provider_event_id=f"race_{uuid.uuid4().hex[:8]}",
+            event_type="thing.happened",
+            payload={"n": 1},
+        ),
+    )
+
+    first_engine, second_engine = create_engine(admin_url), create_engine(admin_url)
+    first, second = Session(first_engine), Session(second_engine)
+    try:
+        # The loser opens first and pins a snapshot in which no receipt exists.
+        # `lock_timeout` guarantees a fast failure rather than a hung job if a
+        # later edit ever puts an uncommitted row in its way again.
+        second.connection(
+            execution_options={"isolation_level": "REPEATABLE READ"}
+        ).execute(text("SET LOCAL lock_timeout = '5s'"))
+        second.execute(text("SELECT 1"))
+
+        # The winner records and COMMITS, so the index entry is live and no
+        # transaction holds it.
+        record_batch(first, prepared, events)
+        first.commit()
+
+        # The loser's SELECT still sees nothing under its older snapshot, so it
+        # inserts — straight into the committed unique index entry.
+        with pytest.raises(ReceiptWriteRaced):
+            record_batch(second, prepared, events)
+    finally:
+        second.rollback()
+        second.close()
+        first.close()
+        first_engine.dispose()
+        second_engine.dispose()
+
+    check = create_engine(admin_url)
+    with check.connect() as conn:
+        surviving = conn.execute(
+            text(
+                "SELECT count(*) FROM mod_intg.inbox_receipts "
+                "WHERE capability_binding_id = :b"
+            ),
+            {"b": binding_id},
+        ).scalar_one()
+    check.dispose()
+    assert surviving == 1, "the race produced two receipts for one provider event"
+
+
+def test_a_collision_mid_batch_leaves_no_partial_row_in_postgres(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The rollback proof against a REAL transaction, not SQLite's.
+
+    A partial write leaves the provider believing the batch was accepted while
+    some events were never recorded, and it will not resend the ones that
+    landed — so it looks delivered and is not. SQLite appeared to give this;
+    Postgres' abort semantics are what actually have to.
+    """
+    from dotmac_integration import (
+        EventIdentityCollision,
+        InboundEvent,
+        PreparedIngress,
+        receive_verified,
+        record_batch,
+    )
+    from sqlalchemy.orm import Session
+
+    admin_url, _ = migrated_scratch
+    setup = create_engine(admin_url)
+    with setup.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn, request)
+    setup.dispose()
+
+    prepared = PreparedIngress(
+        installation_id=installation_id,
+        binding_id=binding_id,
+        connector_key="fake",
+        capability_id="conformance.echo.v1",
+    )
+    events = tuple(
+        InboundEvent(provider_event_id=i, event_type="e", payload={"i": i})
+        for i in ("batch_a", "batch_b", "batch_c")
+    )
+
+    engine = create_engine(admin_url)
+    seed = Session(engine)
+    receive_verified(
+        seed,
+        installation_id=installation_id,
+        capability_binding_id=binding_id,
+        provider_event_id="batch_b",
+        event_type="e",
+        payload={"i": "something else"},
+    )
+    seed.commit()
+    seed.close()
+
+    session = Session(engine)
+    with pytest.raises(EventIdentityCollision):
+        record_batch(session, prepared, events)
+    # The unit of work the deployment owns unwinds here; the module never did.
+    session.rollback()
+    session.close()
+
+    with engine.connect() as conn:
+        surviving = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    "SELECT provider_event_id FROM mod_intg.inbox_receipts "
+                    "WHERE capability_binding_id = :b"
+                ),
+                {"b": binding_id},
+            )
+        }
+    engine.dispose()
+    assert surviving == {
+        "batch_b"
+    }, "an event recorded before the collision survived the rollback"

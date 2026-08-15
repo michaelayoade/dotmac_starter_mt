@@ -439,8 +439,17 @@ def test_every_written_action_is_declared_on_the_manifest() -> None:
     Actions are composed from a prefix at the call site, so a prefix change
     could silently orphan every declaration while every test still passed.
     This pins the composed names to the manifest.
+
+    The `ingress_endpoint.*` codes are written by
+    `dotmac_integration.lifecycle`, not by this module, and are pinned to their
+    own writers in `test_integration_ingress.py`. They are listed here too
+    because the declaration is one set: an equality that named only this
+    module's half would fail the moment another writer declared a code, which
+    is the wrong signal — the rule is one owning declaration, not one owning
+    writer.
     """
     from dotmac_integration import module
+    from dotmac_integration.lifecycle import ENDPOINT_AUDIT_ACTIONS
     from dotmac_integration.operations import AUDIT_ACTION_PREFIX
 
     declared = set(module.audit_actions)
@@ -448,8 +457,9 @@ def test_every_written_action_is_declared_on_the_manifest() -> None:
         f"{AUDIT_ACTION_PREFIX}.delivery.replayed",
         f"{AUDIT_ACTION_PREFIX}.receipt.replayed",
         f"{AUDIT_ACTION_PREFIX}.leases.released",
-    }
+    } | {f"{AUDIT_ACTION_PREFIX}.{action}" for action in ENDPOINT_AUDIT_ACTIONS}
     assert all(a.startswith(f"{AUDIT_ACTION_PREFIX}.") for a in declared)
+    assert len(declared) == len(module.audit_actions), "a code is declared twice"
 
 
 def test_the_module_owns_no_second_audit_ledger() -> None:
