@@ -134,9 +134,12 @@ def test_every_package_is_covered_not_only_the_allowlisted_ones(
     scanning are precisely the NEW ones nobody has thought about yet.
 
     `dotmac-auth-oidc` proved the point. It is a fourth shape — a stateless
-    protocol adapter — deliberately absent from BOTH allowlists while its pilot
-    is unproven, and it would have sat unscanned under the old enumeration:
-    unmonitored rather than exempt, the gap ADR-0018 names.
+    protocol adapter — and it sat absent from BOTH allowlists for as long as its
+    pilot was unproven. Under the old enumeration it would have been unscanned
+    for exactly that period: unmonitored rather than exempt, the gap ADR-0018
+    names. It has since joined the adapter allowlist (2026-08-15), which is
+    precisely why naming packages was the wrong design — membership moves, and
+    the scan must not.
 
     So the scan is now the COMPLEMENT: every directory under `packages/` with a
     `pyproject.toml`. A package added tomorrow is covered on the commit that
@@ -164,10 +167,22 @@ def test_the_complement_reaches_the_packages_the_allowlists_do_not() -> None:
     allowlisted = {name for name, _ in _publishable_packages()}
     unlisted = scanned - allowlisted
     assert {"dotmac-kernel", "dotmac-ui"} <= scanned
-    assert "dotmac-auth-oidc" in unlisted, (
-        "dotmac-auth-oidc joined a release allowlist — confirm the pilot that "
-        "earns it actually ran; the complement proof needs another unlisted "
-        "package or it stops proving anything"
+
+    # The named example was `dotmac-auth-oidc` until 2026-08-15, when its pilot
+    # ran and it joined the adapter allowlist — and this assertion failing is
+    # what forced the question, which is the guard working rather than the guard
+    # being in the way. Its own message asked for another unlisted package, so:
+    #
+    # `dotmac-template-studio` is the durable one. It is not merely unlisted
+    # pending a decision — NO lane can release it: it cannot be imported without
+    # a database (`test_packages_import_without_a_database.py` exempts it, with
+    # the premise asserted), so every release smoke would refuse it. A package
+    # that cannot be published is exactly the kind that quietly stops being
+    # scanned, which is what this complement exists to prevent.
+    assert "dotmac-template-studio" in unlisted, (
+        "dotmac-template-studio joined a release allowlist — that would mean the "
+        "lazy-engine work landed. Re-aim this proof at whatever is still "
+        "unlisted, or the complement stops proving anything"
     )
     assert len(unlisted) >= 3, sorted(unlisted)
 

@@ -83,9 +83,11 @@ def test_no_ledger_entry_is_a_bare_label() -> None:
     """ADR-0018: an exemption states an ENFORCEABLE premise, or the region is
     unmonitored rather than exempt. "Grandfathered" is a description of history
     and is refused so it cannot become the boilerplate that ends the argument.
-    "Reviewed and correct" — `dotmac-auth-oidc`, deliberately unpublished until
-    the Workspace pilot runs — stays distinct from "we have not got to it yet",
-    which is what `dotmac-imports` actually is."""
+    "Reviewed and correct" stays distinct from "we have not got to it yet",
+    which is what `dotmac-imports` actually is. `dotmac-auth-oidc` was the
+    first kind and has since moved on: its pilot ran, it is allowlisted, and its
+    row now says to delete itself at tag time — a reason that expires is the
+    healthiest shape an entry here can have."""
     for distribution, entry in _ledger().items():
         reason = entry["reason"]
         assert len(reason.split()) >= 20, f"{distribution}: a reason, not a label"
