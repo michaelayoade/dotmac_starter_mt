@@ -1,6 +1,6 @@
 # External-connector sources — what the Integrator has to absorb
 
-**As of:** 2026-08-13
+**As of:** 2026-08-14
 **Measured by:** [`scripts/external_connector_sweep.py`](../../scripts/external_connector_sweep.py)
 **Frozen baseline:** [`external-connector-baseline.json`](external-connector-baseline.json)
 **Ratchet:** `tests/architecture/test_external_connector_ratchet.py`
@@ -78,14 +78,37 @@ proof (they are in the test file).
 | `webhook_surface` | declares a route whose path contains `webhook`/`callback`/`/hooks`/`ipn`, or a function named `verify_signature`-ish | a provider callback mounted at a domain-shaped path |
 | `provider_credential` | assigns a name containing a **named provider** and ending in a secret suffix | a provider secret held under a generic name (`api_key`), which is indistinguishable from the product's own |
 | `connector_task` | has a decorated task function whose name mentions sync/connector/integration/poll/fetch, in a module mentioning a scheduler | a connector run triggered inline from a request path |
-| `sync_checkpoint` | declares a class named `*Checkpoint`/`*Cursor`/`*SyncState`, or a `last_synced_at`-family column | a cursor stored in a settings row or a JSON blob |
+| `sync_checkpoint` | declares a class named `*Checkpoint`/`*SyncState`, or a `*Cursor` that **also names its feed** (`*SyncCursor`, `ErpDomainSyncCursor`, `StripeCursor`), or a `last_synced_at`-family column | a cursor stored in a settings row or a JSON blob; a bare `*Cursor` with no feed in its name and no watermark column |
 | `delivery_retry` | mentions dead-letter/backoff/requeue **and** also carries a connector surface | retry policy centralised in a shared helper with no connector import |
+
+**Why `*Cursor` alone is not enough (2026-08-14).** The first live rise this
+ratchet reported was a false one: `dotmac_sub.sync_checkpoint: 9 > baseline 8`,
+caused by `InboxTeamRoundRobinCursor` (`app/models/team_inbox.py`, landed with
+conversational AI intake) — durable per-team ROTATION state for assigning inbox
+conversations to staff (`service_team_id`, `last_assigned_person_id`,
+`rotation_count`). No feed, no watermark, no external system; it matched only
+because "cursor" is a substring. "Checkpoint" and "sync state" name durable
+progress over a stream, but "cursor" is also the ordinary word for a pagination
+cursor and a DBAPI cursor, so a bare `*Cursor` must now also name the feed it
+tracks. Recall is unaffected for anything that stores a position: the watermark
+COLUMN rule is untouched and independent of the class name. **The baseline was
+NOT raised** — the correct response to a miscount is a better detector, and
+raising it would have converted a detector bug into a permanently weakened
+guard. Sub measures 8 again, and no other repo's number moved.
 
 Known imprecision, accepted for the freeze: ERP's `dependency_health.py` and
 `monitoring.py` are counted as `http_client` because they do make direct
 outbound calls, though a health probe is arguably not a provider connector.
 They are left in rather than special-cased — an exclusion list is where a
 ratchet starts lying, and the number only has to be consistent to be useful.
+
+ERP's `EventHandlerCheckpoint` (`app/models/finance/platform/`) is the other
+borderline `sync_checkpoint`: it is per-handler idempotency over ERP's own
+`platform.event_outbox`, not a position in an external feed. It stays counted,
+deliberately — the outbox exists "for reliable event delivery" and carries
+dead-lettering, so it sits inside the delivery machinery ADR-0024 § 6 moves to
+the Integrator. If a later review decides otherwise, that is a re-baseline of
+ERP with the reason in the diff, not a quiet change to the detector.
 
 Tests, migrations and scripts are excluded everywhere. A test that fakes a
 provider is how a connector is verified, not a connector; a connector in a
