@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-numbering"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac dual-plane document-series allocation with immutable receipts"
 authors = ["DotMac"]
 readme = "README.md"
@@ -12,7 +12,7 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a65"
+dotmac-kernel = ">=0.1.0a66"
 sqlalchemy = "^2.0"
 
 [build-system]

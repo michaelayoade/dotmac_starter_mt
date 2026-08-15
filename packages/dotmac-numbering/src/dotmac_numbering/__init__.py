@@ -43,7 +43,7 @@ from dotmac_numbering.service import (
     preview,
 )
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "ALLOCATE_SCOPE",

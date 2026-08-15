@@ -621,7 +621,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a65"
+version = "0.1.0a66"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -648,7 +648,7 @@ url = "packages/dotmac-kernel"
 
 [[package]]
 name = "dotmac-numbering"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "DotMac dual-plane document-series allocation with immutable receipts"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -657,7 +657,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a65"
+dotmac-kernel = ">=0.1.0a66"
 sqlalchemy = "^2.0"
 
 [package.source]
