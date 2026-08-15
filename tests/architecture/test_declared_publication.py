@@ -114,24 +114,33 @@ def test_no_ledger_entry_is_a_bare_label() -> None:
             assert evasion not in reason.lower(), f"{distribution}: {evasion!r}"
 
 
-def test_the_integration_gap_is_recorded_as_evidence() -> None:
-    """The programme's live example, pinned so it cannot be closed by editing a
-    version.
+def test_the_integration_gap_is_closed_and_stays_closed() -> None:
+    """The programme's live example, now CLOSED — and pinned in that state.
 
-    Updated 2026-08-15: `0.1.0a2` was published and tagged, so the gap this
-    test pins is now `0.1.0a3` — declared alongside the `ModeContractError`
-    sanitisation, because a2 renders a connector's exception (and any secret it
-    carries) into the discovery error and its chained traceback. The shape of
-    the assertion is unchanged and is the reason it survives a version moving
-    under it: the ledger must still say the repair is a RELEASE, never an edit
-    of the declared number, which would delete the evidence the decision needs."""
+    This test spent its life asserting a gap: `dotmac-integration` declared a
+    version no tag proved, and the ledger had to say so. `0.1.0a3` was
+    published and tagged on 2026-08-15, so the row was removed in the same
+    change as the release, which is the rule the ledger exists to enforce.
+
+    Inverted rather than deleted, for the same reason the receipt-delivery
+    ratchet was inverted rather than deleted when its columns landed: the
+    assertion that a gap is RECORDED and the assertion that it is CLOSED are
+    the two halves of one ratchet, and dropping the second leaves the example
+    unguarded exactly when it starts looking finished. A re-declared,
+    unpublished version now fails here as well as in the generic test above,
+    and it fails by name.
+    """
     sweep, survey = _survey()
     finding = survey["distributions"]["dotmac-integration"]
-    assert finding["state"] == sweep.DECLARED_UNPUBLISHED
-    assert finding["published_versions"], "a1 is published; only a2 is not"
-    entry = _ledger()["dotmac-integration"]
-    assert entry["declared"] == finding["declared"]
-    assert "NOT to be repaired by editing the version" in entry["reason"]
+    assert finding["state"] == sweep.PUBLISHED, (
+        f"dotmac-integration declares {finding['declared']} with no tag to "
+        "prove it. If that is deliberate, record it in the ledger with a "
+        "reason — the repair is a RELEASE, never an edit of the declared number"
+    )
+    assert "dotmac-integration" not in _ledger(), (
+        "the gap is closed, so the ledger must not still excuse it — a ledger "
+        "that only ever grows stops describing anything"
+    )
 
 
 def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> None:

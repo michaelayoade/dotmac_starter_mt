@@ -2,18 +2,16 @@
 
 ## Release state — read this before pinning
 
-**Two versions have been released: `0.1.0a1` (SPI 1.0) and `0.1.0a2` (SPI 1.1),
-tagged `dotmac-integration-v0.1.0a1` and `dotmac-integration-v0.1.0a2`.**
+**Three versions have been released: `0.1.0a1` (SPI 1.0), `0.1.0a2` (SPI 1.1)
+and `0.1.0a3` (SPI 1.1, with the discovery-error leak fixed).**
 
 **Do not pin `0.1.0a2`.** Its discovery path renders a connector's own exception
 message into `ModeContractError` and chains it as `__cause__`, so any secret a
 connector interpolates into its error reaches the operator's boot log, the
 traceback and any handler using `exc_info`. `0.1.0a3` fixes it. Prefer a3.
 
-`0.1.0a3` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
-is released immediately after the change that declares it; until that run
-completes it is recorded in `docs/inventories/declared-publication-baseline.json`
-as declared-unpublished.
+`0.1.0a3` was published and tagged `dotmac-integration-v0.1.0a3` on
+2026-08-15. It is the version to pin.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -22,7 +20,7 @@ does not exist, or something it should not.
 
 Nothing in this file is a publication claim except this paragraph.
 
-## 0.1.0a3
+## 0.1.0a3 — released 2026-08-15
 
 ### `ModeContractError` no longer repeats what a connector threw
 

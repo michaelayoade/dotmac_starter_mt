@@ -295,10 +295,13 @@ def test_a_floor_naming_an_unpublished_version_is_refused(lane) -> None:
     """THE check this lane adds, and it fires on the live state of the
     repository rather than a hypothetical.
 
-    `dotmac-integration` declares 0.1.0a2 and has published 0.1.0a1. A connector
-    flooring at a2 would produce a wheel whose dependency resolution fails for
-    every consumer — discovered at install time, by someone who did not write
-    it. `release-modules.json` already states the rule for kernels ("a floor
+    The tag set here is SYNTHETIC, which is what keeps this test honest as the
+    live state moves: it pins the RULE, not today's versions. (It was written
+    when `dotmac-integration` declared 0.1.0a2 with only 0.1.0a1 published;
+    a3 has since been released and the gap is closed.) A connector flooring at
+    an unpublished version would produce a wheel whose dependency resolution
+    fails for every consumer — discovered at install time, by someone who did
+    not write it. `release-modules.json` already states the rule for kernels ("a floor
     naming an unpublished version cannot be resolved by an installer, so it is
     not a floor at all"); here it is enforced.
     """
@@ -322,17 +325,25 @@ def test_a_published_floor_is_accepted(lane) -> None:
     )
 
 
-def test_the_live_integration_floor_gap_is_recorded_rather_than_hidden() -> None:
-    """The evidence the test above is built on, asserted against the checked-in
-    ledger so the two cannot drift.
+def test_the_live_integration_floor_gap_is_closed() -> None:
+    """The moment this test's previous form predicted, arrived.
 
-    If `dotmac-integration` is ever released at its declared version this entry
-    must disappear — and the declared-publication guard fails until it does, so
-    the ledger cannot quietly outlive the problem it records.
+    It used to assert that `dotmac-integration`'s declared-but-unpublished
+    version was RECORDED in the ledger, and said so explicitly: "if
+    `dotmac-integration` is ever released at its declared version this entry
+    must disappear". `0.1.0a3` was released and tagged on 2026-08-15, so it did.
+
+    Inverted rather than deleted. The assertion that still matters is the one a
+    connector author depends on — the floor they name must be installable — and
+    that only holds while the declared version is published. Deleting this would
+    leave the live state unchecked precisely because it is currently correct.
     """
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))["unpublished"]
-    assert "dotmac-integration" in ledger
-    assert ledger["dotmac-integration"]["state"] == "declared-unpublished"
+    assert "dotmac-integration" not in ledger, (
+        "the ledger still excuses dotmac-integration. Either it regressed to a "
+        "declared-but-unpublished version, or a row outlived the release that "
+        "closed it"
+    )
 
 
 # ── Discovery registration ──────────────────────────────────────────────────
