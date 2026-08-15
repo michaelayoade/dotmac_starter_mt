@@ -45,6 +45,14 @@ read. See
 
 ### Not released
 
-Not on `.github/release-modules.json`. Absence is the safety mechanism until a
-consumer and a pilot exist (the precedent ADR-0026 § 8 set), and nothing adopts
-this yet.
+Not on `.github/release-modules.json`, and not on `.github/release-adapters.json`
+either. The second file is the lane this package's SHAPE needs — it has no
+`db_schema`, `manifest_attr` or `kernel_floor` for the module lane to assert —
+and it is deliberately EMPTY. The lane is built; the door is shut.
+
+Absence is the safety mechanism until a consumer and a pilot exist (the
+precedent ADR-0026 § 8 set), and nothing adopts this yet. Until then the pilot
+runs against a local wheel built at an exact SHA — see "Testing against an
+unpublished wheel" in `README.md`, which is how `dotmac_workspace` consumes this
+code without a cross-repository path dependency and without relaxing a version
+pin.

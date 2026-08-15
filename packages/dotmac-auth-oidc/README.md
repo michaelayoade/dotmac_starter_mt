@@ -99,6 +99,101 @@ Two things a consumer owns and this package deliberately does not:
   worker cannot be completed on another, and it fails loudly rather than
   degrading.
 
+## Testing against an unpublished wheel
+
+This package is **not published**. It is absent from
+`.github/release-adapters.json`, and absence is the safety mechanism: the entry
+lands with the proof, never ahead of it, and the proof owed is a real pilot
+consumer. `dotmac_workspace` is that pilot, which leaves a chicken-and-egg
+problem — it must run against this code before there is anything to pin.
+
+The answer is a **local wheel built at an exact SHA**, installed as an ordinary
+version-pinned distribution. Not a path dependency: a path dependency across
+repositories is forbidden (see the comment above `dotmac-release-catalog` in the
+root `pyproject.toml`, and `dotmac_workspace/AGENTS.md`), because it makes one
+repository's working tree part of another's build, and nothing then records
+WHICH bytes the pilot proved.
+
+### 1. Build the wheel, in this repository, at the SHA under test
+
+```sh
+git -C dotmac_starter_mt rev-parse HEAD          # record this; it IS the pin
+cd dotmac_starter_mt/packages/dotmac-auth-oidc
+poetry build -f wheel
+```
+
+The artifact lands in `packages/dotmac-auth-oidc/dist/`:
+
+```
+dotmac_auth_oidc-0.1.0a1-py3-none-any.whl
+```
+
+Poetry builds a wheel that is **reproducible in content but not named by SHA** —
+the filename carries only `0.1.0a1`. So record the commit and the file's
+`sha256` together, because the version alone does not distinguish two builds of
+an unreleased alpha:
+
+```sh
+shasum -a 256 dist/dotmac_auth_oidc-0.1.0a1-py3-none-any.whl
+```
+
+Both values — commit and digest — go in the pilot's own notes and in its PR
+description. That pair is what makes "the pilot was green" a statement about
+specific bytes rather than about a version number that has not stabilised.
+
+### 2. Consume it WITHOUT relaxing the pin
+
+Copy the wheel into a directory the consuming repository controls (a
+gitignored `vendor/wheels/`, or a CI artifact — do **not** commit the binary),
+and point the resolver at it as an extra source. The version constraint stays
+EXACT; only where the artifact comes from changes.
+
+Poetry, in `dotmac_workspace/pyproject.toml`:
+
+```toml
+[[tool.poetry.source]]
+name = "local-wheels"
+url = "file:///abs/path/to/vendor/wheels"   # a simple-index directory
+priority = "supplemental"
+
+[tool.poetry.dependencies]
+dotmac-auth-oidc = "0.1.0a1"                # EXACT, not ^ and not >=
+```
+
+pip, equivalently — `--find-links` supplies the artifact while the requirement
+stays exact and the public index still resolves `pyjwt`/`httpx`:
+
+```sh
+pip install --find-links vendor/wheels 'dotmac-auth-oidc==0.1.0a1'
+```
+
+Three properties this preserves, and each is the point:
+
+- **the version pin is untouched.** `==0.1.0a1` resolves the same way before and
+  after publication; only the source moves. Nothing in the consuming repository
+  has to be relaxed and then remembered back;
+- **no path dependency crosses a repository boundary.** The consumer installs a
+  built distribution, exactly as it will from the index;
+- **the cutover is a one-line diff.** When the adapter is finally listed and
+  published, delete the `[[tool.poetry.source]]` block (or the `--find-links`)
+  and the identical `==0.1.0a1` requirement resolves from
+  `registry.dotmac.io`. If the pilot's behaviour changes at that moment,
+  something other than the source changed — which is precisely the signal the
+  recorded `sha256` lets you check.
+
+### 3. What the pilot still owes before an allowlist entry
+
+- a **shared, atomic `StateStore`** — `InMemoryStateStore` cannot complete a
+  login started on another worker (see "The ceremony never travels" above);
+- the client secret **resolved by the product and installed at startup**, never
+  dereferenced on a request path (ADR-0009);
+- the verified subject resolved through `dotmac_kernel.external_identity`, with
+  the pilot issuing its **own** session.
+
+Only then does `.github/release-adapters.json` gain an entry. Publication is
+still not adoption: `EXTRACTION.toml`'s `status` and `contract_consumers` count
+CONSUMERS, and a release moves neither.
+
 ## Documents
 
 - `COMPATIBILITY.md` — the public surface and the stability policy

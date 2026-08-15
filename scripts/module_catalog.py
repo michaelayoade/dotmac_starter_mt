@@ -84,6 +84,23 @@ def _load_allowlist(repo_root: Path) -> dict[str, dict]:
     return modules
 
 
+def _load_adapter_allowlist(repo_root: Path) -> dict[str, dict]:
+    """The stateless-protocol-adapter lane (ADR-0006, 2026-08-14 amendment).
+
+    A SECOND closed allowlist, because an adapter has no `db_schema`,
+    `manifest_attr` or `kernel_floor` for the module lane to assert. The
+    catalogue reads it for one reason: without it, the first adapter to be
+    listed would still be rendered "not allowlisted" here — a generated document
+    quietly contradicting the file that governs it.
+    """
+    path = repo_root / ".github" / "release-adapters.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    adapters = data.get("adapters")
+    if not isinstance(adapters, dict):
+        raise CatalogError(f"{path}: adapters must be an object")
+    return adapters
+
+
 def _shared_package_dirs(repo_root: Path) -> list[Path]:
     packages = repo_root / "packages"
     return sorted(
@@ -312,6 +329,7 @@ def _string_tuple(value: object, *, field: str, package: str) -> tuple[str, ...]
 
 def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
     allowlist = _load_allowlist(repo_root)
+    adapter_allowlist = _load_adapter_allowlist(repo_root)
     records: list[ModuleRecord] = []
 
     for package_dir in _shared_package_dirs(repo_root):
@@ -360,6 +378,25 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
                 )
             release_policy = "module allowlist"
             release_path = repo_root / ".github" / "release-modules.json"
+        elif distribution in adapter_allowlist:
+            # The stateless lane. No schema to cross-check against a manifest —
+            # there is no manifest — so the only assertion available here is
+            # that the entry names this package's directory.
+            adapter_entry = adapter_allowlist[distribution]
+            expected_dir = package_dir.relative_to(repo_root).as_posix()
+            if adapter_entry.get("package_dir") != expected_dir:
+                raise CatalogError(
+                    f"{distribution}: adapter package_dir disagrees with "
+                    f"{expected_dir}"
+                )
+            if classification != "stateless-protocol-adapter":
+                raise CatalogError(
+                    f"{distribution}: listed in the adapter allowlist but "
+                    f"classified {classification!r} — a stateful module "
+                    "published through that lane skips every namespace check"
+                )
+            release_policy = "adapter allowlist"
+            release_path = repo_root / ".github" / "release-adapters.json"
         elif distribution in DEDICATED_RELEASE_WORKFLOWS:
             release_policy = "dedicated workflow"
             release_path = repo_root / DEDICATED_RELEASE_WORKFLOWS[distribution]
@@ -399,7 +436,7 @@ def discover_modules(repo_root: Path = REPO_ROOT) -> tuple[ModuleRecord, ...]:
         )
 
     discovered = {record.distribution for record in records}
-    orphaned = sorted(set(allowlist) - discovered)
+    orphaned = sorted((set(allowlist) | set(adapter_allowlist)) - discovered)
     if orphaned:
         raise CatalogError(
             "release allowlist names packages absent from the catalogue inputs: "
