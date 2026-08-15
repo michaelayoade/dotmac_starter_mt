@@ -328,6 +328,67 @@
           "python"
         ]
       }
+    },
+    "dotmac-application-directory": {
+      "$comment": [
+        "The tenant's connected-application portfolio (ADR-0021 section 4). Listed",
+        "now that the live Postgres migration and catalog gate has passed in this",
+        "repository's integration job via tests/test_application_directory_isolation.py,",
+        "which applies the `ad` lineage against a real database on its own scratch",
+        "DSN. Absence from this file was the safety mechanism while it had not,",
+        "and ADR-0026 section 8 set the precedent that the entry lands with the",
+        "proof rather than ahead of it.",
+        "",
+        "Listing it is what unblocks its consumer. `dotmac_workspace` cannot pin",
+        "an unpublished module, so `first_cutover` was unreachable by construction",
+        "- the same argument dotmac-ticketing and dotmac-integration record.",
+        "",
+        "kernel_floor is a56, the release that added the logical prerequisite",
+        "contract this module's root revision declares via `requires`. NOT its own",
+        "ledger allocation (a46, which is lower) - the floor is the highest of",
+        "everything the module needs, so a capability raise wins over the",
+        "allocation. Same shape as dotmac-ticketing, unlike dotmac-approvals.",
+        "",
+        "The migration is a required wheel content. This repository deliberately",
+        "does NOT compose the module - `app/assembly.py` omits it and `alembic.ini`",
+        "carries no `ad` lineage, because the starter is a target application and",
+        "composing it would put `mod_appdir` into every starter deployment - so a",
+        "wheel that shipped the manifest but dropped the lineage would fail first",
+        "in the Workspace's deployment rather than here.",
+        "",
+        "No `alembic` in allowed_requires: the module ships no helper that emits",
+        "DDL into a consuming product's migration. `dotmac-ticketing` remains the",
+        "only module permitted it."
+      ],
+      "package_dir": "packages/dotmac-application-directory",
+      "import_name": "dotmac_application_directory",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a56",
+      "db_schema": "mod_appdir",
+      "tag_prefix": "dotmac-application-directory-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_application_directory/py.typed",
+          "dotmac_application_directory/manifest.py",
+          "dotmac_application_directory/descriptor.py",
+          "dotmac_application_directory/lifecycle.py",
+          "dotmac_application_directory/models.py",
+          "dotmac_application_directory/service.py",
+          "dotmac_application_directory/migrations/__init__.py",
+          "dotmac_application_directory/migrations/versions/ad_0001_application_bindings.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

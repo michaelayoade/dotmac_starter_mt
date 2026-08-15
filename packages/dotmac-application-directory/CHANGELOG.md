@@ -23,6 +23,26 @@ revision (ADR-0006 D1 amendment).
 - Kernel floor raised to `>=0.1.0a56`, the release that added the prerequisite
   contract. A kernel below it cannot import this manifest.
 
+### Fixed
+
+- `__version__` still read `0.1.0a1` while the distribution built as `0.1.0a2`.
+  Nothing compared them — `test_kernel_version_sync.py` covers the kernel only —
+  so a consumer's support bundle would have reported the wrong module version.
+  Corrected here rather than in a new release, because `0.1.0a2` has never been
+  published: there are no tags for this distribution and it was not on the
+  release allowlist until this change.
+- The README stated the superseded kernel floor (`>=0.1.0a46`, the `mod_appdir`
+  ledger allocation) as if it were current, and the Status section still
+  declared `0.1.0a1`.
+
+### Release
+
+- Added to `.github/release-modules.json` and to both release-workflow choice
+  lists, making the distribution publishable for the first time. The entry lands
+  now because the `ad` lineage has live-Postgres proof in this repository's
+  integration job — the precedent ADR-0026 §8 set. Publishing does not change
+  the dossier status: that ratchet counts consumers, and there are still none.
+
 
 ## 0.1.0a1 — 2026-08-12
 

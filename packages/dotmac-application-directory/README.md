@@ -114,7 +114,7 @@ silently re-pointing a tenant administrator's tile at another tenant's instance
 inside the same application. Version and digest checks cannot catch that: a
 genuine version bump carrying a changed local tenant passes both.
 
-## No role catalogue in 0.1.0a1
+## No role catalogue yet
 
 `ApplicationRole`, `delegable_role_codes` and a separate role-catalogue digest
 are deferred: nothing consumes them. The access module that would is deferred by
@@ -156,12 +156,14 @@ version_locations = …
     .../dotmac_application_directory/migrations/versions
 ```
 
-Requires a kernel that allocates `mod_appdir` in `MIGRATION_OWNER_LEDGER`
-(`>=0.1.0a46`); an earlier one refuses the composition at boot with
-`UnallocatedNamespaceError`.
+Requires `dotmac-kernel >=0.1.0a56`, the release that added the logical
+prerequisite contract this module's root revision declares through `requires`.
+A kernel below it cannot import the manifest. The `mod_appdir` allocation in
+`MIGRATION_OWNER_LEDGER` landed earlier, in `0.1.0a46`; a kernel without it
+refuses the composition at boot with `UnallocatedNamespaceError`.
 
 ## Status
 
-`0.1.0a1`, dossier status `audit-complete` — inventoried, deliberately drawn,
+`0.1.0a2`, dossier status `audit-complete` — inventoried, deliberately drawn,
 **not yet adopted by anything**. Under ADR-0017 §1 that makes it work in
 progress rather than delivered, and `EXTRACTION.toml` says so.

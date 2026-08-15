@@ -52,6 +52,7 @@ on:
           - dotmac-imports
           - dotmac-integration
           - dotmac-approvals
+          - dotmac-application-directory
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
