@@ -73,6 +73,11 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 LEDGER_ALLOCATION_RELEASES = {
+    # Allocated in a65 for the ADR-0030 Cloud commerce programme. It declares
+    # `platform_tables` (a53), `requires`/`tenant_requires` (a56/a60) and
+    # `supported_plane_sets` (a61) — all older than its own allocation, so the
+    # allocation is the floor and this stays out of CAPABILITY_RAISED_FLOORS.
+    "dotmac-numbering": "0.1.0a65",
     # Listed here though the module is not release-registered yet: this map
     # gates the FLOOR, not publication. An unenforced floor is how the same
     # allocation drifted across a56 twice before landing on a58.

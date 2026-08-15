@@ -6,6 +6,21 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a65 — 2026-08-15
+
+Allocates the `numbering` migration owner: schema `mod_numbering`, revision
+prefix `nu`, branch label `numbering`. Additive — one ledger row, no schema
+change, no existing behaviour changed.
+
+The row exists because `dotmac-numbering` is being built (ADR-0030 build-order
+step 5, the first enabling owner of the Cloud commerce programme). A module
+cannot register at all without its ledger row, so the allocation is the
+module's kernel floor.
+
+Dual-plane by declaration: a tenant allocates its own document series, and the
+control plane allocates vendor-side series no tenant may read. ADR-0023 wants
+both planes named rather than one inferred from a missing tenant column.
+
 ## 0.1.0a64 — 2026-08-15
 
 Closes the window between deciding an external login and issuing the session it

@@ -135,19 +135,19 @@
         "has raised this floor three times, and the field must always name the",
         "LAST of them:",
         "",
-        "  - `platform_tables` (dual-plane, ADR-0023) — source a53, first",
+        "  - `platform_tables` (dual-plane, ADR-0023) \u2014 source a53, first",
         "    published a56;",
         "  - the logical prerequisite contract (ADR-0006 D1 amendment) its",
-        "    manifest and migration root use — a56;",
+        "    manifest and migration root use \u2014 a56;",
         "  - ADR-0028 plane selection: the manifest declares",
-        "    `supported_plane_sets` and tk_0001 calls `selected_module_planes` —",
+        "    `supported_plane_sets` and tk_0001 calls `selected_module_planes` \u2014",
         "    a61.",
         "",
         "An earlier kernel cannot import the manifest, so the check never",
         "reaches the allocation. The floor is set by a kernel capability rather",
         "than by this module's own namespace row.",
         "",
-        "This prose said a56 while the field said a61 — the exact field/comment",
+        "This prose said a56 while the field said a61 \u2014 the exact field/comment",
         "drift the a49 correction existed to remove. a56 is the stopping point",
         "for the PLATFORM-ONLY modules, which consume nothing after",
         "`platform_tables`; ticketing consumes plane selection and goes further.",
@@ -390,6 +390,33 @@
           "dotmac_application_directory/service.py",
           "dotmac_application_directory/migrations/__init__.py",
           "dotmac_application_directory/migrations/versions/ad_0001_application_bindings.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-numbering": {
+      "package_dir": "packages/dotmac-numbering",
+      "import_name": "dotmac_numbering",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a65",
+      "db_schema": "mod_numbering",
+      "tag_prefix": "dotmac-numbering-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_numbering/py.typed",
+          "dotmac_numbering/manifest.py",
+          "dotmac_numbering/migrations/__init__.py",
+          "dotmac_numbering/migrations/versions/nu_0001_numbering.py"
         ],
         "forbidden_prefixes": [
           "app/",

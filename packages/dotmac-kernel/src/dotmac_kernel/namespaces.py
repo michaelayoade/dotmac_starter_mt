@@ -567,6 +567,24 @@ APPROVALS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("approvals"),
 )
 
+# Allocated in 0.1.0a65 for `dotmac-numbering`, the first enabling owner of the
+# ADR-0030 Cloud commerce programme (build-order step 5).
+#
+# `nu` rather than `num`: the prefix is a revision-id namespace, not the schema
+# name, and every allocated prefix on this train is two characters. The schema
+# is `mod_numbering` from the owner, which is what a reader of
+# `mod_numbering.allocation_receipts` actually needs to see.
+#
+# Numbering is dual-plane for a reason ADR-0023 cares about: a tenant allocates
+# its own invoice series, and the control plane allocates vendor-side series
+# that no tenant may read. Both planes are DECLARED, not inferred.
+NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="numbering",
+    prefix="nu",
+    branch_label="numbering",
+    db_schema=module_schema("numbering"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -578,6 +596,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     FILES_MIGRATION_OWNER,
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
+    NUMBERING_MIGRATION_OWNER,
 )
 
 

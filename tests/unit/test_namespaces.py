@@ -185,14 +185,18 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # ADR-0025. `approvals` (ADR-0026) is the ninth, and the first allocated for
     # a capability that is real in BOTH planes in production — ERP approves
     # back-office subjects for a tenant, the vendor control plane approves fleet
-    # plans with no tenant at all. None of these allocations installs behaviour
-    # in the kernel.
+    # plans with no tenant at all. `numbering` (ADR-0030) is the tenth, the
+    # first enabling owner of the Cloud commerce programme, and dual-plane for
+    # the same reason approvals is: a tenant allocates its own document series
+    # and the control plane allocates vendor-side series no tenant may read.
+    # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
         "release_catalog",
         "entitlement_allocation",
         "application_directory",
+        "numbering",
         "files",
         "imports",
         "integration",
