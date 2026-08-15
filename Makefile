@@ -51,9 +51,13 @@ palette-baseline: ## Regenerate the hardcoded-palette debt baseline (commit the 
 	poetry run python scripts/palette_debt_baseline.py
 connector-baseline: ## Regenerate the external-connector baseline after a verified Integrator cutover (commit the diff in the same change)
 	poetry run python scripts/external_connector_sweep.py --write-baseline
+module-catalog: ## Regenerate the composable-module discovery catalogue
+	poetry run python scripts/module_catalog.py
+module-catalog-check: ## Fail if the committed module catalogue is stale
+	poetry run python scripts/module_catalog.py --check
 format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
-check: lint lint-imports type-check security migration-gate ui-check format-check ## Lint + types + security + migration composition + design-system asset freshness
+check: lint lint-imports type-check security migration-gate ui-check module-catalog-check format-check ## Lint + types + security + migration composition + generated catalogues + design-system assets
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests
@@ -127,6 +131,6 @@ deploy: ## Deploy tag: make deploy TAG=sha-abc123
 
 .PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
-	css-build css-watch ui-build ui-check palette-baseline connector-baseline \
+	css-build css-watch ui-build ui-check palette-baseline connector-baseline module-catalog module-catalog-check \
 	docker-build docker-dev \
 	bump-version deploy

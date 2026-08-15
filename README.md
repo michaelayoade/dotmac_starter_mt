@@ -55,6 +55,10 @@ for its scope wins and the stale one gets fixed:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — **as-built truth**: what
   the system actually does today (model provenance, ownership, transaction
   authority, settings, portal).
+- [`docs/MODULE_CATALOG.md`](docs/MODULE_CATALOG.md) — **generated module
+  discovery**: every reusable distribution's contract, owner, evidence state,
+  persistence plane, release policy and proven/candidate consumers. Generate
+  it from the owning metadata with `make module-catalog`; never edit it by hand.
 - [`docs/PRODUCT_VISION.md`](docs/PRODUCT_VISION.md) — **strategic north
   star**: why Starter exists and the target ecosystem into which ERP, CRM, and
   Sub are being recomposed. It does not claim as-built behaviour.

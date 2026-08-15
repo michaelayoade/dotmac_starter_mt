@@ -30,6 +30,7 @@ jobs:
             security,
             migration-gate,
             ui-check,
+            module-catalog-check,
             format-check,
           ]
     steps:
