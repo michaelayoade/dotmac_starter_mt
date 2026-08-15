@@ -33,8 +33,8 @@ commit this work started from. Team 2's ingress slice introduces `ig_0003`
 concurrently; whichever lands second REBASES onto the other so the `ig` branch
 keeps a single head. Do not merge this with two heads outstanding.
 
-Revision ID: ig_0004_retention
-Revises: ig_0002_execution
+Revision ID: ig_0006_retention
+Revises: ig_0005_receipt_delivery
 Create Date: 2026-08-15
 """
 
@@ -44,8 +44,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "ig_0004_retention"
-down_revision = "ig_0002_execution"
+revision = "ig_0006_retention"
+down_revision = "ig_0005_receipt_delivery"
 branch_labels = None
 depends_on = None
 

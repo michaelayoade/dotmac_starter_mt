@@ -172,7 +172,7 @@ decisions one.
   and `INTEGRATION_RETENTION_LEGAL_POLICY_OWNER` are both set, in every
   environment. A period baked into a library becomes the deployment's
   data-retention posture without anyone deciding it.
-- **`receipt_legal_holds`** (migration `ig_0004_retention`) — a held receipt is
+- **`receipt_legal_holds`** (migration `ig_0006_retention`) — a held receipt is
   never redacted, and the refusal is named and counted. Platform plane, with a
   PARTIAL unique index enforcing at most one ACTIVE hold per receipt while
   keeping released holds as the record that they existed.

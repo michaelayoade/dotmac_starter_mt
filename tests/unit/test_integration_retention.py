@@ -138,6 +138,23 @@ def binding(db: Session) -> CapabilityBinding:
     return record
 
 
+def _instant(value: object) -> object:
+    """Datetimes compared as INSTANTS, everything else as itself.
+
+    `redact_receipt` ends with `db.refresh`, and SQLite has no timezone type:
+    an aware value written in Python comes back naive, so an untouched
+    timestamp would read as "changed" and this guard would fail on the one
+    thing it is meant to permit. Naive is treated as UTC, which is what the
+    column stores. The guard survives: a redaction that genuinely moved a
+    timestamp changes the instant and is still caught.
+    """
+    if isinstance(value, datetime):
+        return (
+            value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+        )
+    return value
+
+
 def _receipt(
     db: Session,
     binding: CapabilityBinding,
@@ -293,10 +310,10 @@ def test_redaction_touches_only_the_redactable_columns(
     receipt = _receipt(db, binding)
     redactable = {"payload_json", "headers_json", "consequence_json"}
     columns = [c.name for c in InboxReceipt.__table__.columns]
-    before = {name: getattr(receipt, name) for name in columns}
+    before = {name: _instant(getattr(receipt, name)) for name in columns}
 
     redact_receipt(db, receipt, policy=policy, now=NOW)
-    after = {name: getattr(receipt, name) for name in columns}
+    after = {name: _instant(getattr(receipt, name)) for name in columns}
 
     changed = {name for name in columns if before[name] != after[name]}
     assert changed <= redactable, (
@@ -467,9 +484,22 @@ def test_a_receipt_inside_its_period_is_refused(
 def test_an_unknown_future_state_is_refused_rather_than_assumed_safe(
     db: Session, binding: CapabilityBinding, policy: RetentionPolicy
 ) -> None:
-    """A terminal state added upstream must opt IN to ageing, not inherit it."""
-    receipt = _receipt(db, binding, state="archived_by_some_later_slice")
-    assert classify_receipt(receipt, policy=policy, now=NOW, held=False) == "unresolved"
+    """A terminal state added upstream must opt IN to ageing, not inherit it.
+
+    The state is set WITHOUT flushing, because `ck_inbox_receipts_state` now
+    refuses an unrecognised value outright — a stronger guarantee than this
+    test asks for, and one that arrived after it was written. That constraint
+    protects the table; this protects the classifier, which is what would
+    decide the question on the day a new state IS added to the constraint. If
+    `classify_receipt` treated anything it did not recognise as resolved, that
+    future state would silently start ageing out message bodies.
+    """
+    receipt = _receipt(db, binding)
+    with db.no_autoflush:
+        receipt.state = "archived_by_some_later_slice"
+        verdict = classify_receipt(receipt, policy=policy, now=NOW, held=False)
+    db.expire(receipt)
+    assert verdict == "unresolved"
 
 
 def test_the_sweep_leaves_every_refused_receipt_untouched_and_counts_it(

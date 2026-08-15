@@ -113,6 +113,7 @@ from dotmac_integration.operations import record_operation
 
 __all__ = [
     "REDACTION_MARKER",
+    "RETENTION_AUDIT_ACTIONS",
     "RETENTION_DAYS_VAR",
     "RETENTION_LEGAL_POLICY_OWNER_VAR",
     "RETENTION_PLATFORM_TABLES",
@@ -419,6 +420,18 @@ def active_hold_for(db: Any, receipt_id: UUID) -> ReceiptLegalHold | None:
     if hold is None or isinstance(hold, ReceiptLegalHold):
         return hold
     raise TypeError(f"expected a ReceiptLegalHold, got {type(hold).__name__}")
+
+
+#: The audit actions this module writes, WITHOUT the module prefix — the same
+#: shape `lifecycle.ENDPOINT_AUDIT_ACTIONS` uses, so the manifest test can
+#: compose the declared set from its writers instead of restating it. A code
+#: listed here and written nowhere, or written and not listed, is what the
+#: manifest-declaration rule exists to catch.
+RETENTION_AUDIT_ACTIONS: tuple[str, ...] = (
+    "retention.payloads.redacted",
+    "retention.hold.placed",
+    "retention.hold.released",
+)
 
 
 def place_legal_hold(
@@ -774,7 +787,16 @@ def _expired_with_content(cutoff: datetime) -> list[Any]:
         # Already-redacted rows leave the population. This is what makes the
         # sweep idempotent: the second run has no candidates, writes nothing and
         # records no audit event.
-        InboxReceipt.payload_json[REDACTION_MARKER].is_(None),
+        #
+        # `.as_string()` is load-bearing, not decoration. Without it SQLAlchemy
+        # wraps the extracted element for SQLite as
+        # `JSON_QUOTE(JSON_EXTRACT(...))`, and `JSON_QUOTE(NULL)` returns the
+        # STRING 'null' rather than SQL NULL — so `IS NULL` was never true and
+        # the predicate excluded every row, retiring nothing. It rendered
+        # correctly on Postgres, which is what made it survive: the canaries
+        # that run against real Postgres were unaffected, and only the SQLite
+        # unit suite could see it.
+        InboxReceipt.payload_json[REDACTION_MARKER].as_string().is_(None),
     ]
 
 

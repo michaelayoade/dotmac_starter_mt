@@ -262,6 +262,7 @@ from dotmac_integration.receipt_delivery import (
     idempotency_key_for,
     request_fingerprint_for,
     require_stable_fingerprint,
+)
 from dotmac_integration.retention import (
     REDACTION_MARKER,
     RETENTION_DAYS_VAR,
