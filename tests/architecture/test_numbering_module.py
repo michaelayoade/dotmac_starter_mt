@@ -17,7 +17,6 @@ import tomllib
 from pathlib import Path
 
 from dotmac_kernel.namespaces import MIGRATION_OWNER_LEDGER, NUMBERING_MIGRATION_OWNER
-from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1
 from dotmac_numbering import models, service
 from dotmac_numbering.manifest import module
 
@@ -378,35 +377,24 @@ def test_importing_the_package_never_builds_a_database_engine() -> None:
 # ── Release registration ────────────────────────────────────────────────────
 
 
-def test_every_kernel_facility_the_service_calls_is_a_declared_prerequisite() -> None:
-    """The defect this module shipped with, made unrepeatable.
-
-    `allocate` writes the kernel's at-most-once ledger through `execute_once` /
-    `execute_once_platform`. Nothing in `nu_0001` creates those tables, so at
-    0.1.0a1 the dependency existed only in the call — an adopter that had not
-    run the kernel's own lineage migrated cleanly and failed on its first
-    allocation instead.
-
-    Asserted from the CALL, not from the declaration: reading `module.requires`
-    twice would pass with the requirement deleted."""
-    source = (PACKAGE_ROOT / "src/dotmac_numbering/service.py").read_text("utf-8")
-    assert "execute_once" in source, (
-        "the ledger call moved; this canary now proves nothing — re-derive the "
-        "prerequisite from wherever at-most-once is now delegated"
-    )
-    assert IDEMPOTENCY_LEDGER_V1.name in module.requires, (
-        "service.py calls the kernel idempotency ledger but the manifest does "
-        f"not declare {IDEMPOTENCY_LEDGER_V1.name!r} — an adopter without those "
-        "tables would migrate cleanly and fail at the first allocation"
-    )
-
-
-def test_the_ledger_prerequisite_is_common_not_plane_specific() -> None:
-    """Both planes call one of the pair, so neither plane list may hold it —
-    a PLATFORM-only control plane needs `platform_idempotency_records` just as
-    a tenant deployment needs the tenant table."""
-    assert IDEMPOTENCY_LEDGER_V1.name not in module.tenant_requires
-    assert IDEMPOTENCY_LEDGER_V1.name not in module.platform_requires
+# RETIRED 2026-08-16 — `test_every_kernel_facility_the_service_calls_is_a
+# _declared_prerequisite` and `test_the_ledger_prerequisite_is_common_not_plane
+# _specific` lived here, hand-written for this one module and this one
+# facility. `tests/architecture/test_facility_prerequisites.py` now derives the
+# same obligation for EVERY module and every kernel facility that takes a
+# database handle, and additionally checks the half this pair never did: that a
+# migration verifies the prerequisite, not merely that the manifest names it.
+#
+# Deleted rather than kept beside it. Two guards over one invariant drift, and
+# the survivor should be the one that fails when the KERNEL grows — this pair
+# would have stayed green while `dotmac-approvals` shipped an undeclared relay
+# dependency, because nobody had written its equivalent.
+#
+# Both of its properties survive: the generic gate is driven from the CALL (so
+# it cannot pass with the declaration deleted), and plane placement is asserted
+# by `test_the_ledger_prerequisite_is_common_not_plane_specific`'s successor —
+# the COMMON-vs-plane reasoning is now recorded in each manifest and checked by
+# the manifest reader, which searches all three lists.
 
 
 def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
