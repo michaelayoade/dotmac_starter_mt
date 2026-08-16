@@ -22,6 +22,7 @@ is the failure worth catching.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from collections.abc import Iterator
@@ -29,6 +30,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import ProgrammingError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -509,3 +511,178 @@ def test_the_live_audit_fails_when_a_platform_invariant_is_broken(
             assert not audit_snapshot(snapshot)
     finally:
         engine.dispose()
+
+
+# ── `ea_0002`: the at-most-once ledger is DECLARED and VERIFIED ─────────────
+#
+# `stage_allocation` writes `public.platform_idempotency_records` at request
+# time through `execute_once_platform`, and `ea_0001` creates nothing of the
+# sort. Through `0.1.0a1`..`0.1.0a4` — all four published — that was
+# undeclared, so an adopter running its own lineage migrated this module
+# cleanly and would have raised `UndefinedTable` on the first staged
+# activation. `0.1.0a5` declares `idempotency_ledger.v1` and `ea_0002` proves
+# it against the database.
+#
+# These drive `require_prerequisites` with the tuple `ea_0002` itself declares,
+# NOT `verify_idempotency_ledger` directly. The kernel already proves its own
+# verifier clause by clause (`tests/test_numbering_isolation.py`); what is
+# unproven here is that THIS module's declaration reaches that verifier at all.
+# Calling the verifier directly would pass with `REQUIRES` emptied.
+#
+# Scoped to the allocation lineage with an explicit indirect parameter rather
+# than reusing PLATFORM_ONLY_MODULES: `dotmac-release-catalog` declares no
+# prerequisite and calls no kernel facility, so running these against it would
+# assert that an empty requirement list is satisfiable, which is true of every
+# database and proves nothing.
+
+ALLOCATION_VERSIONS = (
+    REPO_ROOT
+    / "packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation"
+    / "migrations/versions"
+)
+_ALLOCATION_ONLY = [
+    pytest.param(ALLOCATION_VERSIONS, id="entitlement-allocation"),
+]
+
+
+def _ledger_requires() -> tuple[str, ...]:
+    """`ea_0002`'s own `REQUIRES`, loaded from the revision file.
+
+    Imported rather than retyped: a copy here would keep passing after someone
+    emptied the migration's tuple, which is precisely the regression these
+    tests exist to catch.
+    """
+    import importlib.util
+
+    path = ALLOCATION_VERSIONS / "ea_0002_idempotency_ledger.py"
+    spec = importlib.util.spec_from_file_location("ea_0002_under_test", path)
+    assert spec is not None and spec.loader is not None
+    revision = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(revision)
+    requires: tuple[str, ...] = revision.REQUIRES
+    assert requires, "ea_0002 declares no prerequisites; it would verify nothing"
+    return requires
+
+
+@contextlib.contextmanager
+def _broken(admin_url: str, statement: str) -> Iterator[Connection]:
+    """Apply one DDL break, hand back the connection, roll it back.
+
+    The break lives in an open transaction on the SAME connection the verifier
+    reads, so the damage is visible to the check and invisible to everything
+    else — no second migrated database per hostile case.
+    """
+    engine = create_engine(admin_url)
+    conn = engine.connect()
+    transaction = conn.begin()
+    try:
+        conn.execute(text(statement))
+        yield conn
+    finally:
+        transaction.rollback()
+        conn.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("composed", _ALLOCATION_ONLY, indirect=True)
+def test_the_ledger_prerequisite_is_satisfied_by_the_migrated_database(
+    composed: tuple[str, str, str],
+) -> None:
+    """The positive proof, and the reason `ea_0002` is not merely paperwork.
+
+    The fixture ran `alembic upgrade heads` over kernel + assembly + `ea`, so
+    `require_prerequisites` has ALREADY executed once inside `ea_0002` — this
+    re-runs it against the finished catalogue, which is what a later adopter's
+    database looks like.
+    """
+    from dotmac_kernel.migrations.verify import require_prerequisites
+
+    admin_url, _, _ = composed
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        require_prerequisites(conn, _ledger_requires())
+    engine.dispose()
+
+
+@pytest.mark.parametrize("composed", _ALLOCATION_ONLY, indirect=True)
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        # The half this module actually calls. `execute_once_platform` is the
+        # only at-most-once entry point `stage_allocation` uses, so this is the
+        # exact table whose absence produced `UndefinedTable` in the field —
+        # taking `write_platform_audit_event` down with it, since the audit
+        # write happens INSIDE the operation.
+        pytest.param(
+            "DROP TABLE public.platform_idempotency_records",
+            "does not exist",
+            id="platform-ledger-absent",
+        ),
+        # At-most-once IS the unique key. Widen it and every staged activation
+        # silently becomes at-least-once — a redelivered contract event stages
+        # a second allocation, and the audit trail records both as first-time
+        # events.
+        pytest.param(
+            "ALTER TABLE public.platform_idempotency_records "
+            "DROP CONSTRAINT uq_platform_idempotency_records_scope_key",
+            "no unique constraint",
+            id="platform-key-widened",
+        ),
+        # ADR-0014's plane posture. A policy on the platform ledger means some
+        # session's `app.current_tenant` decides whether a control-plane record
+        # is visible — and an invisible record reads as "never ran".
+        pytest.param(
+            "ALTER TABLE public.platform_idempotency_records "
+            "ENABLE ROW LEVEL SECURITY",
+            "must carry no",
+            id="platform-ledger-policied",
+        ),
+        # The whole-contract case, and the one specific to declaring a NAME
+        # rather than a table. This module never touches the tenant ledger, yet
+        # `idempotency_ledger.v1` is one indivisible spec: an adopter cannot
+        # satisfy it by supplying only the half allocation happens to call.
+        pytest.param(
+            "DROP TABLE public.idempotency_records",
+            "does not exist",
+            id="tenant-ledger-absent-still-refused",
+        ),
+    ],
+)
+def test_the_ledger_prerequisite_refuses_a_half_supplied_provider(
+    composed: tuple[str, str, str], statement: str, expected: str
+) -> None:
+    """Break one observable at a time, and assert the SPECIFIC refusal.
+
+    Asserting only that something raised would pass on a typo in the table
+    name, on a permissions error, on a rolled-back transaction — every reason
+    except the one being tested. A verifier that fails for the wrong reason is
+    a verifier that will pass for the wrong reason later.
+    """
+    from dotmac_kernel.migrations.verify import (
+        PrerequisiteNotSatisfiedError,
+        require_prerequisites,
+    )
+
+    admin_url, _, _ = composed
+    with _broken(admin_url, statement) as conn:
+        with pytest.raises(PrerequisiteNotSatisfiedError, match=expected):
+            require_prerequisites(conn, _ledger_requires())
+
+
+@pytest.mark.parametrize("composed", _ALLOCATION_ONLY, indirect=True)
+def test_the_refusals_above_are_not_refusing_everything(
+    composed: tuple[str, str, str],
+) -> None:
+    """The sensitivity proof's other direction.
+
+    Every case above damages the ledger and expects a refusal, so they would
+    all still pass if `require_prerequisites` refused unconditionally — or if
+    `_broken`'s transaction poisoned the connection for any query at all. This
+    breaks something the ledger contract does not mention — this module's own
+    child table — and requires the verifier to stay SILENT.
+    """
+    from dotmac_kernel.migrations.verify import require_prerequisites
+
+    admin_url, _, _ = composed
+    with _broken(admin_url, "DROP TABLE mod_ealloc.allocation_entries CASCADE") as conn:
+        require_prerequisites(conn, _ledger_requires())

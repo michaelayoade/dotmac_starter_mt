@@ -121,22 +121,24 @@ CAPABILITY_RAISED_FLOORS = {
     # Ticketing passed through a56 (`requires`) and a60 (`tenant_requires`) on
     # the way here. The floor is always the highest capability the module
     # actually consumes, not the first one that moved it.
-    # ADR-0023: both declare `platform_tables` and own no tenant tables.
-    # The field was INTRODUCED in a53, but a53 was never published — the tags
-    # jump a50 to a56 — so a56 is the earliest kernel a consumer can actually
-    # install with it. A floor naming an unpublished version is unresolvable,
-    # which is why "earliest PUBLISHED" is the operative test, not "earliest".
+    # ADR-0023: release-catalog declares `platform_tables` and owns no tenant
+    # tables. The field was INTRODUCED in a53, but a53 was never published —
+    # the tags jump a50 to a56 — so a56 is the earliest kernel a consumer can
+    # actually install with it. A floor naming an unpublished version is
+    # unresolvable, which is why "earliest PUBLISHED" is the operative test,
+    # not "earliest".
     #
-    # Neither declares `requires` nor calls the prerequisite helpers, so a56
+    # It declares no `requires` and calls no prerequisite helper, so a56 here
     # is set by `platform_tables` alone and not by the a56 prerequisite
-    # contract that raised the modules above.
+    # contract that raised the modules above. `dotmac-entitlement-allocation`
+    # sat beside it on exactly that reasoning until `0.1.0a5`; see its own
+    # entry below for why it no longer does.
     #
     # `supported_plane_sets` is deliberately OMITTED rather than written as an
     # explicit `()`. Writing it would consume an a61 constructor field for a
-    # value the default already supplies, raising both floors to a61 for
+    # value the default already supplies, raising the floor to a61 for
     # nothing. Absence already means atomic.
     "dotmac-release-catalog": ("0.1.0a56", "0.1.0a44"),
-    "dotmac-entitlement-allocation": ("0.1.0a56", "0.1.0a45"),
     "dotmac-ticketing": ("0.1.0a61", "0.1.0a39"),
     "dotmac-approvals": ("0.1.0a61", "0.1.0a59"),
     # Numbering's own ledger row is a65, and for one release that WAS its floor
@@ -167,6 +169,24 @@ CAPABILITY_RAISED_FLOORS = {
     # — every one of those installs on a kernel whose ledger it silently
     # requires and cannot state.
     "dotmac-integration": ("0.1.0a66", "0.1.0a58"),
+    # Entitlement allocation held a56 through `0.1.0a1`..`0.1.0a4`, all four
+    # PUBLISHED, and that a56 was `platform_tables` (ADR-0023) rather than its
+    # a45 ledger row. `0.1.0a5` declares `idempotency_ledger.v1`, the a66 name
+    # for the at-most-once tables `stage_allocation` has been writing at
+    # request time since a1, and verifies it in `ea_0002`. The tables are far
+    # older than the floor — kernel `0018` created them (ADR-0014). What a65
+    # and below lack is the NAME: `validate_prerequisites` raises
+    # `UnknownPrerequisiteError` while the manifest is being constructed, so
+    # the module cannot be imported at all, let alone reach the a45 allocation
+    # check. Capability outranks allocation, as everywhere else in this map,
+    # and the highest capability consumed is what the floor names — which is
+    # why this row moved off a56 rather than staying beside release-catalog.
+    #
+    # Same visible break as integration's, and accepted for the same reason:
+    # four released versions install on a56..a65, a5 will not, and every one
+    # of those four runs against a kernel whose ledger it silently requires
+    # and cannot state.
+    "dotmac-entitlement-allocation": ("0.1.0a66", "0.1.0a45"),
 }
 
 

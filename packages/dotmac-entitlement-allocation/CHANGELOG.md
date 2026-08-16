@@ -1,6 +1,84 @@
 # Changelog — dotmac-entitlement-allocation
 
-## 0.1.0a4 — 2026-08-15
+## Release state — read this before pinning
+
+**Four versions have been released:** `0.1.0a1`, `0.1.0a2`, `0.1.0a3` and
+`0.1.0a4`, tagged `dotmac-entitlement-allocation-v0.1.0a1` … `-v0.1.0a4` from
+`847ce0b`, `5ded880`, `c371b0f` and `67bdfb8`. **Pin `0.1.0a4`.**
+
+`0.1.0a5` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
+is **not released**: no tag, nothing on the index. It is recorded in
+`docs/inventories/declared-publication-baseline.json` as declared-unpublished,
+and — unlike the ordinary declared-then-released cycle — that row does **not**
+expire at the next release run. Michael's standing condition of 2026-08-16: the
+next published version of this module must declare BOTH the idempotency ledger
+and the platform audit dependency. The second prerequisite,
+`platform_audit_log.v1`, does not exist yet, so `0.1.0a5` is unpublishable by
+design rather than by omission. Do not dispatch a release to clear it.
+
+Nothing in this file is a publication claim except this section.
+
+## 0.1.0a5 — UNRELEASED (on `main`; no tag, not on the index)
+
+### `idempotency_ledger.v1` is declared, and verified at deploy
+
+Declares the kernel prerequisite this module has consumed since `0.1.0a1`.
+
+`stage_allocation` delegates at-most-once execution to
+`dotmac_kernel.idempotency.execute_once_platform` (hard rule 21, ADR-0014 — the
+ledger has exactly one owner and it is not this module), so
+`public.platform_idempotency_records` is written at REQUEST time. `ea_0001` —
+the module's only other revision — creates nothing of the sort, so the
+dependency existed only inside a function body: an adopter running its own
+lineage that never ran the kernel's (ERP hosts `public.tenants` itself and
+structurally cannot run kernel `0001`) installs this module, passes every gate
+it has, migrates cleanly, and raises `UndefinedTable` on the first staged
+activation. No test could have caught it before kernel `0.1.0a66`, because
+there was no name to declare. Same defect, same week, as `dotmac-numbering`
+`0.1.0a1` and `dotmac-integration` `0.1.0a1`..`0.1.0a3`.
+
+The blast radius here is wider than replay protection:
+`write_platform_audit_event` is called from INSIDE the idempotent operation, so
+a missing ledger takes the audit trail down with the allocation.
+
+#### Changed
+
+- `ModuleManifest.requires` gains `idempotency_ledger.v1`. COMMON rather than
+  `platform_requires`: this module owns one plane, installed atomically, so
+  there is no selection under which the requirement lapses — and a plane list
+  is unresolvable for an atomic module anyway, since `resolve_depends_on` reads
+  one only via `module=`, which needs a `ModulePlaneSelection` such a module
+  may not have.
+- Kernel floor raised to `>=0.1.0a66`, the release that published the name.
+  a56..a65 HAVE the tables — kernel `0018` created them — but do not know the
+  name, so `validate_prerequisites` refuses the manifest at import. **This is a
+  visible break for a consumer pinned to a released a1..a4 on an older
+  kernel**, and deliberately so: every one of those installs against a kernel
+  whose ledger it silently requires and cannot state.
+- Both migrations are now required wheel contents in
+  `.github/release-modules.json`. `ea_0002` creates nothing, so a wheel that
+  dropped it would ship a declared-but-never-verified prerequisite.
+
+#### Added
+
+- **`ea_0002_idempotency_ledger`** — a DDL-free revision whose whole body is
+  `require_prerequisites`. Deploy is the last moment at which a missing ledger
+  is a failed migration rather than a failed staging call.
+- A NEW revision rather than an edit to `ea_0001`, which shipped in four
+  published tags and whose bytes are therefore history.
+  `tests/architecture/test_released_migrations.py` — extended to this
+  distribution in the same change — records the SHA-256 of every migration file
+  in every released tag, cross-checks each digest against the blob git holds at
+  that tag, and fails if one changes or disappears.
+
+#### Recorded, not fixed
+
+- `write_platform_audit_event` has the identical undeclarable-dependency shape
+  and no name to declare. It is a KNOWN UNMAPPED kernel facility, not an
+  oversight, and it is the whole reason this version is unpublishable. See
+  `docs/inventories/kernel-persisted-runtime-dependencies.md`.
+
+## 0.1.0a4 — 2026-08-15 — RELEASED (tag `dotmac-entitlement-allocation-v0.1.0a4`)
 
 **The persistence plane is now declared correctly.** This module always built
 control-plane tables — no `tenant_id`, no RLS, grants to `platform_api` and

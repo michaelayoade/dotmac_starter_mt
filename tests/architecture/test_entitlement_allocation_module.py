@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 import tomllib
 from pathlib import Path
 
@@ -34,13 +35,19 @@ from dotmac_kernel.planes import (
     ModulePlane,
     ModulePlaneSelection,
     ModulePlaneSelectionError,
+    declared_planes,
+    supported_plane_sets,
+    validate_module_plane_selections,
 )
+from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODULE_ROOT = Path(inspect.getfile(ports)).parent
 PACKAGE_ROOT = MODULE_ROOT.parents[1]
 REPO_ROOT = PACKAGE_ROOT.parents[1]
-LINEAGE = MODULE_ROOT / "migrations" / "versions" / "ea_0001_allocations.py"
+VERSIONS = MODULE_ROOT / "migrations" / "versions"
+LINEAGE = VERSIONS / "ea_0001_allocations.py"
+LEDGER_REVISION = VERSIONS / "ea_0002_idempotency_ledger.py"
 
 
 def _migration_source() -> str:
@@ -486,6 +493,258 @@ def test_the_assembly_cannot_install_this_vendor_only_module() -> None:
     vendor_only = [c for c in contracts if c["name"] == wanted]
     assert vendor_only, "the vendor-only installation contract is missing"
     assert "dotmac_entitlement_allocation" in vendor_only[0]["forbidden_modules"]
+
+
+# ── The at-most-once ledger is DECLARED, and verified at deploy ──────────────
+#
+# The defect this section exists to make unrepeatable: `stage_allocation`
+# delegates at-most-once to `dotmac_kernel.idempotency.execute_once_platform`
+# (hard rule 21, ADR-0014), which writes `public.platform_idempotency_records`
+# at REQUEST time — and `ea_0001`, the module's only other revision, creates
+# nothing of the sort. Through `0.1.0a1`..`0.1.0a4`, all PUBLISHED, that
+# dependency was declared nowhere: an adopter running its own lineage passed
+# every gate here, migrated cleanly, and would raise `UndefinedTable` on the
+# first staged activation.
+#
+# Every assertion below is derived FROM THE CALL. A test that read
+# `module.requires` twice would pass with the requirement deleted and the call
+# still there, which is the state being forbidden.
+
+
+def test_the_module_still_delegates_at_most_once_to_the_kernel() -> None:
+    """The premise every assertion below rests on.
+
+    If `stage_allocation` ever stops calling the kernel — because the module
+    grew its own ledger, which ADR-0014 forbids, or because the delegation
+    moved — the prerequisite reasoning here becomes a statement about code that
+    is gone. Fail loudly at that moment rather than keep asserting it.
+    """
+    source = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
+    assert "from dotmac_kernel.idempotency import execute_once_platform" in source
+    assert "outcome = execute_once_platform(" in source
+
+
+def test_the_ledger_call_is_platform_only() -> None:
+    """`execute_once` (the tenant entry point) must NOT appear.
+
+    This is what makes the COMMON-versus-plane-specific reasoning below a real
+    decision rather than a copy of numbering's. Numbering calls both halves of
+    the pair; this module owns no tenant plane and calls only the platform one.
+    """
+    calls = [
+        line
+        for path in sorted(MODULE_ROOT.rglob("*.py"))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if "execute_once(" in line
+    ]
+    assert not calls, (
+        "a tenant-scoped at-most-once call appeared in a platform-only module: "
+        f"{calls}"
+    )
+
+
+def test_the_kernel_facility_the_service_calls_is_a_declared_prerequisite() -> None:
+    """Asserted from the CALL. The two tests above establish that the call is
+    real and which half it uses; this one requires the manifest to say so."""
+    assert IDEMPOTENCY_LEDGER_V1.name in module.requires, (
+        "`stage_allocation` writes the kernel at-most-once ledger but the "
+        f"manifest does not declare {IDEMPOTENCY_LEDGER_V1.name!r} — an adopter "
+        "without those tables would migrate cleanly and fail at the first "
+        "staged activation"
+    )
+
+
+def test_the_ledger_prerequisite_is_common_not_plane_specific() -> None:
+    assert IDEMPOTENCY_LEDGER_V1.name not in module.tenant_requires
+    assert IDEMPOTENCY_LEDGER_V1.name not in module.platform_requires
+
+
+def test_this_module_owns_exactly_one_plane_installed_atomically() -> None:
+    """The semantic half of the COMMON reason.
+
+    A plane-specific list names what a plane needs WHEN THAT PLANE IS SELECTED.
+    This module declares one plane and no `supported_plane_sets`, so the plane
+    is installed atomically and there is no selection under which the ledger
+    stops being needed. Conditioning on it would describe a variable that
+    cannot vary.
+    """
+    assert module.tables == ()
+    assert declared_planes(module) == (ModulePlane.PLATFORM,)
+    assert module.supported_plane_sets == ()
+    assert supported_plane_sets(module) == ((ModulePlane.PLATFORM,),)
+
+
+def test_an_atomic_module_cannot_carry_a_plane_specific_prerequisite() -> None:
+    """The mechanical half, and the reason this is not merely a style choice.
+
+    `resolve_depends_on` reads a plane list only via `module=`, `module=` reads
+    `selected_module_planes`, and an atomic module may never have a selection
+    installed — so `platform_requires` here would be a declaration nothing could
+    ever resolve. Proved against the kernel's own refusal rather than asserted
+    in prose, and by its SPECIFIC message: a selection rejected for some other
+    reason would satisfy `pytest.raises` just as well.
+
+    `test_an_explicit_plane_selection_is_rejected_for_an_atomic_module` above
+    proves the same refusal through `NamespaceRegistry.from_manifests`. This
+    one drives `validate_module_plane_selections` directly, because that is the
+    function `resolve_depends_on`'s plane path would have to get past.
+    """
+    with pytest.raises(ModulePlaneSelectionError, match="atomic plane contract"):
+        validate_module_plane_selections(
+            [module],
+            [
+                ModulePlaneSelection(
+                    module="entitlement_allocation", planes=(ModulePlane.PLATFORM,)
+                )
+            ],
+        )
+
+
+def _ledger_migration_literals() -> dict[str, tuple[str, ...]]:
+    """`ea_0002`'s three prerequisite tuples, read statically.
+
+    `ast` rather than an import: importing the revision evaluates
+    `resolve_depends_on` at module scope, whose answer depends on which bindings
+    happen to be installed in this process. The literals do not.
+    """
+    tree = ast.parse(LEDGER_REVISION.read_text(encoding="utf-8"))
+    literals: dict[str, tuple[str, ...]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            targets = [node.target.id]
+        else:
+            continue
+        if node.value is None:
+            continue
+        for name in targets:
+            if name in {"COMMON_REQUIRES", "TENANT_REQUIRES", "PLATFORM_REQUIRES"}:
+                literals[name] = ast.literal_eval(node.value)
+    return literals
+
+
+def test_the_migration_declares_the_same_prerequisites_as_the_manifest() -> None:
+    """Manifest and lineage are two audiences for one fact — composition reads
+    the manifest, `alembic upgrade` reads the migration — and only the second
+    is checked against a real database."""
+    literals = _ledger_migration_literals()
+    assert literals["COMMON_REQUIRES"] == tuple(module.requires)
+    assert literals["TENANT_REQUIRES"] == tuple(module.tenant_requires) == ()
+    assert literals["PLATFORM_REQUIRES"] == tuple(module.platform_requires) == ()
+
+
+def test_the_prerequisite_is_actually_verified_against_the_database() -> None:
+    """A declaration orders migrations; it does not prove anything ran. Without
+    `require_prerequisites` the whole change would be paperwork, and an adopter
+    with a stamped or half-supplied ledger would still reach production."""
+    source = LEDGER_REVISION.read_text(encoding="utf-8")
+    assert "require_prerequisites(op.get_bind(), REQUIRES)" in source
+    assert "resolve_depends_on(COMMON_REQUIRES)" in source
+
+
+def test_the_verification_revision_creates_nothing() -> None:
+    """A verification revision that also created something would make "did the
+    check run?" and "did the object appear?" one question with one
+    `alembic_version` row."""
+    source = LEDGER_REVISION.read_text(encoding="utf-8")
+    for ddl in ("op.create_table", "op.execute", "op.add_column", "op.create_index"):
+        assert ddl not in source, f"{ddl} in a revision whose whole job is to verify"
+
+
+def test_the_verification_did_not_land_in_a_released_revision() -> None:
+    """The rule `tests/architecture/test_released_migrations.py` enforces by
+    digest, stated here as intent: no file that shipped in a tag learned to
+    verify a prerequisite after the fact. `ea_0001` shipped in four."""
+    verifying = sorted(
+        path.name
+        for path in VERSIONS.glob("ea_*.py")
+        if "require_prerequisites" in path.read_text(encoding="utf-8")
+    )
+    assert verifying == [LEDGER_REVISION.name]
+
+
+def test_the_lineage_head_is_the_verification_and_it_chains_to_the_root() -> None:
+    """A new head that forgot `down_revision` would leave two roots in one
+    branch, and Alembic would refuse the composition — but only at deploy."""
+    tree = ast.parse(LEDGER_REVISION.read_text(encoding="utf-8"))
+    assigned = {
+        target.id: node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert assigned["revision"].value == "ea_0002_idempotency_ledger"
+    assert assigned["down_revision"].value == "ea_0001_allocations"
+    assert assigned["branch_labels"].value is None, (
+        "the branch label belongs to the lineage ROOT; a second one here would "
+        "claim the branch twice"
+    )
+    assert len("ea_0002_idempotency_ledger") <= 32
+
+
+# ── The second facility, named rather than forgotten ─────────────────────────
+
+
+def test_the_platform_audit_write_is_recorded_as_a_known_unmapped_facility() -> None:
+    """ADR-0018: an omission is either an enforceable exemption or it is
+    unmonitored, and the two must not read alike.
+
+    `write_platform_audit_event` is called from INSIDE the same idempotent
+    operation and writes `public.platform_audit_events` at request time — the
+    identical shape to the ledger call this change declares. It is NOT declared,
+    for one reason only: no kernel prerequisite names it yet. Left silent, the
+    manifest would read as if the audit of the whole class were complete.
+
+    So the manifest has to SAY so, and the inventory has to carry the finding.
+    When `platform_audit_log.v1` exists, this test is what leads the next author
+    to the line that must change.
+    """
+    assert "write_platform_audit_event" in (MODULE_ROOT / "service.py").read_text(
+        encoding="utf-8"
+    )
+    manifest_source = (MODULE_ROOT / "manifest.py").read_text(encoding="utf-8")
+    assert "write_platform_audit_event" in manifest_source, (
+        "the manifest declares one of the two kernel facilities this module "
+        "calls and says nothing about the other — record the unmapped one with "
+        "its reason, or a reader cannot tell an omission from a decision"
+    )
+    assert "KNOWN UNMAPPED" in manifest_source
+    inventory = (
+        PROJECT_ROOT / "docs/inventories/kernel-persisted-runtime-dependencies.md"
+    ).read_text(encoding="utf-8")
+    assert "write_platform_audit_event" in inventory
+
+
+# ── Release surfaces ─────────────────────────────────────────────────────────
+
+
+def test_the_floor_is_the_release_that_named_the_ledger() -> None:
+    """a45 allocated `mod_ealloc` and a56 published `platform_tables`; a66
+    published `idempotency_ledger.v1`. The floor is the highest, because
+    a56..a65 cannot import this manifest at all — `validate_prerequisites` does
+    not know the name."""
+    manifest = tomllib.loads(
+        (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a66"
+
+
+def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
+    """`ea_0002` creates nothing, so a wheel that dropped it would install a
+    module whose prerequisite is declared and never proven — the one failure
+    mode a DDL-free revision has."""
+    entry = json.loads(
+        (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
+    )["modules"]["dotmac-entitlement-allocation"]
+    assert entry["kernel_floor"] == "0.1.0a66"
+    required = set(entry["wheel_contents"]["required"])
+    on_disk = {
+        f"dotmac_entitlement_allocation/migrations/versions/{path.name}"
+        for path in VERSIONS.glob("ea_*.py")
+    }
+    assert on_disk <= required, sorted(on_disk - required)
 
 
 def test_the_extraction_dossier_records_the_single_qualifying_source() -> None:

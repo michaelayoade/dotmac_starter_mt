@@ -2,12 +2,20 @@
 
 ## The enforceable premise (ADR-0018)
 
-`dotmac-integration` has been published three times. Every migration file
-present at `dotmac-integration-v0.1.0a1`, `-v0.1.0a2` and `-v0.1.0a3` is inside
-a wheel on the registry, and has therefore RUN, unmodified, in at least one
-database this repository does not own and cannot inspect.
+`dotmac-integration` has been published three times and
+`dotmac-entitlement-allocation` four. Every migration file present at any of
+those seven tags is inside a wheel on the registry, and has therefore RUN,
+unmodified, in at least one database this repository does not own and cannot
+inspect.
 
-The a3 entry was added while this change was open: a3 was tagged from `b14f66e`
+Allocation is the sharper case, and the reason the guard grew a second
+distribution rather than staying a one-module special. Its four releases hold
+ONE migration with ONE digest: a2 exposed `versions_dir()`, a3 made the ORM
+relationships class-bound, a4 moved a manifest declaration between plane slots.
+Four tags and nothing to show for them in the versions directory reads, to the
+next author, as "the migration is still ours to edit". It is not.
+
+The integration a3 entry was added while #204 was open: a3 was tagged from `b14f66e`
 after the branch was cut, which is exactly the event the map has to absorb
 rather than be surprised by. The six files did not move — a3 is a Python fix —
 so the entry repeats a2's digests, and `test_two_tags_agree_about_a_file_they_
@@ -57,17 +65,28 @@ additive.
 
 ## Scope
 
-`dotmac-integration` only, because it is the module whose released bytes this
-change was tempted to edit. Extending it to another distribution is a data
-edit: add its tags below. It is deliberately NOT generalised to "every
-allowlisted module" today — that would need digests for tags nobody has
-verified in this change, and a guard populated by guesswork is worse than an
-absent one.
+Two distributions: `dotmac-integration` and `dotmac-entitlement-allocation`.
+Each was added by the change that was tempted to edit its released bytes —
+integration's by `ig_0007`, allocation's by `ea_0002` — and each entry's
+digests were read out of the tags in that same change. That is the enrolment
+rule, and it is the reason this is still not generalised to "every allowlisted
+module": a distribution enters when somebody has actually verified its tags,
+because a guard populated by guesswork is worse than an absent one.
+
+Enrolment is therefore a data edit — a row in `DISTRIBUTIONS`, its tags in
+`RELEASED_TAGS`, and its still-editable files in `UNRELEASED`. The
+`test_every_migration_is_either_released_or_declared_unreleased` ratchet then
+holds that distribution's whole versions directory, in both directions.
+
+An unenrolled distribution is UNMONITORED here, not exempt (ADR-0018). The
+difference is visible in `test_the_unmonitored_distributions_are_named`, which
+lists exactly which allowlisted modules this file says nothing about.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -75,17 +94,43 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-VERSIONS = (
-    REPO_ROOT / "packages/dotmac-integration/src/dotmac_integration/migrations/versions"
-)
 
-#: `tag -> (tagged commit, {filename: sha256 of the file at that tag})`.
+#: The distributions this file monitors, and where each keeps its lineage.
 #:
-#: All three are annotated tags created by `release-module.yml` and present on
+#: A distribution is here because somebody read its tags. Everything else is
+#: unmonitored and named as such by
+#: `test_the_unmonitored_distributions_are_named`.
+DISTRIBUTIONS: dict[str, Path] = {
+    "dotmac-integration": (
+        REPO_ROOT
+        / "packages/dotmac-integration/src/dotmac_integration/migrations/versions"
+    ),
+    "dotmac-entitlement-allocation": (
+        REPO_ROOT
+        / "packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation"
+        / "migrations/versions"
+    ),
+}
+
+#: The glob that enumerates one distribution's lineage on disk. Derived from
+#: the module's migration prefix, so the ratchet cannot be defeated by a file
+#: the pattern happens not to match.
+LINEAGE_GLOBS: dict[str, str] = {
+    "dotmac-integration": "ig_*.py",
+    "dotmac-entitlement-allocation": "ea_*.py",
+}
+
+#: Kept for the many call sites that only need integration's directory.
+VERSIONS = DISTRIBUTIONS["dotmac-integration"]
+
+#: `tag -> (distribution, tagged commit, {filename: sha256 at that tag})`.
+#:
+#: Every one is an annotated tag created by `release-module.yml` and present on
 #: `origin`; the commit is recorded so a reviewer can locate the release without
 #: resolving the tag object.
-RELEASED_TAGS: dict[str, tuple[str, dict[str, str]]] = {
+RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
     "dotmac-integration-v0.1.0a1": (
+        "dotmac-integration",
         "1b1d62b",
         {
             "ig_0001_connector_control_plane.py": (
@@ -97,6 +142,7 @@ RELEASED_TAGS: dict[str, tuple[str, dict[str, str]]] = {
         },
     ),
     "dotmac-integration-v0.1.0a2": (
+        "dotmac-integration",
         "aaa3b54",
         {
             "ig_0001_connector_control_plane.py": (
@@ -123,6 +169,7 @@ RELEASED_TAGS: dict[str, tuple[str, dict[str, str]]] = {
     # with the same six migrations. Recorded anyway: "the lineage did not
     # change" is a claim, and an entry per tag is what checks it.
     "dotmac-integration-v0.1.0a3": (
+        "dotmac-integration",
         "b14f66e",
         {
             "ig_0001_connector_control_plane.py": (
@@ -145,6 +192,55 @@ RELEASED_TAGS: dict[str, tuple[str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-entitlement-allocation ───────────────────────────────────────
+    #
+    # Four tags, one migration, one digest. `ea_0001` has not moved a byte
+    # since `0.1.0a1`: a2 exposed `versions_dir()`, a3 made the ORM
+    # relationships class-bound, and a4 moved the tables from the `tables=`
+    # slot to `platform_tables=` — all three are Python-only, and the fourth
+    # changed a manifest declaration rather than any DDL.
+    #
+    # That is exactly the history that makes an in-place edit tempting: four
+    # releases with nothing to show for them in this directory reads as "the
+    # migration is still ours". It is not — those bytes have run in databases
+    # this repository does not own, which is why `ea_0002` exists as its own
+    # head instead of a `require_prerequisites` line appended to `ea_0001`.
+    "dotmac-entitlement-allocation-v0.1.0a1": (
+        "dotmac-entitlement-allocation",
+        "847ce0b",
+        {
+            "ea_0001_allocations.py": (
+                "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            ),
+        },
+    ),
+    "dotmac-entitlement-allocation-v0.1.0a2": (
+        "dotmac-entitlement-allocation",
+        "5ded880",
+        {
+            "ea_0001_allocations.py": (
+                "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            ),
+        },
+    ),
+    "dotmac-entitlement-allocation-v0.1.0a3": (
+        "dotmac-entitlement-allocation",
+        "c371b0f",
+        {
+            "ea_0001_allocations.py": (
+                "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            ),
+        },
+    ),
+    "dotmac-entitlement-allocation-v0.1.0a4": (
+        "dotmac-entitlement-allocation",
+        "67bdfb8",
+        {
+            "ea_0001_allocations.py": (
+                "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            ),
+        },
+    ),
 }
 
 #: Migration files that exist in the tree and have NOT shipped in any tag, so
@@ -152,27 +248,36 @@ RELEASED_TAGS: dict[str, tuple[str, dict[str, str]]] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: `ig_0007` moves when `0.1.0a4` is tagged. That is the same commit in which
-#: this set becomes empty again. It was written as `0.1.0a3` until a3 was
-#: released without it — the release lane does not wait for an open branch,
-#: which is the whole reason "released" is read from tags and not from a
-#: version number somebody intended.
-UNRELEASED = frozenset({"ig_0007_idempotency_ledger.py"})
+#: `ig_0007` moves when integration's `0.1.0a4` is tagged, and `ea_0002` when
+#: allocation's `0.1.0a5` is. Each move is the same commit that removes its
+#: distribution's row from `docs/inventories/declared-publication-baseline
+#: .json`. `ig_0007` was written as `0.1.0a3` until a3 was released without it
+#: — the release lane does not wait for an open branch, which is the whole
+#: reason "released" is read from tags and not from a version number somebody
+#: intended.
+UNRELEASED: dict[str, frozenset[str]] = {
+    "dotmac-integration": frozenset({"ig_0007_idempotency_ledger.py"}),
+    "dotmac-entitlement-allocation": frozenset({"ea_0002_idempotency_ledger.py"}),
+}
 
 
 def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _drift(versions: Path) -> list[str]:
-    """Every released file in `versions` whose bytes are not what shipped.
+def _drift(versions: Path, distribution: str = "dotmac-integration") -> list[str]:
+    """Every released file of `distribution` in `versions` whose bytes moved.
 
     Takes the directory as an argument rather than reading the module constant,
     which is the whole reason the sensitivity proofs below can run: they point
-    it at a deliberately damaged copy of the tree.
+    it at a deliberately damaged copy of the tree. `distribution` selects which
+    tags apply, because one directory holds one lineage and the map now holds
+    several.
     """
     problems: list[str] = []
-    for tag, (commit, files) in sorted(RELEASED_TAGS.items()):
+    for tag, (owner, commit, files) in sorted(RELEASED_TAGS.items()):
+        if owner != distribution:
+            continue
         for name, expected in sorted(files.items()):
             path = versions / name
             if not path.is_file():
@@ -199,7 +304,7 @@ def _shipping_tags(name: str) -> list[str]:
     turns a released migration appearing in one more release into a red suite
     for no reason.
     """
-    return sorted(tag for tag, (_, files) in RELEASED_TAGS.items() if name in files)
+    return sorted(tag for tag, (_, _, files) in RELEASED_TAGS.items() if name in files)
 
 
 # ── The guard ───────────────────────────────────────────────────────────────
@@ -210,28 +315,40 @@ def test_the_map_records_something_to_check() -> None:
     compared nothing — the exact failure ADR-0018 calls a guard with no
     sensitivity."""
     assert RELEASED_TAGS, "no released tags recorded; this file proves nothing"
-    for tag, (_, files) in RELEASED_TAGS.items():
+    for tag, (owner, _, files) in RELEASED_TAGS.items():
         assert files, f"{tag} records no files"
+        assert owner in DISTRIBUTIONS, (
+            f"{tag} names distribution {owner!r}, which has no versions "
+            "directory in DISTRIBUTIONS — the map would then check nothing"
+        )
+    # Every monitored distribution must actually be monitored. A row in
+    # DISTRIBUTIONS with no tag would look enrolled and check nothing.
+    covered = {owner for owner, _, _ in RELEASED_TAGS.values()}
+    assert covered == set(DISTRIBUTIONS), sorted(set(DISTRIBUTIONS) - covered)
 
 
-def test_no_released_migration_has_been_edited() -> None:
+@pytest.mark.parametrize("distribution", sorted(DISTRIBUTIONS))
+def test_no_released_migration_has_been_edited(distribution: str) -> None:
     """The guard itself. Adopters ran these bytes; the tree must still hold
     them, or a repair was made in place instead of in a new revision."""
-    problems = _drift(VERSIONS)
-    assert not problems, "released migrations were modified:\n" + "\n".join(problems)
+    problems = _drift(DISTRIBUTIONS[distribution], distribution)
+    assert not problems, (
+        f"{distribution}: released migrations were modified:\n" + "\n".join(problems)
+    )
 
 
 def test_two_tags_agree_about_a_file_they_both_shipped() -> None:
     """The map's own honesty check.
 
-    `ig_0001` and `ig_0002` appear under both tags. If the recorded digests ever
+    `ig_0001` and `ig_0002` appear under three tags each and
+    `ea_0001_allocations.py` under four. If the recorded digests ever
     disagreed, the map would be asserting that one file had two sets of released
     bytes — which is either a transcription error here or the very edit this
     file exists to forbid, already committed and then papered over by updating
     only one entry.
     """
     seen: dict[str, tuple[str, str]] = {}
-    for tag, (_, files) in sorted(RELEASED_TAGS.items()):
+    for tag, (_, _, files) in sorted(RELEASED_TAGS.items()):
         for name, digest in sorted(files.items()):
             if name in seen:
                 first_tag, first_digest = seen[name]
@@ -244,7 +361,10 @@ def test_two_tags_agree_about_a_file_they_both_shipped() -> None:
     assert seen, "no shared files to compare"
 
 
-def test_every_migration_is_either_released_or_declared_unreleased() -> None:
+@pytest.mark.parametrize("distribution", sorted(DISTRIBUTIONS))
+def test_every_migration_is_either_released_or_declared_unreleased(
+    distribution: str,
+) -> None:
     """The two-directional ratchet.
 
     Without this, the guard is trivially defeated in both directions: a new
@@ -252,23 +372,64 @@ def test_every_migration_is_either_released_or_declared_unreleased() -> None:
     from it in the same commit that edits it. Neither is possible if the union
     must equal the directory exactly.
     """
-    on_disk = {path.name for path in VERSIONS.glob("ig_*.py")}
-    released = {name for _, files in RELEASED_TAGS.values() for name in files}
+    versions = DISTRIBUTIONS[distribution]
+    on_disk = {path.name for path in versions.glob(LINEAGE_GLOBS[distribution])}
+    assert on_disk, f"{distribution}: no migration matched its lineage glob"
+    released = {
+        name
+        for owner, _, files in RELEASED_TAGS.values()
+        if owner == distribution
+        for name in files
+    }
+    unreleased = UNRELEASED[distribution]
 
-    assert not (released & UNRELEASED), (
-        f"{sorted(released & UNRELEASED)} claimed as both released and "
-        "unreleased — a file is one or the other"
+    assert not (released & unreleased), (
+        f"{distribution}: {sorted(released & unreleased)} claimed as both "
+        "released and unreleased — a file is one or the other"
     )
-    missing = sorted(on_disk - released - UNRELEASED)
+    missing = sorted(on_disk - released - unreleased)
     assert not missing, (
-        f"migration(s) {missing} are in neither map. A new migration goes in "
-        "UNRELEASED; record its digest under its tag when it ships"
+        f"{distribution}: migration(s) {missing} are in neither map. A new "
+        "migration goes in UNRELEASED; record its digest under its tag when it "
+        "ships"
     )
-    stale = sorted((released | UNRELEASED) - on_disk)
+    stale = sorted((released | unreleased) - on_disk)
     assert not stale, (
-        f"{stale} are recorded but not on disk — see the deletion message in "
-        "`_drift` before removing anything"
+        f"{distribution}: {stale} are recorded but not on disk — see the "
+        "deletion message in `_drift` before removing anything"
     )
+
+
+def test_the_unmonitored_distributions_are_named() -> None:
+    """ADR-0018: unmonitored and exempt are different labels, and the
+    difference has to be visible.
+
+    A releasable module absent from `DISTRIBUTIONS` is not excused from the
+    rule that released bytes are history — nothing here checks it, which is a
+    weaker statement and a different one. Naming the set turns "this file
+    covers two modules" from a fact a reader has to reconstruct into one the
+    suite reports, and makes enrolling the next module a visible diff rather
+    than a silent absence.
+
+    Deliberately NOT an assertion that the set is empty. It will not be for a
+    long time, and a failing gate nobody can fix is one somebody deletes.
+    """
+    allowlist = set(
+        json.loads(
+            (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
+        )["modules"]
+    )
+    monitored = set(DISTRIBUTIONS)
+    assert monitored <= allowlist, (
+        f"{sorted(monitored - allowlist)} is monitored here but is not in the "
+        "release allowlist — an unreleasable distribution has no released bytes"
+    )
+    unmonitored = sorted(allowlist - monitored)
+    print(
+        "released-migration guard — UNMONITORED (not exempt): "
+        + (", ".join(unmonitored) or "none")
+    )
+    assert monitored, "no distribution is monitored; this file proves nothing"
 
 
 # ── Sensitivity proofs ──────────────────────────────────────────────────────
@@ -324,15 +485,74 @@ def test_the_guard_catches_a_deleted_released_migration(tmp_path: Path) -> None:
         assert "MISSING" in problem
 
 
-def test_an_unreleased_migration_is_free_to_change(tmp_path: Path) -> None:
+@pytest.mark.parametrize("distribution", sorted(DISTRIBUTIONS))
+def test_an_unreleased_migration_is_free_to_change(
+    tmp_path: Path, distribution: str
+) -> None:
     """Specificity for the two above: `_drift` must fire on RELEASED bytes, not
     on any change at all. A guard that refused every edit to the directory would
     pass both proofs above and block all future work."""
     copy = tmp_path / "versions"
-    shutil.copytree(VERSIONS, copy)
-    victim = copy / next(iter(UNRELEASED))
+    shutil.copytree(DISTRIBUTIONS[distribution], copy)
+    victim = copy / next(iter(UNRELEASED[distribution]))
     victim.write_bytes(victim.read_bytes() + b"\n# still being written\n")
-    assert not _drift(copy)
+    assert not _drift(copy, distribution)
+
+
+def test_the_guard_catches_an_edit_to_the_second_distributions_bytes(
+    tmp_path: Path,
+) -> None:
+    """Enrolment is only real if the new rows are actually compared.
+
+    `ea_0001` shipped in four tags with one digest, and every proof above walks
+    integration's directory — so all of them would pass with the allocation
+    rows present and never read. This damages the file `ea_0002` exists to
+    avoid editing, and requires all four releases to be named.
+    """
+    distribution = "dotmac-entitlement-allocation"
+    copy = tmp_path / "versions"
+    shutil.copytree(DISTRIBUTIONS[distribution], copy)
+    assert not _drift(copy, distribution), "the copy must start clean"
+
+    victim = copy / "ea_0001_allocations.py"
+    victim.write_bytes(victim.read_bytes() + b"\n# a formatter ran\n")
+
+    shipped_in = _shipping_tags("ea_0001_allocations.py")
+    assert len(shipped_in) == 4, shipped_in
+    problems = _drift(copy, distribution)
+    assert len(problems) == len(shipped_in), problems
+    for problem, tag in zip(problems, shipped_in, strict=True):
+        assert tag in problem
+        assert "ea_0001_allocations.py" in problem
+        assert (
+            "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            in problem
+        ), "the message must name the digest that shipped, not just 'differs'"
+
+
+def test_one_distributions_damage_is_not_attributed_to_the_other(
+    tmp_path: Path,
+) -> None:
+    """The scoping proof the second distribution makes necessary.
+
+    `_drift` filters by owner. Without that filter it would hunt every recorded
+    filename in whichever directory it was handed — so an intact allocation
+    lineage would be reported as four MISSING files every time integration's
+    directory was checked, and a guard that fails loudly for the wrong module
+    is one whose next real failure gets waved through.
+
+    Damage integration; require the allocation lineage, on disk and untouched,
+    to stay silent.
+    """
+    damaged = tmp_path / "integration"
+    shutil.copytree(DISTRIBUTIONS["dotmac-integration"], damaged)
+    victim = damaged / "ig_0002_execution.py"
+    victim.write_bytes(victim.read_bytes() + b"\n")
+    assert _drift(damaged, "dotmac-integration"), "the damage must be reported"
+
+    intact = tmp_path / "allocation"
+    shutil.copytree(DISTRIBUTIONS["dotmac-entitlement-allocation"], intact)
+    assert not _drift(intact, "dotmac-entitlement-allocation")
 
 
 # ── The map is cross-checked against the tags it claims to quote ────────────
@@ -357,8 +577,14 @@ def _tag_oracle() -> object:
 
 
 def _blob_digest(tag: str, name: str) -> str:
-    """SHA-256 of the migration file as git holds it at `tag`."""
-    relative = VERSIONS.relative_to(REPO_ROOT) / name
+    """SHA-256 of the migration file as git holds it at `tag`.
+
+    The directory comes from the tag's own recorded distribution, not from a
+    module constant — with two lineages in the map, a fixed path would compare
+    one distribution's tags against the other's files and fail on every one.
+    """
+    distribution, _, _ = RELEASED_TAGS[tag]
+    relative = DISTRIBUTIONS[distribution].relative_to(REPO_ROOT) / name
     # Fixed argv, no shell. The only interpolated values are this file's own
     # literals — a tag and a path from `RELEASED_TAGS`. `git` from PATH is the
     # same trust assumption every other subprocess guard here makes.
@@ -408,8 +634,8 @@ def test_the_recorded_digests_are_what_the_tag_actually_holds(tag: str) -> None:
     would go unnoticed by a digest comparison that only walks the map, so the
     tag's own file list is the expected set.
     """
-    commit, files = RELEASED_TAGS[tag]
-    relative = VERSIONS.relative_to(REPO_ROOT).as_posix()
+    distribution, commit, files = RELEASED_TAGS[tag]
+    relative = DISTRIBUTIONS[distribution].relative_to(REPO_ROOT).as_posix()
     argv = ["git", "ls-tree", "-r", "--name-only", tag, "--", relative]
     listing = subprocess.run(  # noqa: S603 # nosec B603 B607
         argv, cwd=REPO_ROOT, capture_output=True, text=True, check=False
@@ -439,10 +665,16 @@ def test_the_cross_check_would_catch_a_doctored_map() -> None:
     otherwise the comparison is not reading git at all, which is exactly how a
     cross-check degrades into a second copy of the thing it checks.
     """
-    tag = "dotmac-integration-v0.1.0a1"
-    actual = _blob_digest(tag, "ig_0001_connector_control_plane.py")
-    assert actual == RELEASED_TAGS[tag][1]["ig_0001_connector_control_plane.py"]
-    assert actual != "0" * 64
+    for tag, name in (
+        ("dotmac-integration-v0.1.0a1", "ig_0001_connector_control_plane.py"),
+        # Both distributions, because `_blob_digest` now resolves the directory
+        # from the tag's owner. Reading only integration's would leave the
+        # allocation rows compared against a path nothing checks.
+        ("dotmac-entitlement-allocation-v0.1.0a1", "ea_0001_allocations.py"),
+    ):
+        actual = _blob_digest(tag, name)
+        assert actual == RELEASED_TAGS[tag][2][name]
+        assert actual != "0" * 64
 
 
 @pytest.mark.parametrize("tag", sorted(RELEASED_TAGS))
@@ -450,7 +682,7 @@ def test_each_recorded_digest_is_a_sha256(tag: str) -> None:
     """A truncated or mistyped digest would compare unequal to everything and
     turn the guard into a permanent failure — or, pasted from the wrong column,
     into a permanent pass against a value nothing produces."""
-    _, files = RELEASED_TAGS[tag]
+    _, _, files = RELEASED_TAGS[tag]
     for name, digest in files.items():
         assert len(digest) == 64, f"{tag}/{name}: {digest!r} is not a sha256"
         assert set(digest) <= set("0123456789abcdef"), f"{tag}/{name}: {digest!r}"
