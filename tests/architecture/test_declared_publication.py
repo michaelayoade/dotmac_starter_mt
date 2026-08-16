@@ -114,33 +114,48 @@ def test_no_ledger_entry_is_a_bare_label() -> None:
             assert evasion not in reason.lower(), f"{distribution}: {evasion!r}"
 
 
-def test_the_integration_gap_is_closed_and_stays_closed() -> None:
-    """The programme's live example, now CLOSED — and pinned in that state.
+def test_the_integration_example_is_in_exactly_one_state() -> None:
+    """The programme's live example, pinned as a BICONDITIONAL rather than as a
+    state.
 
-    This test spent its life asserting a gap: `dotmac-integration` declared a
-    version no tag proved, and the ledger had to say so. `0.1.0a3` was
-    published and tagged on 2026-08-15, so the row was removed in the same
-    change as the release, which is the rule the ledger exists to enforce.
+    This test has now been written three ways in one day, which is the evidence
+    for the shape it finally has. It began as "the gap is RECORDED"; #207
+    inverted it to "the gap is CLOSED and stays closed" when `0.1.0a3` was
+    published and the row was correctly removed; and this change re-opens the
+    gap by declaring `0.1.0a4`. Both fixed forms were true when written and
+    false a few hours later, because a module cycles between the two states
+    every time a version is declared and then released — that cycle is the
+    normal life of the thing, not a defect either form could catch.
 
-    Inverted rather than deleted, for the same reason the receipt-delivery
-    ratchet was inverted rather than deleted when its columns landed: the
-    assertion that a gap is RECORDED and the assertion that it is CLOSED are
-    the two halves of one ratchet, and dropping the second leaves the example
-    unguarded exactly when it starts looking finished. A re-declared,
-    unpublished version now fails here as well as in the generic test above,
-    and it fails by name.
+    So neither state is asserted. What is asserted is that the two agree:
+    a ledger row exists if and only if the declared version is unpublished.
+    Both failure directions are real and both are named — a silent promise to
+    consumers, and an absolution that outlived its release. It still fails BY
+    NAME for this distribution, which is what #207 wanted from a
+    distribution-specific test that the generic ones above cannot give.
     """
     sweep, survey = _survey()
     finding = survey["distributions"]["dotmac-integration"]
-    assert finding["state"] == sweep.PUBLISHED, (
-        f"dotmac-integration declares {finding['declared']} with no tag to "
-        "prove it. If that is deliberate, record it in the ledger with a "
-        "reason — the repair is a RELEASE, never an edit of the declared number"
+    published = finding["state"] == sweep.PUBLISHED
+    excused = "dotmac-integration" in _ledger()
+
+    assert published != excused, "dotmac-integration is " + (
+        "published and STILL excused by the ledger — remove the row in the "
+        "same change as the release; a ledger that only ever grows stops "
+        "describing anything"
+        if published
+        else f"declaring {finding['declared']} with no tag to prove it and "
+        "no ledger row. If that is deliberate, record it with a reason — "
+        "the repair is a RELEASE, never an edit of the declared number"
     )
-    assert "dotmac-integration" not in _ledger(), (
-        "the gap is closed, so the ledger must not still excuse it — a ledger "
-        "that only ever grows stops describing anything"
-    )
+    if excused:
+        # An open gap has to carry the premise, not merely a row. Checked here
+        # and not only in the generic reason-shape test, because this is the
+        # example the programme cites and the sentence is the whole point of it.
+        assert (
+            "NOT to be repaired by editing the version"
+            in _ledger()["dotmac-integration"]["reason"]
+        )
 
 
 def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> None:

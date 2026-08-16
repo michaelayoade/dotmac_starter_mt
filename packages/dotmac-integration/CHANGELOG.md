@@ -3,22 +3,94 @@
 ## Release state — read this before pinning
 
 **Three versions have been released: `0.1.0a1` (SPI 1.0), `0.1.0a2` (SPI 1.1)
-and `0.1.0a3` (SPI 1.1, with the discovery-error leak fixed).**
+and `0.1.0a3` (SPI 1.1, with the discovery-error leak fixed).** Tags
+`dotmac-integration-v0.1.0a1`, `-v0.1.0a2` and `-v0.1.0a3`, from `1b1d62b`,
+`aaa3b54` and `b14f66e`. **Pin `0.1.0a3`.**
 
-**Do not pin `0.1.0a2`.** Its discovery path renders a connector's own exception
-message into `ModeContractError` and chains it as `__cause__`, so any secret a
-connector interpolates into its error reaches the operator's boot log, the
-traceback and any handler using `exc_info`. `0.1.0a3` fixes it. Prefer a3.
+**Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
+connector's own exception message into `ModeContractError` and chains it as
+`__cause__`, so any secret a connector interpolates into its error reaches the
+operator's boot log, the traceback and any handler using `exc_info`. `0.1.0a3`
+fixes it.
 
 `0.1.0a3` was published and tagged `dotmac-integration-v0.1.0a3` on
 2026-08-15. It is the version to pin.
 
+`0.1.0a4` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
+is **not released**: no tag, nothing on the index. Until that run completes it
+is recorded in `docs/inventories/declared-publication-baseline.json` as
+declared-unpublished — a row #207 removed when a3 shipped and this change
+re-opens, which is the ordinary cycle rather than a regression.
+
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
 misdescribes what is installable is how a consumer comes to pin something that
-does not exist, or something it should not.
+does not exist, or something it should not. It has since been wrong in the other
+direction twice: a2 and then a3 were each tagged while this preamble still called
+them unreleased. The table of tags and commits above is what a reader should
+trust, because `git ls-remote --tags` checks it.
 
-Nothing in this file is a publication claim except this paragraph.
+Everything under a `## 0.1.0a2` heading below shipped in that tag. There are
+four such headings because a2's content landed across four merges (SPI 1.1,
+receipt delivery, retention, the type gate) and each wrote its own section
+before the version was cut. They are not four releases.
+
+Nothing in this file is a publication claim except this section.
+
+## 0.1.0a4 — UNRELEASED (on `main`; no tag, not on the index)
+
+Written against a declared-but-unreleased `0.1.0a3`, which was cut from
+`b14f66e` while this change was open. The ledger work moved up to a4 rather than
+being back-dated into a release it was never in — and `ig_0007` stayed unreleased
+rather than joining a3's digest entry in
+`tests/architecture/test_released_migrations.py`.
+
+### `idempotency_ledger.v1` is declared, and verified at deploy
+
+Declares the kernel prerequisite this module has consumed since `0.1.0a1`.
+
+`dotmac_integration.idempotency.run_effect_once` delegates at-most-once
+execution to `dotmac_kernel.idempotency.execute_once_platform` (hard rule 21,
+ADR-0014 — the ledger has exactly one owner and it is not this module), so
+`public.platform_idempotency_records` is written at REQUEST time. Nothing in
+`ig_0001`..`ig_0006` creates it, so the dependency existed only inside a
+function body: an adopter running its own lineage that never ran the kernel's
+— ERP hosts `public.tenants` itself and structurally cannot run kernel `0001` —
+installs this module, passes every gate it has, migrates cleanly, and raises
+`UndefinedTable` on the first guarded delivery. No test could have caught it
+before kernel `0.1.0a66`, because there was no name to declare. Same defect,
+same week, as `dotmac-numbering` `0.1.0a1`.
+
+#### Changed
+
+- `ModuleManifest.requires` gains `idempotency_ledger.v1`. COMMON rather than
+  `platform_requires`: this module owns one plane, installed atomically, so
+  there is no selection under which the requirement lapses — and a plane list
+  is unresolvable for an atomic module anyway, since `resolve_depends_on` reads
+  one only via `module=`, which needs a `ModulePlaneSelection` such a module may
+  not have.
+- Kernel floor raised to `>=0.1.0a66`, the release that published the name.
+  a58..a65 HAVE the tables — kernel `0018` created them — but do not know the
+  name, so `validate_prerequisites` refuses the manifest at import. **This is a
+  visible break for a consumer pinned to a released a1, a2 or a3 on an older
+  kernel**, and deliberately so: every one of those installs against a kernel
+  whose ledger it silently requires and cannot state.
+- Every migration is now a required wheel content in
+  `.github/release-modules.json`, not just the first two. `ig_0007` creates
+  nothing, so a wheel that dropped it would ship a declared-but-never-verified
+  prerequisite.
+
+#### Added
+
+- **`ig_0007_idempotency_ledger`** — a DDL-free revision whose whole body is
+  `require_prerequisites`. Deploy is the last moment at which a missing ledger
+  is a failed migration rather than a failed delivery.
+- A NEW revision rather than an edit to `ig_0001`, which shipped in three
+  published tags and whose bytes are therefore history.
+  `tests/architecture/test_released_migrations.py` records the SHA-256 of every
+  migration file in every released tag, cross-checks each digest against the
+  blob git holds at that tag, and fails if one changes or disappears — the guard
+  numbering did not need, because its `0.1.0a1` was never published.
 
 ## 0.1.0a3 — released 2026-08-15
 
@@ -48,8 +120,9 @@ mode, the failing hook and the exception TYPE.
 
 ### SPI 1.1 — one frozen contract, mode-specific protocols
 
-**SPI 1.1 is not published either.** It ships inside the unreleased `0.1.0a2`
-above. It is also the ONLY SPI version after 1.0: two unpublished drafts existed
+**SPI 1.1 ships in `0.1.0a2`**, and is published because that version is (this
+paragraph said "not published either" while a2 was still unreleased; the tag was
+cut on 2026-08-15). It is the ONLY SPI version after 1.0: two unpublished drafts existed
 on an abandoned branch — one adding the mode protocols, one replacing the
 ingress hooks' loose parameters with a single immutable envelope — and they are
 collapsed into this one. Shipping them as two consecutive breaking SPI versions
@@ -127,7 +200,7 @@ would have excluded every honest `>=1.0,<2.0` delivery connector in order to
 protect a compatibility promise nothing ever consumed.
 
 ### Fixed (the type gate)
-## Unreleased
+## 0.1.0a2 (continued) — RELEASED — receipt-to-product delivery
 
 Receipt-to-product delivery: the half that turns a recorded observation into a
 delivered one. **No version bump** — the persistence this slice specifies is
@@ -181,7 +254,7 @@ absent, so the moment the handoff lands the suite goes red and names the markers
 that must come off. The trusted destination is consumed through structural
 protocols (`TrustedDestination`, `TrustedScope`) that Team 3's frozen
 `DestinationBinding` already satisfies, so adopting it is a one-line import.
-## Unreleased
+## 0.1.0a2 (continued) — RELEASED — payload retention
 
 Payload retention. No version bump here on purpose: the release lane decides
 when this ships, and a bump in the same change as the behaviour makes the two
@@ -214,7 +287,7 @@ decisions one.
 - `retention_backlog`, counted from the ledger at read time. No stored status
   column, for the same reason `health_report` has none.
 
-## 0.1.0a2 — 2026-08-14
+## 0.1.0a2 (continued) — RELEASED — the type gate
 
 Fixes a public function that could never have run, and the gate gap that let it
 ship. `pyproject.toml` declares `dotmac_integration.*` under mypy's strict
@@ -249,4 +322,5 @@ errors and one broken export.
 ## 0.1.0a1 — 2026-08-14 — RELEASED (tag `dotmac-integration-v0.1.0a1`)
 
 The connector control plane, as a Starter module (ADR-0024). Implements SPI 1.0.
-This is the only released version of this package.
+(It was the only released version when this was written; `0.1.0a2` followed on
+2026-08-15. See "Release state" at the top for the current list.)

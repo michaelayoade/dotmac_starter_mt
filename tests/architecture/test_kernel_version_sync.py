@@ -24,6 +24,7 @@ together — which is the failure this test exists to catch.
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -72,18 +73,22 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # minting one kernel version collide in the changelog and leave a consumer
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
-LEDGER_ALLOCATION_RELEASES = {
-    # Listed here though the module is not release-registered yet: this map
-    # gates the FLOOR, not publication. An unenforced floor is how the same
-    # allocation drifted across a56 twice before landing on a58.
-    #
-    # Ledger-allocated rather than capability-raised even though it consumes
-    # `platform_tables` (a53) and `requires` (a56): the floor is the higher of
-    # the two, and its own allocation is the higher.
-    "dotmac-integration": "0.1.0a58",
+#
+# EMPTY today, and that is a fact about the fleet rather than an oversight:
+# every releasable module has now outlived its own allocation floor. The last
+# occupant was `dotmac-integration`, which held a58 — its own ledger row,
+# higher than `platform_tables` (a53) and the a56 prerequisite contract — until
+# integration `0.1.0a4` declared `idempotency_ledger.v1` and moved to a66.
+#
+# An empty map is a parametrize over nothing, and a test that collects nothing
+# passes for the wrong reason. `test_every_releasable_module_has_a_floor_rule`
+# below is what keeps this map watched while it is empty: a module may not be
+# absent from BOTH maps, so emptying this one is only ever safe because the
+# other one grew.
+LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
-    # plane-selection contract lands in a61, so this row moves to
-    # CAPABILITY_RAISED_FLOORS below rather than staying here.
+    # plane-selection contract lands in a61, so its row lives in
+    # CAPABILITY_RAISED_FLOORS below rather than here.
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -145,6 +150,23 @@ CAPABILITY_RAISED_FLOORS = {
     # is ever reached. The floor moved for a capability, so the row moved with
     # it.
     "dotmac-numbering": ("0.1.0a66", "0.1.0a65"),
+    # Integration held a58 — its own ledger row — through `0.1.0a1`, `0.1.0a2`
+    # and `0.1.0a3`, all PUBLISHED. `0.1.0a4` declares `idempotency_ledger.v1`,
+    # the a66 name for the at-most-once tables `run_effect_once` has been
+    # writing at request time since a1, and verifies it in `ig_0007`. The
+    # tables themselves are far older than the floor: kernel `0018` created
+    # them (ADR-0014). What a65 and below lack is the NAME — `validate_
+    # prerequisites` raises `UnknownPrerequisiteError` while constructing the
+    # manifest, so the module cannot be imported at all, let alone reach the
+    # a58 allocation check. Capability outranks allocation, as everywhere else
+    # in this map.
+    #
+    # Unlike numbering, whose a1 was never published, this floor raise is
+    # visible to consumers: `dotmac_integrator` can pin any of three released
+    # versions that run on a58..a65, and a4 will not. That is the correct trade
+    # — every one of those installs on a kernel whose ledger it silently
+    # requires and cannot state.
+    "dotmac-integration": ("0.1.0a66", "0.1.0a58"),
 }
 
 
@@ -209,6 +231,38 @@ def test_a_module_has_exactly_one_floor_rule() -> None:
     assert not set(LEDGER_ALLOCATION_RELEASES) & set(CAPABILITY_RAISED_FLOORS)
 
 
+def test_every_releasable_module_has_a_floor_rule() -> None:
+    """The other half of "exactly one" — and what keeps an EMPTY map watched.
+
+    `LEDGER_ALLOCATION_RELEASES` is currently empty, so the test parametrized
+    over it collects nothing and reports green having asserted nothing. That is
+    only tolerable because a module cannot fall out of both maps: this reads
+    the release allowlist — the closed set of things that may be PUBLISHED, so
+    the set whose floors are public facts — and requires each one to be
+    somewhere. Discovery, not enumeration: adding an allowlist entry enrols it
+    here, the way `test_module_version_sync.py` already does for versions.
+
+    The union may legitimately be a superset. `dotmac-imports` and
+    `dotmac-template-studio` carry floors while still unpublishable, which is
+    the correct direction — an untested floor is the defect, a tested one on an
+    unreleased module is just early.
+    """
+    allowlist = set(
+        json.loads(
+            (PACKAGES.parent / ".github/release-modules.json").read_text("utf-8")
+        )["modules"]
+    )
+    assert allowlist, "the allowlist is empty; this gate would prove nothing"
+    unruled = sorted(
+        allowlist - set(LEDGER_ALLOCATION_RELEASES) - set(CAPABILITY_RAISED_FLOORS)
+    )
+    assert not unruled, (
+        f"releasable module(s) {unruled} have no floor rule — a module absent "
+        "from both maps has an untested kernel floor, and nothing would notice "
+        "it drifting"
+    )
+
+
 @pytest.mark.parametrize(
     "release",
     sorted(
@@ -224,9 +278,20 @@ def test_each_allocation_release_is_documented(release: str) -> None:
 
 def test_no_vendor_module_claims_an_upstream_train_version() -> None:
     """a42 and a43 are spoken for. This test is the reason the renumber cannot
-    silently come back: it fails if any vendor module's floor lands on one."""
+    silently come back: it fails if any vendor module's floor lands on one.
+
+    Reads BOTH maps. It read only the allocation map until that map emptied,
+    at which point it was asserting the empty set against a constant — green,
+    and blind to every floor the fleet actually pins.
+    """
     contested = {"0.1.0a42", "0.1.0a43"}
-    assert set(LEDGER_ALLOCATION_RELEASES.values()) & contested == set()
+    floors = {
+        *LEDGER_ALLOCATION_RELEASES.values(),
+        *(floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()),
+        *(allocation for _, allocation in CAPABILITY_RAISED_FLOORS.values()),
+    }
+    assert floors, "no floors to check; this gate would pass for the wrong reason"
+    assert floors & contested == set()
 
 
 def test_the_kernel_is_at_least_every_module_floor() -> None:

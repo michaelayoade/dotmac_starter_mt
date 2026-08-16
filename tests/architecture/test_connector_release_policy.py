@@ -325,25 +325,58 @@ def test_a_published_floor_is_accepted(lane) -> None:
     )
 
 
-def test_the_live_integration_floor_gap_is_closed() -> None:
-    """The moment this test's previous form predicted, arrived.
+def test_a_connector_floor_may_never_name_the_declared_version_blindly() -> None:
+    """What a connector author actually depends on, stated so it survives.
 
-    It used to assert that `dotmac-integration`'s declared-but-unpublished
-    version was RECORDED in the ledger, and said so explicitly: "if
-    `dotmac-integration` is ever released at its declared version this entry
-    must disappear". `0.1.0a3` was released and tagged on 2026-08-15, so it did.
+    This test has been a fixed-state assertion twice and been overtaken twice.
+    It first said `dotmac-integration`'s declared version was RECORDED as
+    unpublished; a3 shipped, so it was inverted to say the ledger no longer
+    excuses it; and declaring `0.1.0a4` re-opens the gap. Neither state is the
+    invariant — a module is declared-unpublished from the moment a version is
+    bumped until the moment it is tagged, which is most of the life of an open
+    branch.
 
-    Inverted rather than deleted. The assertion that still matters is the one a
-    connector author depends on — the floor they name must be installable — and
-    that only holds while the declared version is published. Deleting this would
-    leave the live state unchecked precisely because it is currently correct.
+    The invariant is the one the lane enforces: **the declared version is not
+    automatically a usable floor.** A connector author reading
+    `pyproject.toml` or `docs/MODULE_CATALOG.md` sees the declared number, and
+    naming it as `integration_floor` produces an unresolvable wheel whenever it
+    has not been tagged. So the two facts are asserted to AGREE, rather than
+    either being pinned:
+
+    * if the declared version is unpublished, the publication ledger must say
+      so — that row is the only warning a connector author gets;
+    * if it is published, the row must be gone.
+
+    `test_a_floor_naming_an_unpublished_version_is_refused` above is what
+    proves the lane refuses such a floor; this one proves the repository still
+    knows which case it is in.
     """
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))["unpublished"]
-    assert "dotmac-integration" not in ledger, (
-        "the ledger still excuses dotmac-integration. Either it regressed to a "
-        "declared-but-unpublished version, or a row outlived the release that "
-        "closed it"
+    sweep_path = PROJECT_ROOT / "scripts" / "declared_publication_sweep.py"
+    spec = importlib.util.spec_from_file_location(
+        "declared_publication_sweep", sweep_path
     )
+    assert spec is not None and spec.loader is not None
+    sweep = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sweep)
+
+    finding = sweep.survey(PROJECT_ROOT)["distributions"]["dotmac-integration"]
+    published = finding["state"] == sweep.PUBLISHED
+    excused = "dotmac-integration" in ledger
+
+    assert published != excused, (
+        f"dotmac-integration declares {finding['declared']} "
+        + (
+            "and it is tagged, but the ledger still excuses it — a row that "
+            "outlived its release warns a connector author about nothing"
+            if published
+            else "with no tag to prove it and no ledger row — a connector "
+            "author naming that floor gets an unresolvable wheel and no "
+            "warning from this repository"
+        )
+    )
+    if not published:
+        assert finding["declared"] not in finding["published_versions"]
 
 
 # ── Discovery registration ──────────────────────────────────────────────────
