@@ -27,7 +27,8 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from kernel_facilities import (
+
+from tests.architecture.kernel_facilities import (
     FROZEN,
     MAPPED,
     OUT_OF_SCOPE,
