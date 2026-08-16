@@ -513,7 +513,7 @@ url = "packages/dotmac-application-directory"
 
 [[package]]
 name = "dotmac-approvals"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "DotMac dual-plane approval policy revisions, content-bound requests and decisions"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -522,7 +522,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a61"
+dotmac-kernel = ">=0.1.0a67"
 sqlalchemy = "^2.0"
 
 [package.source]

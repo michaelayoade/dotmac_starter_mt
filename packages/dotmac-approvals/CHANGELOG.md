@@ -5,6 +5,49 @@ All notable changes to the `dotmac-approvals` distribution. This package follows
 entry landed once the live Postgres migration and catalog gate passed; `0.1.0a1`
 and `0.1.0a2` have since been published.
 
+## 0.1.0a5 — 2026-08-16
+
+**Declares `outbox_relay.v1`, the effect this module has always needed and
+could not name.** `dotmac_approvals.outbox.emit_tenant_events` calls
+`enqueue_event` and `emit_platform_events` calls `enqueue_platform_event`, so
+this module writes `public.outbox_events` and `public.platform_outbox_events`
+at REQUEST time. `ap_0001` creates neither — the approval tables live in
+`mod_approvals`, and the relay is the kernel's.
+
+Every release through `0.1.0a4` therefore shipped an undeclared runtime
+dependency: an adopter running its own lineage installed the module, passed
+every gate it has, migrated cleanly, and took an `UndefinedTable` on the first
+approval decision that emitted an event — with the approval transaction rolling
+back alongside it.
+
+Kernel `0.1.0a67` published the name; this declares it. Found by building the
+facility-to-prerequisite guard rather than by the sweep that produced the
+`dotmac-integration` and `dotmac-entitlement-allocation` fixes: those came from
+grepping the IDEMPOTENCY facility, and nobody had grepped this one.
+
+### Added
+
+- `ap_0002_outbox_relay`, a verification-only revision whose entire `upgrade()`
+  body is `require_prerequisites`. A new head rather than an edit to `ap_0001`,
+  whose bytes shipped in four published tags and have run in databases this
+  repository does not own.
+- `ModuleManifest.requires` gains `outbox_relay.v1`. COMMON, not plane-specific:
+  both planes enqueue, so a PLATFORM-only install needs it exactly as much as a
+  tenant one.
+
+### Changed
+
+- Kernel floor `>=0.1.0a67`. a61 (`supported_plane_sets`) held until the relay
+  prerequisite existed; the floor is always the highest capability actually
+  consumed.
+
+### Note on scope
+
+The whole spec is required even though this module only ENQUEUES and never
+claims. An event enqueued into a database with no relay is never delivered, so
+a table-only dependency would be satisfied by a deployment in which approvals
+silently stop reaching anyone.
+
 ## 0.1.0a4 — 2026-08-15
 
 **Adds the public lineage locator `versions_dir()`.** The `ap` lineage has

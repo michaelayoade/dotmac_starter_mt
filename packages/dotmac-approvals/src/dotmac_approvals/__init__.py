@@ -53,7 +53,7 @@ from dotmac_approvals.contracts import (
 from dotmac_approvals.manifest import module
 from dotmac_approvals.migrations import versions_dir
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 __all__ = [
     "Actor",
