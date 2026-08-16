@@ -216,6 +216,23 @@ def prepare(
     )
 
 
+def _connector_error_detail(exc: BaseException) -> str:
+    """What may be persisted about an exception a CONNECTOR raised.
+
+    The type, and nothing else. A plugin's exception message is built from
+    whatever the plugin knows — which at this point includes the materialized
+    secrets and the provider payload it was called with — so the text must not
+    reach a stored column.
+
+    A non-identifier type name degrades to `Exception` rather than being
+    stored: `type(exc).__name__` is attacker-influenced only via a crafted
+    class, but the whole point is that the shape is guaranteed structurally and
+    not argued about.
+    """
+    name = type(exc).__name__
+    return name if name.isidentifier() else "Exception"
+
+
 def invoke(
     prepared: PreparedDispatch,
     *,
@@ -264,7 +281,19 @@ def invoke(
         return Outcome(
             status=OutcomeStatus.RECONCILIATION_REQUIRED,
             error_code="connector_raised",
-            error_detail=f"{type(exc).__name__}: {exc}",
+            # TYPE NAME ONLY, and `.isidentifier()` is what makes that
+            # structural rather than a convention — a message cannot masquerade
+            # as a type name. Identical to `ingress.ConnectorRaised`, which
+            # already held this line for the request path.
+            #
+            # This one is the sharper case of the two. The handler was just
+            # handed MATERIALIZED SECRETS (see `secrets=` above), and
+            # `error_detail` is PERSISTED — `execution` writes it to
+            # `inbox_receipts.error_detail` and `delivery_attempts.error_detail`,
+            # both `Text`. So a connector that interpolated a resolved
+            # credential into its own exception did not merely log it, it stored
+            # it, in a column an operator reads and a support export copies.
+            error_detail=_connector_error_detail(exc),
         )
     if not isinstance(outcome, Outcome):
         return Outcome(
