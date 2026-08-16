@@ -2,10 +2,15 @@
 
 ## Release state — read this before pinning
 
-**Three versions have been released: `0.1.0a1` (SPI 1.0), `0.1.0a2` (SPI 1.1)
-and `0.1.0a3` (SPI 1.1, with the discovery-error leak fixed).** Tags
-`dotmac-integration-v0.1.0a1`, `-v0.1.0a2` and `-v0.1.0a3`, from `1b1d62b`,
-`aaa3b54` and `b14f66e`. **Pin `0.1.0a3`.**
+**Four versions have been released. Pin `0.1.0a4`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a4`, from `1b1d62b`, `aaa3b54`,
+`b14f66e` and `306a40e`.
+
+`0.1.0a4` is the version the adoption programme pins. It closes the last of the
+release blockers: the at-most-once ledger is DECLARED rather than depended on
+from inside a function body, a connector's exception message can no longer be
+PERSISTED, and `ig_0001`'s literal cross-lineage edge is now a declared,
+bounded deviation with a retirement gate instead of an undocumented one.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -13,14 +18,14 @@ connector's own exception message into `ModeContractError` and chains it as
 operator's boot log, the traceback and any handler using `exc_info`. `0.1.0a3`
 fixes it.
 
-`0.1.0a3` was published and tagged `dotmac-integration-v0.1.0a3` on
-2026-08-15. It is the version to pin.
+**`0.1.0a3` still carries the persisted-exception-text defect**, which `a4`
+fixes: `dispatch.invoke` wrote a connector's exception message into
+`error_detail`, a column `execution` persists — so a connector that
+interpolated a materialized credential into its own exception stored it, where
+it outlives the request, the process and the credential's rotation. Prefer a4.
 
-`0.1.0a4` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
-is **not released**: no tag, nothing on the index. Until that run completes it
-is recorded in `docs/inventories/declared-publication-baseline.json` as
-declared-unpublished — a row #207 removed when a3 shipped and this change
-re-opens, which is the ordinary cycle rather than a regression.
+`0.1.0a4` was published and tagged on 2026-08-16 from `306a40e`, and its
+publication-ledger row was retired in the same change as the release.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -37,7 +42,7 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a4 — UNRELEASED (on `main`; no tag, not on the index)
+## 0.1.0a4 — released 2026-08-16
 
 Written against a declared-but-unreleased `0.1.0a3`, which was cut from
 `b14f66e` while this change was open. The ledger work moved up to a4 rather than
