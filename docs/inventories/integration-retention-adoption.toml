@@ -52,8 +52,10 @@ replay_evidence_retained = [
   "delivery outcome and product_ref",
   "a redaction tombstone (never NULL, which also means 'the provider sent no content')",
 ]
-replay_evidence_period = "UNSET"
-replay_evidence_period_note = "The standard requires replay evidence to carry its OWN explicit, justified period. It does not have one yet. This is a separate decision from the 30-day content period and is not covered by it."
+replay_evidence_period_days = 180
+replay_evidence_period_anchor = "received_at"
+replay_evidence_period_note = "Ruled by Michael 2026-08-16, and a SEPARATE decision from the 30-day content period rather than an extension of it. Content is destroyed at 30 days; the identity, digest, outcome evidence and tombstone that make a replay recognisable survive to 180. Justification: a provider redelivery arriving after the identity has been destroyed is indistinguishable from a new event, so the consequence is applied twice — the window has to outlast realistic provider retry and backfill behaviour, not merely the content period. IMPLEMENTATION IS NOT DONE: no second sweep enforces this yet, so today the evidence is retained indefinitely, which is longer than the ruling permits."
+replay_evidence_implemented = false
 
 [notice]
 # The adoption gate. `revision` stays "PENDING" until Michael accepts a privacy
@@ -76,5 +78,5 @@ code_released_as = "dotmac-integration 0.1.0a3"
 adopted = false
 blocked_on = [
   "notice.revision is PENDING",
-  "behaviour.replay_evidence_period is UNSET",
+  "behaviour.replay_evidence_implemented is false — the 180-day period is ruled but nothing enforces it, so evidence is currently kept indefinitely",
 ]
