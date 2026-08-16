@@ -31,16 +31,50 @@ same change as the guards that reference them.
 from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1
 
 module = ModuleManifest(
     code="entitlement_allocation",
-    version="0.1.0a4",
+    version="0.1.0a5",
     core=False,
     short_code="ealloc",
     migration_prefix="ea",
     migration_branch="entitlement_allocation",
     tables=(),
     platform_tables=("allocations", "allocation_entries"),
+    # ── Logical database prerequisites ──────────────────────────────────────
+    # The ONE effect this module needs that its own migration does not create.
+    # `stage_allocation` delegates at-most-once to the kernel (hard rule 21,
+    # ADR-0014), so `public.platform_idempotency_records` is written at REQUEST
+    # time and nothing in `ea_0001` touches it. Undeclared — every release up
+    # to and including `0.1.0a4` — an adopter that runs its own lineage and
+    # never ran the kernel's passes every gate this module has, migrates
+    # cleanly, and dies on `UndefinedTable` at the first staged activation. A
+    # runtime dependency is still a dependency; it just has no DDL to betray
+    # it. Same defect as `dotmac-numbering` 0.1.0a1 and `dotmac-integration`
+    # 0.1.0a1..a3, found by the kernel persisted-runtime-dependency inventory
+    # and named by kernel a66.
+    #
+    # COMMON, not `platform_requires`, and the reason is the same one
+    # integration reached rather than the one numbering had. Numbering is
+    # plane-SELECTABLE and both of its planes call one of the pair. This module
+    # has exactly one plane: `tables` is empty and `supported_plane_sets` is
+    # unset, so the declared platform plane is installed atomically and there
+    # is no selection under which the requirement could lapse. A
+    # plane-conditional list would be conditioning on something that cannot
+    # vary — and `resolve_depends_on` cannot even resolve one here, because a
+    # plane list needs `module=`, which reads `selected_module_planes`, which
+    # no atomic module may have (`validate_module_plane_selections` refuses a
+    # selection when only one plane set is supported). The spec is whole in any
+    # case: one name, both ledgers, as `IDEMPOTENCY_LEDGER_V1.summary` states.
+    #
+    # NOT declared here, and deliberately: `write_platform_audit_event` writes
+    # `public.platform_audit_events` from inside the same operation and has the
+    # identical shape, but no kernel prerequisite names it yet. It is recorded
+    # as a KNOWN UNMAPPED facility rather than silently omitted — see
+    # `docs/inventories/kernel-persisted-runtime-dependencies.md`. The next
+    # version of this module may not be PUBLISHED until it declares both.
+    requires=(IDEMPOTENCY_LEDGER_V1.name,),
     audit_actions=("entitlement_allocation.staged",),
 )
 

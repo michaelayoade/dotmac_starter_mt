@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-entitlement-allocation"
-version = "0.1.0a4"
+version = "0.1.0a5"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -17,15 +17,25 @@ python = ">=3.11,<3.14"
 # `ContractSnapshot` port, which is what makes this module extractable before
 # the A2 adjudication settles where contracts live.
 #
-# 0.1.0a45 is the kernel bumped IN THIS CHANGE, carrying the `mod_ealloc`
-# allocation. No earlier kernel can register this module —
-# `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError` — so it
-# is a hard floor.
+# a45 carries this module's `mod_ealloc` ledger row, and no earlier kernel can
+# register the module at all — `NamespaceRegistry.from_manifests` raises
+# `UnallocatedNamespaceError`. (a45, not a43: a42/a43 belong to the upstream
+# train — Audit R1, Application Directory / Workspace — and the vendor modules
+# renumber so no two branches mint the same kernel version.)
 #
-# a45, not a43: a42/a43 belong to the upstream train (Audit R1, Application
-# Directory / Workspace). The vendor modules renumber so no two branches mint
-# the same kernel version.
-dotmac-kernel = ">=0.1.0a56"
+# The FLOOR is higher than the allocation, and has been twice. a56 published
+# `ModuleManifest.platform_tables` (ADR-0023), which this module declares. a66
+# published `idempotency_ledger.v1`, which `0.1.0a5` declares: every kernel
+# from a18 HAS `public.platform_idempotency_records` — `0018` created it — but
+# one below a66 does not know the NAME, so `ModuleManifest.__post_init__` ->
+# `validate_prerequisites` raises `UnknownPrerequisiteError` while the manifest
+# is being constructed, before the allocation check is ever reached. Capability
+# outranks allocation, so the floor is the highest capability actually consumed.
+#
+# This raise is VISIBLE to consumers: a1..a4 are all published and all install
+# on a56..a65; a5 will not. That is the correct trade — every one of those
+# installs against a kernel whose ledger it silently requires and cannot state.
+dotmac-kernel = ">=0.1.0a66"
 sqlalchemy = "^2.0"
 
 [build-system]

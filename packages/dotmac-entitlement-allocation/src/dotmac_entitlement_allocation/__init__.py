@@ -83,7 +83,7 @@ from dotmac_entitlement_allocation.service import (
     stage_allocation,
 )
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 __all__ = [
     "AUDIT_ACTION_STAGED",

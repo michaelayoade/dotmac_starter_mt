@@ -98,10 +98,32 @@
       }
     },
     "dotmac-entitlement-allocation": {
+      "$comment": [
+        "kernel_floor is a66, a CAPABILITY raise above its a45 ledger",
+        "allocation and above the a56 `platform_tables` raise that preceded",
+        "it. a66 published `idempotency_ledger.v1`, the name for the",
+        "at-most-once tables `stage_allocation` writes at request time. Every",
+        "kernel from a18 HAS those tables, but one below a66 does not know the",
+        "NAME, so `ModuleManifest.__post_init__` -> `validate_prerequisites`",
+        "raises `UnknownPrerequisiteError` at manifest import, before the",
+        "allocation check is ever reached.",
+        "",
+        "EVERY migration is a required wheel content, deliberately. This",
+        "repository does not compose the module — `app/assembly.py` omits it,",
+        "`alembic.ini` carries no `ea` lineage, and an import-linter contract",
+        "forbids the assembly importing it, because allocating is the vendor",
+        "half and a data plane installing it would acquire the wrong one",
+        "(ruling C4). A wheel that shipped the manifest but dropped a migration",
+        "would therefore fail first in the vendor control plane's deployment,",
+        "not here. ea_0002 is the load-bearing one for this rule: it creates",
+        "nothing, so a wheel that dropped it would install a module whose",
+        "prerequisite is declared and never verified — exactly the state a5",
+        "exists to end."
+      ],
       "package_dir": "packages/dotmac-entitlement-allocation",
       "import_name": "dotmac_entitlement_allocation",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a56",
+      "kernel_floor": "0.1.0a66",
       "db_schema": "mod_ealloc",
       "tag_prefix": "dotmac-entitlement-allocation-v",
       "wheel_contents": {
@@ -109,7 +131,8 @@
           "dotmac_entitlement_allocation/py.typed",
           "dotmac_entitlement_allocation/manifest.py",
           "dotmac_entitlement_allocation/migrations/__init__.py",
-          "dotmac_entitlement_allocation/migrations/versions/ea_0001_allocations.py"
+          "dotmac_entitlement_allocation/migrations/versions/ea_0001_allocations.py",
+          "dotmac_entitlement_allocation/migrations/versions/ea_0002_idempotency_ledger.py"
         ],
         "forbidden_prefixes": [
           "app/",
