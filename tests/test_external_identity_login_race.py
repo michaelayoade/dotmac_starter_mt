@@ -161,7 +161,13 @@ def _subject_of(admin_session: Session, binding_id: uuid.UUID) -> str:
     return str(row)
 
 
-def _issue_session(session: Session, *, tenant_id: uuid.UUID, party_id: uuid.UUID):
+def _issue_session(
+    session: Session,
+    *,
+    tenant_id: uuid.UUID,
+    party_id: uuid.UUID,
+    binding_id: uuid.UUID,
+):
     """What the CALLER does with a finalized login: mint its own session row.
 
     In the same transaction as the finalization, which is the whole contract —
@@ -176,14 +182,17 @@ def _issue_session(session: Session, *, tenant_id: uuid.UUID, party_id: uuid.UUI
     session.execute(
         text(
             "INSERT INTO auth_sessions (id, tenant_id, party_id, token_hash, "
-            "expires_at) VALUES (:id, :tenant_id, :party_id, :token_hash, "
-            "now() + interval '1 hour')"
+            "expires_at, external_identity_binding_id) VALUES (:id, :tenant_id, "
+            ":party_id, :token_hash, now() + interval '1 hour', :binding_id)"
         ),
         {
             "id": str(uuid.uuid4()),
             "tenant_id": str(tenant_id),
             "party_id": str(party_id),
             "token_hash": uuid.uuid4().hex + uuid.uuid4().hex,
+            # a67: the provenance stamp. Without it the disable below has
+            # nothing to select on and the session survives its own binding.
+            "binding_id": str(binding_id),
         },
     )
 
@@ -241,7 +250,16 @@ def _login_worker(
             session.rollback()
             return {"outcome": "login_refused", "seen_active_before": seen_active}
 
-        _issue_session(session, tenant_id=tenant_id, party_id=party_id)
+        # The binding id comes from the FINALIZER's answer, never from the
+        # caller's own variable — that is contract point 2, and threading the
+        # test's `binding_id` here instead would let the canary pass against an
+        # implementation that returned the wrong row.
+        _issue_session(
+            session,
+            tenant_id=tenant_id,
+            party_id=party_id,
+            binding_id=finalized.binding_id,
+        )
         session.commit()
         return {
             "outcome": "session_issued",
@@ -333,15 +351,23 @@ def _observe(
         ),
         {"id": str(binding_id)},
     ).one()
-    sessions = admin_session.execute(
-        text("SELECT count(*) FROM auth_sessions WHERE party_id = :id"),
+    counts = admin_session.execute(
+        text(
+            "SELECT count(*) AS total, "
+            "       count(*) FILTER (WHERE revoked_at IS NOT NULL) AS revoked "
+            "FROM auth_sessions WHERE party_id = :id"
+        ),
         {"id": str(party_id)},
-    ).scalar_one()
+    ).one()
     admin_session.rollback()
     return {
         "binding_active": row.is_active,
         "stamped": row.stamped,
-        "sessions": sessions,
+        "sessions": counts.total,
+        # a67: existence is no longer the interesting fact. A session that
+        # survives its binding's disablement is the defect; one that exists and
+        # is revoked is the fix working.
+        "revoked": counts.revoked,
     }
 
 
@@ -405,7 +431,15 @@ def test_a_disable_that_holds_the_lock_first_forces_the_login_to_refuse(
         )
 
         state = _observe(admin_session, party_id=party_id, binding_id=binding_id)
-        assert state == {"binding_active": False, "stamped": False, "sessions": 0}
+        # No session at all, so nothing to revoke. The disable-first direction
+        # never reaches provenance — the login is refused before it mints
+        # anything, which is a stronger outcome than minting-then-revoking.
+        assert state == {
+            "binding_active": False,
+            "stamped": False,
+            "sessions": 0,
+            "revoked": 0,
+        }
     finally:
         _cleanup(admin_session, party_id=party_id, binding_id=binding_id)
 
@@ -422,12 +456,21 @@ def test_a_login_that_holds_the_lock_first_makes_the_disable_wait_behind_it(
     so the disable blocks until the login's transaction commits and the session
     is legitimately issued from a binding that was active throughout.
 
-    The disable then succeeds — and the session it was meant to prevent is
-    already there, unrevoked. That is not a defect of this fix and the canary
-    asserts it deliberately: serializing the DECISION cannot retract a session
-    that already exists. Retracting it needs the session to record which binding
-    produced it, which is the deferred provenance contract in the module
-    docstring. This assertion is what will have to change when that lands.
+    The disable then succeeds — and as of a67 the session it was meant to
+    prevent is REVOKED rather than left running.
+
+    This assertion is the one the previous version of this docstring said would
+    have to change when provenance landed, and it has. Before a67 the canary
+    asserted the session survived, because serializing the DECISION cannot
+    retract a session that already exists; retracting it needed the session to
+    record which binding produced it. It does now, so the disable sweeps it up
+    on its way past.
+
+    Note what did NOT change: the login still SUCCEEDS. A lock that made every
+    contested login fail would be a denial of service dressed as a fix. The
+    member gets a session, and then loses it a moment later because an
+    administrator disabled their identity — which is the correct outcome and a
+    different one from never having been let in.
     """
     party_id, binding_id = _seed(tenant_sessionmaker, tenant_a.id)
     subject = _subject_of(admin_session, binding_id)
@@ -449,7 +492,17 @@ def test_a_login_that_holds_the_lock_first_makes_the_disable_wait_behind_it(
         assert results["login"]["binding_id"] == str(binding_id)
 
         state = _observe(admin_session, party_id=party_id, binding_id=binding_id)
-        assert state == {"binding_active": False, "stamped": True, "sessions": 1}
+        assert state == {
+            "binding_active": False,
+            "stamped": True,
+            "sessions": 1,
+            # a67. Before provenance this read `"revoked": 0` — the session
+            # outlived the identity it came from, which is the whole gap.
+            "revoked": 1,
+        }, (
+            "the session issued by a login that won the race survived its "
+            f"binding's disablement: {state}"
+        )
     finally:
         _cleanup(admin_session, party_id=party_id, binding_id=binding_id)
 
@@ -513,5 +566,14 @@ def test_an_unforced_race_never_lands_between_the_two_legal_outcomes(
             f"transaction, so this means the decision and the write did not: {state}"
         )
         assert state["binding_active"] is False
+        # a67, and it holds for BOTH legal outcomes: whichever way the unforced
+        # race falls, no live session derived from this binding is left behind.
+        # If the login won, its session exists and is revoked; if it lost, there
+        # is no session at all. "Sessions that exist but are not revoked" is the
+        # one state this must never land in.
+        assert state["revoked"] == state["sessions"], (
+            "a session survived its binding's disablement in the unforced race "
+            f"— this is the outcome provenance exists to prevent: {state}"
+        )
     finally:
         _cleanup(admin_session, party_id=party_id, binding_id=binding_id)

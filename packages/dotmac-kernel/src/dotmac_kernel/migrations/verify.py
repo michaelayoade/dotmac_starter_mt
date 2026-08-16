@@ -36,15 +36,18 @@ what `dotmac_kernel.prerequisites` refuses to do.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Final
+from dataclasses import dataclass
+from typing import Any, Final, NoReturn
 
 import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 
+from dotmac_kernel.migrations.catalog import DEFAULT_APP_ROLE
 from dotmac_kernel.namespaces import HOST_SCHEMA
 from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
+    OUTBOX_RELAY_V1,
     TENANT_SCOPE_CATALOG_V1,
     binding_for,
     prerequisite,
@@ -101,7 +104,10 @@ _TENANT_FUNCTION_MARKERS: Final[tuple[str, ...]] = (
 )
 
 
-def _fail(prerequisite_name: str, detail: str) -> None:
+def _fail(prerequisite_name: str, detail: str) -> NoReturn:
+    """Refuse, naming the binding at fault. Never returns — annotated `NoReturn`
+    so a caller may read a row it has just proven present without a redundant
+    narrowing branch that no test could ever reach."""
     binding = binding_for(prerequisite_name)
     raise PrerequisiteNotSatisfiedError(
         f"{prerequisite_name} is bound to {binding.provider_revision!r} "
@@ -120,10 +126,21 @@ def _assert_columns(
 ) -> None:
     """Prove one table's columns match `contracts`, or fail `name`.
 
-    `name` is a parameter rather than a constant because two prerequisites now
+    `name` is a parameter rather than a constant because three prerequisites now
     describe table shapes, and a shared helper that hard-codes one of them
     reports the wrong binding — which sends a reviewer to a provider that is
-    not the one at fault."""
+    not the one at fault.
+
+    The per-column loop variable is `column_name`, not `name`. It was `name`
+    until `outbox_relay.v1` needed a column-shape refusal proof: the loop
+    shadowed the prerequisite argument, so every per-column `_fail` passed a
+    COLUMN name where a prerequisite name belongs and `binding_for` rejected it
+    as malformed. The refusal a reader got was
+    `InvalidPrerequisiteNameError: prerequisite 'leased_at' must match ...`
+    instead of the shape mismatch — right that something is wrong, useless about
+    what. Only the whole-set branch above was ever exercised, so nothing caught
+    it; `platform-retry-clock-undefaulted` in
+    `tests/test_outbox_relay_prerequisite.py` now drives this loop."""
     inspector = sa.inspect(bind)
     columns = {
         column["name"]: column
@@ -137,31 +154,31 @@ def _assert_columns(
             f"{HOST_SCHEMA}.{table} columns differ (missing={missing}, "
             f"unexpected={extra})",
         )
-    for name, (
+    for column_name, (
         expected,
         nullable,
         length,
         timezone,
         needs_default,
     ) in contracts.items():
-        column = columns[name]
+        column = columns[column_name]
         actual = column["type"]
         if not isinstance(actual, expected):
             _fail(
                 name,
-                f"{HOST_SCHEMA}.{table}.{name} is {actual!s}, expected "
+                f"{HOST_SCHEMA}.{table}.{column_name} is {actual!s}, expected "
                 f"{expected.__name__}",
             )
         if bool(column["nullable"]) is not nullable:
             _fail(
                 name,
-                f"{HOST_SCHEMA}.{table}.{name} nullable={column['nullable']!r}, "
-                f"expected {nullable!r}",
+                f"{HOST_SCHEMA}.{table}.{column_name} "
+                f"nullable={column['nullable']!r}, expected {nullable!r}",
             )
         if length is not None and getattr(actual, "length", None) != length:
             _fail(
                 name,
-                f"{HOST_SCHEMA}.{table}.{name} length="
+                f"{HOST_SCHEMA}.{table}.{column_name} length="
                 f"{getattr(actual, 'length', None)!r}, expected {length}",
             )
         if (
@@ -170,13 +187,13 @@ def _assert_columns(
         ):
             _fail(
                 name,
-                f"{HOST_SCHEMA}.{table}.{name} timezone="
+                f"{HOST_SCHEMA}.{table}.{column_name} timezone="
                 f"{getattr(actual, 'timezone', None)!r}, expected {timezone!r}",
             )
         if needs_default and column.get("default") is None:
             _fail(
                 name,
-                f"{HOST_SCHEMA}.{table}.{name} has no server default",
+                f"{HOST_SCHEMA}.{table}.{column_name} has no server default",
             )
 
 
@@ -474,6 +491,401 @@ def verify_idempotency_ledger(bind: Connection) -> None:
             )
 
 
+# ── outbox_relay.v1 ─────────────────────────────────────────────────────────
+
+# The relay's row shape, in the form the inspector reports it. Like the ledger
+# above this is a RUNTIME prerequisite: a consuming lineage's DDL touches none
+# of it, so an undeclared consumer migrates cleanly and fails on its first
+# claim.
+#
+# Every column here is load-bearing to the relay loop, which is why the whole
+# set is pinned rather than the two lease columns alone:
+#   leased_by/leased_at — the lease, and the stale-lease reclaim predicate;
+#   attempts/available_at/last_error — the retry state the Python policy
+#     recomputes on every failure (`messaging.relay.record_failure`);
+#   status — where the DEAD-LETTER outcome is recorded. There is deliberately
+#     no `dead_lettered` column: `status = 'dead'` IS the dead letter, and the
+#     row is retained rather than deleted, so a provider that drops `status` to
+#     a boolean has silently discarded the terminal state.
+_RELAY_COLUMNS: Final[dict[str, _ColumnContract]] = {
+    "id": (sa.Uuid, False, None, None, False),
+    "event_type": (sa.String, False, 120, None, False),
+    "payload": (sa.JSON, False, None, None, True),
+    "status": (sa.String, False, 20, None, False),
+    "attempts": (sa.Integer, False, None, None, True),
+    "available_at": (sa.DateTime, False, None, True, True),
+    "correlation_id": (sa.String, True, 200, None, False),
+    "sent_at": (sa.DateTime, True, None, True, False),
+    "last_error": (sa.String, True, 500, None, False),
+    "leased_by": (sa.String, True, 200, None, False),
+    "leased_at": (sa.DateTime, True, None, True, False),
+    "created_at": (sa.DateTime, False, None, True, True),
+    "updated_at": (sa.DateTime, False, None, True, True),
+}
+
+_TENANT_RELAY_COLUMNS: Final[dict[str, _ColumnContract]] = {
+    "tenant_id": (sa.Uuid, False, None, None, False),
+    **_RELAY_COLUMNS,
+}
+
+#: Both claim-path indexes. `(status, available_at)` serves the pending-and-due
+#: half of the claim predicate and `(status, leased_at)` the stale-lease reclaim
+#: half — the two arms of the single `WHERE` in `claim_outbox_batch`. Missing
+#: either turns every poll of a large outbox into a sequential scan under
+#: `FOR UPDATE SKIP LOCKED`, which is a production incident rather than a
+#: slowdown: the scan holds locks for its whole duration.
+_RELAY_INDEXES: Final[tuple[tuple[str, ...], ...]] = (
+    ("status", "available_at"),
+    ("status", "leased_at"),
+)
+
+#: The owner every relay `SECURITY DEFINER` function must have. Named rather
+#: than merely "not a superuser": the definer identity IS the privilege the
+#: dispatcher borrows, and `module_database_roles.v1` already fixes `app_admin`
+#: as the BYPASSRLS migrator fleet-wide. A function reowned to the cluster
+#: superuser turns any future defect in its body into cluster compromise.
+_DEFINER_OWNER: Final[str] = "app_admin"
+
+#: Every table privilege, plus the column-level forms of the four that have
+#: them. `has_table_privilege` cannot see a column grant, so checking it alone
+#: would certify `GRANT SELECT (payload) ON outbox_events TO outbox_dispatcher`
+#: as EXECUTE-only. Same pairing the live-catalog gate uses on the platform
+#: plane, for the same reason.
+#
+# Both role and table are CAST explicitly. `has_table_privilege` is overloaded
+# on (name, text), (name, oid), (oid, text) and (oid, oid); two untyped bind
+# parameters make the call ambiguous and PostgreSQL refuses to resolve it, which
+# would fail the verifier for a reason that has nothing to do with the database
+# under test.
+_ANY_TABLE_PRIVILEGE: Final[sa.TextClause] = sa.text(
+    """
+    SELECT (
+        SELECT bool_or(has_table_privilege(
+                   CAST(:role AS name), CAST(:table AS text), p))
+          FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE',
+                            'TRUNCATE', 'REFERENCES', 'TRIGGER']) AS p
+    ) OR (
+        SELECT bool_or(has_any_column_privilege(
+                   CAST(:role AS name), CAST(:table AS text), p))
+          FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'REFERENCES']) AS p
+    )
+    """
+)
+
+#: `grantee = 0` is PUBLIC in an exploded ACL. `acldefault` matters: a NULL
+#: `proacl` is not "nobody has it", it is the built-in default — and the default
+#: for a function is `EXECUTE` to PUBLIC. Reading `proacl IS NULL` as safe would
+#: certify the single most dangerous state this check exists to refuse.
+_FUNCTION_FACTS: Final[sa.TextClause] = sa.text(
+    """
+    SELECT p.prosecdef,
+           p.proconfig,
+           pg_get_userbyid(p.proowner) AS owner,
+           has_function_privilege(
+               CAST(:dispatcher AS name), p.oid, 'EXECUTE') AS dispatcher_may,
+           EXISTS (
+               SELECT 1
+                 FROM aclexplode(COALESCE(
+                          p.proacl,
+                          acldefault(CAST('f' AS "char"), p.proowner))) a
+                WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE'
+           ) AS public_may
+      FROM pg_proc p
+     WHERE p.oid = to_regprocedure(CAST(:signature AS text))
+    """
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _RelayPlane:
+    """One plane of the relay: its table, its function pair, its dispatcher."""
+
+    table: str
+    columns: dict[str, _ColumnContract]
+    dispatcher: str
+    claim: str
+    settle: str
+    #: True on the tenant plane, where isolation is a FORCEd policy. False on
+    #: the platform plane, where isolation is the revoked `app_user` grant and a
+    #: policy would evaluate `app_current_tenant_id()` with no tenant to find.
+    policied: bool
+
+
+_RELAY_PLANES: Final[tuple[_RelayPlane, ...]] = (
+    _RelayPlane(
+        table="outbox_events",
+        columns=_TENANT_RELAY_COLUMNS,
+        dispatcher="outbox_dispatcher",
+        claim="claim_outbox_batch(text, integer, integer)",
+        settle=("settle_outbox_event(uuid, text, text, timestamptz, integer, text)"),
+        policied=True,
+    ),
+    _RelayPlane(
+        table="platform_outbox_events",
+        columns=_RELAY_COLUMNS,
+        dispatcher="platform_outbox_dispatcher",
+        claim="claim_platform_outbox_batch(text, integer, integer)",
+        settle=(
+            "settle_platform_outbox_event"
+            "(uuid, text, text, timestamptz, integer, text)"
+        ),
+        policied=False,
+    ),
+)
+
+#: The marker a tenant relay policy must carry. Existence of a policy is not
+#: enough — `USING (true)` is a policy, and it makes a FORCEd table read as
+#: protected while every dispatcher-adjacent session sees every tenant's events.
+_RELAY_POLICY_MARKER: Final[str] = "app_current_tenant_id()"
+
+
+def _search_path_is_empty(proconfig: Sequence[str] | None) -> bool:
+    """Does this function pin `search_path` to the empty string?
+
+    Absence is False, deliberately. A `SECURITY DEFINER` function with no
+    `search_path` of its own resolves unqualified names through the CALLER's
+    path, so any role that can create a schema on that path can shadow a
+    function or operator the body uses and have it run as the definer. That is
+    a privilege-escalation vector, not a lint, so an unpinned path is refused
+    exactly as hard as a missing function.
+    """
+    for entry in proconfig or ():
+        key, _, value = str(entry).partition("=")
+        if key.strip().lower() != "search_path":
+            continue
+        return value.strip().strip('"').strip("'").strip() == ""
+    return False
+
+
+def verify_outbox_relay(bind: Connection) -> None:
+    """Prove both relay planes exist here, with their claim path and privileges.
+
+    Checks the whole summary, not the table names. The relay's correctness is
+    only half schema: the other half is that a NOBYPASSRLS dispatcher reaches
+    cross-tenant rows through two hardened functions and by no other route. A
+    provider that supplies the tables and grants the dispatcher `SELECT` has
+    satisfied every name in the contract and handed away the entire outbox.
+    """
+    name = OUTBOX_RELAY_V1.name
+    inspector = sa.inspect(bind)
+
+    for plane in _RELAY_PLANES:
+        if not inspector.has_table(plane.table, schema=HOST_SCHEMA):
+            _fail(name, f"{HOST_SCHEMA}.{plane.table} does not exist")
+
+        _assert_columns(bind, name, plane.table, plane.columns)
+
+        indexed = {
+            tuple(index.get("column_names") or ())
+            for index in inspector.get_indexes(plane.table, schema=HOST_SCHEMA)
+        }
+        for required in _RELAY_INDEXES:
+            if required not in indexed:
+                _fail(
+                    name,
+                    f"{HOST_SCHEMA}.{plane.table} has no index on {required!r} "
+                    f"(found {sorted(indexed)!r}) — the claim predicate scans "
+                    "the whole outbox while holding FOR UPDATE locks",
+                )
+
+    if bind.dialect.name != "postgresql":
+        return
+
+    for plane in _RELAY_PLANES:
+        _verify_relay_plane_posture(bind, name, plane)
+        _verify_relay_dispatcher(bind, name, plane)
+        for signature in (plane.claim, plane.settle):
+            _verify_relay_function(bind, name, plane, signature)
+
+
+def _verify_relay_plane_posture(
+    bind: Connection, name: str, plane: _RelayPlane
+) -> None:
+    """RLS on the tenant plane; a revoked grant, and nothing else, on the peer."""
+    row = bind.execute(
+        sa.text(
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = :schema AND c.relname = :table"
+        ),
+        {"schema": HOST_SCHEMA, "table": plane.table},
+    ).one()
+    enabled, forced = bool(row[0]), bool(row[1])
+
+    if not plane.policied:
+        if enabled or forced:
+            _fail(
+                name,
+                f"{HOST_SCHEMA}.{plane.table} is the platform plane and must "
+                f"carry no row-level security (enabled={enabled}, "
+                f"forced={forced}); its isolation is the revoked grant, and a "
+                "policy here evaluates app_current_tenant_id() where there is "
+                "no tenant",
+            )
+        held = bind.scalar(
+            _ANY_TABLE_PRIVILEGE,
+            {"role": DEFAULT_APP_ROLE, "table": f"{HOST_SCHEMA}.{plane.table}"},
+        )
+        if bool(held):
+            _fail(
+                name,
+                f"{HOST_SCHEMA}.{plane.table} is reachable by "
+                f"{DEFAULT_APP_ROLE!r} — on this plane the revoked grant IS the "
+                "isolation, so a privilege held there is the whole control "
+                "plane exposed to tenant request traffic",
+            )
+        return
+
+    if not (enabled and forced):
+        _fail(
+            name,
+            f"{HOST_SCHEMA}.{plane.table} must have FORCEd row-level security "
+            f"(enabled={enabled}, forced={forced}). The relay claim is "
+            "cross-tenant by design, so the table's own policy is the only "
+            "thing keeping ordinary request traffic inside one tenant",
+        )
+
+    policies = bind.execute(
+        sa.text(
+            "SELECT policyname, COALESCE(qual, ''), COALESCE(with_check, '') "
+            "FROM pg_policies WHERE schemaname = :schema AND tablename = :table"
+        ),
+        {"schema": HOST_SCHEMA, "table": plane.table},
+    ).all()
+    if not policies:
+        _fail(
+            name,
+            f"{HOST_SCHEMA}.{plane.table} has FORCEd row-level security and no "
+            "policy at all, which denies every row while reading as protected "
+            "— the relay's own writes fail and the cause looks like a bug in "
+            "the module",
+        )
+    # Every non-empty expression must carry the marker, checked SEPARATELY per
+    # expression. Concatenating `qual` and `with_check` and searching once was
+    # the first spelling and it was wrong in the direction that matters:
+    # `ALTER POLICY ... USING (true)` leaves `with_check` intact, so the joined
+    # string still contained `app_current_tenant_id()` while every SELECT read
+    # every tenant's events. A policy is only as tight as its loosest half.
+    unkeyed = sorted(
+        str(policy[0])
+        for policy in policies
+        if any(
+            str(expression).strip() and _RELAY_POLICY_MARKER not in str(expression)
+            for expression in (policy[1], policy[2])
+        )
+        or not (str(policy[1]).strip() or str(policy[2]).strip())
+    )
+    if unkeyed:
+        _fail(
+            name,
+            f"{HOST_SCHEMA}.{plane.table} policy/policies {unkeyed!r} do not "
+            f"restrict rows by {_RELAY_POLICY_MARKER} — a policy that always "
+            "passes is FORCEd row-level security in name only",
+        )
+
+
+def _verify_relay_dispatcher(bind: Connection, name: str, plane: _RelayPlane) -> None:
+    """The dispatcher exists, cannot bypass RLS, and touches no table.
+
+    Schema `USAGE` is deliberately NOT checked, and this is an unmonitored
+    region rather than an exemption (ADR-0018). Both migrations grant it, so it
+    looks like an obvious fifth assertion — but `PUBLIC` holds `USAGE` on
+    `public` by default in every supported PostgreSQL, so
+    `has_schema_privilege` answers true for the dispatcher whether or not the
+    grant was ever made, and revoking it from the role does not change the
+    answer. A check no break can falsify proves nothing and reads as though it
+    does, which is worse than its absence.
+    """
+    row = bind.execute(
+        sa.text("SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = :role"),
+        {"role": plane.dispatcher},
+    ).one_or_none()
+    if row is None:
+        _fail(
+            name,
+            f"database role {plane.dispatcher!r} does not exist — the relay's "
+            "whole privilege boundary is that one least-privilege role, so "
+            "without it a deployment drains the outbox as something else",
+        )
+    bypasses, superuser = bool(row[0]), bool(row[1])
+    if bypasses or superuser:
+        _fail(
+            name,
+            f"role {plane.dispatcher!r} has rolbypassrls={bypasses} "
+            f"rolsuper={superuser}; both must be false. The dispatcher connects "
+            "to drain events and nothing more — a superuser bypasses row-level "
+            "security whether or not rolbypassrls is set",
+        )
+    held = bind.scalar(
+        _ANY_TABLE_PRIVILEGE,
+        {"role": plane.dispatcher, "table": f"{HOST_SCHEMA}.{plane.table}"},
+    )
+    if bool(held):
+        _fail(
+            name,
+            f"role {plane.dispatcher!r} holds table or column privilege on "
+            f"{HOST_SCHEMA}.{plane.table} — it must reach rows ONLY through the "
+            "SECURITY DEFINER claim/settle pair, or the hardening is decorative",
+        )
+
+
+def _verify_relay_function(
+    bind: Connection, name: str, plane: _RelayPlane, signature: str
+) -> None:
+    """One claim/settle function: it exists, and it is safe to run as its owner."""
+    qualified = f"{HOST_SCHEMA}.{signature}"
+    facts = bind.execute(
+        _FUNCTION_FACTS,
+        {"dispatcher": plane.dispatcher, "signature": qualified},
+    ).one_or_none()
+    if facts is None:
+        _fail(
+            name,
+            f"{qualified} does not exist — the relay claims and settles through "
+            "this exact signature, and a provider supplying the table alone "
+            "leaves every drain raising UndefinedFunction at request time",
+        )
+    secdef, proconfig, owner, dispatcher_may, public_may = facts
+
+    if not bool(secdef):
+        _fail(
+            name,
+            f"{qualified} is not SECURITY DEFINER — the dispatcher holds no "
+            "privilege on the table, so an INVOKER function makes every claim "
+            "permission denied while the catalogue still reads correct",
+        )
+    if not _search_path_is_empty(proconfig):
+        _fail(
+            name,
+            f"{qualified} is SECURITY DEFINER without an empty search_path "
+            f"(proconfig={list(proconfig or ())!r}). Unqualified names then "
+            "resolve through the CALLER's path, so anything the caller can "
+            "shadow runs with the definer's privilege — this is a "
+            "privilege-escalation vector, refused rather than warned about",
+        )
+    if str(owner) != _DEFINER_OWNER:
+        _fail(
+            name,
+            f"{qualified} is SECURITY DEFINER owned by {str(owner)!r}, expected "
+            f"{_DEFINER_OWNER!r} — the owner is the privilege the dispatcher "
+            "borrows on every call, so it is part of the contract, not a "
+            "deployment detail",
+        )
+    if not bool(dispatcher_may):
+        _fail(
+            name,
+            f"role {plane.dispatcher!r} cannot EXECUTE {qualified} — it has no "
+            "table privilege either, so this plane's relay cannot drain at all",
+        )
+    if bool(public_may):
+        _fail(
+            name,
+            f"EXECUTE on {qualified} is granted to PUBLIC — every login role in "
+            "the cluster can then claim and settle other tenants' events "
+            "through a SECURITY DEFINER path that bypasses row-level security",
+        )
+
+
 # ── Dispatch ────────────────────────────────────────────────────────────────
 
 #: A prerequisite's verifier. Takes the migration's bind; raises to refuse.
@@ -488,6 +900,7 @@ _VERIFIERS: dict[str, Verifier] = {
     TENANT_SCOPE_CATALOG_V1.name: verify_tenant_scope_catalog,
     MODULE_DATABASE_ROLES_V1.name: verify_module_database_roles,
     IDEMPOTENCY_LEDGER_V1.name: verify_idempotency_ledger,
+    OUTBOX_RELAY_V1.name: verify_outbox_relay,
 }
 
 
@@ -574,5 +987,6 @@ __all__ = [
     "role_violations",
     "verify_idempotency_ledger",
     "verify_module_database_roles",
+    "verify_outbox_relay",
     "verify_tenant_scope_catalog",
 ]

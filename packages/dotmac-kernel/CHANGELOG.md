@@ -6,6 +6,143 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a67 — 2026-08-16
+
+Two changes, because the version was still unpublished when the second
+landed. Publishing them separately was not available: the release lane
+publishes the version the repository currently declares, so bumping past an
+unreleased a67 would have left it declared by nothing.
+
+### Part 1 — the outbox relay is a declarable prerequisite
+
+Names the outbox relay as a declarable prerequisite: `outbox_relay.v1`
+(`dotmac_kernel.prerequisites`), with its live verifier
+(`dotmac_kernel.migrations.verify.verify_outbox_relay`). Additive — one new
+spec, one new verifier, no schema change, no existing behaviour changed.
+
+The gap it closes is the same one `idempotency_ledger.v1` closed one release
+earlier, found this time BEFORE a consumer shipped rather than after. ADR-0030
+§ 4a rules that `dotmac-durable-timers` is a selectable dual-plane module that
+REUSES the kernel relay for claim, lease, retry and dead-letter instead of
+shipping a second claim loop. A module cannot declare a dependency on a facility
+the kernel has never named, so that ruling was unimplementable: the relay is a
+RUNTIME effect, nothing in a consuming lineage's DDL touches it, and an
+undeclared consumer would migrate cleanly against an adopter running its own
+lineage and die on its first claim.
+
+### Added
+
+- `OUTBOX_RELAY_V1` in `KERNEL_PREREQUISITES`. Both planes in one spec, on the
+  same structural grounds as the ledger: `dotmac_kernel.messaging` publishes
+  `enqueue_event`/`enqueue_platform_event` and `claim_batch`/
+  `claim_platform_batch` from one module, and `messaging.platform_relay` imports
+  `RelayPolicy`, `FailureOutcome` and `_backoff_seconds` from `messaging.relay`
+  — so a consumer cannot take the tenant half without linking code that
+  references the platform table and its function pair. Supplied here by kernel
+  `0008` (the tenant table), `0011` (lease columns, reclaim index, tenant
+  `SECURITY DEFINER` pair, `outbox_dispatcher`) and `0012` (the whole platform
+  peer); a binding names `0012_platform_outbox`, the revision after which the
+  effect is whole.
+- `verify_outbox_relay`, which checks the whole summary rather than the table
+  names. Half of this contract is PRIVILEGE, not shape — a provider can supply
+  both tables, both function pairs and every index, grant the dispatcher
+  `SELECT`, and have handed a NOBYPASSRLS role every tenant's events. So it
+  verifies, per plane: the table; the full column contract (the lease columns
+  `leased_by`/`leased_at`, the retry columns `attempts`/`available_at`/
+  `last_error` with `available_at` defaulted, and `status`, which is where the
+  dead-letter outcome lives); the `(status, available_at)` claim index and the
+  `(status, leased_at)` stale-lease reclaim index; the claim/settle pair by
+  exact signature; that each function is `SECURITY DEFINER`, **owned by
+  `app_admin`**, and carries an **empty `search_path`**; that the dispatcher
+  role exists NOBYPASSRLS/NOSUPERUSER, may EXECUTE its own pair, and holds no
+  table *or column* privilege on the relay table; that `PUBLIC` may not EXECUTE;
+  and the plane posture — FORCEd RLS under a policy keyed on
+  `app_current_tenant_id()` on the tenant plane, no policy at all plus a revoked
+  `app_user` grant on the platform peer.
+
+  An unpinned `search_path` is a refusal, not a warning: a `SECURITY DEFINER`
+  function without one resolves unqualified names through the caller's path, so
+  anything the caller can shadow runs with the definer's privilege.
+
+- `tests/test_outbox_relay_prerequisite.py` — one positive PostgreSQL proof
+  against the migrated catalogue, 25 hostile cases that break one observable
+  each inside a rolled-back transaction and assert the specific refusal for that
+  observable, and a weak-verifier companion that runs a `has_table`-only
+  verifier over the same 25 breaks. It passes **23 of the 25**. The companion
+  asserts an exact id set in both directions, so it fails if a break stops
+  breaking AND fails if `verify_outbox_relay` is ever weakened.
+
+### Fixed
+
+- `_assert_columns`'s per-column loop shadowed its `name` argument with the
+  COLUMN name, so every per-column refusal — wrong type, wrong length, wrong
+  nullability, missing server default — passed a column name to `binding_for`
+  and surfaced as `InvalidPrerequisiteNameError: prerequisite 'leased_at' must
+  match ...` instead of the shape mismatch. Present since a66 and unreachable by
+  any test then shipped: the only column case exercised was a dropped column,
+  which the whole-set branch above the loop catches. `tenant_scope_catalog.v1`
+  and `idempotency_ledger.v1` were affected too; both now report correctly.
+
+### Adopting
+
+A module that calls into `dotmac_kernel.messaging`'s relay — `claim_batch`,
+`record_success`, `record_failure`, or their platform peers — adds
+`"outbox_relay.v1"` to its manifest `requires` and to the requires tuple its
+root migration verifies; an assembly binds it to the revision that supplies the
+relay (kernel `0012_platform_outbox` here). Existing modules are unaffected
+until they declare it.
+
+### Part 2 — session provenance and selective revocation
+
+Session provenance and selective revocation. `auth_sessions` gains
+`external_identity_binding_id UUID NULL`: WHICH external identity binding
+produced this session. This closes the contract `external_identity`'s module
+docstring has carried as "deferred" since a63, and that docstring now records
+what shipped against what was promised.
+
+Before this, `disable_external_identity_binding` stopped FURTHER logins but left
+every session already issued from the binding working until it expired.
+
+### Changed
+
+- `disable_external_identity_binding` REVOKES those sessions itself, in the same
+  transaction. There is no opt-out flag: the contract's wording was *disabling
+  and revoking must not be two calls a caller can do half of*, and a flag whose
+  off position leaves live sessions for a disabled identity is not flexibility.
+- Its read is now an explicit `SELECT … FOR UPDATE`. **This is a correction, not
+  a tidy-up.** The previous implementation used `db.get`, which takes no lock,
+  while its docstring claimed the eventual `UPDATE` serialised it. It did not: a
+  login already inside `finalize_external_login` could commit its session AFTER
+  this transaction scanned for sessions to revoke, and that session would
+  survive its own binding's disablement.
+
+### Added
+
+- `auth_sessions.external_identity_binding_id`, migration
+  `0025_session_provenance`. NULL means provenance ABSENT (a password login),
+  never provenance unknown — which is why the FK is `ON DELETE RESTRICT` and not
+  `SET NULL`; the latter would convert known provenance into the shape of
+  absent provenance while leaving the session live.
+- The FK carries `party_id`:
+  `(tenant_id, party_id, external_identity_binding_id)` →
+  `(tenant_id, party_id, id)`, with a matching unique on the binding side. A
+  `(tenant_id, binding_id)` FK would permit a session for one party to cite
+  another party's binding in the same tenant, and selective revocation would
+  then revoke the wrong person.
+
+### Not added
+
+`revoke_sessions_for_binding` is PRIVATE (`_revoke_sessions_for_binding`).
+Nothing outside `disable_external_identity_binding` needs it, and revoking
+without disabling would leave the binding free to mint a replacement session
+immediately — an operation nobody has asked for and a footgun if offered.
+
+Additive and backward compatible: the column is nullable with no default, every
+existing session reads as a password login, and an assembly that does not stamp
+it keeps working — it simply cannot benefit from selective revocation. Stamping
+is the assembly's job because the assembly mints the session; the kernel can make
+the correct thing easy and say what skipping it costs, and cannot enforce it.
+
 ## 0.1.0a66 — 2026-08-15
 
 Names the at-most-once ledger as a declarable prerequisite:
