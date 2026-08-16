@@ -208,6 +208,53 @@ def test_a_thrown_connector_requires_reconciliation_not_retry(db: Session) -> No
     assert outcome.error_code == "connector_raised"
 
 
+def test_a_connector_exception_message_is_never_persisted(db: Session) -> None:
+    """The sharpest of the three exception-text paths, because it STORES.
+
+    `invoke` hands the handler MATERIALIZED SECRETS, and `error_detail` is
+    persisted by `execution` to `inbox_receipts.error_detail` and
+    `delivery_attempts.error_detail` — both `Text`. A connector that
+    interpolated a resolved credential into its own exception therefore did not
+    merely log it, it wrote it to a column an operator reads and a support
+    export copies.
+
+    `ingress.ConnectorRaised` already held this line for the request path. This
+    is the same discipline on the path that writes to disk.
+    """
+    sentinel = "SENTINEL-MATERIALIZED-SECRET-7c2e40"
+    broken = fake_registry(
+        plugins=[fake_plugin(raises=RuntimeError(f"auth failed for {sentinel}"))]
+    )
+    installation, binding = _enabled(db, broken)
+    delivery = _queued(db, installation, binding)
+
+    prepared = prepare(db, delivery, registry=broken)
+    outcome = invoke(prepared, registry=broken, resolve_secrets=lambda r: {})
+
+    assert outcome.error_detail is not None
+    assert sentinel not in outcome.error_detail
+    # Still diagnosable: an operator gets the class, which is what locates the
+    # bug. The connector's own logs keep the detail.
+    assert outcome.error_detail == "RuntimeError"
+
+
+def test_a_message_cannot_masquerade_as_a_type_name(db: Session) -> None:
+    """Sensitivity proof for the structural half.
+
+    Keeping only `type(exc).__name__` is a convention until something enforces
+    the SHAPE. `.isidentifier()` is that enforcement, and this drives it with a
+    class whose name is not an identifier — the shape a crafted exception would
+    take to smuggle text through a field documented as a type name.
+    """
+    from dotmac_integration.dispatch import _connector_error_detail
+
+    assert _connector_error_detail(RuntimeError("x")) == "RuntimeError"
+
+    smuggled = type("not an identifier: leaked", (Exception,), {})
+    assert _connector_error_detail(smuggled()) == "Exception"
+    assert "leaked" not in _connector_error_detail(smuggled())
+
+
 def test_a_contract_violation_also_requires_reconciliation(db: Session) -> None:
     """Same reasoning: a handler that returned the wrong type may still have
     performed the call before returning."""
