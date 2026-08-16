@@ -110,9 +110,6 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation"
         / "migrations/versions"
     ),
-    "dotmac-approvals": (
-        REPO_ROOT / "packages/dotmac-approvals/src/dotmac_approvals/migrations/versions"
-    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -121,7 +118,6 @@ DISTRIBUTIONS: dict[str, Path] = {
 LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-integration": "ig_*.py",
     "dotmac-entitlement-allocation": "ea_*.py",
-    "dotmac-approvals": "ap_*.py",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -133,46 +129,6 @@ VERSIONS = DISTRIBUTIONS["dotmac-integration"]
 #: `origin`; the commit is recorded so a reviewer can locate the release without
 #: resolving the tag object.
 RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
-    # `dotmac-approvals`: one revision across four tags, and its bytes
-    # CHANGED between a1, a2 and a3 — the same filename is three different
-    # files in three published wheels, which is exactly why the map is
-    # keyed by tag rather than by filename. a4 shipped a3's bytes unchanged.
-    "dotmac-approvals-v0.1.0a1": (
-        "dotmac-approvals",
-        "221f686",
-        {
-            "ap_0001_approvals.py": (
-                "ec5e1aa9e504de8143eebaafacb0615cf24b6ea930648f5b9cfd1a9afc2db70e"
-            ),
-        },
-    ),
-    "dotmac-approvals-v0.1.0a2": (
-        "dotmac-approvals",
-        "3e1f801",
-        {
-            "ap_0001_approvals.py": (
-                "6c7b3263e05f860982dda125439171f62bba716d36d95b21e2c3a3224f19ad6a"
-            ),
-        },
-    ),
-    "dotmac-approvals-v0.1.0a3": (
-        "dotmac-approvals",
-        "16f11a9",
-        {
-            "ap_0001_approvals.py": (
-                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
-            ),
-        },
-    ),
-    "dotmac-approvals-v0.1.0a4": (
-        "dotmac-approvals",
-        "f013c7e",
-        {
-            "ap_0001_approvals.py": (
-                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
-            ),
-        },
-    ),
     "dotmac-integration-v0.1.0a1": (
         "dotmac-integration",
         "1b1d62b",
@@ -302,7 +258,6 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-integration": frozenset({"ig_0007_idempotency_ledger.py"}),
     "dotmac-entitlement-allocation": frozenset({"ea_0002_idempotency_ledger.py"}),
-    "dotmac-approvals": frozenset({"ap_0002_outbox_relay.py"}),
 }
 
 
