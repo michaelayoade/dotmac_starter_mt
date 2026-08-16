@@ -35,8 +35,9 @@
     "  * OUTSTANDING — a version is genuinely owed to consumers. The row",
     "    records evidence a decision still needs. `dotmac-integration` 0.1.0a2",
     "    was the worked example until it was released as 0.1.0a3 and its row",
-    "    removed; `dotmac-kernel` 0.1.0a67 is the current one, awaiting a",
-    "    dispatch rather than a decision.",
+    "    removed; `dotmac-kernel` 0.1.0a67 was the next, and its row went the",
+    "    same way when the release verified and tagged. No OUTSTANDING row",
+    "    stands today, which is what this state is supposed to look like.",
     "",
     "Both are recorded the same way and neither is a pass. The reason text is",
     "where the difference lives, which is why the guard requires a premise",
@@ -62,11 +63,6 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-kernel": {
-      "declared": "0.1.0a67",
-      "reason": "AWAITING DISPATCH, not a decision to leave unreleased. a67 now carries TWO changes, because it was still unpublished when the second landed: session provenance and selective revocation (auth_sessions.external_identity_binding_id, migration 0025), whose consumer dotmac_workspace exact-pins the kernel and needs a67 to stamp provenance; and the outbox_relay.v1 prerequisite with its structural verifier, which ADR-0030 s4a makes a hard gate on dotmac-durable-timers. Folding the second into the unpublished number was deliberate: bumping to a68 instead would have left a67 declared by nothing and unpublishable, since the release lane publishes the version the repository currently declares -- the orphan this file's header warns about, arrived at from the other direction. The version is declared here because the lane publishes what the repository declares; editing it down would discard the work both numbers describe. DELETE THIS ROW in the change that verifies and tags dotmac-kernel-v0.1.0a67; a row surviving publication is the stale absolution the two-directional rule exists to fail on.",
-      "state": "declared-unpublished"
-    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
