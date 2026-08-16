@@ -142,3 +142,56 @@ becomes a constraint every later adopter inherits without having agreed to it.
 
 **Compare row counts or a sampled subset.** Cheaper, and it answers a different
 question. Cardinality equality is consistent with every row differing.
+
+## Amendment, 2026-08-15 — the reference implementation retires; the protocol does not
+
+§ 5 above says Vendor CP "keeps its implementation local until a second real
+cutover needs it". That is no longer true, and this amendment records why rather
+than editing the section, because the reasoning that produced § 5 was sound and
+only its premise changed.
+
+**What happened.** Vendor CP's approvals estate was measured and found ABSENT —
+no Compose `db` service, no data volume, on the designated sole production
+target. With no data to seal, compare or migrate, Vendor took a **greenfield
+authority switch** instead of a sealed cutover: the legacy tables were verified
+empty under `ACCESS EXCLUSIVE` and dropped in one transaction, and
+`dotmac-approvals` became the authority.
+
+**So the implementation and the inventory retire.** `approvals_cutover.py` and
+the legacy inventory both query `approval_policies` and `approval_records`.
+The switch drops those tables and removes their consumers, so both artifacts
+reference a schema that no longer exists in any database the product can
+produce. Retaining them would preserve code that cannot run — the appearance of
+a reference implementation rather than one.
+
+**`c3a0d1b` is preserved as immutable historical reference evidence.** Both
+artifacts remain readable there, in full, with their tests and review history.
+Retirement removes them from the working tree, not from the record.
+
+**What a later cutover does.** It implements **locally**, from this protocol and
+from that product's own current inventory — not by resurrecting Vendor's code,
+which was shaped by a schema and a set of consumers that no longer exist.
+
+**And the extraction bar is unchanged, which is the point most easily lost
+here.** Shared code requires **two CURRENT consumers**. That Vendor once had an
+implementation is not one of them: a retired artifact cannot be a party to a
+contract, and counting it would let a single live adopter shape a shared
+mechanism by pointing at history. The rule in § 5 was always "extract when reuse
+is proven"; this amendment states that proof is measured against what exists,
+not against what once did.
+
+### A correction to the record
+
+An earlier account credited Vendor CP's merged inventory tool with producing the
+`TARGET_ABSENT` observation. **It did not — that tool never ran.** Its
+contribution was to enforce the evidence boundary: presented with no mechanism
+to run against the target, it refused to report absence, on the grounds that
+"the tool cannot run" and "the database is absent" are different facts and only
+the second licenses a greenfield path.
+
+The decisive observation came from a **direct, authorized Docker-boundary check**
+against the named target, which contacted the host, opened no database
+connection, read no credential and changed nothing.
+
+The distinction is the substance of the episode, not a footnote. The greenfield
+path is valid because someone looked — not because looking proved difficult.
