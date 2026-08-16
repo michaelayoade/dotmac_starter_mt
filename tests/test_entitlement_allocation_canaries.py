@@ -19,6 +19,7 @@ import os
 import uuid
 from collections.abc import Generator
 
+import dotmac_kernel.audit_actions as audit_actions
 import pytest
 from dotmac_entitlement_allocation import (
     Allocation,
@@ -28,8 +29,10 @@ from dotmac_entitlement_allocation import (
     UndeclaredCapabilityError,
     UnknownProductError,
     allocation_product,
+    module,
     stage_allocation,
 )
+from dotmac_kernel.audit_actions import AuditActionRegistry
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
@@ -46,6 +49,16 @@ class LiveCatalogue:
             raise UnknownProductError(f"unknown product {product_code!r}")
         if capability_code not in self.declared[product_code]:
             raise UndeclaredCapabilityError(product_code, (capability_code,))
+
+
+@pytest.fixture(autouse=True)
+def _installed_module_audit_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Compose this standalone module without leaking process-global state."""
+    monkeypatch.setattr(
+        audit_actions,
+        "_active_registry",
+        AuditActionRegistry.from_manifests([module]),
+    )
 
 
 def _session_for(env_var: str, label: str) -> Generator[Session, None, None]:

@@ -15,11 +15,6 @@ namespace gate and the live-catalog gate, migrates cleanly, and then dies on
 caught it, because there was no name to declare. Kernel `0.1.0a66` published
 one: `idempotency_ledger.v1`.
 
-The exposure here is wider than the ledger row. `write_platform_audit_event`
-is called INSIDE `_operation`, so a missing ledger takes the audit trail down
-with the allocation rather than merely losing replay protection — the whole
-staging path fails, and it fails on the first delivery rather than at deploy.
-
 ## Why a NEW revision and not an edit to `ea_0001`
 
 `ea_0001` shipped in `dotmac-entitlement-allocation-v0.1.0a1`, `-v0.1.0a2`,

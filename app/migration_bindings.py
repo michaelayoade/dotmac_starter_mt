@@ -27,6 +27,7 @@ from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
+    PLATFORM_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     PrerequisiteBinding,
 )
@@ -71,6 +72,16 @@ ASSEMBLY_PREREQUISITE_BINDINGS: Final[tuple[PrerequisiteBinding, ...]] = (
     PrerequisiteBinding(
         prerequisite=OUTBOX_RELAY_V1.name,
         provider_revision="0012_platform_outbox",
+        provider_owner="kernel",
+    ),
+    # Kernel `0009` creates the table, but it leaves UPDATE and DELETE on the
+    # online platform role.  The later hardening revision completes the v1
+    # effect by reducing that role to SELECT + INSERT and removing every
+    # column-level mutation path.  Bind to the revision that completes the
+    # contract, not the first revision that happened to create its table.
+    PrerequisiteBinding(
+        prerequisite=PLATFORM_AUDIT_LOG_V1.name,
+        provider_revision="0026_platform_audit_log",
         provider_owner="kernel",
     ),
 )

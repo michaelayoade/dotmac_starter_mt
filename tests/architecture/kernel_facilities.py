@@ -110,6 +110,11 @@ class Facility:
 #: obligation for the same reason.
 MAPPED: Final[tuple[Facility, ...]] = (
     Facility(
+        "audit:write_platform_audit_event",
+        "platform_audit_log.v1",
+        "appends to public.platform_audit_events",
+    ),
+    Facility(
         "idempotency:execute_once",
         "idempotency_ledger.v1",
         "writes public.idempotency_records",
@@ -187,22 +192,6 @@ MAPPED: Final[tuple[Facility, ...]] = (
 #: An empty set means "no module calls this today", which is a claim worth
 #: holding: it is how the next caller becomes a visible diff.
 FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
-    "audit:write_platform_audit_event": (
-        "PLATFORM AUDIT — prerequisite named but not built. Michael named it "
-        "`platform_audit_log.v1` on 2026-08-16; the spec, verifier, binding, "
-        "typed actors, module declarations and PostgreSQL proofs are the work "
-        "that follows. Until that lands this is frozen, NOT exempt: the two "
-        "callers below are the exact set the mapping will convert, and a third "
-        "would be a new undeclared dependency on a facility we already know is "
-        "undeclarable.",
-        frozenset(
-            {
-                "dotmac-integration/src/dotmac_integration/operations.py",
-                "dotmac-entitlement-allocation/src/dotmac_entitlement_allocation"
-                "/service.py",
-            }
-        ),
-    ),
     "audit:write_audit_event": (
         "TENANT AUDIT — no published consumer. The persisted-runtime-dependency "
         "inventory found its only module caller is `dotmac-template-studio`, "

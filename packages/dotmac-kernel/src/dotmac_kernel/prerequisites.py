@@ -266,11 +266,30 @@ OUTBOX_RELAY_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     ),
 )
 
+#: The append-only platform audit trail used by installable control-plane
+#: modules.  The tenant audit table is deliberately NOT part of this effect:
+#: it has no published module consumer and collides with independently-owned
+#: ERP/Sub tables, while the two entrypoints are genuinely separable.
+PLATFORM_AUDIT_LOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
+    name="platform_audit_log.v1",
+    summary=(
+        "public.platform_audit_events with its id primary key, nullable "
+        "actor_admin_id foreign key to public.platform_admins ON DELETE SET "
+        "NULL, actor lookup index, action/entity/details/created_at column "
+        "contract, and platform-plane posture: no row-level security, no "
+        "app_user table or column privilege, and platform_api holding "
+        "table-level SELECT and INSERT only. Supplies the append-only online "
+        "write path used by dotmac_kernel.audit.write_platform_audit_event; "
+        "it does not define any module's audit-action vocabulary."
+    ),
+)
+
 KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     TENANT_SCOPE_CATALOG_V1,
     MODULE_DATABASE_ROLES_V1,
     IDEMPOTENCY_LEDGER_V1,
     OUTBOX_RELAY_V1,
+    PLATFORM_AUDIT_LOG_V1,
 )
 
 
@@ -558,6 +577,7 @@ __all__ = [
     "IDEMPOTENCY_LEDGER_V1",
     "MODULE_DATABASE_ROLES_V1",
     "OUTBOX_RELAY_V1",
+    "PLATFORM_AUDIT_LOG_V1",
     "TENANT_SCOPE_CATALOG_V1",
     "DuplicateBindingError",
     "DuplicatePrerequisiteError",

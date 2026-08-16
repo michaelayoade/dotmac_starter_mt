@@ -62,10 +62,20 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-kernel": {
+      "declared": "0.1.0a68",
+      "state": "declared-unpublished",
+      "reason": "AWAITING REVIEW AND DISPATCH. a68 names and verifies platform_audit_log.v1 and hardens public.platform_audit_events to an append-only online-role posture. It must be published before either consumer version can be released. Remove this row only in the change that verifies and tags dotmac-kernel-v0.1.0a68."
+    },
+    "dotmac-integration": {
+      "declared": "0.1.0a5",
+      "state": "declared-unpublished",
+      "reason": "AWAITING KERNEL a68 AND REVIEW. a5 declares platform_audit_log.v1 and verifies it in the new DDL-free ig_0008 revision. Its floor is >=0.1.0a68, so release must follow the verified kernel publication. This is NOT to be repaired by editing the version down. Remove this row only in the change that verifies and tags dotmac-integration-v0.1.0a5."
+    },
     "dotmac-entitlement-allocation": {
       "declared": "0.1.0a5",
       "state": "declared-unpublished",
-      "reason": "UNPUBLISHED BY DESIGN, under a standing condition Michael set on 2026-08-16, and NOT an omission the release lane should close. 0.1.0a1 through 0.1.0a4 are all published and tagged; a4 is the one to pin. 0.1.0a5 declares idempotency_ledger.v1 \u2014 the at-most-once ledger stage_allocation has written at request time since a1 with nothing declaring it \u2014 and verifies it in ea_0002, so an adopter running its own lineage fails at deploy instead of on its first staged activation. It also raises the kernel floor to >=0.1.0a66, which every consumer pinned below that will feel. THE STANDING CONDITION: this module writes a SECOND kernel-persisted facility from inside the same operation, write_platform_audit_event, whose prerequisite (platform_audit_log.v1) does not exist yet \u2014 so the next entitlement-allocation version must not be published until it declares BOTH the idempotency ledger and the platform audit dependency. Publishing a5 as it stands would spend a version number on half the fix and leave the audit half looking addressed. So this row does not expire at the next release run; it expires when platform_audit_log.v1 exists, is declared here, and the version carrying both is tagged. DO NOT dispatch a release to clear it, and NEVER repair it by editing the declared version down."
+      "reason": "AWAITING KERNEL a68 AND REVIEW. Michael's standing condition is now satisfied in source: a5 declares BOTH idempotency_ledger.v1 and platform_audit_log.v1, and its DDL-free ea_0002/ea_0003 revisions verify them in provider order. Its floor is >=0.1.0a68, so it cannot publish before the verified kernel release. Remove this row only in the change that verifies and tags dotmac-entitlement-allocation-v0.1.0a5; never repair it by editing the declared version down."
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",

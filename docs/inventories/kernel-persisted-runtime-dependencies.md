@@ -16,6 +16,18 @@ and the settings storage behind `dotmac_kernel.settings_resolver`.
 until the evidence establishes the exact contract and the real consumers. What
 follows records what a contract WOULD have to cover and who WOULD need it.
 
+> **Status addendum — 2026-08-16.** The recommendation below has now been
+> implemented as `platform_audit_log.v1` for the platform plane only. Kernel
+> migration `0026_platform_audit_log` removes online `UPDATE`/`DELETE` and
+> column-level mutation paths; `verify_platform_audit_log` proves the complete
+> shape and privilege posture on PostgreSQL. `dotmac-integration` a5 declares
+> and verifies it in `ig_0008`; the still-unpublished
+> `dotmac-entitlement-allocation` a5 declares it and verifies it in `ea_0003`,
+> after the idempotency ledger verification in `ea_0002`. The generic facility guard now maps
+> `write_platform_audit_event` to the prerequisite, so future callers must
+> declare and verify it. This addendum supersedes only the dated "does not
+> name" status; the inventory evidence and the tenant/settings rulings remain.
+
 **Revisions read.** Every citation is against a checked-out worktree of
 `origin/main`, never a dirty tree.
 

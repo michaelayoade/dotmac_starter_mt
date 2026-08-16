@@ -2,9 +2,9 @@
 
 ## The enforceable premise (ADR-0018)
 
-`dotmac-integration` has been published three times and
+`dotmac-integration` has been published four times and
 `dotmac-entitlement-allocation` four. Every migration file present at any of
-those seven tags is inside a wheel on the registry, and has therefore RUN,
+those eight tags is inside a wheel on the registry, and has therefore RUN,
 unmodified, in at least one database this repository does not own and cannot
 inspect.
 
@@ -192,6 +192,35 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # a4 adds the DDL-free prerequisite verification revision. Its bytes are
+    # now published history and may not remain in the editable set below.
+    "dotmac-integration-v0.1.0a4": (
+        "dotmac-integration",
+        "306a40e",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+        },
+    ),
     # ── dotmac-entitlement-allocation ───────────────────────────────────────
     #
     # Four tags, one migration, one digest. `ea_0001` has not moved a byte
@@ -248,16 +277,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: `ig_0007` moves when integration's `0.1.0a4` is tagged, and `ea_0002` when
-#: allocation's `0.1.0a5` is. Each move is the same commit that removes its
+#: `ig_0008` moves when integration's `0.1.0a5` is tagged, and `ea_0002` plus
+#: `ea_0003` when allocation's `0.1.0a5` is. Each move is the same commit that
+#: removes its
 #: distribution's row from `docs/inventories/declared-publication-baseline
-#: .json`. `ig_0007` was written as `0.1.0a3` until a3 was released without it
-#: — the release lane does not wait for an open branch, which is the whole
-#: reason "released" is read from tags and not from a version number somebody
-#: intended.
+#: .json`. The release lane does not wait for an open branch, which is the
+#: whole reason "released" is read from tags and not from a version number
+#: somebody intended.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-integration": frozenset({"ig_0007_idempotency_ledger.py"}),
-    "dotmac-entitlement-allocation": frozenset({"ea_0002_idempotency_ledger.py"}),
+    "dotmac-integration": frozenset({"ig_0008_platform_audit_log.py"}),
+    "dotmac-entitlement-allocation": frozenset(
+        {"ea_0002_idempotency_ledger.py", "ea_0003_platform_audit_log.py"}
+    ),
 }
 
 

@@ -42,6 +42,25 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
+## 0.1.0a5 — UNRELEASED
+
+### `platform_audit_log.v1` is declared and verified at deploy
+
+Integration repair and retention operations call
+`dotmac_kernel.audit.write_platform_audit_event`, which appends to
+`public.platform_audit_events`. The module lineage creates none of that
+storage, so the dependency used to exist only in function bodies and could
+fail on an adopter's first repair after an apparently successful migration.
+
+- `ModuleManifest.requires` now declares `platform_audit_log.v1` alongside
+  the roles and idempotency effects already required.
+- `ig_0008_platform_audit_log` is a DDL-free verification revision. It is new
+  rather than an edit to migration bytes already shipped through `0.1.0a4`.
+- The kernel floor is `>=0.1.0a68`, the first release that names and verifies
+  the append-only platform audit effect.
+- The release manifest requires `ig_0008` in the wheel, so publication cannot
+  drop the verification while retaining the declaration.
+
 ## 0.1.0a4 — released 2026-08-16
 
 Written against a declared-but-unreleased `0.1.0a3`, which was cut from

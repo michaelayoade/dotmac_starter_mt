@@ -35,12 +35,15 @@ from dotmac_kernel.planes import (
     supported_plane_sets,
     validate_module_plane_selections,
 )
-from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1
+from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1, PLATFORM_AUDIT_LOG_V1
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-integration"
 SOURCE = PACKAGE_ROOT / "src/dotmac_integration"
-MIGRATION = SOURCE / "migrations/versions/ig_0007_idempotency_ledger.py"
+MIGRATIONS = (
+    SOURCE / "migrations/versions/ig_0007_idempotency_ledger.py",
+    SOURCE / "migrations/versions/ig_0008_platform_audit_log.py",
+)
 
 
 # ── The declaration is derived from the call ────────────────────────────────
@@ -87,6 +90,14 @@ def test_the_kernel_facility_the_module_calls_is_a_declared_prerequisite() -> No
         "without those tables would migrate cleanly and fail at the first "
         "guarded effect"
     )
+
+
+def test_the_platform_audit_writer_is_a_declared_prerequisite() -> None:
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in SOURCE.rglob("*.py")
+    )
+    assert "write_platform_audit_event(" in source
+    assert PLATFORM_AUDIT_LOG_V1.name in module.requires
 
 
 # ── COMMON, and why ─────────────────────────────────────────────────────────
@@ -136,14 +147,14 @@ def test_an_atomic_module_cannot_carry_a_plane_specific_prerequisite() -> None:
 # ── Declared is not enough; it must be verified ─────────────────────────────
 
 
-def _migration_literals() -> dict[str, tuple[str, ...]]:
+def _migration_literals(path: Path) -> dict[str, tuple[str, ...]]:
     """The three prerequisite tuples, read statically.
 
     `ast` rather than an import: importing the revision evaluates
     `resolve_depends_on` at module scope, whose answer depends on which bindings
     happen to be installed in this process. The literals do not.
     """
-    tree = ast.parse(MIGRATION.read_text(encoding="utf-8"))
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     literals: dict[str, tuple[str, ...]] = {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
@@ -164,19 +175,26 @@ def test_the_migration_declares_the_same_prerequisites_as_the_manifest() -> None
     """Manifest and lineage are two audiences for one fact — composition reads
     the manifest, `alembic upgrade` reads the migration — and only the second
     is checked against a real database."""
-    literals = _migration_literals()
-    assert literals["COMMON_REQUIRES"] == tuple(module.requires)
-    assert literals["TENANT_REQUIRES"] == tuple(module.tenant_requires) == ()
-    assert literals["PLATFORM_REQUIRES"] == tuple(module.platform_requires) == ()
+    literals = [_migration_literals(path) for path in MIGRATIONS]
+    verified = tuple(
+        requirement
+        for migration in literals
+        for requirement in migration["COMMON_REQUIRES"]
+    )
+    assert verified == tuple(module.requires)
+    assert all(migration["TENANT_REQUIRES"] == () for migration in literals)
+    assert all(migration["PLATFORM_REQUIRES"] == () for migration in literals)
+    assert tuple(module.tenant_requires) == tuple(module.platform_requires) == ()
 
 
 def test_the_prerequisite_is_actually_verified_against_the_database() -> None:
     """A declaration orders migrations; it does not prove anything ran. Without
     `require_prerequisites` the whole change would be paperwork, and an adopter
     with a stamped or half-supplied ledger would still reach production."""
-    source = MIGRATION.read_text(encoding="utf-8")
-    assert "require_prerequisites(op.get_bind(), REQUIRES)" in source
-    assert "resolve_depends_on(COMMON_REQUIRES)" in source
+    for migration in MIGRATIONS:
+        source = migration.read_text(encoding="utf-8")
+        assert "require_prerequisites(op.get_bind(), REQUIRES)" in source
+        assert "resolve_depends_on(COMMON_REQUIRES)" in source
 
 
 def test_the_verification_did_not_land_in_a_released_revision() -> None:
@@ -189,30 +207,26 @@ def test_the_verification_did_not_land_in_a_released_revision() -> None:
         for path in versions.glob("ig_*.py")
         if "require_prerequisites" in path.read_text(encoding="utf-8")
     )
-    assert verifying == [MIGRATION.name]
+    assert verifying == [path.name for path in MIGRATIONS]
 
 
 # ── Release surfaces ────────────────────────────────────────────────────────
 
 
-def test_the_floor_is_the_release_that_named_the_ledger() -> None:
-    """a58 allocated `mod_intg`; a66 published `idempotency_ledger.v1`. The
-    floor is the higher, because a58..a65 cannot import this manifest at all —
-    `validate_prerequisites` does not know the name."""
+def test_the_floor_is_the_highest_prerequisite_release() -> None:
+    """a68 publishes the audit prerequisite after the a66 ledger name."""
     manifest = tomllib.loads(
         (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
-    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a66"
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a68"
 
 
 def test_the_release_entry_requires_every_migration_in_the_wheel() -> None:
-    """`ig_0007` creates nothing, so a wheel that dropped it would install a
-    module whose prerequisite is declared and never proven — the one failure
-    mode a DDL-free revision has."""
+    """Dropping either DDL-free verification would strand its declaration."""
     entry = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]["dotmac-integration"]
-    assert entry["kernel_floor"] == "0.1.0a66"
+    assert entry["kernel_floor"] == "0.1.0a68"
     required = set(entry["wheel_contents"]["required"])
     on_disk = {
         f"dotmac_integration/migrations/versions/{path.name}"

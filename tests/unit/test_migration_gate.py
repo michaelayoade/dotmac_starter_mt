@@ -137,10 +137,10 @@ def test_the_real_repo_composes() -> None:
     # Non-vacuity: a gate that walked an empty set would pass silently. Bump
     # this deliberately when a lineage gains a revision.
     #
-    # 31 -> 32 in a67: `0025_session_provenance` on the kernel lineage. The
+    # 32 -> 33 in a68: `0026_platform_audit_log` on the kernel lineage. The
     # "deliberately" is the point — this number is not maintenance overhead, it
     # is the reason a migration cannot be added without somebody noticing.
-    assert len(report.revisions) == 32
+    assert len(report.revisions) == 33
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 

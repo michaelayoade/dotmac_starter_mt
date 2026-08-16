@@ -2,8 +2,7 @@
 
 Measured across ERP and Sub production, 93-98% of audit rows have a non-party
 actor, so these tests exist to keep a party-primary model from creeping back in
-— and to keep the one temporary compatibility rule from becoming permanent by
-accident.
+while pinning the one temporary compatibility rule still used by Workspace.
 """
 
 import uuid
@@ -52,19 +51,15 @@ def test_an_undeclared_kind_is_refused() -> None:
     assert "robot" in str(exc.value)
 
 
-def test_a_party_alone_derives_the_legacy_user_actor() -> None:
-    """The temporary shim for released dotmac-template-studio.
-
-    It calls `write_audit_event` with only `actor_party_id`, at nine call sites,
-    and a released artifact cannot be edited retroactively.
-    """
+def test_a_party_alone_derives_the_temporary_workspace_user_actor() -> None:
+    """The compatibility shim remains until Workspace's two callers migrate."""
     party = uuid.uuid4()
 
     assert _resolve(actor_party_id=party) == ("user", str(party))
 
 
-def test_an_explicit_identifier_survives_the_legacy_derivation() -> None:
-    """The shim supplies a fallback identifier; it does not overwrite one."""
+def test_an_identifier_survives_the_temporary_workspace_derivation() -> None:
+    """The shim fills the kind; it never overwrites a supplied identifier."""
     party = uuid.uuid4()
 
     assert _resolve(actor_party_id=party, actor_id="alice") == ("user", "alice")

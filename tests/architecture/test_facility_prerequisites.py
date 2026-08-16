@@ -171,6 +171,7 @@ def _verified_in_migrations(package: Path) -> set[str]:
 _CONSTANTS = {
     "IDEMPOTENCY_LEDGER_V1": "idempotency_ledger.v1",
     "OUTBOX_RELAY_V1": "outbox_relay.v1",
+    "PLATFORM_AUDIT_LOG_V1": "platform_audit_log.v1",
     "TENANT_SCOPE_CATALOG_V1": "tenant_scope_catalog.v1",
     "MODULE_DATABASE_ROLES_V1": "module_database_roles.v1",
 }
@@ -322,17 +323,13 @@ def test_frozen_facilities_gain_no_new_callers(key: str) -> None:
     )
 
 
-def test_the_platform_audit_freeze_names_its_successor() -> None:
-    """The exception is linked to the work that ends it, not left open.
-
-    Michael named `platform_audit_log.v1` on 2026-08-16 and the remaining work
-    is a spec, a verifier, a binding, typed actors, module declarations and
-    PostgreSQL proofs. This asserts the entry says so, so nobody reads the
-    freeze as a decision that platform audit needs no prerequisite.
-    """
-    reason, callers = FROZEN["audit:write_platform_audit_event"]
-    assert "platform_audit_log.v1" in reason
-    assert callers, "the freeze claims callers exist; it must name them"
+def test_the_platform_audit_successor_is_mapped_and_has_real_callers() -> None:
+    """The former freeze became an enforced prerequisite, not an omission."""
+    facility = next(
+        item for item in MAPPED if item.key == "audit:write_platform_audit_event"
+    )
+    assert facility.prerequisite == "platform_audit_log.v1"
+    assert _callers_of(facility.key), "a mapped facility with no caller is dead policy"
 
 
 # ── Sensitivity ─────────────────────────────────────────────────────────────
