@@ -353,7 +353,7 @@
       "package_dir": "packages/dotmac-approvals",
       "import_name": "dotmac_approvals",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a61",
+      "kernel_floor": "0.1.0a67",
       "db_schema": "mod_approvals",
       "tag_prefix": "dotmac-approvals-v",
       "wheel_contents": {

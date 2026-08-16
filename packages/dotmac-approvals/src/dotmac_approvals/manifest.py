@@ -15,6 +15,7 @@ from dotmac_kernel.modules import ModuleManifest
 from dotmac_kernel.planes import ModulePlane
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
+    OUTBOX_RELAY_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
 
@@ -22,7 +23,7 @@ from dotmac_approvals.models import PLATFORM_TABLES, TENANT_TABLES
 
 module = ModuleManifest(
     code="approvals",
-    version="0.1.0a4",
+    version="0.1.0a5",
     core=False,
     short_code="approvals",
     migration_prefix="ap",
@@ -37,7 +38,14 @@ module = ModuleManifest(
     # Deliberately NOT an identity or RBAC prerequisite either way: role
     # membership arrives on the `Actor` value at the call site, so this module
     # installs beside a product whose RBAC the kernel has never seen.
-    requires=(MODULE_DATABASE_ROLES_V1.name,),
+    #
+    # `outbox_relay.v1` (kernel a67) is the effect this module has always
+    # needed and could never name: `dotmac_approvals.outbox` enqueues into
+    # `public.outbox_events` / `public.platform_outbox_events` at REQUEST time
+    # and `ap_0001` creates neither. COMMON because both planes enqueue — the
+    # tenant plane through `enqueue_event`, the control plane through
+    # `enqueue_platform_event` — so a PLATFORM-only install needs it too.
+    requires=(MODULE_DATABASE_ROLES_V1.name, OUTBOX_RELAY_V1.name),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
     supported_plane_sets=(
         (ModulePlane.TENANT,),

@@ -16,6 +16,7 @@ different ones:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import uuid
 from collections.abc import Iterator
@@ -24,6 +25,7 @@ from pathlib import Path
 import pytest
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -461,3 +463,158 @@ def test_a_duplicate_vote_is_refused_by_the_live_constraint(
             )
     finally:
         engine.dispose()
+
+
+@contextlib.contextmanager
+def _bound_prerequisites() -> Iterator[None]:
+    """Install this assembly's bindings, and put back whatever was there.
+
+    Bindings are process state; a test that installs and walks away makes the
+    NEXT test's result depend on file order.
+    """
+    from dotmac_kernel.prerequisites import (
+        install_prerequisite_bindings,
+        installed_bindings,
+    )
+
+    from app.migration_bindings import ASSEMBLY_PREREQUISITE_BINDINGS
+
+    previous = tuple(installed_bindings())
+    install_prerequisite_bindings(ASSEMBLY_PREREQUISITE_BINDINGS)
+    try:
+        yield
+    finally:
+        install_prerequisite_bindings(previous)
+
+
+# ── `outbox_relay.v1` is declared, and verified against the real catalogue ──
+#
+# `dotmac_approvals.outbox` enqueues into the kernel relay at REQUEST time and
+# `ap_0001` creates neither table, so from a1 through a4 the dependency existed
+# only inside two function bodies. `ap_0002` declares it; these prove the
+# declaration reaches the verifier, and that the verifier is looking at the
+# things that actually matter rather than at a table name.
+
+
+def _relay_requires() -> tuple[str, ...]:
+    """The tuple `ap_0002` itself verifies, loaded from the migration.
+
+    Read from the module rather than restated here on purpose: a test that
+    hard-codes `("outbox_relay.v1",)` still passes after someone empties the
+    migration's own tuple, which is the mistake it exists to catch.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "ap_0002_probe", APPROVALS_VERSIONS / "ap_0002_outbox_relay.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(module.REQUIRES)
+
+
+@contextlib.contextmanager
+def _broken_relay(admin_url: str, statement: str) -> Iterator[Connection]:
+    """Apply one DDL break, hand back the connection, roll it back.
+
+    The break lives in an open transaction on the SAME connection the verifier
+    reads, so the damage is visible to the check and to nothing else — no
+    second migrated database per case.
+    """
+    engine = create_engine(admin_url)
+    conn = engine.connect()
+    transaction = conn.begin()
+    try:
+        conn.execute(text(statement))
+        yield conn
+    finally:
+        transaction.rollback()
+        conn.close()
+        engine.dispose()
+
+
+def test_the_declared_relay_prerequisite_is_satisfied_after_migration(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """The positive half: what `ap_0002` verifies passes on a real database."""
+    from dotmac_kernel.migrations.verify import require_prerequisites
+
+    admin_url, _, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with _bound_prerequisites(), engine.connect() as conn:
+        require_prerequisites(conn, _relay_requires())
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        pytest.param(
+            "ALTER TABLE public.outbox_events RENAME TO outbox_events_gone",
+            "does not exist",
+            id="tenant-relay-table-absent",
+        ),
+        pytest.param(
+            "ALTER TABLE public.platform_outbox_events "
+            "RENAME TO platform_outbox_events_gone",
+            "does not exist",
+            id="platform-relay-table-absent",
+        ),
+        pytest.param(
+            "ALTER TABLE public.outbox_events NO FORCE ROW LEVEL SECURITY",
+            "FORCE",
+            id="tenant-relay-unforced",
+        ),
+        pytest.param(
+            "REVOKE EXECUTE ON FUNCTION public.claim_outbox_batch(text, integer, "
+            "integer) FROM outbox_dispatcher",
+            "EXECUTE",
+            id="dispatcher-cannot-claim",
+        ),
+    ],
+)
+def test_the_relay_prerequisite_refuses_a_provider_missing_one_effect(
+    migrated_scratch: tuple[str, str, str], statement: str, expected: str
+) -> None:
+    """One break per case, each asserting the message for THAT observable.
+
+    Deliberately a subset of the kernel's own 25 refusals
+    (`tests/test_outbox_relay_prerequisite.py`), not a copy of them: the kernel
+    owns proving its verifier, and this module owns proving that ITS
+    declaration reaches that verifier against a database its own lineage
+    migrated. Duplicating the full matrix here would give one invariant two
+    owners that drift.
+    """
+    from dotmac_kernel.migrations.verify import (
+        PrerequisiteNotSatisfiedError,
+        require_prerequisites,
+    )
+
+    admin_url, _, _ = migrated_scratch
+    with _bound_prerequisites(), _broken_relay(admin_url, statement) as conn:
+        with pytest.raises(PrerequisiteNotSatisfiedError, match=expected):
+            require_prerequisites(conn, _relay_requires())
+
+
+def test_the_relay_refusals_are_not_refusing_everything(
+    migrated_scratch: tuple[str, str, str],
+) -> None:
+    """The specificity companion.
+
+    Every case above damages the relay and expects a refusal, so all of them
+    would still pass against a verifier that refused unconditionally — or if
+    `_broken_relay`'s open transaction poisoned the connection for any query.
+    This breaks something the relay contract does not mention (this module's
+    own table) and requires SILENCE.
+    """
+    from dotmac_kernel.migrations.verify import require_prerequisites
+
+    admin_url, _, _ = migrated_scratch
+    with (
+        _bound_prerequisites(),
+        _broken_relay(
+            admin_url, "ALTER TABLE mod_approvals.approval_requests RENAME TO gone"
+        ) as conn,
+    ):
+        require_prerequisites(conn, _relay_requires())

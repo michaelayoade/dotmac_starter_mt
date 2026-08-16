@@ -20,6 +20,7 @@ from dotmac_kernel.namespaces import APPROVALS_MIGRATION_OWNER, MIGRATION_OWNER_
 
 MODULE_ROOT = Path(inspect.getfile(service)).parent
 MIGRATION = MODULE_ROOT / "migrations/versions/ap_0001_approvals.py"
+RELAY_MIGRATION = MODULE_ROOT / "migrations/versions/ap_0002_outbox_relay.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -84,7 +85,14 @@ def test_the_migration_declares_the_same_prerequisites_as_the_manifest() -> None
     assert 'COMMON_REQUIRES = ("module_database_roles.v1",)' in source
     assert 'TENANT_REQUIRES = ("tenant_scope_catalog.v1",)' in source
     assert "PLATFORM_REQUIRES: tuple[str, ...] = ()" in source
-    assert set(module.requires) == {"module_database_roles.v1"}
+
+    # The lineage now has TWO heads with an opinion, and the manifest is the
+    # union of what they verify. `ap_0002` verifies `outbox_relay.v1` alone —
+    # re-verifying `ap_0001`'s effects would give two revisions an opinion
+    # about one effect — so this asserts the union rather than one file's tuple.
+    relay = RELAY_MIGRATION.read_text(encoding="utf-8")
+    assert 'COMMON_REQUIRES = ("outbox_relay.v1",)' in relay
+    assert set(module.requires) == {"module_database_roles.v1", "outbox_relay.v1"}
     assert set(module.tenant_requires) == {"tenant_scope_catalog.v1"}
     assert set(module.platform_requires) == set()
 
@@ -405,7 +413,7 @@ def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     assert entry["db_schema"] == module.db_schema
     assert entry["import_name"] == "dotmac_approvals"
     assert entry["tag_prefix"] == "dotmac-approvals-v"
-    assert entry["kernel_floor"] == "0.1.0a61"
+    assert entry["kernel_floor"] == "0.1.0a67"
     # The lineage is a REQUIRED wheel content: this repository does not compose
     # the module, so a wheel that shipped the manifest and dropped the migration
     # would fail first in an adopter's deployment rather than here.

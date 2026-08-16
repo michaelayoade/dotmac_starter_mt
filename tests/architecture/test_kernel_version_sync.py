@@ -140,7 +140,10 @@ CAPABILITY_RAISED_FLOORS = {
     # nothing. Absence already means atomic.
     "dotmac-release-catalog": ("0.1.0a56", "0.1.0a44"),
     "dotmac-ticketing": ("0.1.0a61", "0.1.0a39"),
-    "dotmac-approvals": ("0.1.0a61", "0.1.0a59"),
+    # a61 (`supported_plane_sets`) held until a67 published `outbox_relay.v1`,
+    # which this module's `ap_0002` verifies and its manifest declares. The
+    # floor is always the HIGHEST capability actually consumed.
+    "dotmac-approvals": ("0.1.0a67", "0.1.0a59"),
     # Numbering's own ledger row is a65, and for one release that WAS its floor
     # — every other capability it consumes (`platform_tables` a53,
     # `requires`/`tenant_requires` a56/a60, `supported_plane_sets` a61) predates
