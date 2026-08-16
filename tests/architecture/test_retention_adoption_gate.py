@@ -82,29 +82,38 @@ def test_retention_is_not_adopted_while_the_notice_revision_is_pending() -> None
     assert notice["accepted_by"], "an accepted notice revision needs a person"
 
 
-def test_replay_evidence_carries_its_own_period_or_says_it_does_not() -> None:
+def test_replay_evidence_has_a_period_and_says_whether_it_is_enforced() -> None:
     """The approved fleet standard's qualification, made checkable.
 
     Content and replay identity have separate lifetimes — and "separate" cuts
     both ways: keeping identity is required to recognise a replay, and keeping
     it FOREVER is an unbounded personal-data store justified by a sentence.
-    The period is not set yet; this asserts the gap is declared rather than
-    forgotten, and flips to requiring a real period once one is chosen.
+
+    The period is now ruled (180 days from `received_at`, 2026-08-16), which
+    closes half the gap and opens the half that matters more: a ruled period
+    nothing enforces is not a shorter retention, it is the same indefinite
+    retention with a number written next to it. So the record carries
+    `replay_evidence_implemented`, and adoption stays blocked until it is true.
     """
     behaviour = _record()["behaviour"]
     assert behaviour["replay_evidence_retained"], "redaction keeps something; say what"
 
-    period = behaviour["replay_evidence_period"]
-    if period == "UNSET":
-        assert behaviour["replay_evidence_period_note"], (
-            "an unset period must carry the note that says it is a separate, "
-            "open decision — otherwise it reads as covered by the 30 days"
-        )
-        assert "replay_evidence_period" in " ".join(
+    days = behaviour["replay_evidence_period_days"]
+    assert isinstance(days, int) and days > 0, "a period is a number of days"
+    assert days > _record()["decision"]["period_days"], (
+        "replay evidence must outlive the content it identifies, or a "
+        "redelivery arrives with nothing left to recognise it by"
+    )
+    assert behaviour["replay_evidence_period_anchor"] == "received_at"
+
+    if not behaviour["replay_evidence_implemented"]:
+        assert "replay_evidence_implemented" in " ".join(
             _record()["adoption"]["blocked_on"]
-        ), "an unset replay-evidence period must block adoption, not just be noted"
-    else:
-        assert period != "", "a period is either UNSET with a note, or stated"
+        ), (
+            "a ruled-but-unenforced period must BLOCK adoption. Recording the "
+            "number without enforcing it leaves evidence retained indefinitely "
+            "while the record reads as though a limit applies"
+        )
 
 
 def test_the_code_released_flag_is_not_the_adoption_flag() -> None:
