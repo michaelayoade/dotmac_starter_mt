@@ -30,7 +30,7 @@ an answer rather than a formality.
 from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
-from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1
+from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1, MODULE_DATABASE_ROLES_V1
 
 from dotmac_integration.models import PLATFORM_TABLES, TENANT_TABLES
 from dotmac_integration.retention import RETENTION_PLATFORM_TABLES
@@ -51,7 +51,25 @@ module = ModuleManifest(
     # honest — and keeps two concurrent slices from editing one tuple.
     platform_tables=PLATFORM_TABLES + RETENTION_PLATFORM_TABLES,
     # ── Logical database prerequisites ──────────────────────────────────────
-    # The ONE effect this module needs that none of its own migrations create.
+    # TWO effects this module needs that none of its own migrations create.
+    #
+    # `module_database_roles.v1` is the older of the two and the one that was
+    # never declared at all. `ig_0001` grants `platform_api`/`app_admin` and
+    # revokes `app_user` across every table it makes — on the platform plane the
+    # privilege boundary IS the isolation (ADR-0023) — and a module may not
+    # create a role. That dependency has been expressed since `0.1.0a1` as the
+    # frozen literal `depends_on = ("0001_initial_tenant_schema",)` in `ig_0001`
+    # itself, which is exactly what ADR-0006 D1's amendment forbids: an edge
+    # true only in the assembly that wrote it. Declaring the EFFECT here is the
+    # half that is portable, statically enforced (the composed gate refuses an
+    # assembly that binds no provider) and, unlike the literal, correct about
+    # what is needed — the roles, not the tenant catalogue, which no `mod_intg`
+    # table references. See `docs/adr/0006-…` and
+    # `tests/architecture/test_integration_frozen_depends_on.py` for why the
+    # literal itself cannot be retired in this version.
+    #
+    # `idempotency_ledger.v1` is the effect this module needs that none of its
+    # own migrations create.
     # `run_effect_once` delegates at-most-once to the kernel (hard rule 21,
     # ADR-0014), so `public.platform_idempotency_records` is written at REQUEST
     # time and nothing in `ig_0001`..`ig_0006` touches it. Undeclared — every
@@ -74,7 +92,7 @@ module = ModuleManifest(
     # (`validate_module_plane_selections` refuses a selection when only one
     # plane set is supported). The spec is whole in any case: one name, both
     # ledgers, as `IDEMPOTENCY_LEDGER_V1.summary` states.
-    requires=(IDEMPOTENCY_LEDGER_V1.name,),
+    requires=(MODULE_DATABASE_ROLES_V1.name, IDEMPOTENCY_LEDGER_V1.name),
     # ── Declared audit actions ──────────────────────────────────────────────
     # The FIXED set this module writes, declared rather than left as string
     # literals scattered through `operations`. ADR-0008's rule applied to an

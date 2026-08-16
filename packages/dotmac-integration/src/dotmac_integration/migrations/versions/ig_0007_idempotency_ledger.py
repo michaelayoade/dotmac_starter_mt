@@ -1,4 +1,22 @@
-"""Verify the at-most-once ledger this module has always used. No DDL.
+"""Verify the effects this module has always needed and never declared. No DDL.
+
+## Two effects, one of them older than the other by six revisions
+
+`module_database_roles.v1` has been a hard dependency since `ig_0001`, which
+grants `platform_api`/`app_admin` and revokes `app_user` across every table it
+creates. It was expressed as `ig_0001`'s frozen literal
+`depends_on = ("0001_initial_tenant_schema",)` — an edge true only in an
+assembly that runs the kernel lineage, which is the shape ADR-0006 D1's
+amendment forbids, and over-broad besides: no `mod_intg` table references
+`public.tenants`, so the tenant catalogue was never the thing needed. The
+literal is inside three published wheels and cannot be rewritten
+(`tests/architecture/test_released_migrations.py`), so the LOGICAL declaration
+lands here and on the manifest instead, where it is portable and where the
+composed gate can refuse an assembly that cannot supply it. Verifying it at the
+end of the lineage rather than the start is late, and is still the earliest
+point this version can reach.
+
+`idempotency_ledger.v1` is the newer one, and the reason this revision exists.
 
 `dotmac_integration.idempotency.run_effect_once` delegates at-most-once
 execution to `dotmac_kernel.idempotency.execute_once_platform` (hard rule 21,
@@ -61,16 +79,18 @@ branch_labels = None
 # vary. It would also be unresolvable: `resolve_depends_on` needs `module=` to
 # read a plane list, `module=` reads `selected_module_planes`, and an atomic
 # module may not have a selection installed at all.
-COMMON_REQUIRES = ("idempotency_ledger.v1",)
+COMMON_REQUIRES = ("module_database_roles.v1", "idempotency_ledger.v1")
 TENANT_REQUIRES: tuple[str, ...] = ()
 PLATFORM_REQUIRES: tuple[str, ...] = ()
 REQUIRES = COMMON_REQUIRES + TENANT_REQUIRES + PLATFORM_REQUIRES
 
-# The assembly binds the effect to the revision that SUPPLIES it. In the
-# reference assembly that is kernel `0018_idempotency_one_owner`, not the
-# lineage root — bind it to `0001` and a database stopped at `0017` would order
-# correctly and still have no ledger. This file names neither; that is the
-# point of the indirection (`app/migration_bindings.py` in each assembly).
+# The assembly binds each effect to the revision that SUPPLIES it. In the
+# reference assembly the roles come from kernel `0001_initial_tenant_schema`
+# and the ledger from `0018_idempotency_one_owner` — NOT the lineage root for
+# the second one: bind that to `0001` and a database stopped at `0017` would
+# order correctly and still have no ledger. This file names neither revision;
+# that is the point of the indirection (`app/migration_bindings.py` in each
+# assembly). It is also the contrast with `ig_0001`, which names one.
 #
 # No `module=`: see the note on the tuples above. Passing it with two empty
 # plane lists would buy nothing and raise `ModulePlaneSelectionError`.
