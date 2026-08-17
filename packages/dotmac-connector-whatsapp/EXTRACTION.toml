@@ -9,6 +9,7 @@ owner = "Meta WhatsApp Cloud API ingress authentication and wire translation: su
 contract = "Implement dotmac-integration SPI >=1.2,<2.0 for connector key meta_whatsapp and capability messaging.receive.v1 in INGRESS mode only. The connector receives immutable request bytes plus already-materialized configuration and secret material; it returns verification evidence and normalized provider facts. It owns no rows, sessions, retries, checkpoints, product identity, conversation state, tickets, subscribers, HTTP response status, or destination decision."
 
 source_repositories = [
+  "dotmac_erp",
   "dotmac_sub",
   "dotmac_starter_mt",
 ]
@@ -46,4 +47,3 @@ shadow_and_drift = "Mirror the exact raw body and signature header into Integrat
 local_copy_retirement = "Retire only Sub's provider transport surface: webhook signature verification, provider payload traversal, provider event identity construction and provider acknowledgement. Sub retains the authoritative messaging decision, contact/conversation resolution and timeline consequences behind its typed observation port. No ERPNext or CRM connector is recreated; retired product connections stay retired."
 
 next_action = "Publish 0.1.0a1 after GitHub CI proves the fixture corpus, package boundary, wheel closure and installed SPI conformance. Exact-pin it with dotmac-integration 0.1.0a5 in dotmac_integrator, add the provider-neutral verification observer and Sub ProductPort transport-evidence/location mapping, then run the Sub shadow and callback cutover. Move status to adopted only after the assembly is deployed and Sub's direct provider surface is removed with a measured ratchet reduction."
-

@@ -176,7 +176,15 @@ reaches a customer.
 - `_signature_fallback_secret` exists for a rotation window. Carry the behaviour
   as an explicit `secrets` key, not a database lookup.
 
-## Source 2 — `dotmac_crm` (requirement input, NOT an extraction source)
+## Source 2 — `dotmac_erp` (inventory: no qualifying implementation)
+
+The pre-code inventory searched ERP's application and tests for WhatsApp and
+Meta webhook surfaces and found none. ERP therefore supplies neither source
+code nor parity behaviour for this connector. Recording the no-match matters:
+rule 24 requires both ERP and Sub to be inventoried, and an absent source is
+evidence only when the searched product is named rather than silently omitted.
+
+## Source 3 — `dotmac_crm` (requirement input, NOT an extraction source)
 
 `app/services/meta_webhooks.py` (3282 LOC) and `app/web/public/crm_webhooks.py`
 (1175 LOC). Fused with CRM domain decisions —

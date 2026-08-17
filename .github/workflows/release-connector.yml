@@ -13,6 +13,8 @@ name: Release connector
 # `.github/release-connectors.json` is the authorization boundary. The
 # workflow input is an exact choice list, but the reviewed allowlist is still
 # re-evaluated before build and again after protected-environment approval.
+# The presence of this workflow is not authorization to publish an unlisted
+# connector or to skip the protected-environment approval.
 #
 # The lane was first merged shut because publish permissions, freshness checks
 # and artifact handling are a different review from the first provider

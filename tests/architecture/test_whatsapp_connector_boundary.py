@@ -34,7 +34,10 @@ def test_connector_version_is_one_fact_on_every_public_surface() -> None:
 
 def test_connector_imports_only_the_spi_among_dotmac_packages() -> None:
     internal = {name for name in _imports() if name.startswith("dotmac_")}
-    assert internal == {"dotmac_integration"}
+    # The public package surface imports its own implementation; only imports
+    # crossing out of this distribution are subject to the sibling boundary.
+    assert "dotmac_connector_whatsapp" in internal
+    assert internal - {"dotmac_connector_whatsapp"} == {"dotmac_integration"}
 
 
 def test_ingress_normalization_has_no_network_or_persistence_dependency() -> None:
