@@ -92,6 +92,9 @@ import-linter = "^2.13"
 bandit = "^1.9.4"
 pre-commit = "^4.6.0"
 cryptography = "^45"
+# Build/test input only. The Starter assembly never hosts provider plugins;
+# dotmac_integrator pins the independently released connector at runtime.
+dotmac-connector-whatsapp = { path = "packages/dotmac-connector-whatsapp", develop = true }
 
 [tool.ruff]
 line-length = 88
@@ -142,6 +145,7 @@ module = [
     "dotmac_integration.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
+    "dotmac_connector_whatsapp.*",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
@@ -192,6 +196,7 @@ root_packages = [
     "dotmac_numbering",
     "dotmac_integration",
     "dotmac_auth_oidc",
+    "dotmac_connector_whatsapp",
 ]
 
 [[tool.importlinter.contracts]]
@@ -314,6 +319,26 @@ name = "The OIDC client must not import the kernel or the assembly"
 type = "forbidden"
 source_modules = ["dotmac_auth_oidc"]
 forbidden_modules = ["dotmac_kernel", "app"]
+
+[[tool.importlinter.contracts]]
+name = "Connector plugins depend only on the integration SPI"
+type = "forbidden"
+source_modules = ["dotmac_connector_whatsapp"]
+forbidden_modules = [
+    "app",
+    "dotmac_kernel",
+    "dotmac_ui",
+    "dotmac_template_studio",
+    "dotmac_ticketing",
+    "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
+    "dotmac_application_directory",
+    "dotmac_files",
+    "dotmac_imports",
+    "dotmac_approvals",
+    "dotmac_numbering",
+    "dotmac_auth_oidc",
+]
 
 [[tool.importlinter.contracts]]
 name = "Features are independent of each other"

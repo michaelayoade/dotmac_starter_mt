@@ -10,13 +10,14 @@ name: Release connector
 #
 # THE ALLOWLIST IS THE LOCK, NOT THIS FILE
 #
-# `.github/release-connectors.json` lists NO connectors, so every dispatch of
-# this workflow fails at the gate. That empty object is the authorization
-# boundary. The existence of this workflow is not authorization and must not be
-# read as any — merging it grants nobody the ability to publish anything.
+# `.github/release-connectors.json` is the authorization boundary. The
+# workflow input is an exact choice list, but the reviewed allowlist is still
+# re-evaluated before build and again after protected-environment approval.
+# The presence of this workflow is not authorization to publish an unlisted
+# connector or to skip the protected-environment approval.
 #
-# It is merged now, shut, because publish permissions, freshness checks and
-# artifact handling are a different review from the first provider
+# The lane was first merged shut because publish permissions, freshness checks
+# and artifact handling are a different review from the first provider
 # implementation, with different reviewers and different failure modes. Bundling
 # them means whichever is more urgent carries the other through, and the one
 # that gets waved past is the security sequence — the half nobody can see
@@ -68,13 +69,9 @@ name: Release connector
 # Releasing two in a single dispatch would read as transactional when it is not:
 # the second upload can fail with the first already public.
 #
-# `connector` is a FREE-TEXT input rather than a `choice` for one reason only: a
-# `workflow_dispatch` choice must offer at least one option, and there is
-# nothing to offer. The enforced layer was never the input anyway — it is
-# `resolve`. `tests/architecture/test_connector_release_policy.py` proves no
-# dispatch can succeed today, and requires a `choice` list matching the
-# allowlist exactly once that allowlist is non-empty, so the first entry cannot
-# land without the UI layer following it.
+# `connector` is an exact `choice`, kept byte-for-byte in sync with the
+# allowlist by `tests/architecture/test_connector_release_policy.py`. The
+# enforced layer remains `resolve`; the UI is a convenience, not the lock.
 #
 # Credential: `FORGEJO_PUBLISH_TOKEN`, a protected `registry-release`
 # environment secret whose canonical source is OpenBao
@@ -85,12 +82,11 @@ on:
   workflow_dispatch:
     inputs:
       connector:
-        description: >-
-          Which allowlisted connector plugin to publish. The lane is currently
-          SHUT — `.github/release-connectors.json` lists none, so every value
-          fails at the gate.
+        description: Which allowlisted connector plugin to publish
         required: true
-        type: string
+        type: choice
+        options:
+          - dotmac-connector-whatsapp
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
@@ -150,6 +146,12 @@ jobs:
         working-directory: ${{ steps.resolve.outputs.package_dir }}
         run: poetry build
 
+      - name: Inspect the built wheel
+        run: |
+          python scripts/release_connector.py inspect \
+            "${{ inputs.connector }}" \
+            --dist "${{ steps.resolve.outputs.package_dir }}/dist"
+
       # Release-artifact conformance: install the freshly built wheel into a
       # clean venv beside the pinned control plane and run the SHIPPED kit
       # (`assert_plugin_conforms`) against the installed bytes. The source tree
@@ -158,6 +160,7 @@ jobs:
         run: |
           python -m venv /tmp/connector-smoke
           /tmp/connector-smoke/bin/pip install --quiet \
+            packages/dotmac-kernel packages/dotmac-integration \
             "${{ steps.resolve.outputs.package_dir }}"/dist/*.whl
           python scripts/release_connector.py verify-wheel "${{ inputs.connector }}" \
             --python /tmp/connector-smoke/bin/python

@@ -526,6 +526,32 @@ the actual initial providers, then amend this section with the **exact** named
 connector distributions. There is no wildcard authorization for arbitrary
 future plugins.
 
+#### Amendment 2026-08-17 — first exact connector authorized
+
+Michael subsequently directed the external-integration programme through
+completion without further decision prompts. That direction opens the gate for
+exactly one distribution:
+
+- distribution `dotmac-connector-whatsapp`;
+- import package `dotmac_connector_whatsapp`;
+- connector key `meta_whatsapp`;
+- capability `messaging.receive.v1`;
+- INGRESS mode only;
+- SPI `>=1.2,<2.0`, with published `dotmac-integration 0.1.0a5` as the floor.
+
+This is not wildcard authorization. Any other provider or a send-side WhatsApp
+capability still requires its own product-first dossier and named release entry.
+Publication also does not authorize product consequences: Sub remains the
+message/conversation owner, and adoption requires a shadow cutover followed by
+retirement of its direct provider surface.
+
+The prerequisites the original text named are now satisfied by checked-in
+mechanisms: Integrator materializes secret references through its installed
+resolver; SPI 1.2 carries exact request bytes, provider acknowledgements and
+verification evidence; and the release lane refuses an unpublished Integration
+floor. The package, fixture conformance, allowlist row and installed-wheel proof
+land together so authorization cannot outrun evidence.
+
 #### The Integrator secret resolver is completion work
 
 The audit found that the Integrator assembly has no secret resolver, so no

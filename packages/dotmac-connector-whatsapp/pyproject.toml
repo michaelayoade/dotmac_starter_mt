@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "dotmac-connector-whatsapp"
+version = "0.1.0a1"
+description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_connector_whatsapp", from = "src" }]
+include = [
+    { path = "src/dotmac_connector_whatsapp/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-integration = ">=0.1.0a5"
+
+[tool.poetry.plugins."dotmac_integration.connectors"]
+meta_whatsapp = "dotmac_connector_whatsapp:PLUGIN"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -72,6 +72,7 @@ import pathlib
 import subprocess
 import sys
 import tomllib
+import zipfile
 from typing import Final
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -303,6 +304,14 @@ def cmd_resolve(args: argparse.Namespace) -> None:
             "A key mismatch is invisible until two connectors collide in a live "
             "registry, where the winner depends on install order."
         )
+    registered_target = registrations[registered_key]
+    expected_target = f"{entry['import_name']}:{entry['plugin_attr']}"
+    if registered_target != expected_target:
+        raise ReleaseRefused(
+            f"{args.distribution}: entry point target {registered_target!r} != "
+            f"allowlisted {expected_target!r}. The release proof must execute "
+            "the same object package discovery will load."
+        )
 
     for key in ("package_dir", "import_name", "tag_prefix", "connector_key"):
         print(f"{key}={entry[key]}")
@@ -392,6 +401,63 @@ def cmd_conformance(args: argparse.Namespace) -> None:
     print(f"{args.distribution}: static conformance OK")
 
 
+def cmd_inspect(args: argparse.Namespace) -> None:
+    """Inspect the built wheel against the connector's reviewed closure."""
+    entry = resolve(args.distribution)
+    policy = entry["wheel_contents"]
+    wheels = sorted(pathlib.Path(args.dist).glob("*.whl"))
+    if len(wheels) != 1:
+        raise ReleaseRefused(
+            f"expected exactly one wheel in {args.dist}, found {len(wheels)}"
+        )
+    wheel = wheels[0]
+    with zipfile.ZipFile(wheel) as archive:
+        names = archive.namelist()
+        metadata = next((n for n in names if n.endswith(".dist-info/METADATA")), None)
+        if metadata is None:
+            raise ReleaseRefused(f"{wheel.name}: no METADATA in the wheel")
+        meta_text = archive.read(metadata).decode("utf-8")
+
+    problems: list[str] = []
+    for required in policy["required"]:
+        if required not in names:
+            problems.append(f"missing from the wheel: {required}")
+    for name in names:
+        for prefix in policy["forbidden_prefixes"]:
+            if name.startswith(prefix):
+                problems.append(f"forbidden content: {name}")
+        if "/migrations/" in name:
+            problems.append(f"migration lineage in a stateless connector: {name}")
+
+    requires = [
+        line.split(":", 1)[1].strip()
+        for line in meta_text.splitlines()
+        if line.startswith("Requires-Dist:")
+    ]
+    allowed = {name.lower() for name in policy["allowed_requires"]}
+    for requirement in requires:
+        name = (
+            requirement.split(";")[0]
+            .split("(")[0]
+            .split("[")[0]
+            .split("<")[0]
+            .split(">")[0]
+            .split("=")[0]
+            .split("!")[0]
+            .strip()
+            .lower()
+        )
+        if name not in allowed:
+            problems.append(f"dependency outside the allowed closure: {requirement!r}")
+    problems.extend(secret_shaped(names))
+    if problems:
+        raise ReleaseRefused(
+            f"{wheel.name} fails the wheel-content policy:\n  - "
+            + "\n  - ".join(problems)
+        )
+    print(f"{wheel.name}: content policy OK ({len(names)} entries)")
+
+
 def cmd_verify_wheel(args: argparse.Namespace) -> None:
     """Executable conformance against the INSTALLED bytes.
 
@@ -410,6 +476,8 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
         import_name=entry["import_name"],
         plugin_attr=entry["plugin_attr"],
         connector_key=entry["connector_key"],
+        spi_range=entry["spi_range"],
+        version=_declared(entry)["version"],
     )
     result = subprocess.run(  # nosec B603 — fixed argv, no shell
         [args.python, "-c", program], capture_output=True, text=True, check=False
@@ -441,6 +509,11 @@ key = plugin.manifest.connector_key
 if key != "{connector_key}":
     raise SystemExit(f"manifest connector_key {{key!r}} != allowlisted "
                      "{connector_key!r}")
+if str(plugin.manifest.spi_range) != "{spi_range}":
+    raise SystemExit(f"manifest SPI range {{plugin.manifest.spi_range!s}} != "
+                     "allowlisted {spi_range!r}")
+if package.__version__ != "{version}" or plugin.manifest.version != "{version}":
+    raise SystemExit("package, manifest and allowlisted versions disagree")
 print("{import_name}: conformance OK ({connector_key})")
 """
 
@@ -457,6 +530,11 @@ def main() -> int:
     p = sub.add_parser("conformance", help="static conformance, before install")
     p.add_argument("distribution")
     p.set_defaults(func=cmd_conformance)
+
+    p = sub.add_parser("inspect", help="inspect the built wheel contents")
+    p.add_argument("distribution")
+    p.add_argument("--dist", required=True)
+    p.set_defaults(func=cmd_inspect)
 
     p = sub.add_parser("verify-wheel", help="run the SPI kit on the installed bytes")
     p.add_argument("distribution")

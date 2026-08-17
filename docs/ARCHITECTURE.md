@@ -45,6 +45,14 @@ only provider wire translation and I/O. The thin assembly adds no competing
 engine or persistence. Products therefore add no provider client or conditional
 when an external system changes.
 
+The first concrete plugin follows that split exactly:
+
+| Contract surface | Owner | Non-owner boundary |
+|---|---|---|
+| Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-whatsapp` (`meta_whatsapp`, INGRESS-only, `messaging.receive.v1`) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation or product consequence |
+| Connector installation, binding, materialized secret lifetime, receipt identity, retry/repair and verification evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no Meta header, signature, payload or acknowledgement rule |
+| Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
+
 For ticketing this means separate local installations: Sub owns operational
 customer/service tickets, ERP owns only its internal back-office tickets, and
 the vendor control plane owns vendor-support tickets. A remotely owned ticket
