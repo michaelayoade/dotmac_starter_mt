@@ -1,7 +1,7 @@
 schema_version = 1
 package = "dotmac-entitlement-allocation"
 classification = "optional-module"
-status = "audit-complete"
+status = "adopted"
 source_mode = "product-first"
 owner = "Dotmac entitlement allocation"
 # Full audit: docs/inventories/entitlement-allocation-sources.md (2026-08-12).
@@ -35,19 +35,21 @@ preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_entitlement_allocation_module.py",
   "dotmac_starter_mt:tests/test_entitlement_allocation_canaries.py",
 ]
-contract_consumers = []
-candidate_consumers = [
-  # One concrete candidate. As with the release catalogue, a second cannot exist
-  # until a second vendor or OEM control plane does: app_user is REVOKEd, and
-  # ruling C4 disqualifies a product data plane as a consumer by design.
-  "dotmac_vendor_control_plane",
+contract_consumers = ["dotmac_vendor_control_plane"]
+candidate_consumers = []
+adoption_evidence = [
+  "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
+  "dotmac_vendor_control_plane:production-deploy#32022599873",
+  "ghcr.io/michaelayoade/dotmac_vendor_control_plane@sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc",
+  "dotmac_vendor_control_plane:alembic-head:v014_allocations_authority",
+  "dotmac_vendor_control_plane:live-schema:mod_ealloc",
 ]
 inventory_evidence = [
   "docs/inventories/entitlement-allocation-sources.md",
   "docs/inventories/fleet-decomposition-matrix.md",
   "docs/superpowers/plans/2026-08-12-vendor-cp-composable-parts.md",
 ]
-first_cutover = "The vendor control plane, the qualifying source and only candidate consumer. It supplies a CapabilityCatalogueReader adapter over the target product's manifest catalogue (NOT over active_capabilities(), which describes the modules installed in the vendor CP), keeps allocations/consumer.py as the contract.activated binding, and deletes its local allocations models, service and v005 tables. That cutover is the transition to `adopted`. Kernel a45 and the public installed-lineage locator are published; a3 adds the same-named ORM coexistence required for shadow. The remaining prerequisites are an explicit contract-owned product_code, a product-scoped catalogue, and the checked data-normalisation shadow phase."
-shadow_and_drift = "Four knowing divergences to verify at cutover. FIRST: the source contract, offer, activation event and allocation carry no product identity; do not invent a default or accept the licence command's caller-supplied product. SECOND: the source did NOT validate capability codes at all — it projected whatever the contract lines carried. This module refuses undeclared codes, so a cutover must first confirm every existing allocation entry is declared by its product's manifest, or staging will begin failing on data the old writer accepted. That check belongs before the switch rather than after. THIRD: contract_ref loses its FK, so any query relying on a join to contracts becomes a lookup by reference. FOURTH: duplicate capability codes in one contract are now REFUSED rather than accepted — the source projected whatever the lines carried and would have hit the unique index. If any live contract carries a repeated code, the contract owner must normalize it before cutover, because this module deliberately does not aggregate quantities: deciding what a repeat MEANS is a commercial rule it does not own."
-local_copy_retirement = "vendor_cp.allocations.models and .service are deleted; consumer.py is rewritten to build a ContractSnapshot and call stage_allocation. v005's tables are dropped once mod_ealloc holds the rows. A boundary test must fail if vendor_cp re-acquires an Allocation model. NOTE the inverse obligation: licence issuance currently accepts a product independently of the allocation — it must be changed to read allocation_product(), or the relabelling path this module's product_code exists to close stays open on the vendor side."
-next_action = "0.1.0a1 ships the ContractSnapshot/CapabilityCatalogueReader ports, validating stage_allocation, two tables and ea lineage; a2 adds the public installed-lineage locator; a3 makes the module's ORM models coexist with the same-named extraction source during shadow. To reach `adopted`: (1) the commercial-contract owner supplies a truthful product identity and product-scoped manifest catalogue; (2) validate every live source entry and normalize duplicate capability codes; (3) the vendor CP supplies its catalogue adapter, cuts over once and retires its local copy; (4) licence issuance switches to allocation_product(). `reuse-proven` is not reachable until a second vendor or OEM control plane exists — the same structural case ADR-0006's 2026-08-12 amendment was written for. Do NOT add delivery or acknowledgement state here: that is licence issuance, a different owner, and an allocation tracking its own delivery would become a second delivery authority."
+first_cutover = "Completed greenfield on 2026-08-17 in dotmac_vendor_control_plane. Vendor exact-pins dotmac-entitlement-allocation 0.1.0a4 and migration v014_allocations_authority took ACCESS EXCLUSIVE locks, re-verified the legacy allocation tables were empty, transferred effective DML to platform_api, dropped the local tables, and refused a populated estate. allocations.consumer builds the module-owned ContractSnapshot and calls stage_allocation; licensing derives product identity only through allocation_product(). Production deploy 32022599873 runs main f8f8c3fd636e663e4a17275c19e82fc1667aa52a at immutable image sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc with mod_ealloc live and the legacy public tables absent."
+shadow_and_drift = "Resolved as a measured greenfield switch rather than a data-bearing shadow. Before Vendor had a production estate, the target was observed absent; v014 then made that premise executable by locking and refusing any non-empty legacy table in the same transaction as authority transfer. The four known divergences remain refusal behavior for future adopters: product identity is mandatory, capability codes must be manifest-declared, contract_ref is opaque rather than an FK, and duplicate codes are rejected rather than aggregated. No parity subsystem or synthesized history was built for zero rows."
+local_copy_retirement = "Complete for cutover 1. vendor_cp.allocations.models and .service are deleted, the public allocations/allocation_entries tables are dropped, the shadow-overlap waiver is removed, and a two-directional architecture ratchet refuses any reacquired local writer. allocations.consumer is assembly wiring over stage_allocation, not a second owner. Licence issuance no longer accepts a caller-selected product and reads allocation_product() before lineage, payload, audit and outbox construction."
+next_action = "Hold `adopted` until a second real vendor or OEM control plane completes its own cutover; only then may the dossier become `reuse-proven`. Keep the Vendor authority and no-local-writer ratchets green. Do not add delivery or acknowledgement state here: licence issuance owns that lifecycle."

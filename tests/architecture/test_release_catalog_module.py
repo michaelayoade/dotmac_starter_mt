@@ -319,7 +319,7 @@ def test_the_write_path_is_the_only_documented_entry_point() -> None:
     assert not {"update_artifact", "delete_artifact"} & set(package.__all__)
 
 
-def test_the_extraction_dossier_records_a_greenfield_inventory() -> None:
+def test_the_extraction_dossier_records_the_production_adopter() -> None:
     """Hard rule 24 was executed even though nothing qualified as a source. The
     dossier is the evidence that the inventory ran, not a step skipped because
     the capability looked new."""
@@ -333,11 +333,15 @@ def test_the_extraction_dossier_records_a_greenfield_inventory() -> None:
         "dotmac_sub",
         "dotmac_vendor_control_plane",
     }
-    assert dossier["contract_consumers"] == []
-    # ADR-0006's 2026-08-12 evidence ladder: zero adopters is exactly
-    # `audit-complete`, and one concrete candidate is enough to be a module.
-    assert dossier["status"] == "audit-complete"
-    assert len(dossier["candidate_consumers"]) >= 1
+    assert dossier["contract_consumers"] == ["dotmac_vendor_control_plane"]
+    assert dossier["status"] == "adopted"
+    assert dossier["candidate_consumers"] == []
+    evidence = set(dossier["adoption_evidence"])
+    assert {
+        "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
+        "dotmac_vendor_control_plane:production-deploy#32022599873",
+        "ghcr.io/michaelayoade/dotmac_vendor_control_plane@sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc",
+    } <= evidence
 
 
 def test_the_module_declares_the_platform_plane_and_owns_no_tenant_tables() -> None:

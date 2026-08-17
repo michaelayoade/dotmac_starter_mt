@@ -752,9 +752,15 @@ def test_the_extraction_dossier_records_the_single_qualifying_source() -> None:
         (PACKAGE_ROOT / "EXTRACTION.toml").read_text(encoding="utf-8")
     )
     assert dossier["source_mode"] == "product-first"
-    assert dossier["status"] == "audit-complete"
-    assert dossier["contract_consumers"] == []
-    assert "dotmac_vendor_control_plane" in dossier["candidate_consumers"]
+    assert dossier["status"] == "adopted"
+    assert dossier["contract_consumers"] == ["dotmac_vendor_control_plane"]
+    assert dossier["candidate_consumers"] == []
+    evidence = set(dossier["adoption_evidence"])
+    assert {
+        "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
+        "dotmac_vendor_control_plane:production-deploy#32022599873",
+        "dotmac_vendor_control_plane:alembic-head:v014_allocations_authority",
+    } <= evidence
     assert {"dotmac_erp", "dotmac_sub"} <= set(dossier["source_repositories"])
 
 
