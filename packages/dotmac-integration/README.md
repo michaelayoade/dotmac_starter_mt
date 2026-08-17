@@ -14,7 +14,13 @@ verified.
 
 **Released: `0.1.0a1` through `0.1.0a5`.** Releases a2–a4 implement SPI 1.1;
 a5 implements SPI 1.2. See `CHANGELOG.md`, which is the authority on what has
-and has not shipped.
+and has not shipped. `0.1.0a6` is declared but unreleased.
+
+Capability `config_schema` declarations are executable contracts, not catalog
+metadata. A revision is accepted only when it matches every capability bound to
+the installation; a new revision or changed binding invalidates activation
+until static and live connection validation succeed again. Configuration
+identity includes both content and `schema_version`.
 
 ## Where to read what
 

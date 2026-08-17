@@ -26,9 +26,10 @@ it outlives the request, the process and the credential's rotation. Prefer a4.
 tagged on 2026-08-17 from `7828697`. Its publication-ledger row was retired in
 the immediately following release-record change.
 
-`0.1.0a6` is declared and **not released**. It adds no connector or SPI
-behaviour; it makes the existing platform-audit storage dependency explicit
-and deploy-time verifiable. The declared-publication baseline holds that state
+`0.1.0a6` is declared and **not released**. It keeps SPI 1.2's executable
+protocols, makes the existing platform-audit storage dependency explicit, and
+restores installation/configuration lifecycle behaviour that drifted during
+the product-first port. The declared-publication baseline holds that state
 until the release workflow installs and verifies a6 from the private index.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
@@ -47,6 +48,30 @@ before the version was cut. They are not four releases.
 Nothing in this file is a publication claim except this section.
 
 ## 0.1.0a6 — UNRELEASED
+
+### Configuration declarations are executable contracts
+
+- Refuses a connector whose capability carries malformed Draft 2020-12 JSON
+  Schema, without rendering the connector-owned schema or chaining the
+  validator exception.
+- Validates a revision against every currently bound capability before it can
+  be written, and validates an existing revision before a new capability is
+  bound. Activation repeats the check so a row created by an older module
+  cannot bypass it.
+- Includes `schema_version` in revision identity. Equal values under different
+  schemas no longer collapse into one immutable revision.
+- Restores Sub's lifecycle semantics: a new revision starts `pending`, a
+  configuration or binding change returns the installation to `draft` and
+  disables its bindings, and rebinding the same installation/capability updates
+  the one existing binding rather than surfacing a uniqueness error.
+- Treats connector validation text as secret-bearing. Only bounded
+  lowercase-snake-case diagnostic codes may reach state or exceptions;
+  free-text detail is hidden from `repr` and never persisted or rendered by
+  the lifecycle owner. A raising connector becomes the generic
+  `connection_validation_failed` code with no chained exception.
+- Adds `jsonschema >=4.23,<5.0` as a runtime dependency. This makes the JSON
+  Schema surface already declared by SPI 1.2 real; no provider or connector
+  import enters the module.
 
 ### `platform_audit_log.v1` is declared and verified at deploy
 

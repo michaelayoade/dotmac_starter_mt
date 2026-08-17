@@ -19,8 +19,10 @@ from __future__ import annotations
 import pytest
 from dotmac_integration import (
     CapabilityBinding,
+    CapabilityDeclaration,
     ConnectorConfigRevision,
     ConnectorInstallation,
+    ConnectorManifest,
     DeliveryAttempt,
     ExecutionPolicy,
     LifecycleError,
@@ -77,6 +79,28 @@ def registry():
     return fake_registry()
 
 
+def _schema_registry():
+    manifest = ConnectorManifest(
+        connector_key="conformance_fake",
+        version="1.0.0",
+        spi_range=fake_manifest().spi_range,
+        capabilities=(
+            CapabilityDeclaration(
+                capability_id=FAKE_CAPABILITY,
+                config_schema={
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["region"],
+                    "properties": {
+                        "region": {"type": "string", "minLength": 1},
+                    },
+                },
+            ),
+        ),
+    )
+    return fake_registry(plugins=[fake_plugin(manifest_=manifest)])
+
+
 # ── Lifecycle (test_integration_installations.py) ───────────────────────────
 
 
@@ -99,8 +123,12 @@ def test_an_identical_configuration_does_not_mint_a_second_revision(
     installation = create_draft(
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
-    first, new_first = put_config_revision(db, installation, config={"a": 1})
-    second, new_second = put_config_revision(db, installation, config={"a": 1})
+    first, new_first = put_config_revision(
+        db, installation, registry=registry, config={"a": 1}
+    )
+    second, new_second = put_config_revision(
+        db, installation, registry=registry, config={"a": 1}
+    )
 
     assert new_first and not new_second
     assert first.id == second.id
@@ -111,12 +139,122 @@ def test_a_changed_configuration_mints_the_next_revision(db: Session, registry) 
     installation = create_draft(
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
-    put_config_revision(db, installation, config={"a": 1})
-    second, is_new = put_config_revision(db, installation, config={"a": 2})
+    put_config_revision(db, installation, registry=registry, config={"a": 1})
+    second, is_new = put_config_revision(
+        db, installation, registry=registry, config={"a": 2}
+    )
 
     assert is_new
     assert second.revision == 2
     assert installation.current_config_revision_id == second.id
+
+
+def test_schema_version_is_part_of_configuration_identity(
+    db: Session, registry
+) -> None:
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    first, _ = put_config_revision(
+        db, installation, registry=registry, config={"a": 1}, schema_version="1"
+    )
+    second, is_new = put_config_revision(
+        db, installation, registry=registry, config={"a": 1}, schema_version="2"
+    )
+
+    assert is_new
+    assert first.config_digest != second.config_digest
+
+
+def test_bound_capability_schema_is_enforced_before_a_revision_is_written(
+    db: Session,
+) -> None:
+    registry = _schema_registry()
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    add_binding(db, installation, registry=registry, capability_id=FAKE_CAPABILITY)
+
+    with pytest.raises(LifecycleError, match="config_required"):
+        put_config_revision(db, installation, registry=registry, config={})
+
+    assert installation.current_config_revision_id is None
+
+
+def test_binding_validates_an_existing_revision_before_it_mutates(
+    db: Session,
+) -> None:
+    registry = _schema_registry()
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    revision, _ = put_config_revision(
+        db,
+        installation,
+        registry=registry,
+        config={"must-never-reach-the-error": True},
+    )
+
+    with pytest.raises(LifecycleError) as refused:
+        add_binding(db, installation, registry=registry, capability_id=FAKE_CAPABILITY)
+
+    assert "must-never-reach-the-error" not in str(refused.value)
+    assert revision.validation_status == "pending"
+    assert db.query(CapabilityBinding).count() == 0
+
+
+def test_a_new_configuration_invalidates_activation_until_revalidated(
+    db: Session, registry
+) -> None:
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    binding = add_binding(
+        db, installation, registry=registry, capability_id=FAKE_CAPABILITY
+    )
+    first, _ = put_config_revision(db, installation, registry=registry, config={"a": 1})
+    enable(db, installation, registry=registry)
+    set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
+    assert first.validation_status == "valid"
+
+    second, _ = put_config_revision(
+        db, installation, registry=registry, config={"a": 2}
+    )
+
+    assert second.validation_status == "pending"
+    assert installation.state == "draft"
+    assert installation.state_reason == "configuration_changed"
+    assert installation.validated_at is None
+    assert binding.state == "disabled"
+    assert binding.enabled_at is None
+
+
+def test_rebinding_is_idempotent_and_invalidates_activation(
+    db: Session, registry
+) -> None:
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    first = add_binding(
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        scope={"account": "one"},
+    )
+    second = add_binding(
+        db,
+        installation,
+        registry=registry,
+        capability_id=FAKE_CAPABILITY,
+        scope={"account": "two"},
+    )
+
+    assert second.id == first.id
+    assert second.scope_json == {"account": "two"}
+    assert second.state == "disabled"
+    assert installation.state == "draft"
+    assert installation.state_reason == "capability_binding_changed"
 
 
 def test_a_literal_secret_never_reaches_a_revision(db: Session, registry) -> None:
@@ -126,7 +264,12 @@ def test_a_literal_secret_never_reaches_a_revision(db: Session, registry) -> Non
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
     with pytest.raises(SecretValueError):
-        put_config_revision(db, installation, config={"auth": {"api_key": "sk_live_x"}})
+        put_config_revision(
+            db,
+            installation,
+            registry=registry,
+            config={"auth": {"api_key": "sk_live_x"}},
+        )
 
 
 def test_a_binding_starts_disabled(db: Session, registry) -> None:
@@ -167,19 +310,48 @@ def test_enablement_is_gated_on_a_live_connection_check(db: Session) -> None:
     installation = create_draft(
         db, registry=unhealthy, connector_key="conformance_fake", name="primary"
     )
-    put_config_revision(db, installation, config={"a": 1})
+    put_config_revision(db, installation, registry=unhealthy, config={"a": 1})
 
     with pytest.raises(LifecycleError, match="connection validation failed"):
         enable(db, installation, registry=unhealthy)
     assert installation.state == "validating"
     assert "unreachable" in installation.state_reason
+    revision = db.get(ConnectorConfigRevision, installation.current_config_revision_id)
+    assert revision is not None
+    assert revision.validation_status == "invalid"
+    assert revision.validation_errors == ["unreachable"]
+    assert installation.state_reason == "unreachable"
+    assert "fake is set unhealthy" not in installation.state_reason
+
+
+def test_a_raising_connection_check_cannot_render_connector_material(
+    db: Session,
+) -> None:
+    material = "must-never-reach-state-or-exception"
+    registry = fake_registry(
+        plugins=[fake_plugin(validation_raises=RuntimeError(material))]
+    )
+    installation = create_draft(
+        db, registry=registry, connector_key="conformance_fake", name="primary"
+    )
+    put_config_revision(db, installation, registry=registry, config={"a": 1})
+
+    with pytest.raises(LifecycleError) as refused:
+        enable(db, installation, registry=registry)
+
+    assert material not in str(refused.value)
+    assert refused.value.__cause__ is None
+    assert material not in (installation.state_reason or "")
+    revision = db.get(ConnectorConfigRevision, installation.current_config_revision_id)
+    assert revision is not None
+    assert revision.validation_errors == ["connection_validation_failed"]
 
 
 def test_a_healthy_connection_enables(db: Session, registry) -> None:
     installation = create_draft(
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
-    put_config_revision(db, installation, config={"a": 1})
+    put_config_revision(db, installation, registry=registry, config={"a": 1})
     enable(db, installation, registry=registry)
 
     assert installation.state == "enabled"
@@ -205,7 +377,9 @@ def test_retiring_keeps_the_configuration_history(db: Session, registry) -> None
     installation = create_draft(
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
-    revision, _ = put_config_revision(db, installation, config={"a": 1})
+    revision, _ = put_config_revision(
+        db, installation, registry=registry, config={"a": 1}
+    )
     retire(db, installation, reason="replaced")
 
     assert installation.state == "retired"
@@ -220,7 +394,7 @@ def test_a_retired_installation_takes_no_more_configuration(
     )
     retire(db, installation, reason="done")
     with pytest.raises(LifecycleError, match="retired"):
-        put_config_revision(db, installation, config={"a": 1})
+        put_config_revision(db, installation, registry=registry, config={"a": 1})
 
 
 # ── Manifest adoption (test_integration_manifest_adoption.py) ───────────────
@@ -309,13 +483,17 @@ def _enabled(db: Session, registry) -> tuple:
     installation = create_draft(
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
-    put_config_revision(
-        db, installation, config={"a": 1}, secret_refs={"token": "bao://kv/x#t"}
-    )
-    enable(db, installation, registry=registry)
     binding = add_binding(
         db, installation, registry=registry, capability_id=FAKE_CAPABILITY
     )
+    put_config_revision(
+        db,
+        installation,
+        registry=registry,
+        config={"a": 1},
+        secret_refs={"token": "bao://kv/x#t"},
+    )
+    enable(db, installation, registry=registry)
     set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
     return installation, binding
 
@@ -470,7 +648,7 @@ def test_the_service_surface_the_routes_would_call_is_complete(
     installation = create_draft(
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
-    put_config_revision(db, installation, config={"a": 1})
+    put_config_revision(db, installation, registry=registry, config={"a": 1})
     binding = add_binding(
         db, installation, registry=registry, capability_id=FAKE_CAPABILITY
     )

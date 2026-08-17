@@ -376,6 +376,7 @@ def build(
     put_config_revision(
         db,
         installation,
+        registry=registry,
         config={"variant": "a"},
         secret_refs={"signing": "bao://kv/signing"},
     )
