@@ -138,7 +138,6 @@ REQUIRED_LIST_FIELDS = {
     "source_repositories",
     "source_paths",
     "preserved_tests",
-    "candidate_consumers",
     "inventory_evidence",
 }
 
@@ -384,16 +383,25 @@ def _validate_dossier(
             "source_repositories must show both ERP and Sub were inventoried"
         )
 
-    # A dossier with no named candidate is a package built for nobody, which is
-    # the speculative extraction ADR-0006 section 5 exists to stop.  ONE
-    # concrete candidate is the smallest claim that still carries evidence;
-    # `reuse-proven` is where two become mandatory, and that is checked below
-    # against CONTRACT consumers, which are the real ones.
-    candidate_consumers = dossier.get("candidate_consumers")
-    if isinstance(candidate_consumers, list) and not candidate_consumers:
-        problems.append("candidate_consumers must name at least one concrete consumer")
-
     status = dossier.get("status")
+
+    # Before adoption, a dossier with no named candidate is a package built for
+    # nobody, which is the speculative extraction ADR-0006 section 5 exists to
+    # stop. After adoption, the real contract consumer is the evidence; forcing
+    # a non-empty candidate list would require inventing future demand or
+    # relabelling the existing consumer as one it cannot truthfully be.
+    candidate_consumers = dossier.get("candidate_consumers")
+    if not isinstance(candidate_consumers, list) or not all(
+        isinstance(consumer, str) and consumer.strip()
+        for consumer in candidate_consumers
+    ):
+        problems.append("candidate_consumers must be a string list")
+    elif status == "audit-complete" and not candidate_consumers:
+        problems.append(
+            "candidate_consumers must name at least one concrete consumer "
+            "before adoption"
+        )
+
     expected_debt = PRE_RULE_DEBT.get(directory_name)
     consumers = dossier.get("contract_consumers")
     consumer_count = len(set(consumers)) if isinstance(consumers, list) else 0
@@ -738,22 +746,40 @@ def test_audit_complete_cannot_be_claimed_without_the_inventory() -> None:
         )
 
 
-def test_a_module_must_name_at_least_one_candidate_consumer() -> None:
-    """A package built for nobody is the speculative extraction §5 forbids.
+def test_an_unadopted_module_must_name_at_least_one_candidate_consumer() -> None:
+    """An unadopted package built for nobody is the speculative extraction §5 forbids.
 
     One CONCRETE candidate — an assembly that exists and will consume it — is
-    the smallest claim that still carries evidence.  Zero is a package with no
-    reason to be a package.
+    the smallest claim that still carries evidence before adoption. Zero at
+    this state is a package with no reason to be a package.
     """
     dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
     dossier["candidate_consumers"] = []
 
-    with pytest.raises(ExtractionDossierError, match="at least one concrete"):
+    with pytest.raises(ExtractionDossierError, match="before adoption"):
         _validate_dossier(
             dossier,
             directory_name="dotmac-ticketing",
             distribution_name="dotmac-ticketing",
         )
+
+
+def test_an_adopted_module_needs_no_invented_future_candidate() -> None:
+    """The first real consumer replaces candidate demand with adoption evidence."""
+    dossier = _load_toml(PACKAGES_DIR / "dotmac-ticketing/EXTRACTION.toml")
+    dossier.update(
+        {
+            "status": "adopted",
+            "contract_consumers": ["dotmac_vendor_control_plane"],
+            "candidate_consumers": [],
+        }
+    )
+
+    _validate_dossier(
+        dossier,
+        directory_name="dotmac-ticketing",
+        distribution_name="dotmac-ticketing",
+    )
 
 
 def test_one_candidate_consumer_is_accepted() -> None:

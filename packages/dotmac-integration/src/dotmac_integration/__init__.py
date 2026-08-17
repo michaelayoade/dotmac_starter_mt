@@ -190,6 +190,7 @@ from dotmac_integration.ingress import (
     ReceiptWriteRaced,
     SecretsUnavailable,
     SignatureRejected,
+    VerificationObserver,
     answer_challenge,
     challenge_response,
     prepare_ingress,
@@ -328,12 +329,13 @@ from dotmac_integration.spi import (
     SpiIncompatibleError,
     SpiRange,
     SpiVersion,
+    VerificationResult,
     accepts_manifest_digest,
     require_mode,
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a4"
+__version__ = "0.1.0a5"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -360,6 +362,8 @@ __all__ = [
     "IngressRefused",
     "IngressRequest",
     "InvalidAcknowledgementError",
+    "VerificationObserver",
+    "VerificationResult",
     "ManifestPinUnhonoured",
     "ModeNotAvailable",
     "NotAChallenge",
@@ -475,7 +479,7 @@ __all__ = [
     "ConnectorPlugin",
     "ConnectorMode",
     "CapabilityHandler",
-    # ── SPI 1.1: the mode contract and the ingress types ────────────────────
+    # ── SPI 1.x: mode contracts, ingress types and verification evidence ───
     "MODE_PROTOCOLS",
     "Acknowledgement",
     "DeliveryPlugin",
