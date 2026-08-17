@@ -360,11 +360,12 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: Both monitored lineages currently have no editable migration. The empty
-#: sets are load-bearing: the next file must enter here before it can ship, and
-#: a released file cannot be moved back into this set.
+#: The published a6 tags leave both monitored lineages with no editable files;
+#: this product-port slice introduces `ig_0009` as the one new migration. The
+#: empty allocation set remains load-bearing: a released file cannot move back
+#: into it, and the next allocation migration must enter it before release.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-integration": frozenset(),
+    "dotmac-integration": frozenset({"ig_0009_product_port_descriptors.py"}),
     "dotmac-entitlement-allocation": frozenset(),
 }
 
