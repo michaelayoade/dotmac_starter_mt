@@ -67,11 +67,6 @@
       "reason": "AWAITING FIRST RELEASE. The implementation, SPI 1.2 conformance corpus and connector release allowlist row land together. Delete this row only after release-connector.yml installs 0.1.0a1 from the private index, proves the published wheel conforms, and tags dotmac-connector-whatsapp-v0.1.0a1. Publication does not claim provider operation or Sub adoption; those require the Integrator pin and shadow cutover.",
       "state": "never-published"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a68",
-      "state": "declared-unpublished",
-      "reason": "AWAITING REVIEW AND DISPATCH. a68 names and verifies platform_audit_log.v1 and hardens public.platform_audit_events to an append-only online-role posture. The consumer declaration slice is deliberately sequenced after this artifact is published, because module floors may name only resolvable releases. Remove this row only in the change that verifies and tags dotmac-kernel-v0.1.0a68."
-    },
     "dotmac-entitlement-allocation": {
       "declared": "0.1.0a5",
       "state": "declared-unpublished",
