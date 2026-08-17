@@ -63,9 +63,12 @@ module-catalog: ## Regenerate the composable-module discovery catalogue
 	poetry run python scripts/module_catalog.py
 module-catalog-check: ## Fail if the committed module catalogue is stale
 	poetry run python scripts/module_catalog.py --check
+poetry-lock-check: ## Exact Poetry pin + committed root lock (never regenerates)
+	python3 scripts/check_poetry_toolchain.py --active
+	poetry check --lock
 format-check: ## Formatting is a gate, not a recipe line — CI runs it as its own job
 	poetry run ruff format --check .
-check: lint lint-imports type-check security migration-gate ui-check module-catalog-check format-check ## Lint + types + security + migration composition + generated catalogues + design-system assets
+check: poetry-lock-check lint lint-imports type-check security migration-gate ui-check module-catalog-check format-check ## Lock + lint + types + security + migration composition + generated catalogues + design-system assets
 
 ##@ Testing
 test-unit: ## Fast SQLite unit + architecture tests
@@ -137,7 +140,7 @@ bump-version: ## Bump semver: make bump-version part=patch|minor|major
 deploy: ## Deploy tag: make deploy TAG=sha-abc123
 	IMAGE_NAME=$(IMAGE_NAME) APP_PORT=$(APP_PORT) ./scripts/deploy.sh $(TAG)
 
-.PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts check test test-unit \
+.PHONY: help lint lint-imports format type-check security migration-gate fleet-matrix fleet-facts poetry-lock-check check test test-unit \
 	test-integration test-cov test-db-up test-db-down migrate migrate-new dev \
 	css-build css-watch ui-build ui-check palette-baseline connector-baseline connector-ratchet \
 	publication-check publication-baseline module-catalog module-catalog-check \

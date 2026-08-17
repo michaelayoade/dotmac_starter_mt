@@ -24,6 +24,7 @@ jobs:
         # design-system assets and formatting were unenforced on every PR.
         target:
           [
+            poetry-lock-check,
             lint,
             lint-imports,
             type-check,

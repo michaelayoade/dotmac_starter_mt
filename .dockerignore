@@ -9,6 +9,11 @@ __pycache__
 .import_linter_cache
 *.md
 .superpowers
-.github
+# The build needs exactly one generated Poetry bootstrap. Keep every other
+# workflow/action file out of the context, then reopen only this path.
+.github/*
+!.github/bootstrap/
+.github/bootstrap/*
+!.github/bootstrap/poetry-requirements-py312.txt
 node_modules
 packages/dotmac-kernel/src/dotmac_kernel/static/css/main.css

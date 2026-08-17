@@ -21,7 +21,11 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-POETRY = sys.argv[1] if len(sys.argv) > 1 else "poetry==2.4.1"
+if len(sys.argv) != 2 or not sys.argv[1].startswith("poetry=="):
+    raise SystemExit(
+        "usage: generate.py poetry==X.Y.Z (normally invoked by regenerate.sh)"
+    )
+POETRY = sys.argv[1]
 
 with tempfile.TemporaryDirectory() as tmp:
     report = Path(tmp) / "report.json"

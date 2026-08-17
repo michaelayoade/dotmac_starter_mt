@@ -49,6 +49,9 @@ runs:
           echo "::error::no hash-locked Poetry bootstrap for Python ${py} (looked for ${req}). Generate one with .github/bootstrap/regenerate.sh — do NOT reuse another interpreter's lock, the dependency set differs."
           exit 1
         fi
+        # pyproject.toml owns the exact Poetry version. Reject a stale
+        # generated bootstrap before it gets a chance to install anything.
+        python scripts/check_poetry_toolchain.py --bootstrap "$req"
         echo "req=${req}" >> "$GITHUB_OUTPUT"
         echo "using ${req}"
 
@@ -101,6 +104,8 @@ runs:
             resolved="$("$venv/bin/poetry" --version)"
             echo "${venv}/bin" >> "$GITHUB_PATH"
             echo "installed ${resolved} at ${venv}/bin/poetry"
+            PATH="${venv}/bin:${PATH}" \
+              python scripts/check_poetry_toolchain.py --bootstrap "$req" --active
             "$venv/bin/poetry" config virtualenvs.create true
             "$venv/bin/poetry" config virtualenvs.in-project true
             exit 0

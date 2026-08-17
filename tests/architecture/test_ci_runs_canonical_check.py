@@ -120,13 +120,16 @@ def test_the_parsers_find_something() -> None:
     make_targets = _check_prerequisites(MAKEFILE.read_text(encoding="utf-8"))
     ci_targets = _quality_matrix_targets(CI_WORKFLOW.read_text(encoding="utf-8"))
 
-    assert len(make_targets) >= 6, make_targets
-    assert len(ci_targets) >= 6, ci_targets
+    assert len(make_targets) >= 9, make_targets
+    assert len(ci_targets) >= 9, ci_targets
     assert "ui-check" in make_targets and "ui-check" in ci_targets, (
         "the specific target whose absence motivated this test — if it is gone "
         "from either side, the drift this guards against has recurred"
     )
     assert "format-check" in make_targets and "format-check" in ci_targets
+    assert (
+        "poetry-lock-check" in make_targets and "poetry-lock-check" in ci_targets
+    ), "the exact Poetry + committed-lock gate is absent from an acceptance surface"
 
 
 @pytest.mark.parametrize(

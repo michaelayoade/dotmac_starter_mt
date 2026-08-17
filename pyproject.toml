@@ -5,6 +5,11 @@ description = "Multi-tenant FastAPI starter"
 authors = ["DotMac"]
 readme = "README.md"
 package-mode = false
+# Build-tool version is part of the dependency contract: Poetry versions can
+# compute different content hashes and normalise the same constraints
+# differently. CI, Docker and bootstrap generation all derive from this exact
+# native Poetry constraint; ranges are rejected by the architecture gate.
+requires-poetry = "2.4.1"
 
 [tool.poetry.dependencies]
 python = ">=3.12,<3.14"
