@@ -250,6 +250,7 @@ class ReceiptClaim:
     attempt: int
     leased_until: datetime
     destination: TrustedDestination
+    provider_event_id: str
     event_type: str
     observation: Mapping[str, object]
     correlation_id: str
@@ -282,6 +283,7 @@ class ProductRequest:
     request_fingerprint: str
     correlation_id: str
     receipt_id: UUID
+    provider_event_id: str
     event_type: str
     observation: Mapping[str, object]
 
@@ -426,6 +428,7 @@ def idempotency_key_for(*, receipt_id: UUID, destination: TrustedDestination) ->
 def request_fingerprint_for(
     *,
     destination: TrustedDestination,
+    provider_event_id: str,
     event_type: str,
     observation: Mapping[str, object],
 ) -> str:
@@ -448,6 +451,7 @@ def request_fingerprint_for(
                 "ref": destination.scope.ref,
             },
             "contract_version": destination.contract_version,
+            "provider_event_id": provider_event_id,
             "event_type": event_type,
             "observation": observation,
         }
@@ -484,6 +488,7 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
     """
     fingerprint = request_fingerprint_for(
         destination=claim.destination,
+        provider_event_id=claim.provider_event_id,
         event_type=claim.event_type,
         observation=claim.observation,
     )
@@ -497,6 +502,7 @@ def build_product_request(claim: ReceiptClaim) -> ProductRequest:
         request_fingerprint=fingerprint,
         correlation_id=claim.correlation_id,
         receipt_id=claim.receipt_id,
+        provider_event_id=claim.provider_event_id,
         event_type=claim.event_type,
         observation=claim.observation,
     )
@@ -613,8 +619,8 @@ def claim_statement(
         f"AND state NOT IN ({_TERMINAL_SQL}) "
         f"AND (leased_until IS NULL OR leased_until < {clock}) "
         f"AND (next_attempt_at IS NULL OR next_attempt_at <= {clock}) "
-        "RETURNING attempt_count, leased_until, event_type, payload_json, "
-        "correlation_id, delivery_fingerprint, capability_binding_id"
+        "RETURNING attempt_count, leased_until, provider_event_id, event_type, "
+        "payload_json, correlation_id, delivery_fingerprint, capability_binding_id"
     )
 
 
@@ -732,6 +738,7 @@ class ReceiptClaims:
             attempt=row.attempt_count,
             leased_until=row.leased_until,
             destination=destination,
+            provider_event_id=row.provider_event_id,
             event_type=row.event_type,
             observation=row.payload_json or {},
             # A receipt with no correlation id of its own is still traceable by

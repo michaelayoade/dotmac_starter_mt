@@ -30,6 +30,7 @@ import inspect
 import textwrap
 import uuid
 from collections.abc import Iterator, Mapping
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -48,11 +49,15 @@ from dotmac_integration import (
     DestinationProfile,
     DestinationProfileMissing,
     LocalScope,
+    ProductPortDescriptorInvalid,
+    ProductPortDescriptorSnapshot,
     UntrustedDestination,
     corroborate,
     destination_client,
     establish_destination,
     install_destination_profiles,
+    product_port_descriptor_digest,
+    reconcile_product_port_descriptor,
     require_corroborated,
     require_profile,
     resolve_destination,
@@ -114,6 +119,28 @@ class _RecordingClient:
 
 #: (application, scope_kind, scope_ref) — the ordinary, fully-routed case.
 _DEFAULT_DESTINATION = (OWNER_APP, "inbox", "support")
+
+
+def _descriptor(**overrides: object) -> ProductPortDescriptorSnapshot:
+    base = ProductPortDescriptorSnapshot(
+        schema_version="dotmac.io/product-port-descriptor/v1",
+        application=OWNER_APP,
+        owner_module="messages",
+        capability_id=CAPABILITY,
+        capability_summary="Synthetic inbound observations",
+        contract_version=1,
+        destination_binding_id=uuid.UUID(int=99),
+        delivery_path="/api/v1/integration/observations/remote-binding",
+        mirror_path="/api/v1/integration/observations/remote-binding/mirror",
+        destination_scope=LocalScope(kind="inbox", ref="support"),
+        activation_state="configured_disabled",
+        source_revision="a" * 64,
+        descriptor_digest="0" * 64,
+    )
+    candidate = replace(base, **overrides)
+    return replace(
+        candidate, descriptor_digest=product_port_descriptor_digest(candidate)
+    )
 
 
 def _bound(
@@ -207,6 +234,83 @@ def test_a_binding_names_the_application_the_scope_and_the_contract_version(
     assert destination.contract_version == 1
     # Provenance: WHICH immutable row established this destination.
     assert destination.destination_revision_id is not None
+
+
+def test_product_descriptor_reconciler_is_idempotent_and_resolvable(
+    db: Session,
+) -> None:
+    binding = _bound(db, destination=None)
+    descriptor = _descriptor()
+
+    first = reconcile_product_port_descriptor(
+        db,
+        capability_binding_id=binding.id,
+        descriptor=descriptor,
+        registry=REGISTRY,
+        reconciled_by="platform_admin:test",
+    )
+    second = reconcile_product_port_descriptor(
+        db,
+        capability_binding_id=binding.id,
+        descriptor=descriptor,
+        registry=REGISTRY,
+        reconciled_by="platform_admin:test",
+    )
+
+    assert first == second
+    assert first.product_port == descriptor
+    assert db.query(CapabilityDestinationRevision).count() == 1
+    assert (
+        resolve_destination(
+            db, capability_binding_id=binding.id, registry=REGISTRY
+        ).product_port
+        == descriptor
+    )
+
+
+def test_descriptor_drift_appends_a_new_route_revision(db: Session) -> None:
+    binding = _bound(db, destination=None)
+    first = _descriptor()
+    reconcile_product_port_descriptor(
+        db, capability_binding_id=binding.id, descriptor=first, registry=REGISTRY
+    )
+    changed = _descriptor(activation_state="enabled", source_revision="b" * 64)
+
+    current = reconcile_product_port_descriptor(
+        db, capability_binding_id=binding.id, descriptor=changed, registry=REGISTRY
+    )
+
+    assert current.product_port == changed
+    rows = (
+        db.query(CapabilityDestinationRevision)
+        .order_by(CapabilityDestinationRevision.revision)
+        .all()
+    )
+    assert [row.revision for row in rows] == [1, 2]
+    assert current.destination_revision_id == rows[-1].id
+
+
+def test_a_dishonest_or_cross_origin_descriptor_is_refused(db: Session) -> None:
+    binding = _bound(db, destination=None)
+    dishonest = replace(_descriptor(), descriptor_digest="0" * 64)
+    external = _descriptor(delivery_path="https://attacker.example/write")
+
+    with pytest.raises(ProductPortDescriptorInvalid):
+        reconcile_product_port_descriptor(
+            db,
+            capability_binding_id=binding.id,
+            descriptor=dishonest,
+            registry=REGISTRY,
+        )
+    with pytest.raises(ProductPortDescriptorInvalid):
+        reconcile_product_port_descriptor(
+            db,
+            capability_binding_id=binding.id,
+            descriptor=external,
+            registry=REGISTRY,
+        )
+
+    assert db.query(CapabilityDestinationRevision).count() == 0
 
 
 def test_the_contract_version_comes_from_the_id_so_it_cannot_disagree(
