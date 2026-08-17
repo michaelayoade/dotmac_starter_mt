@@ -12,9 +12,9 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a4`.** Releases a2–a4 implement SPI 1.1.
-This branch declares unreleased `0.1.0a5` and SPI 1.2. See `CHANGELOG.md`, which
-is the authority on what has and has not shipped.
+**Released: `0.1.0a1` through `0.1.0a5`.** Releases a2–a4 implement SPI 1.1;
+a5 implements SPI 1.2. See `CHANGELOG.md`, which is the authority on what has
+and has not shipped.
 
 ## Where to read what
 
