@@ -2,21 +2,20 @@
 
 ## Release state — read this before pinning
 
-**Four versions have been released:** `0.1.0a1`, `0.1.0a2`, `0.1.0a3` and
-`0.1.0a4`, tagged `dotmac-entitlement-allocation-v0.1.0a1` … `-v0.1.0a4` from
-`847ce0b`, `5ded880`, `c371b0f` and `67bdfb8`. **Pin `0.1.0a4`.**
+**Five versions have been released:** `0.1.0a1` through `0.1.0a4`, then
+`0.1.0a6`. **Pin `0.1.0a6`.** The a6 release workflow built exact protected
+main `7e05430`, published the inspected bytes, installed the wheel back from
+the private index, registered its manifest against kernel a68, and only then
+tagged `dotmac-entitlement-allocation-v0.1.0a6` (run 32039171167).
 
-`0.1.0a6` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
-is **not released**: no tag, nothing on the index. It is recorded in
-`docs/inventories/declared-publication-baseline.json` as declared-unpublished.
-It satisfies Michael's standing condition of 2026-08-16: the next published
-version declares BOTH the idempotency ledger and platform audit dependencies.
 `0.1.0a5` was deliberately never published because it carried only the first
-half of that repair.
+half of the persisted-dependency repair. a6 satisfies Michael's standing
+condition of 2026-08-16 by declaring BOTH the idempotency ledger and platform
+audit dependencies.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a6 — UNRELEASED
+## 0.1.0a6 — released 2026-08-17
 
 ### `platform_audit_log.v1` is declared and verified at deploy
 
