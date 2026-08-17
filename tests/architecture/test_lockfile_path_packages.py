@@ -50,6 +50,52 @@ def _package_pyproject(name: str) -> dict:
 LOCKED = _locked_path_packages()
 
 
+def _normalise_name(name: str) -> str:
+    return name.lower().replace("_", "-")
+
+
+def _declared_runtime_dependencies(pyproject: dict) -> dict[str, object]:
+    """The non-optional dependency contract Poetry records in the lock.
+
+    Table-form requirements must not disappear merely because they are not a
+    string.  Optional dependencies are represented through the lock entry's
+    extras and are deliberately outside this map.
+    """
+    declared = pyproject["tool"]["poetry"].get("dependencies", {})
+    result: dict[str, object] = {}
+    for name, constraint in declared.items():
+        if name == "python":
+            continue
+        if isinstance(constraint, str):
+            result[_normalise_name(name)] = constraint
+            continue
+        if not isinstance(constraint, dict):
+            raise AssertionError(f"unsupported dependency declaration for {name}")
+        if constraint.get("optional", False):
+            continue
+        unsupported = set(constraint) - {"version", "extras", "markers", "optional"}
+        assert not unsupported, (
+            f"dependency {name} uses unnormalised keys {sorted(unsupported)}; "
+            "extend the lock guard before relying on this declaration"
+        )
+        normalised = {
+            key: constraint[key]
+            for key in ("version", "extras", "markers")
+            if key in constraint
+        }
+        result[_normalise_name(name)] = (
+            normalised["version"] if set(normalised) == {"version"} else normalised
+        )
+    return result
+
+
+def _locked_runtime_dependencies(package: dict) -> dict[str, object]:
+    return {
+        _normalise_name(name): constraint
+        for name, constraint in package.get("dependencies", {}).items()
+    }
+
+
 def test_every_workspace_package_is_locked() -> None:
     """A package that is not locked is a package CI never installs from source,
     so nothing here would notice it drifting at all."""
@@ -81,18 +127,34 @@ def test_locked_dependency_constraints_match_the_package(name: str) -> None:
     the moment anything reads it, while a floor that is too low silently
     permits an incompatible kernel to resolve.
     """
-    declared = _package_pyproject(name)["tool"]["poetry"].get("dependencies", {})
-    locked = LOCKED[name].get("dependencies", {})
-    for dependency, constraint in declared.items():
-        if dependency == "python" or not isinstance(constraint, str):
-            continue
-        if dependency not in locked:
-            continue
-        assert locked[dependency] == constraint, (
-            f"poetry.lock has {name} requiring {dependency} "
-            f"{locked[dependency]!r}, but packages/{name}/pyproject.toml says "
-            f"{constraint!r} — re-run `poetry lock` with the CI-pinned Poetry"
-        )
+    declared = _declared_runtime_dependencies(_package_pyproject(name))
+    locked = _locked_runtime_dependencies(LOCKED[name])
+    assert locked == declared, (
+        f"poetry.lock has {name} runtime dependencies {locked!r}, but "
+        f"packages/{name}/pyproject.toml declares {declared!r} — re-run "
+        "`poetry lock` with the exact requires-poetry version"
+    )
+
+
+@pytest.mark.parametrize(
+    ("declared", "locked"),
+    [
+        ({"python": ">=3.12", "httpx": "^0.28"}, {}),
+        ({"python": ">=3.12"}, {"httpx": "^0.28"}),
+        (
+            {"python": ">=3.12", "pyjwt": {"version": ">=2", "extras": ["crypto"]}},
+            {"pyjwt": {"version": ">=2"}},
+        ),
+    ],
+)
+def test_bidirectional_guard_detects_planted_path_package_drift(
+    declared: dict[str, object], locked: dict[str, object]
+) -> None:
+    pyproject = {"tool": {"poetry": {"dependencies": declared}}}
+    lock_entry = {"dependencies": locked}
+    assert _declared_runtime_dependencies(pyproject) != _locked_runtime_dependencies(
+        lock_entry
+    )
 
 
 def test_the_kernel_lock_entry_matches_its_own_version() -> None:

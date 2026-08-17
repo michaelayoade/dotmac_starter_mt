@@ -344,6 +344,22 @@ specifics) points here and must never fork these rules.
     (ADR-0024; import-linter contracts `Modules must not import the assembly`
     and `Modules are independent of each other`; ADR-0010/0014)
 
+29. **Poetry is an exact build input, not a workstation preference.**
+    `[tool.poetry].requires-poetry` is the ONE version source; CI's hash-locked
+    bootstrap, the lockfile generator stamp and the production Docker build
+    must equal it exactly. A local command running another Poetry version fails
+    before it may inspect or rewrite the lock. Validate the COMMITTED lock with
+    `poetry check --lock`/`poetry install`; never run `poetry lock` inside a
+    validation lane, because that proves repaired state rather than the commit.
+    A dependency change and its lock change are one commit. Use ordinary
+    `poetry lock` with the pinned tool and review the diff; `--regenerate` is
+    reserved for an explicit dependency-upgrade slice. Root-lock validation is
+    supplemented by the bidirectional path-package guard because Poetry does
+    not re-read nested package metadata for `poetry check --lock`.
+    (`scripts/check_poetry_toolchain.py`; `make poetry-lock-check`;
+    `tests/architecture/test_poetry_toolchain_contract.py`;
+    `tests/architecture/test_lockfile_path_packages.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,

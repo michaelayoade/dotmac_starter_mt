@@ -35,7 +35,6 @@ RUN npm run css:build
 
 FROM python:3.12-slim
 
-ARG POETRY_VERSION=1.8.3
 ARG APP_PORT=8000
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -45,8 +44,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv/app
 
-RUN pip install --no-cache-dir poetry==${POETRY_VERSION}
 COPY pyproject.toml poetry.lock ./
+COPY scripts/check_poetry_toolchain.py ./scripts/check_poetry_toolchain.py
+COPY .github/bootstrap/poetry-requirements-py312.txt ./poetry-requirements.txt
+# Use the same hash-locked Poetry as CI. The contract check runs before and
+# after installation: first to reject drift among the project, lockfile and
+# bootstrap; then to prove PATH resolves to the version that was requested.
+RUN python scripts/check_poetry_toolchain.py --bootstrap poetry-requirements.txt \
+    && python -m pip install --disable-pip-version-check --no-cache-dir \
+         --require-hashes --only-binary=:all: -r poetry-requirements.txt \
+    && python scripts/check_poetry_toolchain.py \
+         --bootstrap poetry-requirements.txt --active
 # The kernel is an editable path dependency (packages/dotmac-kernel); its
 # source must be present before `poetry install` so the develop install
 # resolves. Copied before the install layer, after the manifests, so the

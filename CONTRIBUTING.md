@@ -5,16 +5,21 @@ Human developer rules. Agents follow the same canon via `AGENTS.md`
 
 ## Gates before every commit
 
+Tests run on Dotmac Observer in a fresh isolated worktree; do not install test
+dependencies or run test commands on a workstation. Local static checks are
+allowed. GitHub CI remains the merge owner.
+
 ```bash
-make check        # ruff lint, import-linter, mypy, bandit, format check
-make test-unit    # SQLite-fast: tests/unit + tests/architecture
+make check        # exact Poetry/lock, ruff, import-linter, mypy, bandit, format
+# On Observer only:
+make test-unit
 make test-db-up && make test-integration && make test-db-down
                   # Postgres RLS canaries — required for anything touching
                   # models, migrations, guards, or tenancy
 ```
 
-All green locally before you push. `TEST_DB_PORT` is `?=`-overridable if the
-default port is taken.
+All relevant gates must be green before push. `TEST_DB_PORT` is
+`?=`-overridable if the disposable Observer port is taken.
 
 ## Test-first expectations
 

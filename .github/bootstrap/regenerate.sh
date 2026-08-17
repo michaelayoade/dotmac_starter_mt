@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Regenerate the hash-locked Poetry bootstrap — the ONE command.
 #
-#   .github/bootstrap/regenerate.sh [poetry==<version>]
+#   .github/bootstrap/regenerate.sh
 #
 # Run this whenever the pinned Poetry version moves. A stale lock fails closed
 # (loudly, in every job at once) rather than silently installing something
 # unpinned — the intended trade, but it makes bumping Poetry a deliberate
-# two-step: change the version here, commit the regenerated files.
+# two-step: change `requires-poetry` in pyproject.toml, then commit the
+# regenerated files. The version is not accepted as an argument because that
+# would create a second source of truth at the most dangerous point.
 #
 # ONE FILE PER PYTHON MINOR. pip resolves a different dependency SET per
 # interpreter: on 3.11 Poetry additionally needs backports.tarfile,
@@ -31,8 +33,15 @@
 # false alarm rather than a security signal.
 set -euo pipefail
 
-POETRY_PIN="${1:-poetry==2.4.1}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "${HERE}/../.." && pwd)"
+
+if (( $# != 0 )); then
+  echo "error: edit [tool.poetry].requires-poetry; this command takes no version argument" >&2
+  exit 2
+fi
+
+POETRY_PIN="$(python3 "${REPO}/scripts/check_poetry_toolchain.py" --print-requirement)"
 
 # Must cover every interpreter any workflow sets up — see the kernel-floors
 # matrix in .github/workflows/ci.yml.
