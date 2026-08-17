@@ -30,8 +30,10 @@ from dotmac_entitlement_allocation import (
     UndeclaredCapabilityError,
     UnknownProductError,
     allocation_product,
+    module,
     stage_allocation,
 )
+from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.models import Base
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -68,6 +70,12 @@ class BrokenAdapter:
 
     def require_declared(self, *, product_code: str, capability_code: str) -> None:
         raise KeyError(capability_code)
+
+
+@pytest.fixture(autouse=True)
+def _installed_module_audit_actions() -> None:
+    """Exercise the module as an adopter does: its manifest is installed."""
+    install_audit_actions(AuditActionRegistry.from_manifests([module]))
 
 
 @pytest.fixture

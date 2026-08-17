@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-kernel": {
+      "declared": "0.1.0a68",
+      "state": "declared-unpublished",
+      "reason": "AWAITING REVIEW AND DISPATCH. a68 names and verifies platform_audit_log.v1 and hardens public.platform_audit_events to an append-only online-role posture. The consumer declaration slice is deliberately sequenced after this artifact is published, because module floors may name only resolvable releases. Remove this row only in the change that verifies and tags dotmac-kernel-v0.1.0a68."
+    },
     "dotmac-entitlement-allocation": {
       "declared": "0.1.0a5",
       "state": "declared-unpublished",

@@ -27,6 +27,7 @@ from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
+    PLATFORM_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     PrerequisiteBinding,
 )
@@ -71,6 +72,16 @@ ASSEMBLY_PREREQUISITE_BINDINGS: Final[tuple[PrerequisiteBinding, ...]] = (
     PrerequisiteBinding(
         prerequisite=OUTBOX_RELAY_V1.name,
         provider_revision="0012_platform_outbox",
+        provider_owner="kernel",
+    ),
+    # Kernel `0009` created `platform_audit_events`, but that historical shape
+    # still let the online platform role rewrite and delete rows.  Revision
+    # `0026` completes the named append-only effect by reducing that role to
+    # SELECT + INSERT and removing column-level mutation paths.  Bind the
+    # effect to the revision that makes the complete contract true.
+    PrerequisiteBinding(
+        prerequisite=PLATFORM_AUDIT_LOG_V1.name,
+        provider_revision="0026_platform_audit_log",
         provider_owner="kernel",
     ),
 )

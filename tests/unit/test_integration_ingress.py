@@ -76,6 +76,7 @@ from dotmac_integration import (
     create_draft,
     enable,
     mint_ingress_endpoint,
+    module,
     prepare_ingress,
     put_config_revision,
     receive,
@@ -94,6 +95,7 @@ from dotmac_integration.ingress import (
     challenge_response,
 )
 from dotmac_integration.spi import ConnectorManifest, ConnectorMode, Diagnostic
+from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from dotmac_kernel.models_platform import PlatformAdmin, PlatformAuditEvent
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -111,6 +113,12 @@ MODULE_MODELS = (
     DeliveryAttempt,
     PollingCheckpoint,
 )
+
+
+@pytest.fixture(autouse=True)
+def _installed_integration_audit_actions() -> None:
+    """The standalone module tests compose its declaration registry."""
+    install_audit_actions(AuditActionRegistry.from_manifests([module]))
 
 
 # ── A connector that RECEIVES ───────────────────────────────────────────────

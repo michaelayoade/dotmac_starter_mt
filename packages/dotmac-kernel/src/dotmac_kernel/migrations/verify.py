@@ -48,6 +48,7 @@ from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
+    PLATFORM_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     binding_for,
     prerequisite,
@@ -491,6 +492,199 @@ def verify_idempotency_ledger(bind: Connection) -> None:
             )
 
 
+# ── platform_audit_log.v1 ──────────────────────────────────────────────────
+
+_PLATFORM_AUDIT_COLUMNS: Final[dict[str, _ColumnContract]] = {
+    "id": (sa.Uuid, False, None, None, False),
+    "actor_admin_id": (sa.Uuid, True, None, None, False),
+    "action": (sa.String, False, 120, None, False),
+    "entity_type": (sa.String, False, 120, None, False),
+    "entity_id": (sa.String, True, 120, None, False),
+    "details": (sa.JSON, False, None, None, True),
+    "created_at": (sa.DateTime, False, None, True, True),
+}
+
+_TABLE_PRIVILEGE: Final[sa.TextClause] = sa.text(
+    "SELECT has_table_privilege(CAST(:role AS name), "
+    "CAST(:table AS text), CAST(:privilege AS text))"
+)
+_COLUMN_PRIVILEGE: Final[sa.TextClause] = sa.text(
+    "SELECT has_any_column_privilege(CAST(:role AS name), "
+    "CAST(:table AS text), CAST(:privilege AS text))"
+)
+
+
+def _has_table_privilege(
+    bind: Connection, role: str, table: str, privilege: str
+) -> bool:
+    return bool(
+        bind.execute(
+            _TABLE_PRIVILEGE,
+            {"role": role, "table": table, "privilege": privilege},
+        ).scalar_one()
+    )
+
+
+def _has_column_privilege(
+    bind: Connection, role: str, table: str, privilege: str
+) -> bool:
+    return bool(
+        bind.execute(
+            _COLUMN_PRIVILEGE,
+            {"role": role, "table": table, "privilege": privilege},
+        ).scalar_one()
+    )
+
+
+def verify_platform_audit_log(bind: Connection) -> None:
+    """Prove the platform audit writer reaches append-only isolated storage."""
+    name = PLATFORM_AUDIT_LOG_V1.name
+    table = "platform_audit_events"
+    qualified = f"{HOST_SCHEMA}.{table}"
+    inspector = sa.inspect(bind)
+
+    if not inspector.has_table(table, schema=HOST_SCHEMA):
+        _fail(name, f"{qualified} does not exist")
+    _assert_columns(bind, name, table, _PLATFORM_AUDIT_COLUMNS)
+
+    columns = {
+        column["name"]: column
+        for column in inspector.get_columns(table, schema=HOST_SCHEMA)
+    }
+    details_default = "".join(str(columns["details"].get("default", "")).split())
+    if details_default.lower() not in {"'{}'::json", "'{}'::jsonb"}:
+        _fail(
+            name,
+            f"{qualified}.details must default to an empty JSON object "
+            f"(found {columns['details'].get('default')!r})",
+        )
+    created_at_default = "".join(
+        str(columns["created_at"].get("default", "")).split()
+    ).lower()
+    if created_at_default not in {
+        "now()",
+        "current_timestamp",
+        "transaction_timestamp()",
+    }:
+        _fail(
+            name,
+            f"{qualified}.created_at must default to the current transaction "
+            f"timestamp (found {columns['created_at'].get('default')!r})",
+        )
+
+    primary_key = tuple(
+        inspector.get_pk_constraint(table, schema=HOST_SCHEMA).get(
+            "constrained_columns"
+        )
+        or ()
+    )
+    if primary_key != ("id",):
+        _fail(
+            name,
+            f"{qualified} needs a primary key on ('id',) (found {primary_key!r})",
+        )
+
+    foreign_keys = inspector.get_foreign_keys(table, schema=HOST_SCHEMA)
+    actor_fk = next(
+        (
+            fk
+            for fk in foreign_keys
+            if tuple(fk.get("constrained_columns") or ()) == ("actor_admin_id",)
+        ),
+        None,
+    )
+    actor_fk_ok = bool(
+        actor_fk
+        and actor_fk.get("referred_schema") == HOST_SCHEMA
+        and actor_fk.get("referred_table") == "platform_admins"
+        and tuple(actor_fk.get("referred_columns") or ()) == ("id",)
+        and str((actor_fk.get("options") or {}).get("ondelete", "")).upper()
+        == "SET NULL"
+    )
+    if not actor_fk_ok:
+        _fail(
+            name,
+            f"{qualified} needs a foreign key from ('actor_admin_id',) to "
+            "public.platform_admins ('id',) ON DELETE SET NULL",
+        )
+
+    actor_indexes = [
+        index
+        for index in inspector.get_indexes(table, schema=HOST_SCHEMA)
+        if tuple(index.get("column_names") or ()) == ("actor_admin_id",)
+    ]
+    usable_actor_index = next(
+        (
+            index
+            for index in actor_indexes
+            if not bool(index.get("unique"))
+            and not bool((index.get("dialect_options") or {}).get("postgresql_where"))
+        ),
+        None,
+    )
+    if usable_actor_index is None:
+        _fail(
+            name,
+            f"{qualified} needs a non-unique, non-partial index on "
+            "('actor_admin_id',)",
+        )
+
+    if bind.dialect.name != "postgresql":
+        return
+
+    rls = bind.execute(
+        sa.text(
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = :schema AND c.relname = :table"
+        ),
+        {"schema": HOST_SCHEMA, "table": table},
+    ).one()
+    if bool(rls[0]) or bool(rls[1]):
+        _fail(
+            name,
+            f"{qualified} is the platform plane and must carry no row-level "
+            f"security (enabled={bool(rls[0])}, forced={bool(rls[1])})",
+        )
+
+    if bool(
+        bind.execute(
+            _ANY_TABLE_PRIVILEGE,
+            {"role": DEFAULT_APP_ROLE, "table": qualified},
+        ).scalar_one()
+    ):
+        _fail(
+            name,
+            f"{DEFAULT_APP_ROLE} holds a table or column privilege on "
+            f"{qualified}; the tenant role must not reach the platform log",
+        )
+
+    for privilege in ("SELECT", "INSERT"):
+        if not _has_table_privilege(bind, "platform_api", qualified, privilege):
+            _fail(
+                name,
+                f"platform_api needs table-level {privilege} on {qualified}; "
+                "a partial column grant is not a usable audit writer contract",
+            )
+
+    for privilege in ("UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+        if _has_table_privilege(bind, "platform_api", qualified, privilege):
+            _fail(
+                name,
+                f"platform_api must not hold {privilege} on {qualified}; "
+                "online audit history is append-only",
+            )
+        if privilege in {"UPDATE", "REFERENCES"} and _has_column_privilege(
+            bind, "platform_api", qualified, privilege
+        ):
+            _fail(
+                name,
+                f"platform_api must not hold column-level {privilege} on "
+                f"{qualified}; a column grant is still an audit-history "
+                "mutation path",
+            )
+
+
 # ── outbox_relay.v1 ─────────────────────────────────────────────────────────
 
 # The relay's row shape, in the form the inspector reports it. Like the ledger
@@ -901,6 +1095,7 @@ _VERIFIERS: dict[str, Verifier] = {
     MODULE_DATABASE_ROLES_V1.name: verify_module_database_roles,
     IDEMPOTENCY_LEDGER_V1.name: verify_idempotency_ledger,
     OUTBOX_RELAY_V1.name: verify_outbox_relay,
+    PLATFORM_AUDIT_LOG_V1.name: verify_platform_audit_log,
 }
 
 
@@ -988,5 +1183,6 @@ __all__ = [
     "verify_idempotency_ledger",
     "verify_module_database_roles",
     "verify_outbox_relay",
+    "verify_platform_audit_log",
     "verify_tenant_scope_catalog",
 ]

@@ -41,11 +41,13 @@ from dotmac_integration import (
     IngressCode,
     IngressOutcome,
     IngressRequest,
+    module,
     prepare_ingress,
     receive,
     verify_and_normalize,
 )
 from dotmac_integration.ingress import IngressRefused, challenge_response
+from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
 from sqlalchemy.orm import Session
 
 from tests.unit.test_integration_ingress import (
@@ -64,6 +66,12 @@ from tests.unit.test_integration_ingress import (
 )
 
 PAYLOAD_SENTINEL = "SENTINEL-NORMALIZED-PAYLOAD-3d0c"
+
+
+@pytest.fixture(autouse=True)
+def _installed_integration_audit_actions() -> None:
+    """The standalone module tests compose its declaration registry."""
+    install_audit_actions(AuditActionRegistry.from_manifests([module]))
 
 
 def deliver(registry: Any, session: Session, key: str | None) -> Any:
