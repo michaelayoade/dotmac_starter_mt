@@ -12,10 +12,9 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a7`.** Releases a2–a4 implement SPI 1.1;
-a5–a7 implement SPI 1.2. See `CHANGELOG.md`, which is the authority on what has
-and has not shipped. `0.1.0a8` is declared but unreleased; it retains SPI 1.2
-and adds indexed, revisioned shadow-comparison evidence.
+**Released: `0.1.0a1` through `0.1.0a8`.** Releases a2–a4 implement SPI 1.1;
+a5–a8 implement SPI 1.2. See `CHANGELOG.md`, which is the authority on what has
+and has not shipped. a8 adds indexed, revisioned shadow-comparison evidence.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to

@@ -62,11 +62,6 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-integration": {
-      "declared": "0.1.0a8",
-      "state": "declared-unpublished",
-      "reason": "AWAITING REVIEW AND RELEASE. a7 was published from c669b24 while this branch was being rebased; it contains immutable product-owned descriptor snapshots, receipt-owned provider identity and record-only ingress evidence through ig_0009. a8 adds ig_0010 for indexed, revisioned, append-only shadow-comparison evidence owned by the integration module rather than the thin assembly or kernel audit ledger. The shadow table is platform-plane, provider-neutral and material-safe; it stores only a receipt UUID, comparison revision, closed verdict/blocker codes and bounded field names. SPI remains 1.2 and the floor remains kernel >=0.1.0a68. This state is NOT to be repaired by editing the version, moving the a7 tag or overwriting the published artifact; only a new verified publication closes it. Delete this row only after release-module.yml installs a8 from the private index, registers its manifest, verifies all ten migration files and tags dotmac-integration-v0.1.0a8."
-    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
