@@ -1,7 +1,7 @@
 schema_version = 1
 package = "dotmac-release-catalog"
 classification = "optional-module"
-status = "audit-complete"
+status = "adopted"
 source_mode = "greenfield-after-inventory"
 owner = "Dotmac published-artifact catalogue"
 # The 2026-08-12 fleet sweep measured ERP, CRM, Sub AND the vendor control
@@ -39,20 +39,21 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_release_catalog_identity.py",
   "dotmac_starter_mt:tests/architecture/test_release_catalog_module.py",
 ]
-contract_consumers = []
-candidate_consumers = [
-  # ONE concrete candidate, and structurally there cannot be a second yet.
-  # ADR-0006's 2026-08-12 amendment exists because of this exact case: the
-  # tables REVOKE `app_user`, so a product data plane is disqualified as a
-  # consumer ON PURPOSE, and the second consumer arrives only with a second
-  # vendor or OEM control plane.
-  "dotmac_vendor_control_plane",
+contract_consumers = ["dotmac_vendor_control_plane"]
+candidate_consumers = []
+adoption_evidence = [
+  "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
+  "dotmac_vendor_control_plane:production-deploy#32022599873",
+  "ghcr.io/michaelayoade/dotmac_vendor_control_plane@sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc",
+  "dotmac_vendor_control_plane:catalog-artifact@9094efe1-7cab-4fc7-a2f6-c1787e452e14",
+  "dotmac_vendor_control_plane:catalog-attestation@db269812-d99b-4529-9270-9435a8249124",
+  "dotmac_sub:production-deploy#32009246911",
 ]
 inventory_evidence = [
   "docs/inventories/fleet-decomposition-matrix.md",
   "docs/superpowers/plans/2026-08-12-vendor-cp-composable-parts.md",
 ]
-first_cutover = "The vendor control plane, which is also the only candidate consumer: it is the sole assembly that publishes artifacts, and no product data plane may read this catalogue at all (app_user is REVOKEd in rl_0001). The kernel carrying RELEASE_CATALOG_MIGRATION_OWNER is published; the remaining gate is an exact vendor-CP pin to the module release exposing its installed lineage locator, composition of that lineage, and a successful migration rehearsal."
+first_cutover = "Completed 2026-08-17 in dotmac_vendor_control_plane. Vendor exact-pins dotmac-release-catalog 0.1.0a4, composes rl_0001 on the platform plane, and runs the catalogue as its only release-evidence authority in production at vendor.dotmac.io. Sub 7.187.1 release evidence was ingested as artifact 9094efe1-7cab-4fc7-a2f6-c1787e452e14 plus attestation db269812-d99b-4529-9270-9435a8249124; the held manifest digest was verified from disk, the runtime resolved all five declared capabilities through the exact pin, and an undeclared-code negative control failed closed. app_user has no mod_rel privileges. Deploy run 32022599873 proves the running consumer at main f8f8c3fd636e663e4a17275c19e82fc1667aa52a and immutable image sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc."
 shadow_and_drift = "No shadow phase and no drift window: there is no existing implementation to run beside, and no rows to migrate. The parity question this package replaces is a design one — whether the deferred channel/pin half can be added without reshaping what ships here — answered by keeping selection OUT of the module entirely, so adding channels later adds tables rather than changing these two."
-local_copy_retirement = "Nothing to retire. This is the first implementation of the capability in the fleet. The retirement obligation that DOES exist is the inverse and belongs to a later module: the vendor control plane's `licence_delivery_targets` is documented in its own ARCHITECTURE.md as a temporary licensing-owned projection to be rebuilt from the fleet slice, and that projection must not be allowed to become a second artifact/deployment authority in the meantime."
-next_action = "0.1.0a1 ships digest identity, the two closed vocabularies, the two tables and the rl lineage; 0.1.0a2 adds the public installed-lineage locator required by a separate consuming repository. To reach `adopted`: (1) the vendor CP repins off 0.1.0a9 and adopts the module on an exact pin, running the rl lineage — that first cutover IS the transition to `adopted`, not to `reuse-proven`; (2) routers land, with the release_catalog.publish/.read capability and audit actions declared in the SAME change as the guards referencing them. `reuse-proven` is NOT scheduled and cannot be: a second contract consumer requires a second vendor or OEM control plane, because app_user is REVOKEd and a product data plane is disqualified as a consumer by design. That is the exact case ADR-0006's 2026-08-12 amendment exists for — the state records evidence, not permission to be a module. Do NOT add channels, pins or artifact selection before update authority exists — ruling C3 makes a pin desired state only under vendor-automatic authority, and shipping the table first makes that distinction discoverable only in production."
+local_copy_retirement = "Complete for cutover 1. The Vendor assembly has no release-artifact table or local catalogue writer: vendor_cp.release_evidence is a thin typed ingestion adapter over the module's publish/attest seams, and scripts/catalogue_product_release.py is its operator boundary. The exact runtime pin is operator-owned desired state rather than a second catalogue. The remaining inverse obligation is unchanged: licence_delivery_targets must not become artifact or deployment authority while the fleet slice is still separate."
+next_action = "Hold `adopted` until a second real vendor or OEM control plane consumes the same contract; only that independent consumer can earn `reuse-proven`, because product data planes are deliberately isolated from mod_rel. Do not manufacture a second consumer or add channels, pins or artifact selection before update authority exists. Keep the Vendor production evidence current when its first-adopter implementation changes."

@@ -164,6 +164,12 @@ refuses the composition at boot with `UnallocatedNamespaceError`.
 
 ## Status
 
-`0.1.0a2`, dossier status `audit-complete` — inventoried, deliberately drawn,
-**not yet adopted by anything**. Under ADR-0017 §1 that makes it work in
-progress rather than delivered, and `EXTRACTION.toml` says so.
+`0.1.0a3`, dossier status `adopted` — the Tenant Workspace exact-pins the
+module and exercised the directory-backed launcher in its 2026-08-16
+production pilot at `workspace.dotmac.io`. This proves one consumer, not reuse;
+`reuse-proven` still requires a second real production consumer.
+
+The adoption does not make the Workspace an authorization or shared-session
+authority. The directory records application inventory only; authentication
+stays at the Workspace boundary and every target application owns its own
+authorization and session.
