@@ -307,6 +307,20 @@ from dotmac_integration.selection import (
     SelectionError,
     resolve_binding,
 )
+from dotmac_integration.shadow import (
+    RETRYABLE_SHADOW_VERDICTS,
+    SHADOW_PLATFORM_TABLES,
+    SafeShadowVerdict,
+    ShadowComparisonEvidence,
+    ShadowEvidenceCorrupt,
+    ShadowObservation,
+    ShadowReport,
+    due_shadow_receipt_ids,
+    normalize_shadow_verdict,
+    record_shadow_observation,
+    shadow_report,
+    unreadable_shadow_verdict,
+)
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     MODE_PROTOCOLS,
@@ -340,7 +354,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a7"
+__version__ = "0.1.0a8"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -446,6 +460,20 @@ __all__ = [
     "idempotency_key_for",
     "request_fingerprint_for",
     "require_stable_fingerprint",
+    # ── Revisioned product-port shadow evidence ────────────────────────────
+    "RETRYABLE_SHADOW_VERDICTS",
+    "SHADOW_PLATFORM_TABLES",
+    "SafeShadowVerdict",
+    "ShadowComparisonEvidence",
+    "ShadowEvidenceCorrupt",
+    "ShadowObservation",
+    "ShadowReport",
+    "due_shadow_receipt_ids",
+    "normalize_shadow_verdict",
+    "record_shadow_observation",
+    "shadow_report",
+    "unreadable_shadow_verdict",
+    # ── Payload retention ──────────────────────────────────────────────────
     "REDACTION_MARKER",
     "RETENTION_DAYS_VAR",
     "RETENTION_LEGAL_POLICY_OWNER_VAR",

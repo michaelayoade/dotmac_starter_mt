@@ -63,9 +63,9 @@
   ],
   "unpublished": {
     "dotmac-integration": {
-      "declared": "0.1.0a7",
+      "declared": "0.1.0a8",
       "state": "declared-unpublished",
-      "reason": "AWAITING REVIEW AND RELEASE. a6 was published from 7e05430 before the product-port change merged; it contains the configuration-parity and platform-audit correction through ig_0008. a7 adds ig_0009 for immutable product-owned descriptor snapshots, receipt-owned provider identity and record-only ingress evidence without changing SPI 1.2. The floor remains kernel >=0.1.0a68. This state is NOT to be repaired by editing the version, moving the a6 tag or overwriting the published artifact; only a new verified publication closes it. Delete this row only after release-module.yml installs a7 from the private index, registers its manifest, verifies all nine migration files and tags dotmac-integration-v0.1.0a7."
+      "reason": "AWAITING REVIEW AND RELEASE. a7 was published from c669b24 while this branch was being rebased; it contains immutable product-owned descriptor snapshots, receipt-owned provider identity and record-only ingress evidence through ig_0009. a8 adds ig_0010 for indexed, revisioned, append-only shadow-comparison evidence owned by the integration module rather than the thin assembly or kernel audit ledger. The shadow table is platform-plane, provider-neutral and material-safe; it stores only a receipt UUID, comparison revision, closed verdict/blocker codes and bounded field names. SPI remains 1.2 and the floor remains kernel >=0.1.0a68. This state is NOT to be repaired by editing the version, moving the a7 tag or overwriting the published artifact; only a new verified publication closes it. Delete this row only after release-module.yml installs a8 from the private index, registers its manifest, verifies all ten migration files and tags dotmac-integration-v0.1.0a8."
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",

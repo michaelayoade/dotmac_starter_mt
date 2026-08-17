@@ -318,6 +318,7 @@
           "dotmac_integration/ingress.py",
           "dotmac_integration/discovery.py",
           "dotmac_integration/secret_refs.py",
+          "dotmac_integration/shadow.py",
           "dotmac_integration/migrations/__init__.py",
           "dotmac_integration/migrations/versions/ig_0001_connector_control_plane.py",
           "dotmac_integration/migrations/versions/ig_0002_execution.py",
@@ -327,7 +328,8 @@
           "dotmac_integration/migrations/versions/ig_0006_retention.py",
           "dotmac_integration/migrations/versions/ig_0007_idempotency_ledger.py",
           "dotmac_integration/migrations/versions/ig_0008_platform_audit_log.py",
-          "dotmac_integration/migrations/versions/ig_0009_product_port_descriptors.py"
+          "dotmac_integration/migrations/versions/ig_0009_product_port_descriptors.py",
+          "dotmac_integration/migrations/versions/ig_0010_shadow_evidence.py"
         ],
         "forbidden_prefixes": [
           "app/",
