@@ -83,6 +83,7 @@ def _claim(**overrides: Any) -> ReceiptClaim:
         "attempt": 1,
         "leased_until": datetime.now(UTC) + timedelta(seconds=300),
         "destination": _destination(),
+        "provider_event_id": "provider-event-7",
         "event_type": "message.received",
         "observation": {"text": "hello", "from": "+2348000000000"},
         "correlation_id": "corr-1",
@@ -361,6 +362,7 @@ def test_the_same_request_replays_safely() -> None:
     claim = _claim()
     fingerprint = request_fingerprint_for(
         destination=claim.destination,
+        provider_event_id=claim.provider_event_id,
         event_type=claim.event_type,
         observation=claim.observation,
     )
@@ -403,26 +405,39 @@ def test_the_fingerprint_follows_the_content_and_the_destination() -> None:
     base = _claim()
     same = request_fingerprint_for(
         destination=base.destination,
+        provider_event_id=base.provider_event_id,
         event_type=base.event_type,
         observation=base.observation,
     )
     other_text = request_fingerprint_for(
         destination=base.destination,
+        provider_event_id=base.provider_event_id,
         event_type=base.event_type,
         observation={"text": "goodbye", "from": "+2348000000000"},
     )
     other_version = request_fingerprint_for(
         destination=_destination(contract_version=2),
+        provider_event_id=base.provider_event_id,
         event_type=base.event_type,
         observation=base.observation,
     )
     other_event = request_fingerprint_for(
         destination=base.destination,
+        provider_event_id=base.provider_event_id,
         event_type="message.deleted",
         observation=base.observation,
     )
+    other_provider_identity = request_fingerprint_for(
+        destination=base.destination,
+        provider_event_id="provider-event-8",
+        event_type=base.event_type,
+        observation=base.observation,
+    )
 
-    assert len({same, other_text, other_version, other_event}) == 4
+    assert (
+        len({same, other_text, other_version, other_event, other_provider_identity})
+        == 5
+    )
 
 
 def test_key_order_does_not_change_the_fingerprint() -> None:
@@ -431,11 +446,13 @@ def test_key_order_does_not_change_the_fingerprint() -> None:
     destination = _destination()
     first = request_fingerprint_for(
         destination=destination,
+        provider_event_id="provider-event-1",
         event_type="e",
         observation={"a": 1, "b": {"c": 2, "d": 3}},
     )
     second = request_fingerprint_for(
         destination=destination,
+        provider_event_id="provider-event-1",
         event_type="e",
         observation={"b": {"d": 3, "c": 2}, "a": 1},
     )
@@ -469,6 +486,11 @@ def test_the_request_carries_the_destinations_contract_version() -> None:
         _claim(destination=_destination(contract_version=3))
     )
     assert request.contract_version == 3
+
+
+def test_the_request_carries_provider_identity_from_the_claim() -> None:
+    request = build_product_request(_claim(provider_event_id="wamid.PROVIDER-1"))
+    assert request.provider_event_id == "wamid.PROVIDER-1"
 
 
 def test_the_protocol_matches_team_3s_binding() -> None:
