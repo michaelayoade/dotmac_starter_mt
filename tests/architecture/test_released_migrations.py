@@ -718,9 +718,7 @@ def _tag_inventory_problems(tags: set[str]) -> list[str]:
     for distribution, prefix in sorted(TAG_PREFIXES.items()):
         published = {tag for tag in tags if tag.startswith(prefix)}
         recorded_for_distribution = {
-            tag
-            for tag, (owner, _, _) in RELEASED_TAGS.items()
-            if owner == distribution
+            tag for tag, (owner, _, _) in RELEASED_TAGS.items() if owner == distribution
         }
         unrecorded = sorted(published - recorded_for_distribution)
         if unrecorded:
@@ -754,8 +752,7 @@ def test_the_tag_inventory_rejects_an_unrecorded_future_release() -> None:
     fake = "dotmac-integration-v99.0.0"
     problems = _tag_inventory_problems(set(RELEASED_TAGS) | {fake})
     assert problems == [
-        "dotmac-integration: published tags missing from RELEASED_TAGS: "
-        f"['{fake}']"
+        "dotmac-integration: published tags missing from RELEASED_TAGS: " f"['{fake}']"
     ]
 
 
