@@ -38,6 +38,8 @@ from datetime import UTC, datetime
 from typing import Any, Final
 from uuid import UUID
 
+from jsonschema import Draft202012Validator
+
 from dotmac_integration.discovery import ConnectorRegistry
 from dotmac_integration.execution import payload_digest
 from dotmac_integration.models import (
@@ -46,7 +48,12 @@ from dotmac_integration.models import (
     ConnectorInstallation,
 )
 from dotmac_integration.secret_refs import validate_config_revision
-from dotmac_integration.spi import ConnectorMode, accepts_manifest_digest
+from dotmac_integration.spi import (
+    ConnectorManifest,
+    ConnectorMode,
+    ConnectorPlugin,
+    accepts_manifest_digest,
+)
 
 __all__ = [
     "ENDPOINT_AUDIT_ACTIONS",
@@ -73,6 +80,87 @@ class LifecycleError(RuntimeError):
 
 
 _TERMINAL = frozenset({"retired"})
+
+
+def _pinned_manifest(
+    registry: ConnectorRegistry, installation: ConnectorInstallation
+) -> ConnectorManifest:
+    plugin: ConnectorPlugin = registry.plugin(installation.connector_key)
+    for manifest in (plugin.manifest, *plugin.historical_manifests):
+        if manifest.digest == installation.manifest_digest:
+            return manifest
+    raise LifecycleError(
+        f"the installed {installation.connector_key!r} no longer honours "
+        f"installation {installation.id}'s manifest pin; adopt the current "
+        "manifest before changing its configuration or bindings"
+    )
+
+
+def _schema_error_codes(
+    manifest: ConnectorManifest,
+    capability_ids: set[str],
+    config: dict[str, object],
+) -> tuple[str, ...]:
+    """Validate bound contracts without returning or persisting input values."""
+    errors: set[str] = set()
+    for capability_id in sorted(capability_ids):
+        declaration = manifest.require_declares(capability_id)
+        validator = Draft202012Validator(declaration.config_schema)
+        for error in validator.iter_errors(config):
+            # The instance path comes from operator input. A field name can be a
+            # credential just as readily as a value, so persist only the closed
+            # JSON-Schema validator code and the declared capability identity.
+            errors.add(f"config_{error.validator}:{capability_id}")
+    return tuple(sorted(errors))
+
+
+def _bound_capability_ids(db: Any, installation: ConnectorInstallation) -> set[str]:
+    from sqlalchemy import select
+
+    return set(
+        db.execute(
+            select(CapabilityBinding.capability_id).where(
+                CapabilityBinding.installation_id == installation.id
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _invalidate_activation(
+    db: Any, installation: ConnectorInstallation, *, reason: str, actor: str | None
+) -> None:
+    from sqlalchemy import select
+
+    installation.state = "draft"
+    installation.state_reason = reason
+    installation.validated_at = None
+    installation.updated_by = actor
+    bindings = db.execute(
+        select(CapabilityBinding).where(
+            CapabilityBinding.installation_id == installation.id
+        )
+    ).scalars()
+    for binding in bindings:
+        binding.state = "disabled"
+        binding.enabled_at = None
+        binding.updated_by = actor
+
+
+def _record_validation_failure(
+    db: Any,
+    installation: ConnectorInstallation,
+    revision: ConnectorConfigRevision,
+    *,
+    codes: tuple[str, ...],
+) -> None:
+    revision.validation_status = "invalid"
+    revision.validation_errors = list(codes)
+    installation.state = "validating"
+    installation.state_reason = ",".join(codes)
+    installation.validated_at = None
+    db.flush()
 
 
 def create_draft(
@@ -113,6 +201,7 @@ def put_config_revision(
     db: Any,
     installation: ConnectorInstallation,
     *,
+    registry: ConnectorRegistry,
     config: dict[str, object],
     secret_refs: dict[str, object] | None = None,
     schema_version: str = "1",
@@ -131,11 +220,31 @@ def put_config_revision(
         raise LifecycleError(
             f"installation is {installation.state} and cannot take configuration"
         )
+    normalized_schema_version = schema_version.strip()
+    if not normalized_schema_version:
+        raise LifecycleError("configuration schema version is required")
+    if len(normalized_schema_version) > 32:
+        raise LifecycleError("configuration schema version exceeds 32 characters")
     refs = secret_refs or {}
     # Refuse secret MATERIAL before it is ever written: a revision is immutable
     # and ends up in every backup.
     validate_config_revision(config, refs)
-    digest = payload_digest({"config": config, "secret_refs": refs})
+    manifest = _pinned_manifest(registry, installation)
+    schema_errors = _schema_error_codes(
+        manifest, _bound_capability_ids(db, installation), config
+    )
+    if schema_errors:
+        raise LifecycleError(
+            "configuration does not match the bound capability schema(s): "
+            + ",".join(schema_errors)
+        )
+    digest = payload_digest(
+        {
+            "config": config,
+            "secret_refs": refs,
+            "schema_version": normalized_schema_version,
+        }
+    )
 
     existing = db.execute(
         select(ConnectorConfigRevision).where(
@@ -144,6 +253,10 @@ def put_config_revision(
         )
     ).scalar_one_or_none()
     if existing is not None:
+        if installation.current_config_revision_id != existing.id:
+            _invalidate_activation(
+                db, installation, reason="configuration_changed", actor=actor
+            )
         installation.current_config_revision_id = existing.id
         db.flush()
         return existing, False
@@ -157,18 +270,19 @@ def put_config_revision(
     revision = ConnectorConfigRevision(
         installation_id=installation.id,
         revision=int(highest or 0) + 1,
-        schema_version=schema_version,
+        schema_version=normalized_schema_version,
         config_json=config,
         secret_refs=refs,
         config_digest=digest,
-        validation_status="valid",
+        validation_status="pending",
         created_by=actor,
     )
     db.add(revision)
     db.flush()
     installation.current_config_revision_id = revision.id
-    installation.validated_at = datetime.now(UTC)
-    installation.updated_by = actor
+    _invalidate_activation(
+        db, installation, reason="configuration_changed", actor=actor
+    )
     db.flush()
     return revision, True
 
@@ -189,20 +303,51 @@ def add_binding(
     is a statement of intent and the second is a live decision — collapsing them
     would enable a capability the moment someone wrote it down.
     """
-    manifest = registry.get(installation.connector_key)
+    from sqlalchemy import select
+
+    if installation.state in _TERMINAL:
+        raise LifecycleError(
+            f"installation is {installation.state} and cannot receive capabilities"
+        )
+    manifest = _pinned_manifest(registry, installation)
     # The undeclared-capability refusal, at the write.
     manifest.require_declares(capability_id)
 
-    binding = CapabilityBinding(
-        installation_id=installation.id,
-        capability_id=capability_id,
-        state="disabled",
-        scope_json=scope,
-        policy_json=policy,
-        created_by=actor,
-        updated_by=actor,
+    if installation.current_config_revision_id is not None:
+        revision = db.get(
+            ConnectorConfigRevision, installation.current_config_revision_id
+        )
+        if revision is not None:
+            schema_errors = _schema_error_codes(
+                manifest, {capability_id}, revision.config_json or {}
+            )
+            if schema_errors:
+                raise LifecycleError(
+                    "configuration does not match the capability schema: "
+                    + ",".join(schema_errors)
+                )
+
+    binding: CapabilityBinding | None = db.execute(
+        select(CapabilityBinding).where(
+            CapabilityBinding.installation_id == installation.id,
+            CapabilityBinding.capability_id == capability_id,
+        )
+    ).scalar_one_or_none()
+    if binding is None:
+        binding = CapabilityBinding(
+            installation_id=installation.id,
+            capability_id=capability_id,
+            created_by=actor,
+        )
+        db.add(binding)
+    binding.state = "disabled"
+    binding.enabled_at = None
+    binding.scope_json = scope
+    binding.policy_json = policy
+    binding.updated_by = actor
+    _invalidate_activation(
+        db, installation, reason="capability_binding_changed", actor=actor
     )
-    db.add(binding)
     db.flush()
     return binding
 
@@ -225,6 +370,7 @@ def set_binding_enabled(
         binding.enabled_at = datetime.now(UTC)
     else:
         binding.state = "disabled"
+        binding.enabled_at = None
     binding.updated_by = actor
     db.flush()
     return binding
@@ -523,23 +669,50 @@ def enable(
     plugin.manifest.spi_range.require()
 
     revision = db.get(ConnectorConfigRevision, installation.current_config_revision_id)
-    diagnostics = plugin.validate_connection(
-        config=(revision.config_json if revision else {}) or {},
-        secrets=secrets or {},
+    if revision is None:
+        raise LifecycleError("installation's configuration revision is missing")
+    manifest = _pinned_manifest(registry, installation)
+    schema_errors = _schema_error_codes(
+        manifest, _bound_capability_ids(db, installation), revision.config_json or {}
     )
-    failures = [d for d in diagnostics if not d.ok]
-    if failures:
-        installation.state = "validating"
-        installation.state_reason = "; ".join(f"{d.code}: {d.detail}" for d in failures)
+    if schema_errors:
+        revision.validation_status = "invalid"
+        revision.validation_errors = list(schema_errors)
+        installation.state = "draft"
+        installation.state_reason = ",".join(schema_errors)
+        installation.validated_at = None
         db.flush()
         raise LifecycleError(
-            f"connection validation failed: {installation.state_reason}"
+            "installation static validation failed: " + ",".join(schema_errors)
         )
+    try:
+        diagnostics = plugin.validate_connection(
+            config=revision.config_json or {},
+            secrets=secrets or {},
+        )
+    except Exception:
+        _record_validation_failure(
+            db,
+            installation,
+            revision,
+            codes=("connection_validation_failed",),
+        )
+        raise LifecycleError("connection validation failed") from None
+    failures = [d for d in diagnostics if not d.ok]
+    if failures:
+        codes = tuple(diagnostic.code for diagnostic in failures)
+        _record_validation_failure(db, installation, revision, codes=codes)
+        raise LifecycleError(
+            "connection validation failed: " + ",".join(codes)
+        ) from None
 
     installation.state = "enabled"
     installation.state_reason = None
     installation.enabled_at = datetime.now(UTC)
+    installation.validated_at = datetime.now(UTC)
     installation.updated_by = actor
+    revision.validation_status = "valid"
+    revision.validation_errors = None
     db.flush()
     return installation
 

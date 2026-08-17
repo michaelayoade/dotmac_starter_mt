@@ -27,6 +27,7 @@ python = ">=3.11,<3.14"
 # retention commands write at request time.
 dotmac-kernel = ">=0.1.0a68"
 sqlalchemy = "^2.0"
+jsonschema = ">=4.23,<5.0"
 
 # No `fastapi`, and deliberately no `httpx`. This module is the control plane,
 # not a transport: it decides WHICH connector serves a capability and never

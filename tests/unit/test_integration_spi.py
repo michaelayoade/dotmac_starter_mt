@@ -141,6 +141,34 @@ def test_a_capability_id_must_be_a_versioned_contract_name() -> None:
     assert CapabilityDeclaration(capability_id="ticket.observation.v1")
 
 
+def test_a_capability_config_schema_must_be_valid_json_schema() -> None:
+    with pytest.raises(InvalidManifestError, match="config schema") as refused:
+        CapabilityDeclaration(
+            capability_id="ticket.observation.v1",
+            config_schema={
+                "type": "not-a-json-schema-type",
+                "default": "must-never-reach-the-error",
+            },
+        )
+    assert refused.value.__cause__ is None
+    assert "must-never-reach-the-error" not in str(refused.value)
+
+
+def test_a_diagnostic_code_is_safe_to_persist_and_detail_is_not_repr_visible() -> None:
+    from dotmac_integration import Diagnostic
+
+    diagnostic = Diagnostic(
+        ok=False,
+        code="credential_unavailable",
+        detail="must-never-reach-a-log",
+    )
+
+    assert "must-never-reach-a-log" not in repr(diagnostic)
+    unsafe = Diagnostic(ok=False, code="secret=must-never-be-a-code")
+    assert unsafe.code == "invalid_diagnostic_code"
+    assert "must-never-be-a-code" not in repr(unsafe)
+
+
 def test_a_connector_declaring_nothing_is_refused() -> None:
     with pytest.raises(InvalidManifestError, match="declares no capabilities"):
         ConnectorManifest(

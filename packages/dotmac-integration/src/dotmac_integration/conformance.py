@@ -129,6 +129,9 @@ class FakePlugin:
     #: knob rather than something a test monkeypatches on: this object is frozen
     #: precisely so a test cannot reshape the contract it is meant to check.
     raises: BaseException | None = None
+    #: Make live connection validation raise without monkeypatching the frozen
+    #: contract under test. The lifecycle must contain connector-owned text.
+    validation_raises: Exception | None = None
 
     # ── ingress ─────────────────────────────────────────────────────────────
     #: What `normalize` returns. A TUPLE by default and empty by default, so a
@@ -332,6 +335,8 @@ class FakePlugin:
     def validate_connection(
         self, *, config: dict[str, object], secrets: dict[str, object]
     ) -> tuple[Diagnostic, ...]:
+        if self.validation_raises is not None:
+            raise self.validation_raises
         if self.healthy:
             return (Diagnostic(ok=True, code="reachable"),)
         return (
