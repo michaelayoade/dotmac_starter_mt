@@ -692,8 +692,8 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     """Every kind of change the lineage makes, accounted for.
 
     `ig_0003` and `ig_0005` add COLUMNS to existing tables; `ig_0004` and
-    `ig_0006` add exactly one table each. Asserted from both sides — the
-    declaration says nine and the live schema holds exactly those nine — plus
+    `ig_0006` and `ig_0010` add exactly one table each. Asserted from both sides
+    — the declaration says ten and the live schema holds exactly those ten — plus
     the ADR-0023 contract, which either a new column or a new table could break
     by carrying a tenant scope.
 
@@ -706,9 +706,10 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     from dotmac_kernel.migrations.catalog import audit_live_schemas
     from dotmac_kernel.namespaces import NamespaceRegistry
 
-    assert len(module.platform_tables) == 9
+    assert len(module.platform_tables) == 10
     assert "capability_destination_revisions" in module.platform_tables
     assert "receipt_legal_holds" in module.platform_tables
+    assert "shadow_comparison_evidence" in module.platform_tables
     assert module.tables == ()
 
     admin_url, _ = migrated_scratch
@@ -735,6 +736,38 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     assert live == set(module.platform_tables)
     assert column.is_nullable == "YES", "an unminted binding must stay unminted"
     assert not violations, "platform-plane violations:\n" + "\n".join(violations)
+
+
+def test_shadow_evidence_is_append_reachable_without_tenant_sequence_access(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """A BIGSERIAL sequence is a second privilege object, not table INSERT."""
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        platform_table = conn.execute(
+            text(
+                "SELECT has_table_privilege('platform_api', "
+                "'mod_intg.shadow_comparison_evidence', 'INSERT')"
+            )
+        ).scalar_one()
+        platform_sequence = conn.execute(
+            text(
+                "SELECT has_sequence_privilege('platform_api', "
+                "'mod_intg.shadow_comparison_evidence_id_seq', 'USAGE')"
+            )
+        ).scalar_one()
+        tenant_sequence = conn.execute(
+            text(
+                "SELECT has_sequence_privilege('app_user', "
+                "'mod_intg.shadow_comparison_evidence_id_seq', 'USAGE')"
+            )
+        ).scalar_one()
+    engine.dispose()
+
+    assert platform_table and platform_sequence
+    assert not tenant_sequence
 
 
 @pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "DELETE"])
