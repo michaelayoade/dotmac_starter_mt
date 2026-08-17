@@ -70,7 +70,7 @@
     "dotmac-integration": {
       "declared": "0.1.0a6",
       "state": "declared-unpublished",
-      "reason": "AWAITING REVIEW AND RELEASE. a5 remains the latest published version. a6 declares platform_audit_log.v1, the append-only effect repair and retention operations write at request time, and verifies it in the DDL-free ig_0008 revision after ig_0007 verifies the a66 idempotency effect. The floor rises to kernel >=0.1.0a68. Delete this row only after release-module.yml installs a6 from the private index, registers its manifest, verifies all eight migration files and tags dotmac-integration-v0.1.0a6."
+      "reason": "AWAITING REVIEW AND RELEASE. a5 remains the latest published version. a6 declares platform_audit_log.v1, the append-only effect repair and retention operations write at request time, and verifies it in the DDL-free ig_0008 revision after ig_0007 verifies the a66 idempotency effect. The floor rises to kernel >=0.1.0a68. This state is NOT to be repaired by editing the version; only a verified publication closes it. Delete this row only after release-module.yml installs a6 from the private index, registers its manifest, verifies all eight migration files and tags dotmac-integration-v0.1.0a6."
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",
