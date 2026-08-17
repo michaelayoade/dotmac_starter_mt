@@ -37,7 +37,7 @@ from dotmac_integration.retention import RETENTION_PLATFORM_TABLES
 
 module = ModuleManifest(
     code="integration",
-    version="0.1.0a4",
+    version="0.1.0a5",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="intg",

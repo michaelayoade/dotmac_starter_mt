@@ -301,6 +301,7 @@
           "dotmac_integration/py.typed",
           "dotmac_integration/manifest.py",
           "dotmac_integration/spi.py",
+          "dotmac_integration/ingress.py",
           "dotmac_integration/discovery.py",
           "dotmac_integration/secret_refs.py",
           "dotmac_integration/migrations/__init__.py",
