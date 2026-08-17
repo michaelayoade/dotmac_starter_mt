@@ -354,6 +354,17 @@ default in production are added to `validate_settings`'s prod-fatal list.
 
 ## Validation before any commit
 
+**Test host — hard rule.** Never run test commands or install test/development
+dependencies on the local workstation. Run every focused, unit, architecture,
+integration, migration, browser, and full-suite test on the Dotmac Observer
+server (SSH alias `observe`) in a fresh isolated writable Git worktree pinned
+to the exact branch commit under test; a shared checkout is not test evidence.
+Use only disposable test databases and tear them down after the run. Never use
+`pytest -n auto` on Observer; cap xdist at `-n 2` or `-n 3` to avoid exhausting
+the host. Local work is limited to read-only inspection, editing, formatting,
+and static checks that do not execute tests or install dependencies. Git-hosted
+CI remains the merge acceptance owner.
+
 - `make check` — ruff lint, import-linter, mypy, bandit, the composed
   migration gate (ADR-0006 D1), format check.
 - `make test-unit` — SQLite-fast: `tests/unit` + `tests/architecture`.
