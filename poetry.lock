@@ -565,7 +565,7 @@ url = "packages/dotmac-connector-whatsapp"
 
 [[package]]
 name = "dotmac-entitlement-allocation"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -574,7 +574,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a66"
+dotmac-kernel = ">=0.1.0a68"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -619,7 +619,7 @@ url = "packages/dotmac-imports"
 
 [[package]]
 name = "dotmac-integration"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -628,7 +628,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a66"
+dotmac-kernel = ">=0.1.0a68"
 sqlalchemy = "^2.0"
 
 [package.source]
