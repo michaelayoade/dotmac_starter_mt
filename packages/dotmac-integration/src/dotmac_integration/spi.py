@@ -207,7 +207,7 @@ class SpiVersion:
 #: The SPI this module implements. A connector declaring a range that excludes
 #: it is refused — at discovery, at startup and at activation.
 #
-# 1.1, and 1.1 is the whole of it. Two unpublished drafts existed — one adding
+# SPI 1.1 collapsed two unpublished drafts — one adding
 # the mode protocols, one replacing the ingress hooks' loose parameters with a
 # single immutable envelope — and shipping them as two consecutive BREAKING SPI
 # versions inside one unreleased alpha would have been a fiction: no consumer
@@ -220,7 +220,8 @@ class SpiVersion:
 # 1.1 adds is machinery 1.0 had no expressible form of at all: an ingress
 # protocol, a poll protocol, and the verification that a declared mode is real.
 # A major bump would have excluded every honest `>=1.0,<2.0` delivery connector
-# in order to protect a compatibility promise nothing ever consumed.
+# in order to protect a compatibility promise nothing ever consumed. SPI 1.2
+# then added verification evidence without changing the handler protocols.
 CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 2)
 
 
