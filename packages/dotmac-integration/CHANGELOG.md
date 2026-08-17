@@ -2,13 +2,13 @@
 
 ## Release state — read this before pinning
 
-**Seven versions have been released. Pin `0.1.0a7`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a7`, from `1b1d62b`, `aaa3b54`,
-`b14f66e`, `306a40e`, `7828697`, `7e05430` and `c669b24`.
+**Eight versions have been released. Pin `0.1.0a8`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a8`, from `1b1d62b`, `aaa3b54`,
+`b14f66e`, `306a40e`, `7828697`, `7e05430`, `c669b24` and `4b1e867`.
 
-`0.1.0a7` is the latest published version. It retains SPI 1.2 and adds the
-product-owned destination descriptor snapshot, receipt-owned provider event
-identity and record-only ingress evidence described below.
+`0.1.0a8` is the latest published version. It retains SPI 1.2 and adds the
+module-owned indexed shadow-evidence store needed for the first capability
+cutover.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -33,10 +33,8 @@ dependency explicit and restores installation/configuration lifecycle parity.
 `0.1.0a7` was published, installed back from the private index and tagged on
 2026-08-17 from `c669b24` while the independent a8 branch was being rebased.
 
-`0.1.0a8` is declared and **not released**. It keeps SPI 1.2 and adds the
-module-owned indexed shadow-evidence store needed for the first capability
-cutover. The declared-publication baseline holds that state until the release
-workflow installs and verifies a8 from the private index.
+`0.1.0a8` was published, installed back from the private index, registered and
+tagged on 2026-08-17 from `4b1e867` by release run `32050382156`.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -53,7 +51,7 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a8 — UNRELEASED
+## 0.1.0a8 — released 2026-08-17
 
 ### Indexed, revisioned product-port shadow evidence
 
