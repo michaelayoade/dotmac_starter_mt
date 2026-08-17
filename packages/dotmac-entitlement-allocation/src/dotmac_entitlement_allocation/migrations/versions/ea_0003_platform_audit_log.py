@@ -44,4 +44,3 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Nothing to undo: ``upgrade`` only verified the provider catalogue."""
-
