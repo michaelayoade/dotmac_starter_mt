@@ -23,7 +23,7 @@ The governing evidence is:
 | executable ingress SPI | done: SPI 1.2, released in `dotmac-integration 0.1.0a5` |
 | implementation authorization | done: Michael directed the first Meta/WhatsApp connector and later directed completion without further decision prompts |
 | secret materialization owner | done: `dotmac-integration` owns secret-reference resolution; the connector receives material and never dereferences a store |
-| release eligibility | in this slice: the package, allowlist entry, wheel policy and installed conformance proof land together |
+| release eligibility | done: `0.1.0a1` was rebuilt, inspected, installed from the private index, conformance-checked and tagged by release run `32015394987` on exact main SHA `2b6b046` |
 | provider operation / adoption | not claimed: requires an exact Integrator pin and Sub shadow/cutover |
 
 ADR-0030's original §6 prohibition is retained as history. Its dated amendment
