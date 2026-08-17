@@ -102,8 +102,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 
 #: The distributions this file monitors, and where each keeps its lineage.
 #:
@@ -978,11 +980,58 @@ def test_the_tag_oracle_is_usable_and_complete() -> None:
     sweep = _tag_oracle()
     assert not sweep.is_shallow(REPO_ROOT), (  # type: ignore[attr-defined]
         "shallow checkout: the released-migration cross-check needs full "
-        "history and tags — the `unit` job sets fetch-depth: 0 for this reason"
+        "history and tags — every CI job that reads release history must set "
+        "fetch-depth: 0"
     )
     tags = set(sweep.git_tags(REPO_ROOT))  # type: ignore[attr-defined]
     problems = _tag_inventory_problems(tags)
     assert not problems, "released-tag inventory:\n" + "\n".join(problems)
+
+
+def _job_fetches_full_history(workflow: dict[str, object], job_name: str) -> bool:
+    jobs = workflow.get("jobs")
+    if not isinstance(jobs, dict):
+        return False
+    job = jobs.get(job_name)
+    if not isinstance(job, dict):
+        return False
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict) or not str(step.get("uses", "")).startswith(
+            "actions/checkout@"
+        ):
+            continue
+        checkout_with = step.get("with")
+        return isinstance(checkout_with, dict) and checkout_with.get("fetch-depth") == 0
+    return False
+
+
+def test_every_ci_job_that_reads_release_history_fetches_tags() -> None:
+    """The unit oracle and PostgreSQL upgrade proofs both execute git show."""
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    missing = [
+        job_name
+        for job_name in ("unit", "integration")
+        if not _job_fetches_full_history(workflow, job_name)
+    ]
+    assert not missing, (
+        f"CI jobs {missing} execute release-history proofs without a full checkout; "
+        "set actions/checkout fetch-depth: 0 so published tags are evidence"
+    )
+
+
+def test_the_ci_tag_checkout_guard_detects_a_missing_fetch_depth() -> None:
+    """Sensitivity: the detector must fail when a checkout loses its tag oracle."""
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    checkout = next(
+        step
+        for step in workflow["jobs"]["integration"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    checkout.pop("with", None)
+    assert not _job_fetches_full_history(workflow, "integration")
 
 
 def test_the_tag_inventory_rejects_an_unrecorded_future_release() -> None:
