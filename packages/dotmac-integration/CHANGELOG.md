@@ -2,13 +2,13 @@
 
 ## Release state — read this before pinning
 
-**Six versions have been released. Pin `0.1.0a6`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a6`, from `1b1d62b`, `aaa3b54`,
-`b14f66e`, `306a40e`, `7828697` and `7e05430`.
+**Seven versions have been released. Pin `0.1.0a7`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a7`, from `1b1d62b`, `aaa3b54`,
+`b14f66e`, `306a40e`, `7828697`, `7e05430` and `c669b24`.
 
-`0.1.0a6` is the latest published version. It retains SPI 1.2 and adds the
-configuration-parity and platform-audit prerequisite correction described
-below. It does not contain the product-port changes declared for a7.
+`0.1.0a7` is the latest published version. It retains SPI 1.2 and adds the
+product-port provenance, receipt-owned provider identity and record-only
+evidence behavior described below.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -30,11 +30,9 @@ the immediately following release-record change.
 2026-08-17 from `7e05430`. It keeps SPI 1.2, makes the platform-audit storage
 dependency explicit and restores installation/configuration lifecycle parity.
 
-`0.1.0a7` is declared and **not released**. It carries the product-owned
-destination descriptor snapshot, keeps provider event identity on the product
-request, and closes record-only ingress evidence without scheduling product
-delivery. The declared-publication baseline holds that state until the release
-workflow installs and verifies a7 from the private index.
+`0.1.0a7` was published, installed back from the private index, registered and
+tagged on 2026-08-17 from `c669b24` by release run 32047588617. The workflow
+verified all nine migration files before writing the tag.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -51,7 +49,7 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a7 — UNRELEASED
+## 0.1.0a7 — released 2026-08-17
 
 ### Product-owned destination provenance and complete receipt identity
 

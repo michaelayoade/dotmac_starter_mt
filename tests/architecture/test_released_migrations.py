@@ -2,9 +2,9 @@
 
 ## The enforceable premise (ADR-0018)
 
-`dotmac-integration` has been published six times and
+`dotmac-integration` has been published seven times and
 `dotmac-entitlement-allocation` five. Every migration file present at any of
-those eleven tags is inside a wheel on the registry, and has therefore RUN,
+those twelve tags is inside a wheel on the registry, and has therefore RUN,
 unmodified, in at least one database this repository does not own and cannot
 inspect.
 
@@ -288,6 +288,41 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # a7 is the product-port provenance release. It appends ig_0009 and freezes
+    # the prior eight files at the same bytes a6 shipped.
+    "dotmac-integration-v0.1.0a7": (
+        "dotmac-integration",
+        "c669b24",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+            "ig_0008_platform_audit_log.py": (
+                "1e2cb215be0e71edf1af33b41cd53630ba9583168c2ff270c568483fdff15825"
+            ),
+            "ig_0009_product_port_descriptors.py": (
+                "f95ec953d0ec9d561b5d7d438d1865e817fc4d15b2178c87e5f67350a07ab2d9"
+            ),
+        },
+    ),
     # ── dotmac-entitlement-allocation ───────────────────────────────────────
     #
     # Four tags, one migration, one digest. `ea_0001` has not moved a byte
@@ -361,14 +396,11 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: `ig_0009` is editable until integration a7 is tagged. Integration a6 and
-#: allocation a6 were both published from `7e05430` while this branch was open,
-#: so their migration bytes moved into `RELEASED_TAGS` and allocation's empty
-#: editable set remains explicit. The release lane does not wait for an open
-#: branch, which is the whole reason "released" is read from tags and not from
-#: a version number somebody intended.
+#: Both monitored lineages currently have no editable migration. The empty
+#: sets are load-bearing: the next file must enter here before it can ship, and
+#: a released file cannot be moved back into this set.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-integration": frozenset({"ig_0009_product_port_descriptors.py"}),
+    "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
 }
 
