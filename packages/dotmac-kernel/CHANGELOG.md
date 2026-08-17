@@ -27,9 +27,10 @@ control-plane modules.
 
 ### Fixed
 
-- `dotmac-integration` and `dotmac-entitlement-allocation` can now declare and
-  verify the audit table they write at request time instead of failing only on
-  an adopter whose lineage never supplied it.
+- Publishes the named contract required for `dotmac-integration` and
+  `dotmac-entitlement-allocation` to declare and verify the audit table in the
+  immediately following consumer slice. Their floors stay unchanged until
+  this kernel version is released and therefore resolvable.
 - `write_platform_audit_event` now rejects action codes absent from the active
   manifest registry before adding a row; platform modules' `audit_actions`
   declarations are therefore an enforced vocabulary rather than documentation.

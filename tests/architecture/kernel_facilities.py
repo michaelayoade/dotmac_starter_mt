@@ -110,11 +110,6 @@ class Facility:
 #: obligation for the same reason.
 MAPPED: Final[tuple[Facility, ...]] = (
     Facility(
-        "audit:write_platform_audit_event",
-        "platform_audit_log.v1",
-        "appends to public.platform_audit_events",
-    ),
-    Facility(
         "idempotency:execute_once",
         "idempotency_ledger.v1",
         "writes public.idempotency_records",
@@ -192,6 +187,20 @@ MAPPED: Final[tuple[Facility, ...]] = (
 #: An empty set means "no module calls this today", which is a claim worth
 #: holding: it is how the next caller becomes a visible diff.
 FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
+    "audit:write_platform_audit_event": (
+        "PLATFORM AUDIT — `platform_audit_log.v1` is implemented in kernel "
+        "0.1.0a68, but callers cannot raise their manifest floor to a68 until "
+        "that artifact is published. Keep the exact two-caller set frozen "
+        "through the kernel release; the immediately following consumer slice "
+        "adds both declarations and verifiers, then moves this entry to MAPPED.",
+        frozenset(
+            {
+                "dotmac-integration/src/dotmac_integration/operations.py",
+                "dotmac-entitlement-allocation/src/dotmac_entitlement_allocation"
+                "/service.py",
+            }
+        ),
+    ),
     "audit:write_audit_event": (
         "TENANT AUDIT — no published consumer. The persisted-runtime-dependency "
         "inventory found its only module caller is `dotmac-template-studio`, "

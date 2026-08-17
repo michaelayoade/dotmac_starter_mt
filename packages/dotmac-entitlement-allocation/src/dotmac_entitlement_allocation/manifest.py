@@ -31,7 +31,7 @@ same change as the guards that reference them.
 from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
-from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1, PLATFORM_AUDIT_LOG_V1
+from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1
 
 module = ModuleManifest(
     code="entitlement_allocation",
@@ -43,7 +43,7 @@ module = ModuleManifest(
     tables=(),
     platform_tables=("allocations", "allocation_entries"),
     # ── Logical database prerequisites ──────────────────────────────────────
-    # The TWO effects this module needs that its own migration does not create.
+    # The ONE effect this module needs that its own migration does not create.
     # `stage_allocation` delegates at-most-once to the kernel (hard rule 21,
     # ADR-0014), so `public.platform_idempotency_records` is written at REQUEST
     # time and nothing in `ea_0001` touches it. Undeclared — every release up
@@ -68,11 +68,13 @@ module = ModuleManifest(
     # selection when only one plane set is supported). The spec is whole in any
     # case: one name, both ledgers, as `IDEMPOTENCY_LEDGER_V1.summary` states.
     #
-    # `write_platform_audit_event` runs inside the same operation and writes
-    # `public.platform_audit_events`. Kernel a68 names and verifies that
-    # append-only platform effect, so the unpublished a5 closes both runtime
-    # dependencies together rather than releasing a knowingly partial fix.
-    requires=(IDEMPOTENCY_LEDGER_V1.name, PLATFORM_AUDIT_LOG_V1.name),
+    # NOT declared here, and deliberately: `write_platform_audit_event` writes
+    # `public.platform_audit_events` from inside the same operation and has the
+    # identical shape, but no kernel prerequisite names it yet. It is recorded
+    # as a KNOWN UNMAPPED facility rather than silently omitted — see
+    # `docs/inventories/kernel-persisted-runtime-dependencies.md`. The next
+    # version of this module may not be PUBLISHED until it declares both.
+    requires=(IDEMPOTENCY_LEDGER_V1.name,),
     audit_actions=("entitlement_allocation.staged",),
 )
 

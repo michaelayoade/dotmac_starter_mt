@@ -12,14 +12,15 @@ is **not released**: no tag, nothing on the index. It is recorded in
 and — unlike the ordinary declared-then-released cycle — that row does **not**
 expire at the next release run. Michael's standing condition of 2026-08-16: the
 next published version of this module must declare BOTH the idempotency ledger
-and the platform audit dependency. Version `0.1.0a5` now does; publication
-still waits for kernel `0.1.0a68` to be released and verified.
+and the platform audit dependency. The second prerequisite,
+`platform_audit_log.v1`, does not exist yet, so `0.1.0a5` is unpublishable by
+design rather than by omission. Do not dispatch a release to clear it.
 
 Nothing in this file is a publication claim except this section.
 
 ## 0.1.0a5 — UNRELEASED (on `main`; no tag, not on the index)
 
-### Both runtime persistence effects are declared and verified at deploy
+### `idempotency_ledger.v1` is declared, and verified at deploy
 
 Declares the kernel prerequisite this module has consumed since `0.1.0a1`.
 
@@ -54,20 +55,15 @@ a missing ledger takes the audit trail down with the allocation.
   visible break for a consumer pinned to a released a1..a4 on an older
   kernel**, and deliberately so: every one of those installs against a kernel
   whose ledger it silently requires and cannot state.
-- All three migrations are required wheel contents in
-  `.github/release-modules.json`. `ea_0002` and `ea_0003` create nothing, so a
-  wheel that dropped either would ship a declared-but-never-verified
-  prerequisite.
+- Both migrations are now required wheel contents in
+  `.github/release-modules.json`. `ea_0002` creates nothing, so a wheel that
+  dropped it would ship a declared-but-never-verified prerequisite.
 
 #### Added
 
 - **`ea_0002_idempotency_ledger`** — a DDL-free revision whose whole body is
   `require_prerequisites`. Deploy is the last moment at which a missing ledger
   is a failed migration rather than a failed staging call.
-- **`ea_0003_platform_audit_log`** — a second DDL-free revision for the audit
-  effect. It is separate because its provider revision (`0026`) descends the
-  ledger provider (`0018`); naming both on one module revision gives Alembic
-  two heads from one provider lineage and fails during head maintenance.
 - A NEW revision rather than an edit to `ea_0001`, which shipped in four
   published tags and whose bytes are therefore history.
   `tests/architecture/test_released_migrations.py` — extended to this
@@ -75,14 +71,12 @@ a missing ledger takes the audit trail down with the allocation.
   in every released tag, cross-checks each digest against the blob git holds at
   that tag, and fails if one changes or disappears.
 
-#### Platform audit dependency closed
+#### Recorded, not fixed
 
-- `write_platform_audit_event` runs inside the same idempotent operation and
-  appends to `public.platform_audit_events`. `ModuleManifest.requires` and
-  `ea_0003` now also require `platform_audit_log.v1`.
-- Kernel floor raised again to `>=0.1.0a68`, the first kernel that names and
-  verifies that append-only platform effect. The already-unpublished a5 keeps
-  its version because no consumer could have installed the earlier declaration.
+- `write_platform_audit_event` has the identical undeclarable-dependency shape
+  and no name to declare. It is a KNOWN UNMAPPED kernel facility, not an
+  oversight, and it is the whole reason this version is unpublishable. See
+  `docs/inventories/kernel-persisted-runtime-dependencies.md`.
 
 ## 0.1.0a4 — 2026-08-15 — RELEASED (tag `dotmac-entitlement-allocation-v0.1.0a4`)
 

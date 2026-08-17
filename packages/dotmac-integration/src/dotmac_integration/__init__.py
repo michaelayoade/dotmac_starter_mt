@@ -333,7 +333,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a4"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────

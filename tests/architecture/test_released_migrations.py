@@ -277,18 +277,16 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: `ig_0008` moves when integration's `0.1.0a5` is tagged, and `ea_0002` plus
-#: `ea_0003` when allocation's `0.1.0a5` is. Each move is the same commit that
-#: removes its
+#: Integration has no editable migration after a4: `ig_0007` is now released.
+#: `ea_0002` moves when allocation's `0.1.0a5` is tagged. That move is the same
+#: commit that removes its
 #: distribution's row from `docs/inventories/declared-publication-baseline
 #: .json`. The release lane does not wait for an open branch, which is the
 #: whole reason "released" is read from tags and not from a version number
 #: somebody intended.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-integration": frozenset({"ig_0008_platform_audit_log.py"}),
-    "dotmac-entitlement-allocation": frozenset(
-        {"ea_0002_idempotency_ledger.py", "ea_0003_platform_audit_log.py"}
-    ),
+    "dotmac-integration": frozenset(),
+    "dotmac-entitlement-allocation": frozenset({"ea_0002_idempotency_ledger.py"}),
 }
 
 
@@ -516,13 +514,17 @@ def test_the_guard_catches_a_deleted_released_migration(tmp_path: Path) -> None:
         assert "MISSING" in problem
 
 
-@pytest.mark.parametrize("distribution", sorted(DISTRIBUTIONS))
+@pytest.mark.parametrize(
+    "distribution",
+    sorted(owner for owner, files in UNRELEASED.items() if files),
+)
 def test_an_unreleased_migration_is_free_to_change(
     tmp_path: Path, distribution: str
 ) -> None:
     """Specificity for the two above: `_drift` must fire on RELEASED bytes, not
     on any change at all. A guard that refused every edit to the directory would
     pass both proofs above and block all future work."""
+    assert any(UNRELEASED.values()), "no editable migration exists; proof is vacuous"
     copy = tmp_path / "versions"
     shutil.copytree(DISTRIBUTIONS[distribution], copy)
     victim = copy / next(iter(UNRELEASED[distribution]))

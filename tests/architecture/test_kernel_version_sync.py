@@ -78,8 +78,7 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # every releasable module has now outlived its own allocation floor. The last
 # occupant was `dotmac-integration`, which held a58 — its own ledger row,
 # higher than `platform_tables` (a53) and the a56 prerequisite contract — until
-# integration `0.1.0a4` declared `idempotency_ledger.v1` and moved to a66;
-# unreleased `0.1.0a5` adds `platform_audit_log.v1` and moves to a68.
+# integration `0.1.0a4` declared `idempotency_ledger.v1` and moved to a66.
 #
 # An empty map is a parametrize over nothing, and a test that collects nothing
 # passes for the wrong reason. `test_every_releasable_module_has_a_floor_rule`
@@ -164,15 +163,15 @@ CAPABILITY_RAISED_FLOORS = {
     # them (ADR-0014). What a65 and below lack is the NAME — `validate_
     # prerequisites` raises `UnknownPrerequisiteError` while constructing the
     # manifest, so the module cannot be imported at all, let alone reach the
-    # a58 allocation check. Unreleased a5 adds `platform_audit_log.v1`, named
-    # by a68, so the highest capability wins.
+    # a58 allocation check. Capability outranks allocation, as everywhere else
+    # in this map.
     #
     # Unlike numbering, whose a1 was never published, this floor raise is
     # visible to consumers: `dotmac_integrator` can pin any of three released
     # versions that run on a58..a65, and a4 will not. That is the correct trade
     # — every one of those installs on a kernel whose ledger it silently
     # requires and cannot state.
-    "dotmac-integration": ("0.1.0a68", "0.1.0a58"),
+    "dotmac-integration": ("0.1.0a66", "0.1.0a58"),
     # Entitlement allocation held a56 through `0.1.0a1`..`0.1.0a4`, all four
     # PUBLISHED, and that a56 was `platform_tables` (ADR-0023) rather than its
     # a45 ledger row. `0.1.0a5` declares `idempotency_ledger.v1`, the a66 name
@@ -185,14 +184,11 @@ CAPABILITY_RAISED_FLOORS = {
     # check. Capability outranks allocation, as everywhere else in this map,
     # and the highest capability consumed is what the floor names — which is
     # why this row moved off a56 rather than staying beside release-catalog.
-    # The same unreleased a5 also declares `platform_audit_log.v1`, moving the
-    # floor again to the a68 release that first names it.
-    #
     # Same visible break as integration's, and accepted for the same reason:
     # four released versions install on a56..a65, a5 will not, and every one
     # of those four runs against a kernel whose ledger it silently requires
     # and cannot state.
-    "dotmac-entitlement-allocation": ("0.1.0a68", "0.1.0a45"),
+    "dotmac-entitlement-allocation": ("0.1.0a66", "0.1.0a45"),
 }
 
 
