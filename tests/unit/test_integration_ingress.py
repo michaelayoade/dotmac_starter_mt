@@ -70,6 +70,7 @@ from dotmac_integration import (
     PreparedIngress,
     ReceiptWriteFailed,
     SecretsUnavailable,
+    VerificationResult,
     add_binding,
     answer_challenge,
     create_draft,
@@ -143,7 +144,7 @@ class IngressFake:
         modes: frozenset[ConnectorMode] = frozenset(
             {ConnectorMode.INGRESS, ConnectorMode.DELIVERY}
         ),
-        verified: bool = True,
+        verified: bool | VerificationResult = True,
         events: tuple[InboundEvent, ...] = (),
         acknowledgement: Acknowledgement | None = None,
         normalize_returns: Any = _UNSET,
@@ -246,7 +247,7 @@ class _Handler:
         *,
         config: dict[str, object],
         secrets: dict[str, object],
-    ) -> bool:
+    ) -> bool | VerificationResult:
         self.fake.seen.append(("verify", request, config, secrets))
         if self.fake.raises is not None:
             raise self.fake.raises
@@ -1053,12 +1054,19 @@ def test_the_plugin_phase_cannot_be_handed_a_session() -> None:
         parameters = inspect.signature(phase).parameters
         assert "db" not in parameters
         assert "session" not in parameters
-        assert list(parameters) == [
-            "prepared",
-            "request",
-            "registry",
-            "resolve_secrets",
-        ]
+    assert list(inspect.signature(verify_and_normalize).parameters) == [
+        "prepared",
+        "request",
+        "registry",
+        "resolve_secrets",
+        "observe_verification",
+    ]
+    assert list(inspect.signature(challenge_response).parameters) == [
+        "prepared",
+        "request",
+        "registry",
+        "resolve_secrets",
+    ]
 
 
 def test_one_request_object_reaches_both_hooks(db: Session) -> None:
@@ -1123,6 +1131,115 @@ def test_a_rejected_signature_persists_nothing(db: Session) -> None:
     assert outcome.acknowledgement is None
     assert db.query(InboxReceipt).count() == 0
     assert [hook for hook, *_ in fake.seen] == ["verify"], "normalize was reached"
+
+
+def test_verification_evidence_reaches_a_generic_observer_before_normalization(
+    db: Session,
+) -> None:
+    """A connector may identify WHICH configured secret positions matched.
+
+    The engine reports those positions through a provider-neutral observer.  It
+    never learns a secret name or value, while the assembly can count rotation
+    traffic without importing or branching on a connector.
+    """
+    evidence = VerificationResult(accepted=True, matched_secret_positions=(0, 2))
+    fake = IngressFake(verified=evidence, normalize_returns=object())
+    registry = registry_for(fake)
+    _, _, key = build(db, registry)
+    observed: list[VerificationResult] = []
+
+    outcome = receive(
+        Uow(db),
+        endpoint=address(key),
+        request=delivery_request(),
+        registry=registry,
+        resolve_secrets=resolver(),
+        observe_verification=observed.append,
+    )
+
+    assert observed == [evidence]
+    assert outcome.code is IngressCode.CONNECTOR_CONTRACT
+    assert db.query(InboxReceipt).count() == 0
+
+
+def test_a_legacy_boolean_verification_result_remains_compatible(db: Session) -> None:
+    """SPI 1.2 adds evidence without invalidating honest SPI 1.0/1.1 plugins."""
+    fake = IngressFake(verified=True)
+    registry = registry_for(fake)
+    _, _, key = build(db, registry)
+    observed: list[VerificationResult] = []
+
+    receive(
+        Uow(db),
+        endpoint=address(key),
+        request=delivery_request(),
+        registry=registry,
+        resolve_secrets=resolver(),
+        observe_verification=observed.append,
+    )
+
+    assert observed == [VerificationResult(accepted=True, matched_secret_positions=())]
+
+
+def test_a_truthy_non_contract_verification_result_is_refused(db: Session) -> None:
+    """Before SPI 1.2 any truthy object silently authenticated a request."""
+    fake = IngressFake(verified=object())  # type: ignore[arg-type]
+    registry = registry_for(fake)
+    _, _, key = build(db, registry)
+
+    outcome = receive(
+        Uow(db),
+        endpoint=address(key),
+        request=delivery_request(),
+        registry=registry,
+        resolve_secrets=resolver(),
+    )
+
+    assert outcome.code is IngressCode.CONNECTOR_CONTRACT
+    assert db.query(InboxReceipt).count() == 0
+
+
+def test_a_raising_verification_observer_cannot_break_ingress(db: Session) -> None:
+    """Telemetry is optional evidence, never an ingress availability dependency."""
+    event = InboundEvent(
+        provider_event_id="evt-observer-failure",
+        event_type="e",
+        payload={"i": 1},
+    )
+    fake = IngressFake(
+        verified=VerificationResult(True, (1,)),
+        events=(event,),
+    )
+    registry = registry_for(fake)
+    _, _, key = build(db, registry)
+
+    def unavailable(_result: VerificationResult) -> None:
+        raise RuntimeError("metrics backend unavailable")
+
+    outcome = receive(
+        Uow(db),
+        endpoint=address(key),
+        request=delivery_request(),
+        registry=registry,
+        resolve_secrets=resolver(),
+        observe_verification=unavailable,
+    )
+
+    assert outcome.code is IngressCode.ACCEPTED
+    assert (
+        db.query(InboxReceipt)
+        .filter_by(provider_event_id=event.provider_event_id)
+        .one()
+    )
+
+
+def test_verification_evidence_has_no_surface_for_secret_material() -> None:
+    evidence = VerificationResult(True, (0,))
+
+    assert set(evidence.__slots__) == {"accepted", "matched_secret_positions"}
+    assert SECRET_SENTINEL not in repr(evidence)
+    with pytest.raises((AttributeError, TypeError)):
+        object.__setattr__(evidence, "secret", SECRET_SENTINEL)
 
 
 def test_a_raising_connector_carries_only_its_type_name(db: Session) -> None:

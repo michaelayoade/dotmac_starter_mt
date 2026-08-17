@@ -8,18 +8,13 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | **`0.1.0a1`** only (tag `dotmac-integration-v0.1.0a1`), implementing **SPI 1.0** |
-| On `main`, unreleased | `0.1.0a2`, implementing **SPI 1.1** |
+| Released | `0.1.0a1` through **`0.1.0a4`**; a2–a4 implement **SPI 1.1** |
+| On this branch, unreleased | `0.1.0a5`, implementing **SPI 1.2** |
 
-`0.1.0a2` has no tag and is not on the index, and **SPI 1.1 is unpublished**. No
-connector anywhere has been built against anything but SPI 1.0, so the only
-compatibility obligation this contract carries is to 1.0's delivery connectors.
-That obligation is discharged by a test, not by this sentence — see
-"SPI 1.0 still works" below.
-
-There was never a published SPI 1.1 or 1.2. Two drafts existed on an abandoned
-branch and are collapsed into the single SPI 1.1 described here; version 1.2 is
-unused and available.
+SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
+SPI 1.1's boolean ingress-verification result to the evidence-free form of the
+new result. That obligation is discharged by tests, not by this sentence — see
+"SPI 1.0 still works" and "Verification evidence" below.
 
 ## Two version axes, and only one of them is this package's version
 
@@ -174,7 +169,8 @@ provider's exact handshake format — a raw echo, a `{"status":"ok"}`, an empty
   inferred from the shape of a request. A bodyless POST is still a DELIVERY, and
   a provider that confirms a subscription with a bodied request must still be
   able to handshake. Returning `None` is a refusal.
-- `verify` decides authenticity from `request.raw_body`.
+- `verify` decides authenticity from `request.raw_body`. It may return SPI
+  1.1's `bool` or SPI 1.2's `VerificationResult`.
 - `normalize` shapes a verified request into `(events, acknowledgement)` and is
   never called on an unverified body. It builds the acknowledgement because it
   is the last connector code that runs: the engine records the batch after
@@ -184,6 +180,20 @@ provider's exact handshake format — a raw echo, a `{"status":"ok"}`, an empty
 
 `config` reaches `normalize`; `secrets` deliberately does not — normalization
 that needs a secret is doing verification in the wrong place.
+
+### Verification evidence — positions, never material
+
+`VerificationResult` contains an acceptance bit and an increasing tuple of
+positions in the connector's ordered active-secret set. It cannot carry a
+secret name, secret-store reference or value. This is enough for an assembly to
+count how often an old or new signing secret matched during rotation while
+remaining provider-neutral.
+
+The ingress engine reports the result through an optional observer before
+normalization. A failing observer is ignored: metrics are evidence, not an
+availability dependency. A legacy boolean becomes the same result with an empty
+position tuple. Any other object is a connector-contract refusal rather than an
+implicit authentication through Python truthiness.
 
 ## SPI 1.0 still works
 
@@ -198,7 +208,7 @@ It is proved to **discover**, to **conform**, and to actually be **dispatched
 to**. The range check is separately proved live, so "`>=1.0,<2.0` is admitted"
 is a fact about the range rather than about nothing being checked.
 
-This is why SPI 1.1 is a minor. A major would have excluded every honest
+This is why SPI 1.1 and 1.2 are minors. A major would have excluded every honest
 `>=1.0,<2.0` delivery connector in order to protect a compatibility promise
 nothing ever consumed.
 

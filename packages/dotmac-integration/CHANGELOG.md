@@ -42,6 +42,24 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
+## 0.1.0a5 — unreleased
+
+### SPI 1.2 — provider-neutral verification evidence
+
+- Adds `VerificationResult`, containing only an acceptance bit and zero or more
+  positions in a connector's ordered active-secret set. No secret name,
+  reference or value is representable on the type.
+- Adds a provider-neutral verification observer to the ingress engine so an
+  assembly can count secret-rotation traffic without importing a connector or
+  branching on a provider. Observer failure is non-fatal telemetry failure.
+- Keeps SPI 1.0/1.1 ingress plugins source-compatible: a boolean verification
+  result is adapted to `VerificationResult` with no secret positions.
+- Refuses any other truthy object. Before this release, a plugin accidentally
+  returning an object instead of `bool` authenticated the request because the
+  engine relied on Python truthiness.
+- Raises `CURRENT_SPI_VERSION` from 1.1 to 1.2. No persistence or migration
+  changes are included.
+
 ## 0.1.0a4 — released 2026-08-16
 
 Written against a declared-but-unreleased `0.1.0a3`, which was cut from
