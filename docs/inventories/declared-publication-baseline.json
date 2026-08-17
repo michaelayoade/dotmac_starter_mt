@@ -62,15 +62,10 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-entitlement-allocation": {
-      "declared": "0.1.0a6",
-      "state": "declared-unpublished",
-      "reason": "AWAITING REVIEW AND RELEASE. The standing publication condition is now satisfied: a6 declares BOTH kernel-persisted effects used by stage_allocation \u2014 idempotency_ledger.v1 and platform_audit_log.v1 \u2014 and verifies them in the ordered, DDL-free ea_0002 and ea_0003 revisions. The kernel floor is >=0.1.0a68, the first release that names the audit effect after a66 named the ledger. Versions a1 through a4 remain the published history; a5 was deliberately never published because it carried only half the dependency repair. Delete this row only after release-module.yml installs a6 from the private index, registers its manifest against published kernel a68, verifies the wheel contents and tags dotmac-entitlement-allocation-v0.1.0a6."
-    },
     "dotmac-integration": {
-      "declared": "0.1.0a6",
+      "declared": "0.1.0a7",
       "state": "declared-unpublished",
-      "reason": "AWAITING REVIEW AND RELEASE. a5 remains the latest published version. a6 declares platform_audit_log.v1, verifies it in DDL-free ig_0008, then adds ig_0009 for immutable product-owned descriptor snapshots. It also carries receipt-owned provider identity and record-only ingress evidence without changing SPI 1.2. The floor is kernel >=0.1.0a68. This state is NOT to be repaired by editing the version; only a verified publication closes it. Delete this row only after release-module.yml installs a6 from the private index, registers its manifest, verifies all nine migration files and tags dotmac-integration-v0.1.0a6."
+      "reason": "AWAITING REVIEW AND RELEASE. a6 was published from 7e05430 before the product-port change merged; it contains the configuration-parity and platform-audit correction through ig_0008. a7 adds ig_0009 for immutable product-owned descriptor snapshots, receipt-owned provider identity and record-only ingress evidence without changing SPI 1.2. The floor remains kernel >=0.1.0a68. This state is NOT to be repaired by editing the version, moving the a6 tag or overwriting the published artifact; only a new verified publication closes it. Delete this row only after release-module.yml installs a7 from the private index, registers its manifest, verifies all nine migration files and tags dotmac-integration-v0.1.0a7."
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",

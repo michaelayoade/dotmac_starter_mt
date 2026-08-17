@@ -255,8 +255,9 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
-    # a6 adds the ordered platform-audit verifier. All eight bytes were
-    # installed from the registry before the release workflow wrote the tag.
+    # a6 adds the DDL-free platform-audit prerequisite verifier. It was
+    # published from main before the product-port branch merged, so ig_0009 is
+    # deliberately absent from this immutable release record.
     "dotmac-integration-v0.1.0a6": (
         "dotmac-integration",
         "7e05430",
@@ -360,10 +361,12 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: The published a6 tags leave both monitored lineages with no editable files;
-#: this product-port slice introduces `ig_0009` as the one new migration. The
-#: empty allocation set remains load-bearing: a released file cannot move back
-#: into it, and the next allocation migration must enter it before release.
+#: `ig_0009` is editable until integration a7 is tagged. Integration a6 and
+#: allocation a6 were both published from `7e05430` while this branch was open,
+#: so their migration bytes moved into `RELEASED_TAGS` and allocation's empty
+#: editable set remains explicit. The release lane does not wait for an open
+#: branch, which is the whole reason "released" is read from tags and not from
+#: a version number somebody intended.
 UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-integration": frozenset({"ig_0009_product_port_descriptors.py"}),
     "dotmac-entitlement-allocation": frozenset(),
