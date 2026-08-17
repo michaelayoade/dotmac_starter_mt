@@ -44,7 +44,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 
 | Distribution | Classification | Evidence | Module capability | Supported installation sets | This assembly installs | Release policy | Declared version | Kernel requirement | Proven consumers | Candidate consumers |
 |---|---|---|---|---|---|---|---:|---|---|---|
-| [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`audit-complete`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | — | `dotmac_workspace` |
+| [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp`, `dotmac_workspace` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator` |
@@ -69,9 +69,9 @@ and the next gate.
 
 - **Owner:** The tenant's connected-application portfolio
 - **Contract:** Which applications a tenant has, how to reach each one, which tenant it corresponds to inside the target — as IMMUTABLE binding identity, never rewritten by reconciliation — and how much the stored descriptor can currently be trusted. NOT who may enter them (ADR-0021 §3), not the deployment, not the product catalogue, not the entitlement, not the remote application.
-- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-application-directory/EXTRACTION.toml); source mode `greenfield-after-inventory`.
-- **Proven consumers:** —.
-- **Candidate consumers:** `dotmac_workspace`.
+- **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-application-directory/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** `dotmac_workspace`.
+- **Candidate consumers:** —.
 
 ### [`dotmac-approvals`](../packages/dotmac-approvals/README.md)
 
