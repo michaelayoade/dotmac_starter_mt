@@ -277,16 +277,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: Integration has no editable migration after a4: `ig_0007` is now released.
-#: `ea_0002` moves when allocation's `0.1.0a5` is tagged. That move is the same
-#: commit that removes its
+#: `ig_0008` is editable until integration a6 is tagged. Allocation a5 was
+#: deliberately never published, so both `ea_0002` and `ea_0003` move when a6
+#: is tagged. Those moves are the same commit that removes each
 #: distribution's row from `docs/inventories/declared-publication-baseline
 #: .json`. The release lane does not wait for an open branch, which is the
 #: whole reason "released" is read from tags and not from a version number
 #: somebody intended.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-integration": frozenset(),
-    "dotmac-entitlement-allocation": frozenset({"ea_0002_idempotency_ledger.py"}),
+    "dotmac-integration": frozenset({"ig_0008_platform_audit_log.py"}),
+    "dotmac-entitlement-allocation": frozenset(
+        {"ea_0002_idempotency_ledger.py", "ea_0003_platform_audit_log.py"}
+    ),
 }
 
 

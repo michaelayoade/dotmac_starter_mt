@@ -163,20 +163,24 @@ CAPABILITY_RAISED_FLOORS = {
     # them (ADR-0014). What a65 and below lack is the NAME — `validate_
     # prerequisites` raises `UnknownPrerequisiteError` while constructing the
     # manifest, so the module cannot be imported at all, let alone reach the
-    # a58 allocation check. Capability outranks allocation, as everywhere else
-    # in this map.
+    # a58 allocation check. a6 then declares `platform_audit_log.v1`, published
+    # in a68, and verifies it in `ig_0008`. Capability outranks allocation, as
+    # everywhere else in this map; the highest named effect sets the floor.
     #
     # Unlike numbering, whose a1 was never published, this floor raise is
     # visible to consumers: `dotmac_integrator` can pin any of three released
-    # versions that run on a58..a65, and a4 will not. That is the correct trade
+    # versions that run on a58..a65, and a4 will not. a6 additionally excludes
+    # a66/a67 because neither knows the audit effect. That is the correct trade
     # — every one of those installs on a kernel whose ledger it silently
     # requires and cannot state.
-    "dotmac-integration": ("0.1.0a66", "0.1.0a58"),
+    "dotmac-integration": ("0.1.0a68", "0.1.0a58"),
     # Entitlement allocation held a56 through `0.1.0a1`..`0.1.0a4`, all four
     # PUBLISHED, and that a56 was `platform_tables` (ADR-0023) rather than its
     # a45 ledger row. `0.1.0a5` declares `idempotency_ledger.v1`, the a66 name
     # for the at-most-once tables `stage_allocation` has been writing at
-    # request time since a1, and verifies it in `ea_0002`. The tables are far
+    # request time since a1, and verifies it in `ea_0002`. a6 also declares the
+    # platform audit effect and verifies it in `ea_0003`; a68 is the first
+    # kernel release that names that second effect. The tables are far
     # older than the floor — kernel `0018` created them (ADR-0014). What a65
     # and below lack is the NAME: `validate_prerequisites` raises
     # `UnknownPrerequisiteError` while the manifest is being constructed, so
@@ -185,10 +189,11 @@ CAPABILITY_RAISED_FLOORS = {
     # and the highest capability consumed is what the floor names — which is
     # why this row moved off a56 rather than staying beside release-catalog.
     # Same visible break as integration's, and accepted for the same reason:
-    # four released versions install on a56..a65, a5 will not, and every one
+    # four released versions install on a56..a65, a5 will not, and a6 also
+    # excludes a66/a67. Every one
     # of those four runs against a kernel whose ledger it silently requires
     # and cannot state.
-    "dotmac-entitlement-allocation": ("0.1.0a66", "0.1.0a45"),
+    "dotmac-entitlement-allocation": ("0.1.0a68", "0.1.0a45"),
 }
 
 

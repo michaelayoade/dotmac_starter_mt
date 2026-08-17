@@ -99,14 +99,17 @@
     },
     "dotmac-entitlement-allocation": {
       "$comment": [
-        "kernel_floor is a66, a CAPABILITY raise above its a45 ledger",
+        "kernel_floor is a68, a CAPABILITY raise above its a45 ledger",
         "allocation and above the a56 `platform_tables` raise that preceded",
         "it. a66 published `idempotency_ledger.v1`, the name for the",
         "at-most-once tables `stage_allocation` writes at request time. Every",
         "kernel from a18 HAS those tables, but one below a66 does not know the",
         "NAME, so `ModuleManifest.__post_init__` -> `validate_prerequisites`",
         "raises `UnknownPrerequisiteError` at manifest import, before the",
-        "allocation check is ever reached.",
+        "allocation check is ever reached. a68 then published",
+        "`platform_audit_log.v1`, the second effect staging writes inside the",
+        "same operation. ea_0002 and ea_0003 verify those effects in provider",
+        "lineage order; both are DDL-free and both are required wheel content.",
         "",
         "EVERY migration is a required wheel content, deliberately. This",
         "repository does not compose the module — `app/assembly.py` omits it,",
@@ -115,15 +118,15 @@
         "half and a data plane installing it would acquire the wrong one",
         "(ruling C4). A wheel that shipped the manifest but dropped a migration",
         "would therefore fail first in the vendor control plane's deployment,",
-        "not here. ea_0002 is the load-bearing one for this rule: it creates",
-        "nothing, so a wheel that dropped it would install a module whose",
-        "prerequisite is declared and never verified — exactly the state a5",
-        "exists to end."
+        "not here. ea_0002 and ea_0003 are the load-bearing ones for this rule:",
+        "they create nothing, so a wheel that dropped either would install a",
+        "module whose prerequisite is declared and never verified — exactly",
+        "the state a6 exists to end."
       ],
       "package_dir": "packages/dotmac-entitlement-allocation",
       "import_name": "dotmac_entitlement_allocation",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a66",
+      "kernel_floor": "0.1.0a68",
       "db_schema": "mod_ealloc",
       "tag_prefix": "dotmac-entitlement-allocation-v",
       "wheel_contents": {
@@ -132,7 +135,8 @@
           "dotmac_entitlement_allocation/manifest.py",
           "dotmac_entitlement_allocation/migrations/__init__.py",
           "dotmac_entitlement_allocation/migrations/versions/ea_0001_allocations.py",
-          "dotmac_entitlement_allocation/migrations/versions/ea_0002_idempotency_ledger.py"
+          "dotmac_entitlement_allocation/migrations/versions/ea_0002_idempotency_ledger.py",
+          "dotmac_entitlement_allocation/migrations/versions/ea_0003_platform_audit_log.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -253,7 +257,7 @@
         "this entry existed the module was unpublishable, and an assembly that",
         "cannot pin a module cannot compose it.",
         "",
-        "kernel_floor is a66, a CAPABILITY raise above its a58 ledger",
+        "kernel_floor is a68, a CAPABILITY raise above its a58 ledger",
         "allocation, and the row moved to CAPABILITY_RAISED_FLOORS with it.",
         "a66 published `idempotency_ledger.v1`, the name for the at-most-once",
         "tables `run_effect_once` writes at request time. Every kernel from",
@@ -275,9 +279,11 @@
         "would therefore fail first in the Integrator's deployment, not here.",
         "The list said 'both migrations' while the lineage had grown to six;",
         "ig_0003..ig_0006 were added with ig_0007 so the claim is true again.",
-        "ig_0007 is the load-bearing one for this rule: it creates nothing, so",
-        "a wheel that dropped it would install a module whose prerequisite is",
-        "declared and never verified — exactly the state a3 exists to end.",
+        "ig_0007 and ig_0008 are load-bearing for this rule: both create",
+        "nothing, so a wheel that dropped either would install a module whose",
+        "prerequisite is declared and never verified. a68 published",
+        "`platform_audit_log.v1`, the effect repair and retention commands",
+        "write at request time; ig_0008 verifies it after the a66 ledger effect.",
         "",
         "No `alembic` in allowed_requires: unlike dotmac-ticketing this module",
         "ships no link helper that emits DDL into a consuming product's",
@@ -293,7 +299,7 @@
       "package_dir": "packages/dotmac-integration",
       "import_name": "dotmac_integration",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a66",
+      "kernel_floor": "0.1.0a68",
       "db_schema": "mod_intg",
       "tag_prefix": "dotmac-integration-v",
       "wheel_contents": {
@@ -311,7 +317,8 @@
           "dotmac_integration/migrations/versions/ig_0004_destinations.py",
           "dotmac_integration/migrations/versions/ig_0005_receipt_delivery.py",
           "dotmac_integration/migrations/versions/ig_0006_retention.py",
-          "dotmac_integration/migrations/versions/ig_0007_idempotency_ledger.py"
+          "dotmac_integration/migrations/versions/ig_0007_idempotency_ledger.py",
+          "dotmac_integration/migrations/versions/ig_0008_platform_audit_log.py"
         ],
         "forbidden_prefixes": [
           "app/",

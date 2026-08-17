@@ -6,17 +6,30 @@
 `0.1.0a4`, tagged `dotmac-entitlement-allocation-v0.1.0a1` … `-v0.1.0a4` from
 `847ce0b`, `5ded880`, `c371b0f` and `67bdfb8`. **Pin `0.1.0a4`.**
 
-`0.1.0a5` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
+`0.1.0a6` is declared in `pyproject.toml`, `manifest.py` and `__init__.py` and
 is **not released**: no tag, nothing on the index. It is recorded in
-`docs/inventories/declared-publication-baseline.json` as declared-unpublished,
-and — unlike the ordinary declared-then-released cycle — that row does **not**
-expire at the next release run. Michael's standing condition of 2026-08-16: the
-next published version of this module must declare BOTH the idempotency ledger
-and the platform audit dependency. The second prerequisite,
-`platform_audit_log.v1`, does not exist yet, so `0.1.0a5` is unpublishable by
-design rather than by omission. Do not dispatch a release to clear it.
+`docs/inventories/declared-publication-baseline.json` as declared-unpublished.
+It satisfies Michael's standing condition of 2026-08-16: the next published
+version declares BOTH the idempotency ledger and platform audit dependencies.
+`0.1.0a5` was deliberately never published because it carried only the first
+half of that repair.
 
 Nothing in this file is a publication claim except this section.
+
+## 0.1.0a6 — UNRELEASED
+
+### `platform_audit_log.v1` is declared and verified at deploy
+
+- Declares the append-only platform audit effect that `stage_allocation`
+  writes inside its idempotent operation.
+- Adds DDL-free `ea_0003_platform_audit_log`, chained after `ea_0002`, so the
+  consumer follows the provider order: kernel `0018` supplies the ledger and
+  descendant `0026` supplies the audit effect.
+- Raises the kernel floor to `>=0.1.0a68`, the first release that knows the
+  audit prerequisite name and verifier.
+- Requires all three module migrations in the published wheel.
+- Converts `write_platform_audit_event` from a frozen caller set into a mapped
+  facility whose callers must declare and verify `platform_audit_log.v1`.
 
 ## 0.1.0a5 — UNRELEASED (on `main`; no tag, not on the index)
 
@@ -71,12 +84,11 @@ a missing ledger takes the audit trail down with the allocation.
   in every released tag, cross-checks each digest against the blob git holds at
   that tag, and fails if one changes or disappears.
 
-#### Recorded, not fixed
+#### Recorded for the next version
 
-- `write_platform_audit_event` has the identical undeclarable-dependency shape
-  and no name to declare. It is a KNOWN UNMAPPED kernel facility, not an
-  oversight, and it is the whole reason this version is unpublishable. See
-  `docs/inventories/kernel-persisted-runtime-dependencies.md`.
+- `write_platform_audit_event` had the identical undeclarable-dependency shape
+  and no name to declare at this version. That is why a5 was never published;
+  a6 closes it with kernel a68's `platform_audit_log.v1`.
 
 ## 0.1.0a4 — 2026-08-15 — RELEASED (tag `dotmac-entitlement-allocation-v0.1.0a4`)
 

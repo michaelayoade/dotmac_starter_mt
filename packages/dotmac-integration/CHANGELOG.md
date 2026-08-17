@@ -26,6 +26,11 @@ it outlives the request, the process and the credential's rotation. Prefer a4.
 tagged on 2026-08-17 from `7828697`. Its publication-ledger row was retired in
 the immediately following release-record change.
 
+`0.1.0a6` is declared and **not released**. It adds no connector or SPI
+behaviour; it makes the existing platform-audit storage dependency explicit
+and deploy-time verifiable. The declared-publication baseline holds that state
+until the release workflow installs and verifies a6 from the private index.
+
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
 misdescribes what is installable is how a consumer comes to pin something that
@@ -40,6 +45,20 @@ receipt delivery, retention, the type gate) and each wrote its own section
 before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
+
+## 0.1.0a6 — UNRELEASED
+
+### `platform_audit_log.v1` is declared and verified at deploy
+
+- Declares the append-only platform audit effect used by repair and retention
+  operations at request time.
+- Adds DDL-free `ig_0008_platform_audit_log` after the released `ig_0007`
+  ledger verifier. Published migration bytes remain untouched.
+- Raises the kernel floor to `>=0.1.0a68`, the first release that publishes
+  the audit prerequisite and its live-catalog verifier.
+- Requires all eight migrations in the release wheel.
+- Converts `write_platform_audit_event` from frozen caller debt into a mapped
+  facility enforced against every module caller.
 
 ## 0.1.0a5 — released 2026-08-17
 

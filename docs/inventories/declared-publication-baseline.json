@@ -63,9 +63,14 @@
   ],
   "unpublished": {
     "dotmac-entitlement-allocation": {
-      "declared": "0.1.0a5",
+      "declared": "0.1.0a6",
       "state": "declared-unpublished",
-      "reason": "UNPUBLISHED BY DESIGN, under a standing condition Michael set on 2026-08-16, and NOT an omission the release lane should close. 0.1.0a1 through 0.1.0a4 are all published and tagged; a4 is the one to pin. 0.1.0a5 declares idempotency_ledger.v1 \u2014 the at-most-once ledger stage_allocation has written at request time since a1 with nothing declaring it \u2014 and verifies it in ea_0002, so an adopter running its own lineage fails at deploy instead of on its first staged activation. It also raises the kernel floor to >=0.1.0a66, which every consumer pinned below that will feel. THE STANDING CONDITION: this module writes a SECOND kernel-persisted facility from inside the same operation, write_platform_audit_event, whose prerequisite (platform_audit_log.v1) does not exist yet \u2014 so the next entitlement-allocation version must not be published until it declares BOTH the idempotency ledger and the platform audit dependency. Publishing a5 as it stands would spend a version number on half the fix and leave the audit half looking addressed. So this row does not expire at the next release run; it expires when platform_audit_log.v1 exists, is declared here, and the version carrying both is tagged. DO NOT dispatch a release to clear it, and NEVER repair it by editing the declared version down."
+      "reason": "AWAITING REVIEW AND RELEASE. The standing publication condition is now satisfied: a6 declares BOTH kernel-persisted effects used by stage_allocation \u2014 idempotency_ledger.v1 and platform_audit_log.v1 \u2014 and verifies them in the ordered, DDL-free ea_0002 and ea_0003 revisions. The kernel floor is >=0.1.0a68, the first release that names the audit effect after a66 named the ledger. Versions a1 through a4 remain the published history; a5 was deliberately never published because it carried only half the dependency repair. Delete this row only after release-module.yml installs a6 from the private index, registers its manifest against published kernel a68, verifies the wheel contents and tags dotmac-entitlement-allocation-v0.1.0a6."
+    },
+    "dotmac-integration": {
+      "declared": "0.1.0a6",
+      "state": "declared-unpublished",
+      "reason": "AWAITING REVIEW AND RELEASE. a5 remains the latest published version. a6 declares platform_audit_log.v1, the append-only effect repair and retention operations write at request time, and verifies it in the DDL-free ig_0008 revision after ig_0007 verifies the a66 idempotency effect. The floor rises to kernel >=0.1.0a68. This state is NOT to be repaired by editing the version; only a verified publication closes it. Delete this row only after release-module.yml installs a6 from the private index, registers its manifest, verifies all eight migration files and tags dotmac-integration-v0.1.0a6."
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",

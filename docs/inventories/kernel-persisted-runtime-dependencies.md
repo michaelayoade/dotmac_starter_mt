@@ -16,18 +16,17 @@ and the settings storage behind `dotmac_kernel.settings_resolver`.
 until the evidence establishes the exact contract and the real consumers. What
 follows records what a contract WOULD have to cover and who WOULD need it.
 
-> **Status addendum — 2026-08-16.** The recommendation below has now been
-> implemented as `platform_audit_log.v1` for the platform plane only. Kernel
-> migration `0026_platform_audit_log` removes online `UPDATE`/`DELETE` and
-> column-level mutation paths; `verify_platform_audit_log` proves the complete
-> shape and privilege posture on PostgreSQL. Consumer declarations are
-> deliberately sequenced after the a68 artifact is published: until then their
-> existing exact caller set remains frozen by the generic facility guard, and
-> their module floors remain at a66. The next slice adds DDL-free verifier
-> revisions to `dotmac-integration` and `dotmac-entitlement-allocation`, then
-> moves the facility from FROZEN to MAPPED. This addendum supersedes only the
-> dated "does not name" status; the inventory evidence and the tenant/settings
-> rulings remain.
+> **Status addendum — 2026-08-17.** The recommendation below is implemented as
+> `platform_audit_log.v1` for the platform plane only. Kernel migration
+> `0026_platform_audit_log` removes online `UPDATE`/`DELETE` and column-level
+> mutation paths; `verify_platform_audit_log` proves the complete shape and
+> privilege posture on PostgreSQL. Kernel a68 is published. Integration a6 and
+> entitlement-allocation a6 now declare the effect, verify it in DDL-free
+> `ig_0008` and `ea_0003` revisions, and raise their floors to a68. The generic
+> facility guard maps `write_platform_audit_event` to the prerequisite, so a
+> caller that omits either declaration or verification fails the build. This
+> addendum supersedes only the dated "does not name" status; the inventory
+> evidence and the tenant/settings rulings remain.
 
 **Revisions read.** Every citation is against a checked-out worktree of
 `origin/main`, never a dirty tree.

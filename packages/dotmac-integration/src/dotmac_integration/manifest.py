@@ -30,14 +30,18 @@ an answer rather than a formality.
 from __future__ import annotations
 
 from dotmac_kernel.modules import ModuleManifest
-from dotmac_kernel.prerequisites import IDEMPOTENCY_LEDGER_V1, MODULE_DATABASE_ROLES_V1
+from dotmac_kernel.prerequisites import (
+    IDEMPOTENCY_LEDGER_V1,
+    MODULE_DATABASE_ROLES_V1,
+    PLATFORM_AUDIT_LOG_V1,
+)
 
 from dotmac_integration.models import PLATFORM_TABLES, TENANT_TABLES
 from dotmac_integration.retention import RETENTION_PLATFORM_TABLES
 
 module = ModuleManifest(
     code="integration",
-    version="0.1.0a5",
+    version="0.1.0a6",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="intg",
@@ -51,7 +55,7 @@ module = ModuleManifest(
     # honest — and keeps two concurrent slices from editing one tuple.
     platform_tables=PLATFORM_TABLES + RETENTION_PLATFORM_TABLES,
     # ── Logical database prerequisites ──────────────────────────────────────
-    # TWO effects this module needs that none of its own migrations create.
+    # THREE effects this module needs that none of its own migrations create.
     #
     # `module_database_roles.v1` is the older of the two and the one that was
     # never declared at all. `ig_0001` grants `platform_api`/`app_admin` and
@@ -92,7 +96,15 @@ module = ModuleManifest(
     # (`validate_module_plane_selections` refuses a selection when only one
     # plane set is supported). The spec is whole in any case: one name, both
     # ledgers, as `IDEMPOTENCY_LEDGER_V1.summary` states.
-    requires=(MODULE_DATABASE_ROLES_V1.name, IDEMPOTENCY_LEDGER_V1.name),
+    # `write_platform_audit_event` is the third: repair and retention commands
+    # write `public.platform_audit_events` at request time. Kernel a68 names
+    # that append-only effect, and `ig_0008` verifies it after the a66 ledger
+    # effect already verified by `ig_0007`.
+    requires=(
+        MODULE_DATABASE_ROLES_V1.name,
+        IDEMPOTENCY_LEDGER_V1.name,
+        PLATFORM_AUDIT_LOG_V1.name,
+    ),
     # ── Declared audit actions ──────────────────────────────────────────────
     # The FIXED set this module writes, declared rather than left as string
     # literals scattered through `operations`. ADR-0008's rule applied to an
