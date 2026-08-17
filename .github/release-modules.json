@@ -353,11 +353,12 @@
         "mechanism while it had not, and ADR-0026 section 8 says the entry lands",
         "with the proof rather than ahead of it.",
         "",
-        "kernel_floor is a59, its OWN ledger allocation. It consumes",
-        "platform_tables (a53) and the logical prerequisite contract (a56), but",
-        "the floor is the highest of everything the module needs and its",
-        "allocation is the highest - the ordinary case, like dotmac-integration",
-        "and unlike dotmac-ticketing.",
+        "kernel_floor is a67, the release that names outbox_relay.v1. The",
+        "module enqueues on both planes, so the dependency is COMMON and the",
+        "new ap_0002 verification revision is required wheel content. ap_0001",
+        "has three grandfathered released byte sets across a1-a4; the checked-in",
+        "byte census and PostgreSQL upgrade matrix preserve that evidence and",
+        "refuse a fourth in-place edit.",
         "",
         "The migration is a required wheel content. This repository does not",
         "compose the module - `app/assembly.py` omits it and `alembic.ini`",
@@ -386,7 +387,8 @@
           "dotmac_approvals/service.py",
           "dotmac_approvals/outbox.py",
           "dotmac_approvals/migrations/__init__.py",
-          "dotmac_approvals/migrations/versions/ap_0001_approvals.py"
+          "dotmac_approvals/migrations/versions/ap_0001_approvals.py",
+          "dotmac_approvals/migrations/versions/ap_0002_outbox_relay.py"
         ],
         "forbidden_prefixes": [
           "app/",
