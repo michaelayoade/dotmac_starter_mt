@@ -105,7 +105,7 @@ LOCATOR = "versions_dir"
 PRE_RULE_DEBT = {
     "dotmac-files": "no locator; lineage `fi`",
     "dotmac-imports": "no locator; lineage `im`",
-    "dotmac-integration": "no locator; lineage `ig`, two revisions",
+    "dotmac-integration": "no locator; lineage `ig`, eight revisions",
     "dotmac-template-studio": "no locator; lineage `ts`, two revisions",
     "dotmac-ticketing": "no locator; lineage `tk`",
 }
