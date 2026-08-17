@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0a1 — declared, unpublished
+## 0.1.0a1 — 2026-08-17
 
 - First ingress-only connector for `messaging.receive.v1`.
 - Exact-byte HMAC verification with ordered rotation evidence.
