@@ -124,7 +124,7 @@ and the next gate.
 ### [`dotmac-integration`](../packages/dotmac-integration/README.md)
 
 - **Owner:** External connector control plane
-- **Contract:** The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state.
+- **Contract:** The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, authenticated product-port descriptor snapshots, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state.
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-integration/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** `dotmac_integrator`.
 - **Candidate consumers:** —.

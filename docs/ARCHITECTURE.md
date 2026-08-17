@@ -50,7 +50,8 @@ The first concrete plugin follows that split exactly:
 | Contract surface | Owner | Non-owner boundary |
 |---|---|---|
 | Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-whatsapp` (`meta_whatsapp`, INGRESS-only, `messaging.receive.v1`) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation or product consequence |
-| Connector installation, binding, materialized secret lifetime, receipt identity, retry/repair and verification evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no Meta header, signature, payload or acknowledgement rule |
+| Connector installation, binding, product-port descriptor projection, materialized secret lifetime, receipt identity, retry/repair and verification evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no Meta header, signature, payload or acknowledgement rule; fetches no product descriptor itself |
+| Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
 
 For ticketing this means separate local installations: Sub owns operational

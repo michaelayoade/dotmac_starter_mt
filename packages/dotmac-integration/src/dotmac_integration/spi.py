@@ -98,6 +98,7 @@ __all__ = [
     "DeliveryPlugin",
     "Diagnostic",
     "DispatchRequest",
+    "InboundDisposition",
     "InboundEvent",
     "IngressHandler",
     "IngressPlugin",
@@ -407,6 +408,19 @@ class DispatchRequest:
     idempotency_key: str
 
 
+class InboundDisposition(str, Enum):
+    """Whether a verified provider fact is eligible for product delivery.
+
+    Provider errors, malformed entries and unsupported wire types remain
+    durable transport evidence without becoming product-domain observations.
+    ``RECORD_ONLY`` lets the generic engine close those receipts after writing
+    them; no connector-specific worker or payload convention is involved.
+    """
+
+    DELIVER = "deliver"
+    RECORD_ONLY = "record_only"
+
+
 @dataclass(frozen=True, slots=True)
 class InboundEvent:
     """One normalized provider fact, ready to be recorded.
@@ -418,6 +432,7 @@ class InboundEvent:
     provider_event_id: str
     event_type: str
     payload: dict[str, object]
+    disposition: InboundDisposition = InboundDisposition.DELIVER
 
 
 @dataclass(frozen=True, slots=True, repr=False)

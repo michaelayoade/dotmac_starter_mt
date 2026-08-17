@@ -21,7 +21,7 @@ owner = "External connector control plane"
 # ownership, provider-account rate limiting, backoff and idempotency, which is
 # the entire reason the runtime is separate. The same shape
 # dotmac_vendor_control_plane already uses for dotmac-release-catalog.
-contract = "The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state."
+contract = "The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, authenticated product-port descriptor snapshots, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state."
 
 # PLATFORM-PLANE ONLY (ADR-0023). Declared, not discovered: a connector
 # installation, its config revisions and its delivery evidence are control-plane
@@ -152,7 +152,7 @@ payload_retention = "NEW behaviour, not ported: Sub retains inbound payloads ind
 
 local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
 
-next_action = "dotmac-integration 0.1.0a5 is published with SPI 1.2 verification evidence. Pin a5 in the dotmac_integrator thin assembly, then build and publish the first ingress-only Meta/WhatsApp connector against >=1.2,<2.0. Wire its provider-neutral evidence observer and the Sub product port in the assembly, run a shadow cutover, and lower Sub's external-connector ratchet in the same change that retires the displaced direct surface."
+next_action = "Publish dotmac-integration 0.1.0a6 after its product-owned descriptor snapshot, receipt-owned provider identity and record-only evidence pass the composed gates. Then exact-pin kernel a68 and integration a6 in dotmac_integrator, install Sub's authenticated descriptor in mirror mode, prove zero unexplained drift, and only then cut over one binding and retire Sub's provider webhook/client/credentials/retry path while lowering the external-connector ratchet in the same change. dotmac-connector-whatsapp 0.1.0a1 is already published against SPI >=1.2,<2.0."
 
 # PARITY DISPOSITIONS — one per source suite, and the reason.
 #

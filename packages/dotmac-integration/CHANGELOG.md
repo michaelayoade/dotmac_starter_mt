@@ -26,10 +26,13 @@ it outlives the request, the process and the credential's rotation. Prefer a4.
 tagged on 2026-08-17 from `7828697`. Its publication-ledger row was retired in
 the immediately following release-record change.
 
-`0.1.0a6` is declared and **not released**. It adds no connector or SPI
-behaviour; it makes the existing platform-audit storage dependency explicit
-and deploy-time verifiable. The declared-publication baseline holds that state
-until the release workflow installs and verifies a6 from the private index.
+`0.1.0a6` is declared and **not released**. It makes the existing
+platform-audit storage dependency explicit and deploy-time verifiable, carries
+the product-owned destination descriptor snapshot, keeps provider event
+identity on the product request, and closes record-only ingress evidence
+without scheduling product delivery. SPI remains 1.2. The
+declared-publication baseline holds that state until the release workflow
+installs and verifies a6 from the private index.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -48,6 +51,22 @@ Nothing in this file is a publication claim except this section.
 
 ## 0.1.0a6 — UNRELEASED
 
+### Product-owned destination provenance and complete receipt identity
+
+- Adds append-only `ig_0009_product_port_desc` columns on destination
+  revisions. A named reconciler accepts one already-authenticated product
+  descriptor, verifies its digest, owner, capability, version and same-origin
+  paths, and appends only when the digest changes.
+- Carries `provider_event_id` from the claimed receipt into `ProductRequest`
+  and its fingerprint. The engine-owned durable identity no longer has to be
+  reconstructed from connector payload content.
+- Adds `InboundDisposition.RECORD_ONLY`, defaulting to `DELIVER`. Malformed,
+  provider-error and unsupported-wire evidence can remain durable and
+  deduplicated while being closed without entering a product delivery worker.
+- Keeps SPI 1.2 and its verification-evidence observer unchanged; the new
+  disposition is additive and existing connector events retain their delivery
+  behaviour.
+
 ### `platform_audit_log.v1` is declared and verified at deploy
 
 - Declares the append-only platform audit effect used by repair and retention
@@ -56,7 +75,7 @@ Nothing in this file is a publication claim except this section.
   ledger verifier. Published migration bytes remain untouched.
 - Raises the kernel floor to `>=0.1.0a68`, the first release that publishes
   the audit prerequisite and its live-catalog verifier.
-- Requires all eight migrations in the release wheel.
+- Requires all nine migrations in the release wheel.
 - Converts `write_platform_audit_event` from frozen caller debt into a mapped
   facility enforced against every module caller.
 
