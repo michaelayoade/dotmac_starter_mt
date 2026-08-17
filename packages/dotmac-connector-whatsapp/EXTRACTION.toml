@@ -1,0 +1,49 @@
+schema_version = 1
+package = "dotmac-connector-whatsapp"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "product-first"
+
+owner = "Meta WhatsApp Cloud API ingress authentication and wire translation: subscription challenge, exact-byte request verification, provider event identity, typed message/status/error observations, and provider acknowledgement bytes."
+
+contract = "Implement dotmac-integration SPI >=1.2,<2.0 for connector key meta_whatsapp and capability messaging.receive.v1 in INGRESS mode only. The connector receives immutable request bytes plus already-materialized configuration and secret material; it returns verification evidence and normalized provider facts. It owns no rows, sessions, retries, checkpoints, product identity, conversation state, tickets, subscribers, HTTP response status, or destination decision."
+
+source_repositories = [
+  "dotmac_sub",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  "dotmac_sub:app/services/integrations/whatsapp_runtime.py",
+  "dotmac_sub:app/services/integrations/whatsapp_installation.py",
+  "dotmac_sub:tests/services/integrations/test_whatsapp_runtime.py",
+  "dotmac_starter_mt:docs/inventories/whatsapp-connector-sources.md",
+  "dotmac_starter_mt:docs/superpowers/specs/2026-08-15-meta-whatsapp-ingress-conformance.md",
+  "dotmac_starter_mt:tests/fixtures/meta_whatsapp/manifest.json",
+  "dotmac_starter_mt:packages/dotmac-connector-whatsapp/src/dotmac_connector_whatsapp/plugin.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_meta_whatsapp_ingress_conformance.py",
+  "dotmac_starter_mt:tests/unit/test_whatsapp_connector.py",
+  "dotmac_starter_mt:tests/architecture/test_whatsapp_connector_boundary.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator"]
+
+inventory_evidence = [
+  "docs/inventories/whatsapp-connector-sources.md",
+  "docs/inventories/whatsapp-connector-dossier.md",
+  "docs/adr/0024-apps-compose-by-synchronizing-data.md",
+  "docs/adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md",
+]
+
+first_cutover = "Sub is the first product destination, through the independently deployed dotmac_integrator assembly. The connector is published first, then exact-pinned beside dotmac-integration 0.1.0a5. The assembly records provider-neutral verification evidence and delivers the typed messaging.receive.v1 observation to Sub's product-owned port. Sub shadows the direct WhatsApp receiver before the provider callback changes; publication alone is not a cutover and does not enter contract_consumers."
+
+shadow_and_drift = "Mirror the exact raw body and signature header into Integrator without changing Sub's current response path. Compare provider event identities, observation count, event type, typed message/status/location content, and refusal reason; never compare product consequences the old source cannot express. Duplicate observations are safe only through mod_intg's binding-scoped receipt identity and the product port's own idempotency. Cut over the provider callback after the corpus and live shadow agree for the configured retry horizon, then lower Sub's external-connector ratchet in the same change that removes the displaced direct verification/normalization surface."
+
+local_copy_retirement = "Retire only Sub's provider transport surface: webhook signature verification, provider payload traversal, provider event identity construction and provider acknowledgement. Sub retains the authoritative messaging decision, contact/conversation resolution and timeline consequences behind its typed observation port. No ERPNext or CRM connector is recreated; retired product connections stay retired."
+
+next_action = "Publish 0.1.0a1 after GitHub CI proves the fixture corpus, package boundary, wheel closure and installed SPI conformance. Exact-pin it with dotmac-integration 0.1.0a5 in dotmac_integrator, add the provider-neutral verification observer and Sub ProductPort transport-evidence/location mapping, then run the Sub shadow and callback cutover. Move status to adopted only after the assembly is deployed and Sub's direct provider surface is removed with a measured ratchet reduction."
+

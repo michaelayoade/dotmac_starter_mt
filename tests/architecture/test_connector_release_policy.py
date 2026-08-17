@@ -14,12 +14,9 @@ Three layers, as in the module and adapter lanes, and each fails differently:
 2. `conformance` checks statically what can be checked before installation.
 3. `verify-wheel` runs the shipped SPI kit against the INSTALLED bytes.
 
-**The lane is shut.** `connectors` is `{}` and no connector distribution exists,
-so every proof below plants a synthetic entry rather than pointing at a real
-package. That is deliberate: absence is the safety mechanism, and a guard tested
-only against the entries that happen to exist stops being a guard the moment the
-first one is added. It also means these tests cannot rot into "the lane is
-empty, so everything passes".
+The lane contains one connector. Synthetic entries still drive each refusal so
+the gate cannot rot into a check that merely recognises today's package, while
+the real entry has its own resolution and wheel-policy proofs.
 
 **The classification is a shared floor, not the separator.** A connector's
 `EXTRACTION.toml` declares `stateless-protocol-adapter` — the same as an
@@ -38,6 +35,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -397,6 +395,25 @@ def test_a_key_mismatch_between_entry_point_and_allowlist_is_refused(
     assert "connector_key" in str(refusal.value)
 
 
+def test_entry_point_must_load_the_object_the_release_gate_executes(lane) -> None:
+    """A correct key pointing at another object would certify the wrong plugin."""
+    import argparse
+
+    gate, package = lane(_valid_entry())
+    pyproject = package / "pyproject.toml"
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8").replace(
+            "dotmac_connector_example:PLUGIN", "dotmac_connector_example:OTHER"
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit) as refusal:
+        gate.cmd_resolve(
+            argparse.Namespace(distribution="dotmac-connector-example", version="")
+        )
+    assert "same object package discovery will load" in str(refusal.value)
+
+
 def test_a_distribution_must_register_exactly_one_connector(lane, tmp_path) -> None:
     """Two makes "which one failed" unanswerable at boot — discovery is
     fail-closed as a SET. Zero is invisible to the control plane it was built
@@ -520,6 +537,59 @@ def test_static_conformance_refuses_a_secret_shaped_file(lane) -> None:
     assert "secret-shaped" in str(refusal.value)
 
 
+def _write_wheel(dist: Path, *, files: list[str], requires: list[str]) -> None:
+    dist.mkdir(exist_ok=True)
+    with zipfile.ZipFile(dist / "example-0.1.0a1-py3-none-any.whl", "w") as wheel:
+        for name in files:
+            wheel.writestr(name, "")
+        metadata = "Metadata-Version: 2.4\n" + "".join(
+            f"Requires-Dist: {requirement}\n" for requirement in requires
+        )
+        wheel.writestr("example-0.1.0a1.dist-info/METADATA", metadata)
+
+
+def test_wheel_inspection_enforces_required_surface_and_dependency_closure(
+    lane, tmp_path: Path
+) -> None:
+    """The allowlist's wheel policy is executable, not decorative metadata."""
+    import argparse
+
+    entry = {
+        **_valid_entry(),
+        "wheel_contents": {
+            "required": ["dotmac_connector_example/plugin.py"],
+            "forbidden_prefixes": ["app/", "tests/"],
+            "allowed_requires": ["dotmac-integration", "python"],
+        },
+    }
+    gate, _ = lane(entry)
+    dist = tmp_path / "dist"
+    _write_wheel(
+        dist,
+        files=["dotmac_connector_example/plugin.py"],
+        requires=["dotmac-integration (>=0.1.0a1)", "python (>=3.12)"],
+    )
+    gate.cmd_inspect(
+        argparse.Namespace(distribution="dotmac-connector-example", dist=str(dist))
+    )
+
+    wheel = next(dist.glob("*.whl"))
+    wheel.unlink()
+    _write_wheel(
+        dist,
+        files=["tests/test_plugin.py"],
+        requires=["sqlalchemy (>=2)"],
+    )
+    with pytest.raises(SystemExit) as refusal:
+        gate.cmd_inspect(
+            argparse.Namespace(distribution="dotmac-connector-example", dist=str(dist))
+        )
+    message = str(refusal.value)
+    assert "missing from the wheel" in message
+    assert "forbidden content" in message
+    assert "dependency outside the allowed closure" in message
+
+
 # ── The policy names a contract that actually exists ────────────────────────
 
 
@@ -561,22 +631,18 @@ def test_the_executable_conformance_actually_calls_the_kit() -> None:
     assert "source tree" in program
 
 
-# ── The lane is shut, and opening it is one complete diff ───────────────────
+# ── The lane opens only through one complete reviewed diff ──────────────────
 
 
-def test_the_allowlist_is_the_lock_and_every_dispatch_fails_today() -> None:
-    """THE SHUT-LANE PROOF. The workflow exists; the ALLOWLIST is the lock.
-
-    A merged workflow is easy to misread as authorization, so this asserts the
-    thing that is actually true: with `connectors` empty, `resolve` — the one
-    enforced layer, re-run on the publish side too — refuses every value a
-    dispatcher could type, including the names of real packages in this tree.
-    """
-    assert _policy()["connectors"] == {}, (
-        "the lane is no longer shut; this proof must be replaced by one that "
-        "drives the real entry, not deleted"
-    )
+def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
+    """The real entry resolves while every neighbouring lane remains refused."""
+    assert set(_policy()["connectors"]) == {"dotmac-connector-whatsapp"}
     gate = _gate()
+    resolved = gate.resolve(
+        "dotmac-connector-whatsapp", tags={"dotmac-integration-v0.1.0a5"}
+    )
+    assert resolved["connector_key"] == "meta_whatsapp"
+    assert resolved["spi_range"] == ">=1.2,<2.0"
     for attempt in (
         "dotmac-connector-stripe",  # a plausible future name
         "dotmac-auth-oidc",  # a real package, right classification
@@ -584,11 +650,28 @@ def test_the_allowlist_is_the_lock_and_every_dispatch_fails_today() -> None:
         "",
     ):
         with pytest.raises(SystemExit) as refusal:
-            gate.resolve(attempt, tags={"dotmac-integration-v0.1.0a1"})
-        assert "the lane is shut" in str(refusal.value), attempt
+            gate.resolve(attempt, tags={"dotmac-integration-v0.1.0a5"})
+        assert "not an allowlisted connector plugin" in str(refusal.value), attempt
 
 
-def test_the_workflow_input_is_free_text_only_while_the_lane_is_shut() -> None:
+def test_the_real_entry_resolves_through_the_release_command(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    gate = _gate()
+    monkeypatch.setattr(
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a5"]
+    )
+    gate.cmd_resolve(
+        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a1")
+    )
+    output = capsys.readouterr().out
+    assert "connector_key=meta_whatsapp" in output
+    assert "tag=dotmac-connector-whatsapp-v0.1.0a1" in output
+
+
+def test_the_workflow_choice_matches_the_allowlist_exactly() -> None:
     """TWO-DIRECTIONAL. A `workflow_dispatch` choice must offer at least one
     option, and an empty allowlist has none — so the input is free text today.
     The moment a connector is listed the input must become an exact `choice`
@@ -598,12 +681,9 @@ def test_the_workflow_input_is_free_text_only_while_the_lane_is_shut() -> None:
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     connector_input = workflow[True]["workflow_dispatch"]["inputs"]["connector"]
     connectors = _policy()["connectors"]
-    if connectors:
-        assert connector_input["type"] == "choice"
-        assert set(connector_input["options"]) == set(connectors)
-    else:
-        assert connector_input["type"] == "string"
-        assert "options" not in connector_input
+    assert connectors
+    assert connector_input["type"] == "choice"
+    assert set(connector_input["options"]) == set(connectors)
 
 
 def test_the_workflow_says_the_allowlist_is_the_lock() -> None:
@@ -634,6 +714,8 @@ def test_the_workflow_matches_the_release_security_sequence() -> None:
     assert "download-artifact" in source, "publish must use the built bytes"
     assert source.count("twine upload") == 1
     assert source.index("poetry build") < source.index("twine upload")
+    assert "release_connector.py inspect" in source
+    assert source.index("release_connector.py inspect") < source.index("twine upload")
     # Defence in depth: the gate is re-run after the approval wait.
     publish = source.split("publish:", 1)[1].split("verify:", 1)[0]
     assert "release_connector.py resolve" in publish
