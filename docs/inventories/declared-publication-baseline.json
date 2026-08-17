@@ -62,6 +62,16 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-entitlement-allocation": {
+      "declared": "0.1.0a6",
+      "state": "declared-unpublished",
+      "reason": "AWAITING REVIEW AND RELEASE. The standing publication condition is now satisfied: a6 declares BOTH kernel-persisted effects used by stage_allocation \u2014 idempotency_ledger.v1 and platform_audit_log.v1 \u2014 and verifies them in the ordered, DDL-free ea_0002 and ea_0003 revisions. The kernel floor is >=0.1.0a68, the first release that names the audit effect after a66 named the ledger. Versions a1 through a4 remain the published history; a5 was deliberately never published because it carried only half the dependency repair. Delete this row only after release-module.yml installs a6 from the private index, registers its manifest against published kernel a68, verifies the wheel contents and tags dotmac-entitlement-allocation-v0.1.0a6."
+    },
+    "dotmac-integration": {
+      "declared": "0.1.0a6",
+      "state": "declared-unpublished",
+      "reason": "AWAITING REVIEW AND RELEASE. a5 remains the latest published version. a6 declares platform_audit_log.v1, verifies it in DDL-free ig_0008, then adds ig_0009 for immutable product-owned descriptor snapshots. It also carries receipt-owned provider identity and record-only ingress evidence without changing SPI 1.2. The floor is kernel >=0.1.0a68. This state is NOT to be repaired by editing the version; only a verified publication closes it. Delete this row only after release-module.yml installs a6 from the private index, registers its manifest, verifies all nine migration files and tags dotmac-integration-v0.1.0a6."
+    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",

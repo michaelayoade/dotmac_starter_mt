@@ -12,9 +12,9 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a6`.** Releases a2–a4 implement SPI 1.1;
-a5 and a6 implement SPI 1.2. See `CHANGELOG.md`, which is the authority on
-what has and has not shipped.
+**Released: `0.1.0a1` through `0.1.0a5`.** Releases a2–a4 implement SPI 1.1;
+a5 implements SPI 1.2. See `CHANGELOG.md`, which is the authority on what has
+and has not shipped. `0.1.0a6` is declared but unreleased and retains SPI 1.2.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to
@@ -61,6 +61,15 @@ SPI 1.2 lets `verify` return a `VerificationResult`: acceptance plus positions
 in an ordered active-secret set, with no field capable of carrying a secret
 name, reference or value. The assembly may observe that provider-neutral result
 for rotation metrics. SPI 1.1 boolean results remain valid.
+
+The module also carries product delivery provenance without owning product
+meaning. A destination application publishes one authenticated
+`ProductPortDescriptorSnapshot`; `reconcile_product_port_descriptor` verifies
+and appends the snapshot to the destination revision history. Claimed receipts
+carry their durable `provider_event_id` into `ProductRequest`, and
+`InboundDisposition.RECORD_ONLY` closes transport evidence that must never
+enter the product consequence worker. These are engine contracts, not provider
+branches.
 
 ## Certifying a connector
 
