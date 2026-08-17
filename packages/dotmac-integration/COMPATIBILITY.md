@@ -16,6 +16,11 @@ SPI 1.1's boolean ingress-verification result to the evidence-free form of the
 new result. That obligation is discharged by tests, not by this sentence — see
 "SPI 1.0 still works" and "Verification evidence" below.
 
+The `InboundEvent.disposition` field added in a6 defaults to `deliver`.
+Existing connectors therefore keep their behaviour; connectors may explicitly
+mark transport-only evidence `record_only` so the engine persists and closes it
+without scheduling a product consequence.
+
 ## Two version axes, and only one of them is this package's version
 
 | Axis | Constant | What it gates |

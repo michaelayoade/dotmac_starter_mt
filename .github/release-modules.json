@@ -284,6 +284,9 @@
         "prerequisite is declared and never verified. a68 published",
         "`platform_audit_log.v1`, the effect repair and retention commands",
         "write at request time; ig_0008 verifies it after the a66 ledger effect.",
+        "ig_0009 is the immutable product-port snapshot used by the named",
+        "reconciler; dropping it would leave authenticated product provenance",
+        "with nowhere durable to be recorded.",
         "",
         "No `alembic` in allowed_requires: unlike dotmac-ticketing this module",
         "ships no link helper that emits DDL into a consuming product's",
@@ -318,7 +321,8 @@
           "dotmac_integration/migrations/versions/ig_0005_receipt_delivery.py",
           "dotmac_integration/migrations/versions/ig_0006_retention.py",
           "dotmac_integration/migrations/versions/ig_0007_idempotency_ledger.py",
-          "dotmac_integration/migrations/versions/ig_0008_platform_audit_log.py"
+          "dotmac_integration/migrations/versions/ig_0008_platform_audit_log.py",
+          "dotmac_integration/migrations/versions/ig_0009_product_port_descriptors.py"
         ],
         "forbidden_prefixes": [
           "app/",

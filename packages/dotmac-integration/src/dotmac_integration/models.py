@@ -354,6 +354,31 @@ class CapabilityDestinationRevision(Base):
     #: The contract version in force when the route was established.
     contract_version: Mapped[int] = mapped_column(Integer, nullable=False)
 
+    # Product-owned port descriptor snapshot (ig_0009). All nullable for
+    # pre-descriptor history, but the migration constrains the group to be
+    # entirely absent or entirely present. The existing destination columns
+    # remain the queryable routing facts; these fields prove where they came
+    # from and how the product said to reach its two typed ports.
+    descriptor_schema_version: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )
+    descriptor_owner_module: Mapped[str | None] = mapped_column(
+        String(160), nullable=True
+    )
+    descriptor_capability_summary: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    product_binding_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
+    delivery_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    mirror_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    product_activation_state: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    descriptor_source_revision: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    descriptor_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     established_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
     #: Why the route changed. Free text, operator-supplied, never parsed.
     reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
