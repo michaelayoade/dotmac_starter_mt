@@ -139,3 +139,14 @@ def test_installation_sets_are_never_blank_for_a_stateful_module() -> None:
             f"{record.distribution} renders no installation set; a stateful "
             "module is atomic by default, never unknown"
         )
+
+
+def test_catalog_reads_the_connector_release_lane() -> None:
+    """A connector allowlist row may not render as 'not allowlisted'."""
+    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+    import module_catalog
+
+    records = {r.distribution: r for r in module_catalog.discover_modules(PROJECT_ROOT)}
+    connector = records["dotmac-connector-whatsapp"]
+    assert connector.release_policy == "connector allowlist"
+    assert connector.persistence_plane == "n/a"

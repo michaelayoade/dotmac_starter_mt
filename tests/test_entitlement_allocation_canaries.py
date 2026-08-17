@@ -28,11 +28,39 @@ from dotmac_entitlement_allocation import (
     UndeclaredCapabilityError,
     UnknownProductError,
     allocation_product,
+    module,
     stage_allocation,
+)
+from dotmac_kernel.audit_actions import (
+    AuditActionRegistry,
+    AuditActionsNotInstalledError,
+    active_audit_actions,
+    install_audit_actions,
 )
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
+
+
+@pytest.fixture(autouse=True)
+def _installed_module_audit_actions() -> Generator[None, None, None]:
+    """Exercise the standalone module with its declared action vocabulary.
+
+    The Starter assembly deliberately does not compose this vendor-only module,
+    so these direct module canaries must install the same manifest registry a
+    real vendor assembly installs at boot.  Without it, the kernel correctly
+    refuses the action before the database behavior under test is reached.
+    """
+    try:
+        previous = active_audit_actions()
+    except AuditActionsNotInstalledError:
+        previous = None
+    install_audit_actions(AuditActionRegistry.from_manifests([module]))
+    try:
+        yield
+    finally:
+        if previous is not None:
+            install_audit_actions(previous)
 
 
 class LiveCatalogue:

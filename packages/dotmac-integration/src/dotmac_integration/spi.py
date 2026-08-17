@@ -65,15 +65,16 @@ an ``Enum`` with members cannot be subclassed, ``ConnectorMode("invented")``
 raises, and :data:`MODE_PROTOCOLS` is a read-only mapping asserted exhaustive at
 import.
 
-## SPI 1.1 is not published, and neither was anything after 1.0
+## SPI 1.2 adds verification evidence without exposing secret material
 
-The only release of ``dotmac-integration`` on the index is ``0.1.0a1`` (tag
-``dotmac-integration-v0.1.0a1``), which implements SPI 1.0. ``0.1.0a2`` is
-declared in ``pyproject.toml`` and was never tagged or published; SPI 1.1 ships
-unreleased alongside it. There is consequently **no plugin anywhere built
-against anything but SPI 1.0**, and the only compatibility obligation this
-contract carries is to 1.0's delivery connectors — which is a claim held by a
-test with a real 1.0 fixture connector, not by this paragraph.
+``dotmac-integration`` 0.1.0a2 through a4 published SPI 1.1. SPI 1.2 adds
+:class:`VerificationResult`: an ingress connector may report only whether
+verification succeeded and which POSITIONS in its ordered active-secret set
+matched. It cannot report a secret name, reference or value. The host can count
+rotation traffic through a provider-neutral observer without importing or
+branching on a connector. SPI 1.1's boolean result remains accepted and is
+adapted to evidence with no positions, so honest ``>=1.0,<2.0`` connectors keep
+working unchanged.
 """
 
 from __future__ import annotations
@@ -111,6 +112,7 @@ __all__ = [
     "SpiIncompatibleError",
     "SpiRange",
     "SpiVersion",
+    "VerificationResult",
     "accepts_manifest_digest",
     "require_mode",
     "verify_plugin_modes",
@@ -205,7 +207,7 @@ class SpiVersion:
 #: The SPI this module implements. A connector declaring a range that excludes
 #: it is refused — at discovery, at startup and at activation.
 #
-# 1.1, and 1.1 is the whole of it. Two unpublished drafts existed — one adding
+# SPI 1.1 collapsed two unpublished drafts — one adding
 # the mode protocols, one replacing the ingress hooks' loose parameters with a
 # single immutable envelope — and shipping them as two consecutive BREAKING SPI
 # versions inside one unreleased alpha would have been a fiction: no consumer
@@ -218,8 +220,9 @@ class SpiVersion:
 # 1.1 adds is machinery 1.0 had no expressible form of at all: an ingress
 # protocol, a poll protocol, and the verification that a declared mode is real.
 # A major bump would have excluded every honest `>=1.0,<2.0` delivery connector
-# in order to protect a compatibility promise nothing ever consumed.
-CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 1)
+# in order to protect a compatibility promise nothing ever consumed. SPI 1.2
+# then added verification evidence without changing the handler protocols.
+CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -493,6 +496,41 @@ class IngressRequest:
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
 
 
+@dataclass(frozen=True, slots=True)
+class VerificationResult:
+    """Provider-neutral evidence from an ingress authenticity check.
+
+    ``accepted`` is the SPI 1.1 boolean made explicit.  The optional positions
+    are indexes into the connector's ordered active-secret set; they reveal no
+    secret name, reference, or value.  A host can therefore count rotation
+    traffic generically without importing a connector or learning its scheme.
+
+    Positions are strictly increasing and unique.  A rejected request cannot
+    claim a match.  An accepted result may carry no positions for schemes that
+    do not authenticate with an ordered secret set, and legacy boolean results
+    are adapted to exactly that evidence-free form by the ingress engine.
+    """
+
+    accepted: bool
+    matched_secret_positions: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.accepted, bool):
+            raise ValueError("accepted must be a boolean")
+        positions = self.matched_secret_positions
+        if not isinstance(positions, tuple):
+            raise ValueError("secret positions must be a tuple")
+        if any(
+            not isinstance(position, int) or isinstance(position, bool) or position < 0
+            for position in positions
+        ):
+            raise ValueError("secret positions must be non-negative integers")
+        if tuple(sorted(set(positions))) != positions:
+            raise ValueError("secret positions must be unique and increasing")
+        if not self.accepted and positions:
+            raise ValueError("a rejected verification cannot report secret positions")
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class Acknowledgement:
     """What a connector wants written back, and NOTHING about how.
@@ -626,7 +664,7 @@ class IngressHandler(Protocol):
         *,
         config: dict[str, object],
         secrets: dict[str, str],
-    ) -> bool: ...
+    ) -> bool | VerificationResult: ...
 
     def normalize(
         self, request: IngressRequest, *, config: dict[str, object]

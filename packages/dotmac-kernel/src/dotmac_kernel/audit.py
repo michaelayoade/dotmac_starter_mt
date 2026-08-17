@@ -8,10 +8,9 @@ stays in app.features.rbac.
 step 3). `write_audit_event` validates it against the process-active
 `dotmac_kernel.audit_actions.AuditActionRegistry` — built from the installed
 manifests' `audit_actions` — before it writes anything, so a typo cannot quietly
-create a second near-identical action nobody queries for. `write_platform_audit_event`
-is deliberately NOT validated the same way: platform actions are written by the
-kernel's own control plane, which has no module manifest to declare them on;
-that is a separate authority and a later step.
+create a second near-identical action nobody queries for. The platform writer
+enforces the same registry: its callers are installable control-plane modules,
+and their `ModuleManifest.audit_actions` declarations own that vocabulary.
 
 **The actor is `(actor_type, actor_id)`, not a party.** `actor_party_id` is
 optional accountability *enrichment*, never the primary identity, and
@@ -139,13 +138,14 @@ def resolve_audit_actor(
 ) -> tuple[str, str | None]:
     """Return the `(actor_type, actor_id)` to record, or raise.
 
-    Carries one temporary compatibility rule. Released `dotmac-template-studio`
-    calls `write_audit_event` with only `actor_party_id` — nine call sites — and
-    a released artifact cannot be edited retroactively. When a party is supplied
-    with no kind, this derives `user` and uses the party id as the principal
-    identifier, which is exactly what those call sites mean.
+    Carries one temporary compatibility rule. `dotmac_workspace` still has two
+    live callers that pass only `actor_party_id`; removing the fallback in this
+    repository would break that independently released consumer. When a party
+    is supplied with no kind, this derives `user` and uses the party id as the
+    principal identifier, which is exactly what those call sites mean.
 
-    The rule is temporary and retires when the released callers pass the pair.
+    The rule retires only after both Workspace callers pass the explicit pair.
+    Starter's nine Template Studio callers already do so and may not regress.
     What is NOT temporary: supplying neither raises. Defaulting a missing actor
     to `system` would be indistinguishable, forever, from a genuine system
     action.
@@ -258,7 +258,9 @@ def write_platform_audit_event(
     details: dict[str, object] | None = None,
 ) -> PlatformAuditEvent:
     """Record a PLATFORM-level audit event (no tenant context). Same add/flush
-    contract as `write_audit_event`; the actor is a `PlatformAdmin`."""
+    contract as `write_audit_event`; the actor is a `PlatformAdmin` and the
+    action must be declared by an installed manifest."""
+    active_audit_actions().require(action)
     event = PlatformAuditEvent(
         actor_admin_id=actor_admin_id,
         action=action,

@@ -6,6 +6,35 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a68 — UNRELEASED
+
+Names and proves the platform-only audit storage consumed by installable
+control-plane modules.
+
+### Added
+
+- `platform_audit_log.v1`, covering the full `public.platform_audit_events`
+  shape and usable defaults, actor foreign key and non-unique/non-partial lookup
+  index, absence of RLS, complete tenant
+  role isolation, and the online `platform_api` role's append-only
+  `SELECT`+`INSERT` posture.
+- `verify_platform_audit_log`, with real-PostgreSQL proofs that break each
+  observable individually and a sensitivity companion showing a table-name
+  check misses every nonexistence defect.
+- Kernel migration `0026_platform_audit_log`, which removes the historical
+  `UPDATE`/`DELETE` grants and every column-level mutation path before granting
+  `platform_api` only the operations the writer uses.
+
+### Fixed
+
+- Publishes the named contract required for `dotmac-integration` and
+  `dotmac-entitlement-allocation` to declare and verify the audit table in the
+  immediately following consumer slice. Their floors stay unchanged until
+  this kernel version is released and therefore resolvable.
+- `write_platform_audit_event` now rejects action codes absent from the active
+  manifest registry before adding a row; platform modules' `audit_actions`
+  declarations are therefore an enforced vocabulary rather than documentation.
+
 ## 0.1.0a67 — 2026-08-16
 
 Two changes, because the version was still unpublished when the second

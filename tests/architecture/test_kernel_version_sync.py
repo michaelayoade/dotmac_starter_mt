@@ -184,7 +184,6 @@ CAPABILITY_RAISED_FLOORS = {
     # check. Capability outranks allocation, as everywhere else in this map,
     # and the highest capability consumed is what the floor names — which is
     # why this row moved off a56 rather than staying beside release-catalog.
-    #
     # Same visible break as integration's, and accepted for the same reason:
     # four released versions install on a56..a65, a5 will not, and every one
     # of those four runs against a kernel whose ledger it silently requires

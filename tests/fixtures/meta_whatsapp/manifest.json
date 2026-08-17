@@ -3,19 +3,19 @@
   "title": "Meta/WhatsApp Cloud API ingress conformance fixtures",
   "spec": "docs/superpowers/specs/2026-08-15-meta-whatsapp-ingress-conformance.md",
   "dossier": "docs/inventories/whatsapp-connector-dossier.md",
-  "status": "specification-only",
+  "status": "implementation-authorized",
   "notice": [
-    "This is a CONFORMANCE SPECIFICATION expressed as data. No connector exists,",
-    "and ADR-0030 section 6 does not authorize one. The assertions here describe",
-    "what a future ingress connector must satisfy; tests/unit/",
-    "test_meta_whatsapp_ingress_conformance.py proves the corpus is internally",
-    "consistent and that the identity rules are computable from the bytes."
+    "This is the preimplementation CONFORMANCE SPECIFICATION expressed as data.",
+    "ADR-0030's 2026-08-17 amendment authorizes exactly this connector, and the",
+    "implementation is evaluated against these unchanged request bytes.",
+    "tests/unit/test_meta_whatsapp_ingress_conformance.py proves the corpus is",
+    "internally consistent and identities are computable from provider items."
   ],
   "capability_id": "messaging.receive.v1",
   "distribution": "dotmac-connector-whatsapp",
   "import_package": "dotmac_connector_whatsapp",
   "connector_key": "meta_whatsapp",
-  "spi_range": ">=1.1,<2.0",
+  "spi_range": ">=1.2,<2.0",
   "modes": [
     "ingress"
   ],
@@ -117,17 +117,17 @@
   },
   "identity_rules": {
     "message": {
-      "template": "wa:msg:{message.id}",
+      "template": "{message.id}",
       "identity_source": "provider",
       "note": "The wamid is provider-assigned and stable across redelivery and across regrouping into a different batch."
     },
     "status": {
-      "template": "wa:status:{status.id}:{status.status}:{status.timestamp}",
+      "template": "{status.id}:{status.status}:{status.timestamp}",
       "identity_source": "provider",
       "note": "One outbound message yields several status callbacks. The message id alone is NOT an event identity: sent, delivered and read would collapse into one row."
     },
     "error": {
-      "template": "wa:error:{scope}:{sha256(canonical_json(item))[:32]}",
+      "template": "error:{scope}:{sha256(canonical_json(item))[:32]}",
       "identity_source": "derived",
       "scope": "value.metadata.phone_number_id, else entry.id",
       "canonical_json": "json.dumps(item, sort_keys=True, separators=(',', ':')) encoded UTF-8",
@@ -154,7 +154,7 @@
       "expected_observations": [
         {
           "locator": "/entry/0/changes/0/value/messages/0",
-          "provider_event_id": "wa:msg:wamid.meta-1",
+          "provider_event_id": "wamid.meta-1",
           "identity_source": "provider",
           "event_type": "whatsapp.message.received.v1"
         }
@@ -175,7 +175,7 @@
       "expected_observations": [
         {
           "locator": "/entry/0/changes/0/value/messages/0",
-          "provider_event_id": "wa:msg:wamid.media-1",
+          "provider_event_id": "wamid.media-1",
           "identity_source": "provider",
           "event_type": "whatsapp.message.received.v1"
         }
@@ -196,7 +196,7 @@
       "expected_observations": [
         {
           "locator": "/entry/0/changes/0/value/messages/0",
-          "provider_event_id": "wa:msg:wamid.location-1",
+          "provider_event_id": "wamid.location-1",
           "identity_source": "provider",
           "event_type": "whatsapp.message.received.v1"
         }
@@ -217,7 +217,7 @@
       "expected_observations": [
         {
           "locator": "/entry/0/changes/0/value/statuses/0",
-          "provider_event_id": "wa:status:wamid.outbound-1:delivered:1783670500",
+          "provider_event_id": "wamid.outbound-1:delivered:1783670500",
           "identity_source": "provider",
           "event_type": "whatsapp.message.status.v1"
         }
@@ -238,7 +238,7 @@
       "expected_observations": [
         {
           "locator": "/entry/0/changes/0/value/statuses/0",
-          "provider_event_id": "wa:status:wamid.missing:failed:1783670600",
+          "provider_event_id": "wamid.missing:failed:1783670600",
           "identity_source": "provider",
           "event_type": "whatsapp.message.status.v1"
         }
@@ -260,38 +260,38 @@
       "expected_observations": [
         {
           "locator": "/entry/0/changes/0/value/messages/0",
-          "provider_event_id": "wa:msg:wamid.meta-1",
+          "provider_event_id": "wamid.meta-1",
           "identity_source": "provider",
           "event_type": "whatsapp.message.received.v1"
         },
         {
           "locator": "/entry/0/changes/0/value/messages/1",
-          "provider_event_id": "wa:msg:wamid.batch-2",
+          "provider_event_id": "wamid.batch-2",
           "identity_source": "provider",
           "event_type": "whatsapp.message.received.v1"
         },
         {
           "locator": "/entry/0/changes/0/value/statuses/0",
-          "provider_event_id": "wa:status:wamid.outbound-1:delivered:1783670500",
+          "provider_event_id": "wamid.outbound-1:delivered:1783670500",
           "identity_source": "provider",
           "event_type": "whatsapp.message.status.v1"
         },
         {
           "locator": "/entry/0/changes/0/value/statuses/1",
-          "provider_event_id": "wa:status:wamid.outbound-1:read:1783670600",
+          "provider_event_id": "wamid.outbound-1:read:1783670600",
           "identity_source": "provider",
           "event_type": "whatsapp.message.status.v1"
         },
         {
           "locator": "/entry/1/changes/0/value/messages/0",
-          "provider_event_id": "wa:msg:wamid.bad-1",
+          "provider_event_id": "wamid.bad-1",
           "identity_source": "provider",
           "event_type": "whatsapp.entry.malformed.v1",
           "reason_code": "message_sender_missing"
         },
         {
           "locator": "/entry/2/changes/0/value/errors/0",
-          "provider_event_id": "wa:error:waba-1:25ddc68545fc84a96e548d6f52f291a6",
+          "provider_event_id": "error:waba-1:25ddc68545fc84a96e548d6f52f291a6",
           "identity_source": "derived",
           "event_type": "whatsapp.error.v1"
         }
@@ -328,7 +328,7 @@
       "expected_observations": [
         {
           "locator": "/entry/0/changes/0/value/messages/0",
-          "provider_event_id": "wa:msg:wamid.reaction-1",
+          "provider_event_id": "wamid.reaction-1",
           "identity_source": "provider",
           "event_type": "whatsapp.message.received.v1",
           "reason_code": "message_type_unsupported"
@@ -338,11 +338,11 @@
   ],
   "shared_events": {
     "_rule": "Two fixtures share an event identity. A connector keyed on the request digest cannot see that; a connector keyed on the provider's own ids must.",
-    "wa:msg:wamid.meta-1": [
+    "wamid.meta-1": [
       "bodies/01_text_message.json",
       "bodies/06_batch_mixed.json"
     ],
-    "wa:status:wamid.outbound-1:delivered:1783670500": [
+    "wamid.outbound-1:delivered:1783670500": [
       "bodies/04_status_delivered.json",
       "bodies/06_batch_mixed.json"
     ]

@@ -81,6 +81,7 @@ def test_the_kernel_ships_exactly_the_effects_modules_need() -> None:
         "module_database_roles.v1",
         "idempotency_ledger.v1",
         "outbox_relay.v1",
+        "platform_audit_log.v1",
     }
 
 

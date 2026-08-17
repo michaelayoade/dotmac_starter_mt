@@ -1,4 +1,4 @@
-"""SPI 1.1 — the frozen contract, and the proof that each refusal bites.
+"""SPI 1.x — the frozen contract, and proof that each refusal bites.
 
 `ConnectorMode` shipped in SPI 1.0 with three members and nothing consulting
 them. The consequences ran from "cannot work" to "works wrongly":
@@ -15,6 +15,10 @@ SPI 1.1 answers all three: a base protocol carrying identity and metadata, one
 executable protocol per mode, an implication checked in BOTH directions at
 discovery, and the SHAPE of what a factory returns checked rather than merely
 its presence.
+
+SPI 1.2 adds provider-neutral verification evidence while retaining SPI 1.1's
+boolean result. It also closes the truthiness hole explicitly: a random truthy
+object is not proof that a request was authenticated.
 
 Every guard below is paired with a case that makes it FIRE. A test that only
 shows a guard accepting a good connector proves nothing about what it refuses,
@@ -64,6 +68,7 @@ from dotmac_integration.spi import (
     SpiIncompatibleError,
     SpiRange,
     SpiVersion,
+    VerificationResult,
     _modes_without_contracts,
     require_mode,
     verify_plugin_modes,
@@ -863,9 +868,31 @@ def test_the_spi_range_check_is_live_for_the_fixture() -> None:
     nothing being checked.
     """
     assert SpiRange.parse(">=1.0,<2.0").admits(CURRENT_SPI_VERSION)
-    assert CURRENT_SPI_VERSION == SpiVersion(1, 1)
+    assert CURRENT_SPI_VERSION == SpiVersion(1, 2)
     with pytest.raises(SpiIncompatibleError, match="running module implements"):
-        discover(points=[_point(_Spi10DeliveryConnector(spi_range=">=1.0,<1.1"))])
+        discover(points=[_point(_Spi10DeliveryConnector(spi_range=">=1.0,<1.2"))])
+
+
+def test_verification_result_refuses_contradictory_or_unsafe_positions() -> None:
+    assert VerificationResult(
+        accepted=True, matched_secret_positions=(0, 2)
+    ).matched_secret_positions == (0, 2)
+
+    for positions in ((-1,), (1, 1), (2, 1)):
+        with pytest.raises(ValueError, match="secret positions"):
+            VerificationResult(accepted=True, matched_secret_positions=positions)
+
+    with pytest.raises(ValueError, match="rejected verification"):
+        VerificationResult(accepted=False, matched_secret_positions=(0,))
+
+    with pytest.raises(ValueError, match="accepted must be a boolean"):
+        VerificationResult(accepted=1)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="positions must be a tuple"):
+        VerificationResult(
+            accepted=True,
+            matched_secret_positions=[0],  # type: ignore[arg-type]
+        )
 
 
 def _point(plugin: ConnectorPlugin) -> Any:

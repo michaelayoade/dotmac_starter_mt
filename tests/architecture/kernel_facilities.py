@@ -188,13 +188,11 @@ MAPPED: Final[tuple[Facility, ...]] = (
 #: holding: it is how the next caller becomes a visible diff.
 FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
     "audit:write_platform_audit_event": (
-        "PLATFORM AUDIT — prerequisite named but not built. Michael named it "
-        "`platform_audit_log.v1` on 2026-08-16; the spec, verifier, binding, "
-        "typed actors, module declarations and PostgreSQL proofs are the work "
-        "that follows. Until that lands this is frozen, NOT exempt: the two "
-        "callers below are the exact set the mapping will convert, and a third "
-        "would be a new undeclared dependency on a facility we already know is "
-        "undeclarable.",
+        "PLATFORM AUDIT — `platform_audit_log.v1` is implemented in kernel "
+        "0.1.0a68, but callers cannot raise their manifest floor to a68 until "
+        "that artifact is published. Keep the exact two-caller set frozen "
+        "through the kernel release; the immediately following consumer slice "
+        "adds both declarations and verifiers, then moves this entry to MAPPED.",
         frozenset(
             {
                 "dotmac-integration/src/dotmac_integration/operations.py",

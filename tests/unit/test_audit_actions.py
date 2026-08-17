@@ -19,9 +19,11 @@ from dotmac_kernel import (
     UndeclaredAuditActionError,
     install_audit_actions,
     write_audit_event,
+    write_platform_audit_event,
 )
 from dotmac_kernel.audit import AuditEvent
 from dotmac_kernel.models import Party, Tenant
+from dotmac_kernel.models_platform import PlatformAuditEvent
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -78,6 +80,10 @@ def _count(db: Session) -> int:
     return db.scalar(select(func.count()).select_from(AuditEvent)) or 0
 
 
+def _platform_count(db: Session) -> int:
+    return db.scalar(select(func.count()).select_from(PlatformAuditEvent)) or 0
+
+
 def test_declared_action_is_written(
     db: Session, tenant_row: Tenant, party_row: Party
 ) -> None:
@@ -129,6 +135,40 @@ def test_undeclared_action_is_rejected_and_writes_nothing(
             entity_type="probe",
         )
     assert _count(db) == before
+
+
+def test_declared_platform_action_is_written(db: Session) -> None:
+    install_audit_actions(
+        AuditActionRegistry.from_manifests([_m("probe", "probe.platform.ok")])
+    )
+    before = _platform_count(db)
+
+    event = write_platform_audit_event(
+        db,
+        actor_admin_id=None,
+        action="probe.platform.ok",
+        entity_type="probe",
+    )
+
+    assert event.action == "probe.platform.ok"
+    assert _platform_count(db) == before + 1
+
+
+def test_undeclared_platform_action_is_rejected_before_add(db: Session) -> None:
+    install_audit_actions(
+        AuditActionRegistry.from_manifests([_m("probe", "probe.platform.ok")])
+    )
+    before = _platform_count(db)
+
+    with pytest.raises(UndeclaredAuditActionError):
+        write_platform_audit_event(
+            db,
+            actor_admin_id=None,
+            action="probe.platform.typo",
+            entity_type="probe",
+        )
+
+    assert _platform_count(db) == before
 
 
 def test_a_real_feature_action_is_declared_by_its_own_module() -> None:

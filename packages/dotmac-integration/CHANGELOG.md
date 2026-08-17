@@ -2,15 +2,13 @@
 
 ## Release state — read this before pinning
 
-**Four versions have been released. Pin `0.1.0a4`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a4`, from `1b1d62b`, `aaa3b54`,
-`b14f66e` and `306a40e`.
+**Five versions have been released. Pin `0.1.0a5`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a5`, from `1b1d62b`, `aaa3b54`,
+`b14f66e`, `306a40e` and `7828697`.
 
-`0.1.0a4` is the version the adoption programme pins. It closes the last of the
-release blockers: the at-most-once ledger is DECLARED rather than depended on
-from inside a function body, a connector's exception message can no longer be
-PERSISTED, and `ig_0001`'s literal cross-lineage edge is now a declared,
-bounded deviation with a retirement gate instead of an undocumented one.
+`0.1.0a5` is the version the first connector programme pins. It adds SPI 1.2's
+provider-neutral verification evidence while retaining a4's declared
+at-most-once dependency and persisted-exception hardening.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -24,8 +22,9 @@ fixes: `dispatch.invoke` wrote a connector's exception message into
 interpolated a materialized credential into its own exception stored it, where
 it outlives the request, the process and the credential's rotation. Prefer a4.
 
-`0.1.0a4` was published and tagged on 2026-08-16 from `306a40e`, and its
-publication-ledger row was retired in the same change as the release.
+`0.1.0a5` was published, installed back from the private index, composed and
+tagged on 2026-08-17 from `7828697`. Its publication-ledger row was retired in
+the immediately following release-record change.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -41,6 +40,24 @@ receipt delivery, retention, the type gate) and each wrote its own section
 before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
+
+## 0.1.0a5 — released 2026-08-17
+
+### SPI 1.2 — provider-neutral verification evidence
+
+- Adds `VerificationResult`, containing only an acceptance bit and zero or more
+  positions in a connector's ordered active-secret set. No secret name,
+  reference or value is representable on the type.
+- Adds a provider-neutral verification observer to the ingress engine so an
+  assembly can count secret-rotation traffic without importing a connector or
+  branching on a provider. Observer failure is non-fatal telemetry failure.
+- Keeps SPI 1.0/1.1 ingress plugins source-compatible: a boolean verification
+  result is adapted to `VerificationResult` with no secret positions.
+- Refuses any other truthy object. Before this release, a plugin accidentally
+  returning an object instead of `bool` authenticated the request because the
+  engine relied on Python truthiness.
+- Raises `CURRENT_SPI_VERSION` from 1.1 to 1.2. No persistence or migration
+  changes are included.
 
 ## 0.1.0a4 — released 2026-08-16
 

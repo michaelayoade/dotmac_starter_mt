@@ -13,6 +13,7 @@ Grant/RLS boundaries for these platform catalog tables are proven on Postgres
 
 from __future__ import annotations
 
+from dotmac_kernel import AuditActionRegistry, FeatureManifest, install_audit_actions
 from dotmac_kernel.audit import write_platform_audit_event
 from dotmac_kernel.idempotency_models import PlatformIdempotencyRecord
 from dotmac_kernel.messaging import process_once_platform
@@ -26,6 +27,14 @@ def _admin(db: Session) -> PlatformAdmin:
     db.add(admin)
     db.flush()
     return admin
+
+
+def _declare_platform_action(action: str) -> None:
+    install_audit_actions(
+        AuditActionRegistry.from_manifests(
+            [FeatureManifest(name="platform-audit-probe", audit_actions=(action,))]
+        )
+    )
 
 
 # ── process_once_platform ────────────────────────────────────────────────────
@@ -102,6 +111,7 @@ def test_process_once_platform_distinct_ids_each_run(db: Session) -> None:
 
 # ── write_platform_audit_event ───────────────────────────────────────────────
 def test_write_platform_audit_event_records_row(db: Session) -> None:
+    _declare_platform_action("account.created")
     admin = _admin(db)
     event = write_platform_audit_event(
         db,
@@ -127,6 +137,7 @@ def test_write_platform_audit_event_allows_no_actor_and_defaults_details(
     db: Session,
 ) -> None:
     # A system-initiated platform action has no admin actor; details default to {}.
+    _declare_platform_action("system.reconcile")
     event = write_platform_audit_event(
         db,
         actor_admin_id=None,

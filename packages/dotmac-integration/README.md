@@ -12,10 +12,9 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` only** (tag `dotmac-integration-v0.1.0a1`), implementing
-SPI 1.0. `0.1.0a2` and the **SPI 1.1** it carries are on `main` and
-**unreleased** — no tag, nothing on the index. See `CHANGELOG.md`, which is the
-authority on what has and has not shipped.
+**Released: `0.1.0a1` through `0.1.0a5`.** Releases a2–a4 implement SPI 1.1;
+a5 implements SPI 1.2. See `CHANGELOG.md`, which is the authority on what has
+and has not shipped.
 
 ## Where to read what
 
@@ -51,6 +50,11 @@ the same bytes. They hand back an `Acknowledgement`, which carries the response
 **body** and **media type** and deliberately cannot carry a **status code**: a
 connector must be able to satisfy a provider's exact handshake format without
 being able to lie about whether the engine accepted the request.
+
+SPI 1.2 lets `verify` return a `VerificationResult`: acceptance plus positions
+in an ordered active-secret set, with no field capable of carrying a secret
+name, reference or value. The assembly may observe that provider-neutral result
+for rotation metrics. SPI 1.1 boolean results remain valid.
 
 ## Certifying a connector
 

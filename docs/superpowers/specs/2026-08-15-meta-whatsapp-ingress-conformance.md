@@ -1,11 +1,13 @@
 # Meta/WhatsApp ingress — capability contract and conformance specification
 
 **Date:** 2026-08-15
-**Status:** Specification only. **No connector is authorized.**
+**Status:** Implemented for release candidate `dotmac-connector-whatsapp
+0.1.0a1` on 2026-08-17.
 **Authority:** [ADR-0030](../../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
-§ 6 permits *connector dossiers, capability contracts and conformance
-specifications*; it blocks connector implementation. This document and the
-corpus under `tests/fixtures/meta_whatsapp/` are the permitted artefacts.
+§ 6 plus its 2026-08-17 authorization amendment; [ADR-0024](../../adr/0024-apps-compose-by-synchronizing-data.md)
+owns the reusable connector boundary. The corpus under
+`tests/fixtures/meta_whatsapp/` was fixed before implementation and remains the
+acceptance oracle.
 **Evidence:**
 [`whatsapp-connector-sources.md`](../../inventories/whatsapp-connector-sources.md),
 [`whatsapp-connector-dossier.md`](../../inventories/whatsapp-connector-dossier.md)
@@ -17,10 +19,9 @@ implements its own retry/checkpoint engine) and
 [ADR-0009](../../adr/0009-secrets-are-held-not-dereferenced.md) (a secret is
 held, never dereferenced on a request path).
 
-This is not a plan to build a connector. It is the set of obligations a
-connector must discharge *before* anyone agrees it works — written now, while
-there is no implementation to rationalise around, so the acceptance criteria
-cannot be quietly relaxed to match whatever gets built.
+This is the set of obligations the connector must discharge before publication
+and again after installation from the registry. It was written before the
+implementation, so the acceptance criteria were not fitted to the code.
 
 Every requirement below carries an id (`WAI-n`) and names the test that binds
 it. A requirement with no test is a preference; this document has none of those.
@@ -40,7 +41,7 @@ placeholders, and the fixture manifest binds every one of them
 | connector key | `meta_whatsapp` |
 | capability | `messaging.receive.v1` |
 | mode | `INGRESS` only |
-| SPI range | `>=1.1,<2.0` |
+| SPI range | `>=1.2,<2.0` |
 | extraction classification | `stateless-protocol-adapter` |
 | release profile | `connector-plugin` |
 | path | `packages/dotmac-connector-whatsapp/` |
@@ -69,7 +70,8 @@ is explicitly out of scope, roughly two-thirds of Sub's `whatsapp_runtime.py`.
 Outbound is where a mistake reaches a customer, and an ingress-only connector
 cannot make that mistake at all.
 
-**The seam is now real.** SPI 1.1 (#185, merged) froze it, and this
+**The seam is now real.** SPI 1.1 froze the mode protocols and SPI 1.2 added
+provider-neutral verification evidence. This
 specification is written against the merged names rather than against a
 proposal:
 
@@ -282,8 +284,8 @@ come from the events, never from the request.
 
 | Id | Requirement | Bound by |
 |---|---|---|
-| **WAI-20** | A message's identity is `wa:msg:{message.id}` — the provider's `wamid`. | `test_every_identity_is_recomputable_from_the_body` |
-| **WAI-21** | A status's identity is `wa:status:{id}:{status}:{timestamp}`. The message id ALONE is not an identity. | `test_one_message_yields_distinct_identities_for_each_status` |
+| **WAI-20** | A message's identity is the raw provider `message.id` (`wamid`). The product port owns any local namespace. | `test_every_identity_is_recomputable_from_the_body` |
+| **WAI-21** | A status's identity is `{id}:{status}:{timestamp}`. The message id ALONE is not an identity. | `test_one_message_yields_distinct_identities_for_each_status` |
 | **WAI-22** | Where Meta supplies no identity (a change-level `errors[]` item), one is derived from the **item's** canonical JSON, never from the request body. | `test_the_derived_error_identity_comes_from_the_item_not_the_request` |
 | **WAI-23** | Every observation declares `identity_source` as `provider` or `derived`. | `test_an_identity_declares_whether_the_provider_supplied_it` |
 | **WAI-24** | Identities are unique within one request. | `test_event_identities_are_unique_within_one_request` |
@@ -326,7 +328,7 @@ event identity is nonetheless the same one.
 ### WAI-22: the derived rule, stated exactly
 
 ```
-wa:error:{scope}:{sha256(canonical_json(item)).hexdigest()[:32]}
+error:{scope}:{sha256(canonical_json(item)).hexdigest()[:32]}
 
 scope          = value.metadata.phone_number_id, else entry.id
 canonical_json = json.dumps(item, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -351,7 +353,7 @@ signature would silently drop all but the first.
 | **WAI-27** | Every observation carries an RFC 6901 locator into the request document. | `test_every_declared_locator_resolves_in_its_fixture` |
 | **WAI-28** | A structurally bad item becomes its own typed `whatsapp.entry.malformed.v1` observation with a locator and a reason code, and normalisation **continues**. | `test_a_malformed_entry_does_not_suppress_the_rest_of_the_batch` |
 | **WAI-29** | A malformed item's observation carries a reason **code**, never a fragment of the request content. | `test_a_malformed_entry_does_not_suppress_the_rest_of_the_batch` |
-| **WAI-30** | A message type the connector cannot interpret is observed with `reason_code: message_type_unsupported`, never dropped, and keeps the `wa:msg:` identity space. | `test_an_uninterpretable_message_type_is_observed_rather_than_dropped` |
+| **WAI-30** | A message type the connector cannot interpret is observed with `reason_code: message_type_unsupported`, never dropped, and keeps its raw provider identity. | `test_an_uninterpretable_message_type_is_observed_rather_than_dropped` |
 | **WAI-31** | An empty batch normalises to zero observations and is a **successful** outcome. | `test_an_empty_batch_normalises_to_zero_observations` |
 | **WAI-32** | `normalize` is pure: no network, no clock-dependent output, no session. | § 7 |
 | **WAI-33** | Every observation from one request is recorded in **one** transaction. One collision rolls the whole batch back. | `whatsapp-connector-sources.md`, three-phase ingress |
@@ -475,12 +477,12 @@ exists.
 
 ---
 
-## 9. Release lane — and why this connector cannot ship yet
+## 9. Release lane
 
-The lane landed in #187 and is **shut**: `.github/release-connectors.json` has
-`"connectors": {}`, and that empty object is the lock, not the workflow's
-existence. Five requirements are enforced by `scripts/release_connector.py`
-rather than asserted in review:
+The lane landed shut in #187. This implementation opens it for exactly
+`dotmac-connector-whatsapp`; `.github/release-connectors.json` remains the lock,
+not the workflow input. Requirements are enforced by
+`scripts/release_connector.py` rather than asserted in review:
 
 1. **Classification and location.** `EXTRACTION.toml` says
    `stateless-protocol-adapter`, read from the package and never trusted from
@@ -513,20 +515,10 @@ both share. What separates them is requirement set above —
 showing `dotmac-auth-oidc` carries the identical classification and is still
 refused by this gate.
 
-### The floor arithmetic, which blocks release today
+### The floor arithmetic
 
-SPI 1.1 arrived in `dotmac-integration` **source** 0.1.0a2. That version is
-declared and **unpublished**; the only published release is 0.1.0a1, which
-implements SPI 1.0. A declared range of `>=1.1,<2.0` therefore admits **no
-published release**, so there is no floor to name — and requirement 4 refuses an
-`integration_floor` with no release tag.
-
-`release-connectors.json` states the same fact from the module side: "a
-connector may currently floor at a1 or wait, and may not floor at a2." This
-connector needs 1.1, so it **waits**. The single final `dotmac-integration`
-alpha comes after the whole module train lands; the connector's release entry
-follows that publication, and the entry lands *with* the conformance proof,
-never ahead of it.
-
-That ordering is a property of the programme, not of this specification, and
-nothing here can shorten it.
+`dotmac-integration 0.1.0a5` is published and tagged after registry install-back
+verification. It implements SPI 1.2, so the connector declares
+`>=1.2,<2.0` and floors exactly at `0.1.0a5`. The release gate verifies the tag,
+the package dependency, the manifest range, and the installed wheel rather than
+trusting the numbers in this document.

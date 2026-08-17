@@ -137,7 +137,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Final
@@ -164,6 +164,7 @@ from dotmac_integration.spi import (
     IngressPlugin,
     IngressRequest,
     InvalidAcknowledgementError,
+    VerificationResult,
     accepts_manifest_digest,
 )
 
@@ -200,6 +201,8 @@ __all__ = [
     "SecretsUnavailable",
     "SignatureRejected",
     "UnitOfWork",
+    "VerificationObserver",
+    "VerificationResult",
     "answer_challenge",
     "challenge_response",
     "prepare_ingress",
@@ -213,6 +216,17 @@ __all__ = [
 #: ADR-0009 reasoning as dispatch's: the module holds references and the
 #: deployment decides how to dereference them.
 SecretResolver = Callable[[Mapping[str, str]], Mapping[str, str]]
+
+#: A provider-neutral telemetry seam.  A result contains only an acceptance bit
+#: and indexes into an ordered active-secret set — never a name, reference, or
+#: value.  The assembly may count those positions without naming a connector.
+VerificationObserver = Callable[[VerificationResult], None]
+
+
+def _ignore_verification(_result: VerificationResult) -> None:
+    """Default observer: evidence is optional for hosts that expose no metrics."""
+    return None
+
 
 #: The deployment decides what a unit of work IS — engine, pool, isolation
 #: level, commit-on-clean-exit, roll-back-on-exception. This module decides how
@@ -896,6 +910,7 @@ def verify_and_normalize(
     request: IngressRequest,
     registry: ConnectorRegistry,
     resolve_secrets: SecretResolver,
+    observe_verification: VerificationObserver = _ignore_verification,
 ) -> tuple[tuple[InboundEvent, ...], Acknowledgement | None]:
     """Verify the RAW bytes, then shape them. NO session, NO transaction.
 
@@ -943,13 +958,28 @@ def verify_and_normalize(
     # is worse than the leak. So the binding is cleared on every exit instead.
     try:
         try:
-            verified = handler.verify(request, config=prepared.config, secrets=secrets)
+            returned_verification = handler.verify(
+                request, config=prepared.config, secrets=secrets
+            )
         except Exception as exc:
             # `from None` is load-bearing: the plugin's message is built from
             # provider-controlled bytes, and `__cause__` would carry it into any
             # traceback the edge logs.
             raise ConnectorRaised(type(exc).__name__) from None
-        if not verified:
+        if isinstance(returned_verification, bool):
+            verification = VerificationResult(accepted=returned_verification)
+        elif isinstance(returned_verification, VerificationResult):
+            verification = returned_verification
+        else:
+            raise ConnectorContract()
+
+        # Telemetry must never become an availability dependency. The host's
+        # observer receives no material and its failure cannot turn an
+        # authenticated provider request into a retry storm.
+        with suppress(Exception):
+            observe_verification(verification)
+
+        if not verification.accepted:
             raise SignatureRejected()
 
         try:
@@ -1136,6 +1166,7 @@ def receive(
     request: IngressRequest,
     registry: ConnectorRegistry,
     resolve_secrets: SecretResolver,
+    observe_verification: VerificationObserver = _ignore_verification,
 ) -> IngressOutcome:
     """The DELIVERY façade. Two units of work, neither spanning the plugin call.
 
@@ -1169,6 +1200,7 @@ def receive(
             request=request,
             registry=registry,
             resolve_secrets=resolve_secrets,
+            observe_verification=observe_verification,
         )
     except IngressRefused as exc:
         return refusal_outcome(exc, prepared=prepared)

@@ -47,11 +47,12 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`audit-complete`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | — | `dotmac_workspace` |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`audit-complete`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | — | `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp`, `dotmac_workspace` |
+| [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`audit-complete`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a66` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
-| [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`audit-complete`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a66` | — | `dotmac_integrator`, `dotmac_sub` |
-| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a67` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a66` | `dotmac_integrator` | — |
+| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a68` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`audit-complete`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
@@ -88,6 +89,14 @@ and the next gate.
 - **Proven consumers:** `dotmac_workspace`.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_workspace`.
 
+### [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md)
+
+- **Owner:** Meta WhatsApp Cloud API ingress authentication and wire translation: subscription challenge, exact-byte request verification, provider event identity, typed message/status/error observations, and provider acknowledgement bytes.
+- **Contract:** Implement dotmac-integration SPI >=1.2,<2.0 for connector key meta_whatsapp and capability messaging.receive.v1 in INGRESS mode only. The connector receives immutable request bytes plus already-materialized configuration and secret material; it returns verification evidence and normalized provider facts. It owns no rows, sessions, retries, checkpoints, product identity, conversation state, tickets, subscribers, HTTP response status, or destination decision.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`.
+
 ### [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md)
 
 - **Owner:** Dotmac entitlement allocation
@@ -116,9 +125,9 @@ and the next gate.
 
 - **Owner:** External connector control plane
 - **Contract:** The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state.
-- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-integration/EXTRACTION.toml); source mode `product-first`.
-- **Proven consumers:** —.
-- **Candidate consumers:** `dotmac_integrator`, `dotmac_sub`.
+- **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-integration/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** `dotmac_integrator`.
+- **Candidate consumers:** —.
 
 ### [`dotmac-kernel`](../packages/dotmac-kernel/README.md)
 

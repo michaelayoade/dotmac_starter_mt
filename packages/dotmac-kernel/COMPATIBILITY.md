@@ -504,11 +504,11 @@ constraint on the backing column. If you are adding a sixth, copy
   **This is the supported way for an assembly with its own session cookie to
   authorize.** Re-implementing the role query locally is not: a private copy is
   the one that will not receive the next fix to the tenant scoping or the join.
-- `dotmac_kernel.audit.write_audit_event` validates `action` against the active
-  registry **before** it adds anything to the session, so a rejected write leaves
-  no partial state. `write_platform_audit_event` is deliberately NOT validated
-  this way: platform actions are written by the kernel's own control plane, which
-  has no module manifest to declare them on.
+- `dotmac_kernel.audit.write_audit_event` and `write_platform_audit_event`
+  validate `action` against the active registry **before** adding anything to
+  the session, so a rejected write leaves no partial state. Platform actions
+  are owned by the installable control-plane modules that call the writer and
+  are declared through their `ModuleManifest.audit_actions` entries.
 
 #### Audit actor and time contract
 
