@@ -289,6 +289,11 @@
         "ships no link helper that emits DDL into a consuming product's",
         "migration, so Alembic is a dev tool here and importing it at runtime",
         "would be a packaging slip.",
+        "`jsonschema` IS a runtime dependency from a6: capability declarations",
+        "publish Draft 2020-12 schemas and the lifecycle validates them before",
+        "configuration can be written, bound or enabled. Listing it is not a",
+        "general dependency escape; the PR-time exact-set gate keeps every",
+        "module's declared dependencies equal to this reviewed closure.",
         "",
         "`secret_refs.py` is a required wheel content because it is the ADR-0024 \u00a7 7",
         "enforcement point \u2014 a wheel that shipped the models but dropped the refusal",
@@ -328,6 +333,7 @@
         ],
         "allowed_requires": [
           "dotmac-kernel",
+          "jsonschema",
           "sqlalchemy",
           "python"
         ]
