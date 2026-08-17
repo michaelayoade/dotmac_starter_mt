@@ -627,7 +627,7 @@ def test_the_guard_catches_an_edit_to_the_second_distributions_bytes(
     victim.write_bytes(victim.read_bytes() + b"\n# a formatter ran\n")
 
     shipped_in = _shipping_tags("ea_0001_allocations.py")
-    assert len(shipped_in) == 4, shipped_in
+    assert len(shipped_in) == 5, shipped_in
     problems = _drift(copy, distribution)
     assert len(problems) == len(shipped_in), problems
     for problem, tag in zip(problems, shipped_in, strict=True):
