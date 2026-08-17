@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-connector-whatsapp": {
+      "declared": "0.1.0a1",
+      "reason": "AWAITING FIRST RELEASE. The implementation, SPI 1.2 conformance corpus and connector release allowlist row land together. Delete this row only after release-connector.yml installs 0.1.0a1 from the private index, proves the published wheel conforms, and tags dotmac-connector-whatsapp-v0.1.0a1. Publication does not claim provider operation or Sub adoption; those require the Integrator pin and shadow cutover.",
+      "state": "never-published"
+    },
     "dotmac-entitlement-allocation": {
       "declared": "0.1.0a5",
       "state": "declared-unpublished",

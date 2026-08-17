@@ -1,13 +1,12 @@
-"""The Meta/WhatsApp ingress conformance kit — executable, connector-free.
+"""The Meta/WhatsApp ingress conformance kit and connector acceptance suite.
 
-ADR-0030 § 6 permits connector **dossiers, capability contracts and conformance
-specifications**, and blocks connector implementation. This module is the third
-of those: it turns
+This module turns
 `docs/superpowers/specs/2026-08-15-meta-whatsapp-ingress-conformance.md` into
 assertions that run today, against a corpus of real Meta request bodies ported
-from `dotmac_sub`, with no connector installed and no network.
+from `dotmac_sub`, with no network. ADR-0030's 2026-08-17 amendment authorizes
+the exact connector, whose separate acceptance suite consumes this oracle.
 
-## What it proves without a connector
+## What it proves independently of the connector
 
 A conformance suite that only asserted "the future connector will do X" would be
 a comment. These tests instead assert properties of the **corpus** that a
@@ -23,9 +22,9 @@ connector cannot satisfy by accident:
   request-digest identity anti-pattern (`meta:{sha256(raw_body)}`, live in Sub
   today) failing in front of the reader.
 
-When the gate in ADR-0030 § 6 opens and a connector distribution is named, its
-`normalize` runs against this same manifest and must produce exactly the
-declared observations. Nothing here needs to change for that to happen.
+The connector now runs against the same corpus committed before implementation.
+The oracle remains independent: expected identities are recomputed from the
+provider nodes rather than copied from connector output.
 
 ## The reference oracle
 
@@ -140,7 +139,7 @@ def _identity_scope(document: Any, pointer: str) -> str:
 def _derived_error_identity(document: Any, pointer: str) -> str:
     node = _resolve(document, pointer)
     digest = hashlib.sha256(_canonical(node)).hexdigest()[:32]
-    return f"wa:error:{_identity_scope(document, pointer)}:{digest}"
+    return f"error:{_identity_scope(document, pointer)}:{digest}"
 
 
 def _expected_identity(document: Any, observation: dict[str, Any]) -> str:
@@ -149,9 +148,9 @@ def _expected_identity(document: Any, observation: dict[str, Any]) -> str:
     node = _resolve(document, pointer)
     list_name = _locator_list(pointer)
     if list_name == "messages":
-        return f"wa:msg:{node['id']}"
+        return str(node["id"])
     if list_name == "statuses":
-        return f"wa:status:{node['id']}:{node['status']}:{node['timestamp']}"
+        return f"{node['id']}:{node['status']}:{node['timestamp']}"
     if list_name == "errors":
         return _derived_error_identity(document, pointer)
     raise AssertionError(f"no identity rule for locator {pointer!r}")
@@ -208,7 +207,7 @@ def test_the_authorized_coordinates_are_exact():
     assert MANIFEST["distribution"] == "dotmac-connector-whatsapp"
     assert MANIFEST["import_package"] == "dotmac_connector_whatsapp"
     assert MANIFEST["connector_key"] == "meta_whatsapp"
-    assert MANIFEST["spi_range"] == ">=1.1,<2.0"
+    assert MANIFEST["spi_range"] == ">=1.2,<2.0"
     assert MANIFEST["modes"] == ["ingress"]
     # The release gate reads the path prefix, not the distribution name, so the
     # two must agree before the package is ever created.
@@ -216,21 +215,11 @@ def test_the_authorized_coordinates_are_exact():
     assert MANIFEST["import_package"] == MANIFEST["distribution"].replace("-", "_")
 
 
-def test_the_declared_spi_range_excludes_every_published_integration():
-    """Why this connector cannot be released yet, as arithmetic.
-
-    The connector lane requires an `integration_floor` naming a PUBLISHED
-    `dotmac-integration`. SPI 1.1 arrived in source 0.1.0a2, which is declared
-    and unpublished; the only published release is 0.1.0a1, which implements
-    SPI 1.0. A range of `>=1.1,<2.0` therefore admits no published release, so
-    there is no floor to name — the connector waits for the final alpha rather
-    than flooring on a1.
-    """
+def test_the_declared_spi_range_has_a_published_floor():
+    """SPI 1.2 is released in dotmac-integration 0.1.0a5."""
     minimum, below = MANIFEST["spi_range"].lstrip(">=").split(",<")
-    assert tuple(int(p) for p in minimum.split(".")) == (1, 1)
+    assert tuple(int(p) for p in minimum.split(".")) == (1, 2)
     assert tuple(int(p) for p in below.split(".")) == (2, 0)
-    # SPI 1.0 — what the one published release implements — is excluded.
-    assert (1, 0) < (1, 1), "a1's SPI is below the declared minimum"
 
 
 def test_no_fixture_carries_credential_shaped_material():
@@ -506,7 +495,7 @@ def test_an_uninterpretable_message_type_is_observed_rather_than_dropped():
     observations = BY_FILE[relative]["expected_observations"]
     assert len(observations) == 1
     assert observations[0]["reason_code"] == "message_type_unsupported"
-    assert observations[0]["provider_event_id"].startswith("wa:msg:"), (
+    assert observations[0]["provider_event_id"] == "wamid.reaction-1", (
         "an unsupported type keeps the message identity space, so a connector "
         "that later learns to interpret reactions does not re-record them"
     )
@@ -567,7 +556,7 @@ def test_the_handshake_is_answerable_before_the_binding_is_enabled():
 
     The property is "answerable before enablement". The STATE NAMES that carry
     it differ between the two systems, which is the trap this test exists to
-    keep shut — see `_vocabulary_warning` in the manifest.
+    keep closed — see `_vocabulary_warning` in the manifest.
     """
     eligibility = MANIFEST["handshake"]["eligibility"]
     answers = set(eligibility["installation_answers_challenge"])

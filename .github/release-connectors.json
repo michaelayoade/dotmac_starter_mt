@@ -126,30 +126,21 @@
     "    perfectly and still be misconfigured against a live provider; that is",
     "    what the control plane's health and quarantine paths are for.",
     "",
-    "## Why it is empty",
+    "## Why the first entry is here",
     "",
-    "No connector distribution exists yet. ABSENCE IS THE SAFETY MECHANISM — the",
-    "rule ADR-0026 section 8 set for `dotmac-approvals` and PR #180 applied to",
-    "`dotmac-auth-oidc`: the release entry lands WITH the proof, never ahead of",
-    "it.",
+    "The Meta/WhatsApp ingress connector is listed with its implementation,",
+    "prebuilt conformance corpus, installed-wheel SPI proof and published",
+    "dotmac-integration 0.1.0a5 floor. This is the rule ADR-0026 section 8 set",
+    "for release eligibility: the entry lands WITH the proof, never ahead of it.",
     "",
-    "THIS EMPTY OBJECT IS THE LOCK. `.github/workflows/release-connector.yml`",
-    "exists and is NOT the lock — a reader must not mistake its presence for",
-    "authorization. It is merged now, shut, following PR #180's precedent",
-    "exactly, so that review of publish permissions, freshness checks and",
-    "artifact handling happens separately from review of the first provider",
-    "implementation. Those are different questions with different reviewers, and",
-    "bundling them means whichever is more urgent carries the other through.",
+    "THIS OBJECT IS THE LOCK. `.github/workflows/release-connector.yml` exists",
+    "and is NOT the lock — a reader must not mistake an input option for",
+    "authorization. `resolve` reads this exact object before build and again",
+    "after protected-environment approval.",
     "",
-    "While this object is empty the workflow's `connector` input is FREE TEXT,",
-    "because a `workflow_dispatch` choice must offer at least one option and",
-    "there is nothing to offer — and every value fails at",
-    "`scripts/release_connector.py resolve`, which is the enforced layer and was",
-    "never the input.",
-    "`tests/architecture/test_connector_release_policy.py` proves a dispatch",
-    "cannot succeed today, and requires the input to become an exact `choice`",
-    "list matching this object once it is non-empty, so the first entry cannot",
-    "land without the UI layer following it."
+    "The workflow input is now an exact choice list matching this object.",
+    "`tests/architecture/test_connector_release_policy.py` keeps that UI layer",
+    "and the enforced policy in sync in both directions."
   ],
   "conformance": {
     "$comment": [
@@ -170,5 +161,42 @@
     "classification": "stateless-protocol-adapter",
     "package_dir_prefix": "packages/dotmac-connector-"
   },
-  "connectors": {}
+  "connectors": {
+    "dotmac-connector-whatsapp": {
+      "$comment": [
+        "Ingress-only Meta WhatsApp Cloud API translation and authentication.",
+        "It implements messaging.receive.v1 through SPI 1.2, owns no rows and",
+        "imports no product. Sub is the first shadow/cutover target; publication",
+        "alone does not make it a contract consumer.",
+        "",
+        "The required wheel surface is deliberately small: plugin.py is the",
+        "provider adapter, __init__.py is the public/discovery surface, and",
+        "py.typed keeps the handler contract typed in the Integrator assembly."
+      ],
+      "package_dir": "packages/dotmac-connector-whatsapp",
+      "import_name": "dotmac_connector_whatsapp",
+      "plugin_attr": "PLUGIN",
+      "connector_key": "meta_whatsapp",
+      "spi_range": ">=1.2,<2.0",
+      "integration_floor": "0.1.0a5",
+      "tag_prefix": "dotmac-connector-whatsapp-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_connector_whatsapp/__init__.py",
+          "dotmac_connector_whatsapp/plugin.py",
+          "dotmac_connector_whatsapp/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-integration",
+          "python"
+        ]
+      }
+    }
+  }
 }
