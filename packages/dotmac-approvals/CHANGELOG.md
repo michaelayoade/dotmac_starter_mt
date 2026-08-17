@@ -2,8 +2,8 @@
 
 All notable changes to the `dotmac-approvals` distribution. This package follows
 [Semantic Versioning](https://semver.org). The `.github/release-modules.json`
-entry landed once the live Postgres migration and catalog gate passed; `0.1.0a1`
-and `0.1.0a2` have since been published.
+entry landed once the live Postgres migration and catalog gate passed;
+`0.1.0a1` through `0.1.0a4` have since been published.
 
 ## 0.1.0a5 — 2026-08-16
 
@@ -34,6 +34,17 @@ grepping the IDEMPOTENCY facility, and nobody had grepped this one.
 - `ModuleManifest.requires` gains `outbox_relay.v1`. COMMON, not plane-specific:
   both planes enqueue, so a PLATFORM-only install needs it exactly as much as a
   tenant one.
+- The release allowlist now requires `ap_0002_outbox_relay.py` in the wheel.
+  Omitting the file would publish a5's declaration without the migration-time
+  verification that makes the dependency fail before a request.
+- The released-migration guard now enrols approvals with an exact tag/digest
+  census. It records — but does not excuse — the three `ap_0001` byte sets that
+  shipped across a1–a4, retains a3/a4 as the canonical current bytes, and has a
+  sensitivity proof that a fourth byte set is refused.
+- A six-case PostgreSQL upgrade matrix reconstructs each historical byte set
+  from its release tag, builds every meaning that release supported, seeds
+  durable rows, and upgrades to `ap_0002` without rerunning `ap_0001`, losing
+  data, or changing the selected persistence planes.
 
 ### Changed
 

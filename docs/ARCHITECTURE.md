@@ -1702,6 +1702,18 @@ audit remains a separate policy adapter because it owns explicit platform and
 split-policy exceptions, but it reuses the kernel catalog's UNIQUE-constraint
 query and enforces the same composite-unique rule for tenant-scoped tables.
 
+**Published migration bytes are immutable history.** The release-history guard
+reconstructs every enrolled migration from its release tag and compares
+the blob digest with the checked-in tree; a new revision is the only repair
+path. Approvals carries the one explicit historical exception:
+`ap_0001_approvals` shipped three byte sets across a1–a4 before enrolment. The
+exception freezes that exact tag/digest census, permits only the latest shipped
+bytes in the current tree, and refuses a fourth variant. A PostgreSQL upgrade
+matrix builds each released meaning, seeds both selected planes, and proves the
+canonical additive `ap_0002` upgrade preserves rows and plane selection. This
+records damage already in the registry; it does not legalise future in-place
+edits.
+
 **Two grandfathered lineages.** `kernel` (`0001_initial_tenant_schema` …
 `0012_platform_outbox`) and `assembly` (`a001_adopt_cfd` …
 `a003_revocation_lists`) predate D1. Their ids are already recorded in live

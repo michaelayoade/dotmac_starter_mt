@@ -74,7 +74,7 @@
     },
     "dotmac-approvals": {
       "declared": "0.1.0a5",
-      "reason": "AWAITING DISPATCH. a5 declares `outbox_relay.v1`, the effect this module has always needed and could not name until kernel a67 published it: `dotmac_approvals.outbox` enqueues into the kernel relay tables at REQUEST time while `ap_0001` creates neither, so every release through a4 shipped an undeclared runtime dependency. The declaration is worth publishing on its own -- an adopter on its own lineage currently fails on the first approval that emits an event -- but it is a floor raise to kernel a67, so the dispatch is Michael's call rather than automatic. DELETE THIS ROW in the change that verifies and tags dotmac-approvals-v0.1.0a5.",
+      "reason": "AWAITING DISPATCH. a5 declares `outbox_relay.v1`, the effect this module has always needed and could not name until kernel a67 published it: `dotmac_approvals.outbox` enqueues into the kernel relay tables at REQUEST time while `ap_0001` creates neither, so every release through a4 shipped an undeclared runtime dependency. The release allowlist now requires `ap_0002_outbox_relay.py`; approvals is enrolled in the released-byte guard with the exact three `ap_0001` variants shipped across a1-a4, a fourth-variant sensitivity proof, and six PostgreSQL historical-upgrade cases. The declaration is worth publishing on its own -- an adopter on its own lineage currently fails on the first approval that emits an event -- but it is a floor raise to kernel a67, so the dispatch is Michael's call rather than automatic. DELETE THIS ROW in the change that verifies and tags dotmac-approvals-v0.1.0a5.",
       "state": "declared-unpublished"
     }
   }
