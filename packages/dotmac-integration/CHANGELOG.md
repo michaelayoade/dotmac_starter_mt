@@ -2,13 +2,13 @@
 
 ## Release state — read this before pinning
 
-**Five versions have been released. Pin `0.1.0a5`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a5`, from `1b1d62b`, `aaa3b54`,
-`b14f66e`, `306a40e` and `7828697`.
+**Six versions have been released. Pin `0.1.0a6`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a6`, from `1b1d62b`, `aaa3b54`,
+`b14f66e`, `306a40e`, `7828697` and `7e05430`.
 
-`0.1.0a5` is the version the first connector programme pins. It adds SPI 1.2's
-provider-neutral verification evidence while retaining a4's declared
-at-most-once dependency and persisted-exception hardening.
+`0.1.0a6` is the version the first connector programme pins. It retains SPI
+1.2, makes configuration declarations executable, restores product-first
+lifecycle parity and declares the platform audit prerequisite.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -26,11 +26,10 @@ it outlives the request, the process and the credential's rotation. Prefer a4.
 tagged on 2026-08-17 from `7828697`. Its publication-ledger row was retired in
 the immediately following release-record change.
 
-`0.1.0a6` is declared and **not released**. It keeps SPI 1.2's executable
-protocols, makes the existing platform-audit storage dependency explicit, and
-restores installation/configuration lifecycle behaviour that drifted during
-the product-first port. The declared-publication baseline holds that state
-until the release workflow installs and verifies a6 from the private index.
+`0.1.0a6` was published, installed back from the private index, composed and
+tagged on 2026-08-17 from `7e05430`. The stale declared-publication and
+released-migration ledgers were corrected immediately afterwards; a new
+two-directional tag check now makes that release-record drift a failing test.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -47,7 +46,7 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a6 — UNRELEASED
+## 0.1.0a6 — released 2026-08-17
 
 ### Configuration declarations are executable contracts
 
