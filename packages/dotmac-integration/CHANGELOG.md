@@ -2,9 +2,9 @@
 
 ## Release state — read this before pinning
 
-**Five versions have been released. Pin `0.1.0a5`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a5`, from `1b1d62b`, `aaa3b54`,
-`b14f66e`, `306a40e` and `7828697`.
+**Six versions have been released. Pin `0.1.0a6`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a6`, from `1b1d62b`, `aaa3b54`,
+`b14f66e`, `306a40e`, `7828697` and `7e05430`.
 
 `0.1.0a5` is the version the first connector programme pins. It adds SPI 1.2's
 provider-neutral verification evidence while retaining a4's declared
@@ -26,11 +26,12 @@ it outlives the request, the process and the credential's rotation. Prefer a4.
 tagged on 2026-08-17 from `7828697`. Its publication-ledger row was retired in
 the immediately following release-record change.
 
-`0.1.0a6` is declared and **not released**. It keeps SPI 1.2's executable
-protocols, makes the existing platform-audit storage dependency explicit, and
-restores installation/configuration lifecycle behaviour that drifted during
-the product-first port. The declared-publication baseline holds that state
-until the release workflow installs and verifies a6 from the private index.
+`0.1.0a6` keeps SPI 1.2's executable protocols, makes the existing
+platform-audit storage dependency explicit, and restores installation and
+configuration lifecycle behaviour that drifted during the product-first port.
+Release run 32037844227 built exact protected main `7e05430`, published the
+inspected bytes, installed the wheel from the private index, registered its
+manifest against kernel a68, and only then tagged the release.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -47,7 +48,7 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a6 — UNRELEASED
+## 0.1.0a6 — released 2026-08-17
 
 ### Configuration declarations are executable contracts
 
