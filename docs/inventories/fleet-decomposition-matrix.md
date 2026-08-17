@@ -178,7 +178,7 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | projects-tasks | 10 | 11 | 11 | 0 | 10 | 0 | consolidate CRM → Sub; module source **unassigned** |
 | notifications-comms | 7 | 18 | 22 | 0 | 11 | 5 | kernel (consent + outbox) + module ← Sub |
 | engagement-inbox | 0 | 28 | 29 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
-| sales-agreements | 7 | 13 | 24 | 2 | 8 | 2 | consolidate CRM → Sub, then module ← Sub; vendor rows are a distinct module ← vendor CP (A2(a), ruled 2026-08-12) |
+| sales-agreements | 7 | 13 | 24 | 2 | 8 | 2 | consolidate CRM → Sub; `dotmac-sales` ← Sub through accepted Quote; SalesOrder follows `dotmac-orders`; vendor rows are a distinct module ← vendor CP (A2(a), ruled 2026-08-12) |
 | commercial-offers | 0 | 0 | 2 | 1 | 1 | 0 | module source **unassigned** (Sub or vendor CP) — A2 |
 | billing-revenue | 12 | 3 | 74 | 0 | 2 | 0 | module ← Sub + contract with ERP |
 | outside-plant | 0 | 33 | 94 | 0 | 30 | 0 | consolidate → Sub, then module ← Sub |
@@ -217,8 +217,13 @@ are frozen in
 [`approval-workflow-dispositions.toml`](approval-workflow-dispositions.toml)
 and explained in
 [`approvals-workflow-source-audit.md`](approvals-workflow-source-audit.md).
-`sales-agreements` still holds rows from two repositories with no adjudicated
-source; it remains marked rather than resolved.
+`sales-agreements` is a measured family, not one authority boundary. The
+2026-08-17 product-first audit in [`sales-sources.md`](sales-sources.md) rules
+Sub the qualifying source for `dotmac-sales` through accepted Quote, CRM a
+retirement source only, and ERP AR Quote a distinct requirements source. The
+same bucket also contains SalesOrder, contract and referral rows that remain
+with their separate owners. The counts stay frozen for reproducibility; the
+disposition is now disaggregated rather than pretending the bucket is a module.
 
 ### Dispositions
 
@@ -311,7 +316,7 @@ implementation for the eventual module is Sub's, not CRM's.
 | outside-plant | 33 | 94 | 30 exact | CRM reads fibre/OLT/ONT/splice state through Sub's API; local `fiber_*`, `olt_*`, `ont_*`, `splitter*`, `splice*` dropped after shadow/reconcile proves parity. Already recorded as a parallel-authority violation of Sub's checked-in `FIBER_TOPOLOGY_SOT.md`, with the resolution direction (load OSP into Sub's staging→review→apply pipeline, then demote CRM's copy) agreed and unexecuted. |
 | engagement-inbox | 28 | 29 | 9 aliased | The largest duplication in the fleet, and the one exact-name counting scored as zero: `crm_conversations`/`inbox_conversations`, `crm_messages`/`inbox_messages`, `crm_agent_presence`/`inbox_agent_presence`, `crm_pipelines`/`pipelines`, plus the routing/macro/assignment tables. Sub already owns `conversation_ticket_handoff` and `conversation_lead_relationships`, so the seam is load-bearing today. Retires when Sub's team inbox closes CRM's agent-facing capability gaps. |
 | field-workforce | 26 | 38 | 15 exact | Work orders, technician profiles, shifts, skills, dispatch and ETA are Sub-owned; CRM keeps only agent-side projections, provenance-stamped and repairable. **Known gap:** Sub's dispatch assigns without availability/conflict checks, and CRM's `is_technician_available` dies at exit — close it before, not after. |
-| sales-agreements | 13 | 24 | 8 exact + 2 aliased | `crm_quotes`/`quotes`, `quote_line_items`, `crm_leads`/`leads`, `sales_orders`, `contracts`, `referrals`. Sub's PR #1508 implements the lead→quote→order→project→subscription chain; the remaining work is adoption, capture population and reconciliation, not a new owner decision. |
+| sales-agreements | 13 | 24 | 8 exact + 2 aliased | The measured bucket contains `crm_quotes`/`quotes`, `quote_line_items`, `crm_leads`/`leads`, `sales_orders`, `contracts`, and `referrals`, but it is not one domain. ADR-0033 assigns `dotmac-sales` only through the immutable accepted Quote and product-neutral handoff; SalesOrder follows `dotmac-orders`, while contracts/referrals keep their separate owners. Sub is the qualifying sales source and CRM is retirement evidence only. |
 | geospatial-qualification | 6 | 11 | 5 exact | Coverage areas, service buildings and qualifications resolve from Sub; CRM's copies retire. |
 | subscriber-service | 9 | 76 | 3 exact | CRM already treats subscribers correctly as Sub projections; the remaining tables become read-through projections with a named source, never writers. |
 
@@ -430,7 +435,7 @@ constraint that adoption — not scope — is the scarce resource.
 | **1** | CRM → Sub authority consolidation, driven by Sub's existing `crm_web_retirement` ledger: outside-plant, engagement-inbox, field-workforce, sales-agreements, geospatial, subscriber projections. **Entry gate:** declare an owner in Sub's registry for the 28 duplicates that have none — see [`fleet-fact-level-decomposition.md`](fleet-fact-level-decomposition.md). | 72 of the 133 CRM↔Sub duplicated names, and it needs no new package to start. The authority questions are already adjudicated; this is capability closure and reconciliation against a named owner. Intermediate — these domains follow into modules in wave 4. |
 | **2** | `dotmac-ticketing` cutover — name the adopter, adopt in Sub, then land CRM's ticket retirement into the module. | The package and its source audit already exist; the only open gate is an adopter. The **first proof that a non-kernel module lineage runs in production**, which every later module wave depends on. |
 | **3** | Consent → delivery/outbox → channel policy → campaigns, in that order. | Consent is a kernel owner and a legal boundary; shipping delivery first ships a suppression bypass. |
-| **4** | Sub-sourced modules: network-operations, subscriber-service, outside-plant, field-workforce, engagement-inbox, sales-agreements, billing. | The domains consolidated in wave 1, now extracted product-first from Sub and consumed back by Sub as an assembly. Depends on wave 2's lineage proof. |
+| **4** | Sub-sourced modules: network-operations, subscriber-service, outside-plant, field-workforce, engagement-inbox, `dotmac-sales` through accepted Quote, billing. SalesOrder is sequenced with `dotmac-orders`, not bundled into sales. | The domains consolidated in wave 1, now extracted product-first from Sub and consumed back by Sub as an assembly. Depends on wave 2's lineage proof. |
 | **5** | ERP-sourced modules: finance-ledger, people-payroll, inventory-procurement, assets-fleet, expenses, content-help; separately audit forms-data-capture and workflow-automation. | Zero duplication, so nobody is paying for a second implementation today — that sequences it late, and does not exempt it. ERP's kernel/UI adoption must land first. A1 proved the two workflow-named candidates cannot be bundled. |
 | **6** | Source adjudication for projects-tasks (ERP vs Sub) and analytics-reporting, then extraction. | Target layer settled, qualifying source unsettled. Needs the audit `dotmac-ticketing` got. |
 
