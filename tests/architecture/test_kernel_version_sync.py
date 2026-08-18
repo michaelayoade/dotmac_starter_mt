@@ -86,9 +86,7 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # absent from BOTH maps, so emptying this one is only ever safe because the
 # other one grew.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
-    # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
-    # plane-selection contract lands in a61, so its row lives in
-    # CAPABILITY_RAISED_FLOORS below rather than here.
+    "dotmac-media-observations": "0.1.0a71",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

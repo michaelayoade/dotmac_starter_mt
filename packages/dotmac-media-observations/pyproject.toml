@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "dotmac-media-observations"
+version = "0.1.0a1"
+description = "Provider-neutral immutable external media observations and rebuildable projections"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_media_observations", from = "src" }]
+include = [
+    { path = "src/dotmac_media_observations/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_media_observations/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+

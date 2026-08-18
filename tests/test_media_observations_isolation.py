@@ -415,6 +415,51 @@ def test_exact_money_round_trips_with_minor_unit_provenance(
         assert minor_units == 5_000_000
         assert currency == "NGN"
         assert minor_unit == 2
+
+        invalid_observation = uuid.uuid4()
+        with pytest.raises(DBAPIError), engine.begin() as connection:
+            period_id = connection.execute(
+                text(
+                    "SELECT id FROM mod_mediaobs.metric_periods "
+                    "WHERE tenant_id=:tenant LIMIT 1"
+                ),
+                {"tenant": tenant_id},
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO mod_mediaobs.observations ("
+                    "id, tenant_id, installation_ref, source_system, "
+                    "source_observation_id, kind, content_fingerprint, "
+                    "source_observed_at, received_at, normalization_version, "
+                    "restatement_depth) VALUES ("
+                    ":id, :tenant, 'install-1', 'external-media', "
+                    "'invalid-money', 'metric', :fingerprint, :observed, "
+                    ":received, 1, 0)"
+                ),
+                {
+                    "id": invalid_observation,
+                    "tenant": tenant_id,
+                    "fingerprint": "0" * 64,
+                    "observed": T0,
+                    "received": T0 + timedelta(minutes=1),
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO mod_mediaobs.metric_observations ("
+                    "id, tenant_id, observation_id, period_id, value_type, "
+                    "money_amount, money_minor_units, money_currency, "
+                    "money_minor_unit, claim_status) VALUES ("
+                    ":id, :tenant, :observation, :period, 'money', "
+                    "1.00, 99, 'NGN', 2, 'provider_reported')"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "tenant": tenant_id,
+                    "observation": invalid_observation,
+                    "period": period_id,
+                },
+            )
     finally:
         engine.dispose()
 
@@ -490,4 +535,3 @@ def test_database_count_column_is_integral_not_float(
         assert CountValue(1).value == 1
     finally:
         engine.dispose()
-

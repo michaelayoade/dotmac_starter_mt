@@ -29,10 +29,12 @@ control plane and make the package provider-specific.
 
 Michael directed the module to be built, validated and released product-first,
 then on 2026-08-18 explicitly paused product adoption. This decision records
-both instructions. The direction is a narrow ADR-0017 owner-directed exception
-for this named module, its namespace allocation and an independently validated
-release. It does not make an unadopted release delivered work and creates no
-exception for another speculative module.
+both instructions. The package and namespace may be built and validated under
+that owner direction, but the repository's closed release policy requires a
+module's publication entry to land with first-adopter proof. The specified
+execution order likewise puts release after Backoffice shadow/cutover. The
+pause therefore leaves the validated package intentionally unpublished rather
+than silently reordering the programme.
 
 ## Decision
 
@@ -70,8 +72,10 @@ receipt arrival order never decides current state.
 ### 3. Domain identity excludes transport identity
 
 An observation identity is `(tenant, installation reference, source system,
-observation kind, source observation id)`. Its content fingerprint covers the
-complete normalized fact and source time. A transport receipt reference is
+source observation id)` across every observation kind. A connector namespaces
+an upstream identifier before handing it over when the upstream source does not
+provide a globally unique event identity. The content fingerprint covers the
+kind, complete normalized fact and source time. A transport receipt reference is
 provenance attached to the fact; it is not part of domain identity or content
 fingerprint.
 
@@ -151,10 +155,10 @@ Until Michael resumes adoption, this work must not:
 - retire a `dotmac_mkt` writer; or
 - count either product as a contract consumer.
 
-A package release is independently installable contract evidence, not adoption.
-The dossier stays `audit-complete` with an empty `contract_consumers` list until
-a product pins the exact release, shadows it, reconciles it and retires its
-displaced local writer.
+The dossier stays `audit-complete` with an empty `contract_consumers` list and
+the package stays outside the release allowlist until a product is authorized
+to perform the first-adopter proof. Publication itself does not transfer domain
+authority, but it follows that proof under this repository's release policy.
 
 ## Consequences
 
@@ -168,8 +172,8 @@ displaced local writer.
 - Backoffice is only a candidate while adoption is paused. Its repository has
   no remote or deployment today, so it could not supply release or production
   adoption evidence even if composition were authorized.
-- Publication requires the exact kernel allocation release, Observer unit,
-  architecture, PostgreSQL, concurrency, clean-wheel and sensitivity gates.
+- Future publication requires the exact kernel allocation release, Observer
+  unit, architecture, PostgreSQL, concurrency, clean-wheel and sensitivity
+  gates plus the authorized first-adopter proof.
 - Completion of the larger programme remains open while the adoption pause is
   in force.
-

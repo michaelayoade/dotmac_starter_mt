@@ -585,6 +585,18 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-media-observations` — the ELEVENTH allocated installable module.
+# External media hierarchy, configuration and provider-reported aggregate
+# performance are tenant data-plane observations; the source audit found no
+# platform-plane adopter. `mediaobs` remains legible in catalog output and the
+# short `mo` revision prefix preserves the readable-slug budget.
+MEDIA_OBSERVATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="media_observations",
+    prefix="mo",
+    branch_label="media_observations",
+    db_schema=module_schema("mediaobs"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -597,6 +609,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    MEDIA_OBSERVATIONS_MIGRATION_OWNER,
 )
 
 
@@ -936,6 +949,7 @@ __all__ = [
     "IMPORTS_MIGRATION_OWNER",
     "INTEGRATION_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
+    "MEDIA_OBSERVATIONS_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",

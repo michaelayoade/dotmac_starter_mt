@@ -30,6 +30,7 @@ from dotmac_media_observations import (
     MetricSemantic,
     MetricValueType,
     NodeTypeDeclaration,
+    NormalizedObservationCase,
     ObservationConflict,
     ObservationSource,
     ProviderRestatement,
@@ -49,6 +50,7 @@ from dotmac_media_observations import (
     record_restatement,
     report_hierarchy_drift,
     report_metric_drift,
+    run_normalized_conformance,
 )
 from dotmac_media_observations.models import (
     APPEND_ONLY_TABLES,
@@ -56,6 +58,7 @@ from dotmac_media_observations.models import (
     CurrentEntity,
     CurrentHierarchy,
     CurrentMetric,
+    MetricPeriod,
     ObservationEnvelope,
     ObservationReceipt,
 )
@@ -238,6 +241,33 @@ def test_reusing_source_identity_with_changed_content_is_a_conflict(
     assert db.scalar(select(func.count()).select_from(ObservationEnvelope)) == 1
 
 
+def test_source_identity_cannot_be_reused_for_another_observation_kind(
+    db: Session,
+) -> None:
+    _node(db)
+    _metric(db)
+    record_entity(db, _entity("shared-source-id"))
+
+    with pytest.raises(ObservationConflict) as caught:
+        record_metric(
+            db,
+            MetricObservation(
+                source=_source("shared-source-id"),
+                external_account_ref="account-7",
+                entity_ref="campaign-42",
+                metric_code="reported_impressions",
+                metric_version=1,
+                period_start=T0,
+                period_end=T0 + timedelta(days=1),
+                value=CountValue(1),
+            ),
+        )
+
+    assert caught.value.report.code == "observation_identity_conflict"
+    assert db.scalar(select(func.count()).select_from(ObservationEnvelope)) == 1
+    assert db.scalar(select(func.count()).select_from(MetricPeriod)) == 0
+
+
 def test_restatement_appends_history_and_moves_only_the_projection(db: Session) -> None:
     _node(db)
     original = record_entity(db, _entity("entity-v1", name="Old name"))
@@ -414,6 +444,54 @@ def test_metric_periods_are_half_open_and_partially_overlapping_is_refused(
                 period_end=T0 + timedelta(days=1, hours=12),
             ),
         )
+
+
+def test_metric_restatement_reuses_the_period_and_replaces_only_current_value(
+    db: Session,
+) -> None:
+    _node(db)
+    _metric(db)
+    record_entity(db, _entity("entity"))
+    original_command = MetricObservation(
+        source=_source("metric-original"),
+        external_account_ref="account-7",
+        entity_ref="campaign-42",
+        metric_code="reported_impressions",
+        metric_version=1,
+        period_start=T0,
+        period_end=T0 + timedelta(days=1),
+        value=CountValue(100),
+    )
+    original = record_metric(db, original_command)
+    corrected = record_restatement(
+        db,
+        ProviderRestatement(
+            replaces_observation_id=original.observation_id,
+            replacement=replace(
+                original_command,
+                source=_source(
+                    "metric-correction", observed_at=T0 + timedelta(minutes=5)
+                ),
+                value=CountValue(105),
+            ),
+        ),
+    )
+
+    [metric] = read_period_metrics(
+        db,
+        tenant_id=TENANT,
+        installation_ref="installation-alpha",
+        source_system="external-media",
+        external_account_ref="account-7",
+        entity_ref="campaign-42",
+        period_start=T0,
+        period_end=T0 + timedelta(days=1),
+    )
+    assert corrected.status is RecordStatus.RESTATED
+    assert metric.observation_id == corrected.observation_id
+    assert metric.value == CountValue(105)
+    assert db.scalar(select(func.count()).select_from(MetricPeriod)) == 1
+    assert db.scalar(select(func.count()).select_from(ObservationEnvelope)) == 3
 
 
 def test_metric_value_must_match_the_versioned_definition(db: Session) -> None:
@@ -599,3 +677,31 @@ def test_append_only_model_set_excludes_only_rebuildable_projections() -> None:
         CurrentMetric.__tablename__,
     } & names
 
+
+def test_provider_free_normalization_conformance_replays_a_stable_fixture(
+    db: Session,
+) -> None:
+    class FakeProducer:
+        def normalized_case(self) -> NormalizedObservationCase:
+            return NormalizedObservationCase(
+                node_declarations=(
+                    NodeTypeDeclaration(
+                        tenant_id=TENANT,
+                        code="campaign",
+                        version=1,
+                        label="Campaign",
+                        traits={"aggregate": True},
+                        declared_by="conformance-fake",
+                        declared_at=T0,
+                    ),
+                ),
+                metric_declarations=(),
+                observations=(_entity("conformance-entity"),),
+            )
+
+    report = run_normalized_conformance(db, FakeProducer())
+
+    assert report.observation_count == 1
+    assert report.replay_count == 1
+    assert report.installation_ref == "installation-alpha"
+    assert report.source_system == "external-media"

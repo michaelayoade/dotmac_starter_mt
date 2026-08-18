@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import ast
+import os
 import pathlib
+import shutil
+import subprocess
+import sys
 import tomllib
+import venv
 
 import dotmac_media_observations
+import pytest
 from dotmac_kernel.namespaces import (
     MEDIA_OBSERVATIONS_MIGRATION_OWNER,
     MIGRATION_OWNER_LEDGER,
@@ -201,6 +207,70 @@ def test_public_surface_is_explicit_and_resolves() -> None:
         assert hasattr(dotmac_media_observations, name), name
 
 
+@pytest.mark.slow
+def test_clean_wheel_installs_registers_and_carries_its_lineage(
+    tmp_path: pathlib.Path,
+) -> None:
+    poetry = shutil.which("poetry")
+    assert poetry is not None, "the pinned Poetry executable is required"
+    kernel_dist = tmp_path / "kernel-dist"
+    module_dist = tmp_path / "module-dist"
+    for package, output in (
+        (ROOT / "packages/dotmac-kernel", kernel_dist),
+        (PACKAGE_ROOT, module_dist),
+    ):
+        result = subprocess.run(  # noqa: S603
+            [poetry, "build", "--format", "wheel", "--output", str(output)],
+            cwd=package,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+
+    kernel_wheel = next(kernel_dist.glob("*.whl"))
+    module_wheel = next(module_dist.glob("*.whl"))
+    consumer = tmp_path / "consumer"
+    venv.EnvBuilder(with_pip=True).create(consumer)
+    bin_dir = consumer / ("Scripts" if sys.platform == "win32" else "bin")
+    pip = bin_dir / "pip"
+    python = bin_dir / "python"
+    installed = subprocess.run(  # noqa: S603
+        [str(pip), "install", "--quiet", str(kernel_wheel), str(module_wheel)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert installed.returncode == 0, installed.stderr
+
+    env = {key: value for key, value in os.environ.items() if key != "DATABASE_URL"}
+    probe = subprocess.run(  # noqa: S603
+        [
+            str(python),
+            "-I",
+            "-c",
+            (
+                "import pathlib, dotmac_media_observations as media; "
+                "from dotmac_kernel.namespaces import NamespaceRegistry; "
+                "here=pathlib.Path(media.__file__).resolve(); "
+                "assert 'site-packages' in str(here), here; "
+                "NamespaceRegistry.from_manifests([media.module]); "
+                "versions=media.versions_dir(); "
+                "assert (versions/'mo_0001_media_observations.py').is_file(); "
+                "print(media.__version__, media.module.db_schema)"
+            ),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout.strip() == "0.1.0a1 mod_mediaobs"
+
+
 def test_dossier_keeps_adoption_paused_and_attribution_outside() -> None:
     dossier = tomllib.loads((PACKAGE_ROOT / "EXTRACTION.toml").read_text())
     assert dossier["status"] == "audit-complete"
@@ -223,4 +293,3 @@ def test_attribution_boundary_detector_fires_on_a_planted_violation() -> None:
 
     assert violations("def write(lead_id):\n    return lead_id\n") == {"lead_id"}
     assert not violations("def emit(observation_id):\n    return observation_id\n")
-

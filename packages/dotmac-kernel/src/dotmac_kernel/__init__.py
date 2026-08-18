@@ -142,6 +142,7 @@ from dotmac_kernel.money import (
 from dotmac_kernel.namespaces import (
     HOST_SCHEMA,
     MAX_REVISION_ID_LENGTH,
+    MEDIA_OBSERVATIONS_MIGRATION_OWNER,
     MIGRATION_OWNER_LEDGER,
     DuplicateBranchLabelError,
     DuplicateMigrationPrefixError,
@@ -198,7 +199,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a70"
+__version__ = "0.1.0a71"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -364,6 +365,7 @@ __all__ = [
     # database namespaces + migration lineage identity (ADR-0006 D1)
     "HOST_SCHEMA",
     "MAX_REVISION_ID_LENGTH",
+    "MEDIA_OBSERVATIONS_MIGRATION_OWNER",
     "MIGRATION_OWNER_LEDGER",
     "MigrationOwner",
     "NamespaceRegistry",
