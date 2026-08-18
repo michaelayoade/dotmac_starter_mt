@@ -146,6 +146,11 @@ class FeatureManifest:
     # Scope kinds this module introduces — levels in the settings hierarchy,
     # each naming where it sits. See `dotmac_kernel.setting_scopes`.
     scope_kinds: Sequence[ScopeKindSpec] = field(default_factory=tuple)
+    # Open commercial vocabularies whose members belong to products rather
+    # than the reusable subscriptions owner. The subscriptions registry is the
+    # consumer and refuses undeclared or multiply-owned members (ADR-0008).
+    charge_models: Sequence[str] = field(default_factory=tuple)
+    obligation_sources: Sequence[str] = field(default_factory=tuple)
 
 
 def load_manifests(module_names: Sequence[str]) -> list[FeatureManifest]:

@@ -1,9 +1,10 @@
 # `dotmac-subscriptions` — proposed public contracts
 
-**Status:** proposed specification. **Non-authoritative intent** — no package,
-namespace, lineage, manifest, release or code exists, and this document creates
-none. ADR-0017 P11 is closed.
-**As of:** 2026-08-14
+**Status:** implemented contract reference. This specification remains
+**non-authoritative intent**; the published Python surface and migrations under
+`packages/dotmac-subscriptions/` are the as-built truth. The package, namespace,
+manifest and lineage now exist, but no release or adopter cutover is claimed.
+**As of:** 2026-08-18
 **Decision:** ADR-0020 amendment A4, 2026-08-14
 **Evidence:** `docs/inventories/subscriptions-sources.md`,
 `docs/inventories/a2-commercial-offer-source-audit.md`
@@ -773,24 +774,24 @@ rest are static and run in `make check` / `make test-unit`.
 
 ---
 
-## 9. Open dependencies
+## 9. Remaining adoption dependencies
 
-This specification is not implementable today, and nothing here asks for it to
-be.
+The producer implementation now exists; these are release/cutover gates, not
+permission to create another owner.
 
-- **ADR-0017 P11** — no package, namespace, prefix or lineage exists or may be
-  created.
-- **P3 durable timers** — the `DurableTimer` port of § 7 has no owner. It is
-  ported product-first from Sub, paired with this real consumer, when the
-  scheduled Vendor adoption is blocked on it. A cron scan over all contracts is
-  not a substitute.
+- **ADR-0017 P11** — closed before M0; the package, namespace and lineage are
+  allocated together in the implemented extraction.
+- **P3 durable timers** — a product-first timer implementation exists on the
+  coordinated worktree. An adopter must bind this package's `DurableTimerPort`
+  to its released contract and prove generation/replay. A cron scan over all
+  contracts is not a substitute.
 - **G2 / billing input** — ownership is **settled**: subscriptions produces
   `RatedObligationOutputV1`, billing consumes `AcceptRatedObligationV1`, the
   assembly maps between them. This is no longer an ownership gap. What remains is
   a **release** dependency: the consumer half is the billing team's
-  specification and is unreleased, so subscriptions may be developed and tested
-  against the fake of § 7, but **an adopter does not enable recurring output into
-  nowhere**.
+  implementation on the coordinated billing worktree. The assembly mapping and
+  release proof remain required: **an adopter does not enable recurring output
+  into nowhere**.
 - **`vendor_cp.contracts` packaging** — recommended to stay in Vendor CP for now;
   see `docs/inventories/a2-commercial-offer-source-audit.md` § 7 for the
   evidence, the trigger, and the three preconditions.

@@ -73,9 +73,12 @@ pure typed deployment-profile registry, tenant-local WS2 entitlement
 grants/evaluation, and WS8 licence verification, revocation, and authenticated
 applied-state contracts. The reference assembly owns the durable
 licence/revocation receiver state and thin apply/import adapters. It does
-**not** yet implement runtime profile/provider selection, the complete
-effective-capability availability lifecycle, subscriptions, billing, or
-metering. The target architecture is authoritative in
+**not** yet implement runtime profile/provider selection or the complete
+effective-capability availability lifecycle. The repository now builds the
+uncomposed `dotmac-subscriptions` package and its selectable tenant/platform
+lineage; this reference assembly owns no commercial rows and no adopter cutover
+is claimed. Billing, collections, durable timers and orders remain independent
+peer owners joined only by consuming assemblies. The target architecture is authoritative in
 [`ADR-0003`](adr/0003-unified-deployment-profiles.md); ADR-0006 owns its package
 and presentation boundaries, with delivery gates in the
 [`deployment profiles and commercial platform plan`](superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md).
@@ -1263,6 +1266,20 @@ made concrete — every model has exactly one declared owner.
 | `TenantTicketComment` | `mod_tkt.ticket_comments` | `dotmac-ticketing` optional module | Tenant-plane comment trail owned with its local ticket; never a cross-application conversation store. |
 | `PlatformTicket` | `mod_tkt.platform_tickets` | `dotmac-ticketing` optional module | Platform-plane form of the same persistence-free lifecycle for a control-plane installation: no tenant column/RLS, platform grants, `app_user` revoked (ADR-0023). |
 | `PlatformTicketComment` | `mod_tkt.platform_ticket_comments` | `dotmac-ticketing` optional module | Platform-plane comment trail owned with its vendor-support ticket; no cross-plane or cross-application FK. |
+| `Offer` | `mod_subscriptions.offers` | `dotmac-subscriptions` optional module | Tenant-plane stable commercial offer identity; product semantics live in adopter-owned link tables. Product-first from Sub with forced-RLS port delta. |
+| `OfferVersion` | `mod_subscriptions.offer_versions` | `dotmac-subscriptions` optional module | Tenant-plane immutable published terms and source provenance; withdrawal is the only post-publication state change. |
+| `OfferVersionPrice` | `mod_subscriptions.offer_version_prices` | `dotmac-subscriptions` optional module | Tenant-plane immutable exact pre-tax price child; currency and scale are explicit and never defaulted. |
+| `SubscriptionContract` | `mod_subscriptions.subscription_contracts` | `dotmac-subscriptions` optional module | Tenant-plane stable recurring-commercial identity sourced from an opaque product fact. |
+| `SubscriptionContractVersion` | `mod_subscriptions.subscription_contract_versions` | `dotmac-subscriptions` optional module | Tenant-plane immutable effective-dated cadence/version authority; supersession is contiguous and structurally non-overlapping. |
+| `SubscriptionContractLine` | `mod_subscriptions.subscription_contract_lines` | `dotmac-subscriptions` optional module | Tenant-plane immutable rated term with stable line lineage, required opaque product link and immutable offer-version provenance. |
+| `RecurringChargeOccurrence` | `mod_subscriptions.recurring_charge_occurrences` | `dotmac-subscriptions` optional module | Tenant-plane unique replayable pre-tax rating fact and transactionally staged producer output; billing owns every financial consequence. |
+| `PlatformOffer` | `mod_subscriptions.platform_offers` | `dotmac-subscriptions` optional module | Platform-plane form of the same offer behavior; no tenant column/RLS, platform reachability and full tenant-role revoke. |
+| `PlatformOfferVersion` | `mod_subscriptions.platform_offer_versions` | `dotmac-subscriptions` optional module | Platform-plane immutable published terms and source provenance. |
+| `PlatformOfferVersionPrice` | `mod_subscriptions.platform_offer_version_prices` | `dotmac-subscriptions` optional module | Platform-plane immutable exact price child, product-first from Vendor's exact-money publication seam. |
+| `PlatformSubscriptionContract` | `mod_subscriptions.platform_subscription_contracts` | `dotmac-subscriptions` optional module | Platform-plane stable recurring-commercial identity; no foreign key crosses into the tenant plane. |
+| `PlatformSubscriptionContractVersion` | `mod_subscriptions.platform_subscription_contract_versions` | `dotmac-subscriptions` optional module | Platform-plane use of the same cadence and supersession engine. |
+| `PlatformSubscriptionContractLine` | `mod_subscriptions.platform_subscription_contract_lines` | `dotmac-subscriptions` optional module | Platform-plane immutable rated term and product-link correlation. |
+| `PlatformRecurringChargeOccurrence` | `mod_subscriptions.platform_recurring_charge_occurrences` | `dotmac-subscriptions` optional module | Platform-plane replayable pre-tax producer fact, isolated from `app_user`. |
 | `TenantStoredFile` | `mod_files.stored_files` | `dotmac-files` optional module | Tenant plane: product-first port of Sub's provider/staged lifecycle, ERP's document/image policy coverage and CRM's content-spoofing canaries; forced RLS and required `TenantScope` (ADR-0022/0023; [`files-sources.md`](inventories/files-sources.md)). ERP then Academy are the first tenant cutovers; ERP E8 still gates source-product retirement. |
 | `PlatformStoredFile` | `mod_files.platform_stored_files` | `dotmac-files` optional module | Platform plane over the same persistence-free physical engine: no tenant column or RLS, platform grants, and `app_user` revoked. Vendor CP is candidate cutover 3 through a licensing-owned exact-bundle relation; no product tenant is created and no consumer is claimed yet (ADR-0023). |
 | `ImportRun` | `mod_imports.import_runs` | `dotmac-imports` optional module | Tenant plane: product-first port of Sub's run lifecycle and one-shot dry-run→apply promotion, joined to ERP's decoding/alias/preview mechanism; forced RLS and a tenant-composite identity neither source had (ADR-0025; [`imports-sources.md`](inventories/imports-sources.md)). The input is an opaque `dotmac-files` id plus its SHA-256, not an inline payload. Validation and apply independently hash the raw bytes, and each locked call advances one resumable durable checkpoint. ERP, then Sub, then CRM are the candidate cutovers; ERP E8 still gates source-product retirement. |
@@ -1305,6 +1322,7 @@ write:
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
 | Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |
+| Subscription offers, contract versions and recurring occurrences | `dotmac_subscriptions.service` is the sole reusable writer over the explicitly selected plane: `publish_offer_version`, `withdraw_offer_version`, `record_contract_version`, `end_contract_version` and `generate_recurring_charge`. It receives the caller's session and a timer port, flushes without committing, and stages exact pre-tax output with the occurrence. Billing, collections, timers, orders and product link-table writers remain peers; none writes `mod_subscriptions` rows directly. This reference assembly does not compose the lineage. |
 | Stored-file metadata and physical state | `dotmac_files.service.stage_file` / `request_deletion`, then the explicit target→external-action→record-result phases (`deletion_target` → `delete_object` → `finalize_purge`; `reconciliation_target` → `observe_object` → `record_presence`). DB phases filter explicit `TenantScope` and flush without commit/rollback; provider phases accept no `Session`, so no network call or download stream holds a DB transaction. The owner covers only provider/byte state. Domain attachment relations, read authorization, retention permission, document meaning, and import outcomes remain with the domain that references the opaque file UUID (ADR-0022). |
 | Import run and row outcomes | `dotmac_imports.service` — `create_dry_run`, `validate_next_chunk` (which takes no applier and therefore cannot mutate a domain), `promote` (digest-verified, uniquely constrained so a validated run applies once), `apply_next_chunk`, `mark_failed`. A chunk call locks the run, hashes and decodes the recorded bytes, resumes after the committed checkpoint, and returns without committing; `dotmac_kernel.db` remains the one transaction authority. Completed re-delivery is a no-op. Expected domain refusals are typed `RowRejected` outcomes; unexpected exceptions roll back the attempted chunk and escape. The importing domain remains the sole writer of its own rows through the `RowValidator`/`RowApplier` ports, and owns any reversal of what an import created (ADR-0025). |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
@@ -1542,12 +1560,13 @@ inert fields would be exactly that. Its `settings` field is present only as
 
 ## Manifest declaration catalogues
 
-Five vocabularies now work this way, and **ADR-0008 makes the shape the standard**:
+Six registries now work this way, and **ADR-0008 makes the shape the standard**:
 a kernel-level vocabulary whose members belong to modules is DECLARED on module
 manifests and validated by a registry — never enumerated by the kernel as an enum
 or a fixed list, and never pinned by a CHECK constraint on the backing column.
 Each one arrived WITH its consumer, under the directive's "a declaration has no
-consumer" rule.
+consumer" rule. The sixth registry carries two related but independent member
+sets — charge models and obligation sources — under one subscriptions boundary.
 
 | Declaration | Catalogue (owner) | Real consumer | When an undeclared reference fails |
 |---|---|---|---|
@@ -1556,6 +1575,7 @@ consumer" rule.
 | `...audit_actions` (bare codes) | `dotmac_kernel.audit_actions.AuditActionRegistry` | `dotmac_kernel.audit.write_audit_event` | at the WRITE, before anything is added to the session (`UndeclaredAuditActionError`) |
 | `...feature_flags` (`FeatureFlagSpec`) | `dotmac_kernel.flags.FlagCatalogue` | `dotmac_kernel.flags.resolve_flag` | at resolution (`UndeclaredFlagError`) |
 | `...setting_domains` (bare codes) | `dotmac_kernel.setting_domains.SettingDomainRegistry` | `dotmac_kernel.settings_resolver.upsert_by_key`/`ensure_by_key`, and the settings admin API's path-to-domain lookup | at the WRITE (`UndeclaredSettingDomainError`); an unknown domain in a URL is a 404 |
+| `...charge_models` + `...obligation_sources` (independent bare-code sets) | `dotmac_subscriptions.vocabulary.SubscriptionVocabularyRegistry` | offer publication, contract recording and occurrence generation | at the owning service call (`SubscriptionDataError`); duplicate ownership fails registry construction |
 
 Both are siblings of `CapabilityCatalogue` (WS1) in shape and posture, and gate
 different questions — capability: "is this TENANT entitled?"; permission: "does

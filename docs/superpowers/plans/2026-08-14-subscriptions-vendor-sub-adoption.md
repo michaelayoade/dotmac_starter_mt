@@ -1,6 +1,7 @@
 # `dotmac-subscriptions`: Vendor platform plane, then Sub tenant plane
 
-**Status:** execution plan; no package, namespace, release, or adoption exists
+**Status:** M0 package/namespace implemented on 2026-08-18; release and product
+adoption remain pending
 **Decision:** ADR-0020 amendment A4, 2026-08-14
 **Source audit:** `docs/inventories/subscriptions-sources.md`
 **Order selected by Michael:** Vendor CP platform plane first; Sub tenant plane
@@ -44,15 +45,16 @@ service status.
 
 ## Gates before implementation
 
-### G0 — ADR-0017 P11
+### G0 — ADR-0017 P11 — PASSED
 
-Do not create `packages/dotmac-subscriptions`, reserve a namespace, or allocate
-a migration prefix until Sub's checked-in adoption ledger proves the kernel
-migration lineage is composed and running in Sub's production database. A
-prepared branch, rehearsal, hosted tenant table, or GUC predecessor is not that
-evidence.
+The original gate required Sub's checked-in adoption ledger to prove the kernel
+lineage in production. ADR-0017's 2026-08-17 amendment superseded that wording
+after accepting Vendor production as the platform-lineage reference; its
+evidence is indexed in `docs/inventories/p11-adoption-status.md`. A prepared
+branch, rehearsal, hosted tenant table, or stamped revision would still not
+have met the gate.
 
-### G1 — durable timers (P3)
+### G1 — durable timers (P3) — COORDINATED IMPLEMENTATION EXISTS
 
 Automatic recurrence needs the shared durable-timer facility: wake one owner
 and entity at one instant, once per generation, with stale generations refused.
@@ -60,7 +62,7 @@ Port it product-first from Sub only when the scheduled Vendor adoption is
 blocked on it; pair the facility with this real consumer. A cron scan over all
 contracts is not a substitute.
 
-### G2 — billing input contract
+### G2 — billing input contract — COORDINATED IMPLEMENTATION EXISTS
 
 The assembly needs a released, provider-neutral
 `AcceptRatedObligationV1`/equivalent billing input contract before the first
@@ -100,9 +102,11 @@ profiles.
 
 ### Persistence
 
-The package allocates its short code, prefix, branch label, schema, ledger row,
-manifest declarations, migration root, and `EXTRACTION.toml` in one change
-after G0. Do not reserve any of them in this plan.
+The package allocates its `subscriptions` short code, `su` prefix,
+`subscriptions` branch label, `mod_subscriptions` schema, ledger row, manifest,
+migration root and `EXTRACTION.toml` in the M0 implementation. The reference
+assembly builds the package but deliberately does not select or install either
+plane; Vendor CP and Sub own those explicit selections during cutover.
 
 The first migration creates all seven tenant tables and all seven platform
 tables from the source audit. It creates each plane's isolation in that same
@@ -140,7 +144,7 @@ proxy for service state.
 
 ## M0 — canary-first package slice
 
-Only after G0–G2:
+G0–G2 now permit this slice; the release and adoption gates below remain:
 
 1. Create `EXTRACTION.toml` at `audit-complete`, citing both sources and the
    exact preserved tests. Candidate consumers are Vendor CP then Sub;

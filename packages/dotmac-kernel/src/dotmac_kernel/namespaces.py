@@ -585,6 +585,19 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-subscriptions` — the ELEVENTH allocated installable module and the
+# recurring-commercial owner on explicit tenant and platform planes. The long
+# schema identity is intentional and readable in operational SQL; the compact
+# `su` prefix preserves revision-id budget. Billing, collections, durable
+# timers and orders remain peer lineages and receive their own allocations in
+# the coordinated landing rather than sharing this namespace.
+SUBSCRIPTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="subscriptions",
+    prefix="su",
+    branch_label="subscriptions",
+    db_schema=module_schema("subscriptions"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -597,6 +610,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    SUBSCRIPTIONS_MIGRATION_OWNER,
 )
 
 
@@ -940,6 +954,7 @@ __all__ = [
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "SUBSCRIPTIONS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
