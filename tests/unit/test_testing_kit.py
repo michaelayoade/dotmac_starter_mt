@@ -39,9 +39,7 @@ def test_engine_scales_past_sqlites_ten_attached_namespace_limit() -> None:
     harness raises ``sqlite3.OperationalError: too many attached databases``
     with this exact metadata shape.
     """
-    existing = {
-        table.schema for table in Base.metadata.tables.values() if table.schema
-    }
+    existing = {table.schema for table in Base.metadata.tables.values() if table.schema}
     probe_tables = [
         sa.Table(
             f"sqlite_namespace_capacity_probe_{index}",
