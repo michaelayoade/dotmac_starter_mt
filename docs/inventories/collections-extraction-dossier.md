@@ -9,22 +9,20 @@
 **Decision boundary:** ADR-0020 § 4 + its 2026-08-14 amendment (A1, A2, A6),
 as amended for Collections by ADR-0032
 
-## Why this is a markdown file and not `packages/dotmac-collections/EXTRACTION.toml`
+## Relationship to `packages/dotmac-collections/EXTRACTION.toml`
 
 P11 is met by the production evidence recorded in ADR-0017's 2026-08-18
 amendment, and ADR-0032 resolves the inbound/outbound contracts and tenant-first
-plane. Package creation is nevertheless not safe in the current checkout:
-`starter-billing` has active overlapping changes to the namespace ledger,
-kernel/package metadata, root dependency metadata, lockfile and migration/test
-harness. Those shared allocations must be integrated at one exact head, never
-overwritten by a parallel stateful-package diff.
+plane. The shared-file overlap has now been reconciled in the integrated a71
+cohort, and `packages/dotmac-collections/EXTRACTION.toml` is the machine-checked
+package dossier. This file remains the long-form measurement, port rationale
+and retirement evidence behind it.
 
-So this file holds the dossier **content**, in the exact field names and shapes of
-`packages/dotmac-files/EXTRACTION.toml`, ready to be moved into a package root
-once the shared-file overlap clears. `status` is
-`audit-complete` and may not become `approved`, `adopted` or `reuse-proven` here —
-those transitions are earned by the cutovers in the adoption plan, not by a
-document.
+The TOML block below records the pre-integration dossier prepared while package
+creation was blocked. It is retained as revision-pinned audit history, not as a
+second live manifest; the package-root `EXTRACTION.toml` owns current field
+values. Both remain `audit-complete`: adoption evidence can advance only through
+the cutovers in the adoption plan, never through documentation alone.
 
 Every `source_paths` and `preserved_tests` entry below was reconfirmed at Sub
 `d1a1a913e287ffadaf21b7da7be448f2c28b5483`. From the previous clean pin

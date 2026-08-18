@@ -570,12 +570,30 @@ develop = true
 
 [package.dependencies]
 alembic = ">=1.13"
-dotmac-kernel = ">=0.1.0a70"
+dotmac-kernel = ">=0.1.0a71"
 sqlalchemy = "^2.0"
 
 [package.source]
 type = "directory"
 url = "packages/dotmac-billing"
+
+[[package]]
+name = "dotmac-collections"
+version = "0.1.0a1"
+description = "DotMac tenant collections policy and case owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-collections"
 
 [[package]]
 name = "dotmac-connector-whatsapp"
@@ -605,7 +623,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a70"
+dotmac-kernel = ">=0.1.0a71"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -665,6 +683,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-imports"
+
+[[package]]
+name = "dotmac-inbox"
+version = "0.1.0a1"
+description = "Dotmac Inbox — tenant-scoped conversation, message, lifecycle, threading, and read-state ownership"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-inbox"
 
 [[package]]
 name = "dotmac-integration"
@@ -731,6 +767,60 @@ type = "directory"
 url = "packages/dotmac-numbering"
 
 [[package]]
+name = "dotmac-orders"
+version = "0.1.0a1"
+description = "Dotmac Orders — tenant-scoped customer orders, immutable accepted line snapshots, coverage receipts, and fulfillment publication"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-orders"
+
+[[package]]
+name = "dotmac-positioning"
+version = "0.1.0a1"
+description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
+optional = false
+python-versions = ">=3.12,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-positioning"
+
+[[package]]
+name = "dotmac-projects"
+version = "0.1.0a1"
+description = "Dotmac Projects — tenant-scoped project, task, template, dependency, scheduling, and assignment ownership"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-projects"
+
+[[package]]
 name = "dotmac-release-catalog"
 version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
@@ -749,8 +839,26 @@ type = "directory"
 url = "packages/dotmac-release-catalog"
 
 [[package]]
-name = "dotmac-subscriptions"
+name = "dotmac-sales"
 version = "0.1.0a1"
+description = "DotMac leads, pipelines and immutable accepted-Quote handoff"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-sales"
+
+[[package]]
+name = "dotmac-subscriptions"
+version = "0.1.0a2"
 description = "DotMac dual-plane recurring commercial contracts and occurrences"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -767,6 +875,24 @@ type = "directory"
 url = "packages/dotmac-subscriptions"
 
 [[package]]
+name = "dotmac-surveys"
+version = "0.1.0a1"
+description = "Dotmac Surveys — tenant-scoped feedback definitions, invitations, responses, and aggregate evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-surveys"
+
+[[package]]
 name = "dotmac-template-studio"
 version = "0.2.0a3"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
@@ -777,7 +903,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a56"
+dotmac-kernel = ">=0.1.0a70"
 fastapi = ">=0.111,<0.116"
 pydantic = ">=2.7.4,<3.0"
 sqlalchemy = "^2.0"
@@ -807,7 +933,7 @@ url = "packages/dotmac-ticketing"
 
 [[package]]
 name = "dotmac-ui"
-version = "0.1.0a7"
+version = "0.1.0a8"
 description = "DotMac shared UI design system — semantic design tokens and compiled, self-hosted, CSP-compatible assets (ADR-0006 U1)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -818,6 +944,44 @@ develop = true
 [package.source]
 type = "directory"
 url = "packages/dotmac-ui"
+
+[[package]]
+name = "dotmac-web-analytics"
+version = "0.1.0a1"
+description = "Privacy-first first-party website observations and deterministic analytical projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-web-analytics"
+
+[[package]]
+name = "dotmac-work-orders"
+version = "0.1.0a1"
+description = "DotMac Work Orders — tenant-scoped physical work execution, assignment, evidence and work logs"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+alembic = ">=1.13"
+dotmac-kernel = ">=0.1.0a71"
+pydantic = "^2.9"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-work-orders"
 
 [[package]]
 name = "email-validator"
@@ -2981,4 +3145,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "9e84445e120e8712e09cf083b91130d4d5052be7aafff96a598dada870883608"
+content-hash = "28a39006f06e6670bb50549e378944a8920c7504bb5bb867205cc48a73f4c99e"

@@ -1,20 +1,92 @@
+schema_version = 1
 package = "dotmac-collections"
+classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
-source_repositories = ["dotmac_sub"]
-source_revisions = ["dotmac_sub:d1a1a913e287ffadaf21b7da7be448f2c28b5483"]
-source_paths = [
-  "dotmac_sub/app/services/dunning_service.py",
-  "dotmac_sub/app/tasks/dunning_runner.py",
-  "dotmac_sub/app/tasks/prepaid_balance_sweep.py",
+owner = "The collections decision on an identified receivable or coverage exposure: immutable versioned policy ladders, exact case membership, grace, payment arrangements and installments, typed notice and CollectionActionRequestedV1 requests, owner receipts, reconciliation, closure and reopening; tenant plane first, with any later platform plane demand-gated"
+contract = "Accept AssessCollectionExposureV1 carrying identity, explicit tenant scope and trigger provenance but never money; reread the exact current per-currency position through ReceivablesReader at every decision; pin an immutable policy version to a case; evaluate an ordered ladder against explicit anchors; use a typed timer port; emit idempotent notice and CollectionActionRequestedV1 requests; record the owning product's typed receipt; and reconcile, close or reopen the case. Collections owns no invoice, settlement, allocation, balance, subscription, service/access state, delivery, timer infrastructure, provider transport or ERP accounting."
+source_repositories = [
+  "dotmac_sub",
+  "dotmac_erp",
+  "dotmac_vendor_control_plane",
 ]
-source_tests = [
-  "dotmac_sub/tests/test_dunning_service.py",
-  "dotmac_sub/tests/test_prepaid_balance_sweep.py",
+source_revisions = [
+  "dotmac_sub:d1a1a913e287ffadaf21b7da7be448f2c28b5483",
+  "dotmac_erp:0f4b1698ddbf",
+  "dotmac_vendor_control_plane:89848017d6b8",
+]
+source_paths = [
+  "dotmac_sub:app/models/collections.py",
+  "dotmac_sub:app/models/collections_case.py",
+  "dotmac_sub:app/models/payment_arrangement.py",
+  "dotmac_sub:app/models/durable_timer.py",
+  "dotmac_sub:app/services/collections/_core.py",
+  "dotmac_sub:app/services/collections/lifecycle.py",
+  "dotmac_sub:app/services/collections/postpaid_policy.py",
+  "dotmac_sub:app/services/collections/prepaid_policy.py",
+  "dotmac_sub:app/services/collections/mode_policies.py",
+  "dotmac_sub:app/services/collections/grace_policy.py",
+  "dotmac_sub:app/services/collections/prepaid_balance_sweep.py",
+  "dotmac_sub:app/services/collections/scheduled.py",
+  "dotmac_sub:app/services/prepaid_enforcement_planner.py",
+  "dotmac_sub:app/services/prepaid_enforcement_state.py",
+  "dotmac_sub:app/services/payment_arrangements.py",
+  "dotmac_sub:app/services/payment_arrangement_staff_actions.py",
+  "dotmac_sub:app/services/dunning_staff_actions.py",
+  "dotmac_sub:app/services/billing_communication_policy.py",
+  "dotmac_sub:app/services/enforcement_window.py",
+  "dotmac_sub:app/services/billing_enforcement_guards.py",
+  "dotmac_sub:app/services/runtime_durable_timers.py",
+  "dotmac_sub:app/services/web_billing_dunning.py",
+  "dotmac_sub:app/web/admin/billing_dunning.py",
+  "dotmac_sub:app/services/account_lifecycle.py",
+  "dotmac_sub:app/services/sot_registry/domains/financial_access/collections.py",
+  "dotmac_sub:docs/adr/0007-end-to-end-billing-target-architecture.md",
+  "dotmac_sub:docs/designs/DUNNING_STAFF_SAFE_ACTIONS.md",
+  "dotmac_sub:docs/FINANCIAL_ACCESS_ENFORCEMENT.md",
+  "dotmac_sub:tests/architecture/billing_scheduled_sweep_baseline.txt",
+  "dotmac_erp:app/services/finance/reminder_service.py",
+]
+preserved_tests = [
+  "dotmac_sub:tests/test_collections_target_lifecycle.py",
+  "dotmac_sub:tests/test_collections_dunning_services.py",
+  "dotmac_sub:tests/test_collections_services.py",
+  "dotmac_sub:tests/test_payment_arrangements.py",
+  "dotmac_sub:tests/test_payment_arrangement_safe_actions.py",
+  "dotmac_sub:tests/test_dunning_staff_safe_actions.py",
+  "dotmac_sub:tests/test_prepaid_enforcement_planner.py",
+  "dotmac_sub:tests/test_prepaid_balance_sweep.py",
+  "dotmac_sub:tests/test_prepaid_threshold_resolver.py",
+  "dotmac_sub:tests/test_prepaid_sweep_budget.py",
+  "dotmac_sub:tests/test_prepaid_notice_progression.py",
+  "dotmac_sub:tests/test_prepaid_enforcement_state_owner.py",
+  "dotmac_sub:tests/test_prepaid_flag_clear_on_restore.py",
+  "dotmac_sub:tests/test_grace_policy_sot.py",
+  "dotmac_sub:tests/test_financial_access_consequence_evidence.py",
+  "dotmac_sub:tests/test_financial_access_restore.py",
+  "dotmac_sub:tests/test_notification_queue_suppression.py",
+  "dotmac_sub:tests/test_enforcement_window.py",
+  "dotmac_sub:tests/test_enforcement_window_gate.py",
+  "dotmac_sub:tests/architecture/test_financial_action_boundaries.py",
+  "dotmac_sub:tests/architecture/test_financial_ownership.py",
+  "dotmac_sub:tests/architecture/test_grace_policy_boundary.py",
+  "dotmac_sub:tests/architecture/test_billing_target_architecture.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub"]
-first_cutover = "dotmac_sub tenant plane after backfill, shadow comparison, reconciliation and one coupled authority watermark"
-drift_proof = "preserved-scenario fixture plus two-directional legacy-path ratchets and sensitivity proofs"
-local_copy_retirement = "Retire dunning_runner and prepaid_balance_sweep decision paths only after dotmac_sub shadow parity, rollback proof, zero divergent writes, and sensitivity-proven two-directional ratchets."
-next_action = "Prepare dotmac_sub adoption without production authority switch or legacy deletion."
+candidate_consumers = ["dotmac_sub", "dotmac_vendor_control_plane"]
+inventory_evidence = [
+  "docs/inventories/collections-sources.md",
+  "docs/inventories/collections-extraction-dossier.md",
+  "docs/inventories/billing-sources.md",
+  "docs/adr/0020-billing-owns-operational-receivables.md",
+  "docs/adr/0023-dual-plane-modules-declare-both-persistence-planes.md",
+  "docs/adr/0024-apps-compose-by-synchronizing-data.md",
+  "docs/adr/0032-collections-assesses-identity-and-requests-actions.md",
+  "docs/superpowers/specs/2026-08-14-collections-policy-consequence-and-timer-contracts.md",
+  "docs/superpowers/specs/2026-08-18-collections-canary-first-surface.md",
+  "docs/superpowers/plans/2026-08-14-collections-sub-vendor-cp-adoption.md",
+]
+first_cutover = "dotmac_sub tenant plane after total writer classification, backfill, shadow comparison, reconciliation and a one-writer authority watermark. Vendor CP remains demand-gated and gets no speculative platform plane."
+shadow_and_drift = "Compare live Sub and module shadow decisions for the complete candidate cohort by exact subject, reason, currency, source version, case state, pinned policy/step, next-action instant and timer generation, suppression, arrangement/grace scope, requested consequence and owner receipt. Every mismatch is classified; no unexplained bucket passes. During Billing's coupled authority switch, an unavailable receivables read blocks only the case and emits no consequence."
+local_copy_retirement = "Retire Sub's dunning_runner, DunningWorkflow, prepaid_balance_sweep/planner, transitional cycle/timer columns, direct credential and invoice/overlap writes, hardcoded notice path and both local case implementations only after shadow parity and rollback proof. Each displaced writer stays behind a sensitivity-proven two-directional ratchet whose baseline is lowered in the same change. Historical rows may remain read-only; no product-local copy of the extracted engine may survive."
+next_action = "Complete the canonical flush-only persistence service and its PostgreSQL concurrency/RLS canaries, validate the independent package on Observe, then prepare the Sub adapter/backfill/shadow/rollback slice without switching production authority or deleting legacy data. Durable Timers stays a separately released typed dependency; Collections implements no timer scanner, claim or retry engine."
