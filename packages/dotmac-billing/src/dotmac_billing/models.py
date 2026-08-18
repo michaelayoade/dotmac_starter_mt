@@ -27,13 +27,15 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.orm import Mapped, declared_attr, mapped_column
+from sqlalchemy.orm import Mapped, MappedColumn, declared_attr, mapped_column
 
 SCHEMA = module_schema("billing")
 MONEY = Numeric(20, 6)
 
 
-def money_column(*, nullable: bool = False, default: Decimal | None = None):
+def money_column(
+    *, nullable: bool = False, default: Decimal | None = None
+) -> MappedColumn[Decimal]:
     return mapped_column(
         MONEY,
         nullable=nullable,

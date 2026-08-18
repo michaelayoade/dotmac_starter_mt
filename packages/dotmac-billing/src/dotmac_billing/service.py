@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeAlias, TypeVar, cast
 from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import Scope, TenantScope
 from dotmac_kernel.idempotency import (
     IdempotentOutcome,
+    Operation,
     execute_once,
     execute_once_platform,
     fingerprint_of,
@@ -20,6 +21,7 @@ from dotmac_kernel.idempotency import (
 from dotmac_kernel.messaging import enqueue_event, enqueue_platform_event
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import Select
 
 from dotmac_billing import models
 from dotmac_billing.commands import (
@@ -72,29 +74,50 @@ _AccountingEffectKind = Literal[
     "reversal",
 ]
 
+_AccountRow: TypeAlias = models.BillingAccount | models.PlatformBillingAccount
+_ObligationRow: TypeAlias = models.RatedObligation | models.PlatformRatedObligation
+_DocumentRow: TypeAlias = models.BillingDocument | models.PlatformBillingDocument
+_SettlementRow: TypeAlias = (
+    models.ConfirmedSettlement | models.PlatformConfirmedSettlement
+)
+_PostingGroupRow: TypeAlias = models.PostingGroup | models.PlatformPostingGroup
+_DocumentFactRow: TypeAlias = (
+    models.InvoiceDocumentFact | models.PlatformInvoiceDocumentFact
+)
+_ArtifactRow: TypeAlias = models.DocumentArtifact | models.PlatformDocumentArtifact
+
+_RowT = TypeVar("_RowT")
+_SelectT = TypeVar("_SelectT", bound=Select[Any])
+
 
 @dataclass(frozen=True, slots=True)
 class _PlaneModels:
-    # Each slot holds one of two SQLAlchemy mapped classes with the same
-    # persisted shape but no shared mapped base protocol.  ``Any`` is local to
-    # this private plane adapter; published commands and facts remain fully
-    # concrete and the manifest/live-catalog tests prove both class families.
-    account: Any
-    obligation: Any
-    document: Any
-    line: Any
-    event: Any
-    settlement: Any
-    group: Any
-    effect: Any
-    allocation: Any
-    tax: Any
-    fx: Any
-    party_tax: Any
-    document_fact: Any
-    artifact: Any
-    accounting_fact: Any
-    position_fact: Any
+    account: type[models.BillingAccount] | type[models.PlatformBillingAccount]
+    obligation: type[models.RatedObligation] | type[models.PlatformRatedObligation]
+    document: type[models.BillingDocument] | type[models.PlatformBillingDocument]
+    line: type[models.DocumentLine] | type[models.PlatformDocumentLine]
+    event: type[models.DocumentEvent] | type[models.PlatformDocumentEvent]
+    settlement: (
+        type[models.ConfirmedSettlement] | type[models.PlatformConfirmedSettlement]
+    )
+    group: type[models.PostingGroup] | type[models.PlatformPostingGroup]
+    effect: type[models.PostingEffect] | type[models.PlatformPostingEffect]
+    allocation: type[models.AllocationEffect] | type[models.PlatformAllocationEffect]
+    tax: type[models.AppliedTaxSnapshot] | type[models.PlatformAppliedTaxSnapshot]
+    fx: type[models.AppliedFxSnapshot] | type[models.PlatformAppliedFxSnapshot]
+    party_tax: (
+        type[models.PartyTaxIdentitySnapshot]
+        | type[models.PlatformPartyTaxIdentitySnapshot]
+    )
+    document_fact: (
+        type[models.InvoiceDocumentFact] | type[models.PlatformInvoiceDocumentFact]
+    )
+    artifact: type[models.DocumentArtifact] | type[models.PlatformDocumentArtifact]
+    accounting_fact: type[models.AccountingFact] | type[models.PlatformAccountingFact]
+    position_fact: (
+        type[models.ReceivablePositionFact]
+        | type[models.PlatformReceivablePositionFact]
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,14 +181,19 @@ def _values(scope: Scope, values: dict[str, object]) -> dict[str, object]:
     return values
 
 
-def _where_scope(statement, scope: Scope, model):
+def _where_scope(
+    statement: _SelectT, scope: Scope, model: type[object]
+) -> _SelectT:
     if isinstance(scope, TenantScope):
-        return statement.where(model.tenant_id == scope.tenant_id)
+        scoped = statement.where(cast(Any, model).tenant_id == scope.tenant_id)
+        return cast(_SelectT, scoped)
     return statement
 
 
-def _jsonable(value: object) -> Any:
-    return json.loads(json.dumps(value, default=str, sort_keys=True))
+def _jsonable(value: Mapping[str, object]) -> dict[str, object]:
+    return cast(
+        dict[str, object], json.loads(json.dumps(value, default=str, sort_keys=True))
+    )
 
 
 def _idempotent(
@@ -175,7 +203,7 @@ def _idempotent(
     operation_scope: str,
     key: str,
     fingerprint: str,
-    operation,
+    operation: Operation,
 ) -> IdempotentOutcome:
     if isinstance(scope, TenantScope):
         return execute_once(
@@ -220,7 +248,14 @@ def _emit(
         )
 
 
-def _one(db: Session, *, scope: Scope, model, row_id: UUID, lock: bool = False):
+def _one(
+    db: Session,
+    *,
+    scope: Scope,
+    model: type[_RowT],
+    row_id: UUID,
+    lock: bool = False,
+) -> _RowT:
     statement = select(model).where(model.id == row_id)
     statement = _where_scope(statement, scope, model)
     if lock:
@@ -233,7 +268,7 @@ def _one(db: Session, *, scope: Scope, model, row_id: UUID, lock: bool = False):
     return row
 
 
-def _require_account_money(account, money: MoneyV1) -> None:
+def _require_account_money(account: _AccountRow, money: MoneyV1) -> None:
     if account.currency != money.currency or account.minor_units != money.minor_units:
         raise BillingRuleViolation(
             "money_identity_mismatch",
@@ -266,7 +301,7 @@ def create_billing_account(
     external_account_ref: str,
     currency: str,
     minor_units: int,
-):
+) -> _AccountRow:
     MoneyV1(Decimal("0"), currency, minor_units)
     plane = _models(scope)
     statement = select(plane.account).where(
@@ -305,7 +340,7 @@ def accept_rated_obligation(
     scope: Scope,
     command: AcceptRatedObligationV1,
     accepted_source_kinds: frozenset[str],
-):
+) -> _ObligationRow:
     _require_scope_matches(routed=scope, declared=command.scope)
     if command.source_kind not in accepted_source_kinds:
         raise BillingRuleViolation(
@@ -444,7 +479,9 @@ def accept_rated_obligation(
     )
 
 
-def create_draft_document(db: Session, *, scope: Scope, command: CreateDraftDocument):
+def create_draft_document(
+    db: Session, *, scope: Scope, command: CreateDraftDocument
+) -> _DocumentRow:
     plane = _models(scope)
     obligation = _one(
         db, scope=scope, model=plane.obligation, row_id=command.obligation_id
@@ -625,7 +662,7 @@ def _document_financial_snapshots(
     *,
     scope: Scope,
     plane: _PlaneModels,
-    document,
+    document: _DocumentRow,
 ) -> tuple[tuple[AppliedTaxSnapshotV1, ...], AppliedFxSnapshotV1 | None]:
     taxes_statement = select(plane.tax).where(
         (plane.tax.document_id == document.id)
@@ -682,7 +719,7 @@ def _post_group(
     reverses_group_id: UUID | None = None,
     tax_snapshots: tuple[AppliedTaxSnapshotV1, ...] = (),
     fx_snapshot: AppliedFxSnapshotV1 | None = None,
-):
+) -> _PostingGroupRow:
     plane = _models(scope)
     _one(db, scope=scope, model=plane.account, row_id=account_id, lock=True)
     group_id = uuid4()
@@ -1012,8 +1049,13 @@ def _due_date_basis(value: object) -> DueDateBasisV1:
 
 
 def _document_fact(
-    db: Session, *, scope: Scope, document, state: str, correlation_id: str
-):
+    db: Session,
+    *,
+    scope: Scope,
+    document: _DocumentRow,
+    state: str,
+    correlation_id: str,
+) -> _DocumentFactRow:
     plane = _models(scope)
     version_statement = select(
         func.coalesce(func.max(plane.document_fact.fact_version), 0)
@@ -1147,7 +1189,7 @@ def issue_document(
     scope: Scope,
     command: IssueDocument,
     numbering: NumberingProvider,
-):
+) -> _DocumentRow:
     plane = _models(scope)
     command.due_date_basis.require_collectible(
         native=command.native and command.collectible
@@ -1274,7 +1316,7 @@ def void_document(
     actor_ref: str,
     occurred_at: datetime,
     source_ref: str,
-):
+) -> _PostingGroupRow:
     plane = _models(scope)
     offered = fingerprint_of(
         {"document_id": document_id, "actor_ref": actor_ref, "occurred_at": occurred_at}
@@ -1363,7 +1405,7 @@ def issue_credit_note(
     scope: Scope,
     command: IssueCreditNote,
     numbering: NumberingProvider,
-):
+) -> _DocumentRow:
     plane = _models(scope)
     original = _one(
         db,
@@ -1599,7 +1641,7 @@ def accept_settlement(
     scope: Scope,
     command: AcceptSettlementV1,
     accepted_confirmation_evidence: frozenset[str],
-):
+) -> _SettlementRow:
     _require_scope_matches(routed=scope, declared=command.scope)
     if command.confirmation_evidence not in accepted_confirmation_evidence:
         raise BillingRuleViolation(
@@ -1707,7 +1749,9 @@ def _document_allocated(db: Session, *, scope: Scope, document_id: UUID) -> Deci
     )
 
 
-def allocate_settlement(db: Session, *, scope: Scope, command: AllocationCommand):
+def allocate_settlement(
+    db: Session, *, scope: Scope, command: AllocationCommand
+) -> _PostingGroupRow:
     plane = _models(scope)
     settlement_evidence = _one(
         db,
@@ -1803,7 +1847,9 @@ def allocate_settlement(db: Session, *, scope: Scope, command: AllocationCommand
     )
 
 
-def deallocate_settlement(db: Session, *, scope: Scope, command: DeallocationCommand):
+def deallocate_settlement(
+    db: Session, *, scope: Scope, command: DeallocationCommand
+) -> _PostingGroupRow:
     plane = _models(scope)
     original = _one(
         db, scope=scope, model=plane.allocation, row_id=command.allocation_id
@@ -1869,7 +1915,9 @@ def deallocate_settlement(db: Session, *, scope: Scope, command: DeallocationCom
     )
 
 
-def reallocate_settlement(db: Session, *, scope: Scope, command: ReallocationCommand):
+def reallocate_settlement(
+    db: Session, *, scope: Scope, command: ReallocationCommand
+) -> _PostingGroupRow:
     plane = _models(scope)
     settlement = _one(
         db, scope=scope, model=plane.settlement, row_id=command.settlement_id
@@ -1938,7 +1986,9 @@ def reallocate_settlement(db: Session, *, scope: Scope, command: ReallocationCom
     )
 
 
-def refund_settlement(db: Session, *, scope: Scope, command: RefundCommand):
+def refund_settlement(
+    db: Session, *, scope: Scope, command: RefundCommand
+) -> _PostingGroupRow:
     plane = _models(scope)
     settlement = _one(
         db, scope=scope, model=plane.settlement, row_id=command.settlement_id
@@ -1996,7 +2046,7 @@ def _posting_command(
     occurred_at: datetime,
     effects: Iterable[tuple[EffectLane, Decimal]],
     allocations: Iterable[_AllocationInput],
-):
+) -> _PostingGroupRow:
     plane = _models(scope)
 
     def operation(session: Session) -> dict[str, object]:
@@ -2034,10 +2084,10 @@ def _reverse_group(
     db: Session,
     *,
     scope: Scope,
-    original,
+    original: _PostingGroupRow,
     occurred_at: datetime,
     source_ref: str,
-):
+) -> _PostingGroupRow:
     plane = _models(scope)
     already_statement = select(plane.group.id).where(
         plane.group.reverses_group_id == original.id
@@ -2089,7 +2139,7 @@ def _reverse_group(
 
 def reverse_posting_group(
     db: Session, *, scope: Scope, command: ReversePostingGroupCommand
-):
+) -> _PostingGroupRow:
     plane = _models(scope)
     original_evidence = _one(
         db,
@@ -2195,7 +2245,7 @@ def record_document_artifact(
     scope: Scope,
     command: RecordDocumentArtifactV1,
     declared_supersession_reasons: frozenset[str] = frozenset(),
-):
+) -> _ArtifactRow:
     _require_scope_matches(routed=scope, declared=command.scope)
     plane = _models(scope)
     fact_statement = select(plane.document_fact).where(

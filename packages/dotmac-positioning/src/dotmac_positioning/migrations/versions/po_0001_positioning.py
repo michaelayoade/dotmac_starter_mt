@@ -7,6 +7,8 @@ Create Date: 2026-08-18
 
 from __future__ import annotations
 
+from typing import Any
+
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
@@ -23,7 +25,7 @@ depends_on = resolve_depends_on(REQUIRES)
 _SCHEMA = "mod_pos"
 
 
-def _timestamps() -> tuple[sa.Column, sa.Column]:
+def _timestamps() -> tuple[sa.Column[Any], sa.Column[Any]]:
     return (
         sa.Column(
             "created_at",

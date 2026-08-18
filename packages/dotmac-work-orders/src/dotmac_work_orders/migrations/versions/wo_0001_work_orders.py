@@ -7,6 +7,8 @@ Create Date: 2026-08-18
 
 from __future__ import annotations
 
+from typing import Any
+
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
@@ -35,7 +37,9 @@ _TENANT_TABLES = (
 )
 
 
-def _identity(name: str) -> tuple[sa.Column, sa.Column, sa.UniqueConstraint]:
+def _identity(
+    name: str,
+) -> tuple[sa.Column[Any], sa.Column[Any], sa.UniqueConstraint]:
     return (
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
@@ -61,7 +65,7 @@ def _work_order_fk(name: str) -> sa.ForeignKeyConstraint:
     )
 
 
-def _timestamps() -> tuple[sa.Column, sa.Column]:
+def _timestamps() -> tuple[sa.Column[Any], sa.Column[Any]]:
     return (
         sa.Column(
             "created_at",
