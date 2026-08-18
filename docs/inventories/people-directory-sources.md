@@ -272,6 +272,7 @@ employee and position identities before rejecting any overlapping finite or
 open-ended primary interval. Vacancy is derived from those dated assignments;
 there is no `is_vacant` column to drift.
 
-This checkpoint is implementation evidence only. The kernel/module versions
-remain unreleased, Backoffice has not composed them, no backfill or shadow has
-run, and ERP remains the sole authoritative employment writer.
+Kernel a71 and dotmac-people a1 were registry-verified and tagged on 2026-08-18.
+This checkpoint is still not adoption evidence: Backoffice has not composed the
+releases, no backfill or shadow has run, and ERP remains the sole authoritative
+employment writer.

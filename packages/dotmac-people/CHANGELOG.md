@@ -1,6 +1,6 @@
 # Changelog — dotmac-people
 
-## 0.1.0a1 — UNRELEASED
+## 0.1.0a1 — 2026-08-18
 
 ### Added
 

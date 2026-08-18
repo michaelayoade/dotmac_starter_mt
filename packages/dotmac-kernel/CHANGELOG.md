@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a71 — UNRELEASED
+## 0.1.0a71 — 2026-08-18
 
 Allocates the independent tenant-only people and campaigns lineages, names and
 proves the Party-person catalogue consumed by employment-directory modules,
