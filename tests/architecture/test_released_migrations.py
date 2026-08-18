@@ -125,6 +125,9 @@ DISTRIBUTIONS: dict[str, Path] = {
         / "packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation"
         / "migrations/versions"
     ),
+    "dotmac-files": (
+        REPO_ROOT / "packages/dotmac-files/src/dotmac_files/migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -134,12 +137,14 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-approvals": "ap_*.py",
     "dotmac-integration": "ig_*.py",
     "dotmac-entitlement-allocation": "ea_*.py",
+    "dotmac-files": "fi_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
     "dotmac-approvals": "dotmac-approvals-v",
     "dotmac-integration": "dotmac-integration-v",
     "dotmac-entitlement-allocation": "dotmac-entitlement-allocation-v",
+    "dotmac-files": "dotmac-files-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -541,6 +546,19 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── dotmac-files ────────────────────────────────────────────────────────
+    # a2's root is the published atomic catalogue. a3 adds fi_0002 rather than
+    # changing this digest, so an existing a2 installation and a fresh a3
+    # installation converge through an ordinary Alembic upgrade.
+    "dotmac-files-v0.1.0a2": (
+        "dotmac-files",
+        "b3e47855",
+        {
+            "fi_0001_stored_files.py": (
+                "58976eab44ccfaaa77af255c52f92ef333e650e89ee3f6808211820b3c3b4fd0"
+            ),
+        },
+    ),
 }
 
 
@@ -606,6 +624,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-approvals": frozenset(),
     "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
+    "dotmac-files": frozenset({"fi_0002_selectable_planes.py"}),
 }
 
 
@@ -1148,6 +1167,7 @@ def test_the_cross_check_would_catch_a_doctored_map() -> None:
         # leave the other rows compared against a path nothing checks.
         ("dotmac-entitlement-allocation-v0.1.0a1", "ea_0001_allocations.py"),
         ("dotmac-approvals-v0.1.0a1", "ap_0001_approvals.py"),
+        ("dotmac-files-v0.1.0a2", "fi_0001_stored_files.py"),
     ):
         actual = _blob_digest(tag, name)
         assert actual == RELEASED_TAGS[tag][2][name]

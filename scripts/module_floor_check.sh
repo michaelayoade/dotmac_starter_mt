@@ -65,7 +65,7 @@ FLOOR_PYTHON="${FLOOR_PYTHON:-python3}"
 
 # The modules under proof, as "package_dir:import_name". Each is checked
 # against ITS OWN declared floor — see "Why the pair is derived" above.
-MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation}"
+MODULES="${MODULES:-packages/dotmac-release-catalog:dotmac_release_catalog packages/dotmac-entitlement-allocation:dotmac_entitlement_allocation packages/dotmac-files:dotmac_files}"
 
 # Overrides for a one-off investigation. Left unset in CI: a hand-set pair is
 # a claim about a module that the module itself can contradict, which is the

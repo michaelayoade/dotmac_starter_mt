@@ -107,7 +107,10 @@ CAPABILITY_RAISED_FLOORS = {
     # these moved out of LEDGER_ALLOCATION_RELEASES rather than keeping their
     # allocation floors.
     "dotmac-application-directory": ("0.1.0a56", "0.1.0a46"),
-    "dotmac-files": ("0.1.0a56", "0.1.0a54"),
+    # a56 made fi_0001's prerequisite declarations installable; a61 is now the
+    # operative floor because a3 declares supported_plane_sets and fi_0002
+    # consumes selected_module_planes.
+    "dotmac-files": ("0.1.0a61", "0.1.0a54"),
     "dotmac-imports": ("0.1.0a56", "0.1.0a55"),
     "dotmac-template-studio": ("0.1.0a56", "0.1.0a13"),
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
