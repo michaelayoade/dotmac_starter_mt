@@ -9,9 +9,10 @@
 
 `dotmac_mkt` is the qualifying code and test source for external advertising /
 social hierarchy normalization and daily performance behavior. The audit does
-**not** establish that its writer is production-used authority. Its default
-branch is tested and deployment-shaped, but the available repository and GitHub
-evidence contains no deployment record, named runtime or observed database.
+**not** establish that its writer is production-used authority. Its configured
+default branch and its one-commit-newer `main` branch are tested and
+deployment-shaped, but the available repository and GitHub evidence contains no
+deployment record, named runtime or observed database.
 
 Therefore:
 
@@ -48,16 +49,16 @@ PR-only and remains pending because Michael did not authorize a PR.
 | Repository | Exact source inspected | Finding |
 |---|---|---|
 | `dotmac_starter_mt` | `12df64ad69ee76cc334948f9375748c98aa6338e` (`origin/main`) | Kernel/module contracts, tenant RLS, namespace, extraction and connector-control-plane rules. |
-| `dotmac_mkt` | `1a185b47164e34601769c84976e95578996c4523` (`master`) | Qualifying hierarchy/metric behavior and tests; deployment-shaped, production use unproven. |
+| `dotmac_mkt` | `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d` (`main`); configured default `master` remains at predecessor `1a185b47164e34601769c84976e95578996c4523` | Qualifying hierarchy/metric behavior and tests; the newer commit adds only local Campaign/Post/PostDelivery affinity. Deployment-shaped, production use unproven. |
 | `dotmac_crm` | `60daaa2dd305696636632f48505ab784110a55d2` (`origin/main`) | Campaign reply and provider metadata currently write Lead attribution/ROI projections: negative boundary evidence. |
 | `dotmac_sub` | `510b80ca7fab4f54a57f261872f94b5e972c8eb6` (`origin/main`) | Authoritative immutable Lead origin and sales-to-service lifecycle boundary. |
 | `dotmac_erp` | `dd6416cd981ffdf48564e2770b87d3cd7201186c` (`origin/main`) | Required fleet sweep found no advertising/social hierarchy or media-performance owner. |
 | `dotmac_integrator` | `e7ec250be9c681883f3acab8a8a19614fec30d29` (`origin/main`) | Thin assembly of released `dotmac-integration`; transport authority, not media-domain authority. |
 | `dotmac_backoffice` | `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d` (local clean branch) | Tenant-plane candidate assembly with no modules, remote, image, database or deployment. Adoption paused. |
 
-The Mkt audit used a fresh clean clone at
-`/private/tmp/dotmac_mkt_media_observations`. Dirty local product worktrees were
-not evidence and were not modified.
+The Mkt audit and source refresh used fresh clean detached clones under
+`/private/tmp`. Dirty local product worktrees were not evidence and were not
+modified.
 
 ## Mkt: qualifying behavior and mandatory corrections
 
@@ -69,7 +70,7 @@ not evidence and were not modified.
 | `app/services/ad_sync_service.py` | maps multiple provider shapes onto the common hierarchy; a repeated natural key does not duplicate rows | Preserve shape convergence and idempotent replay. Replace in-place overwrite with a new immutable restatement fact plus deterministic current projection. |
 | `tests/test_ad_sync_service.py` | hierarchy mapping for three payload families and repeat-sync replacement | Port provider-free fixture equivalents. The repeat-sync test becomes replay plus restatement history proof. |
 | `app/models/channel_metric.py` and `tests/test_analytics_daily_totals.py` | daily aggregate reporting over channel/post metrics | Port aggregate period reads and total parity without importing content/Post identity. |
-| `app/tasks/analytics_sync.py` and `tests/test_analytics_sync.py` | missing remote objects are noticed | Preserve the signal as an archive/deletion observation. Explicitly reject the source's local `db.delete(post)` consequence. |
+| `app/tasks/analytics_sync.py` and `tests/test_analytics_sync.py` | missing remote objects are noticed; current `main` also associates imported remote posts with local Campaign/Post/PostDelivery state | Preserve the missing-object signal as an archive/deletion observation. Explicitly reject the source's local `db.delete(post)` consequence and its content/publication associations. |
 
 ### Behavior that must not port
 
@@ -87,8 +88,16 @@ not evidence and were not modified.
 
 ### Production-use conclusion
 
-The Mkt default-branch pin has a successful GitHub Actions CI run. The
-repository contains Compose/Nginx deployment assets and the hostname
+GitHub reports `master` as Mkt's configured default branch at
+`1a185b47164e34601769c84976e95578996c4523`, while `main` is one commit ahead at
+`7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d`. Both exact commits have successful
+[GitHub Actions](https://github.com/michaelayoade/dotmac_mkt/actions/runs/23803711157)
+[CI runs](https://github.com/michaelayoade/dotmac_mkt/actions/runs/23806219221)
+on `main`. The newer commit changes only local Campaign/Post/PostDelivery
+affinity and its tests; it neither changes the qualifying external
+hierarchy/metric behavior nor supplies runtime evidence.
+
+The repository contains Compose/Nginx deployment assets and the hostname
 `marketing.dotmac.io`, which shows deployment intent. GitHub's deployment list
 for the repository is empty, and no checked-in ledger identifies a production
 database, image, run or current writer. Those facts do not prove that the
