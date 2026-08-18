@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a70 — UNRELEASED
+## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known
 production caller migrated to the canonical identity pair.
