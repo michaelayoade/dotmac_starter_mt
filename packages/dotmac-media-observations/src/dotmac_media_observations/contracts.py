@@ -416,9 +416,7 @@ class TransportReceiptProvenance:
     received_at: datetime
 
     def __post_init__(self) -> None:
-        _require_text(
-            "transport_receipt_ref", self.transport_receipt_ref, maximum=255
-        )
+        _require_text("transport_receipt_ref", self.transport_receipt_ref, maximum=255)
         _require_aware("received_at", self.received_at)
 
 
