@@ -1706,11 +1706,13 @@ query and enforces the same composite-unique rule for tenant-scoped tables.
 reconstructs every enrolled migration from its release tag and compares
 the blob digest with the checked-in tree; a new revision is the only repair
 path. Approvals carries the one explicit historical exception:
-`ap_0001_approvals` shipped three byte sets across a1–a4 before enrolment. The
+`ap_0001_approvals` shipped three byte sets across a1–a4 before enrolment; a5
+reuses the canonical third set and adds `ap_0002`. The
 exception freezes that exact tag/digest census, permits only the latest shipped
 bytes in the current tree, and refuses a fourth variant. A PostgreSQL upgrade
 matrix builds each released meaning, seeds both selected planes, and proves the
-canonical additive `ap_0002` upgrade preserves rows and plane selection. This
+canonical additive `ap_0002` upgrade preserves rows and plane selection; a5
+then shipped that additive revision after registry verification. This
 records damage already in the registry; it does not legalise future in-place
 edits.
 

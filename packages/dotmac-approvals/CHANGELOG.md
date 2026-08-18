@@ -3,9 +3,13 @@
 All notable changes to the `dotmac-approvals` distribution. This package follows
 [Semantic Versioning](https://semver.org). The `.github/release-modules.json`
 entry landed once the live Postgres migration and catalog gate passed;
-`0.1.0a1` through `0.1.0a4` have since been published.
+`0.1.0a1` through `0.1.0a5` have since been published.
 
 ## 0.1.0a5 — 2026-08-16
+
+Published and verified by release run `32062654126`; the registry-installed
+manifest registered `mod_approvals` against kernel `0.1.0a68` before the
+workflow created `dotmac-approvals-v0.1.0a5` on commit `8d4ddfd`.
 
 **Declares `outbox_relay.v1`, the effect this module has always needed and
 could not name.** `dotmac_approvals.outbox.emit_tenant_events` calls
@@ -39,7 +43,7 @@ grepping the IDEMPOTENCY facility, and nobody had grepped this one.
   verification that makes the dependency fail before a request.
 - The released-migration guard now enrols approvals with an exact tag/digest
   census. It records — but does not excuse — the three `ap_0001` byte sets that
-  shipped across a1–a4, retains a3/a4 as the canonical current bytes, and has a
+  shipped across a1–a5, retains a3/a4/a5 as the canonical current bytes, and has a
   sensitivity proof that a fourth byte set is refused.
 - A six-case PostgreSQL upgrade matrix reconstructs each historical byte set
   from its release tag, builds every meaning that release supported, seeds
