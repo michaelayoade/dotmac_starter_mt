@@ -5,12 +5,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, time
 
-from dotmac_kernel.models import Base
+from dotmac_kernel.models import Base, Tenant
 from dotmac_kernel.namespaces import module_schema
 from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -31,12 +32,6 @@ class Campaign(Base):
         UniqueConstraint("tenant_id", "id", name="uq_campaigns_tenant_id_id"),
         UniqueConstraint("tenant_id", "code", name="uq_campaigns_tenant_code"),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaigns_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "active_revision_id"],
             [
                 f"{SCHEMA}.campaign_revisions.tenant_id",
@@ -50,7 +45,11 @@ class Campaign(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     code: Mapped[str] = mapped_column(String(80), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
@@ -88,12 +87,6 @@ class CampaignRevision(Base):
             name="uq_campaign_revisions_tenant_campaign_number",
         ),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_revisions_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
             [f"{SCHEMA}.campaigns.tenant_id", f"{SCHEMA}.campaigns.id"],
             ondelete="CASCADE",
@@ -104,7 +97,11 @@ class CampaignRevision(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
     kind: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -130,12 +127,6 @@ class CampaignStep(Base):
             name="uq_campaign_steps_tenant_revision_position",
         ),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_steps_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
             [f"{SCHEMA}.campaigns.tenant_id", f"{SCHEMA}.campaigns.id"],
             ondelete="CASCADE",
@@ -155,7 +146,11 @@ class CampaignStep(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     revision_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -182,12 +177,6 @@ class CampaignAudience(Base):
             name="uq_campaign_audiences_source_snapshot",
         ),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_audiences_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
             [f"{SCHEMA}.campaigns.tenant_id", f"{SCHEMA}.campaigns.id"],
             ondelete="CASCADE",
@@ -198,7 +187,11 @@ class CampaignAudience(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
     source_version: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -223,12 +216,6 @@ class CampaignRecipient(Base):
             name="uq_campaign_recipients_source_subject",
         ),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_recipients_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
             [f"{SCHEMA}.campaigns.tenant_id", f"{SCHEMA}.campaigns.id"],
             ondelete="CASCADE",
@@ -249,7 +236,11 @@ class CampaignRecipient(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     audience_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     source_owner: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -283,12 +274,6 @@ class CampaignConsentReceipt(Base):
             "phase",
             "fingerprint",
             name="uq_campaign_consent_receipts_evaluation",
-        ),
-        ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_consent_receipts_tenant",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
@@ -325,7 +310,11 @@ class CampaignConsentReceipt(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     recipient_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     recipient_step_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
@@ -354,12 +343,6 @@ class CampaignRecipientStep(Base):
             "recipient_id",
             "step_id",
             name="uq_campaign_recipient_steps_recipient_step",
-        ),
-        ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_recipient_steps_tenant",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
@@ -392,7 +375,11 @@ class CampaignRecipientStep(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     recipient_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     step_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
@@ -431,12 +418,6 @@ class CampaignDeliveryIntent(Base):
             "tenant_id", "dispatch_id", name="uq_campaign_delivery_intents_dispatch"
         ),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_delivery_intents_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
             [f"{SCHEMA}.campaigns.tenant_id", f"{SCHEMA}.campaigns.id"],
             ondelete="CASCADE",
@@ -456,7 +437,11 @@ class CampaignDeliveryIntent(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     recipient_step_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     dispatch_id: Mapped[uuid.UUID] = mapped_column(nullable=False, default=uuid.uuid4)
@@ -498,12 +483,6 @@ class CampaignObservation(Base):
             name="uq_campaign_observations_source_event",
         ),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_observations_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
             [f"{SCHEMA}.campaigns.tenant_id", f"{SCHEMA}.campaigns.id"],
             ondelete="CASCADE",
@@ -532,7 +511,11 @@ class CampaignObservation(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     recipient_step_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     delivery_intent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
@@ -566,12 +549,6 @@ class CampaignUnsubscribeRequest(Base):
             name="uq_campaign_unsubscribe_requests_source_event",
         ),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_unsubscribe_requests_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
             [f"{SCHEMA}.campaigns.tenant_id", f"{SCHEMA}.campaigns.id"],
             ondelete="RESTRICT",
@@ -595,7 +572,11 @@ class CampaignUnsubscribeRequest(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     recipient_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     channel: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -618,12 +599,6 @@ class CampaignResponse(Base):
         UniqueConstraint("tenant_id", "id", name="uq_campaign_responses_tenant_id_id"),
         UniqueConstraint(
             "tenant_id", "observation_id", name="uq_campaign_responses_observation"
-        ),
-        ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_responses_tenant",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
@@ -662,7 +637,11 @@ class CampaignResponse(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     recipient_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     recipient_step_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
@@ -687,12 +666,6 @@ class CampaignCounter(Base):
             "tenant_id", "campaign_id", name="uq_campaign_counters_campaign"
         ),
         ForeignKeyConstraint(
-            ["tenant_id"],
-            ["public.tenants.id"],
-            ondelete="CASCADE",
-            name="fk_campaign_counters_tenant",
-        ),
-        ForeignKeyConstraint(
             ["tenant_id", "campaign_id"],
             [f"{SCHEMA}.campaigns.tenant_id", f"{SCHEMA}.campaigns.id"],
             ondelete="CASCADE",
@@ -702,7 +675,11 @@ class CampaignCounter(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     campaign_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     total_recipients: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     pending: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

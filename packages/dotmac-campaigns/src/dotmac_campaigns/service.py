@@ -104,6 +104,14 @@ def _aware(name: str, value: datetime) -> None:
         raise CampaignError(f"{name} must be timezone-aware")
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Restore SQLite's dropped offset at persistence boundaries."""
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _campaign(
     db: Session, tenant_id: UUID, campaign_id: UUID, *, lock: bool = False
 ) -> Campaign:
@@ -558,6 +566,7 @@ def schedule_campaign(
             )
             if audience_receipt is None or not audience_receipt.allowed:
                 continue
+            due_at = _as_utc(campaign.scheduled_at)
             recipient_step = CampaignRecipientStep(
                 tenant_id=tenant_id,
                 campaign_id=campaign_id,
@@ -566,7 +575,7 @@ def schedule_campaign(
                 position=0,
                 status=RecipientStepStatus.SCHEDULED.value,
                 delivery_state=DeliveryState.PENDING.value,
-                due_at=campaign.scheduled_at,
+                due_at=due_at,
                 created_at=recorded_at,
                 updated_at=recorded_at,
             )
@@ -576,10 +585,10 @@ def schedule_campaign(
                 session,
                 tenant_id=tenant_id,
                 identity=_step_identity(recipient_step),
-                due_at=campaign.scheduled_at,
+                due_at=due_at,
                 output=TimerOutput(DUE_EVENT_TYPE),
                 recorded_at=recorded_at,
-                expires_at=campaign.evidence_expires_at,
+                expires_at=_as_utc(campaign.evidence_expires_at),
             )
             recipient_step.timer_generation = scheduled.generation
             created_steps += 1
@@ -768,7 +777,7 @@ def accept_due_work(
             due_at=due,
             output=TimerOutput(DUE_EVENT_TYPE),
             recorded_at=accepted_at,
-            expires_at=campaign.evidence_expires_at,
+            expires_at=_as_utc(campaign.evidence_expires_at),
         )
         row.status = RecipientStepStatus.DEFERRED.value
         row.due_at = due
@@ -1090,7 +1099,7 @@ def _materialize_successor(
             due_at=due_at,
             output=TimerOutput(DUE_EVENT_TYPE),
             recorded_at=occurred_at,
-            expires_at=campaign.evidence_expires_at,
+            expires_at=_as_utc(campaign.evidence_expires_at),
         )
         successor.timer_generation = timer.generation
     else:
@@ -1325,7 +1334,7 @@ def resume_campaign(
             ),
         )
     ):
-        due_at = max(row.due_at, resumed_at)
+        due_at = max(_as_utc(row.due_at), resumed_at)
         timer = timers.schedule(
             db,
             tenant_id=tenant_id,
@@ -1333,7 +1342,7 @@ def resume_campaign(
             due_at=due_at,
             output=TimerOutput(DUE_EVENT_TYPE),
             recorded_at=resumed_at,
-            expires_at=campaign.evidence_expires_at,
+            expires_at=_as_utc(campaign.evidence_expires_at),
         )
         row.due_at = due_at
         row.timer_generation = timer.generation
@@ -1754,7 +1763,7 @@ def purge_expired_pii(
             )
             .order_by(CampaignRecipient.pii_expires_at, CampaignRecipient.id)
             .limit(limit)
-            .with_for_update(skip_locked=True)
+            .with_for_update()
         )
     )
     for recipient in recipients:
@@ -1777,7 +1786,7 @@ def purge_expired_pii(
                     CampaignDeliveryIntent.id,
                 )
                 .limit(remaining)
-                .with_for_update(skip_locked=True)
+                .with_for_update()
             )
         )
         for intent in intents:

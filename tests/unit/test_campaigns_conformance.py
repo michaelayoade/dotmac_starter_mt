@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from dotmac_campaigns.contracts import (
+    ContractError,
     RenderRequest,
     SenderRequest,
     TimerIdentity,
@@ -106,5 +107,5 @@ def test_conformance_refuses_a_renderer_without_stable_fingerprint() -> None:
                 fingerprint_sha256="",
             )
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ContractError):
         assert_renderer_conformance(BrokenRenderer())  # type: ignore[arg-type]
