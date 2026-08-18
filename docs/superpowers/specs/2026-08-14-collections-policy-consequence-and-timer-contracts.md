@@ -1,9 +1,9 @@
 # Collections: policy, consequence and timer contracts
 
 - **Status:** non-authoritative intent (`docs/superpowers/specs/` — see
-  `CLAUDE.md`'s documentation hierarchy). This specifies contracts for a module
-  that does **not** exist and is **not** authorised to exist. ADR-0017's P11
-  lineage gate is closed.
+  `CLAUDE.md`'s documentation hierarchy). The module does not yet exist; P11 is
+  met and ADR-0032 now authoritatively fixes the contract and initial-plane
+  decisions this draft originally left open.
 - **Decision boundary:** ADR-0020 and its 2026-08-14 amendment (A1 composition,
   A2 planes, A6 the per-application matrix); ADR-0023, ADR-0024, ADR-0014,
   ADR-0008, ADR-0018.
@@ -16,13 +16,34 @@
   restate it and must not contradict it. Where it does, § 12 says so explicitly.
 - **Evidence:** `docs/inventories/collections-sources.md`;
   dossier `docs/inventories/collections-extraction-dossier.md`.
-- **Measured at:** starter `5417e51`, Sub `27c76aaee`, ERP `0f4b1698`,
-  vendor CP `8984801`.
+- **Revalidated at:** starter `8d4ddfd9`, Sub `d1a1a913`, ERP `0f4b1698`,
+  vendor CP source evidence `8984801`; P11 production evidence is recorded in
+  ADR-0017's 2026-08-18 amendment.
 
-This document specifies three things and nothing else: the **inbound
-receivable-position contract and the port that carries it**, the **outbound
-consequence-request contract**, and the **timer port** the module needs and is
-not allowed to build for itself.
+## Amendment 2026-08-18 — ADR-0032 resolves the draft conflicts
+
+Michael approved the following exact boundary:
+
+- inbound is `AssessCollectionExposureV1`, carrying identity, explicit scope
+  and trigger provenance and **never a money amount**;
+- `ReceivablesReader` supplies the current authoritative exact position at
+  every decision point;
+- outbound is `CollectionActionRequestedV1`; Collections records the owning
+  product service's typed receipt as evidence;
+- grace always declares an anchor; there is no implicit default;
+- the timer port is assembly-bound to the separate
+  `dotmac-durable-timers` owner and Collections builds no scheduler; and
+- revision 1 explicitly declares an atomic tenant-only plane for the real Sub
+  adopter, so ADR-0028 requires no assembly selector. Platform persistence
+  remains absent until Vendor's real-case demand gate is met.
+
+Sections 9 and 11 retain the original contradictions as historical review
+evidence, but their open decisions are closed by ADR-0032.
+
+This document specifies three things and nothing else: the
+`AssessCollectionExposureV1`/`ReceivablesReader` inbound seam,
+`CollectionActionRequestedV1` plus typed owner receipt, and the timer port the
+module needs and is not allowed to build for itself.
 
 ---
 
@@ -38,8 +59,9 @@ writer if the detail is wrong:
    tables and quietly becomes a second balance calculation.
 2. **The write seam** is where a consequence stops being a request and becomes a
    direct write to service state.
-3. **The scheduling seam** is where an absent timer facility gets replaced by a
-   sweep, and ordering becomes business state.
+3. **The scheduling seam** is where the separately released timer module is
+   bound through a port. If that boundary is missing, a local sweep becomes a
+   second time owner and ordering becomes business state.
 
 Sub has already made two of those three mistakes and has already designed the
 correction (its ADR-0007 Phase 5). This spec ports the correction, not the
@@ -80,16 +102,16 @@ allowed to see.
 
 ### 2.2 Why a port and not a queued payload
 
-The adoption plan's inbound `AssessCollectionExposure` command carries the
+The adoption plan's original inbound `AssessCollectionExposure` command carried the
 amount inside the message. A queued command carrying money goes stale between
 enqueue and handling, and a policy step that fires three days later would act
-on the amount as it was three days ago. The reconciliation this spec proposes,
-and which needs Michael's ratification (§ 12.1):
+on the amount as it was three days ago. ADR-0032 resolves the reconciliation:
 
 > **The command carries identity; the port supplies the amount.**
-> `AssessCollectionExposure` names *which* exposure to evaluate and at what
-> source version. `ReceivablesReader.read` is called at decision time —
-> including at every timer fire — to obtain the exact current position. The
+> `AssessCollectionExposureV1` names *which* exposure to evaluate, in which
+> scope, and why it was triggered. `ReceivablesReader.read` is called at
+> decision time — including at every timer fire — to obtain the exact current
+> position. The
 > module holds no cached amount it can act on.
 
 This keeps both halves of the plan: the assembly still delivers a versioned
@@ -164,7 +186,7 @@ than picking the larger number.
 
 ---
 
-## 3. The write seam: `ConsequenceRequestV1`
+## 3. The write seam: `CollectionActionRequestedV1`
 
 ### 3.1 The rule
 
@@ -175,8 +197,8 @@ adoption plan's invariant 9 states it. What this section adds is the exact
 shape and the failure semantics.
 
 ```text
-collections  --ConsequenceRequestV1-->  assembly adapter
-             <--ConsequenceReceiptV1--  the owning service (Sub / Vendor CP)
+collections  --CollectionActionRequestedV1-->  assembly adapter
+             <--CollectionActionReceiptV1---  the owning service (Sub / Vendor CP)
 ```
 
 The adapter maps the request onto a locally owned command. The owner locks and
@@ -200,7 +222,7 @@ whether a service was suspended.
 
 ### 3.3 The scope guard: no account-wide consequence for a scoped debt
 
-**Guard.** A `ConsequenceRequestV1` whose action's declared `effect_scope` is
+**Guard.** A `CollectionActionRequestedV1` whose action's declared `effect_scope` is
 broader than the narrowest scope shared by every exposure admitted to the case
 is rejected at construction, in the pure engine, before persistence.
 
@@ -401,10 +423,11 @@ identity. A corrected exposure replans only the cases it touches.
 
 ### 5.3 The `Timer` port
 
-**P3 durable timers is gap-listed and NOT authorised** (`billing-sources.md`
-P3; ADR-0020 A5; adoption plan G2). The module therefore declares a **port**,
-ships a **fake**, and ships a **parametrized contract suite** — and does not
-build a timer facility inside the collections schema.
+`dotmac-durable-timers` is the accepted separate owner but is not yet released.
+Collections therefore declares a **port**, ships a **fake**, and ships a
+**parametrized contract suite**. The consuming application later binds that
+port to the released timer module through its assembly; Collections imports no
+sibling and builds no timer facility inside its schema.
 
 ```python
 @dataclass(frozen=True)
@@ -419,9 +442,15 @@ class TimerRequest:
 
 class Timer(Protocol):
     def schedule(self, req: TimerRequest) -> TimerHandle: ...   # create OR replace
-    def cancel(self, *, owner, entity_kind, entity_id, purpose) -> bool: ...
+    def cancel(self, *, owner, entity_kind, entity_id, purpose, observed_generation) -> CancellationOutcome: ...
     def current(self, *, owner, entity_kind, entity_id, purpose) -> TimerHandle | None: ...
+    def accept_trigger(self, trigger: TimerTrigger) -> Current | Stale: ...
 ```
+
+`CancellationOutcome` distinguishes `Canceled`, `AlreadyFired`,
+`NothingScheduled` and `Stale`. `Stale` and stale trigger acceptance return both
+`observed_generation` and `current_generation`; a boolean is insufficient
+evidence for a delayed financial/access consequence.
 
 The contract suite — the definition, which the fake and any real implementation
 must both pass:
@@ -431,15 +460,16 @@ must both pass:
 | Wake an owner/entity at a time | a scheduled timer fires at or after `due_at` and not before |
 | Exactly one current timer | at most one `scheduled` row per `(owner, entity_kind, entity_id, purpose)`; a second `schedule` supersedes rather than adding |
 | Generation | replacement bumps `generation`; a delivery carrying a superseded generation is rejected by the consumer and is a no-op |
-| Cancel by exact identity | `cancel` on the four-tuple removes exactly that timer and is idempotent; it never cancels a sibling purpose |
+| Cancel by exact identity | `cancel` on the four-tuple affects exactly that timer, never a sibling purpose, and returns one typed cancellation outcome |
+| Stale delivery evidence | acceptance returns both observed and current generations and the consumer effect remains untouched |
 | Transactional staging | `schedule`/`cancel` participate in the caller's transaction and flush only; they never commit (kernel rule 8) |
 | Aware instants only | a naive `due_at` raises; it is never assumed UTC |
 | No decisions | firing emits the declared trigger and records delivery, and reads no customer, invoice, funding or access state |
 | At-most-once effect | § 5.4 |
 
-The port's field names are deliberately identical to Sub's
-`app/models/durable_timer.py` and `ScheduleTimerCommand`, so that the eventual
-P3 facility is a port binding rather than a translation.
+The port preserves Sub's proven identity/generation fields and the accepted
+typed-outcome corrections, so the released timer owner is an assembly binding
+rather than a second Collections implementation.
 
 ### 5.4 At-most-once delegates to the kernel, and reserves nothing first
 
@@ -595,8 +625,8 @@ one carries a sensitivity proof (ADR-0018 § 5).
 ## 8. What this spec does not do
 
 It does not create a package, a namespace, a lineage, a model, a migration or an
-`EXTRACTION.toml`. It does not lift ADR-0017's moratorium, does not authorise
-P3, and does not claim any adoption. It does not restate the adoption plan's
+`EXTRACTION.toml`. P11 is now met and ADR-0030/0032 authorize the named module;
+this historical spec still does not itself claim implementation or adoption. It does not restate the adoption plan's
 gates, cutovers or retirement sequence. It does not specify billing's producer
 side, arrangements, or grace beyond the fields the three contracts touch.
 
@@ -614,32 +644,31 @@ with evidence:
   command. Its typed payload carries… currency and exact amount" (plan
   § "Inbound exposure").
 - **This spec:** the amount is read at decision time through
-  `ReceivablesReader`; the command carries identity and source version only.
+  `ReceivablesReader`; the command carries identity, explicit scope and trigger
+  provenance only.
 - **Why it matters:** a queued command carrying money goes stale between enqueue
   and a step that fires days later, and a timer fire has no message to re-read.
-- **Resolution proposed** (§ 2.2): command carries identity, port supplies the
-  amount. Both names survive and nothing in the plan's ownership boundary
-  changes. **Needs Michael's ratification** — this is a contract-shape decision,
-  not a documentation tidy.
+- **Resolved by ADR-0032:** `AssessCollectionExposureV1` carries identity,
+  explicit scope and trigger provenance, never an amount; the reader supplies
+  current money at every decision point.
 
 ### 9.2 Outbound contract naming
 
 - **Plan:** `CollectionActionRequested`.
-- **This spec's brief:** `ConsequenceRequestV1`.
+- **This spec's original brief:** `ConsequenceRequestV1`.
 - These are the same record. The fields the plan lists are a subset of § 3.2.
-  One name must win before any code; this spec has no basis to overrule the
-  plan's name and recommends the plan's `CollectionActionRequested`, versioned
-  as `…V1`, with `ConsequenceRequestV1` retired as an alias.
+  ADR-0032 chooses `CollectionActionRequestedV1`; `ConsequenceRequestV1` does
+  not ship as an alias.
 
 ### 9.3 Timer ownership: facility vs port
 
-- **Plan G2:** extract Sub's `runtime.durable_timers` into "the appropriate
-  kernel facility" as a separate release, before the live Sub slice.
+- **Plan G2 originally:** extract Sub's `runtime.durable_timers` into "the
+  appropriate kernel facility" as a separate release, before the live Sub slice.
 - **This spec § 5.3:** the module declares a `Timer` **port** with a fake and a
   contract suite.
-- **Not a contradiction** if read as: the port is what the module declares, the
-  P3 facility is what the assembly binds to it, and the fake is what makes the
-  module developable and testable before P3 exists. Recorded here because
+- **Resolved:** the port is what Collections declares,
+  `dotmac-durable-timers` is what the assembly binds to it, and the fake makes
+  the module developable and testable before timer-backed behavior. Recorded here because
   "extract the facility" and "declare a port" have been conflated before, and
   because a port with no adopter must not land in the kernel (P6's lesson,
   `billing-sources.md` P6).
@@ -684,16 +713,14 @@ between a quiet pause and a batch of wrong suspensions.
 
 ---
 
-## 11. Open questions
+## 11. Original open questions and disposition
 
-Listed rather than decided; each blocks a specific piece of implementation, none
-blocks documentation.
+ADR-0032 disposes the contract and initial-plane questions:
 
-1. **§ 9.1** — pushed command carrying money, or command-plus-port. Blocks the
-   inbound contract.
-2. **§ 9.2** — `CollectionActionRequested` or `ConsequenceRequestV1`. Blocks the
-   outbound contract.
-3. **§ 6.1 plane gap** — the platform plane has no consent ledger and no
+1. **§ 9.1 — resolved:** `AssessCollectionExposureV1` plus reader; no command
+   money.
+2. **§ 9.2 — resolved:** `CollectionActionRequestedV1`.
+3. **§ 6.1 plane gap — demand-gated:** the platform plane has no consent ledger and no
    delivery receipt loop. Options: (a) Vendor CP collections notices are
    product-owned and the module never requests one on the platform plane;
    (b) `dotmac_kernel.consent`/`delivery` gain platform variants under ADR-0023,
@@ -703,11 +730,10 @@ blocks documentation.
    Vendor work, and inventing a platform consent ledger before a real Vendor
    notice exists is supply-pushed persistence of exactly the kind ADR-0017
    measured.
-4. **Grace anchor default** — the policy declares whether grace anchors on
+4. **Grace anchor default — resolved:** the policy declares whether grace anchors on
    exposure time, request time or accepted notice receipt. There is no safe
-   default; a missing anchor should be a policy validation failure rather than a
-   silent choice. Needs confirmation that products will always declare it.
-5. **`effect_scope` vocabulary** (§ 3.3) — `obligation | service | contract |
+   default; a missing anchor is a policy validation failure.
+5. **`effect_scope` vocabulary — still extensible:** `obligation | service | contract |
    subject` is proposed from Sub's shape. Vendor CP's consequence scope is
    unknown until it has a real case, and the vocabulary is a declaration
    registry precisely so it can grow. Confirm the four initial values.

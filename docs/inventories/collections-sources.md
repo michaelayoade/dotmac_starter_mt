@@ -1,6 +1,26 @@
 # Collections, dunning and enforcement sources
 
-**As of:** 2026-08-15 (revision of the 2026-08-14 ADR-0020 measurement)
+**As of:** 2026-08-18 (revalidation of the 2026-08-14 ADR-0020 measurement)
+
+**2026-08-18 revalidation.** Starter was re-read at
+`8d4ddfd9e285da06ce1fdd29b59f1b483d6ea38c` and Sub at
+`d1a1a913e287ffadaf21b7da7be448f2c28b5483`. Since the preserved Sub source pin
+`4489ca`, only `app/services/billing_enforcement_guards.py` changed in the
+focused Collections source/test set (commit `caa257b03`, +14/−2); the case,
+arrangement, grace, timer, dunning, prepaid, and preserved behavior-test owners
+remain unchanged. The exact revalidation commands and path list are recorded in
+`collections-extraction-dossier.md`.
+
+ADR-0032 is now authoritative for the previously open contract and plane
+questions: `AssessCollectionExposureV1` carries identity/scope/trigger
+provenance and no money; `ReceivablesReader` supplies current authoritative
+positions at every decision; outbound is `CollectionActionRequestedV1` with a
+typed `CollectionActionReceiptV1`; revision one is tenant-only; and the timer
+owner is the separate selectable `dotmac-durable-timers` module. Collections'
+revision-one tenant plane is explicit but atomic under ADR-0028, so it takes no
+assembly `ModulePlaneSelection`. Historical
+dual-plane and kernel-timer conclusions later in this measured inventory are
+superseded where they conflict with ADR-0032.
 
 | Repository | Revision read | Note |
 |---|---|---|
@@ -15,9 +35,13 @@
 § 1 (the deliberately narrow Collections row), build-order step 11, § 6 (the
 owner-directed implementation exception naming `dotmac-collections`) and § 7 (the
 application adoption matrix). **Extends** ADR-0020 § 4 and its 2026-08-14
-amendment (A1, A2, A6), which remain the ownership boundary.
+amendment (A1, A2, A6), as amended by
+[ADR-0032](../adr/0032-collections-assesses-identity-and-requests-actions.md),
+which is authoritative for the contract names/shapes, initial plane, and timer
+boundary.
 **Adoption sequence:** `docs/superpowers/plans/2026-08-14-collections-sub-vendor-cp-adoption.md`
 **Contracts:** `docs/superpowers/specs/2026-08-14-collections-policy-consequence-and-timer-contracts.md`
+**Canary surface:** `docs/superpowers/specs/2026-08-18-collections-canary-first-surface.md`
 **Dossier:** `docs/inventories/collections-extraction-dossier.md`
 **Portfolio pass:** `docs/inventories/cloud-commerce-owner-sources.md`
 
@@ -877,6 +901,27 @@ Measured against ADR-0018:
   together, since `_throttle_account` reached production behaviour through a web
   helper before it was retired.
 
+Working-slice evidence (2026-08-18) closes the sensitivity gap without changing
+the historical finding above. The uncommitted Sub adoption worktree adds
+`scripts/architecture/collections_retirement_guards.py`,
+`tests/architecture/collections_retirement_baseline.json`, and
+`tests/architecture/test_collections_retirement_ratchets.py`. The syntax-only
+AST scan covers `app/` and `scripts/`, freezes exact counts for R1-R12, and has
+both family-level planted violations and comparator mutations for added, grown,
+and unreviewed-shrink cases. The expanded scan includes 24 ambient-clock reads,
+the two direct access-owner calls, two direct notice-queue calls, twelve
+external legacy access calls, and 27 external receivable-answer calls; import
+alias canonicalization catches `from app.services import collections as ...`
+rather than counting only direct symbol imports. On Observe at
+`d1a1a913e287ffadaf21b7da7be448f2c28b5483`, format and lint passed and the
+focused suite passed (`4 passed, 1 warning in 17.93s`; the minimal environment
+did not install pytest-asyncio). A disposable probe assignment to
+`credential.radius_profile_id` made the primary ratchet fail exactly at
+`credential_write:radius_profile_id: 4 -> 5`. A second module-alias probe failed
+at `legacy_access_call:restore_account_services: 9 -> 10`; removing it returned
+the primary ratchet to green (`1 passed`). This is retirement-gate
+instrumentation, not cutover evidence.
+
 ---
 
 ## 8. Tests available to port
@@ -1374,10 +1419,10 @@ This is what § 5.15 and R9 retire the postpaid path into.
 
 **Two gaps that bear on this module specifically:**
 
-1. **P3 durable timers is missing from the kernel and gap-listed**
-   (`billing-sources.md` P3; ADR-0020 A5; ADR-0030 § 4 names
-   `dotmac_kernel.durable_timers` as an enabling owner and build-order step 6 sequences it
-   *before* the business modules). Correction to the 2026-08-14 text: Sub's
+1. **The separate `dotmac-durable-timers` module is not released**
+   (`billing-sources.md` P3; ADR-0020 A5; ADR-0030 § 4's original kernel-owner
+   wording is superseded by ADR-0032 for Collections). Correction to the
+   2026-08-14 text: Sub's
    reference implementation is not merely present, it is **production-proven by
    eight other owners** — `access_invitations.py:103,125`,
    `advance_renewal_invoicing.py:39`, `billing/contracts.py:726,971`,
@@ -1569,8 +1614,9 @@ It does **not** own, and the gate must refuse:
 - **sending notifications** — no rendering, no channel selection, no transport,
   no delivery-status enum, no queue in the collections schema (§ 10.1);
 - **the invoice, subscription, contract, offer or licence lifecycle**;
-- **durable-timer infrastructure** — P3 owns generations and firing; collections
-  declares a port, ships a fake and a contract suite, and consumes the trigger;
+- **durable-timer infrastructure** — `dotmac-durable-timers` owns identity,
+  generations and firing; Collections declares a port, ships a fake and a
+  contract suite, and consumes the trigger;
 - **approval as a generic workflow** — ADR-0026; a product that needs
   maker-checker composes the approval decision and then asks collections to
   recheck and perform its own transition;
@@ -1590,24 +1636,24 @@ only read path is a declared `ReceivablesReader` port; the **assembly** binds
 Billing's published receivable/coverage facts to it, and until Sub adopts
 `dotmac-billing` the same assembly binds Sub's existing authoritative financial
 facts to the same port. A later billing cutover changes the producer behind the
-port, not the collections owner. The command carries identity and source version;
-the port supplies the amount at decision time, including at every timer fire, so
+port, not the collections owner. The command carries identity, explicit scope
+and trigger provenance; the port supplies the current position and its source
+version at decision time, including at every timer fire, so
 no stale money is ever acted on — and during the coupled billing authority switch
 the reader returns `Unavailable(retryable=True)`, no case advances, and **no
 consequence request may be emitted**.
 
-**Planes (ADR-0023/0028, rule 27).** Dual-plane, declared, from revision one: one
-persistence-free behaviour engine (ladder evaluator, case machine, grace
-calculator, arrangement coverage, consequence-request builder — value objects in,
-value objects out) plus `tables` (tenant: `tenant_id UUID NOT NULL`, composite
-uniques, RLS ENABLEd **and** FORCEd in the creating migration) and
-`platform_tables` (no tenant column, no RLS, `REVOKE ALL` from the tenant app
-role across every table and column privilege, reachable by the online platform
-role through schema `USAGE` plus row DML). A table appears in exactly one plane;
-**no foreign key crosses the planes**; nullable `tenant_id`, sentinel tenants and
-polymorphic scope columns are refused. Sub needs the tenant plane and has no
-source evidence for it (§ 5.16); Vendor CP is platform-only and cannot declare
-one at its current kernel pin (§ 9.2).
+**Planes (ADR-0023/0028, rule 27, as resolved by ADR-0032).** Revision one is
+tenant-only because Sub is the only real adopter: one persistence-free behavior
+engine plus `tables` with `tenant_id UUID NOT NULL`, composite uniques/FKs, and
+RLS ENABLEd **and** FORCEd with policies and exact grants in the creating
+migration. `platform_tables` and `supported_plane_sets` stay empty, making the
+one declared plane atomic; Sub supplies no selector for a nonexistent choice.
+If Vendor CP later meets its real-case demand
+gate, an additive release may declare a platform repository with no tenant
+column, no RLS, exact online-platform reachability and full `app_user`
+revocation. No foreign key crosses planes; nullable/sentinel tenants and
+polymorphic scope columns remain refused.
 
 ---
 
@@ -1624,13 +1670,13 @@ both sufficient and necessary. Each is a consumption, not a restatement.
 | Exact money | `money.Money`, `Currency`, `allocate()` | every amount on a position, an arrangement instalment or a consequence request; `float` is unrepresentable in the contract type |
 | Settings resolution | `settings_resolver` (ADR-0011/0012) | policy selection, thresholds, the enforcement window, and every value § 5.11 currently hardcodes — read from rows and defaults, never the environment |
 | Declaration registries | `modules.ModuleManifest` (ADR-0008, rule 12) | `action_codes`, reason codes, case-state codes, notice purposes, setting domains, audit actions — declared, referenced only when declared, and consumed |
-| Declared planes | `modules.tables` / `platform_tables`, `planes.ModulePlaneSelection` (ADR-0023/0028, rule 27) | the dual-plane declaration and the assembly's explicit per-module plane selection |
+| Declared planes | `modules.tables` / `platform_tables`, then `planes.ModulePlaneSelection` only when subsets exist (ADR-0023/0028, rule 27) | revision one's explicit tenant-only atomic declaration; a platform repository and selectable subsets are additive only with their real adopter |
 | Namespace + lineage | `namespaces`, `MIGRATION_OWNER_LEDGER` (ADR-0006 D1, rule 14) | one `mod_<short>` schema, one migration prefix, one branch label, allocated in the package-creation diff |
 | Audit | `audit.write_audit_event` | every case transition, policy pin, request and receipt, against declared action codes |
 | Consent | `consent.may_send` / `suppression_reason` | eligibility before a notice intent; consent is not a preference and never loses |
 | Channel policy | `channel_policy.resolve_channels` | which channels a notice class uses; a policy step's `channel_preference` is a preference, and a disagreement is recorded on the step attempt |
 | Delivery receipts and the send path | `delivery.record_receipt`, `delivery_providers.send` | consumed by the product's communication adapter, **not** by this module (§ 10.1) — named here so "collections does not send" is checkable against a real API |
-| Durable timers | `dotmac_kernel.durable_timers` — **does not exist** | the escalation wake-up. ADR-0030 § 4 names it an enabling owner and build-order step 6 sequences it before the business modules; until it exists Collections declares a `Timer` port, ships a fake and a parametrized contract suite, and **must not invent a second scheduler ledger** in its own schema |
+| Durable timers | separately released `dotmac-durable-timers` — **does not exist at this revalidation** | the escalation wake-up. Collections declares a timer port, ships a fake and a parametrized contract suite, and **must not invent a second scheduler ledger** in its own schema or import the sibling module; each application binds the released contract locally |
 
 Two floor facts that are easy to get wrong. The kernel's platform-plane
 `messaging` and `idempotency` variants exist, so the platform plane needs no
@@ -1654,15 +1700,14 @@ Every item below is written new, against a real migrated PostgreSQL.
    migration; a cross-tenant canary proves tenant A cannot read, update or delete
    tenant B's case, exposure, arrangement, step attempt or consequence request,
    including through a join and through an aggregate count.
-2. **Platform-plane revocation and reachability.** No collections platform table
-   has a tenant column or a policy; `app_user` is denied on **all seven table
-   privileges and their column-level forms**, each check on a fresh connection
-   (Vendor CP's `test_platform_role_access_and_tenant_role_denial` is the
-   template); and the online platform role holds schema `USAGE` plus at least one
-   row DML privilege — declared-and-unreachable fails too.
-3. **No foreign key crosses the planes**, in either direction, and no module
-   table points at a product table; the per-plane link helpers each refuse an
-   unusable configuration.
+2. **No undeclared or unusable plane.** Revision one declares no platform table
+   and is atomically tenant-only. A later platform release must prove
+   no tenant column or policy, denial of **all seven table privileges and their
+   column-level forms** to `app_user` on fresh connections, and online-platform
+   schema `USAGE` plus row DML.
+3. **No foreign key crosses a declared plane**, and no module table points at a
+   product table; the tenant link helper refuses an unusable configuration. A
+   later platform helper and cross-plane proof arrive with that plane.
 4. **Concurrency.** Two workers advancing the same case produce exactly one step
    attempt and one consequence request; two settlements arriving together close
    the case once; concurrent policy activation and case advance cannot interleave
@@ -1709,8 +1754,9 @@ Every item below is written new, against a real migrated PostgreSQL.
 15. **Exact money.** No `float` anywhere in a money path (a type-level property,
     plus an architecture test); no cross-currency comparison; no epsilon; a
     multi-currency subject yields several positions and several cases.
-16. **Both planes run the same behaviour suite** and produce the same decisions
-    for otherwise identical input.
+16. **Every installed plane runs the same behavior suite.** Revision one proves
+    the atomic tenant plane; a later platform release must run the identical suite
+    for otherwise identical input before it can ship.
 17. **Every new ratchet ships a sensitivity proof** (ADR-0018, rule 25) — R4, R5,
     R6, R8, R9, R11 and R12, and the ported sweep baseline, which currently has
     none (§ 7.1).
