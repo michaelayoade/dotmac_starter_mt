@@ -696,10 +696,14 @@ document's SemVer policy (its HTTP helper needs the `testing` extra:
 fakes work without it). The package re-exports everything from three submodules:
 
 - **`harness`** — the in-memory-SQLite + savepoint-isolation wiring:
-  - `create_test_engine() -> Engine` — a fresh in-memory SQLite engine with
-    `Base.metadata` created. The **assembly must import its own feature models
-    first** so `Base.metadata` is fully populated (SQLite has no RLS — this is
-    for service-logic/unit tests; tenancy is proven separately on Postgres).
+  - `create_test_engine(*, module_schemas: Iterable[str] = (), metadata:
+    MetaData | None = None) -> Engine` — a fresh in-memory SQLite engine with
+    public tables plus only the explicitly composed module schemas created.
+    The **assembly must import its own feature/module models first** so the
+    selected schemas are present in metadata. Unknown schemas and compositions
+    beyond SQLite's attachment ceiling fail closed; SQLite has no RLS, so
+    tenancy remains separately proven on PostgreSQL. `metadata` exists for
+    reusable-kernel canaries and defaults to `Base.metadata`.
   - `isolated_session(engine)` — a context-managed session wrapped in an outer
     transaction + restarting SAVEPOINT, so a test rolls back even if service
     code commits.

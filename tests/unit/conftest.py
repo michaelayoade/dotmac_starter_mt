@@ -161,11 +161,13 @@ def _reference_template_composition():
 
 @pytest.fixture(scope="session")
 def unit_engine():
-    # The kit's create_test_engine() builds the in-memory SQLite engine and
-    # runs create_all over the (now fully imported) Base.metadata — same engine
-    # this conftest used to hand-build, including the check_same_thread=False
-    # relaxation TestClient needs. See dotmac_kernel.testing.harness.
-    engine = create_test_engine()
+    # Importing an optional package only populates global metadata; it does not
+    # compose that package. Name the two module schemas this shared fixture
+    # actually exercises so unrelated architecture-test imports cannot consume
+    # SQLite's ten-attachment limit or silently alter the unit assembly.
+    engine = create_test_engine(
+        module_schemas=("mod_appdir", "mod_tstudio"),
+    )
     yield engine
     engine.dispose()
 

@@ -520,6 +520,35 @@
           "python"
         ]
       }
+    },
+    "dotmac-durable-timers": {
+      "package_dir": "packages/dotmac-durable-timers",
+      "import_name": "dotmac_durable_timers",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a70",
+      "db_schema": "mod_timers",
+      "tag_prefix": "dotmac-durable-timers-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_durable_timers/py.typed",
+          "dotmac_durable_timers/manifest.py",
+          "dotmac_durable_timers/models.py",
+          "dotmac_durable_timers/service.py",
+          "dotmac_durable_timers/migrations/__init__.py",
+          "dotmac_durable_timers/migrations/versions/dt_0001_durable_timers.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

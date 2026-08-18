@@ -586,7 +586,7 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # `dotmac-billing` — the operational-receivables owner on declared tenant and
-# platform planes. Allocated with the first complete package in kernel a69;
+# platform planes. Allocated with the first complete package in kernel a70;
 # `bi` and `mod_billing` are permanent physical identities, never deployment
 # configuration.
 BILLING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
@@ -594,6 +594,17 @@ BILLING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     prefix="bi",
     branch_label="billing",
     db_schema=module_schema("billing"),
+)
+
+# `dotmac-durable-timers` — an optional dual-plane timing-mechanics owner.
+# `timers` keeps the physical catalog readable, while `dt` and
+# `durable_timers` permanently identify its independent Alembic lineage.
+# The module writes the kernel outbox but owns no relay state or dispatcher.
+DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="durable_timers",
+    prefix="dt",
+    branch_label="durable_timers",
+    db_schema=module_schema("timers"),
 )
 
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
@@ -609,6 +620,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
     BILLING_MIGRATION_OWNER,
+    DURABLE_TIMERS_MIGRATION_OWNER,
 )
 
 
@@ -963,6 +975,7 @@ __all__ = [
     "DuplicateMigrationPrefixError",
     "DuplicateSchemaError",
     "DuplicateTableOwnerError",
+    "DURABLE_TIMERS_MIGRATION_OWNER",
     "HostSchemaClaimError",
     "InvalidMigrationPrefixError",
     "InvalidRevisionIdError",

@@ -43,6 +43,10 @@ production caller migrated to the canonical identity pair.
 - Allocated the permanent `dotmac-billing` migration identity: owner
   `billing`, schema `mod_billing`, prefix `bi`, branch label `billing`. This is
   an allocation only; operational receivables remain in the optional module.
+- Allocated the independent `dotmac-durable-timers` identity: owner and branch
+  label `durable_timers`, schema `mod_timers`, prefix `dt`. The module consumes
+  the existing `outbox_relay.v1` prerequisite but owns timer identity,
+  generation and terminal evidence outside the kernel.
 
 ### Changed
 

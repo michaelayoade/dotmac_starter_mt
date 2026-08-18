@@ -6,8 +6,9 @@ consumer assembly gets the same fast unit-test setup without copying it.
 
 SQLite has no RLS — this harness is for service-logic/unit tests; tenancy
 enforcement is proven separately against real Postgres. `create_test_engine`
-does `Base.metadata.create_all`, so the ASSEMBLY must import its own feature
-models before calling it (that populates the shared `Base.metadata`).
+creates public tables plus only explicitly named module schemas, so the
+ASSEMBLY must import its own feature/module models before calling it (that
+populates the shared `Base.metadata`).
 
 `dotmac_kernel.deps` is imported INSIDE `assembly_test_client`, not at module
 scope. Importing it pulls `dotmac_kernel.db`, which constructs the SQLAlchemy
@@ -20,7 +21,7 @@ the TestClient helper, which is building a real app anyway, pays that cost.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -34,14 +35,6 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 
-def _schema_tables(metadata: MetaData) -> dict[str | None, set[str]]:
-    """Local table names grouped by their declared schema."""
-    grouped: dict[str | None, set[str]] = {}
-    for table in metadata.tables.values():
-        grouped.setdefault(table.schema, set()).add(table.name)
-    return grouped
-
-
 def _sqlite_max_attached() -> int:
     """Return this Python build's real SQLite attachment ceiling."""
     connection = sqlite3.connect(":memory:")
@@ -49,53 +42,6 @@ def _sqlite_max_attached() -> int:
         return connection.getlimit(sqlite3.SQLITE_LIMIT_ATTACHED)
     finally:
         connection.close()
-
-
-def _sqlite_schema_layout(
-    metadata: MetaData, *, max_attached: int
-) -> tuple[tuple[str, ...], dict[str, str | None]]:
-    """Allocate SQLite schema slots without allowing table-name collisions.
-
-    SQLite's compile-time attachment limit is commonly ten.  Preserve exact
-    schema names for the largest namespaces first; once every attachment slot
-    is occupied, translate a smaller namespace into ``main`` or an already
-    attached namespace only when their local table names are disjoint.
-    """
-    grouped = _schema_tables(metadata)
-    module_schemas = sorted(
-        ((schema, names) for schema, names in grouped.items() if schema is not None),
-        key=lambda item: (-len(item[1]), item[0]),
-    )
-    main_names = set(grouped.get(None, set()))
-    attached: list[str] = []
-    occupied: dict[str | None, set[str]] = {None: main_names}
-    translation: dict[str, str | None] = {}
-
-    for schema, names in module_schemas:
-        if len(attached) < max_attached:
-            attached.append(schema)
-            occupied[schema] = set(names)
-            continue
-
-        target = next(
-            (
-                candidate
-                for candidate, existing_names in occupied.items()
-                if names.isdisjoint(existing_names)
-            ),
-            ...,
-        )
-        if target is ...:
-            raise RuntimeError(
-                "SQLite cannot represent the imported module schemas without "
-                f"a table-name collision: {schema!r} exceeds its "
-                f"{max_attached}-schema attachment limit; use PostgreSQL or "
-                "split the unit-test composition"
-            )
-        translation[schema] = target
-        occupied[target].update(names)
-
-    return tuple(sorted(attached)), translation
 
 
 def _module_schemas(metadata: MetaData) -> tuple[str, ...]:
@@ -106,13 +52,23 @@ def _module_schemas(metadata: MetaData) -> tuple[str, ...]:
     must not care whether a schema belongs to an installed module, so it never
     needs to import one.
     """
-    return tuple(sorted(schema for schema in _schema_tables(metadata) if schema))
+    return tuple(
+        sorted({table.schema for table in metadata.tables.values() if table.schema})
+    )
 
 
-def create_test_engine(*, metadata: MetaData | None = None) -> Engine:
-    """A fresh in-memory SQLite engine with the full `Base.metadata` schema
-    created. `check_same_thread=False` because a TestClient runs sync route
-    dependencies on a worker thread while the test holds one connection —
+def create_test_engine(
+    *,
+    module_schemas: Iterable[str] = (),
+    metadata: MetaData | None = None,
+) -> Engine:
+    """A fresh in-memory SQLite engine for an explicit test composition.
+
+    Public tables are always created. Module tables are created only for
+    ``module_schemas``; importing an optional module populates global
+    ``Base.metadata`` but does not compose it. ``check_same_thread=False``
+    because a TestClient runs sync route dependencies on a worker thread while
+    the test holds one connection —
     sequential use only, never concurrent.
 
     **Module schemas (ADR-0006 D1).** A stateful module binds its models to
@@ -120,27 +76,38 @@ def create_test_engine(*, metadata: MetaData | None = None) -> Engine:
     fully qualified `mod_x.thing` — which is the entire point of D1, and which
     plain SQLite rejects because it has no schemas. Each such schema is
     therefore ATTACHed as its own in-memory database before `create_all`, on
-    every connection.
+    every connection. SQLite permits at most ten attached databases in the
+    standard build, so inference from every model imported during pytest
+    collection is both architecturally wrong and eventually unexecutable.
 
-    ATTACH keeps emitted SQL identical to production's while the imported
-    composition fits SQLite's compile-time attachment ceiling.  Above that
-    ceiling, the largest schemas keep their exact names and smaller spillover
-    schemas are co-located only when their table names cannot collide.  The
-    static migration gate and PostgreSQL lane remain the exact qualification,
-    RLS and grant authorities; SQLite is only the fast service-logic lane.
+    ATTACH keeps emitted SQL identical to production's. A composition that
+    exceeds this Python build's attachment ceiling is refused rather than
+    silently translating module tables into another namespace. The static
+    migration gate and PostgreSQL lane remain the exact qualification, RLS and
+    grant authorities; SQLite is only the fast service-logic lane.
 
-    ``metadata`` is injectable for reusable-kernel canaries.  Assemblies omit
-    it and receive the shared declarative ``Base.metadata``.
+    ``metadata`` is injectable for reusable-kernel canaries. Assemblies omit it
+    and receive the shared declarative ``Base.metadata``.
     """
     selected_metadata = Base.metadata if metadata is None else metadata
-    schemas, translation = _sqlite_schema_layout(
-        selected_metadata, max_attached=_sqlite_max_attached()
-    )
+    available = set(_module_schemas(selected_metadata))
+    schemas = tuple(sorted(set(module_schemas)))
+    unknown = set(schemas) - available
+    if unknown:
+        raise ValueError(
+            f"module schemas are not present in Base.metadata: {sorted(unknown)}"
+        )
+    max_attached = _sqlite_max_attached()
+    if len(schemas) > max_attached:
+        raise ValueError(
+            f"SQLite supports at most {max_attached} attached module schemas; "
+            "split this unit composition or use PostgreSQL"
+        )
+
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         future=True,
         connect_args={"check_same_thread": False},
-        execution_options={"schema_translate_map": translation},
     )
     if schemas:
 
@@ -156,7 +123,13 @@ def create_test_engine(*, metadata: MetaData | None = None) -> Engine:
             finally:
                 cursor.close()
 
-    selected_metadata.create_all(engine)
+    selected = set(schemas)
+    tables = tuple(
+        table
+        for table in selected_metadata.tables.values()
+        if table.schema is None or table.schema in selected
+    )
+    selected_metadata.create_all(engine, tables=tables)
     return engine
 
 

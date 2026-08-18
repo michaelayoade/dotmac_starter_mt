@@ -27,7 +27,7 @@ from dotmac_kernel.testing import (
     fake_branding,
     isolated_session,
 )
-from sqlalchemy import Column, Integer, MetaData, Table, select
+from sqlalchemy import Column, Integer, MetaData, Table, inspect, text
 
 
 # ── harness ──────────────────────────────────────────────────────────────────
@@ -64,14 +64,38 @@ def test_isolated_session_rolls_back_between_uses() -> None:
         engine.dispose()
 
 
-def test_test_engine_supports_more_schemas_than_sqlite_can_attach() -> None:
-    """Package growth must not make the shared unit lane unbootable.
+def test_module_schemas_are_explicit_not_inferred_from_imported_metadata() -> None:
+    """An imported optional package is not an installed module."""
+    engine = create_test_engine()
+    try:
+        with engine.connect() as connection:
+            attached = connection.execute(text("PRAGMA database_list")).all()
+        assert [row[1] for row in attached if row[1] != "temp"] == ["main"]
+        assert "templates" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
 
-    SQLite is commonly compiled with ``MAX_ATTACHED=10``.  The Starter
-    catalogue now exceeds that count, so the harness must preserve the largest
-    qualified namespaces and safely co-locate only collision-free spillover.
-    PostgreSQL remains the live proof for exact schemas, RLS and grants.
-    """
+
+def test_an_explicit_module_schema_is_attached_and_created() -> None:
+    engine = create_test_engine(module_schemas=("mod_tstudio",))
+    try:
+        with engine.connect() as connection:
+            attached = connection.execute(text("PRAGMA database_list")).all()
+        assert [row[1] for row in attached if row[1] != "temp"] == [
+            "main",
+            "mod_tstudio",
+        ]
+        assert "templates" in inspect(engine).get_table_names(schema="mod_tstudio")
+    finally:
+        engine.dispose()
+
+
+def test_an_unknown_module_schema_fails_instead_of_being_ignored() -> None:
+    with pytest.raises(ValueError, match="not present in Base.metadata"):
+        create_test_engine(module_schemas=("mod_not_loaded",))
+
+
+def test_too_many_explicit_module_schemas_are_refused_without_translation() -> None:
     metadata = MetaData()
     tables = tuple(
         Table(
@@ -80,17 +104,14 @@ def test_test_engine_supports_more_schemas_than_sqlite_can_attach() -> None:
             Column("id", Integer, primary_key=True),
             schema=f"mod_probe_{index:02d}",
         )
-        for index in range(12)
+        for index in range(11)
     )
 
-    engine = create_test_engine(metadata=metadata)
-    try:
-        with engine.begin() as connection:
-            for index, table in enumerate(tables):
-                connection.execute(table.insert().values(id=index))
-                assert connection.execute(select(table.c.id)).scalar_one() == index
-    finally:
-        engine.dispose()
+    with pytest.raises(ValueError, match="split this unit composition"):
+        create_test_engine(
+            metadata=metadata,
+            module_schemas=tuple(table.schema for table in tables if table.schema),
+        )
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────

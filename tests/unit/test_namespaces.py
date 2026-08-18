@@ -191,7 +191,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # and the control plane allocates vendor-side series no tenant may read.
     # `billing` is the eleventh, allocating the single dual-plane owner of
     # operational receivables under ADR-0020 without composing it into Starter.
-    # None of these allocations installs behaviour in the kernel.
+    # `durable_timers` is the twelfth and reuses the kernel outbox relay rather
+    # than adding another due-work engine. None of these allocations installs
+    # behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -204,6 +206,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "integration",
         "approvals",
         "billing",
+        "durable_timers",
     }
 
 
