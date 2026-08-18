@@ -64,6 +64,21 @@ def test_isolated_session_rolls_back_between_uses() -> None:
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────
+def test_harness_can_select_the_module_schemas_owned_by_its_test_assembly() -> None:
+    """Unrelated package imports must not exhaust SQLite's attachment limit."""
+
+    engine = create_test_engine(module_schemas=())
+    try:
+        with engine.connect() as connection:
+            attached = {
+                row[1]
+                for row in connection.exec_driver_sql("PRAGMA database_list").all()
+            }
+        assert not {name for name in attached if name.startswith("mod_")}
+    finally:
+        engine.dispose()
+
+
 def test_fake_clock_is_deterministic_and_advanceable() -> None:
     clock = FakeClock()
     start = clock.now()
