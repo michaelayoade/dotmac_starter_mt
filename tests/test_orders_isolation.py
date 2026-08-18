@@ -43,8 +43,8 @@ from dotmac_orders import (
     RecordCoverageResolutionCommand,
     SubmitOrderCommand,
     TaxSnapshotV1,
-    TermValueV1,
     TermsSnapshotV1,
+    TermValueV1,
     accept_order,
     acknowledge_fulfillment,
     cancel_order,
@@ -283,13 +283,9 @@ def test_tenant_rls_hides_orders_lines_and_receipts_from_another_tenant(
 
     with _session(user_url, right) as session:
         assert session.scalar(select(func.count()).select_from(Order)) == 0
+        assert session.scalar(select(func.count()).select_from(OrderLineSnapshot)) == 0
         assert (
-            session.scalar(select(func.count()).select_from(OrderLineSnapshot)) == 0
-        )
-        assert (
-            session.scalar(
-                select(func.count()).select_from(CoverageResolutionReceipt)
-            )
+            session.scalar(select(func.count()).select_from(CoverageResolutionReceipt))
             == 0
         )
         with pytest.raises(DBAPIError):
@@ -319,15 +315,9 @@ def test_rls_sensitivity_without_the_guard_the_other_tenant_sees_the_order(
 
     engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     with engine.connect() as conn:
-        conn.execute(
-            text("DROP POLICY orders_tenant_isolation ON mod_orders.orders")
-        )
-        conn.execute(
-            text("ALTER TABLE mod_orders.orders NO FORCE ROW LEVEL SECURITY")
-        )
-        conn.execute(
-            text("ALTER TABLE mod_orders.orders DISABLE ROW LEVEL SECURITY")
-        )
+        conn.execute(text("DROP POLICY orders_tenant_isolation ON mod_orders.orders"))
+        conn.execute(text("ALTER TABLE mod_orders.orders NO FORCE ROW LEVEL SECURITY"))
+        conn.execute(text("ALTER TABLE mod_orders.orders DISABLE ROW LEVEL SECURITY"))
     engine.dispose()
 
     with _session(user_url, right) as session:
@@ -396,10 +386,7 @@ def test_online_roles_cannot_delete_any_order_owned_state(
         for role in ("app_user", "platform_api"):
             for table in module.tables:
                 assert not conn.scalar(
-                    text(
-                        "SELECT has_table_privilege("
-                        ":role, :table, 'DELETE')"
-                    ),
+                    text("SELECT has_table_privilege(" ":role, :table, 'DELETE')"),
                     {"role": role, "table": f"mod_orders.{table}"},
                 ), (role, table)
     engine.dispose()
@@ -525,21 +512,32 @@ def test_submission_replay_conflict_and_rollback_share_the_kernel_ledger(
         )
         session.rollback()
     with _session(user_url, tenant_id) as session:
-        assert session.scalar(
-            select(func.count()).select_from(Order).where(
-                Order.order_reference == "ORD-ROLLBACK"
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(Order)
+                .where(Order.order_reference == "ORD-ROLLBACK")
             )
-        ) == 0
-        assert session.scalar(
-            select(func.count()).select_from(IdempotencyRecord).where(
-                IdempotencyRecord.key == "rolled-back"
+            == 0
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(IdempotencyRecord)
+                .where(IdempotencyRecord.key == "rolled-back")
             )
-        ) == 0
-        assert session.scalar(
-            select(func.count()).select_from(OutboxEvent).where(
-                OutboxEvent.payload["order_reference"].as_string() == "ORD-ROLLBACK"
+            == 0
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(OutboxEvent)
+                .where(
+                    OutboxEvent.payload["order_reference"].as_string() == "ORD-ROLLBACK"
+                )
             )
-        ) == 0
+            == 0
+        )
 
 
 def test_concurrent_same_checkout_creates_one_order_and_replays_the_winner(
@@ -621,8 +619,7 @@ def test_partial_out_of_order_and_unregistered_coverage_converge_once(
                 ),
             )
         assert (
-            duplicate_resolution.value.code
-            == "coverage_resolution_identity_conflict"
+            duplicate_resolution.value.code == "coverage_resolution_identity_conflict"
         )
         completed = _resolve(session, tenant_id, order_id, "invoice:1")
         assert completed.coverage_resolution is not None
@@ -641,9 +638,7 @@ def test_partial_out_of_order_and_unregistered_coverage_converge_once(
             _resolve(session, tenant_id, order_id, "not-in-the-bound-set")
         assert exc.value.code == "unregistered_coverage_obligation"
         assert (
-            session.scalar(
-                select(func.count()).select_from(CoverageResolutionReceipt)
-            )
+            session.scalar(select(func.count()).select_from(CoverageResolutionReceipt))
             == 2
         )
         session.commit()
@@ -698,16 +693,14 @@ def test_concurrent_final_coverage_resolutions_publish_each_line_once(
         assert session.scalar(select(func.count()).select_from(FulfillmentRequest)) == 2
         assert (
             session.scalar(
-                select(func.count()).select_from(OutboxEvent).where(
-                    OutboxEvent.event_type == "orders.fulfillment_requested.v1"
-                )
+                select(func.count())
+                .select_from(OutboxEvent)
+                .where(OutboxEvent.event_type == "orders.fulfillment_requested.v1")
             )
             == 2
         )
         assert (
-            session.scalar(
-                select(func.count()).select_from(CoverageResolutionReceipt)
-            )
+            session.scalar(select(func.count()).select_from(CoverageResolutionReceipt))
             == 2
         )
         session.commit()
@@ -718,9 +711,7 @@ def test_concurrent_final_coverage_resolutions_publish_each_line_once(
         assert replay.coverage_resolution is not None
         assert replay.coverage_resolution.resolution_ref == "billing:invoice:1"
         assert (
-            session.scalar(
-                select(func.count()).select_from(CoverageResolutionReceipt)
-            )
+            session.scalar(select(func.count()).select_from(CoverageResolutionReceipt))
             == 2
         )
         assert session.scalar(select(func.count()).select_from(FulfillmentRequest)) == 2
@@ -840,10 +831,13 @@ def test_concurrent_fulfillment_acceptances_keep_one_ordered_timeline(
         )
         sequences = [event.sequence for event in timeline]
         assert sequences == list(range(1, len(sequences) + 1))
-        assert sum(
-            event.event_type == "orders.fulfillment_accepted.v1"
-            for event in timeline
-        ) == 2
+        assert (
+            sum(
+                event.event_type == "orders.fulfillment_accepted.v1"
+                for event in timeline
+            )
+            == 2
+        )
 
 
 def test_cancellation_after_fulfillment_acceptance_is_recorded_and_refused(
@@ -889,10 +883,7 @@ def test_cancellation_after_fulfillment_acceptance_is_recorded_and_refused(
                     accepted_at=NOW.replace(hour=9),
                 ),
             )
-        assert (
-            acceptance_conflict.value.code
-            == "fulfillment_acceptance_conflict"
-        )
+        assert acceptance_conflict.value.code == "fulfillment_acceptance_conflict"
         result = cancel_order(
             session,
             scope=scope,
@@ -906,14 +897,11 @@ def test_cancellation_after_fulfillment_acceptance_is_recorded_and_refused(
         )
         assert result.refused is True
         assert (
-            result.refusal_code
-            == "cancellation_refused_after_fulfillment_acceptance"
+            result.refusal_code == "cancellation_refused_after_fulfillment_acceptance"
         )
         assert result.order.state == "fulfillment_requested"
         audit = session.scalar(
-            select(AuditEvent).where(
-                AuditEvent.action == "orders.cancellation_refused"
-            )
+            select(AuditEvent).where(AuditEvent.action == "orders.cancellation_refused")
         )
         assert audit is not None
         assert audit.is_success is False

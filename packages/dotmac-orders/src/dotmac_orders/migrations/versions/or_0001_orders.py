@@ -35,6 +35,7 @@ _MONEY = sa.Numeric(20, 6)
 _QUANTITY = sa.Numeric(20, 6)
 _FX_RATE = sa.Numeric(38, 18)
 
+
 def _id() -> sa.Column[Any]:
     return sa.Column("id", sa.Uuid(), primary_key=True)
 
@@ -73,9 +74,7 @@ def _updated_at() -> sa.Column[Any]:
 def upgrade() -> None:
     require_prerequisites(op.get_bind(), REQUIRES)
     op.execute("CREATE SCHEMA IF NOT EXISTS mod_orders;")
-    op.execute(
-        "GRANT USAGE ON SCHEMA mod_orders TO app_user, platform_api, app_admin;"
-    )
+    op.execute("GRANT USAGE ON SCHEMA mod_orders TO app_user, platform_api, app_admin;")
 
     op.create_table(
         "orders",
@@ -278,9 +277,7 @@ def upgrade() -> None:
         _created_at(),
         _updated_at(),
         _tenant_fk("fk_coverage_gates_tenant"),
-        sa.UniqueConstraint(
-            "tenant_id", "id", name="uq_coverage_gates_tenant_id_id"
-        ),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_coverage_gates_tenant_id_id"),
         sa.UniqueConstraint(
             "tenant_id", "order_id", name="uq_coverage_gates_tenant_order"
         ),
@@ -478,9 +475,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
         _tenant_fk("fk_order_events_tenant"),
-        sa.UniqueConstraint(
-            "tenant_id", "id", name="uq_order_events_tenant_id_id"
-        ),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_order_events_tenant_id_id"),
         sa.UniqueConstraint(
             "tenant_id", "event_ref", name="uq_order_events_tenant_event_ref"
         ),
@@ -924,12 +919,8 @@ def _install_rls_and_grants() -> None:
         "TO app_user, platform_api;"
     )
 
-    op.execute(
-        "ALTER TABLE mod_orders.order_line_snapshots ENABLE ROW LEVEL SECURITY;"
-    )
-    op.execute(
-        "ALTER TABLE mod_orders.order_line_snapshots FORCE ROW LEVEL SECURITY;"
-    )
+    op.execute("ALTER TABLE mod_orders.order_line_snapshots ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_orders.order_line_snapshots FORCE ROW LEVEL SECURITY;")
     op.execute(
         "CREATE POLICY order_line_snapshots_tenant_isolation "
         "ON mod_orders.order_line_snapshots "
@@ -953,12 +944,8 @@ def _install_rls_and_grants() -> None:
         "TO app_user, platform_api;"
     )
 
-    op.execute(
-        "ALTER TABLE mod_orders.coverage_obligations ENABLE ROW LEVEL SECURITY;"
-    )
-    op.execute(
-        "ALTER TABLE mod_orders.coverage_obligations FORCE ROW LEVEL SECURITY;"
-    )
+    op.execute("ALTER TABLE mod_orders.coverage_obligations ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_orders.coverage_obligations FORCE ROW LEVEL SECURITY;")
     op.execute(
         "CREATE POLICY coverage_obligations_tenant_isolation "
         "ON mod_orders.coverage_obligations "
@@ -989,12 +976,8 @@ def _install_rls_and_grants() -> None:
         "TO app_user, platform_api;"
     )
 
-    op.execute(
-        "ALTER TABLE mod_orders.fulfillment_requests ENABLE ROW LEVEL SECURITY;"
-    )
-    op.execute(
-        "ALTER TABLE mod_orders.fulfillment_requests FORCE ROW LEVEL SECURITY;"
-    )
+    op.execute("ALTER TABLE mod_orders.fulfillment_requests ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_orders.fulfillment_requests FORCE ROW LEVEL SECURITY;")
     op.execute(
         "CREATE POLICY fulfillment_requests_tenant_isolation "
         "ON mod_orders.fulfillment_requests "
@@ -1021,19 +1004,13 @@ def _install_rls_and_grants() -> None:
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS mod_orders.order_events CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_orders.fulfillment_requests CASCADE;")
-    op.execute(
-        "DROP TABLE IF EXISTS mod_orders.coverage_resolution_receipts CASCADE;"
-    )
+    op.execute("DROP TABLE IF EXISTS mod_orders.coverage_resolution_receipts CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_orders.coverage_obligations CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_orders.coverage_gates CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_orders.order_line_snapshots CASCADE;")
     op.execute("DROP TABLE IF EXISTS mod_orders.orders CASCADE;")
-    op.execute(
-        "DROP FUNCTION IF EXISTS mod_orders.require_consistent_coverage_gate();"
-    )
-    op.execute(
-        "DROP FUNCTION IF EXISTS mod_orders.require_complete_order_snapshot();"
-    )
+    op.execute("DROP FUNCTION IF EXISTS mod_orders.require_consistent_coverage_gate();")
+    op.execute("DROP FUNCTION IF EXISTS mod_orders.require_complete_order_snapshot();")
     op.execute(
         "DROP FUNCTION IF EXISTS "
         "mod_orders.refuse_obligation_insert_after_binding();"

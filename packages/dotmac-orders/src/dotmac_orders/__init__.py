@@ -20,8 +20,8 @@ from dotmac_orders.contracts import (
     RecordCoverageResolutionCommand,
     SubmitOrderCommand,
     TaxSnapshotV1,
-    TermValueV1,
     TermsSnapshotV1,
+    TermValueV1,
 )
 from dotmac_orders.engine import (
     DEFAULT_ORDER_STATES,

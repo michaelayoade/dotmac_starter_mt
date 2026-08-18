@@ -104,7 +104,7 @@ def _referenced_names(node: ast.AST | None) -> set[str]:
 
 def _string_sequence(node: ast.AST | None) -> tuple[str, ...] | None:
     value = _literal(node)
-    if not isinstance(value, (tuple, list)) or not all(
+    if not isinstance(value, tuple | list) or not all(
         isinstance(item, str) for item in value
     ):
         return None
@@ -113,7 +113,7 @@ def _string_sequence(node: ast.AST | None) -> tuple[str, ...] | None:
 
 def _call_string_sequence(node: ast.AST) -> tuple[str, ...] | None:
     value = _literal(node)
-    if not isinstance(value, (list, tuple)) or not all(
+    if not isinstance(value, list | tuple) or not all(
         isinstance(item, str) for item in value
     ):
         return None

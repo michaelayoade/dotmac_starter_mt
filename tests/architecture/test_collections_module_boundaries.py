@@ -126,7 +126,7 @@ def _timing_specific(identifier: str) -> bool:
 def _numeric_constant(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Constant)
-        and isinstance(node.value, (int, float))
+        and isinstance(node.value, int | float)
         and not isinstance(node.value, bool)
     )
 
@@ -134,7 +134,7 @@ def _numeric_constant(node: ast.AST) -> bool:
 def _nonzero_numeric_constant(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Constant)
-        and isinstance(node.value, (int, float))
+        and isinstance(node.value, int | float)
         and not isinstance(node.value, bool)
         and node.value != 0
     )
@@ -171,17 +171,17 @@ def scan_collections_boundaries(package_root: Path) -> tuple[str, ...]:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         aliases = _import_aliases(tree)
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.Import | ast.ImportFrom):
                 for imported in _imported_roots(node):
                     if _forbidden_import(imported):
                         issues.add(_issue(relative, node, "forbidden-import", imported))
 
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 if _timing_specific(node.name):
                     issues.add(
                         _issue(relative, node, "timing-specific-symbol", node.name)
                     )
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                     lowered = node.name.lower()
                     if any(token in lowered for token in SWEEP_NAME_TOKENS):
                         issues.add(_issue(relative, node, "sweep-owner", node.name))
@@ -196,7 +196,7 @@ def scan_collections_boundaries(package_root: Path) -> tuple[str, ...]:
                                 )
                             )
 
-            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
                 for name in _assigned_names(node):
                     leaf = name.rsplit(".", 1)[-1]
                     if _timing_specific(leaf):

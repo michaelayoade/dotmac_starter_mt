@@ -193,9 +193,7 @@ class PolicyAnchorSetV1:
         if self.request_at is not None:
             require_aware("request_at", self.request_at)
         if self.accepted_notice_receipt_at is not None:
-            require_aware(
-                "accepted_notice_receipt_at", self.accepted_notice_receipt_at
-            )
+            require_aware("accepted_notice_receipt_at", self.accepted_notice_receipt_at)
 
     def get(self, anchor: AnchorKind) -> datetime | None:
         if anchor == "exposure_at":

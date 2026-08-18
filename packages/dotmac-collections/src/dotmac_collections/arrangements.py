@@ -73,9 +73,9 @@ class PaymentArrangementDraftV1:
         keys = tuple((item.source_owner, item.exposure_ref) for item in self.exposures)
         if len(set(keys)) != len(keys):
             raise ValueError("arrangement exposures must be unique")
-        currencies = {
-            item.admitted_amount.currency for item in self.exposures
-        } | {item.amount.currency for item in self.installments}
+        currencies = {item.admitted_amount.currency for item in self.exposures} | {
+            item.amount.currency for item in self.installments
+        }
         if len(currencies) != 1:
             raise ValueError("arrangement must use one currency")
         expected = tuple(range(1, len(self.installments) + 1))

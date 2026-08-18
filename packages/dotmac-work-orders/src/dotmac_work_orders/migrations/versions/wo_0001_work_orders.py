@@ -8,10 +8,11 @@ Create Date: 2026-08-18
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "wo_0001_work_orders"
 down_revision = None

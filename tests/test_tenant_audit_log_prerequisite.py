@@ -106,8 +106,7 @@ def test_the_online_tenant_role_can_append_but_not_rewrite_history() -> None:
                     conn.execute(text("SET LOCAL ROLE app_user"))
                     conn.execute(
                         text(
-                            "SELECT set_config("
-                            "'app.current_tenant', :tenant, true)"
+                            "SELECT set_config(" "'app.current_tenant', :tenant, true)"
                         ),
                         {"tenant": tenant_id},
                     )
@@ -229,10 +228,7 @@ BREAKS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ),
     (
         "policy-using-all-rows",
-        (
-            f"ALTER POLICY audit_events_tenant_isolation ON {TABLE} "
-            "USING (true)",
-        ),
+        (f"ALTER POLICY audit_events_tenant_isolation ON {TABLE} " "USING (true)",),
         r"USING and WITH CHECK both call app_current_tenant_id",
     ),
     (
@@ -245,7 +241,7 @@ BREAKS: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ),
     (
         "tenant-role-cannot-read",
-        (f"REVOKE SELECT ON {TABLE} FROM app_user",),
+        ("REVOKE SELECT ON public.audit_events FROM app_user",),
         r"app_user needs table-level SELECT",
     ),
     (

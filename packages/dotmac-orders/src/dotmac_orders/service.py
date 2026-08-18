@@ -39,8 +39,8 @@ from dotmac_orders.contracts import (
     RecordCoverageResolutionCommand,
     SubmitOrderCommand,
     TaxSnapshotV1,
-    TermValueV1,
     TermsSnapshotV1,
+    TermValueV1,
 )
 from dotmac_orders.engine import (
     OrderPhase,
@@ -327,15 +327,18 @@ def _event(
     details: Mapping[str, object] | None = None,
 ) -> OrderEvent:
     actor_type, actor_id, actor_label = _actor_values(actor)
-    next_sequence = int(
-        db.scalar(
-            select(func.coalesce(func.max(OrderEvent.event_sequence), 0)).where(
-                OrderEvent.tenant_id == scope.tenant_id,
-                OrderEvent.order_id == order_id,
+    next_sequence = (
+        int(
+            db.scalar(
+                select(func.coalesce(func.max(OrderEvent.event_sequence), 0)).where(
+                    OrderEvent.tenant_id == scope.tenant_id,
+                    OrderEvent.order_id == order_id,
+                )
             )
+            or 0
         )
-        or 0
-    ) + 1
+        + 1
+    )
     row = OrderEvent(
         id=uuid4(),
         tenant_id=scope.tenant_id,
@@ -451,8 +454,7 @@ def get_order_snapshot(
     order = _load_order(db, scope=scope, order_id=order_id)
     unit = Currency(order.currency_code, order.currency_minor_units)
     lines = tuple(
-        _line_contract(row)
-        for row in _load_lines(db, scope=scope, order_id=order.id)
+        _line_contract(row) for row in _load_lines(db, scope=scope, order_id=order.id)
     )
     fx_snapshot = None
     if order.fx_rate is not None:
@@ -460,12 +462,7 @@ def get_order_snapshot(
         rate_ref = order.fx_rate_ref
         source = order.fx_source
         as_of = order.fx_as_of
-        if (
-            base_code is None
-            or rate_ref is None
-            or source is None
-            or as_of is None
-        ):
+        if base_code is None or rate_ref is None or source is None or as_of is None:
             raise OrderConflict(
                 "invalid_stored_fx_snapshot",
                 "The persisted FX snapshot is incomplete.",
@@ -1154,8 +1151,7 @@ def _fulfillment_contracts(
         .order_by(FulfillmentRequest.id)
     ).scalars()
     return tuple(
-        _request_contract(order, lines[row.line_snapshot_id], row)
-        for row in rows
+        _request_contract(order, lines[row.line_snapshot_id], row) for row in rows
     )
 
 
@@ -1245,8 +1241,7 @@ def record_coverage_resolution(
             or 0
         )
         became_satisfied = (
-            gate.resolved_count == gate.obligation_count
-            and gate.satisfied_at is None
+            gate.resolved_count == gate.obligation_count and gate.satisfied_at is None
         )
         if became_satisfied:
             gate.state = "satisfied"
@@ -1308,10 +1303,7 @@ def record_coverage_resolution(
             correlation_id=command.correlation_id,
         )
     except IntegrityError as exc:
-        if (
-            _constraint_name(exc)
-            != "uq_coverage_resolution_receipts_tenant_resolution"
-        ):
+        if _constraint_name(exc) != "uq_coverage_resolution_receipts_tenant_resolution":
             raise
         raise OrderConflict(
             "coverage_resolution_identity_conflict",
@@ -1446,9 +1438,7 @@ def acknowledge_fulfillment(
     return OrderCommandResult(
         order=get_order_snapshot(db, scope=scope, order_id=order_id),
         replayed=outcome.replayed,
-        fulfillment_requests=_fulfillment_contracts(
-            db, scope=scope, order_id=order_id
-        ),
+        fulfillment_requests=_fulfillment_contracts(db, scope=scope, order_id=order_id),
     )
 
 
@@ -1581,9 +1571,7 @@ def cancel_order(
     )
     refused = bool(outcome.result.get("refused", False))
     refusal_code_value = outcome.result.get("refusal_code")
-    refusal_code = (
-        str(refusal_code_value) if refusal_code_value is not None else None
-    )
+    refusal_code = str(refusal_code_value) if refusal_code_value is not None else None
     return OrderCommandResult(
         order=get_order_snapshot(db, scope=scope, order_id=command.order_id),
         replayed=outcome.replayed,

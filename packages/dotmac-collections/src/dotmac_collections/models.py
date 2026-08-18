@@ -227,7 +227,9 @@ class CollectionCaseExposure(Base, _TenantFact):
     source_version: Mapped[int] = mapped_column(Integer, nullable=False)
     position_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
     position_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class CollectionCaseTransition(Base, _TenantFact):
@@ -290,7 +292,9 @@ class CollectionStepAttempt(Base, _TenantFact):
     request_kind: Mapped[str] = mapped_column(String(20), nullable=False)
     request_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     decision_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
-    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class PaymentArrangement(Base, _TenantFact):
@@ -308,7 +312,9 @@ class PaymentArrangement(Base, _TenantFact):
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
     lifecycle: Mapped[str] = mapped_column(String(32), nullable=False)
-    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    proposed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
@@ -399,7 +405,9 @@ class PaymentArrangementSettlementReceipt(Base, _TenantFact):
     source_version: Mapped[int] = mapped_column(Integer, nullable=False)
     receipt_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
     settled_amount: Mapped[Decimal] = mapped_column(MONEY_VALUE, nullable=False)
-    settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    settled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class CollectionGraceGrant(Base, _TenantFact):
@@ -423,7 +431,9 @@ class CollectionGraceGrant(Base, _TenantFact):
     duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     actor_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     reason_code: Mapped[str] = mapped_column(String(120), nullable=False)
-    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class CollectionNoticeRequest(Base, _TenantFact):
@@ -451,7 +461,9 @@ class CollectionNoticeRequest(Base, _TenantFact):
     attempt_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     purpose_code: Mapped[str] = mapped_column(String(120), nullable=False)
     decision_evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class CollectionNoticeReceipt(Base, _TenantFact):
@@ -478,7 +490,9 @@ class CollectionNoticeReceipt(Base, _TenantFact):
     owner_receipt_id: Mapped[str] = mapped_column(String(255), nullable=False)
     receipt_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
     receipt_evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class CollectionActionRequest(Base, _TenantFact):
@@ -507,7 +521,9 @@ class CollectionActionRequest(Base, _TenantFact):
     action_code: Mapped[str] = mapped_column(String(120), nullable=False)
     effect_scope: Mapped[str] = mapped_column(String(120), nullable=False)
     decision_evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class CollectionActionReceipt(Base, _TenantFact):
@@ -534,7 +550,9 @@ class CollectionActionReceipt(Base, _TenantFact):
     owner_receipt_id: Mapped[str] = mapped_column(String(255), nullable=False)
     receipt_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
     receipt_evidence: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class CollectionReconciliation(Base, _TenantFact):
@@ -565,7 +583,9 @@ class CollectionReconciliation(Base, _TenantFact):
     source_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
     rebuilt_fingerprint: Mapped[str] = mapped_column(String(255), nullable=False)
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
-    reconciled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reconciled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 __all__ = [

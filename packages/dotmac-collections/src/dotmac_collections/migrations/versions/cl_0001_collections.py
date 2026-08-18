@@ -68,7 +68,9 @@ def _upgrade_tenant_plane() -> None:
         sa.ForeignKeyConstraint(
             ["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"
         ),
-        sa.UniqueConstraint("tenant_id", "id", name="uq_collection_policies_tenant_id_id"),
+        sa.UniqueConstraint(
+            "tenant_id", "id", name="uq_collection_policies_tenant_id_id"
+        ),
         sa.UniqueConstraint(
             "tenant_id", "policy_code", name="uq_collection_policies_code"
         ),
@@ -341,7 +343,9 @@ def _upgrade_tenant_plane() -> None:
             "attempt_ordinal",
             name="uq_collection_step_attempts_attempt",
         ),
-        sa.CheckConstraint("attempt_ordinal > 0", name="ck_collection_step_attempts_ordinal"),
+        sa.CheckConstraint(
+            "attempt_ordinal > 0", name="ck_collection_step_attempts_ordinal"
+        ),
         sa.CheckConstraint(
             "request_kind IN ('notice', 'action')",
             name="ck_collection_step_attempts_kind",
@@ -471,7 +475,9 @@ def _upgrade_tenant_plane() -> None:
         sa.CheckConstraint(
             "ordinal > 0", name="ck_payment_arrangement_installments_ordinal"
         ),
-        sa.CheckConstraint("amount > 0", name="ck_payment_arrangement_installments_amount"),
+        sa.CheckConstraint(
+            "amount > 0", name="ck_payment_arrangement_installments_amount"
+        ),
         schema=_SCHEMA,
     )
     op.create_table(
@@ -756,7 +762,8 @@ def _upgrade_tenant_plane() -> None:
             "source_version > 0", name="ck_collection_reconciliations_version"
         ),
         sa.CheckConstraint(
-            "outcome IN ('match', 'drift')", name="ck_collection_reconciliations_outcome"
+            "outcome IN ('match', 'drift')",
+            name="ck_collection_reconciliations_outcome",
         ),
         schema=_SCHEMA,
     )

@@ -177,9 +177,7 @@ def calculate_line_snapshot(line: LineInput) -> LineSnapshot:
             "negative_line_component",
             "Unit price and discount cannot be negative.",
         )
-    price_version_ref = _required(
-        line.price_version_ref, field="price_version_ref"
-    )
+    price_version_ref = _required(line.price_version_ref, field="price_version_ref")
     terms_ref = _required(line.terms_ref, field="terms_ref")
     if line.terms_snapshot.version_ref != terms_ref:
         raise OrderError(
@@ -205,9 +203,7 @@ def calculate_line_snapshot(line: LineInput) -> LineSnapshot:
                 f"Term {term.name!r} appears more than once in the snapshot.",
             )
         term_names.add(term.name)
-    specification_ref = _required(
-        line.specification_ref, field="specification_ref"
-    )
+    specification_ref = _required(line.specification_ref, field="specification_ref")
     if (line.source_ref is None) != (line.source_version is None) or any(
         value is not None and not value.strip()
         for value in (line.source_ref, line.source_version)
@@ -220,9 +216,7 @@ def calculate_line_snapshot(line: LineInput) -> LineSnapshot:
     tax_keys: set[tuple[str, str]] = set()
     for component in line.taxes:
         tax_code = _required(component.tax_code, field="tax_code")
-        source_version = _required(
-            component.source_version, field="tax_source_version"
-        )
+        source_version = _required(component.source_version, field="tax_source_version")
         key = (tax_code, source_version)
         if key in tax_keys:
             raise OrderError(
@@ -275,9 +269,7 @@ def calculate_line_snapshot(line: LineInput) -> LineSnapshot:
                 "tax_code": component.tax_code,
                 "source_version": component.source_version,
                 "taxable_basis": str(component.taxable_basis.amount),
-                "rate": (
-                    str(component.rate) if component.rate is not None else None
-                ),
+                "rate": (str(component.rate) if component.rate is not None else None),
                 "amount": str(component.amount.amount),
             }
             for component in line.taxes

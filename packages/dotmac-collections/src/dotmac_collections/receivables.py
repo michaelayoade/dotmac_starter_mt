@@ -158,9 +158,7 @@ class ReceivablesReader(Protocol):
 
 class FakeReceivablesReader:
     def __init__(self) -> None:
-        self._results: dict[
-            tuple[TenantScope, str, str], ReceivablesReadResult
-        ] = {}
+        self._results: dict[tuple[TenantScope, str, str], ReceivablesReadResult] = {}
         self._calls: list[ReceivablesReadCallV1] = []
 
     @property

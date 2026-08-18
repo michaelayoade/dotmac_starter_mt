@@ -140,21 +140,15 @@ class Order(Base, TimestampMixin):
     )
     accepted_actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     accepted_actor_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    accepted_actor_label: Mapped[str | None] = mapped_column(
-        String(160), nullable=True
-    )
+    accepted_actor_label: Mapped[str | None] = mapped_column(String(160), nullable=True)
     accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     covered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    cancelled_actor_type: Mapped[str | None] = mapped_column(
-        String(32), nullable=True
-    )
-    cancelled_actor_id: Mapped[str | None] = mapped_column(
-        String(120), nullable=True
-    )
+    cancelled_actor_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    cancelled_actor_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     cancelled_actor_label: Mapped[str | None] = mapped_column(
         String(160), nullable=True
     )
@@ -221,9 +215,7 @@ class OrderLineSnapshot(Base):
             "OR (source_ref IS NOT NULL AND source_version IS NOT NULL)",
             name="ck_order_line_snapshots_source_provenance_complete",
         ),
-        Index(
-            "ix_order_line_snapshots_tenant_order", "tenant_id", "order_id"
-        ),
+        Index("ix_order_line_snapshots_tenant_order", "tenant_id", "order_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -239,9 +231,7 @@ class OrderLineSnapshot(Base):
     extended_price: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     discount_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     tax_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
-    tax_snapshot: Mapped[list[dict[str, object]]] = mapped_column(
-        _JSON, nullable=False
-    )
+    tax_snapshot: Mapped[list[dict[str, object]]] = mapped_column(_JSON, nullable=False)
     line_total: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     price_version_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     terms_ref: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -313,9 +303,7 @@ class CoverageObligation(Base):
             name="fk_coverage_obligations_gate",
             ondelete="RESTRICT",
         ),
-        Index(
-            "ix_coverage_obligations_tenant_gate", "tenant_id", "gate_id"
-        ),
+        Index("ix_coverage_obligations_tenant_gate", "tenant_id", "gate_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -359,9 +347,7 @@ class CoverageResolutionReceipt(Base):
             name="fk_coverage_resolution_receipts_obligation",
             ondelete="RESTRICT",
         ),
-        Index(
-            "ix_coverage_resolution_receipts_tenant_gate", "tenant_id", "gate_id"
-        ),
+        Index("ix_coverage_resolution_receipts_tenant_gate", "tenant_id", "gate_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -412,9 +398,7 @@ class FulfillmentRequest(Base, TimestampMixin):
             name="fk_fulfillment_requests_line",
             ondelete="RESTRICT",
         ),
-        Index(
-            "ix_fulfillment_requests_tenant_order", "tenant_id", "order_id"
-        ),
+        Index("ix_fulfillment_requests_tenant_order", "tenant_id", "order_id"),
         Index("ix_fulfillment_requests_tenant_state", "tenant_id", "state"),
         CheckConstraint(
             "publication_count >= 1",
