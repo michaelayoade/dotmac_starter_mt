@@ -62,16 +62,6 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-kernel": {
-      "declared": "0.1.0a71",
-      "reason": "OUTSTANDING: party_person_catalog.v1 and the mod_people namespace allocation are declared for the product-first people extraction. Kernel a70 is already tagged and verified; publish a71 only after the named live-catalog verifier, hostile PostgreSQL cases, composed migration gate, and exact module floor pass, then remove this row in the release-record change.",
-      "state": "declared-unpublished"
-    },
-    "dotmac-people": {
-      "declared": "0.1.0a1",
-      "reason": "OUTSTANDING: the first product-first employment-directory release is intentionally declared before publication so the root migration, RLS canaries, ERP parity tests, wheel boundary, and Backoffice first-consumer contract can be reviewed together. Publish a1 only after kernel a71 is released and the exact-head PostgreSQL validation passes; then remove this row in the release-record change.",
-      "state": "never-published"
-    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
