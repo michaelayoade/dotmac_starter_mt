@@ -8,11 +8,6 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
-from dotmac_kernel.idempotency_models import IdempotencyRecord
-from dotmac_kernel.models import Base, Tenant
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session
-
 from dotmac_analytics import (
     DimensionKind,
     DimensionSpec,
@@ -40,6 +35,10 @@ from dotmac_analytics.models import (
     MetricObservation,
     MetricPoint,
 )
+from dotmac_kernel.idempotency_models import IdempotencyRecord
+from dotmac_kernel.models import Base, Tenant
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session
 
 TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 OTHER_TENANT_ID = UUID("00000000-0000-0000-0000-000000000099")

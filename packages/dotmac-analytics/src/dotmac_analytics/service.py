@@ -163,7 +163,7 @@ def _ensure_catalog_entry(
             raise InvalidAnalyticsContract(
                 f"activated metric {declaration.metric_code!r} v"
                 f"{declaration.schema_version} cannot change declaration"
-            )
+            ) from None
         return winner
 
 
