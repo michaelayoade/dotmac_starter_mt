@@ -67,7 +67,6 @@ from dotmac_kernel.consent_models import (
     SUPPRESSION_SCOPES,
     CommunicationSuppression,
 )
-from dotmac_kernel.db import conflict_savepoint
 
 _DIGITS = re.compile(r"\D+")
 
@@ -296,6 +295,11 @@ def suppress(
             f"unknown suppression reason {reason!r} — expected one of "
             f"{', '.join(SUPPRESSION_REASONS)}"
         )
+    # Importing ``dotmac_kernel.db`` constructs the configured engine. Keep
+    # that cost behind the write operation so packages may import consent
+    # contracts and manifests before an application installs its database URL.
+    from dotmac_kernel.db import conflict_savepoint
+
     normalized_channel = normalize_channel(channel)
     if not normalized_channel:
         raise ConsentError("cannot suppress on an empty channel")

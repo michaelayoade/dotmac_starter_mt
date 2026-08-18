@@ -301,6 +301,10 @@ retired prefix is never reused.
 | `application_directory` | `mod_appdir` | `ad` | `application_directory` |
 | `files` | `mod_files` | `fi` | `files` |
 | `imports` | `mod_imports` | `im` | `imports` |
+| `integration` | `mod_intg` | `ig` | `integration` |
+| `approvals` | `mod_approvals` | `ap` | `approvals` |
+| `numbering` | `mod_numbering` | `nu` | `numbering` |
+| `campaigns` | `mod_campaigns` | `ca` | `campaigns` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
@@ -697,10 +701,14 @@ document's SemVer policy (its HTTP helper needs the `testing` extra:
 fakes work without it). The package re-exports everything from three submodules:
 
 - **`harness`** — the in-memory-SQLite + savepoint-isolation wiring:
-  - `create_test_engine() -> Engine` — a fresh in-memory SQLite engine with
-    `Base.metadata` created. The **assembly must import its own feature models
-    first** so `Base.metadata` is fully populated (SQLite has no RLS — this is
-    for service-logic/unit tests; tenancy is proven separately on Postgres).
+  - `create_test_engine(*, tables=...) -> Engine` — a fresh in-memory SQLite
+    engine with the selected `Base.metadata` tables created. The **assembly
+    must import its own feature models first** so `Base.metadata` is populated;
+    a large shared test process should pass its exact table slice so unrelated
+    independently installable packages do not consume SQLite's ten schema
+    attachments. Omitting `tables` retains the all-imported-tables behavior.
+    SQLite has no RLS, so this is for service-logic/unit tests; tenancy is
+    proven separately on Postgres.
   - `isolated_session(engine)` — a context-managed session wrapped in an outer
     transaction + restarting SAVEPOINT, so a test rolls back even if service
     code commits.

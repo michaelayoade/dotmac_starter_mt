@@ -69,6 +69,7 @@ def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
     would make the unit lane exercise UNQUALIFIED SQL that no deployment ever
     runs, quietly hiding exactly the qualification defects D1's gate exists to
     catch. Attaching keeps the emitted SQL identical to production's.
+
     """
     selected_tables = tuple(Base.metadata.tables.values() if tables is None else tables)
     engine = create_engine(

@@ -592,13 +592,25 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 
 # `dotmac-people` — the ELEVENTH allocated installable module. It owns a tenant
 # employment directory and references, but does not duplicate, the kernel Party
-# person catalogue.  `people` stays readable in catalog dumps and `pe` leaves
+# person catalogue. `people` stays readable in catalog dumps and `pe` leaves
 # the revision-id budget for the lineage's descriptive slugs.
 PEOPLE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="people",
     prefix="pe",
     branch_label="people",
     db_schema=module_schema("people"),
+)
+
+# `dotmac-campaigns` — the tenant-only outbound campaign progression owner
+# accepted by ADR-0032. `campaigns` is intentionally explicit in live catalog
+# dumps; the compact `ca` prefix leaves the lineage's revision ids readable.
+# No platform plane was allocated by inference: the audit found no named
+# control-plane consumer, and the module manifest declares tenant tables only.
+CAMPAIGNS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="campaigns",
+    prefix="ca",
+    branch_label="campaigns",
+    db_schema=module_schema("campaigns"),
 )
 
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
@@ -614,6 +626,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
     PEOPLE_MIGRATION_OWNER,
+    CAMPAIGNS_MIGRATION_OWNER,
 )
 
 
@@ -947,6 +960,7 @@ __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
+    "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",

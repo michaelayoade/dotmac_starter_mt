@@ -47,6 +47,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp`, `dotmac_workspace` |
+| [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md) | optional module | [`audit-complete`](../packages/dotmac-campaigns/EXTRACTION.toml) | [tenant · `mod_campaigns`](../packages/dotmac-campaigns/src/dotmac_campaigns/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac_backoffice`, `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`adopted`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a6` | `>=0.1.0a68` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | `tenant`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a61` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
@@ -89,6 +90,14 @@ and the next gate.
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-auth-oidc/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** `dotmac_workspace`.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_workspace`.
+
+### [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md)
+
+- **Owner:** Provider-neutral outbound campaign identity, immutable audience/recipient evidence and ordered recipient progression
+- **Contract:** Create and revise a tenant campaign; freeze one active revision, its ordered one-time/nurture steps, its audience and recipient snapshots when sending begins; record consent decisions without making policy; schedule due work through a typed Durable Timers seam; publish one provider-neutral delivery intent per recipient/step through the kernel outbox; consume deduplicated delivery/open/click/reply facts without regressing terminal state; record unsubscribe and response/correlation facts; rebuild counters, report drift, reconcile missing publication and scrub PII at explicit retention deadlines. NOT Party/customer identity, audience business rules, Leads/Sales conversion, orders/subscriptions/billing/collections, consent policy, Inbox messages/conversations, provider I/O/retry/credentials, templates, advertising hierarchy/raw metrics, attribution, retention cases or service cancellation.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-campaigns/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_backoffice`, `dotmac_crm`, `dotmac_sub`.
 
 ### [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md)
 

@@ -6,14 +6,18 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a71 — UNRELEASED
+## 0.1.0a71 — 2026-08-18
 
-Names and proves the narrow Party-person catalogue consumed by installable
-employment-directory modules, and allocates the first such module's physical
-namespace.
+Allocates the independent tenant-only people and campaigns lineages, names and
+proves the Party-person catalogue consumed by employment-directory modules,
+and keeps optional-package imports and large test assemblies independent of
+database configuration and SQLite's ten-attachment ceiling.
 
 ### Added
 
+- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
+  branch label `campaigns`. The module owns provider-neutral campaign
+  progression and consumes the kernel's consent, idempotency and outbox owners.
 - `party_person_catalog.v1`, covering the required `public.parties` and
   `public.party_persons` columns, keys, relationship, forced tenant RLS,
   tenant-policy marker, and `app_user` read posture without coupling consumers
@@ -21,6 +25,12 @@ namespace.
 - `verify_party_person_catalog`, a live-catalog verifier that refuses a stamped,
   aliased, unprotected, unusable, or structurally incompatible provider.
 - `PEOPLE_MIGRATION_OWNER`: `pe`, branch `people`, schema `mod_people`.
+
+### Changed
+
+- Defers the canonical conflict-savepoint import in consent and idempotency
+  write paths until execution, so independently installable module contracts
+  can be imported before an assembly configures `DATABASE_URL`.
 - `dotmac_kernel.testing.create_test_engine(tables=...)` can now create an
   explicit assembly/package metadata slice. This keeps qualified SQLite module
   schemas while preventing test collection of uncomposed packages from

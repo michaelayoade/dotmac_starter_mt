@@ -191,6 +191,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # and the control plane allocates vendor-side series no tenant may read.
     # `people` is the eleventh: a tenant-only employment directory that links
     # to, and never duplicates, the kernel Party-person catalogue.
+    # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
+    # audit found no real named platform consumer.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -204,6 +206,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "integration",
         "approvals",
         "people",
+        "campaigns",
     }
 
 
