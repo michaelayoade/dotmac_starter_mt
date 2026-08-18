@@ -6,7 +6,27 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a68 — UNRELEASED
+## 0.1.0a69 — UNRELEASED
+
+Makes route-guard imports safe during package discovery without moving
+transaction authority out of `dotmac_kernel.db`.
+
+### Changed
+
+- `dotmac_kernel.deps.get_db` and `get_platform_db` are thin generator adapters
+  that import and enter the existing transaction owners only when FastAPI
+  resolves a request dependency. Importing a module manifest that references a
+  router therefore no longer constructs an engine or requires `DATABASE_URL`.
+- `dotmac_kernel.web_deps` consumes the same adapter object, preserving FastAPI
+  dependency-override identity.
+- `idempotency_key` defers importing the idempotency owner until validation is
+  requested; reading the guard module no longer reaches the eager engine
+  through `conflict_savepoint`.
+- The package-root no-database import gate now covers every distribution with
+  no exemption. Delegation tests prove the adapters still enter, yield from and
+  close the canonical transaction owners.
+
+## 0.1.0a68 — 2026-08-17
 
 Names and proves the platform-only audit storage consumed by installable
 control-plane modules.

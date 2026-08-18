@@ -1807,6 +1807,12 @@ There is exactly ONE transaction authority in this codebase:
   (request boundaries) and `platform_session` (the non-request boundary for
   lifespan hooks/jobs) construct the session, commit on success, roll back
   on error, and close. Nothing else does.
+- **Route dependencies enter the boundary lazily.** `dotmac_kernel.deps`
+  exports thin `get_db`/`get_platform_db` generator adapters whose only action
+  is a function-local import followed by `yield from` the corresponding
+  `dotmac_kernel.db` owner. This keeps module manifests and routers importable
+  before an assembly resolves `DATABASE_URL` without creating a second session
+  or transaction authority.
 - **Services only mutate and flush.** A feature service never calls
   `db.commit()`, never calls `db.rollback()` directly (hard rule; see the
   savepoint section below), and never constructs a session of its own.

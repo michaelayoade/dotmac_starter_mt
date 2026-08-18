@@ -86,9 +86,11 @@ and may change or disappear without a deprecation cycle**.
    dotmac_kernel` succeeds without `DATABASE_URL`. It covers models, exceptions,
    feature manifests, config, identity/query helpers, security primitives, audit,
    and the settings read/declare contract.
-2. **Supported submodules** — `from dotmac_kernel.<module> import ...`. The DB
-   session/guard/middleware/platform-auth APIs live here (not at the top level)
-   because importing them constructs the SQLAlchemy engine from `DATABASE_URL`.
+2. **Supported submodules** — `from dotmac_kernel.<module> import ...`. The
+   eager DB session owner and engine live here (not at the top level). Route
+   guards in `dotmac_kernel.deps` are safe to import before database
+   configuration: `get_db` and `get_platform_db` defer entry into the owner
+   until FastAPI resolves the dependency for a request.
 
 ### Supported modules and their public names
 
