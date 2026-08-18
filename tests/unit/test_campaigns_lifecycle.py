@@ -25,18 +25,28 @@ from dotmac_campaigns import (
     SequenceStep,
     SnapshotImmutable,
     accept_due_work,
+    authorize_delivery,
     campaign_snapshot,
     cancel_campaign,
     create_campaign,
     ingest_audience,
+    next_send_at,
+    purge_expired_pii,
     rebuild_counters,
     record_observation,
     report_drift,
+    request_unsubscribe,
     schedule_campaign,
 )
 from dotmac_campaigns.fakes import FakeRenderer, FakeSenderResolver, FakeTimerPort
-from dotmac_campaigns.models import ALL_MODELS, CampaignCounter, CampaignRecipient
-from dotmac_kernel.consent import register_marketing_categories, suppress
+from dotmac_campaigns.models import (
+    ALL_MODELS,
+    CampaignCounter,
+    CampaignDeliveryIntent,
+    CampaignRecipient,
+    CampaignResponse,
+)
+from dotmac_kernel.consent import may_send, register_marketing_categories, suppress
 from dotmac_kernel.consent_models import CommunicationSuppression
 from dotmac_kernel.idempotency_models import IdempotencyRecord
 from dotmac_kernel.messaging.models import OutboxEvent
@@ -130,6 +140,41 @@ def _audience(address: str = "person@example.com") -> AudienceBatch:
             ),
         ),
     )
+
+
+def _publish_first_intent(db: Session, *, timers: FakeTimerPort | None = None):
+    campaign = _create(db)
+    ingest_audience(
+        db,
+        tenant_id=TENANT_ID,
+        campaign_id=campaign.id,
+        batch=_audience(),
+        idempotency_key="audience-1",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        evaluated_at=NOW,
+    )
+    timer_port = timers or FakeTimerPort()
+    schedule_campaign(
+        db,
+        tenant_id=TENANT_ID,
+        campaign_id=campaign.id,
+        timers=timer_port,
+        idempotency_key="schedule-1",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        recorded_at=NOW,
+    )
+    accepted = accept_due_work(
+        db,
+        tenant_id=TENANT_ID,
+        trigger=timer_port.only_current_trigger(),
+        timers=timer_port,
+        renderer=FakeRenderer(),
+        senders=FakeSenderResolver(),
+        idempotency_key="due-1",
+        idempotency_expires_at=NOW + timedelta(days=7),
+        accepted_at=NOW,
+    )
+    return campaign, timer_port, accepted
 
 
 def test_changed_create_fingerprint_conflicts_instead_of_reusing_the_key(
@@ -495,3 +540,179 @@ def test_counter_drift_is_reported_then_rebuilt_from_recipient_facts(
     assert drift.fields["total_recipients"] == (99, 1)
     rebuild_counters(db, tenant_id=TENANT_ID, campaign_id=campaign.id, rebuilt_at=NOW)
     assert not report_drift(db, tenant_id=TENANT_ID, campaign_id=campaign.id).has_drift
+
+
+def test_send_windows_preserve_sub_day_overnight_and_all_day_semantics() -> None:
+    before_day_window = datetime(2026, 8, 18, 5, 30, tzinfo=UTC)
+    assert next_send_at(
+        before_day_window,
+        timezone="Africa/Lagos",
+        window_start=time(8),
+        window_end=time(18),
+    ) == datetime(2026, 8, 18, 7, 0, tzinfo=UTC)
+
+    inside_overnight = datetime(2026, 8, 18, 22, 0, tzinfo=UTC)
+    assert (
+        next_send_at(
+            inside_overnight,
+            timezone="Africa/Lagos",
+            window_start=time(20),
+            window_end=time(6),
+        )
+        == inside_overnight
+    )
+
+    overnight_gap = datetime(2026, 8, 18, 10, 0, tzinfo=UTC)
+    assert next_send_at(
+        overnight_gap,
+        timezone="Africa/Lagos",
+        window_start=time(20),
+        window_end=time(6),
+    ) == datetime(2026, 8, 18, 19, 0, tzinfo=UTC)
+
+    assert (
+        next_send_at(
+            overnight_gap,
+            timezone="Africa/Lagos",
+            window_start=time(8),
+            window_end=time(8),
+        )
+        == overnight_gap
+    )
+
+
+def test_final_delivery_gate_revalidates_after_the_intent_was_published(
+    db: Session,
+) -> None:
+    campaign, _, accepted = _publish_first_intent(db)
+    suppress(
+        db,
+        TENANT_ID,
+        channel="email",
+        address="person@example.com",
+        reason="complaint",
+    )
+
+    gate = authorize_delivery(
+        db,
+        tenant_id=TENANT_ID,
+        dispatch_id=accepted.dispatch_id,
+        evaluated_at=NOW + timedelta(minutes=1),
+    )
+
+    assert gate.allowed is False
+    assert gate.reason == "complaint"
+    snapshot = campaign_snapshot(db, tenant_id=TENANT_ID, campaign_id=campaign.id)
+    assert snapshot.recipients[0].consent_receipts[-1].phase == "delivery"
+    assert snapshot.recipients[0].steps[0].delivery_state == DeliveryState.SUPPRESSED
+
+
+def test_click_implies_open_and_reply_emits_a_fact_for_the_sales_adapter(
+    db: Session,
+) -> None:
+    campaign, timers, accepted = _publish_first_intent(db)
+    record_observation(
+        db,
+        tenant_id=TENANT_ID,
+        observation=Observation(
+            dispatch_id=accepted.dispatch_id,
+            kind=ObservationKind.CLICK,
+            source_owner="dotmac_crm.tracking",
+            source_event_id="click-1",
+            source_fingerprint="d" * 64,
+            occurred_at=NOW + timedelta(minutes=1),
+        ),
+        timers=timers,
+        idempotency_expires_at=NOW + timedelta(days=30),
+        recorded_at=NOW + timedelta(minutes=1),
+    )
+    record_observation(
+        db,
+        tenant_id=TENANT_ID,
+        observation=Observation(
+            dispatch_id=accepted.dispatch_id,
+            kind=ObservationKind.REPLY,
+            source_owner="dotmac_inbox",
+            source_event_id="reply-1",
+            source_fingerprint="e" * 64,
+            occurred_at=NOW + timedelta(minutes=2),
+            correlation_ref="conversation:opaque-9",
+        ),
+        timers=timers,
+        idempotency_expires_at=NOW + timedelta(days=30),
+        recorded_at=NOW + timedelta(minutes=2),
+    )
+
+    snapshot = campaign_snapshot(db, tenant_id=TENANT_ID, campaign_id=campaign.id)
+    step = snapshot.recipients[0].steps[0]
+    assert step.first_clicked_at is not None
+    assert step.first_opened_at == step.first_clicked_at
+    assert step.first_replied_at is not None
+    response = db.scalar(select(CampaignResponse))
+    assert response is not None
+    assert response.correlation_ref == "conversation:opaque-9"
+    assert db.scalar(
+        select(OutboxEvent).where(OutboxEvent.event_type == "campaigns.response.v1")
+    )
+
+
+def test_unsubscribe_blocks_marketing_without_silencing_billing(db: Session) -> None:
+    request_unsubscribe(
+        db,
+        tenant_id=TENANT_ID,
+        channel="email",
+        address="person@example.com",
+        source_owner="campaigns.unsubscribe_edge",
+        source_event_id="unsubscribe-1",
+        source_fingerprint="f" * 64,
+        requested_at=NOW,
+        idempotency_expires_at=NOW + timedelta(days=365),
+    )
+
+    assert not may_send(
+        db,
+        TENANT_ID,
+        channel="email",
+        address="person@example.com",
+        category="campaign",
+    )
+    assert may_send(
+        db,
+        TENANT_ID,
+        channel="email",
+        address="person@example.com",
+        category="billing",
+    )
+
+
+def test_explicit_privacy_deadline_scrubs_pii_but_keeps_hashed_evidence(
+    db: Session,
+) -> None:
+    _, _, accepted = _publish_first_intent(db)
+    assert (
+        purge_expired_pii(
+            db,
+            tenant_id=TENANT_ID,
+            before=NOW + timedelta(days=89),
+            limit=10,
+            scrubbed_at=NOW + timedelta(days=89),
+        )
+        == 0
+    )
+    assert (
+        purge_expired_pii(
+            db,
+            tenant_id=TENANT_ID,
+            before=NOW + timedelta(days=91),
+            limit=10,
+            scrubbed_at=NOW + timedelta(days=91),
+        )
+        == 2
+    )
+    recipient = db.scalar(select(CampaignRecipient))
+    intent = db.get(CampaignDeliveryIntent, accepted.delivery_intent_id)
+    assert recipient is not None and recipient.address is None
+    assert recipient.address_hash
+    assert intent is not None and intent.address is None
+    assert intent.address_hash
+    assert intent.rendered_body is None
