@@ -8,6 +8,48 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-17: P11 is met by Vendor production
+
+Michael accepted the production-lineage evidence recorded below. This
+amendment supersedes the 2026-08-14 amendment's sentence that P11 was still
+unmet; it does not rewrite that earlier measurement or collapse the two plane
+tracks established there.
+
+**P11 is MET.** The Vendor Control Plane, the platform-lineage reference
+adopter, ran the kernel and independently released module lineages in its real
+production database:
+
+- exact Vendor source
+  `f8f8c3fd636e663e4a17275c19e82fc1667aa52a` pins
+  `dotmac-kernel==0.1.0a61`, `dotmac-release-catalog==0.1.0a4`,
+  `dotmac-entitlement-allocation==0.1.0a4`, and
+  `dotmac-approvals==0.1.0a4`;
+- Vendor's public migration composer supplies the kernel, Release Catalog,
+  Entitlement Allocation, Approvals, and Vendor version locations, and its
+  production deploy path permits only the composed `heads` target;
+- successful protected-environment deployment run
+  [`32022599873`](https://github.com/michaelayoade/dotmac_vendor_control_plane/actions/runs/32022599873)
+  applied immutable image
+  `sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc`
+  to the explicitly selected `vendor-cp-prod` target after the role contract,
+  pre-migration backup, composed-head post-condition, and health checks; and
+- the Release Catalog, Entitlement Allocation, and Approvals dossiers record
+  `dotmac_vendor_control_plane` as their production contract consumer and carry
+  the same exact source, deploy-run, and image identities.
+
+That satisfies decision 2's exit condition: this is a real product assembly
+running the kernel's shipped lineage in production, not the Starter assembly, a
+scratch database, a stamp, copied migrations, or an installed model over a
+product-owned table. The current measured record and re-verification procedure
+are [`p11-adoption-status.md`](../inventories/p11-adoption-status.md).
+
+The consequence is narrow. Decision 2's general P11 moratorium has ended, but
+each proposed module still needs its own accepted owner, product-first dossier,
+canaries, lineage allocation, consumer, and cutover gates. Sub tenant-plane /
+RLS proof remains a separate adoption track; P11 does not claim that work is
+complete. This amendment authorizes no deployment, merge, production cutover,
+or local-writer retirement by itself.
+
 ## Amendment, 2026-08-14: the lineage gate splits by plane, and two facilities get owners
 
 Decided after the commercial-module evidence batch, whose P11 dashboard is
