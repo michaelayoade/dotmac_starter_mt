@@ -89,6 +89,10 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
     # CAPABILITY_RAISED_FLOORS below rather than here.
+    # Orders' prerequisites land with its a73 tenant-only allocation, after
+    # Billing/Timers a70, Subscriptions a71 and the earlier Sales a72 work.
+    # The ledger release itself is the earliest kernel that can register it.
+    "dotmac-orders": "0.1.0a73",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -109,7 +113,11 @@ CAPABILITY_RAISED_FLOORS = {
     "dotmac-application-directory": ("0.1.0a56", "0.1.0a46"),
     "dotmac-files": ("0.1.0a56", "0.1.0a54"),
     "dotmac-imports": ("0.1.0a56", "0.1.0a55"),
-    "dotmac-template-studio": ("0.1.0a56", "0.1.0a13"),
+    # Template Studio has always written tenant audit events from its online
+    # adapters. a73 is the first kernel that names and verifies that storage as
+    # tenant_audit_log.v1, so the unshipped module now declares the dependency
+    # its request path already had instead of relying on this assembly's schema.
+    "dotmac-template-studio": ("0.1.0a73", "0.1.0a13"),
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
     # prerequisite contract raises it again. The floor is always the highest
     # capability the module actually consumes, not the first one that moved it.
@@ -261,13 +269,12 @@ def test_a_module_has_exactly_one_floor_rule() -> None:
 def test_every_releasable_module_has_a_floor_rule() -> None:
     """The other half of "exactly one" — and what keeps an EMPTY map watched.
 
-    `LEDGER_ALLOCATION_RELEASES` is currently empty, so the test parametrized
-    over it collects nothing and reports green having asserted nothing. That is
-    only tolerable because a module cannot fall out of both maps: this reads
-    the release allowlist — the closed set of things that may be PUBLISHED, so
-    the set whose floors are public facts — and requires each one to be
-    somewhere. Discovery, not enumeration: adding an allowlist entry enrols it
-    here, the way `test_module_version_sync.py` already does for versions.
+    A test parametrized only over either hand-maintained map can report green
+    while a newly releasable module is absent from both. This reads the release
+    allowlist — the closed set of things that may be PUBLISHED, so the set whose
+    floors are public facts — and requires each one to be somewhere. Discovery,
+    not enumeration: adding an allowlist entry enrols it here, the way
+    `test_module_version_sync.py` already does for versions.
 
     The union may legitimately be a superset. `dotmac-imports` and
     `dotmac-template-studio` carry floors while still unpublishable, which is

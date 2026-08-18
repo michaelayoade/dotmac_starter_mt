@@ -49,6 +49,7 @@ from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
     PLATFORM_AUDIT_LOG_V1,
+    TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     binding_for,
     prerequisite,
@@ -489,6 +490,175 @@ def verify_idempotency_ledger(bind: Connection) -> None:
                 f"RLS (enabled={enabled}, forced={forced}); its isolation is "
                 "the revoked grant, and a policy here evaluates "
                 "app_current_tenant_id() where there is no tenant",
+            )
+
+
+# ── tenant_audit_log.v1 ────────────────────────────────────────────────────
+
+_TENANT_AUDIT_COLUMNS: Final[dict[str, _ColumnContract]] = {
+    "id": (sa.Uuid, False, None, None, False),
+    "tenant_id": (sa.Uuid, False, None, None, False),
+    "actor_type": (sa.String, True, 32, None, False),
+    "actor_id": (sa.String, True, 120, None, False),
+    "actor_label": (sa.String, True, 160, None, False),
+    "actor_party_id": (sa.Uuid, True, None, None, False),
+    "action": (sa.String, False, 120, None, False),
+    "entity_type": (sa.String, False, 120, None, False),
+    "entity_id": (sa.String, True, 120, None, False),
+    "request_id": (sa.String, True, 120, None, False),
+    "status_code": (sa.Integer, True, None, None, False),
+    "is_success": (sa.Boolean, True, None, None, False),
+    "ip_address": (sa.String, True, 64, None, False),
+    "user_agent": (sa.String, True, 255, None, False),
+    "details": (sa.JSON, False, None, None, True),
+    "occurred_at": (sa.DateTime, True, None, True, True),
+    "created_at": (sa.DateTime, False, None, True, True),
+}
+
+
+def verify_tenant_audit_log(bind: Connection) -> None:
+    """Prove the tenant audit writer reaches isolated append-only storage."""
+    name = TENANT_AUDIT_LOG_V1.name
+    table = "audit_events"
+    qualified = f"{HOST_SCHEMA}.{table}"
+    inspector = sa.inspect(bind)
+
+    if not inspector.has_table(table, schema=HOST_SCHEMA):
+        _fail(name, f"{qualified} does not exist")
+    _assert_columns(bind, name, table, _TENANT_AUDIT_COLUMNS)
+
+    columns = {
+        column["name"]: column
+        for column in inspector.get_columns(table, schema=HOST_SCHEMA)
+    }
+    details_default = "".join(str(columns["details"].get("default", "")).split())
+    if details_default.lower() not in {"'{}'::json", "'{}'::jsonb"}:
+        _fail(
+            name,
+            f"{qualified}.details must default to an empty JSON object "
+            f"(found {columns['details'].get('default')!r})",
+        )
+    for column_name in ("occurred_at", "created_at"):
+        timestamp_default = "".join(
+            str(columns[column_name].get("default", "")).split()
+        ).lower()
+        if timestamp_default not in {
+            "now()",
+            "current_timestamp",
+            "transaction_timestamp()",
+        }:
+            _fail(
+                name,
+                f"{qualified}.{column_name} must default to the current "
+                "transaction timestamp "
+                f"(found {columns[column_name].get('default')!r})",
+            )
+
+    primary_key = tuple(
+        inspector.get_pk_constraint(table, schema=HOST_SCHEMA).get(
+            "constrained_columns"
+        )
+        or ()
+    )
+    if primary_key != ("id",):
+        _fail(name, f"{qualified} needs a primary key on ('id',)")
+
+    tenant_fk = next(
+        (
+            fk
+            for fk in inspector.get_foreign_keys(table, schema=HOST_SCHEMA)
+            if tuple(fk.get("constrained_columns") or ()) == ("tenant_id",)
+        ),
+        None,
+    )
+    tenant_fk_ok = bool(
+        tenant_fk
+        and tenant_fk.get("referred_schema") in {None, HOST_SCHEMA}
+        and tenant_fk.get("referred_table") == "tenants"
+        and tuple(tenant_fk.get("referred_columns") or ()) == ("id",)
+        and str((tenant_fk.get("options") or {}).get("ondelete", "")).upper()
+        == "CASCADE"
+    )
+    if not tenant_fk_ok:
+        _fail(
+            name,
+            f"{qualified} needs a foreign key from ('tenant_id',) to "
+            "public.tenants ('id',) ON DELETE CASCADE",
+        )
+
+    tenant_indexes = [
+        index
+        for index in inspector.get_indexes(table, schema=HOST_SCHEMA)
+        if tuple(index.get("column_names") or ()) == ("tenant_id",)
+        and not bool(index.get("unique"))
+        and not bool((index.get("dialect_options") or {}).get("postgresql_where"))
+    ]
+    if not tenant_indexes:
+        _fail(
+            name,
+            f"{qualified} needs a non-unique, non-partial index on ('tenant_id',)",
+        )
+
+    if bind.dialect.name != "postgresql":
+        return
+
+    rls = bind.execute(
+        sa.text(
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = :schema AND c.relname = :table"
+        ),
+        {"schema": HOST_SCHEMA, "table": table},
+    ).one()
+    if not (bool(rls[0]) and bool(rls[1])):
+        _fail(
+            name,
+            f"{qualified} must have FORCEd row-level security "
+            f"(enabled={bool(rls[0])}, forced={bool(rls[1])})",
+        )
+
+    policies = bind.execute(
+        sa.text(
+            "SELECT policyname, COALESCE(qual, ''), COALESCE(with_check, '') "
+            "FROM pg_policies WHERE schemaname = :schema AND tablename = :table"
+        ),
+        {"schema": HOST_SCHEMA, "table": table},
+    ).all()
+    unkeyed = sorted(
+        str(policy[0])
+        for policy in policies
+        if any(
+            not str(expression).strip()
+            or "app_current_tenant_id()" not in str(expression)
+            for expression in (policy[1], policy[2])
+        )
+    )
+    if not policies or unkeyed:
+        _fail(
+            name,
+            f"{qualified} needs a tenant policy whose USING and WITH CHECK "
+            "both call app_current_tenant_id()",
+        )
+
+    for privilege in ("SELECT", "INSERT"):
+        if not _has_table_privilege(bind, DEFAULT_APP_ROLE, qualified, privilege):
+            _fail(
+                name,
+                f"{DEFAULT_APP_ROLE} needs table-level {privilege} on {qualified}",
+            )
+    for privilege in ("UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+        if _has_table_privilege(bind, DEFAULT_APP_ROLE, qualified, privilege):
+            _fail(
+                name,
+                f"{DEFAULT_APP_ROLE} must not hold {privilege} on {qualified}",
+            )
+        if privilege in {"UPDATE", "REFERENCES"} and _has_column_privilege(
+            bind, DEFAULT_APP_ROLE, qualified, privilege
+        ):
+            _fail(
+                name,
+                f"{DEFAULT_APP_ROLE} must not hold column-level {privilege} "
+                f"on {qualified}",
             )
 
 
@@ -1095,6 +1265,7 @@ _VERIFIERS: dict[str, Verifier] = {
     MODULE_DATABASE_ROLES_V1.name: verify_module_database_roles,
     IDEMPOTENCY_LEDGER_V1.name: verify_idempotency_ledger,
     OUTBOX_RELAY_V1.name: verify_outbox_relay,
+    TENANT_AUDIT_LOG_V1.name: verify_tenant_audit_log,
     PLATFORM_AUDIT_LOG_V1.name: verify_platform_audit_log,
 }
 
@@ -1184,5 +1355,6 @@ __all__ = [
     "verify_module_database_roles",
     "verify_outbox_relay",
     "verify_platform_audit_log",
+    "verify_tenant_audit_log",
     "verify_tenant_scope_catalog",
 ]

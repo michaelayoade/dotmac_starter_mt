@@ -6,6 +6,25 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a73 — UNRELEASED
+
+Allocates the tenant-only namespace and migration lineage for the reusable
+Orders owner authorized by ADR-0030. This follows Billing and Durable Timers
+at a70, Subscriptions at a71, and the earlier committed Sales workstream to be
+rebased at a72; Orders does not reuse any of those release identities.
+
+### Added
+
+- `ORDERS_MIGRATION_OWNER`: owner and short code `orders`, schema
+  `mod_orders`, migration prefix `or`, and branch label `orders`. The row lands
+  with the module manifest and first lineage; it reserves no speculative
+  control-plane storage.
+- `tenant_audit_log.v1`, the live-catalog contract for the existing
+  tenant-scoped `public.audit_events` writer. It proves the canonical actor and
+  forensic shape, tenant foreign key and index, FORCEd RLS policy, and the
+  online tenant role's append-only `SELECT`+`INSERT` posture before an
+  installable tenant module may call `write_audit_event`.
+
 ## 0.1.0a69 — UNRELEASED
 
 Makes route-guard imports safe during package discovery without moving

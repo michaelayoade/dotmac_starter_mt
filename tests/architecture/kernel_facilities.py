@@ -175,6 +175,11 @@ MAPPED: Final[tuple[Facility, ...]] = (
         "platform peer of relay.record_failure",
     ),
     Facility(
+        "audit:write_audit_event",
+        "tenant_audit_log.v1",
+        "writes the append-only tenant-scoped public.audit_events trail",
+    ),
+    Facility(
         "audit:write_platform_audit_event",
         "platform_audit_log.v1",
         "writes the append-only public.platform_audit_events trail",
@@ -192,20 +197,6 @@ MAPPED: Final[tuple[Facility, ...]] = (
 #: An empty set means "no module calls this today", which is a claim worth
 #: holding: it is how the next caller becomes a visible diff.
 FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
-    "audit:write_audit_event": (
-        "TENANT AUDIT — no published consumer. The persisted-runtime-dependency "
-        "inventory found its only module caller is `dotmac-template-studio`, "
-        "which has no tag in any version and sits in no release lane, so there "
-        "is nothing in the field to protect and no evidence yet for what a "
-        "prerequisite would have to verify. Frozen so the first PUBLISHED "
-        "consumer is a visible diff rather than a discovery.",
-        frozenset(
-            {
-                "dotmac-template-studio/src/dotmac_template_studio/router.py",
-                "dotmac-template-studio/src/dotmac_template_studio/web.py",
-            }
-        ),
-    ),
     "settings_resolver:resolve_value": (
         "SETTINGS — ruled NOT a prerequisite (Michael, 2026-08-16). "
         "`domain_settings` is one table serving both scopes through a nullable "

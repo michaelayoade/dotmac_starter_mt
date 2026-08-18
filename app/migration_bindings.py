@@ -28,6 +28,7 @@ from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
     PLATFORM_AUDIT_LOG_V1,
+    TENANT_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     PrerequisiteBinding,
 )
@@ -72,6 +73,14 @@ ASSEMBLY_PREREQUISITE_BINDINGS: Final[tuple[PrerequisiteBinding, ...]] = (
     PrerequisiteBinding(
         prerequisite=OUTBOX_RELAY_V1.name,
         provider_revision="0012_platform_outbox",
+        provider_owner="kernel",
+    ),
+    # `0001` created the tenant audit table and its RLS/grants; `0023` completes
+    # the named writer contract with the canonical actor pair and request
+    # forensics consumed by `write_audit_event`.
+    PrerequisiteBinding(
+        prerequisite=TENANT_AUDIT_LOG_V1.name,
+        provider_revision="0023_audit_actor_and_forensics",
         provider_owner="kernel",
     ),
     # Kernel `0009` created `platform_audit_events`, but that historical shape

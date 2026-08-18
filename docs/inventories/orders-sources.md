@@ -1,10 +1,11 @@
 # Orders sources
 
-**As of:** 2026-08-15
-**Starter:** `e6ba2022f3d7` (branch `docs/adr-0030-cloud-commerce-composition`)
-**Sub:** `27c76aaeebb7`
-**ERP:** `0f4b1698ddbf` (revision-pinned reads; worktree had 67 local paths)
-**CRM:** `c64b5aa0f790` (revision-pinned reads; worktree had 3 local paths)
+**As of:** 2026-08-18 (source decision from 2026-08-15, revalidated below)
+**Starter:** `7c93ebf` (`origin/main`)
+**Sales candidate:** `504ed25` (`origin/agent/dotmac-sales-implementation`)
+**Sub:** `d1a1a913e` (`origin/main`)
+**ERP:** `dd6416cd` (revision-pinned read)
+**CRM:** `d363af3d` (revision-pinned read)
 **Vendor CP:** `89848017d6b8`
 **Integrator:** `d014116e63ad`
 **Decision:** [ADR-0030](../adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md)
@@ -40,6 +41,51 @@ The port delta is not optional and is the substance of the module:
    not ported.
 3. **No source has tenant isolation.** Sub has no `tenant_id` and no RLS
    anywhere; ERP scopes by `organization_id` with no row policy; CRM likewise.
+
+### 2026-08-18 revalidation
+
+The qualifying-source decision still holds at the refs above. Sub remains the
+only source with the finite coverage gate, receipted owner outputs and lifecycle
+reconciler; ERP still contributes transition/FX requirements rather than an
+adoptable aggregate; CRM remains a retirement-only subset.
+
+One source defect was fixed after the original audit and is no longer a port
+obligation: Sub `origin/main` contains the reviewed sequence beginning at
+`9e8f78a0e` and `c99d39522`, plus the typed waiver follow-up through
+`1ba0021a7`. Generic/operator order updates can no longer set funding fields;
+the internal path requires an explicit `FundingAuthority`; and a waiver is an
+accountable order decision rather than manufactured payment evidence. The
+historical finding remains below because it explains the boundary, but the
+current source is proof that the boundary can be retired in the first adopter.
+
+The concurrent Billing package exposes a separate adoption gap. Its pending
+`0.1.0a1` contract says allocation and coverage are internal derivations and
+publishes `ReceivablePositionV1`/accounting facts, but no owner-decided
+per-obligation coverage-resolution fact. Orders cannot derive one from balance
+or allocation arithmetic without becoming a second financial decision owner,
+and an assembly adapter cannot make that decision either. Before Sub cutover,
+Billing must publish a typed obligation-resolution fact that maps mechanically
+to `RecordCoverageResolutionCommand`, or Michael must name a different owner.
+Until then the Orders command is a safe seam with no valid Billing producer,
+and adoption is blocked rather than guessed.
+
+The separate committed `dotmac-sales` candidate explains why an Orders module
+could look as though it already existed, but it does not own one. Its checked-in
+contract explicitly stops at an immutable accepted Quote, publishes
+`sales.accepted-quote.v1`, and forbids creating or identifying a `SalesOrder`.
+That is the correct upstream boundary and confirms `dotmac-orders` is a distinct
+owner rather than a duplicate package.
+
+Its current `AcceptedQuoteHandoffV1` is not yet a mechanically consumable Orders
+input. It carries exact line/totals values and a pricing snapshot reference, but
+omits the accepted terms content, specification provenance, component tax
+evidence, currency minor-unit contract and finite coverage membership required
+by `SubmitOrderCommand`. A product adapter cannot fill those fields from live
+catalogue rows after acceptance without becoming a second commercial decision
+path. Before the first cutover, Sales must extend its frozen owner output (or a
+different named owner must publish the missing immutable fact) so the assembly
+only translates fields. This is a second adoption gate alongside Billing's
+missing coverage-resolution output.
 
 ## Sub source
 
@@ -323,10 +369,11 @@ Version one **owns**:
 - **order identity** — one order row, an order reference unique within the
   tenant, and an idempotency identity for submission so a retried checkout
   cannot produce two orders;
-- **accepted line snapshots** — one immutable row per line, written once at
-  acceptance and never updated or deleted. No `onupdate`, no `is_active`, no
-  operator edit path. A correction is a new order or a documented amendment
-  order, never an in-place rewrite;
+- **commercial line snapshots** — one immutable row per line, written and
+  frozen when checkout is submitted, then carried unchanged through the
+  separate acceptance decision. No `onupdate`, no `is_active`, no operator edit
+  path. A correction is a new order or a documented amendment order, never an
+  in-place rewrite;
 - **captured price/terms/specification references** — each line records the
   price it was sold at as an exact value *and* the immutable price-version
   identifier it came from, the terms snapshot in force, and an opaque
@@ -381,8 +428,8 @@ control-plane order. Declared, not inferred.
 
 ## Kernel floor
 
-Capabilities this owner consumes from `dotmac_kernel` at
-`e6ba2022f3d7`, to be proven necessary and sufficient later:
+Capabilities this owner consumes from `dotmac_kernel` at `7c93ebf`, now named
+and enforced by the package manifest and root migration:
 
 - `db` — the single transaction authority; the order aggregate never commits.
 - `money` — exact `Money`, `Currency`, `ExchangeRate` for every line amount,
@@ -394,7 +441,8 @@ Capabilities this owner consumes from `dotmac_kernel` at
 - `messaging` (`outbox`, `envelope`, `inbox`, `relay`, `worker`) — fulfillment
   request publication and coverage-observation intake. Nothing leaves in-request.
 - `audit` — `write_audit_event` for submission, acceptance, cancellation and
-  every refused mutation attempt, with declared `audit_actions`.
+  lifecycle/refusal evidence, with declared `audit_actions` and the verified
+  `tenant_audit_log.v1` storage prerequisite.
 - `planes` — `ModulePlane.tenant` declared on the manifest; the gate must see a
   single-plane declaration, not infer one.
 - `namespaces` / `prerequisites` / `migrations` — one immutable `mod_<code>`
@@ -406,22 +454,22 @@ Capabilities this owner consumes from `dotmac_kernel` at
   registries, not enums).
 - `tenancy` — request tenant context for the RLS canaries.
 
-Consumed from a sibling **enabling** owner, not the kernel:
-`dotmac-numbering` for the order reference series. `dotmac_kernel.durable_timers`
-does **not** exist at this revision and Orders does not need it — quote expiry
-belongs to the quote owner, dunning to Collections.
+An assembly may obtain the opaque order reference from `dotmac-numbering`, but
+Orders does not import or require that sibling: its command receives the
+already-allocated reference. Orders likewise has no durable-timer dependency —
+quote expiry belongs to the quote owner and dunning to Collections.
 
 ## Fresh proof required
 
 1. tenant-plane RLS isolation: a second tenant can neither read nor write
    another tenant's order, line, or coverage receipt. No source supplies this.
-2. an accepted line snapshot cannot be updated or deleted by service, API, admin
-   surface, or direct ORM write; the attempt raises a typed error and leaves the
-   row and the derived totals byte-identical.
+2. an accepted line snapshot cannot be updated or deleted by service, API,
+   admin surface, direct ORM or SQL write; persistence-level attempts fail and
+   leave the row and derived totals byte-identical.
 3. two concurrent submissions of the same checkout produce exactly one order and
    one reference; the loser replays rather than duplicating.
-4. a rolled-back consuming transaction leaves no order, no allocated reference,
-   and no staged outbox row.
+4. a rolled-back consuming transaction leaves no order, idempotency ledger row,
+   or staged outbox row. Reference allocation is a separate owner's transaction.
 5. same-key/same-fingerprint submission replay returns the original order;
    a changed fingerprint raises `IdempotencyConflict`.
 6. partial coverage never advances the gate; the complete registered set

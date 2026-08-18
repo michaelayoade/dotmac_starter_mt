@@ -172,6 +172,7 @@ _CONSTANTS = {
     "IDEMPOTENCY_LEDGER_V1": "idempotency_ledger.v1",
     "OUTBOX_RELAY_V1": "outbox_relay.v1",
     "PLATFORM_AUDIT_LOG_V1": "platform_audit_log.v1",
+    "TENANT_AUDIT_LOG_V1": "tenant_audit_log.v1",
     "TENANT_SCOPE_CATALOG_V1": "tenant_scope_catalog.v1",
     "MODULE_DATABASE_ROLES_V1": "module_database_roles.v1",
 }
@@ -323,12 +324,19 @@ def test_frozen_facilities_gain_no_new_callers(key: str) -> None:
     )
 
 
-def test_the_platform_audit_successor_is_mapped_and_has_real_callers() -> None:
-    """The former freeze became an enforced prerequisite, not an omission."""
-    facility = next(
-        item for item in MAPPED if item.key == "audit:write_platform_audit_event"
-    )
-    assert facility.prerequisite == "platform_audit_log.v1"
+@pytest.mark.parametrize(
+    ("key", "prerequisite"),
+    (
+        ("audit:write_audit_event", "tenant_audit_log.v1"),
+        ("audit:write_platform_audit_event", "platform_audit_log.v1"),
+    ),
+)
+def test_each_audit_writer_is_mapped_and_has_real_callers(
+    key: str, prerequisite: str
+) -> None:
+    """Both former freezes became enforced prerequisites, not omissions."""
+    facility = next(item for item in MAPPED if item.key == key)
+    assert facility.prerequisite == prerequisite
     assert _callers_of(facility.key), "a mapped facility with no caller is dead policy"
 
 

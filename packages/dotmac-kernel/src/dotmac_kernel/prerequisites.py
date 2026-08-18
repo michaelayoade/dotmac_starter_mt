@@ -266,10 +266,29 @@ OUTBOX_RELAY_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     ),
 )
 
+#: The append-only tenant audit trail used by installable tenant-plane modules.
+#: This effect is deliberately separate from ``tenant_scope_catalog.v1``:
+#: supplying a tenant FK target does not imply an assembly also supplies the
+#: kernel's forensic actor shape or an online append-only audit writer.
+TENANT_AUDIT_LOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
+    name="tenant_audit_log.v1",
+    summary=(
+        "public.audit_events with tenant_id NOT NULL and a foreign key to "
+        "public.tenants ON DELETE CASCADE; canonical nullable actor_type, "
+        "actor_id, actor_label and actor_party_id fields; action, entity, "
+        "request-forensics, details, occurred_at and created_at columns; "
+        "FORCEd row-level security under app_current_tenant_id(); and the "
+        "app_user online role holding table-level SELECT and INSERT but no "
+        "mutation privilege. Supplies dotmac_kernel.audit.write_audit_event; "
+        "module manifests still own the audit-action vocabulary."
+    ),
+)
+
 #: The append-only platform audit trail used by installable control-plane
-#: modules.  The tenant audit table is deliberately NOT part of this effect:
-#: it has no published module consumer and collides with independently-owned
-#: ERP/Sub tables, while the two entrypoints are genuinely separable.
+#: modules. The tenant audit table is deliberately a DIFFERENT effect: Orders
+#: consumes that tenant-plane contract, while Integration and Entitlement
+#: Allocation consume this control-plane shape. The entrypoints, isolation and
+#: online roles are genuinely separable and an assembly may supply only one.
 PLATFORM_AUDIT_LOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     name="platform_audit_log.v1",
     summary=(
@@ -289,6 +308,7 @@ KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     MODULE_DATABASE_ROLES_V1,
     IDEMPOTENCY_LEDGER_V1,
     OUTBOX_RELAY_V1,
+    TENANT_AUDIT_LOG_V1,
     PLATFORM_AUDIT_LOG_V1,
 )
 
@@ -578,6 +598,7 @@ __all__ = [
     "MODULE_DATABASE_ROLES_V1",
     "OUTBOX_RELAY_V1",
     "PLATFORM_AUDIT_LOG_V1",
+    "TENANT_AUDIT_LOG_V1",
     "TENANT_SCOPE_CATALOG_V1",
     "DuplicateBindingError",
     "DuplicatePrerequisiteError",
