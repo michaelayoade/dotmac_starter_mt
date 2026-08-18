@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-sales"
+version = "0.1.0a1"
+description = "DotMac leads, pipelines and immutable accepted-Quote handoff"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_sales", from = "src" }]
+include = [
+    { path = "src/dotmac_sales/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_sales/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a70"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
