@@ -6,6 +6,21 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a72 — UNRELEASED
+
+Allocates the independent durable-timer module lineage and adds the declaration
+surface its output routing contract requires. This is an allocation and a
+vocabulary guard, not a second timer engine in the kernel.
+
+### Added
+
+- `DURABLE_TIMERS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_timers`, revision prefix `dt`, branch label `durable_timers`. The module
+  owns timer identity, generation and terminal evidence; it consumes the
+  existing `outbox_relay.v1` prerequisite for delivery mechanics.
+- A manifest-declared outbox event-type registry so timer outputs fail closed
+  on an undeclared routing code instead of enqueueing work no consumer owns.
+
 ## 0.1.0a71 — 2026-08-18
 
 Allocates the independent tenant-only people and campaigns lineages, names and

@@ -193,7 +193,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # to, and never duplicates, the kernel Party-person catalogue.
     # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
     # audit found no real named platform consumer.
-    # None of these allocations installs behaviour in the kernel.
+    # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
+    # than adding another due-work engine. None of these allocations installs
+    # behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -207,6 +209,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "approvals",
         "people",
         "campaigns",
+        "durable_timers",
     }
 
 

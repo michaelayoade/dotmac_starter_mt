@@ -57,13 +57,14 @@ def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
     packages into the shared metadata, while SQLite supports at most ten
     attached databases. Selection is explicit rather than silently flattening
     schemas or pretending an uncomposed package belongs to the assembly.
-
     **Module schemas (ADR-0006 D1).** A stateful module binds its models to
     `mod_<short_code>` via `namespaces.schema_table_args`, so the ORM emits
     fully qualified `mod_x.thing` — which is the entire point of D1, and which
     plain SQLite rejects because it has no schemas. Each such schema is
     therefore ATTACHed as its own in-memory database before `create_all`, on
-    every connection.
+    every connection. SQLite permits at most ten attached databases in the
+    standard build, so inference from every model imported during pytest
+    collection is both architecturally wrong and eventually unexecutable.
 
     ATTACH rather than a `schema_translate_map`: translating the schema away
     would make the unit lane exercise UNQUALIFIED SQL that no deployment ever

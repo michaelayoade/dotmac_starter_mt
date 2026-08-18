@@ -76,6 +76,16 @@
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
       "state": "never-published"
+    },
+    "dotmac-durable-timers": {
+      "declared": "0.1.0a1",
+      "reason": "OUTSTANDING 2026-08-18: this product-first module is being reconciled to its accepted cancellation, source-evidence and stale-rejection contract on the Dotmac Observer before publication. It remains absent from the release allowlist until the exact a72 allocation and PostgreSQL proof revision are green. Delete this row in the release-enrolment change that verifies the exact module artifact.",
+      "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a72",
+      "reason": "OUTSTANDING 2026-08-18: a72 is reserved after the open a71 People allocation and allocates mod_timers/dt/durable_timers plus the declared output-routing surface required by the accepted timer dossier. Delete this row only when the exact protected-main a72 artifact is verified and tagged.",
+      "state": "declared-unpublished"
     }
   }
 }

@@ -82,6 +82,12 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-campaigns": "0.1.0a71",
     "dotmac-people": "0.1.0a71",
+    # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
+    # plane-selection contract lands in a61, so its row lives in
+    # CAPABILITY_RAISED_FLOORS below rather than here.
+    # Durable timers consumes a67's relay contract, but its own namespace is
+    # allocated later, so the allocation remains the effective floor.
+    "dotmac-durable-timers": "0.1.0a72",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
