@@ -79,7 +79,7 @@
     },
     "dotmac-durable-timers": {
       "declared": "0.1.0a1",
-      "reason": "OUTSTANDING 2026-08-18: this product-first module is being reconciled to its accepted cancellation, source-evidence and stale-rejection contract on the Dotmac Observer before publication. It remains absent from the release allowlist until the exact a72 allocation and PostgreSQL proof revision are green. Delete this row in the release-enrolment change that verifies the exact module artifact.",
+      "reason": "RELEASE SEQUENCED 2026-08-18: the accepted contract, all ten PostgreSQL proofs, their sensitivity companions, full static/unit/architecture/integration validation and the release allowlist are green at exact candidate a3c82cd266141d80fdd0a128e74cc5b276bc04a4. Publication still waits for this revision to reach protected main and for its exact dotmac-kernel 0.1.0a72 allocation artifact to be published and verified first. Delete this row only in the follow-up release-record change after dotmac-durable-timers 0.1.0a1 is registry-verified and tagged; an allowlist row is not publication evidence.",
       "state": "never-published"
     },
     "dotmac-kernel": {

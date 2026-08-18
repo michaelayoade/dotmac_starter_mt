@@ -1,18 +1,37 @@
 # Durable timers — source revalidation
 
-**As of:** 2026-08-17
+**As of:** 2026-08-18
 **Subject:** `dotmac-durable-timers`, ADR-0030 §5 build-order step 6.
 **Authorizing decision:** ADR-0030 §6 — "Where a dossier is incomplete, the
 exception permits completing the audit; it does not turn missing evidence into
 permission to greenfield." ADR-0030 §5 build order places step 6 immediately
 after step 5 (`dotmac-numbering`, landed at starter `0b8d47a`, PR #193).
 
-This document is **source evidence**. It creates no package, model, migration,
-namespace or version. Its `EXTRACTION.toml` content remains drafted inline
-until the active `starter-billing` worktree has settled: that worktree currently
-changes the namespace ledger, kernel package metadata and root lockfile that a
-new stateful package must also change, and those shared allocations must be
-integrated rather than overwritten.
+This document began as **source evidence** and the original audit remains below
+as provenance. The resulting package, model, migration, namespace and version
+now live under `packages/dotmac-durable-timers/`; its checked-in
+`EXTRACTION.toml` is the machine-readable current contract. Candidate revision
+`a3c82cd266141d80fdd0a128e74cc5b276bc04a4` is rebased on the merged campaigns
+foundation and preserves both namespace allocations and root-lock inputs.
+
+## Implementation evidence — 2026-08-18
+
+The implementation and its accepted contract are complete at candidate
+`a3c82cd266141d80fdd0a128e74cc5b276bc04a4`. In a fresh isolated writable
+checkout on the Dotmac Observer, pinned Poetry 2.4.1 regenerated and validated
+the combined lock, `make check` passed, the complete unit/architecture suite
+passed, and the complete PostgreSQL integration suite passed after migrating a
+disposable database. The database, network and container were removed after
+the run.
+
+`tests/test_durable_timers_isolation.py` contains all ten PostgreSQL proofs from
+§11 and one named sensitivity companion for each failure mechanism: concurrent
+first schedule, concurrent reschedule, exclusive relay claims, stale-lease
+recovery, cancel/accept ordering, stale-generation rejection, poison isolation,
+tenant RLS/composite identity, platform revocation/reachability, and dual-plane
+parity/append-only history. This closes the implementation-proof gate; it is not
+adoption evidence. Sub remains the required first adopter, one timer family at
+a time, after kernel a72 and module a1 are published and pinned exactly.
 
 ## Revalidation 2026-08-17 — decision and released prerequisite
 
@@ -898,13 +917,13 @@ string means, it does not belong in the kernel.*
 
 ---
 
-## 10. Draft `EXTRACTION.toml`
+## 10. Original draft `EXTRACTION.toml`
 
-**Draft only until the active billing overlap settles.** This becomes
-`packages/dotmac-durable-timers/EXTRACTION.toml`; it is not merged into the
-kernel dossier. The package is a selectable stateful module and records the
-kernel relay as a reused source and declared prerequisite, not as timer-owned
-behavior.
+This is the audit's original draft, retained as provenance. The reconciled
+contract is now `packages/dotmac-durable-timers/EXTRACTION.toml`; it is not
+merged into the kernel dossier. The package is a selectable stateful module and
+records the kernel relay as a reused source and declared prerequisite, not as
+timer-owned behavior.
 
 ```toml
 schema_version = 1
@@ -1292,13 +1311,15 @@ cross-plane foreign key.
 1. **Placement and prerequisite gates are met.** ADR-0017/0030 select the
    module, P11 is met, and released kernel `0.1.0a67` publishes the structurally
    verified `outbox_relay.v1` prerequisite.
-2. **Integrate after the active billing allocation settles.** Do not allocate
-   the timer namespace or edit shared kernel metadata/root lock state on top of
-   the active `starter-billing` worktree's uncommitted versions of those files.
-3. **Land the ten proofs first.** Neither source contributes a real-database
-   timer test; Sub's suite runs where the lock does not exist. This matrix is the
-   capability's entire correctness evidence base, not an addition to an
-   inherited one.
+2. **Shared-state integration is complete at the candidate.** The timer
+   namespace, kernel metadata and root lock were rebased over the merged
+   campaigns allocation and regenerated with pinned Poetry 2.4.1 rather than
+   overwriting either owner.
+3. **The ten proofs landed first and are green.** Neither source contributes a
+   real-database timer test; Sub's suite runs where the lock does not exist.
+   The complete matrix and its sensitivity companions passed on Observer at
+   exact candidate `a3c82cd266141d80fdd0a128e74cc5b276bc04a4` before any caller
+   was touched.
 4. **Reuse the claiming engine; do not rewrite it.** The module schedules by
    writing a kernel outbox row with `available_at = due_at`. Any module claim
    function, timer due scan or timer dispatcher role is a boundary violation.
