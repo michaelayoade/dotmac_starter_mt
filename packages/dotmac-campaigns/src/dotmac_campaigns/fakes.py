@@ -76,7 +76,7 @@ class FakeTimerPort(TimerPort):
             int
         )
         self._current: dict[tuple[UUID, TimerIdentity], ScheduledTimer] = {}
-        self._cancelled: set[tuple[UUID, TimerIdentity, int]] = set()
+        self._cancelled: set[tuple[UUID, UUID, int]] = set()
         self._accepted: set[tuple[UUID, UUID, int]] = set()
 
     def schedule(

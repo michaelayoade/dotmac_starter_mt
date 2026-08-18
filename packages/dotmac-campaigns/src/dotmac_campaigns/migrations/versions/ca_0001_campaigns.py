@@ -13,6 +13,8 @@ privacy-scrub transition.
 
 from __future__ import annotations
 
+from typing import Any
+
 import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
@@ -35,7 +37,7 @@ depends_on = resolve_depends_on(REQUIRES)
 _SCHEMA = "mod_campaigns"
 
 
-def _identity(name: str) -> tuple[sa.Column[object], ...]:
+def _identity(name: str) -> tuple[sa.Column[Any], ...]:
     return (
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
@@ -54,8 +56,8 @@ def _tenant_constraints(name: str) -> tuple[sa.Constraint, ...]:
     )
 
 
-def _timestamps(*, updated: bool = False) -> tuple[sa.Column[object], ...]:
-    columns: list[sa.Column[object]] = [
+def _timestamps(*, updated: bool = False) -> tuple[sa.Column[Any], ...]:
+    columns: list[sa.Column[Any]] = [
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

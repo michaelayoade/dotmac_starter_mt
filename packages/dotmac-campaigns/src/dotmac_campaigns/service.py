@@ -489,9 +489,9 @@ def ingest_audience(
     )
     return AudienceIngestionResult(
         audience_id=UUID(str(outcome.result["audience_id"])),
-        created=int(outcome.result["created"]),
-        eligible=int(outcome.result["eligible"]),
-        suppressed=int(outcome.result["suppressed"]),
+        created=int(str(outcome.result["created"])),
+        eligible=int(str(outcome.result["eligible"])),
+        suppressed=int(str(outcome.result["suppressed"])),
         replayed=outcome.replayed,
     )
 
@@ -970,14 +970,16 @@ def authorize_delivery(
             CampaignRecipientStep.id == intent.recipient_step_id,
         )
     )
+    if step is None:
+        raise DeliveryIntentNotFound("delivery intent lost its recipient evidence")
     recipient = db.scalar(
         select(CampaignRecipient).where(
             CampaignRecipient.tenant_id == tenant_id,
-            CampaignRecipient.id == step.recipient_id if step is not None else False,
+            CampaignRecipient.id == step.recipient_id,
         )
     )
     campaign = _campaign(db, tenant_id, intent.campaign_id, lock=True)
-    if step is None or recipient is None:
+    if recipient is None:
         raise DeliveryIntentNotFound("delivery intent lost its recipient evidence")
     forced_reason = (
         "campaign_cancelled"
