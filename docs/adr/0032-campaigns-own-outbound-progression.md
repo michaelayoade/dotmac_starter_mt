@@ -101,6 +101,14 @@ one transaction under legacy-table write locks. A pre-produced report is only a
 rehearsal. No permanent shadow writer, mirrored recipient ledger, or fallback
 scan survives.
 
+The 2026-08-18 current-head adoption recheck found a prerequisite before that
+switch. Sub pins kernel `a50`, does not yet compose the kernel lineage, and its
+platform-adoption ledger classifies consent, idempotency and outbox as S7+
+ownership collisions. Campaigns consumes those kernel owners directly, so
+neither product adapters to the legacy stores nor parallel kernel tables are an
+admissible bridge. Sub must complete those recorded cutovers and compose the
+exact released kernel before campaigns can be allowlisted or released.
+
 ## Consequences
 
 - The package can be built and validated before adoption, but its dossier stays
@@ -114,6 +122,10 @@ scan survives.
 - Durable Timers is a release/adoption prerequisite for due-work activation.
   Campaigns remains independently installable because it depends on the port,
   not the sibling package.
+- Sub's kernel S7 consent/idempotency/outbox disposition and real-lineage
+  composition precede the campaigns release. This keeps the product-first order
+  without installing a second execution or delivery owner beside Sub's current
+  stores.
 
 ## Alternatives rejected
 

@@ -3,6 +3,7 @@
 - **As of:** 2026-08-18
 - **Starter:** `c6ef6cd7b13105bd95c3faf354ffee9032077625`
 - **Sub:** `510b80ca7fab4f54a57f261872f94b5e972c8eb6`
+- **Sub adoption head recheck:** `0d27ab91181fbc2717731bef28e21578f3442cc4`
 - **CRM:** `60daaa2dd305696636632f48505ab784110a55d2`
 - **dotmac_mkt:** `1a185b9f9d3ee102255bd57ce4bc62a587c08552`
 - **Backoffice:** `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d`
@@ -12,6 +13,11 @@
   was refreshed successfully; its current default-branch commit is the pin
   above. ERP was inspected from its pinned Git tree because its checkout had
   unrelated local changes; no working-tree content was used as evidence.
+- **Adoption recheck:** the current Sub `origin/dev` campaign model, service,
+  task and parity-test paths have no changes from the qualifying Sub pin above.
+  Its current `docs/PLATFORM_ADOPTION_LEDGER.md`, executable owner registry and
+  kernel rehearsal were inspected separately because adoption readiness is a
+  different claim from source qualification.
 - **Decision:** product-first from Sub. CRM supplies parity and negative
   evidence. dotmac_mkt supplies media requirements only. ERP and Backoffice
   have no campaign owner; Backoffice is the independent reuse proof, not a
@@ -214,6 +220,32 @@ greenfield source or adding ERP as an adopter for this slice.
 | `dotmac-template-studio` | Exact published template revisions are immutable. A renderer adapter returns rendered content plus revision/fingerprint for a bounded delivery snapshot. No module import. |
 | `dotmac-durable-timers` candidate branch | Owns timer generation, supersession/cancellation, current-trigger acceptance, history retention and delayed outbox relay. Campaigns has no scan loop or due-work ledger and no sibling import. |
 
+## Sub adoption prerequisite discovered by the current-head recheck
+
+Sub cannot install the module merely by adding a package pin. Its authoritative
+platform-adoption ledger currently pins `dotmac-kernel==0.1.0a50`, deliberately
+does not compose the kernel migration lineage, and proves that lineage still
+stops at revision `0001` pending per-table collision disposition. The same
+ledger classifies the three persisted owners campaigns consumes as unresolved
+S7+ cutovers:
+
+- `dotmac_kernel.consent` collides with Sub's mature
+  `communication_suppressions` table and `communications.eligibility` writer;
+- kernel idempotency would sit beside Sub's `IdempotencyKey`/`TaskExecution`
+  owners; and
+- kernel tenant/platform outbox tables and relays would sit beside Sub's
+  `events.store`, communication-intent and integration owners.
+
+Those are source-of-truth collisions, not dependency-resolution details. A Sub
+adapter that redirected campaigns to the legacy stores would contradict the
+required kernel owners; installing the kernel tables beside them would create
+parallel writers. The module therefore remains buildable and independently
+validated, but stays unallowlisted and unreleased until Sub completes the
+existing S7 disposition/cutover work, composes the exact released kernel
+lineage and proves the superseded local writers are retired. This gate precedes
+the Durable Timers and campaigns authority cutovers; it does not demote Sub as
+the qualifying source or permit Backoffice to go first.
+
 ## Contract and invariant map
 
 | Required property | Module evidence |
@@ -235,19 +267,22 @@ greenfield source or adding ERP as an adopter for this slice.
 
 ### Sub — cutover 1
 
-1. Compose `mod_campaigns` and backfill campaigns, revisions, steps, immutable
+1. Complete Sub's checked-in kernel S7 adoption gates for tenant scope,
+   consent, idempotency and outbox, including per-table collision disposition,
+   real-lineage rehearsal, exact kernel pin and local-owner retirement evidence.
+2. Compose `mod_campaigns` and backfill campaigns, revisions, steps, immutable
    recipient snapshots and delivery facts with source ids/fingerprints.
-2. Shadow every eligible audience and due step through the module while the
+3. Shadow every eligible audience and due step through the module while the
    legacy service remains the only writer. Compare campaign/recipient/step
    identity, eligibility/suppression decisions, sender snapshot, window result,
    delivery intent and terminal observation. Provider ids are excluded from
    domain equality and retained as provenance only.
-3. Rehearse drift until zero unexplained mismatches, then seal authority using
+4. Rehearse drift until zero unexplained mismatches, then seal authority using
    ADR-0031's same-transaction observation/verification/switch protocol while
    legacy tables are write-locked.
-4. Route commands and reads to the module. Delete the scan task and local
+5. Route commands and reads to the module. Delete the scan task and local
    campaign writer; archive/drop legacy tables only after rollback expiry.
-5. A two-directional caller/table ratchet must reach zero. No mirrored recipient
+6. A two-directional caller/table ratchet must reach zero. No mirrored recipient
    ledger or dual writer survives the cutover.
 
 ### Backoffice — cutover 2
@@ -275,8 +310,10 @@ references; there is no shared database, import or campaign-id adoption.
 ## Audit conclusion
 
 The extraction is authorized as a tenant-only optional module with Sub as the
-mandatory code/test base. The unresolved items are execution dependencies, not
-boundary questions: publish/adopt Durable Timers before Sub enables due-work,
-implement the module canaries first, complete Sub's sealed cutover, then prove
-independent reuse in Backoffice. Until Sub retires its writer the package may be
-built and tested but must not claim `adopted` or become a second authority.
+mandatory code/test base. The module and its canaries are implemented and
+validated, but publication is blocked by authoritative adoption dependencies:
+complete Sub's kernel S7 consent/idempotency/outbox cutovers and lineage
+composition first, then publish/adopt Durable Timers before due-work, seal the
+Sub campaigns cutover, and only then prove independent reuse in Backoffice.
+Until those owners and Sub's local campaign writer are retired the package may
+be built and tested but must not claim `adopted` or become a second authority.
