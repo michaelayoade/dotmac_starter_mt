@@ -19,7 +19,7 @@ the TestClient helper, which is building a real app anyway, pays that cost.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -44,7 +44,7 @@ def _module_schemas() -> tuple[str, ...]:
     return tuple(sorted({t.schema for t in Base.metadata.tables.values() if t.schema}))
 
 
-def create_test_engine() -> Engine:
+def create_test_engine(*, module_schemas: Iterable[str] | None = None) -> Engine:
     """A fresh in-memory SQLite engine with the full `Base.metadata` schema
     created. `check_same_thread=False` because a TestClient runs sync route
     dependencies on a worker thread while the test holds one connection —
@@ -61,13 +61,29 @@ def create_test_engine() -> Engine:
     would make the unit lane exercise UNQUALIFIED SQL that no deployment ever
     runs, quietly hiding exactly the qualification defects D1's gate exists to
     catch. Attaching keeps the emitted SQL identical to production's.
+
+    A large test process may import models from more independently installable
+    packages than its test assembly composes. SQLite permits only ten attached
+    databases, so such an assembly passes its own module schema set explicitly.
+    Tables in unrelated imported schemas are then excluded from `create_all`;
+    the metadata remains qualified and unchanged. Omitting `module_schemas`
+    preserves the convenient all-imported-models behavior for smaller tests.
     """
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         future=True,
         connect_args={"check_same_thread": False},
     )
-    schemas = _module_schemas()
+    loaded_schemas = _module_schemas()
+    schemas = (
+        loaded_schemas if module_schemas is None else tuple(sorted(set(module_schemas)))
+    )
+    unknown = set(schemas) - set(loaded_schemas)
+    if unknown:
+        raise ValueError(
+            "module_schemas contains schemas absent from Base.metadata: "
+            f"{sorted(unknown)}"
+        )
     if schemas:
 
         @event.listens_for(engine, "connect")
@@ -82,7 +98,12 @@ def create_test_engine() -> Engine:
             finally:
                 cursor.close()
 
-    Base.metadata.create_all(engine)
+    tables = [
+        table
+        for table in Base.metadata.tables.values()
+        if table.schema is None or table.schema in schemas
+    ]
+    Base.metadata.create_all(engine, tables=tables)
     return engine
 
 
