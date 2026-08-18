@@ -42,7 +42,7 @@ def test_engine_scales_past_sqlites_ten_attached_namespace_limit() -> None:
     existing = {table.schema for table in Base.metadata.tables.values() if table.schema}
     probe_tables = [
         sa.Table(
-            f"sqlite_namespace_capacity_probe_{index}",
+            f"namespace_capacity_probe_{index}",
             Base.metadata,
             sa.Column("id", sa.Integer, primary_key=True),
             schema=f"mod_capacityprobe{index}",
