@@ -1,9 +1,10 @@
 """Measure the fleet duplication baseline the decomposition matrix freezes.
 
 `docs/inventories/fleet-decomposition-matrix.md` claims, per capability family,
-how many persisted tables each source monolith owns and how many table NAMES are
-implemented in more than one of them. Those numbers are the programme's only
-countable duplication signal, so they are measured here rather than eyeballed.
+how many persisted tables each source application owns and how many table NAMES
+are implemented in more than one of them. Those numbers are the programme's
+only countable duplication signal, so they are measured here rather than
+eyeballed.
 
 Two deliberate choices, both learned from `restatement_sweep.py`:
 
@@ -33,24 +34,25 @@ import sys
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASELINE = PROJECT_ROOT / "docs" / "inventories" / "fleet-decomposition-baseline.json"
 
-# Repo -> the subtree its persisted models live under. The three source
-# monoliths follow the same `app/models/` convention; the vendor control plane
-# is a thin assembly whose models sit beside their feature, so the path is
+# Repo -> the subtree its persisted models live under. The four source
+# applications follow the same `app/models/` convention; the vendor control
+# plane is a thin assembly whose models sit beside its feature, so the path is
 # per-repo rather than assumed.
 MODEL_ROOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dotmac_erp", ("app", "models")),
     ("dotmac_crm", ("app", "models")),
     ("dotmac_sub", ("app", "models")),
+    ("dotmac_mkt", ("app", "models")),
     ("dotmac_vendor_control_plane", ("src", "vendor_cp")),
 )
 
 REPOS = tuple(repo for repo, _ in MODEL_ROOTS)
 
-# The three being decomposed. The vendor control plane is measured for a
-# different reason — see the matrix § "The fourth repository is not a fourth
-# monolith" — so anything that reasons about "the monoliths" must say so
-# explicitly rather than meaning "everything in REPOS".
-SOURCE_MONOLITHS = ("dotmac_erp", "dotmac_crm", "dotmac_sub")
+# The four being decomposed. The vendor control plane is measured for a
+# different reason — see the matrix § "The fifth measured repository is not a
+# fifth source application" — so anything that reasons about source products
+# must say so explicitly rather than meaning "everything in REPOS".
+SOURCE_MONOLITHS = ("dotmac_erp", "dotmac_crm", "dotmac_sub", "dotmac_mkt")
 
 # Ordered: first match wins, so platform invariants claim their tables before a
 # broader domain pattern can. A family here is a MEASUREMENT bucket for the
@@ -102,12 +104,21 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         r"crm_social|crm_pipeline|automation_rule|pipelines$|"
         r"pipeline_stages|conversation|agent_|presence|macro|messages$)",
     ),
+    ("campaigns-marketing", r"^(campaign|crm_campaign)"),
     (
         "notifications-comms",
         r"^(notification|notifications$|comms_|communication|"
-        r"campaign|crm_campaign|survey|email_|sms_|push_|"
+        r"survey|email_|sms_|push_|"
         r"admin_alerts$|alert_notification|portal_messages|message_template|"
         r"module_email_routing|.*_notifications$|.*_notification_.*)",
+    ),
+    (
+        "content-publishing",
+        r"^(assets$|channels$|posts$|post_deliveries$)",
+    ),
+    (
+        "marketing-observations",
+        r"^(channel_metrics$|ad_campaigns$|ad_groups$|ads$|ad_metrics$)",
     ),
     (
         "ticketing-sla",
@@ -152,6 +163,7 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         "billing-revenue",
         r"^(invoice|payment|billing_|autopay|collection|credit_|refund|"
         r"subledger|dunning|policy_(sets|dunning)|prepaid_|topup|"
+        r"products?$|prices?$|coupons?$|discounts?$|"
         r"enforcement_lock|compensation_failure|financial_access|"
         r"splynx_billing|cutover_balance|consolidated_(credit|payment)|"
         r"customer_(payment|posting|position|subledger|tax)|"
@@ -230,7 +242,7 @@ FAMILIES: tuple[tuple[str, str], ...] = (
     ("forms-data-capture", r"^form($|_)"),
     (
         "content-help",
-        r"^(admin_whats_new|help_|attachment|stored_files|avatar|public_media|"
+        r"^(admin_whats_new|help_|attachment|file_uploads|stored_files|avatar|public_media|"
         r".*_attachments?$|.*_comments?$)",
     ),
     ("branding-templates", r"^(brand|template_|document_template|.*_templates$)"),
@@ -243,7 +255,9 @@ _COMPILED = tuple((name, re.compile(pattern)) for name, pattern in FAMILIES)
 # `crm_conversations` and Sub's `inbox_conversations` are the same thing built
 # twice. Exact-name collisions alone therefore UNDERCOUNT the duplication, which
 # is the failure mode this second measure exists to close.
-_NAMESPACE_PREFIX = re.compile(r"^(crm_|team_inbox_|inbox_|support_|erp_|sub_|dotmac_)")
+_NAMESPACE_PREFIX = re.compile(
+    r"^(crm_|team_inbox_|inbox_|support_|erp_|sub_|mkt_|dotmac_)"
+)
 
 
 def denamespace(table: str) -> str:

@@ -1,7 +1,7 @@
 # Fact-level ownership — declarations, and a reachability heuristic over them
 
 **Status:** declaration counts are measured; **ownership conclusions are not**.
-**As of:** 2026-08-12 · **ERP** `0f4b1698` · **CRM** `c64b5aa0` · **Sub** `9f6f9f36`
+**As of:** 2026-08-18 Mkt addendum · **ERP** `0f4b1698` · **CRM** `c64b5aa0` · **Sub** `9f6f9f36` · **Mkt** `1a185b47`
 **Measured by:** `scripts/fleet_fact_registry.py` (`make fleet-facts`)
 **Registry:** [`fleet-fact-registry.json`](fleet-fact-registry.json) — carries its own
 provenance block (date, revisions, detector schema version, normalization rules,
@@ -18,8 +18,8 @@ The unit is the one the source-of-truth standard uses: a business fact or state
 transition with exactly one named authoritative writer. Sub declares these
 directly — `app/services/sot_registry/` names 426 services, the module
 implementing each, and the facts each `owns`, validated by Sub's own registry
-tests. ERP has a smaller `sot_relationships.py` of the same shape. CRM has
-neither.
+tests. ERP has a smaller `sot_relationships.py` of the same shape. CRM and Mkt
+have neither.
 
 Extracting those declarations is sound. Relating them to tables is not, yet:
 
@@ -42,39 +42,39 @@ no declared owner". That claim exceeded the detector and is withdrawn.
 
 ## Declaration counts — measured
 
-| | Sub | ERP | CRM |
-|---|---:|---:|---:|
-| Declared domains | 30 | 9 | 0 |
-| Declared services | 426 | 25 | 0 |
-| **Declared facts** | **1,392** | **41** | **0** |
-| Tables | 576 | 397 | 218 |
+| | Sub | ERP | CRM | Mkt |
+|---|---:|---:|---:|---:|
+| Declared domains | 30 | 9 | 0 | 0 |
+| Declared services | 426 | 25 | 0 | 0 |
+| **Declared facts** | **1,392** | **41** | **0** | **0** |
+| Tables | 576 | 397 | 218 | 39 |
 
 1,433 facts are declared fleet-wide and **97% of them are Sub's**. ERP's registry
 is a Phase-0 seed covering tenancy, identity, configuration, audit, GL, platform
 events, licensing and sync; it does not reach finance detail, HR, payroll,
-inventory or assets. CRM declares nothing.
+inventory or assets. CRM and Mkt declare nothing.
 
 That asymmetry is the finding. Fact-level decomposition is largely authored for
-Sub, barely started for ERP, and absent for CRM.
+Sub, barely started for ERP, and absent for CRM and Mkt.
 
 ## Direct-import reachability — detected, not proven
 
-| | Sub | ERP | CRM |
-|---|---:|---:|---:|
-| Tables with a direct import edge from a declared service | 428 | 52 | 0 |
-| Tables with **no detected edge** | 148 | 345 | 218 |
+| | Sub | ERP | CRM | Mkt |
+|---|---:|---:|---:|---:|
+| Tables with a direct import edge from a declared service | 428 | 52 | 0 | 0 |
+| Tables with **no detected edge** | 148 | 345 | 218 | 39 |
 
-711 tables fleet-wide have no detected edge. Read that as **a detection gap, not
+750 tables fleet-wide have no detected edge. Read that as **a detection gap, not
 an ownership gap** — it is the set to look at, sized, and nothing more.
 
 ## The triage queue
 
-Of the 125 exactly duplicated table names, **28 have no detected direct import
+Of the 130 exactly duplicated table names, **29 have no detected direct import
 edge from any declared service in any product**. That is a screening result, and
-these 28 are a **high-priority manual triage list** — not a proven set of
+these 29 are a **high-priority manual triage list** — not a proven set of
 unowned facts.
 
-| Family | Tables (CRM ↔ Sub in every case) |
+| Family | Tables (CRM ↔ Sub except where noted) |
 |---|---|
 | field-workforce (9) | `availability_blocks`, `eta_updates`, `field_map_asset_location_provenance`, `field_tech_location_pings`, `installation_project_notes`, `shifts`, `skills`, `technician_skills`, `work_links` |
 | outside-plant (6) | `buildout_milestones`, `buildout_requests`, `buildout_updates`, `olt_power_units`, `olt_sfp_modules`, `wireless_masts` |
@@ -85,6 +85,7 @@ unowned facts.
 | analytics-reporting (1) | `kpi_aggregates` |
 | settings (1) | `kpi_configs` |
 | integration-external (1) | `external_references` |
+| subscriber-service (1) | `usage_records` — Mkt's inherited billing copy collides with Sub and must retire, not acquire a second owner |
 
 Triage asks one question per row: **does a declared fact already govern this
 state, reached indirectly — or is there genuinely no owner?** Only the second
@@ -123,6 +124,28 @@ Sizing the classes, honestly:
 
 **Which of the ≤72 are extraction sources is not measured here and must be
 adjudicated.** Table exclusivity is a candidate signal, not a classification.
+
+## Mkt's zero is extraction debt plus inherited retirement debt
+
+Mkt declares zero facts, services or domains across 39 class-mapped tables. Its
+zero is **not uniformly intentional** either, but the split differs from CRM:
+
+- Eleven class-mapped marketing tables are `extraction_source` candidates. The
+  product-first audit selected content, publishing, media observations and web
+  analytics behavior from Mkt, while selecting campaigns from Sub. The three
+  SQLAlchemy association tables omitted by this detector are still part of that
+  source audit.
+- Twenty-eight tables are inherited Starter/platform, billing, file, task and
+  notification state. They are `retirement_source` inputs, not marketing owners;
+  18 of Mkt's 39 class tables exactly duplicate another product.
+- Provider credentials, OAuth, SDK calls and checkpoints are transport and move
+  to Integrator connector plugins; product-side outcomes become typed
+  observations/projections.
+
+Ownership characterization is a prerequisite for porting every selected Mkt
+slice. The exact source and rejection map is
+[`marketing-suite-sources.md`](marketing-suite-sources.md); the fact detector
+does not promote table names into owners.
 
 ## The target: explicit product-side linkage
 

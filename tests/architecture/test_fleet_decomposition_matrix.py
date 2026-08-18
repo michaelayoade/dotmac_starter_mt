@@ -5,10 +5,10 @@ artifact, not a one-off memo. Two things rot first: the frozen duplication
 baseline drifts away from the prose that quotes it, and the required columns
 quietly disappear until the table is a list of opinions.
 
-This test deliberately does NOT re-measure the fleet. ERP, CRM and Sub are not
-present in this repository's CI, and a re-measuring test would either fail
-everywhere or — far worse — score three absent repositories as zero duplication
-and report the programme complete. `scripts/fleet_decomposition_sweep.py` owns
+This test deliberately does NOT re-measure the fleet. ERP, CRM, Sub and Mkt are
+not present in this repository's CI, and a re-measuring test would either fail
+everywhere or — far worse — score absent repositories as zero duplication and
+report the programme complete. `scripts/fleet_decomposition_sweep.py` owns
 measurement and refuses that reading explicitly; this file owns doc↔baseline
 agreement.
 """
@@ -24,11 +24,17 @@ BASELINE = INVENTORIES / "fleet-decomposition-baseline.json"
 VISION = PROJECT_ROOT / "docs" / "PRODUCT_VISION.md"
 
 # Column order in the doc's family table. The vendor control plane is measured
-# for a different reason than the three it follows — it is a consumer assembly,
-# not a monolith being decomposed — so the two sets are named separately and
-# nothing here may quietly mean "all four" when it means "the monoliths".
-REPOS = ("dotmac_erp", "dotmac_crm", "dotmac_sub", "dotmac_vendor_control_plane")
-SOURCE_MONOLITHS = ("dotmac_erp", "dotmac_crm", "dotmac_sub")
+# for a different reason than the four source applications — it is a consumer
+# assembly, not an application being decomposed — so the two sets are named
+# separately.
+REPOS = (
+    "dotmac_erp",
+    "dotmac_crm",
+    "dotmac_sub",
+    "dotmac_mkt",
+    "dotmac_vendor_control_plane",
+)
+SOURCE_MONOLITHS = ("dotmac_erp", "dotmac_crm", "dotmac_sub", "dotmac_mkt")
 
 # The columns PRODUCT_VISION § 2 requires the matrix to record.
 REQUIRED_COLUMNS = (
@@ -186,7 +192,8 @@ def test_integrator_deployment_does_not_create_a_code_destination() -> None:
     """The engine is a Starter module; the independent repo only runs it."""
     source = MATRIX.read_text()
     match = re.search(
-        r"^\|\s*integration-external\s*\|(?:\s*\d+\s*\|){6}([^|]*)\|\s*$",
+        r"^\|\s*integration-external\s*\|(?:\s*\d+\s*\|){%d}([^|]*)\|\s*$"
+        % (len(REPOS) + 2),
         source,
         re.MULTILINE,
     )
@@ -258,16 +265,16 @@ def test_baseline_covers_every_measured_repository() -> None:
     assert set(SOURCE_MONOLITHS) <= set(baseline["repos_measured"])
 
 
-def test_the_fourth_repository_is_not_presented_as_a_fourth_monolith() -> None:
+def test_the_fifth_repository_is_not_presented_as_a_source_application() -> None:
     """The vendor CP is a consumer assembly; the matrix must say so.
 
     Adding a column is the easy half. The failure mode is a reader taking the
-    fourth column to mean "a fourth monolith to de-duplicate", which would make
+    vendor column to mean "another monolith to de-duplicate", which would make
     its 22 tables look like debt to retire rather than a build-once source and a
     set of capabilities nothing in the fleet implements.
     """
     normalized = " ".join(MATRIX.read_text().lower().split())
-    assert "not a fourth monolith" in normalized
+    assert "not a fifth source application" in normalized
     assert "consumer" in normalized
 
 
@@ -294,15 +301,15 @@ def test_capability_gaps_are_recorded_separately_from_measured_families() -> Non
 def test_family_row_detector_is_sensitive() -> None:
     """A wrong number in the doc must fail, not be skipped as an unparsed row."""
     parsed = _family_rows(
-        "| ticketing-sla | 6 | 17 | 22 | 0 | 10 | 6 | module |\n"
-        "| projects-tasks | 10 | 11 | 11 | 0 | 10 | 0 | module candidate |\n"
-        "| not-a-row | many | 17 | 22 | 0 | 10 | 6 | module |\n"
-        # A row that still carries the pre-vendor column count is stale, not a
+        "| ticketing-sla | 6 | 17 | 22 | 0 | 0 | 10 | 6 | module |\n"
+        "| projects-tasks | 10 | 11 | 11 | 1 | 0 | 10 | 0 | module candidate |\n"
+        "| not-a-row | many | 17 | 22 | 0 | 0 | 10 | 6 | module |\n"
+        # A row that still carries the pre-Mkt column count is stale, not a
         # row with a missing number, and must not parse as if it were current.
-        "| stale-shape | 6 | 17 | 22 | 10 | 6 | module |\n"
+        "| stale-shape | 6 | 17 | 22 | 0 | 10 | 6 | module |\n"
     )
 
     assert parsed == {
-        "ticketing-sla": (6, 17, 22, 0, 10, 6),
-        "projects-tasks": (10, 11, 11, 0, 10, 0),
+        "ticketing-sla": (6, 17, 22, 0, 0, 10, 6),
+        "projects-tasks": (10, 11, 11, 1, 0, 10, 0),
     }
