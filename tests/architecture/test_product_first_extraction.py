@@ -164,6 +164,12 @@ def _required_slice_names(directory_name: str) -> set[str]:
     # the dossier says about it.
     if dotmac_ui.PUBLISHED_COMPONENT_CLASSES:
         required.add("components")
+    # MAP_FRAME is its own evidence slice: the empty-state component already
+    # has two released consumers while this contract intentionally has none.
+    # Treating both as one row would let the mature component hide the new
+    # contract's weaker evidence level.
+    if dotmac_ui.MAP_FRAME in dotmac_ui.COMPONENTS:
+        required.add("map-frame")
     return required
 
 
@@ -887,6 +893,27 @@ def test_deleting_a_slice_cannot_restore_a_stronger_headline() -> None:
 
     dossier = _ui_dossier()
     dossier["slices"] = [s for s in dossier["slices"] if s["name"] != "components"]
+    dossier["status"] = "reuse-proven"
+
+    with pytest.raises(ExtractionDossierError, match="no slice"):
+        _validate_ui(dossier)
+
+
+def test_deleting_the_map_frame_slice_cannot_overstate_the_package() -> None:
+    """Sensitivity proof for the new audit-complete contract.
+
+    Without a live-surface binding, deleting only the weakest row and changing
+    the headline back to reuse-proven would validate, even though MAP_FRAME is
+    still published by the package.
+    """
+    import dotmac_ui
+
+    assert dotmac_ui.MAP_FRAME in dotmac_ui.COMPONENTS
+
+    dossier = _ui_dossier()
+    dossier["slices"] = [
+        entry for entry in dossier["slices"] if entry["name"] != "map-frame"
+    ]
     dossier["status"] = "reuse-proven"
 
     with pytest.raises(ExtractionDossierError, match="no slice"):

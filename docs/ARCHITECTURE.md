@@ -880,10 +880,15 @@ Tokens are named by ROLE (`--dmui-surface-primary`,
 because Tailwind v4's `@theme` emits unprefixed `--color-*`/`--font-*` into the
 same `:root`. Dark values are emitted under both `.dark` (what this portal's
 Alpine store already toggles) and `[data-dmui-theme="dark"]`. The published
-component slice currently contains `empty_state`; every emitted `.dmui-*`
-class is derived from its typed component contract. ADR-0006 § 5 still forbids
-adding a component because markup merely looks similar, and a guard fails the
-build if a selector appears without a declaration. Full contract:
+component surface contains the reuse-proven `empty_state` and the
+audit-complete, deliberately unadopted `map_frame`; every emitted `.dmui-*`
+class is derived from its typed component contract. `map_frame` owns only an
+accessible canvas frame and generic ready/loading/empty/error presentation.
+Provider runtime, tiles, viewport, endpoints, polling, layers, fallback lists
+and domain vocabulary remain host-owned, as recorded in
+`docs/inventories/map-ui-sources.md`. ADR-0006 § 5 still forbids adding a
+component because markup merely looks similar, and a guard fails the build if a
+selector appears without a declaration. Full contract:
 `packages/dotmac-ui/COMPATIBILITY.md`.
 
 The first product-facing cutover is the shared document canvas, tenant login,
@@ -1307,6 +1312,7 @@ write:
 | Notification channel-policy setting | Same canonical `DomainSetting` writers as above; `dotmac_kernel.channel_policy.resolve_channels` is the typed reader and the legacy per-event shadow setting is not supported |
 | `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, whose resolved colour fields are projected by `app.features.presentation.service.project_brand_stylesheet` through `dotmac_ui.render_brand_css`. Template Studio is not an owner or writer |
 | Runtime brand stylesheet projection | `app.features.presentation.service.project_brand_stylesheet` is the sole composer: kernel-resolved brand data in, public `dotmac_ui` generator out. `web.py` only guards scope and applies response policy; templates only link the route. No stored CSS, parallel renderer, or Template Studio writer exists |
+| Reusable map-frame presentation | `dotmac_ui.components.MAP_FRAME` owns only the inert canvas/state markup, token-native CSS and accessibility contract. A composing product owns the state transition and every provider, tile, viewport, endpoint, poll, location datum, layer, popup, control, fallback and domain decision. The contract is audit-complete with zero product adopters; no product-local owner is retired yet. |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
 | Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |

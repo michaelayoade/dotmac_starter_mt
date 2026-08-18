@@ -247,6 +247,113 @@ def test_the_product_specific_seam_guard_still_bites() -> None:
         _assert_empty_state_has_no_product_specific_seams("{{ icon | safe }}")
 
 
+def test_map_frame_publishes_only_presentation_inputs() -> None:
+    """The host owns map data, runtime, provider, viewport and domain policy."""
+    assert dotmac_ui.MAP_FRAME.parameters == (
+        "canvas_id",
+        "label",
+        "state",
+        "status_title",
+        "status_message",
+    )
+
+
+@pytest.mark.parametrize("state", ["ready", "loading", "empty", "error"])
+def test_map_frame_renders_the_generic_view_state(state: str) -> None:
+    rendered = _render(
+        dotmac_ui.MAP_FRAME,
+        canvas_id="operations-map",
+        label="Operations map",
+        state=state,
+        status_title="Map status",
+        status_message="The host supplied this message.",
+    )
+
+    assert 'id="operations-map"' in rendered
+    assert 'aria-label="Operations map"' in rendered
+    assert f"dmui-map-frame--{state}" in rendered
+    assert f'aria-busy="{str(state == "loading").lower()}"' in rendered
+    assert "Map status" in rendered
+    assert "The host supplied this message." in rendered
+    assert 'role="status"' in rendered
+    assert 'aria-live="polite"' in rendered
+
+
+def test_map_frame_does_not_invent_a_duplicate_canvas_id() -> None:
+    rendered = _render(dotmac_ui.MAP_FRAME)
+
+    assert 'class="dmui-map-frame__canvas"' in rendered
+    assert 'id="' not in rendered
+    assert 'aria-label="Map"' in rendered
+
+
+def test_map_frame_fails_an_unknown_view_state_closed() -> None:
+    rendered = _render(dotmac_ui.MAP_FRAME, state="tracking-technician")
+
+    assert "dmui-map-frame--error" in rendered
+    assert "tracking-technician" not in rendered
+
+
+def _assert_map_frame_has_no_product_or_provider_policy(source: str) -> None:
+    """A presentation primitive must not become a hidden map engine."""
+    markup = re.sub(r"{#.*?#}", "", source, flags=re.DOTALL).lower()
+    forbidden = {
+        "map provider": r"\b(?:leaflet|mapbox|google maps|openstreetmap)\b",
+        "remote or product asset": r"(?:https?://|[\"']/static/)",
+        "network/data owner": r"\b(?:fetch|xmlhttprequest|websocket)\s*\(",
+        "polling policy": r"\b(?:setinterval|settimeout)\s*\(",
+        "location data shape": r"\b(?:latitude|longitude|latlng|geojson)\b",
+        "product vocabulary": (
+            r"\b(?:technician|vehicle|subscriber|work order|geofence|fleet)\b"
+        ),
+        "hard-coded coordinates": r"\[\s*-?\d{1,3}\.\d+\s*,\s*-?\d{1,3}\.\d+\s*\]",
+        "inline sizing or palette": r"\bstyle\s*=",
+    }
+    found = [name for name, pattern in forbidden.items() if re.search(pattern, markup)]
+    assert not found, f"map_frame carries product/provider policy: {found}"
+
+
+def test_map_frame_has_no_product_or_provider_policy() -> None:
+    source = (dotmac_ui.template_dir() / dotmac_ui.MAP_FRAME.template).read_text(
+        encoding="utf-8"
+    )
+    _assert_map_frame_has_no_product_or_provider_policy(source)
+
+
+def test_the_map_policy_guard_still_bites() -> None:
+    """Sensitivity proof: a convenient provider default must fail the gate."""
+    with pytest.raises(AssertionError, match="map provider"):
+        _assert_map_frame_has_no_product_or_provider_policy(
+            "<script>Leaflet.map('map')</script>"
+        )
+
+
+def test_map_frame_size_is_a_host_override_not_a_product_assumption() -> None:
+    css = dotmac_ui.stylesheet_path().read_text(encoding="utf-8")
+
+    size = dotmac_ui.token("map-frame-min-block-size")
+    assert size.value == "24rem"
+    assert "min-block-size: var(--dmui-map-frame-min-block-size);" in css
+    assert "height: 500px" not in css
+    assert "height: 66vh" not in css
+
+
+@pytest.mark.parametrize(
+    ("intent", "state"),
+    [("info", "loading"), ("neutral", "empty"), ("negative", "error")],
+)
+def test_map_frame_state_panel_meets_text_contrast(intent: str, state: str) -> None:
+    for mode in ("light", "dark"):
+        ratio = token_contrast(
+            f"status-{intent}-foreground",
+            f"status-{intent}-surface",
+            mode,
+        )
+        assert (
+            ratio >= 4.5
+        ), f"map-frame {state} text contrast is {ratio:.2f}:1 in {mode} mode"
+
+
 @pytest.mark.slow
 def test_the_templates_are_present_in_the_built_wheel(tmp_path: Path) -> None:
     """Package data that is not packaged is a source-checkout-only feature.

@@ -58,7 +58,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
-| [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`reuse-proven`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
+| [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`audit-complete`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
 
 ## Contracts and ownership
 
@@ -181,7 +181,7 @@ and the next gate.
 ### [`dotmac-ui`](../packages/dotmac-ui/README.md)
 
 - **Owner:** Dotmac design system
-- **Contract:** Two published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) inert Jinja component templates with their declared contracts and token-native CSS. The headline status is the weaker of the two.
-- **Evidence:** `reuse-proven` from [`EXTRACTION.toml`](../packages/dotmac-ui/EXTRACTION.toml); source mode `product-first`.
+- **Contract:** Three published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) the reuse-proven empty-state inert Jinja component; (map-frame) an audit-complete provider-neutral accessible map canvas and generic view-state presentation. The headline status is the weakest of the three.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-ui/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`.
 - **Candidate consumers:** `dotmac_crm`.
