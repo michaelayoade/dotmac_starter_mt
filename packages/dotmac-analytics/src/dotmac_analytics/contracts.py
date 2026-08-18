@@ -293,10 +293,7 @@ class MetricPointInput:
         exponent = cast(int, raw_exponent)
         scale = max(-exponent, 0)
         integer_digits = max(len(digits) + exponent, 0)
-        if (
-            integer_digits > MAX_NUMERIC_INTEGER_DIGITS
-            or scale > MAX_NUMERIC_SCALE
-        ):
+        if integer_digits > MAX_NUMERIC_INTEGER_DIGITS or scale > MAX_NUMERIC_SCALE:
             raise InvalidAnalyticsContract(
                 f"metric value exceeds NUMERIC({MAX_NUMERIC_PRECISION},"
                 f"{MAX_NUMERIC_SCALE})"
@@ -322,9 +319,7 @@ class SourceProvenance:
         _require_code(self.source_owner, field_name="source owner")
         _require_reference(self.source_event_id, field_name="source_event_id")
         if self.source_schema_version < 1:
-            raise InvalidAnalyticsContract(
-                "source_schema_version must be positive"
-            )
+            raise InvalidAnalyticsContract("source_schema_version must be positive")
         _require_reference(self.source_reference, field_name="source_reference")
         _require_code(self.adapter_code, field_name="adapter code")
         if self.delivery_id is not None:
@@ -415,9 +410,7 @@ class MetricDeclarationRegistry:
 
     def validate_batch(
         self, command: RecordMetricBatchCommand
-    ) -> tuple[
-        tuple[MetricDeclaration, tuple[tuple[str, str], ...]], ...
-    ]:
+    ) -> tuple[tuple[MetricDeclaration, tuple[tuple[str, str], ...]], ...]:
         validated = tuple(self.validate_point(point) for point in command.points)
         for declaration, _ in validated:
             if declaration.owner_code != command.provenance.source_owner:
@@ -471,8 +464,7 @@ class MetricSelector:
             )
         for dimension in self.dimensions:
             if isinstance(dimension.value, str) and (
-                not dimension.value
-                or len(dimension.value) > MAX_DIMENSION_VALUE_LENGTH
+                not dimension.value or len(dimension.value) > MAX_DIMENSION_VALUE_LENGTH
             ):
                 raise InvalidAnalyticsContract(
                     f"selector dimension {dimension.code!r} must contain 1.."

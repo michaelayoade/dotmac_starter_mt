@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Literal, TypeAlias, TypeVar, cast
+from typing import Any, Literal, TypeAlias, cast
 from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import Scope, TenantScope
@@ -21,7 +21,6 @@ from dotmac_kernel.idempotency import (
 from dotmac_kernel.messaging import enqueue_event, enqueue_platform_event
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import Select
 
 from dotmac_billing import models
 from dotmac_billing.commands import (
@@ -86,38 +85,28 @@ _DocumentFactRow: TypeAlias = (
 )
 _ArtifactRow: TypeAlias = models.DocumentArtifact | models.PlatformDocumentArtifact
 
-_RowT = TypeVar("_RowT")
-_SelectT = TypeVar("_SelectT", bound=Select[Any])
-
 
 @dataclass(frozen=True, slots=True)
 class _PlaneModels:
-    account: type[models.BillingAccount] | type[models.PlatformBillingAccount]
-    obligation: type[models.RatedObligation] | type[models.PlatformRatedObligation]
-    document: type[models.BillingDocument] | type[models.PlatformBillingDocument]
-    line: type[models.DocumentLine] | type[models.PlatformDocumentLine]
-    event: type[models.DocumentEvent] | type[models.PlatformDocumentEvent]
-    settlement: (
-        type[models.ConfirmedSettlement] | type[models.PlatformConfirmedSettlement]
-    )
-    group: type[models.PostingGroup] | type[models.PlatformPostingGroup]
-    effect: type[models.PostingEffect] | type[models.PlatformPostingEffect]
-    allocation: type[models.AllocationEffect] | type[models.PlatformAllocationEffect]
-    tax: type[models.AppliedTaxSnapshot] | type[models.PlatformAppliedTaxSnapshot]
-    fx: type[models.AppliedFxSnapshot] | type[models.PlatformAppliedFxSnapshot]
-    party_tax: (
-        type[models.PartyTaxIdentitySnapshot]
-        | type[models.PlatformPartyTaxIdentitySnapshot]
-    )
-    document_fact: (
-        type[models.InvoiceDocumentFact] | type[models.PlatformInvoiceDocumentFact]
-    )
-    artifact: type[models.DocumentArtifact] | type[models.PlatformDocumentArtifact]
-    accounting_fact: type[models.AccountingFact] | type[models.PlatformAccountingFact]
-    position_fact: (
-        type[models.ReceivablePositionFact]
-        | type[models.PlatformReceivablePositionFact]
-    )
+    # SQLAlchemy cannot preserve mapped attributes through a union of mirrored
+    # tenant/platform classes. Keep the dynamic type at this one private plane
+    # dispatch boundary; published contracts and service returns stay concrete.
+    account: Any
+    obligation: Any
+    document: Any
+    line: Any
+    event: Any
+    settlement: Any
+    group: Any
+    effect: Any
+    allocation: Any
+    tax: Any
+    fx: Any
+    party_tax: Any
+    document_fact: Any
+    artifact: Any
+    accounting_fact: Any
+    position_fact: Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,12 +170,9 @@ def _values(scope: Scope, values: dict[str, object]) -> dict[str, object]:
     return values
 
 
-def _where_scope(
-    statement: _SelectT, scope: Scope, model: type[object]
-) -> _SelectT:
+def _where_scope(statement: Any, scope: Scope, model: Any) -> Any:
     if isinstance(scope, TenantScope):
-        scoped = statement.where(cast(Any, model).tenant_id == scope.tenant_id)
-        return cast(_SelectT, scoped)
+        return statement.where(model.tenant_id == scope.tenant_id)
     return statement
 
 
@@ -252,10 +238,10 @@ def _one(
     db: Session,
     *,
     scope: Scope,
-    model: type[_RowT],
+    model: Any,
     row_id: UUID,
     lock: bool = False,
-) -> _RowT:
+) -> Any:
     statement = select(model).where(model.id == row_id)
     statement = _where_scope(statement, scope, model)
     if lock:
@@ -317,7 +303,7 @@ def create_billing_account(
                 "account_precision_conflict",
                 "the account currency already has a different minor-unit precision",
             )
-        return existing
+        return cast(_AccountRow, existing)
     row = plane.account(
         **_values(
             scope,
@@ -331,7 +317,7 @@ def create_billing_account(
     )
     db.add(row)
     db.flush()
-    return row
+    return cast(_AccountRow, row)
 
 
 def accept_rated_obligation(
@@ -471,11 +457,14 @@ def accept_rated_obligation(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.obligation,
-        row_id=UUID(str(outcome.result["obligation_id"])),
+    return cast(
+        _ObligationRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.obligation,
+            row_id=UUID(str(outcome.result["obligation_id"])),
+        ),
     )
 
 
@@ -575,11 +564,14 @@ def create_draft_document(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.document,
-        row_id=UUID(str(outcome.result["document_id"])),
+    return cast(
+        _DocumentRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.document,
+            row_id=UUID(str(outcome.result["document_id"])),
+        ),
     )
 
 
@@ -939,7 +931,7 @@ def _post_group(
             **_jsonable(asdict(typed_position)),
         },
     )
-    return group
+    return cast(_PostingGroupRow, group)
 
 
 def _snapshot_mapping(value: object, *, field: str) -> dict[str, object]:
@@ -1180,7 +1172,7 @@ def _document_fact(
         payload={"fact_id": str(fact_id), **payload},
         correlation_id=correlation_id,
     )
-    return fact
+    return cast(_DocumentFactRow, fact)
 
 
 def issue_document(
@@ -1300,11 +1292,14 @@ def issue_document(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.document,
-        row_id=UUID(str(outcome.result["document_id"])),
+    return cast(
+        _DocumentRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.document,
+            row_id=UUID(str(outcome.result["document_id"])),
+        ),
     )
 
 
@@ -1391,11 +1386,14 @@ def void_document(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.group,
-        row_id=UUID(str(outcome.result["posting_group_id"])),
+    return cast(
+        _PostingGroupRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.group,
+            row_id=UUID(str(outcome.result["posting_group_id"])),
+        ),
     )
 
 
@@ -1627,11 +1625,14 @@ def issue_credit_note(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.document,
-        row_id=UUID(str(outcome.result["document_id"])),
+    return cast(
+        _DocumentRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.document,
+            row_id=UUID(str(outcome.result["document_id"])),
+        ),
     )
 
 
@@ -1721,11 +1722,14 @@ def accept_settlement(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.settlement,
-        row_id=UUID(str(outcome.result["settlement_id"])),
+    return cast(
+        _SettlementRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.settlement,
+            row_id=UUID(str(outcome.result["settlement_id"])),
+        ),
     )
 
 
@@ -1839,11 +1843,14 @@ def allocate_settlement(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.group,
-        row_id=UUID(str(outcome.result["posting_group_id"])),
+    return cast(
+        _PostingGroupRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.group,
+            row_id=UUID(str(outcome.result["posting_group_id"])),
+        ),
     )
 
 
@@ -2072,11 +2079,14 @@ def _posting_command(
         fingerprint=fingerprint,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.group,
-        row_id=UUID(str(outcome.result["posting_group_id"])),
+    return cast(
+        _PostingGroupRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.group,
+            row_id=UUID(str(outcome.result["posting_group_id"])),
+        ),
     )
 
 
@@ -2180,11 +2190,14 @@ def reverse_posting_group(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.group,
-        row_id=UUID(str(outcome.result["posting_group_id"])),
+    return cast(
+        _PostingGroupRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.group,
+            row_id=UUID(str(outcome.result["posting_group_id"])),
+        ),
     )
 
 
@@ -2383,11 +2396,14 @@ def record_document_artifact(
         fingerprint=offered,
         operation=operation,
     )
-    return _one(
-        db,
-        scope=scope,
-        model=plane.artifact,
-        row_id=UUID(str(outcome.result["artifact_id"])),
+    return cast(
+        _ArtifactRow,
+        _one(
+            db,
+            scope=scope,
+            model=plane.artifact,
+            row_id=UUID(str(outcome.result["artifact_id"])),
+        ),
     )
 
 

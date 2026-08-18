@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import SchemaItem
 
 from alembic import op
 
@@ -33,7 +34,7 @@ _REBUILDS = "metric_projection_rebuilds"
 _IMMUTABLE_TABLES = (_CATALOG, _RECEIPTS, _OBSERVATIONS, _REBUILDS)
 
 
-def _id_and_tenant(name: str) -> list[sa.SchemaItem]:
+def _id_and_tenant(name: str) -> list[SchemaItem]:
     return [
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
@@ -162,7 +163,9 @@ def upgrade() -> None:
             "selector_digest",
             name="uq_metric_observations_receipt_coordinate",
         ),
-        sa.CheckConstraint("schema_version >= 1", name="ck_metric_observations_version"),
+        sa.CheckConstraint(
+            "schema_version >= 1", name="ck_metric_observations_version"
+        ),
         sa.CheckConstraint(
             "period_end > period_start", name="ck_metric_observations_period"
         ),
@@ -271,8 +274,12 @@ def upgrade() -> None:
     )
 
     # Written out so the composed gate can see every table/policy literally.
-    op.execute("ALTER TABLE mod_analytics.metric_catalog_entries ENABLE ROW LEVEL SECURITY;")
-    op.execute("ALTER TABLE mod_analytics.metric_catalog_entries FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "ALTER TABLE mod_analytics.metric_catalog_entries ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_analytics.metric_catalog_entries FORCE ROW LEVEL SECURITY;"
+    )
     op.execute(
         """
         CREATE POLICY metric_catalog_entries_tenant_isolation
@@ -281,8 +288,12 @@ def upgrade() -> None:
             WITH CHECK (tenant_id = public.app_current_tenant_id());
         """
     )
-    op.execute("ALTER TABLE mod_analytics.metric_ingest_receipts ENABLE ROW LEVEL SECURITY;")
-    op.execute("ALTER TABLE mod_analytics.metric_ingest_receipts FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "ALTER TABLE mod_analytics.metric_ingest_receipts ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_analytics.metric_ingest_receipts FORCE ROW LEVEL SECURITY;"
+    )
     op.execute(
         """
         CREATE POLICY metric_ingest_receipts_tenant_isolation
@@ -291,8 +302,12 @@ def upgrade() -> None:
             WITH CHECK (tenant_id = public.app_current_tenant_id());
         """
     )
-    op.execute("ALTER TABLE mod_analytics.metric_observations ENABLE ROW LEVEL SECURITY;")
-    op.execute("ALTER TABLE mod_analytics.metric_observations FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "ALTER TABLE mod_analytics.metric_observations ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_analytics.metric_observations FORCE ROW LEVEL SECURITY;"
+    )
     op.execute(
         """
         CREATE POLICY metric_observations_tenant_isolation
@@ -311,8 +326,12 @@ def upgrade() -> None:
             WITH CHECK (tenant_id = public.app_current_tenant_id());
         """
     )
-    op.execute("ALTER TABLE mod_analytics.metric_projection_rebuilds ENABLE ROW LEVEL SECURITY;")
-    op.execute("ALTER TABLE mod_analytics.metric_projection_rebuilds FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "ALTER TABLE mod_analytics.metric_projection_rebuilds ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_analytics.metric_projection_rebuilds FORCE ROW LEVEL SECURITY;"
+    )
     op.execute(
         """
         CREATE POLICY metric_projection_rebuilds_tenant_isolation
@@ -338,9 +357,7 @@ def upgrade() -> None:
             f"BEFORE UPDATE OR DELETE ON mod_analytics.{table} "
             "FOR EACH ROW EXECUTE FUNCTION mod_analytics.refuse_mutation();"
         )
-        op.execute(
-            f"GRANT SELECT, INSERT ON mod_analytics.{table} TO app_user;"
-        )
+        op.execute(f"GRANT SELECT, INSERT ON mod_analytics.{table} TO app_user;")
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_analytics.metric_points "
         "TO app_user;"

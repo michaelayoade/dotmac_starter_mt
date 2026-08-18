@@ -168,9 +168,12 @@ def test_online_role_without_context_sees_nothing(
     engine = create_engine(app_url)
     try:
         with engine.connect() as conn:
-            assert conn.execute(
-                text("SELECT count(*) FROM mod_analytics.metric_catalog_entries")
-            ).scalar_one() == 0
+            assert (
+                conn.execute(
+                    text("SELECT count(*) FROM mod_analytics.metric_catalog_entries")
+                ).scalar_one()
+                == 0
+            )
     finally:
         engine.dispose()
 

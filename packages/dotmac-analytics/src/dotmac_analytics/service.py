@@ -73,9 +73,7 @@ def _canonical_decimal(value: Decimal) -> str:
 
 def _batch_document(
     command: RecordMetricBatchCommand,
-    validated: tuple[
-        tuple[MetricDeclaration, tuple[tuple[str, str], ...]], ...
-    ],
+    validated: tuple[tuple[MetricDeclaration, tuple[tuple[str, str], ...]], ...],
 ) -> dict[str, object]:
     points: list[dict[str, object]] = []
     for point, (_, dimensions) in zip(command.points, validated, strict=True):
@@ -262,9 +260,7 @@ def _record_batch_effect(
     db: Session,
     *,
     command: RecordMetricBatchCommand,
-    validated: tuple[
-        tuple[MetricDeclaration, tuple[tuple[str, str], ...]], ...
-    ],
+    validated: tuple[tuple[MetricDeclaration, tuple[tuple[str, str], ...]], ...],
 ) -> dict[str, object]:
     ensured: set[tuple[str, int]] = set()
     for declaration, _ in validated:

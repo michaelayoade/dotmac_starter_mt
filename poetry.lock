@@ -505,6 +505,24 @@ trio = ["trio (>=0.30)"]
 wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
+name = "dotmac-analytics"
+version = "0.1.0a1"
+description = "Declared aggregate metric evidence and rebuildable tenant analytics projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-analytics"
+
+[[package]]
 name = "dotmac-application-directory"
 version = "0.1.0a3"
 description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
@@ -3145,4 +3163,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "28a39006f06e6670bb50549e378944a8920c7504bb5bb867205cc48a73f4c99e"
+content-hash = "10543340337665578846ab6db92bb1010c0ba7ca19b6ac15340de8ea6577b3c2"

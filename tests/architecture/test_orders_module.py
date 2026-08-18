@@ -22,8 +22,7 @@ MIGRATIONS = MIGRATION.parent
 
 def _source() -> str:
     return "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in sorted(MODULE_ROOT.rglob("*.py"))
+        path.read_text(encoding="utf-8") for path in sorted(MODULE_ROOT.rglob("*.py"))
     )
 
 
@@ -250,8 +249,7 @@ def test_the_lineage_passes_the_composed_migration_gate() -> None:
     report = run_gate(
         [module],
         [
-            REPO_ROOT
-            / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
+            REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
             REPO_ROOT / "alembic/versions",
             MIGRATIONS,
         ],
@@ -266,8 +264,7 @@ def test_the_gate_refuses_orders_when_an_assembly_binds_nothing() -> None:
     report = run_gate(
         [module],
         [
-            REPO_ROOT
-            / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
+            REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
             REPO_ROOT / "alembic/versions",
             MIGRATIONS,
         ],

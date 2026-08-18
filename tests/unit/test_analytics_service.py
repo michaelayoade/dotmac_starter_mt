@@ -88,9 +88,7 @@ def declarations() -> MetricDeclarationRegistry:
                 unit_code="money",
                 granularities=(MetricGranularity.DAY,),
                 dimensions=(
-                    DimensionSpec(
-                        "channel", DimensionKind.ENUM, ("bank", "cash")
-                    ),
+                    DimensionSpec("channel", DimensionKind.ENUM, ("bank", "cash")),
                 ),
             ),
         )

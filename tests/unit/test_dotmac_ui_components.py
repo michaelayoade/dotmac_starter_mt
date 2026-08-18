@@ -195,9 +195,7 @@ def test_catalog_grid_requires_both_action_values() -> None:
         CatalogItem(title="Label only", action_label="Open"),
         CatalogItem(title="URL only", action_url="/open"),
     ):
-        assert "dmui-catalog-grid__action" not in _render(
-            CATALOG_GRID, items=(item,)
-        )
+        assert "dmui-catalog-grid__action" not in _render(CATALOG_GRID, items=(item,))
 
     rendered = _render(
         CATALOG_GRID,
@@ -228,9 +226,7 @@ def test_catalog_grid_text_roles_meet_contrast() -> None:
             >= TEXT_CONTRAST_MINIMUM
         )
         assert (
-            token_contrast(
-                "status-warning-foreground", "status-warning-surface", mode
-            )
+            token_contrast("status-warning-foreground", "status-warning-surface", mode)
             >= TEXT_CONTRAST_MINIMUM
         )
 

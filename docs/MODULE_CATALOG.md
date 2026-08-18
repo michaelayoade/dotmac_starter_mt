@@ -44,6 +44,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 
 | Distribution | Classification | Evidence | Module capability | Supported installation sets | This assembly installs | Release policy | Declared version | Kernel requirement | Proven consumers | Candidate consumers |
 |---|---|---|---|---|---|---|---:|---|---|---|
+| [`dotmac-analytics`](../packages/dotmac-analytics/README.md) | optional module | [`audit-complete`](../packages/dotmac-analytics/EXTRACTION.toml) | [tenant · `mod_analytics`](../packages/dotmac-analytics/src/dotmac_analytics/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac_academy_app`, `dotmac_backoffice`, `dotmac_crm`, `dotmac_erp` |
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp`, `dotmac_workspace` |
@@ -76,6 +77,14 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 The dossier linked from each entry remains authoritative for source
 paths, parity tests, first cutover, drift proof, local-copy retirement
 and the next gate.
+
+### [`dotmac-analytics`](../packages/dotmac-analytics/README.md)
+
+- **Owner:** Immutable declared aggregate metric evidence and the deterministic rebuildable current-point projection for one application's tenants
+- **Contract:** Given an installed immutable metric declaration and a typed tenant-scoped aggregate batch from that declaration's named domain owner, validate exact Decimal values and bounded dimensions, delegate replay/fingerprint conflict/concurrent-key handling to dotmac_kernel.idempotency, preserve an append-only domain receipt and observation evidence, maintain one deterministic rebuildable winning-point projection, and provide bounded latest/history/explicit-period comparison reads plus digest-backed repair evidence. The receipt is not a second replay ledger. NOT source-domain calculations or lifecycle decisions, raw rows/events, arbitrary SQL, subject identity, web analytics, provider media observations, attribution, observability, saved dashboards, report scheduling/rendering/delivery, connector transport, or transaction control.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-analytics/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_academy_app`, `dotmac_backoffice`, `dotmac_crm`, `dotmac_erp`.
 
 ### [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md)
 

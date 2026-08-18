@@ -27,8 +27,7 @@ PACKAGE_ROOT = REPO_ROOT / "packages/dotmac-analytics"
 
 def _package_source() -> str:
     return "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in sorted(MODULE_ROOT.rglob("*.py"))
+        path.read_text(encoding="utf-8") for path in sorted(MODULE_ROOT.rglob("*.py"))
     )
 
 
@@ -43,9 +42,7 @@ def test_the_module_is_tenant_only_and_declares_every_model_table() -> None:
     registry = NamespaceRegistry.from_manifests([module])
     assert module.platform_tables == ()
     assert module.tables == models.TENANT_TABLES
-    assert registry.declared_tables("mod_analytics") == frozenset(
-        models.TENANT_TABLES
-    )
+    assert registry.declared_tables("mod_analytics") == frozenset(models.TENANT_TABLES)
     assert {model.__tablename__ for model in models.TENANT_MODELS} == set(
         models.TENANT_TABLES
     )
@@ -69,9 +66,7 @@ def test_no_foreign_key_reaches_a_product_or_sibling_module() -> None:
         for constraint in model.__table__.constraints:
             if not isinstance(constraint, ForeignKeyConstraint):
                 continue
-            targets = {
-                element.column.table.fullname for element in constraint.elements
-            }
+            targets = {element.column.table.fullname for element in constraint.elements}
             assert targets <= permitted, (model.__name__, targets)
 
 

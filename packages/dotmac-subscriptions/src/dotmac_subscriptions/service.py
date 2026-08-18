@@ -1366,9 +1366,7 @@ def list_effective_offers(
         )
 
     identities = statement.with_only_columns(plane.offer.id).order_by(None).subquery()
-    total = int(
-        db.execute(select(func.count()).select_from(identities)).scalar_one()
-    )
+    total = int(db.execute(select(func.count()).select_from(identities)).scalar_one())
     rows = db.execute(
         apply_pagination(
             statement.order_by(
