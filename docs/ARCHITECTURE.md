@@ -432,6 +432,18 @@ packages/dotmac-imports/         optional bulk-import run ledger
                  TESTED HERE, NOT COMPOSED by this reference assembly. The
                  domain owns the field vocabulary, validation and mutation;
                  `dotmac-files` owns the bytes the run reads.
+packages/dotmac-people/          optional tenant employment directory
+  pyproject.toml                 distribution dotmac-people; audit-complete,
+  EXTRACTION.toml                with ERP as the qualifying source and clean
+                                 Backoffice as the first exact-pin consumer
+  src/dotmac_people/             narrow employee lifecycle, organization
+                 catalogues, positions, temporal assignments and date-aware
+                 reporting resolution; manifest plus independent `pe` lineage
+                 in schema `mod_people`. Tenant plane only, forced RLS, and
+                 linked to kernel Party through `party_person_catalog.v1`.
+                 BUILT AND TESTED HERE, NOT COMPOSED by this reference
+                 assembly. No ERP identity, payroll, attendance, finance,
+                 integration, notification or persisted vacancy cache ports.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1272,6 +1284,12 @@ made concrete — every model has exactly one declared owner.
 | `PlatformStoredFile` | `mod_files.platform_stored_files` | `dotmac-files` optional module | Platform plane over the same persistence-free physical engine: no tenant column or RLS, platform grants, and `app_user` revoked. Vendor CP is candidate cutover 3 through a licensing-owned exact-bundle relation; no product tenant is created and no consumer is claimed yet (ADR-0023). |
 | `ImportRun` | `mod_imports.import_runs` | `dotmac-imports` optional module | Tenant plane: product-first port of Sub's run lifecycle and one-shot dry-run→apply promotion, joined to ERP's decoding/alias/preview mechanism; forced RLS and a tenant-composite identity neither source had (ADR-0025; [`imports-sources.md`](inventories/imports-sources.md)). The input is an opaque `dotmac-files` id plus its SHA-256, not an inline payload. Validation and apply independently hash the raw bytes, and each locked call advances one resumable durable checkpoint. ERP, then Sub, then CRM are the candidate cutovers; ERP E8 still gates source-product retirement. |
 | `ImportRunRow` | `mod_imports.import_run_rows` | `dotmac-imports` optional module | One minimised outcome per input line — `ok | error | skipped`, a canonical row fingerprint, bounded typed safe error detail, and the domain applier's opaque result. Mapped row values and raw exception text are not retained. Carries NO foreign key into a domain table: Sub's shared row table welded `payment_id` into the ledger, and the reference runs the other way here (ADR-0025 § 3). |
+| `Employee` | `mod_people.employees` | `dotmac-people` optional module | Product-first port of ERP's narrow employment relationship: one kernel Party person per tenant, stable code, lifecycle state/dates, and optional catalogue references. Personal identity, auth, reporting caches, compensation, payroll, attendance, finance and integrations are excluded ([`people-directory-sources.md`](inventories/people-directory-sources.md)). |
+| `Department` | `mod_people.departments` | `dotmac-people` optional module | Tenant department identity and hierarchy. ERP's competing `head_id` employee pointer and cost-centre FK do not port; department head is derived through one declared head position and its dated incumbent. |
+| `Designation` | `mod_people.designations` | `dotmac-people` optional module | Tenant job-title catalogue. ERP's NCC reporting category remains with its regulatory consumer rather than widening the directory contract. |
+| `EmploymentType` | `mod_people.employment_types` | `dotmac-people` optional module | Tenant employment-arrangement catalogue with no payroll or product-integration fields. |
+| `Position` | `mod_people.positions` | `dotmac-people` optional module | Canonical reporting hierarchy and vacancy-routing policy. Vacancy is derived from dated assignments; ERP's persisted `is_vacant` cache is deliberately not ported. |
+| `PositionAssignment` | `mod_people.position_assignments` | `dotmac-people` optional module | Historical PRIMARY/ACTING/INTERIM occupancy. Service checks preserve ERP behavior and a PostgreSQL trigger serializes and rejects all overlapping primary intervals, including the finite intervals ERP's open-ended partial indexes missed. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

@@ -69,6 +69,9 @@ dotmac-auth-oidc = { path = "packages/dotmac-auth-oidc", develop = true }
 # above: built and proven here, composed by the first product adopter.
 dotmac-approvals = { path = "packages/dotmac-approvals", develop = true }
 dotmac-numbering = { path = "packages/dotmac-numbering", develop = true }
+# Tenant employment-directory owner extracted product-first from ERP. Built and
+# proven here; the clean Backoffice assembly is its first exact-pin consumer.
+dotmac-people = { path = "packages/dotmac-people", develop = true }
 # The external connector control plane (ADR-0024). Built and proven here;
 # its runtime is the separate `dotmac_integrator` assembly, so the reference
 # assembly deliberately does not compose the `ig` lineage.
@@ -146,6 +149,7 @@ module = [
     "dotmac_files.*",
     "dotmac_approvals.*",
     "dotmac_numbering.*",
+    "dotmac_people.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
     "dotmac_release_catalog.*",
@@ -199,6 +203,7 @@ root_packages = [
     "dotmac_imports",
     "dotmac_approvals",
     "dotmac_numbering",
+    "dotmac_people",
     "dotmac_integration",
     "dotmac_auth_oidc",
     "dotmac_connector_whatsapp",
@@ -260,6 +265,7 @@ source_modules = [
     "dotmac_integration",
     "dotmac_approvals",
     "dotmac_numbering",
+    "dotmac_people",
     "dotmac_auth_oidc",
 ]
 forbidden_modules = ["app"]
@@ -301,6 +307,7 @@ modules = [
     "dotmac_integration",
     "dotmac_approvals",
     "dotmac_numbering",
+    "dotmac_people",
     "dotmac_auth_oidc",
 ]
 
@@ -342,6 +349,7 @@ forbidden_modules = [
     "dotmac_imports",
     "dotmac_approvals",
     "dotmac_numbering",
+    "dotmac_people",
     "dotmac_auth_oidc",
 ]
 
