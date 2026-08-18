@@ -212,6 +212,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "durable_timers",
         "collections",
         "orders",
+        "subscriptions",
     }
 
 

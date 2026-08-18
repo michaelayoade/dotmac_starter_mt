@@ -147,6 +147,7 @@ from dotmac_kernel.namespaces import (
     HOST_SCHEMA,
     MAX_REVISION_ID_LENGTH,
     MIGRATION_OWNER_LEDGER,
+    SUBSCRIPTIONS_MIGRATION_OWNER,
     DuplicateBranchLabelError,
     DuplicateMigrationPrefixError,
     DuplicateSchemaError,
@@ -202,7 +203,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a70"
+__version__ = "0.1.0a71"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -373,6 +374,7 @@ __all__ = [
     "BILLING_MIGRATION_OWNER",
     "COLLECTIONS_MIGRATION_OWNER",
     "ORDERS_MIGRATION_OWNER",
+    "SUBSCRIPTIONS_MIGRATION_OWNER",
     "MigrationOwner",
     "NamespaceRegistry",
     "module_schema",

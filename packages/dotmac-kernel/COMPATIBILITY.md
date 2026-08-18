@@ -181,9 +181,10 @@ it never grants entitlement and it never deploys anything.
 - **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
   `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
   `permissions`, `audit_actions`, `feature_flags`, `setting_domains`,
-  `short_code`, `migration_prefix`,
-  `migration_branch`, `tables`, `platform_tables`, `core`, `enabled_by_default`,
-  `seed`. `code`
+  `setting_value_types`, `scope_kinds`, `charge_models`, `obligation_sources`,
+  `short_code`, `migration_prefix`, `migration_branch`, `tables`,
+  `platform_tables`, `requires`, `tenant_requires`, `platform_requires`,
+  `supported_plane_sets`, `core`, `enabled_by_default`, `seed`. `code`
   is the stable identifier every other authority references (a dependency edge,
   a profile's required/forbidden set, a capability owner). `version` is the module's own release version;
   `contract_version` is the kernel manifest generation it was built against —
@@ -245,7 +246,7 @@ module manifest without a call-site change. `AnyManifest` is the union type used
 in those signatures.
 
 **Deliberately not declared yet.** The directive's manifest sketch also lists
-`settings`, `feature_flags`, `entity_types`, and `health_checks`. Those belong to
+`settings`, `entity_types`, and `health_checks`. Those belong to
 later program steps, and the same directive requires CI to fail when "a
 declaration has no consumer" — each field lands with the registry code that
 derives behavior from it, as `permissions` and `audit_actions` did in step 3
@@ -425,7 +426,7 @@ revision ids are already recorded in live `alembic_version` rows, so
 exempts them from the strict id and `schema=` rules. Their tables legitimately
 live in `public`. Every installable module gets the strict rules.
 
-### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`, `dotmac_kernel.setting_domains`)
+### Manifest declaration catalogues
 
 Siblings of `dotmac_kernel.capabilities.CapabilityCatalogue` and
 `dotmac_kernel.flags.FlagCatalogue` — same shape, same fail-closed posture, same
@@ -435,8 +436,10 @@ invented anywhere else.** Pure and in-memory; no engine, no I/O.
 **ADR-0008 makes this the standard.** A kernel-level vocabulary whose members
 belong to modules is declared on manifests and validated by a registry — never
 enumerated by the kernel as an enum or a fixed list, and never pinned by a CHECK
-constraint on the backing column. If you are adding a sixth, copy
-`dotmac_kernel.audit_actions` and change the nouns.
+constraint on the backing column. Six catalogue boundaries now use this shape;
+the sixth is `dotmac_subscriptions.vocabulary.SubscriptionVocabularyRegistry`,
+which consumes the two independent product declaration sets `charge_models`
+and `obligation_sources` explicitly at each subscriptions service call.
 
 - **`PermissionSpec(code, description="", default_roles=("admin",))`** — one
   permission a module owns. `default_roles` is the code-declared default binding
@@ -459,6 +462,12 @@ constraint on the backing column. If you are adding a sixth, copy
   `String(120)` and correctness comes from the write boundary. Kernel-owned
   domains are bound as class attributes (`SettingDomain.branding`); a product
   constructs its own (`SettingDomain("payroll")`).
+- **`SubscriptionVocabularyRegistry.from_manifests(manifests)`** — owned by
+  `dotmac-subscriptions`, not the kernel, because it validates that module's
+  producer inputs. It refuses duplicate charge-model or obligation-source
+  ownership at construction and refuses an undeclared member at offer,
+  contract, or occurrence use. The assembly passes it explicitly; there is no
+  process-global commercial vocabulary or kernel enum.
 - **Process-active install.** `install_permissions` / `install_audit_actions` /
   `install_setting_domains` set the process-active catalogue and registries;
   `active_permissions` / `active_audit_actions` / `active_setting_domains` read

@@ -1,7 +1,8 @@
 # `dotmac-subscriptions` — extraction dossier content, parity tests, planes, retirement
 
-**As of:** 2026-08-14
-**Status:** `audit-complete`. **Not** `approved`, not started, no package.
+**As of:** 2026-08-18
+**Status:** `audit-complete`; M0 extraction implemented. No release or adopter
+cutover is claimed.
 **Source audit:** `docs/inventories/subscriptions-sources.md` (published A2b
 conclusion) and `docs/inventories/a2-commercial-offer-source-audit.md`
 (independent verification)
@@ -11,13 +12,11 @@ conclusion) and `docs/inventories/a2-commercial-offer-source-audit.md`
 
 ## What this document is
 
-The `EXTRACTION.toml` **content** for `dotmac-subscriptions`, written as a
-markdown document because **ADR-0017's P11 gate is closed**. There is no
-`packages/dotmac-subscriptions/`, no namespace, no short code, no migration
-prefix, no manifest and no lineage, and this document creates none of them. The
-TOML block in § 1 uses the exact field names of
-`packages/dotmac-files/EXTRACTION.toml` so that it becomes the real file
-verbatim in the adoption plan's M0 step 1, once G0–G2 pass.
+The durable source audit behind the implemented
+`packages/dotmac-subscriptions/EXTRACTION.toml`. The package now owns the
+`subscriptions` / `su` / `mod_subscriptions` allocation and its selectable
+dual-plane lineage. This document remains the detailed parity, cutover and
+retirement evidence; the checked-in TOML is the machine-readable dossier.
 
 It does not restate the source comparison. Read `subscriptions-sources.md` for
 the published conclusion and `a2-commercial-offer-source-audit.md` for the
@@ -41,6 +40,10 @@ contract = "Publish immutable offer versions and their immutable price children 
 source_repositories = [
   "dotmac_sub",
   "dotmac_vendor_control_plane",
+]
+source_revisions = [
+  "dotmac_sub:27c76aaeebb7",
+  "dotmac_vendor_control_plane:89848017d6b8",
 ]
 source_paths = [
   "dotmac_sub:app/services/billing/cadence.py",
@@ -74,7 +77,7 @@ preserved_tests = [
 contract_consumers = []
 candidate_consumers = ["dotmac_vendor_control_plane", "dotmac_sub"]
 
-composition_boundary = "ADR-0024 § 2: dotmac-subscriptions, dotmac-billing and dotmac-collections are peers over dotmac-kernel and none imports another. Each adopter installs its own copy of the one migration lineage on the plane it uses, owns its own rows, and wires every cross-module outcome through its assembly as a versioned command or event. Publishing a recurring obligation NEVER imports or calls billing: the module emits RatedObligationOutputV1 and the consuming assembly maps it to billing's AcceptRatedObligationV1. Vendor CP's commercial-agreement owner and Sub's service/access owner submit approved recurring terms INTO the module through the assembly and consume contract facts back out of it; neither gains a cross-module foreign key. Product semantics — Vendor capability codes, Sub ISP service/access type, region, usage allowance, SLA, policy set, RADIUS, speed, portal visibility, plan family — live in product-owned link tables created by the module's plane-specific link helpers in the ADOPTER's schema and lineage, never as columns in the module's tables. Charge models and obligation sources are ADR-0008 declaration registries supplied by the product; the module invents no vocabulary and branches on no product, provider, currency, plan name or deployment profile."
+composition_boundary = "ADR-0024 § 2: dotmac-subscriptions, dotmac-billing, dotmac-collections, dotmac-durable-timers and dotmac-orders are peers over dotmac-kernel and none imports another. Each adopter installs its own copy of each selected migration lineage, owns its own rows, and wires every cross-module outcome through its assembly as a versioned command, event or typed port. Publishing a recurring obligation NEVER imports or calls billing: the module emits RatedObligationOutputV1 and the consuming assembly maps it to billing's AcceptRatedObligationV1. Timer scheduling and cancellation stop at DurableTimerPort, and accepted orders enter only through the subscriptions command surface. Vendor CP's commercial-agreement owner and Sub's service/access owner submit approved recurring terms INTO the module through the assembly and consume contract facts back out of it; neither gains a cross-module foreign key. Product semantics — Vendor capability codes, Sub ISP service/access type, region, usage allowance, SLA, policy set, RADIUS, speed, portal visibility, plan family — live in product-owned link tables created by the module's plane-specific link helpers in the ADOPTER's schema and lineage, never as columns in the module's tables. Charge models and obligation sources are ADR-0008 declaration registries supplied by the product; the module invents no vocabulary and branches on no product, provider, currency, plan name or deployment profile."
 
 inventory_evidence = [
   "docs/inventories/subscriptions-sources.md",
@@ -85,22 +88,21 @@ inventory_evidence = [
   "docs/superpowers/plans/2026-08-14-subscriptions-vendor-sub-adoption.md",
 ]
 
-first_cutover = "dotmac_vendor_control_plane is cutover 1, on the PLATFORM plane, by Michael's ordering recorded in ADR-0020 A4. It has the smallest offer source (one table, five business columns, one writer), it is the assembly that forces the platform plane to exist at all, and it has no recurring engine to retire — so the first cutover exercises the plane split and the offer contract without also carrying the recurrence risk. It is NOT a greenfield cutover: existing offer_versions rows and the publish_offer_version writer must be migrated and removed, and its capability_codes column must become a Vendor-owned platform link table. dotmac_sub is cutover 2, on the TENANT plane, and is the qualifying product-first source for cadence, contract versioning, proration and recurrence; it moves one owner slice at a time through measured shadow-and-cutover because hundreds of catalog, billing, service and provisioning callers read mixed generic and ISP fields. First adopter and implementation source are deliberately different claims. No cutover begins before ADR-0017 P11, P3 durable timers, and a released assembly-wired billing input contract."
+first_cutover = "dotmac_vendor_control_plane is cutover 1, on the PLATFORM plane, by Michael's ordering recorded in ADR-0020 A4. It has the smallest offer source (one table, five business columns, one writer), it is the assembly that forces the platform plane to exist at all, and it has no recurring engine to retire — so the first cutover exercises the plane split and the offer contract without also carrying the recurrence risk. It is NOT a greenfield cutover: existing offer_versions rows and the publish_offer_version writer must be migrated and removed, and its capability_codes column must become a Vendor-owned platform link table. dotmac_sub is cutover 2, on the TENANT plane, and is the qualifying product-first source for cadence, contract versioning, proration and recurrence; it moves one owner slice at a time through measured shadow-and-cutover because hundreds of catalog, billing, service and provisioning callers read mixed generic and ISP fields. First adopter and implementation source are deliberately different claims. Cutover still requires released subscriptions, durable-timer and assembly-wired billing contracts even though their coordinated implementations now exist."
 
 shadow_and_drift = "Vendor: before any write, characterize offer row counts, distinct codes, versions and currencies, duplicate or gapped versions, invalid exact-money values, every contract_lines.offer_version_id reference and any orphan, undeclared capability codes, and whether each active contract intended to recur has explicit cadence, timezone, collection timing, effective start and price — a missing term is a blocking NULL, never a monthly, Africa/Lagos or default-currency guess, and an unclassified active contract is a stop condition. Then backfill each local version into a stable platform Offer, one platform OfferVersion and one immutable price child preserving exact money, source identity, version and timestamps as provenance, and shadow-read every legacy and module snapshot; the reconciler reports missing, extra, price, currency, version and capability-link drift and repairs idempotently only from the declared authoritative side. Sub: write the cross-tenant PostgreSQL isolation canary before the first model or migration change, then shadow every sellable and contracted offer at an effective instant, with ambiguous active prices, mutable live terms, missing currency and unversioned contracted prices becoming explicit remediation cohorts rather than silent defaults. Compare effective-at resolution and supersession over the complete active cohort. Route every boundary through the module cadence and accept the shadow matrix — daily, weekly, monthly, N-month and yearly intervals; month-end 29/30/31; leap years; strict-same-day refusal; contract-anniversary, calendar-start and fixed-anchor alignment; timezone and DST boundaries; none, full, calendar-day and elapsed-time proration including no-coverage and out-of-period failures — before retiring any legacy helper. Known customer-visible differences are measured and approved, never normalized away to make parity green. Recurrence switches per named cohort against Sub's existing Phase-2 durable shadow evidence, comparing exact period, pre-tax amount, proration factor, source identity and billing acceptance, and expands only when duplicate, missing, overlapping and fingerprint-conflict counts are zero."
 
 local_copy_retirement = "Vendor CP must delete vendor_cp/offers models, service and routes and drop its offer_versions table in an expand/contract release after parity is zero; contracts/service.py:537 _resolve_offer must stop importing vendor_cp.offers.models and receive an assembly-resolved typed immutable snapshot instead. Sub must remove generic offer, version and price writes from app/services/catalog/offers.py while keeping its ISP link writers; delete the local billing-contract, version and line writers in app/services/billing/contracts.py after promoting the module writer through Sub's SOT registry; retire NINE parallel cadence owners, not the three the plan currently names — billing_automation.py:272 _add_months, :288 _period_end, :2542 inline month arithmetic, catalog/subscriptions.py:92 _add_months, :135 _compute_next_billing_at, :485 _billing_cycle_start, web_catalog_calculator.py:19 _cycle_bounds, payment_arrangements.py:132 _add_month_clamped, web_billing_overview.py:193 _add_months — plus their five secondary consumers; retire the monthly-only prepaid renewal engine in prepaid_service_renewals.py and the postpaid engine in billing_automation.py into one collection_timing field; retire the legacy invoice-line dedupe at billing_automation.py:1782, :1931, :2252 and :1006 together with the concatenated-string index uq_invoice_lines_active_billing_line_key; retire Subscription.billing_mode, billing_cycle, next_billing_at and unit_price as cadence authority; and retire billing_profile.py entirely, since it exists only to detect the four-way cadence disagreement the contract version replaces. Every retirement is a two-directional ratchet with a sensitivity proof: the count must fail when it rises AND when it falls without the baseline being lowered in the same change. No permanent parallel writer, no runtime flag leaving both enabled, and no local copy retained as a fallback."
 
-next_action = "None in this repository. The three gates are external and unmet: ADR-0017 P11 requires Sub's checked-in adoption ledger to prove the kernel migration lineage is composed and running in Sub's production database; P3 requires a durable-timer owner ported product-first from Sub and paired with this real consumer, not a cron scan; and a released, provider-neutral billing input contract (AcceptRatedObligationV1, Team 2's specification) must exist and be assembly-wired before any occurrence becomes financially effective. When all three pass, M0 step 1 of the adoption plan converts this document into packages/dotmac-subscriptions/EXTRACTION.toml verbatim and allocates the short code, prefix, branch label, schema, ledger row, manifest declarations and migration root in that one change. contract_consumers stays [] until Vendor CP's local offer writer is actually deleted; it becomes reuse-proven only when both products exercise the same released contract with their local owners gone."
+next_action = "Complete M0 proof and land this package with the coordinated billing, durable-timer, orders and collections slices. Then release exact versions and wire the producer, timer and billing contracts in the first adopting assembly. contract_consumers stays [] until Vendor CP's local offer writer is actually deleted; it becomes reuse-proven only when both products exercise the same released contract with their local owners gone."
 ```
 
 ### Why `status = "audit-complete"` and not `approved`
 
-The source question is answered and the boundary is decided (ADR-0020 A4). What
-is not true is that anything may be built: § 6 of ADR-0020 is unchanged, ADR-0017
-P11 is closed, and the amendment says in terms that it "does not lift ADR-0017's
-moratorium, does not claim P11, does not create a package, namespace, lineage,
-or dossier". `audit-complete` is the honest state — the same state
+The source question is answered and the boundary is decided (ADR-0020 A4). M0
+is now built because P11 and the coordinated implementation gates passed. What
+is not yet true is adoption or reuse: neither candidate consumer has pinned a
+release and retired its local writer. `audit-complete` is the honest state — the same state
 `packages/dotmac-files/EXTRACTION.toml` carries with a far more advanced
 adoption story.
 
@@ -150,7 +152,7 @@ counts are from reading the files' test-function names.
 
 | Test file | Tests | What it proves | Port note |
 |---|---|---|---|
-| `dotmac_sub:tests/test_billing_cadence.py` | 18 | The whole cadence value object: quarterly is three calendar months not ninety days; annual is twelve months across a leap year; month-end anniversary clamps under the declared rule; strict-same-day fails closed instead of silently shifting; consecutive periods are contiguous and half-open; **rate unit is independent of invoice interval**; an annual service period can be invoiced quarterly; `period_containing` walks calendar periods; a moment before contract start fails closed; calendar-day proration is declared not inferred; `none` bills the full period; a covered interval outside the period fails closed; calendar alignment snaps to the month boundary; periods compute in the contract timezone; naive datetimes are refused; an unknown timezone fails at construction; fixed-anchor alignment requires an anchor day; an interval must end after it starts. | **Port in full, unchanged.** 287 lines against a 456-line resolver. This is the module's foundation suite. |
+| `dotmac_sub:tests/test_billing_cadence.py` | 18 | The whole cadence value object: quarterly is three calendar months not ninety days; annual is twelve months across a leap year; month-end anniversary clamps under the declared rule; strict-same-day fails closed instead of silently shifting; consecutive periods are contiguous and half-open; **rate unit is independent of invoice interval**; an annual service period can be invoiced quarterly; `period_containing` walks calendar periods; a moment before contract start fails closed; calendar-day proration is declared not inferred; `none` bills the full period; a covered interval outside the period fails closed; calendar alignment snaps to the month boundary; periods compute in the contract timezone; naive datetimes are refused; an unknown timezone fails at construction; fixed-anchor alignment requires an anchor day; an interval must end after it starts. | **Port in full, with one explicit defect correction.** The source's day-number comparison rates a clamped 31 January–28 February interval as zero monthly units. The module compares the resolved calendar anniversary and adds a regression canary proving that interval is one unit. This is the module's foundation suite. |
 | `dotmac_sub:tests/test_subscription_billing_cadence.py` | 7 | Cadence **precedence**: contracted cadence beats offer cadence; offer cadence is snapshotted when uncontracted; the biller prefers subscription over offer and falls back when unset; next-billing computation for quarterly; cadence-aware price suffix. | **Port the precedence cases.** Precedence is exactly the behaviour that disappears when the four parallel cadence stores retire, so these are the only tests proving the retirement did not change customer-visible behaviour. The published parity list omits this file; it must be on it. |
 | `dotmac_sub:tests/test_billing_contracts.py` | 14 | Immutable versions; replay of one idempotency key writes one version; supersession closes the previous version **contiguously**; **line lineage survives supersession**; effective-at resolves exactly one row across a boundary; cadence round-trips through the stored version; mixed currency between contract and line is refused; a version cannot start before the current effective one; duplicate charge component on one version is refused; recording requires an idempotency key; the owner command rejects a caller-owned transaction; live add-on purchases coalesce without resetting contract cadence. | **Port all but the add-on cases**, which are Sub product behaviour and become an adopter test over the module's contract. `test_owner_command_rejects_a_caller_owned_transaction` becomes the module's transaction-authority test. |
 | `dotmac_sub:tests/test_billing_rating.py` | 11 | Fixed-period rating is the contracted line amount; rating is deterministic; a recorded policy version must have an explicit replay implementation; a per-day rate aggregates into a monthly period; declared calendar-day proration narrows the charge; rating an unknown line fails closed; usage-metered rating without an observation fails closed. Plus four tax cases. | **Port the six non-tax cases.** The four tax cases (`test_tax_is_added_from_the_named_active_rate`, `test_tax_inclusive_price_backs_the_net_out`, and the two fail-closed tax-rate cases) move to `dotmac-billing`. `test_usage_metered_rating_without_observation_fails_closed` ports **as a refusal test** — the module declares the rate basis and refuses to rate it. |
@@ -198,11 +200,13 @@ on its own side.
 the reason this module can be dual-plane at all: 456 lines, owns no records,
 opens no transaction, reads no session, and its docstring says so. The module's
 engine is that file plus the pre-tax half of `rating.py` and the lifecycle
-guards from `contracts.py`, with **one mandatory delta**: `cadence.py:32-39`
-imports its vocabulary from `app.models.billing_contract`, and the engine must
-own those types itself. If the engine imports persistence, the "one behaviour"
-claim is false and the guards cannot be reused on the other plane — ADR-0023 § 1
-says exactly this.
+guards from `contracts.py`, with **two deliberate deltas**: `cadence.py:32-39`
+imports its vocabulary from `app.models.billing_contract`, so the engine owns
+those types itself; and monthly rate-unit counting compares the resolved
+calendar anniversary instead of raw day numbers, so a clamped 31 January–28
+February interval is one unit rather than zero. If the engine imports
+persistence, the "one behaviour" claim is false and the guards cannot be reused
+on the other plane — ADR-0023 § 1 says exactly this.
 
 Extensible vocabularies (charge model, obligation source) are ADR-0008
 declaration registries supplied by the product. Closed vocabularies (interval
@@ -405,14 +409,13 @@ per cohort, disable the legacy path, delete it in the same release train.
    trigger (a second consumer from the CRM→Sub sales-agreement consolidation)
    and three preconditions.
 2. **The `RatedObligationOutputV1` ↔ `AcceptRatedObligationV1` pairing.**
-   Producer side is specified in
-   `docs/superpowers/specs/2026-08-14-subscriptions-public-contracts.md`;
-   the consumer side is Team 2's. The pairing is the plan's G2 gate and neither
-   half is released.
-3. **P3 durable timers** have no owner. The plan is explicit that they are ported
-   product-first from Sub only when the scheduled Vendor adoption is blocked on
-   them, and paired with that real consumer. A cron scan over all contracts is
-   not a substitute.
+   Both producer and consumer implementations are being landed in the same
+   coordinated train; the adopting assembly must still map them and prove the
+   contract suite before recurring output becomes financially effective.
+3. **P3 durable timers** now has a product-first owner on the coordinated timer
+   worktree. `dotmac-subscriptions` consumes only `DurableTimerPort`; the
+   adopting assembly must bind that port to the released timer package and
+   prove generation/replay behavior. A cron scan remains inadmissible.
 4. **Vendor CP's untested platform revokes, untested contract suspension, and
    unimplemented `superseded_by_id`** (`contracts/models.py:72`). None blocks
    this module; all three block ever auditing a commercial-agreement module.

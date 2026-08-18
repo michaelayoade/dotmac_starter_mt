@@ -74,20 +74,22 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# The integrated commerce modules are direct-allocation cases: the released
-# a69 predecessor contains none of their permanent namespace rows, so a70 is
-# the first kernel that can construct their registries. Other releasable modules
-# are listed below when a later capability raises the effective floor.
+# The coordinated modules are direct-allocation cases: released a70 contains
+# none of their permanent namespace rows. Their allocations, Subscriptions'
+# open manifest vocabularies, and the tenant audit prerequisite therefore land
+# together in a71. Other releasable modules are listed below when a later
+# capability raises the effective floor.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
     # CAPABILITY_RAISED_FLOORS below rather than here.
-    "dotmac-billing": "0.1.0a70",
+    "dotmac-billing": "0.1.0a71",
     # Durable timers consumes a67's relay contract, but its own namespace is
     # allocated later, so the allocation remains the effective floor.
-    "dotmac-durable-timers": "0.1.0a70",
-    "dotmac-collections": "0.1.0a70",
-    "dotmac-orders": "0.1.0a70",
+    "dotmac-durable-timers": "0.1.0a71",
+    "dotmac-collections": "0.1.0a71",
+    "dotmac-orders": "0.1.0a71",
+    "dotmac-subscriptions": "0.1.0a71",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

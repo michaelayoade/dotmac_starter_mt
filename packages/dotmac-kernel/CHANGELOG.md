@@ -6,6 +6,20 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a71 — UNRELEASED
+
+Adds subscriptions' declaration and namespace seams for the coordinated
+commercial-module landing.
+
+### Added
+
+- Product-owned `charge_models` and `obligation_sources` manifest declarations,
+  consumed by `dotmac-subscriptions` as open ADR-0008 registries rather than
+  fixed kernel enums.
+- The permanent `subscriptions` / `su` / `mod_subscriptions` migration-owner
+  allocation. Billing, collections, durable timers and orders remain peer
+  owners and do not share its lineage.
+
 ## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known

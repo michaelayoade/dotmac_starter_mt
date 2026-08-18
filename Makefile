@@ -41,10 +41,11 @@ OIDC_SRC ?= packages/dotmac-auth-oidc/src/dotmac_auth_oidc
 CONNECTOR_WHATSAPP_SRC ?= packages/dotmac-connector-whatsapp/src/dotmac_connector_whatsapp
 BILLING_SRC ?= packages/dotmac-billing/src/dotmac_billing
 COLLECTIONS_SRC ?= packages/dotmac-collections/src/dotmac_collections
+SUBSCRIPTIONS_SRC ?= packages/dotmac-subscriptions/src/dotmac_subscriptions
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(DURABLE_TIMERS_SRC) $(ORDERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(BILLING_SRC) $(COLLECTIONS_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(DURABLE_TIMERS_SRC) $(ORDERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(BILLING_SRC) $(COLLECTIONS_SRC) $(SUBSCRIPTIONS_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(DURABLE_TIMERS_SRC) $(ORDERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(BILLING_SRC) $(COLLECTIONS_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(DURABLE_TIMERS_SRC) $(ORDERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(BILLING_SRC) $(COLLECTIONS_SRC) $(SUBSCRIPTIONS_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py

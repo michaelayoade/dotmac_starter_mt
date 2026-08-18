@@ -78,8 +78,8 @@
       "state": "never-published"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a70",
-      "reason": "AWAITING RELEASE AUTHORIZATION. a69 is the canonical import-safety predecessor. The integrated a70 allocates Billing, Durable Timers, Collections and Orders, publishes tenant_audit_log.v1, and exposes explicit multi-module SQLite test composition without moving domain behavior into Kernel. Michael authorized draft PR preparation but explicitly did not authorize publishing a release. Delete this row only when the exact dotmac-kernel-v0.1.0a70 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or reuse a69.",
+      "declared": "0.1.0a71",
+      "reason": "AWAITING RELEASE AUTHORIZATION. Released a70 is the canonical audit-identity predecessor. The coordinated a71 allocates the independently owned reusable modules in this PR, publishes tenant_audit_log.v1 and the open Subscriptions vocabularies, and preserves explicit multi-module SQLite composition without moving domain behavior into Kernel. Michael authorized draft PR preparation but explicitly did not authorize publishing a release. Delete this row only when the exact dotmac-kernel-v0.1.0a71 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or reuse a70.",
       "state": "declared-unpublished"
     },
     "dotmac-imports": {
@@ -90,6 +90,11 @@
     "dotmac-orders": {
       "declared": "0.1.0a1",
       "reason": "INTENDED pre-adoption state: dotmac-orders is audit-complete but has no contract consumer and is deliberately absent from every release allowlist. Its EXTRACTION.toml requires Dotmac Sub to run shadow parity and retire the displaced order, line, coverage and fulfillment writers before publication eligibility is claimed. Do not dispatch a release or add an allowlist row until that first-adopter change supplies the dossier's cutover evidence.",
+      "state": "never-published"
+    },
+    "dotmac-subscriptions": {
+      "declared": "0.1.0a1",
+      "reason": "OUTSTANDING first-release proof: the product-first subscriptions extraction now has a declared package version, dual-plane lineage and public contracts, but no clean-host wheel smoke or published tag yet. Keep it out of the release allowlist until the coordinated landing is green on Observe and the dedicated release workflow can publish these exact bytes.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

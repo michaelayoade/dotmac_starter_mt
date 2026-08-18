@@ -586,7 +586,7 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # `dotmac-billing` — the operational-receivables owner on declared tenant and
-# platform planes. Allocated with the first complete package in kernel a70;
+# platform planes. Allocated with the first complete package in kernel a71;
 # `bi` and `mod_billing` are permanent physical identities, never deployment
 # configuration.
 BILLING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
@@ -619,7 +619,7 @@ COLLECTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # `dotmac-orders` — the tenant-only owner of the customer-order aggregate
-# (ADR-0030 §5b), allocated in the same integrated kernel a70 as Billing,
+# (ADR-0030 §5b), allocated in the same integrated kernel a71 as Billing,
 # Durable Timers, and Collections.
 #
 # Orders has no control-plane row set: Vendor CP owns no orders today, while
@@ -631,6 +631,18 @@ ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     prefix="or",
     branch_label="orders",
     db_schema=module_schema("orders"),
+)
+
+# `dotmac-subscriptions` — the recurring-commercial owner on explicit tenant
+# and platform planes. The long schema identity is intentional and readable in
+# operational SQL; the compact `su` prefix preserves revision-id budget.
+# Billing, Collections, Durable Timers and Orders lineages remain peers and do
+# not share this namespace.
+SUBSCRIPTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="subscriptions",
+    prefix="su",
+    branch_label="subscriptions",
+    db_schema=module_schema("subscriptions"),
 )
 
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
@@ -649,6 +661,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     DURABLE_TIMERS_MIGRATION_OWNER,
     COLLECTIONS_MIGRATION_OWNER,
     ORDERS_MIGRATION_OWNER,
+    SUBSCRIPTIONS_MIGRATION_OWNER,
 )
 
 
@@ -995,6 +1008,7 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "ORDERS_MIGRATION_OWNER",
+    "SUBSCRIPTIONS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

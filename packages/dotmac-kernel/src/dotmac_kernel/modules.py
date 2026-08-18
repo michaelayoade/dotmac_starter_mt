@@ -173,6 +173,11 @@ class ModuleManifest:
     # Scope kinds this module introduces — levels in the settings hierarchy,
     # each naming where it sits. See `dotmac_kernel.setting_scopes`.
     scope_kinds: Sequence[ScopeKindSpec] = field(default_factory=tuple)
+    # Product-owned recurring-commercial vocabularies. They are strings, not
+    # kernel enums: the subscriptions module composes the declaration registry
+    # and validates references while each product remains the member owner.
+    charge_models: Sequence[str] = field(default_factory=tuple)
+    obligation_sources: Sequence[str] = field(default_factory=tuple)
     # ── D1: database namespace + migration lineage identity (ADR-0006) ──────
     # `short_code` is the registry-ALLOCATED database identity of a STATEFUL
     # module (see `dotmac_kernel.namespaces.MIGRATION_OWNER_LEDGER`). Its schema
@@ -249,6 +254,8 @@ class ModuleManifest:
             "setting_domains",
             "setting_value_types",
             "scope_kinds",
+            "charge_models",
+            "obligation_sources",
             "tables",
             "platform_tables",
             "feature_flags",
@@ -474,6 +481,8 @@ class ModuleManifest:
             setting_domains=manifest.setting_domains,
             setting_value_types=manifest.setting_value_types,
             scope_kinds=manifest.scope_kinds,
+            charge_models=manifest.charge_models,
+            obligation_sources=manifest.obligation_sources,
             core=manifest.core,
             enabled_by_default=manifest.enabled_by_default,
             seed=manifest.seed,
