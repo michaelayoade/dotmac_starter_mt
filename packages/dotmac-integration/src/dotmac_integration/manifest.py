@@ -38,10 +38,11 @@ from dotmac_kernel.prerequisites import (
 
 from dotmac_integration.models import PLATFORM_TABLES, TENANT_TABLES
 from dotmac_integration.retention import RETENTION_PLATFORM_TABLES
+from dotmac_integration.shadow import SHADOW_PLATFORM_TABLES
 
 module = ModuleManifest(
     code="integration",
-    version="0.1.0a6",
+    version="0.1.0a8",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="intg",
@@ -53,7 +54,9 @@ module = ModuleManifest(
     # machinery; `retention.RETENTION_PLATFORM_TABLES` is the legal-hold
     # ledger. Declaring each beside the code that owns it keeps the declaration
     # honest — and keeps two concurrent slices from editing one tuple.
-    platform_tables=PLATFORM_TABLES + RETENTION_PLATFORM_TABLES,
+    platform_tables=(
+        PLATFORM_TABLES + RETENTION_PLATFORM_TABLES + SHADOW_PLATFORM_TABLES
+    ),
     # ── Logical database prerequisites ──────────────────────────────────────
     # THREE effects this module needs that none of its own migrations create.
     #

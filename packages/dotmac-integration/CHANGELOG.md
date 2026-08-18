@@ -2,13 +2,13 @@
 
 ## Release state — read this before pinning
 
-**Five versions have been released. Pin `0.1.0a5`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a5`, from `1b1d62b`, `aaa3b54`,
-`b14f66e`, `306a40e` and `7828697`.
+**Eight versions have been released. Pin `0.1.0a8`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a8`, from `1b1d62b`, `aaa3b54`,
+`b14f66e`, `306a40e`, `7828697`, `7e05430`, `c669b24` and `4b1e867`.
 
-`0.1.0a5` is the version the first connector programme pins. It adds SPI 1.2's
-provider-neutral verification evidence while retaining a4's declared
-at-most-once dependency and persisted-exception hardening.
+`0.1.0a8` is the latest published version. It retains SPI 1.2 and adds the
+module-owned indexed shadow-evidence store needed for the first capability
+cutover.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -26,11 +26,15 @@ it outlives the request, the process and the credential's rotation. Prefer a4.
 tagged on 2026-08-17 from `7828697`. Its publication-ledger row was retired in
 the immediately following release-record change.
 
-`0.1.0a6` is declared and **not released**. It keeps SPI 1.2's executable
-protocols, makes the existing platform-audit storage dependency explicit, and
-restores installation/configuration lifecycle behaviour that drifted during
-the product-first port. The declared-publication baseline holds that state
-until the release workflow installs and verifies a6 from the private index.
+`0.1.0a6` was published, installed back from the private index and tagged on
+2026-08-17 from `7e05430`. It keeps SPI 1.2, makes the platform-audit storage
+dependency explicit and restores installation/configuration lifecycle parity.
+
+`0.1.0a7` was published, installed back from the private index and tagged on
+2026-08-17 from `c669b24` while the independent a8 branch was being rebased.
+
+`0.1.0a8` was published, installed back from the private index, registered and
+tagged on 2026-08-17 from `4b1e867` by release run `32050382156`.
 
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
@@ -47,7 +51,44 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
-## 0.1.0a6 — UNRELEASED
+## 0.1.0a8 — released 2026-08-17
+
+### Indexed, revisioned product-port shadow evidence
+
+- Adds append-only `shadow_comparison_evidence` in the module's platform plane
+  through additive revision `ig_0010`; released migration bytes stay frozen.
+- Stores only the Integrator receipt UUID, an explicit comparison revision,
+  closed verdict/blocker codes and bounded field names. Provider identities,
+  payloads, headers, values and exception text are not representable.
+- Selects due receipts without claiming or mutating them. Terminal evidence is
+  observed once per revision; transient outcomes retry only after an explicit
+  interval; a new deployment revision deliberately re-drives the population.
+- Aggregates only the latest result per receipt and refuses to call an empty or
+  blocked sample cutover-safe. The final cutover remains a product decision.
+- Keeps transaction authority with the assembly: services accept a session,
+  mutate and flush; they never create sessions, commit or roll back.
+- Does not use the kernel operator-audit ledger as a high-volume polling index,
+  and does not put reusable state in the thin assembly.
+
+## 0.1.0a7 — released 2026-08-17
+
+### Product-owned destination provenance and complete receipt identity
+
+- Adds append-only `ig_0009_product_port_desc` columns on destination
+  revisions. A named reconciler accepts one already-authenticated product
+  descriptor, verifies its digest, owner, capability, version and same-origin
+  paths, and appends only when the digest changes.
+- Carries `provider_event_id` from the claimed receipt into `ProductRequest`
+  and its fingerprint. The engine-owned durable identity no longer has to be
+  reconstructed from connector payload content.
+- Adds `InboundDisposition.RECORD_ONLY`, defaulting to `DELIVER`. Malformed,
+  provider-error and unsupported-wire evidence can remain durable and
+  deduplicated while being closed without entering a product delivery worker.
+- Keeps SPI 1.2 and its verification-evidence observer unchanged; the new
+  disposition is additive and existing connector events retain their delivery
+  behaviour.
+
+## 0.1.0a6 — released 2026-08-17
 
 ### Configuration declarations are executable contracts
 

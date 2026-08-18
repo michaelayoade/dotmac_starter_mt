@@ -21,7 +21,7 @@ owner = "External connector control plane"
 # ownership, provider-account rate limiting, backoff and idempotency, which is
 # the entire reason the runtime is separate. The same shape
 # dotmac_vendor_control_plane already uses for dotmac-release-catalog.
-contract = "The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state."
+contract = "The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, authenticated product-port descriptor snapshots, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, indexed shadow evidence, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state."
 
 # PLATFORM-PLANE ONLY (ADR-0023). Declared, not discovered: a connector
 # installation, its config revisions and its delivery evidence are control-plane
@@ -59,6 +59,10 @@ source_paths = [
   "dotmac_sub:app/services/integrations/egress_gateway.py",
   "dotmac_sub:app/services/integrations/egress_policy.py",
   "dotmac_sub:app/services/integrations/external_runner.py",
+  # The product-owned comparison contract that supplies the closed verdict,
+  # blocker and field-name vocabulary. Its domain reads stay in Sub; only the
+  # provider-neutral aggregation/refusal shape is ported.
+  "dotmac_sub:app/services/team_inbox_integrator_mirror.py",
 ]
 preserved_tests = [
   # The four that port. Carried WITH the code they prove, slice by slice.
@@ -66,6 +70,13 @@ preserved_tests = [
   "dotmac_sub:tests/test_integration_manifest_adoption.py",
   "dotmac_sub:tests/test_integration_delivery.py",
   "dotmac_sub:tests/test_integration_installation_api.py",
+]
+# The comparison is a later product-first source, separate from the original
+# nine-suite engine extraction accounting below. Its product DB reads stay in
+# Sub; these tests are the parity source for the closed aggregation/refusal
+# contract ported into `shadow.py`.
+shadow_parity_evidence = [
+  "dotmac_sub:tests/test_integrator_observation_mirror.py",
 ]
 
 # NOT ported, and named so nobody ports them by reflex:
@@ -81,8 +92,9 @@ preserved_tests = [
 #   podman_transport.py     Sub deployment infrastructure.
 not_ported = ["connectors/*", "*_capability.py", "crm_ticket_readiness.py", "backoffice_contracts.py", "podman_transport.py"]
 
-# The thin assembly is the module's one authoritative runtime and pins the
-# published a5 distribution plus the first connector on its default branch.
+# The thin assembly is the module's one authoritative runtime. It must now
+# repin from published a5 to published a6; the first connector is already on
+# its default branch.
 # Products are deliberately
 # absent from both sets: they consume typed observations over their own ports,
 # never this module, and Sub keeps only its capability handlers after cutover.
@@ -153,7 +165,7 @@ payload_retention = "NEW behaviour, not ported: Sub retains inbound payloads ind
 
 local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
 
-next_action = "dotmac-integration 0.1.0a5 and the first ingress-only Meta/WhatsApp connector are published, pinned and composition-tested in dotmac_integrator. Publish the unreleased a6 product-parity correction and repin the assembly, then add provider-neutral installation/configuration/binding authoring. Wire the Sub product port, run a shadow cutover, and lower Sub's external-connector ratchet in the same change that retires the displaced direct surface."
+next_action = "dotmac-integration a8 is published and verified. Exact-pin kernel a68 and integration a8 in dotmac_integrator, replace its provisional kernel-audit projection with the module API, add provider-neutral installation/configuration/binding authoring, install Sub's authenticated descriptor in mirror mode, prove zero unexplained drift, and only then cut over one binding and retire Sub's provider webhook/client/credentials/retry path while lowering the external-connector ratchet in the same change."
 
 # PARITY DISPOSITIONS — one per source suite, and the reason.
 #

@@ -256,7 +256,7 @@ def test_the_same_lineage_loads_once_the_edge_is_logical(
 
     A copy of the real files with the one line replaced by the compliant form
     resolves to an empty edge (no bindings installed, which is the
-    graph-inspection case `resolve_depends_on` documents) and walks all seven
+    graph-inspection case `resolve_depends_on` documents) and walks all ten
     revisions. Without this, the test above would also pass if the lineage were
     broken for an unrelated reason.
     """
