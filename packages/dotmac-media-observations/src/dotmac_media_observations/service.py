@@ -1030,16 +1030,16 @@ def _cycle_children(
             by_scope.setdefault(key[:3], {})[key[3]] = fact.parent_entity_ref
     for scope, edges in by_scope.items():
         for start in edges:
-            order: list[str] = []
+            traversal: list[str] = []
             positions: dict[str, int] = {}
             current = start
             while current in edges:
                 if current in positions:
-                    for child in order[positions[current] :]:
+                    for child in traversal[positions[current] :]:
                         cycle.add((*scope, child))
                     break
-                positions[current] = len(order)
-                order.append(current)
+                positions[current] = len(traversal)
+                traversal.append(current)
                 current = edges[current]
     return cycle
 

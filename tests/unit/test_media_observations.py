@@ -326,12 +326,9 @@ def test_out_of_order_delivery_has_a_deterministic_projection(db: Session) -> No
 def test_naive_provider_or_receipt_timestamp_is_refused(db: Session) -> None:
     _node(db)
     aware = _source("aware")
-    for bad in (
-        replace(aware, observed_at=T0.replace(tzinfo=None)),
-        replace(aware, received_at=T0.replace(tzinfo=None)),
-    ):
+    for field_name in ("observed_at", "received_at"):
         with pytest.raises(InvalidObservation, match="timezone-aware"):
-            record_entity(db, replace(_entity("aware"), source=bad))
+            replace(aware, **{field_name: T0.replace(tzinfo=None)})
 
 
 def test_a_missing_parent_is_not_silently_re_rooted(db: Session) -> None:
@@ -643,7 +640,7 @@ def test_metric_reads_include_complete_provenance(db: Session) -> None:
 def test_derived_ratio_is_explicitly_not_a_provider_observation() -> None:
     ratio = derive_ratio(Decimal("3"), Decimal("4"), unit="fraction")
     assert isinstance(ratio, DerivedRatio)
-    assert ratio.value == RatioValue(Decimal("0.75")).value
+    assert ratio.value == RatioValue(Decimal("0.75"))
     assert ratio.claim_status is ClaimStatus.DERIVED_PROJECTION
 
 
