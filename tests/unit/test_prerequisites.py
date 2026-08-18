@@ -75,12 +75,17 @@ def test_the_kernel_ships_exactly_the_effects_modules_need() -> None:
     dead-letter rather than shipping a second claim loop — and a module cannot
     declare a dependency on a facility the kernel has never named. Publishing
     the name is what unblocks that module; shipping the module first would
-    repeat the numbering defect deliberately."""
+    repeat the numbering defect deliberately.
+
+    `tenant_audit_log.v1` follows the normal consumer-first discovery: Orders
+    calls the existing tenant audit writer, so its manifest must be able to
+    name and verify the exact storage effect before that module can migrate."""
     assert {spec.name for spec in KERNEL_PREREQUISITES} == {
         "tenant_scope_catalog.v1",
         "module_database_roles.v1",
         "idempotency_ledger.v1",
         "outbox_relay.v1",
+        "tenant_audit_log.v1",
         "platform_audit_log.v1",
     }
 

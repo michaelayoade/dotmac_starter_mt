@@ -48,7 +48,15 @@ production caller migrated to the canonical identity pair.
   the existing `outbox_relay.v1` prerequisite but owns timer identity,
   generation and terminal evidence outside the kernel.
 - Allocated the permanent `cl` / `collections` / `mod_coll` tenant-only
-  Collections lineage alongside the integrated commerce modules.
+  Collections lineage. Receivable, timer, product, and delivery authority stay
+  outside that package behind typed contracts.
+- Allocated the tenant-only Orders lineage: owner and short code `orders`,
+  schema `mod_orders`, migration prefix `or`, and branch label `orders`. It
+  reserves no speculative control-plane storage.
+- Added `tenant_audit_log.v1`, the live-catalog contract for the existing
+  tenant-scoped `public.audit_events` writer. It proves the canonical actor and
+  forensic shape, tenant foreign key/index, FORCE RLS, and the online role's
+  append-only `SELECT`+`INSERT` posture before a module may use that writer.
 
 ### Changed
 

@@ -74,11 +74,10 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# Billing is the current direct-allocation case: a68 is already published and
-# does not contain its permanent namespace row, so a69 is the first kernel that
-# can construct the module registry. Other releasable modules have outlived
-# their allocation floors and are listed below when a later capability raises
-# the effective floor.
+# The integrated commerce modules are direct-allocation cases: the released
+# a69 predecessor contains none of their permanent namespace rows, so a70 is
+# the first kernel that can construct their registries. Other releasable modules
+# are listed below when a later capability raises the effective floor.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
@@ -88,6 +87,7 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # allocated later, so the allocation remains the effective floor.
     "dotmac-durable-timers": "0.1.0a70",
     "dotmac-collections": "0.1.0a70",
+    "dotmac-orders": "0.1.0a70",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -111,7 +111,11 @@ CAPABILITY_RAISED_FLOORS = {
     # consumes selected_module_planes.
     "dotmac-files": ("0.1.0a61", "0.1.0a54"),
     "dotmac-imports": ("0.1.0a56", "0.1.0a55"),
-    "dotmac-template-studio": ("0.1.0a56", "0.1.0a13"),
+    # Template Studio has always written tenant audit events from its online
+    # adapters. a70 is the first kernel that names and verifies that storage as
+    # tenant_audit_log.v1, so the unshipped module now declares the dependency
+    # its request path already had instead of relying on this assembly's schema.
+    "dotmac-template-studio": ("0.1.0a70", "0.1.0a13"),
     # ADR-0023 dual-plane (`platform_tables`, a53) raised this one first; the
     # prerequisite contract raises it again. The floor is always the highest
     # capability the module actually consumes, not the first one that moved it.

@@ -39,14 +39,18 @@ from alembic import op
 revision = "ts_0001_templates"
 down_revision = None
 branch_labels = ("template_studio",)
-# This lineage needs a tenant catalogue to point its foreign keys at and roles to
-# grant to — NOT the kernel's identity, RBAC or audit estate. Naming those
-# EFFECTS instead of kernel revision `0001_initial_tenant_schema` is what lets
-# this module install into an assembly that supplies them from its own lineage;
+# This lineage needs a tenant catalogue to point its foreign keys at, roles to
+# grant to, and the append-only audit storage its online decisions write. Naming
+# those EFFECTS instead of kernel revision `0001_initial_tenant_schema` is what
+# lets this module install into an assembly that supplies them from its own lineage;
 # ERP hosts `public.tenants` itself and can never run kernel 0001 (ADR-0006 D1
 # amendment). Literals, not imported constants, so the composed gate can read
 # them statically and diff them against the manifest.
-REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")
+REQUIRES = (
+    "tenant_scope_catalog.v1",
+    "module_database_roles.v1",
+    "tenant_audit_log.v1",
+)
 
 # Resolved from this assembly's installed bindings, so Alembic still orders on a
 # concrete revision id.

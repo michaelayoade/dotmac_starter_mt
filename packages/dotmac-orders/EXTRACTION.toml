@@ -1,0 +1,57 @@
+schema_version = 1
+package = "dotmac-orders"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+
+owner = "The tenant-scoped customer-order aggregate: stable order identity, immutable accepted line snapshots with exact price/terms/specification provenance, refused-by-default submission/acceptance/cancellation, finite coverage-obligation receipts, and one replayable fulfillment request identity per frozen line."
+
+contract = "Accept a typed checkout snapshot under a required TenantScope and kernel idempotency key; persist one order with immutable exact-money line snapshots, captured price/terms/specification version references, and totals derived only from those snapshots; record a finite set of opaque coverage obligations and deduplicated satisfying receipts; and publish one typed, replayable fulfillment request per frozen line through the kernel outbox once acceptance and complete coverage both hold. NOT quote/cart authoring, offer or price ownership, invoice/receivable/settlement, subscription recurrence, fulfillment execution, stock/shipment, service lifecycle, numbering policy, provider transport, or the general ledger."
+
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_crm", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_sub:app/models/sales.py",
+  "dotmac_sub:app/models/sales_order_funding.py",
+  "dotmac_sub:app/services/sales_orders.py",
+  "dotmac_sub:app/services/sales_order_funding.py",
+  "dotmac_sub:app/services/sales/quote_acceptance.py",
+  "dotmac_sub:app/services/sales_fulfillment.py",
+  "dotmac_sub:app/services/sales_lifecycle_reconciliation.py",
+  "dotmac_erp:app/models/finance/ar/sales_order.py",
+  "dotmac_erp:app/services/finance/ar/sales_order.py",
+  "dotmac_erp:app/services/finance/ar/quote.py",
+  "dotmac_crm:app/models/sales_order.py",
+  "dotmac_crm:app/services/sales_orders.py",
+  "dotmac_starter_mt@504ed25:packages/dotmac-sales/README.md",
+  "dotmac_starter_mt@504ed25:packages/dotmac-sales/src/dotmac_sales/contracts.py",
+]
+preserved_tests = [
+  "dotmac_sub:tests/test_sales_order_funding.py",
+  "dotmac_sub:tests/test_quote_financial_safety.py",
+  "dotmac_sub:tests/test_sales_orders_services.py",
+  "dotmac_sub:tests/test_quote_acceptance_workflow.py",
+  "dotmac_sub:tests/test_sales_lifecycle_chain.py",
+  "dotmac_sub:tests/test_sales_to_service_lifecycle.py",
+  "dotmac_sub:tests/architecture/test_sales_lifecycle_chain_boundary.py",
+  "dotmac_erp:tests/ifrs/ar/test_sales_order_service.py",
+  "dotmac_starter_mt:tests/unit/test_orders_engine.py",
+  "dotmac_starter_mt:tests/architecture/test_orders_module.py",
+  "dotmac_starter_mt:tests/test_orders_isolation.py",
+  "dotmac_starter_mt:tests/test_tenant_audit_log_prerequisite.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_sub", "dotmac_cloud"]
+
+inventory_evidence = [
+  "docs/inventories/orders-sources.md",
+  "docs/inventories/cloud-commerce-owner-sources.md",
+  "docs/adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md",
+]
+
+first_cutover = "dotmac_sub is first: it is the qualifying source, has the live finite funding gate and reconciler, and has already retired the generic operator payment path that could manufacture funding. Cut over coverage first, then immutable order acceptance/lines, then submission/cancellation and fulfillment publication. Dotmac Cloud is a later greenfield consumer and proves reuse, not the first authority transfer."
+
+shadow_and_drift = "Sub writes the module in shadow beside sales_orders and compares identity, frozen values, version provenance, totals, finite obligation membership, coverage state and fulfillment identity for every active cohort. Missing price-version, terms or specification provenance is a blocking remediation row, never a guessed default. The module reconciler repairs only missing fulfillment publication from module-owned snapshots and never from live product catalogue rows."
+
+local_copy_retirement = "After accepted shadow parity, Sub retires SalesOrderLines.create/update, PATCH /sales-order-lines/{id}, the admin line-edit branch, generic sales-order ownership of funding fields, is_active soft-delete cancellation, the local finite funding writer, and live-line reads in sales_fulfillment._funding_contract_snapshots. CRM's push writers and local sales-order tables retire only after Sub cutover; ERP's physical warehouse sales order remains ERP-owned and retires nothing."
+
+next_action = "Integrate Orders on the shared kernel a70 foundation and generate the root lock with exactly Poetry 2.4.1. Before adoption, close both cross-owner inputs. Billing 0.1.0a1 explicitly keeps allocation/coverage internal and is not the eligibility owner; Michael must name a different owner-decided fact mechanically translatable to RecordCoverageResolutionCommand, or the adopted Orders profile must omit the financial gate. Orders and an assembly adapter must not infer eligibility from ReceivablePositionV1, allocation arithmetic or balances. Sales AcceptedQuoteHandoffV1 correctly stops before SalesOrder, but its current V1 omits the terms content, specification provenance, tax components, minor-unit contract and finite coverage membership Orders requires; extend that owner output until an assembly can translate it mechanically without live catalogue reads or a new commercial decision. Validate the package's static, unit, PostgreSQL isolation/concurrency/replay, migration and clean-wheel proofs on Observe from the exact committed branch. Keep the module unreleased and outside every release allowlist until Sub's separate shadow/cutover change removes the displaced local writers; only then release the exact kernel floor followed by dotmac-orders 0.1.0a1 and mark the dossier adopted."

@@ -618,6 +618,21 @@ COLLECTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("coll"),
 )
 
+# `dotmac-orders` — the tenant-only owner of the customer-order aggregate
+# (ADR-0030 §5b), allocated in the same integrated kernel a70 as Billing,
+# Durable Timers, and Collections.
+#
+# Orders has no control-plane row set: Vendor CP owns no orders today, while
+# Sub is the qualifying tenant-plane source and first cutover.  The plain
+# `orders` short code keeps the catalogue readable, and the distinct `or`
+# prefix gives the lineage its own revision-id namespace.
+ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="orders",
+    prefix="or",
+    branch_label="orders",
+    db_schema=module_schema("orders"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -633,6 +648,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     BILLING_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
     COLLECTIONS_MIGRATION_OWNER,
+    ORDERS_MIGRATION_OWNER,
 )
 
 
@@ -978,6 +994,7 @@ __all__ = [
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "ORDERS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

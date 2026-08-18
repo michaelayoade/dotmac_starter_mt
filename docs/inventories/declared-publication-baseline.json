@@ -79,12 +79,17 @@
     },
     "dotmac-kernel": {
       "declared": "0.1.0a70",
-      "reason": "AWAITING RELEASE AUTHORIZATION. a69 is the canonical import-safety predecessor. a70 preserves that history, allocates the integrated commerce modules' permanent namespace identities, and exposes one explicit multi-module SQLite test-composition seam without moving any domain behavior into the kernel. Billing therefore requires >=a70. Michael authorized draft PR preparation but explicitly did not authorize publishing a release. Delete this row only when the exact dotmac-kernel-v0.1.0a70 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or reuse a69.",
+      "reason": "AWAITING RELEASE AUTHORIZATION. a69 is the canonical import-safety predecessor. The integrated a70 allocates Billing, Durable Timers, Collections and Orders, publishes tenant_audit_log.v1, and exposes explicit multi-module SQLite test composition without moving domain behavior into Kernel. Michael authorized draft PR preparation but explicitly did not authorize publishing a release. Delete this row only when the exact dotmac-kernel-v0.1.0a70 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or reuse a69.",
       "state": "declared-unpublished"
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
+      "state": "never-published"
+    },
+    "dotmac-orders": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED pre-adoption state: dotmac-orders is audit-complete but has no contract consumer and is deliberately absent from every release allowlist. Its EXTRACTION.toml requires Dotmac Sub to run shadow parity and retire the displaced order, line, coverage and fulfillment writers before publication eligibility is claimed. Do not dispatch a release or add an allowlist row until that first-adopter change supplies the dossier's cutover evidence.",
       "state": "never-published"
     },
     "dotmac-template-studio": {
