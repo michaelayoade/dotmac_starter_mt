@@ -15,21 +15,26 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import dotmac_durable_timers.service as timer_service
 import pytest
 from dotmac_durable_timers.models import (
     PlatformTimer,
     PlatformTimerAcceptance,
+    PlatformTimerRejection,
     Timer,
     TimerAcceptance,
+    TimerRejection,
 )
 from dotmac_durable_timers.service import (
     AcceptanceOutcome,
     CancelOutcome,
+    TimerError,
     TimerIdentity,
     TimerOutput,
     TimerTrigger,
     accept_trigger,
     cancel_timer,
+    current_timer,
     purge_history,
     schedule_timer,
 )
@@ -45,6 +50,11 @@ from dotmac_kernel.messaging.relay import (
     claim_batch,
     record_failure,
     record_success,
+)
+from dotmac_kernel.modules import ModuleManifest
+from dotmac_kernel.outbox_event_types import (
+    OutboxEventTypeRegistry,
+    install_outbox_event_types,
 )
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import create_engine, event, func, select, text
@@ -65,6 +75,21 @@ PAST = datetime(2020, 1, 1, tzinfo=UTC)
 NOW = datetime(2029, 1, 2, tzinfo=UTC)
 FUTURE = datetime(2030, 2, 1, tzinfo=UTC)
 OUTPUT = TimerOutput("tests.timer_due")
+
+
+@pytest.fixture(autouse=True)
+def _declared_timer_output() -> None:
+    install_outbox_event_types(
+        OutboxEventTypeRegistry.from_manifests(
+            [
+                ModuleManifest(
+                    code="tests_timer_consumer",
+                    version="1.0.0",
+                    outbox_event_types=(OUTPUT.event_type,),
+                )
+            ]
+        )
+    )
 
 
 def _superuser_url() -> str:
@@ -204,24 +229,35 @@ def _schedule_tenant(
     identity: TimerIdentity,
     *,
     due_at: datetime = PAST,
+    expected_source_version: int | None = None,
 ):
     with _tenant_session(url, tenant_id) as session:
+        assert session.scalar(text("SHOW transaction_isolation")) == "read committed"
         result = schedule_timer(
             session,
             scope=TenantScope(tenant_id),
             identity=identity,
             due_at=due_at,
             output=OUTPUT,
+            expected_source_version=expected_source_version,
             recorded_at=NOW,
         )
         session.commit()
         return result
 
 
-def _schedule_platform(url: str, identity: TimerIdentity):
+def _schedule_platform(
+    url: str,
+    identity: TimerIdentity,
+    *,
+    expected_source_version: int | None = None,
+):
     engine = create_engine(url)
     try:
         with Session(engine) as session:
+            assert (
+                session.scalar(text("SHOW transaction_isolation")) == "read committed"
+            )
             result = schedule_timer(
                 session,
                 scope=PlatformScope(),
@@ -229,6 +265,7 @@ def _schedule_platform(url: str, identity: TimerIdentity):
                 due_at=PAST,
                 output=OUTPUT,
                 recorded_at=NOW,
+                expected_source_version=expected_source_version,
             )
             session.commit()
             return result
@@ -277,6 +314,48 @@ def test_proof_1_concurrent_first_schedules_allocate_gapless_generations(
         assert rows[-1].status == "scheduled"
 
 
+def test_proof_1_sensitivity_query_then_insert_reproduces_named_unique_failure(
+    scratch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    identity = _identity(11)
+    rendezvous = threading.Barrier(2)
+    unlocked_latest = timer_service._latest
+
+    def query_then_insert(db, scope, candidate, *, for_update):
+        row = unlocked_latest(db, scope, candidate, for_update=False)
+        rendezvous.wait()
+        return row
+
+    monkeypatch.setattr(timer_service, "_lock_identity", lambda *_: None)
+    monkeypatch.setattr(timer_service, "_latest", query_then_insert)
+
+    def run(offset: int):
+        return _schedule_tenant(
+            scratch["tenant"],
+            tenant_id,
+            identity,
+            due_at=PAST + timedelta(minutes=offset),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(run, 1), pool.submit(run, 2)]
+        outcomes: list[object] = []
+        for future in futures:
+            failure = future.exception()
+            outcomes.append(failure if failure is not None else future.result())
+
+    failures = [outcome for outcome in outcomes if isinstance(outcome, DBAPIError)]
+    successes = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    assert len(successes) == len(failures) == 1
+    failure = failures[0]
+    assert getattr(failure.orig, "sqlstate", None) == "23505"
+    assert getattr(failure.orig.diag, "constraint_name", None) in {
+        "uq_timers_identity_generation",
+        "uq_timers_current_identity",
+    }
+
+
 def test_proof_2_concurrent_reschedules_serialize_over_an_existing_timer(
     scratch,
 ) -> None:
@@ -312,6 +391,44 @@ def test_proof_2_concurrent_reschedules_serialize_over_an_existing_timer(
     ]
 
 
+def test_proof_2_sensitivity_unlocked_reschedules_raise_transition_conflict(
+    scratch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    identity = _identity(21)
+    _schedule_tenant(scratch["tenant"], tenant_id, identity)
+    rendezvous = threading.Barrier(2)
+    unlocked_latest = timer_service._latest
+
+    def query_then_transition(db, scope, candidate, *, for_update):
+        row = unlocked_latest(db, scope, candidate, for_update=False)
+        rendezvous.wait()
+        return row
+
+    monkeypatch.setattr(timer_service, "_lock_identity", lambda *_: None)
+    monkeypatch.setattr(timer_service, "_latest", query_then_transition)
+
+    def run(offset: int):
+        return _schedule_tenant(
+            scratch["tenant"],
+            tenant_id,
+            identity,
+            due_at=PAST + timedelta(hours=offset),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(run, 1), pool.submit(run, 2)]
+        outcomes: list[object] = []
+        for future in futures:
+            failure = future.exception()
+            outcomes.append(failure if failure is not None else future.result())
+
+    failures = [outcome for outcome in outcomes if isinstance(outcome, TimerError)]
+    successes = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    assert len(successes) == len(failures) == 1
+    assert failures[0].code == "durable_timers.transition_conflict"
+
+
 def test_proof_3_kernel_relay_claims_are_exclusive_and_cover_every_due_timer(
     scratch,
 ) -> None:
@@ -325,6 +442,10 @@ def test_proof_3_kernel_relay_claims_are_exclusive_and_cover_every_due_timer(
         with Session(first_engine) as first, Session(second_engine) as second:
             assert (
                 first.execute(text("SHOW transaction_isolation")).scalar()
+                == "read committed"
+            )
+            assert (
+                second.execute(text("SHOW transaction_isolation")).scalar()
                 == "read committed"
             )
             claimed_first = claim_batch(
@@ -344,6 +465,20 @@ def test_proof_3_kernel_relay_claims_are_exclusive_and_cover_every_due_timer(
     assert len(first_ids) == 5
     assert first_ids.isdisjoint(second_ids)
     assert len(first_ids | second_ids) == 12
+    admin = create_engine(scratch["admin"])
+    with admin.connect() as connection:
+        leases = dict(
+            connection.execute(
+                text(
+                    "SELECT id, leased_by FROM public.outbox_events "
+                    "WHERE id = ANY(:ids)"
+                ),
+                {"ids": list(first_ids | second_ids)},
+            ).all()
+        )
+    admin.dispose()
+    assert {leases[event_id] for event_id in first_ids} == {"proof-3-a"}
+    assert {leases[event_id] for event_id in second_ids} == {"proof-3-b"}
 
     platform_schedules = [
         _schedule_platform(scratch["platform"], _identity(300 + number))
@@ -373,6 +508,41 @@ def test_proof_3_kernel_relay_claims_are_exclusive_and_cover_every_due_timer(
         platform_dispatcher.dispose()
 
 
+def test_proof_3_sensitivity_without_skip_locked_hits_server_lock_timeout(
+    scratch,
+) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    for number in range(2):
+        _schedule_tenant(scratch["tenant"], tenant_id, _identity(320 + number))
+
+    dispatcher = create_engine(scratch["dispatcher"])
+    admin = create_engine(scratch["admin"])
+    try:
+        with Session(dispatcher) as holder, admin.connect() as contender:
+            [locked] = claim_batch(
+                holder,
+                worker_id="proof-3-lock-holder",
+                policy=RelayPolicy(batch_size=1),
+            )
+            assert locked.id is not None
+            transaction = contender.begin()
+            contender.execute(text("SET LOCAL lock_timeout = '250ms'"))
+            with pytest.raises(DBAPIError) as captured:
+                contender.execute(
+                    text(
+                        "SELECT id FROM public.outbox_events "
+                        "WHERE status = 'pending' AND available_at <= now() "
+                        "ORDER BY available_at LIMIT 20 FOR UPDATE"
+                    )
+                ).all()
+            assert getattr(captured.value.orig, "sqlstate", None) == "55P03"
+            transaction.rollback()
+            holder.rollback()
+    finally:
+        admin.dispose()
+        dispatcher.dispose()
+
+
 def test_proof_4_stale_lease_recovery_accepts_one_timer_effect(scratch) -> None:
     tenant_id = _make_tenant(scratch["admin"])
     scheduled = _schedule_tenant(scratch["tenant"], tenant_id, _identity(4))
@@ -400,6 +570,12 @@ def test_proof_4_stale_lease_recovery_accepts_one_timer_effect(scratch) -> None:
         )
         session.commit()
     assert reclaimed.id == scheduled.outbox_event_id
+    with admin.connect() as connection:
+        lease = connection.execute(
+            text("SELECT leased_by, attempts FROM public.outbox_events WHERE id = :id"),
+            {"id": reclaimed.id},
+        ).one()
+    assert lease == ("proof-4-w2", 0)
     with _tenant_session(scratch["tenant"], tenant_id) as session:
         trigger = TimerTrigger.from_payload(reclaimed.payload)
         result = accept_trigger(
@@ -424,79 +600,263 @@ def test_proof_4_stale_lease_recovery_accepts_one_timer_effect(scratch) -> None:
     dispatcher.dispose()
 
 
+def test_proof_4_sensitivity_live_lease_is_not_reclaimed(scratch) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    _schedule_tenant(scratch["tenant"], tenant_id, _identity(41))
+    dispatcher = create_engine(scratch["dispatcher"])
+    try:
+        with Session(dispatcher) as session:
+            [claimed] = claim_batch(
+                session,
+                worker_id="proof-4-live-owner",
+                policy=RelayPolicy(batch_size=1),
+            )
+            session.commit()
+        admin = create_engine(scratch["admin"])
+        with admin.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE public.outbox_events "
+                    "SET leased_at = now() - interval '1 hour' WHERE id = :id"
+                ),
+                {"id": claimed.id},
+            )
+        admin.dispose()
+        with Session(dispatcher) as session:
+            refused = claim_batch(
+                session,
+                worker_id="proof-4-too-early",
+                policy=RelayPolicy(batch_size=1, stale_lease_seconds=7200),
+            )
+            session.commit()
+        assert refused == []
+    finally:
+        dispatcher.dispose()
+
+
 def test_proof_5_cancel_and_accept_have_distinct_race_outcomes(scratch) -> None:
     tenant_id = _make_tenant(scratch["admin"])
-    identity = _identity(5)
-    scheduled = _schedule_tenant(scratch["tenant"], tenant_id, identity)
-    trigger = TimerTrigger.for_scheduled(scheduled)
-    barrier = threading.Barrier(2)
+    scope = TenantScope(tenant_id)
 
-    def run_accept():
-        with _tenant_session(scratch["tenant"], tenant_id) as session:
-            barrier.wait()
-            result = accept_trigger(
-                session,
-                scope=TenantScope(tenant_id),
-                trigger=trigger,
+    fire_identity = _identity(5)
+    fire_scheduled = _schedule_tenant(scratch["tenant"], tenant_id, fire_identity)
+    fire_engine = _tenant_engine(scratch["tenant"], tenant_id)
+    contender_engine = _tenant_engine(scratch["tenant"], tenant_id)
+    try:
+        with Session(fire_engine) as fire, Session(contender_engine) as contender:
+            assert fire.scalar(text("SHOW transaction_isolation")) == "read committed"
+            assert (
+                contender.scalar(text("SHOW transaction_isolation")) == "read committed"
+            )
+            locked = timer_service._latest(fire, scope, fire_identity, for_update=True)
+            assert locked is not None and locked.id == fire_scheduled.timer_id
+            contender.execute(text("SET LOCAL lock_timeout = '250ms'"))
+            with pytest.raises(DBAPIError) as captured:
+                cancel_timer(
+                    contender,
+                    scope=scope,
+                    identity=fire_identity,
+                    observed_generation=fire_scheduled.generation,
+                    recorded_at=NOW,
+                )
+            assert getattr(captured.value.orig, "sqlstate", None) == "55P03"
+            contender.rollback()
+            accepted = accept_trigger(
+                fire,
+                scope=scope,
+                trigger=TimerTrigger.for_scheduled(fire_scheduled),
                 accepted_at=NOW,
             )
-            session.commit()
-            return result.outcome
-
-    def run_cancel():
-        with _tenant_session(scratch["tenant"], tenant_id) as session:
-            barrier.wait()
-            result = cancel_timer(
-                session,
-                scope=TenantScope(tenant_id),
-                identity=identity,
+            assert accepted.outcome is AcceptanceOutcome.CURRENT
+            fire.commit()
+        with _tenant_session(scratch["tenant"], tenant_id) as contender:
+            after_fire = cancel_timer(
+                contender,
+                scope=scope,
+                identity=fire_identity,
+                observed_generation=fire_scheduled.generation,
                 recorded_at=NOW,
             )
-            session.commit()
-            return result.outcome
+            assert after_fire.outcome is CancelOutcome.ALREADY_FIRED
+            contender.commit()
+    finally:
+        fire_engine.dispose()
+        contender_engine.dispose()
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        accept_future = pool.submit(run_accept)
-        cancel_future = pool.submit(run_cancel)
-        outcomes = (accept_future.result(), cancel_future.result())
-    assert outcomes in {
-        (AcceptanceOutcome.CURRENT, CancelOutcome.ALREADY_FIRED),
-        (AcceptanceOutcome.CANCELED, CancelOutcome.CANCELED),
-    }
+    cancel_identity = _identity(50)
+    cancel_scheduled = _schedule_tenant(scratch["tenant"], tenant_id, cancel_identity)
+    cancel_engine = _tenant_engine(scratch["tenant"], tenant_id)
+    contender_engine = _tenant_engine(scratch["tenant"], tenant_id)
+    try:
+        with Session(cancel_engine) as cancel, Session(contender_engine) as contender:
+            locked = timer_service._latest(
+                cancel, scope, cancel_identity, for_update=True
+            )
+            assert locked is not None and locked.id == cancel_scheduled.timer_id
+            contender.execute(text("SET LOCAL lock_timeout = '250ms'"))
+            with pytest.raises(DBAPIError) as captured:
+                accept_trigger(
+                    contender,
+                    scope=scope,
+                    trigger=TimerTrigger.for_scheduled(cancel_scheduled),
+                    accepted_at=NOW,
+                )
+            assert getattr(captured.value.orig, "sqlstate", None) == "55P03"
+            contender.rollback()
+            canceled = cancel_timer(
+                cancel,
+                scope=scope,
+                identity=cancel_identity,
+                observed_generation=cancel_scheduled.generation,
+                recorded_at=NOW,
+            )
+            assert canceled.outcome is CancelOutcome.CANCELED
+            cancel.commit()
+        with _tenant_session(scratch["tenant"], tenant_id) as contender:
+            refused = accept_trigger(
+                contender,
+                scope=scope,
+                trigger=TimerTrigger.for_scheduled(cancel_scheduled),
+                accepted_at=NOW,
+            )
+            assert refused.outcome is AcceptanceOutcome.CANCELED
+            contender.commit()
+    finally:
+        cancel_engine.dispose()
+        contender_engine.dispose()
 
-    canceled = _schedule_tenant(scratch["tenant"], tenant_id, _identity(50))
     with _tenant_session(scratch["tenant"], tenant_id) as session:
-        result = cancel_timer(
-            session,
-            scope=TenantScope(tenant_id),
-            identity=_identity(50),
-            recorded_at=NOW,
-        )
-        assert result.outcome is CancelOutcome.CANCELED
-        session.commit()
-        refused = accept_trigger(
-            session,
-            scope=TenantScope(tenant_id),
-            trigger=TimerTrigger.for_scheduled(canceled),
-            accepted_at=NOW,
-        )
-        assert refused.outcome is AcceptanceOutcome.CANCELED
         missing = cancel_timer(
             session,
-            scope=TenantScope(tenant_id),
+            scope=scope,
             identity=_identity(500),
+            observed_generation=1,
             recorded_at=NOW,
         )
         assert missing.outcome is CancelOutcome.NOTHING_SCHEDULED
 
 
+def test_proof_5_sensitivity_without_row_lock_breaks_typed_race_outcomes(
+    scratch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    scope = TenantScope(tenant_id)
+    identity = _identity(53)
+    scheduled = _schedule_tenant(scratch["tenant"], tenant_id, identity)
+    rendezvous = threading.Barrier(2)
+    unlocked_latest = timer_service._latest
+
+    def plain_latest(db, candidate_scope, candidate, *, for_update):
+        row = unlocked_latest(db, candidate_scope, candidate, for_update=False)
+        rendezvous.wait()
+        return row
+
+    monkeypatch.setattr(timer_service, "_latest", plain_latest)
+
+    def run_accept():
+        with _tenant_session(scratch["tenant"], tenant_id) as session:
+            result = timer_service.accept_trigger(
+                session,
+                scope=scope,
+                trigger=TimerTrigger.for_scheduled(scheduled),
+                accepted_at=NOW,
+            )
+            session.commit()
+            return result
+
+    def run_cancel():
+        with _tenant_session(scratch["tenant"], tenant_id) as session:
+            result = timer_service.cancel_timer(
+                session,
+                scope=scope,
+                identity=identity,
+                observed_generation=scheduled.generation,
+                recorded_at=NOW,
+            )
+            session.commit()
+            return result
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(run_accept), pool.submit(run_cancel)]
+        outcomes: list[object] = []
+        for future in futures:
+            failure = future.exception()
+            outcomes.append(failure if failure is not None else future.result())
+
+    failures = [outcome for outcome in outcomes if isinstance(outcome, TimerError)]
+    assert len(failures) == 1
+    assert failures[0].code == "durable_timers.transition_conflict"
+
+
+def test_proof_5_stale_cancel_cannot_cancel_the_current_generation(scratch) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    identity = _identity(51)
+    observed = _schedule_tenant(scratch["tenant"], tenant_id, identity)
+    current = _schedule_tenant(scratch["tenant"], tenant_id, identity)
+
+    with _tenant_session(scratch["tenant"], tenant_id) as session:
+        result = cancel_timer(
+            session,
+            scope=TenantScope(tenant_id),
+            identity=identity,
+            observed_generation=observed.generation,
+            recorded_at=NOW,
+        )
+        session.commit()
+        current_row = session.scalar(select(Timer).where(Timer.id == current.timer_id))
+
+    assert result.outcome is CancelOutcome.STALE
+    assert result.observed_generation == 1
+    assert result.current_generation == 2
+    assert current_row is not None and current_row.status == "scheduled"
+
+
+def test_proof_5_sensitivity_removing_stale_cancel_guard_cancels_current(
+    scratch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    identity = _identity(52)
+    observed = _schedule_tenant(scratch["tenant"], tenant_id, identity)
+    current = _schedule_tenant(scratch["tenant"], tenant_id, identity, due_at=FUTURE)
+    monkeypatch.setattr(timer_service, "_cancel_is_stale", lambda *_: False)
+
+    with _tenant_session(scratch["tenant"], tenant_id) as session:
+        result = timer_service.cancel_timer(
+            session,
+            scope=TenantScope(tenant_id),
+            identity=identity,
+            observed_generation=observed.generation,
+            recorded_at=NOW,
+        )
+        session.commit()
+        current_row = session.scalar(select(Timer).where(Timer.id == current.timer_id))
+
+    assert result.outcome is CancelOutcome.CANCELED
+    assert current_row is not None and current_row.status == "canceled"
+
+
 def test_proof_6_old_generation_is_rejected_before_the_consumer_effect(scratch) -> None:
     tenant_id = _make_tenant(scratch["admin"])
     identity = _identity(6)
-    old = _schedule_tenant(scratch["tenant"], tenant_id, identity)
-    current = _schedule_tenant(scratch["tenant"], tenant_id, identity, due_at=FUTURE)
+    old = _schedule_tenant(
+        scratch["tenant"], tenant_id, identity, expected_source_version=41
+    )
+    current = _schedule_tenant(
+        scratch["tenant"],
+        tenant_id,
+        identity,
+        due_at=FUTURE,
+        expected_source_version=42,
+    )
     effects = 0
     with _tenant_session(scratch["tenant"], tenant_id) as session:
+        snapshot = current_timer(
+            session, scope=TenantScope(tenant_id), identity=identity
+        )
+        assert snapshot is not None
+        assert snapshot.timer_id == current.timer_id
+        assert snapshot.generation == 2
+        assert snapshot.expected_source_version == 42
         stale = accept_trigger(
             session,
             scope=TenantScope(tenant_id),
@@ -508,6 +868,14 @@ def test_proof_6_old_generation_is_rejected_before_the_consumer_effect(scratch) 
         assert stale.outcome is AcceptanceOutcome.STALE
         assert stale.observed_generation == 1
         assert stale.current_generation == 2
+        assert stale.expected_source_version == 41
+        rejection = session.scalar(
+            select(TimerRejection).where(TimerRejection.timer_id == old.timer_id)
+        )
+        assert rejection is not None
+        assert rejection.observed_generation == 1
+        assert rejection.current_generation == 2
+        assert rejection.expected_source_version == 41
         accepted = accept_trigger(
             session,
             scope=TenantScope(tenant_id),
@@ -516,8 +884,33 @@ def test_proof_6_old_generation_is_rejected_before_the_consumer_effect(scratch) 
         )
         if accepted.outcome is AcceptanceOutcome.CURRENT and not accepted.replayed:
             effects += 1
+        assert accepted.expected_source_version == 42
         session.commit()
     assert effects == 1
+
+
+def test_proof_6_sensitivity_removing_current_generation_guard_fires_stale(
+    scratch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    identity = _identity(61)
+    observed = _schedule_tenant(scratch["tenant"], tenant_id, identity)
+    current = _schedule_tenant(scratch["tenant"], tenant_id, identity)
+    monkeypatch.setattr(timer_service, "_trigger_matches_current", lambda *_: True)
+
+    with _tenant_session(scratch["tenant"], tenant_id) as session:
+        result = timer_service.accept_trigger(
+            session,
+            scope=TenantScope(tenant_id),
+            trigger=TimerTrigger.for_scheduled(observed),
+            accepted_at=NOW,
+        )
+        session.commit()
+        current_row = session.scalar(select(Timer).where(Timer.id == current.timer_id))
+
+    assert result.outcome is AcceptanceOutcome.CURRENT
+    assert result.observed_generation == 1
+    assert current_row is not None and current_row.status == "fired"
 
 
 def test_proof_7_one_poison_delivery_does_not_block_or_replay_the_other_nineteen(
@@ -531,6 +924,7 @@ def test_proof_7_one_poison_delivery_does_not_block_or_replay_the_other_nineteen
     with Session(dispatcher) as dispatch:
         claimed = claim_batch(dispatch, worker_id="proof-7", policy=policy)
         dispatch.commit()
+    assert len(claimed) == 20
     poison = claimed[0]
     for event_row in claimed[1:]:
         with _tenant_session(scratch["tenant"], tenant_id) as session:
@@ -601,6 +995,32 @@ def test_proof_7_one_poison_delivery_does_not_block_or_replay_the_other_nineteen
     dispatcher.dispose()
 
 
+def test_proof_7_sensitivity_one_batch_transaction_rolls_back_a_good_sibling(
+    scratch,
+) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    first = _schedule_tenant(scratch["tenant"], tenant_id, _identity(720))
+    _schedule_tenant(scratch["tenant"], tenant_id, _identity(721))
+
+    with _tenant_session(scratch["tenant"], tenant_id) as broken_batch:
+        accepted = accept_trigger(
+            broken_batch,
+            scope=TenantScope(tenant_id),
+            trigger=TimerTrigger.for_scheduled(first),
+            accepted_at=NOW,
+        )
+        assert accepted.outcome is AcceptanceOutcome.CURRENT
+        broken_batch.rollback()
+
+    with _tenant_session(scratch["tenant"], tenant_id) as observer:
+        acceptance_count = observer.scalar(
+            select(func.count()).select_from(TimerAcceptance)
+        )
+        first_row = observer.scalar(select(Timer).where(Timer.id == first.timer_id))
+    assert acceptance_count == 0
+    assert first_row is not None and first_row.status == "scheduled"
+
+
 def test_proof_8_tenant_rls_and_composite_current_identity(scratch) -> None:
     left = _make_tenant(scratch["admin"])
     right = _make_tenant(scratch["admin"])
@@ -626,6 +1046,24 @@ def test_proof_8_tenant_rls_and_composite_current_identity(scratch) -> None:
             select(func.count()).select_from(TimerAcceptance)
         )
         assert acceptance_count == 1
+        left_current = schedule_timer(
+            session,
+            scope=TenantScope(left),
+            identity=identity,
+            due_at=FUTURE,
+            output=OUTPUT,
+            recorded_at=NOW,
+        )
+        stale = accept_trigger(
+            session,
+            scope=TenantScope(left),
+            trigger=TimerTrigger.for_scheduled(left_timer),
+            accepted_at=NOW,
+        )
+        assert stale.outcome is AcceptanceOutcome.STALE
+        assert left_current.generation == 2
+        session.commit()
+        assert session.scalar(select(func.count()).select_from(TimerRejection)) == 1
     with _tenant_session(scratch["tenant"], right) as session:
         accept_trigger(
             session,
@@ -644,6 +1082,24 @@ def test_proof_8_tenant_rls_and_composite_current_identity(scratch) -> None:
             select(func.count()).select_from(TimerAcceptance)
         )
         assert acceptance_count == 1
+        right_current = schedule_timer(
+            session,
+            scope=TenantScope(right),
+            identity=identity,
+            due_at=FUTURE,
+            output=OUTPUT,
+            recorded_at=NOW,
+        )
+        stale = accept_trigger(
+            session,
+            scope=TenantScope(right),
+            trigger=TimerTrigger.for_scheduled(right_timer),
+            accepted_at=NOW,
+        )
+        assert stale.outcome is AcceptanceOutcome.STALE
+        assert right_current.generation == 2
+        session.commit()
+        assert session.scalar(select(func.count()).select_from(TimerRejection)) == 1
 
     admin = create_engine(scratch["admin"])
     with admin.connect() as connection:
@@ -652,22 +1108,70 @@ def test_proof_8_tenant_rls_and_composite_current_identity(scratch) -> None:
                 "SELECT relname, relrowsecurity, relforcerowsecurity "
                 "FROM pg_class WHERE oid IN "
                 "('mod_timers.timers'::regclass, "
-                "'mod_timers.timer_acceptances'::regclass) ORDER BY relname"
+                "'mod_timers.timer_acceptances'::regclass, "
+                "'mod_timers.timer_rejections'::regclass) ORDER BY relname"
             )
         ).all()
         assert rls_rows == [
             ("timer_acceptances", True, True),
+            ("timer_rejections", True, True),
             ("timers", True, True),
         ]
         policy_count = connection.execute(
             text(
                 "SELECT count(*) FROM pg_policies "
                 "WHERE schemaname = 'mod_timers' "
-                "AND tablename IN ('timers', 'timer_acceptances')"
+                "AND tablename IN "
+                "('timers', 'timer_acceptances', 'timer_rejections')"
             )
         ).scalar_one()
-        assert policy_count == 2
+        assert policy_count == 3
+        tenant_grants = connection.execute(
+            text(
+                "SELECT table_name, privilege_type "
+                "FROM information_schema.table_privileges "
+                "WHERE grantee = 'app_user' AND table_schema = 'mod_timers' "
+                "AND table_name IN "
+                "('timers', 'timer_acceptances', 'timer_rejections') "
+                "ORDER BY table_name, privilege_type"
+            )
+        ).all()
+        assert tenant_grants == [
+            ("timer_acceptances", "INSERT"),
+            ("timer_acceptances", "SELECT"),
+            ("timer_rejections", "INSERT"),
+            ("timer_rejections", "SELECT"),
+            ("timers", "INSERT"),
+            ("timers", "SELECT"),
+        ]
+        assert connection.scalar(
+            text(
+                "SELECT has_function_privilege("
+                "'app_user', "
+                "'mod_timers.lock_timer_identity(uuid,text,text,text,text)', "
+                "'EXECUTE')"
+            )
+        )
     admin.dispose()
+
+
+def test_proof_8_sensitivity_disabling_rls_exposes_the_other_tenant(scratch) -> None:
+    left = _make_tenant(scratch["admin"])
+    right = _make_tenant(scratch["admin"])
+    identity = _identity(81)
+    _schedule_tenant(scratch["tenant"], left, identity)
+    right_timer = _schedule_tenant(scratch["tenant"], right, identity)
+
+    admin = create_engine(scratch["admin"])
+    with admin.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE mod_timers.timers DISABLE ROW LEVEL SECURITY")
+        )
+    admin.dispose()
+
+    with _tenant_session(scratch["tenant"], left) as session:
+        leaked = session.scalar(select(Timer).where(Timer.id == right_timer.timer_id))
+    assert leaked is not None and leaked.tenant_id == right
 
 
 def _assert_sqlstate(
@@ -698,6 +1202,11 @@ def test_proof_9_platform_tables_are_revoked_from_tenants_and_reachable_online(
         "VALUES (gen_random_uuid())",
         "UPDATE mod_timers.platform_timer_acceptances SET id = id",
         "DELETE FROM mod_timers.platform_timer_acceptances",
+        "SELECT * FROM mod_timers.platform_timer_rejections",
+        "INSERT INTO mod_timers.platform_timer_rejections (id) "
+        "VALUES (gen_random_uuid())",
+        "UPDATE mod_timers.platform_timer_rejections SET id = id",
+        "DELETE FROM mod_timers.platform_timer_rejections",
     )
     for operation in operations:
         _assert_sqlstate(scratch["tenant"], operation, "42501")
@@ -709,7 +1218,8 @@ def test_proof_9_platform_tables_are_revoked_from_tenants_and_reachable_online(
                 "SELECT count(*) FROM information_schema.table_privileges "
                 "WHERE grantee = 'app_user' AND table_schema = 'mod_timers' "
                 "AND table_name IN "
-                "('platform_timers', 'platform_timer_acceptances')"
+                "('platform_timers', 'platform_timer_acceptances', "
+                "'platform_timer_rejections')"
             )
         ).scalar_one()
         column_grants = connection.execute(
@@ -717,7 +1227,8 @@ def test_proof_9_platform_tables_are_revoked_from_tenants_and_reachable_online(
                 "SELECT count(*) FROM information_schema.column_privileges "
                 "WHERE grantee = 'app_user' AND table_schema = 'mod_timers' "
                 "AND table_name IN "
-                "('platform_timers', 'platform_timer_acceptances')"
+                "('platform_timers', 'platform_timer_acceptances', "
+                "'platform_timer_rejections')"
             )
         ).scalar_one()
         assert table_grants == column_grants == 0
@@ -726,14 +1237,43 @@ def test_proof_9_platform_tables_are_revoked_from_tenants_and_reachable_online(
                 "SELECT relname, relrowsecurity, relforcerowsecurity "
                 "FROM pg_class WHERE oid IN "
                 "('mod_timers.platform_timers'::regclass, "
-                "'mod_timers.platform_timer_acceptances'::regclass) "
+                "'mod_timers.platform_timer_acceptances'::regclass, "
+                "'mod_timers.platform_timer_rejections'::regclass) "
                 "ORDER BY relname"
             )
         ).all()
         assert rls_rows == [
             ("platform_timer_acceptances", False, False),
+            ("platform_timer_rejections", False, False),
             ("platform_timers", False, False),
         ]
+        platform_grants = connection.execute(
+            text(
+                "SELECT table_name, privilege_type "
+                "FROM information_schema.table_privileges "
+                "WHERE grantee = 'platform_api' AND table_schema = 'mod_timers' "
+                "AND table_name IN "
+                "('platform_timers', 'platform_timer_acceptances', "
+                "'platform_timer_rejections') "
+                "ORDER BY table_name, privilege_type"
+            )
+        ).all()
+        assert platform_grants == [
+            ("platform_timer_acceptances", "INSERT"),
+            ("platform_timer_acceptances", "SELECT"),
+            ("platform_timer_rejections", "INSERT"),
+            ("platform_timer_rejections", "SELECT"),
+            ("platform_timers", "INSERT"),
+            ("platform_timers", "SELECT"),
+        ]
+        assert connection.scalar(
+            text(
+                "SELECT has_function_privilege("
+                "'platform_api', "
+                "'mod_timers.lock_platform_timer_identity(text,text,text,text)', "
+                "'EXECUTE')"
+            )
+        )
     admin.dispose()
     platform = create_engine(scratch["platform"])
     with Session(platform) as session:
@@ -758,7 +1298,47 @@ def test_proof_9_platform_tables_are_revoked_from_tenants_and_reachable_online(
             select(func.count()).select_from(PlatformTimerAcceptance)
         )
         assert count == 1
+        current = schedule_timer(
+            session,
+            scope=PlatformScope(),
+            identity=_identity(9),
+            due_at=FUTURE,
+            output=OUTPUT,
+            recorded_at=NOW,
+        )
+        stale = accept_trigger(
+            session,
+            scope=PlatformScope(),
+            trigger=TimerTrigger.for_scheduled(scheduled),
+            accepted_at=NOW,
+        )
+        assert stale.outcome is AcceptanceOutcome.STALE
+        assert current.generation == 2
+        session.commit()
+        assert (
+            session.scalar(select(func.count()).select_from(PlatformTimerRejection))
+            == 1
+        )
     platform.dispose()
+
+
+def test_proof_9_sensitivity_grant_exposes_platform_rows_to_the_tenant_role(
+    scratch,
+) -> None:
+    platform_timer = _schedule_platform(scratch["platform"], _identity(91))
+    admin = create_engine(scratch["admin"])
+    with admin.begin() as connection:
+        connection.execute(
+            text("GRANT SELECT ON mod_timers.platform_timers TO app_user")
+        )
+    admin.dispose()
+
+    tenant_id = _make_tenant(scratch["admin"])
+    with _tenant_session(scratch["tenant"], tenant_id) as session:
+        leaked = session.scalar(
+            select(PlatformTimer).where(PlatformTimer.id == platform_timer.timer_id)
+        )
+    assert leaked is not None and leaked.id == platform_timer.timer_id
 
 
 @pytest.mark.parametrize("platform", [False, True])
@@ -770,6 +1350,7 @@ def test_proof_10_plane_parity_no_clock_and_append_only_terminal_history(
         scope = PlatformScope()
         engine = create_engine(scratch["platform"])
         model = PlatformTimer
+        rejection_model = PlatformTimerRejection
         role_url = scratch["platform"]
         update_statement = (
             "UPDATE mod_timers.platform_timers SET fired_at = fired_at WHERE id = :id"
@@ -779,6 +1360,7 @@ def test_proof_10_plane_parity_no_clock_and_append_only_terminal_history(
         scope = TenantScope(tenant_id)
         engine = _tenant_engine(scratch["tenant"], tenant_id)
         model = Timer
+        rejection_model = TimerRejection
         role_url = scratch["tenant"]
         update_statement = (
             "UPDATE mod_timers.timers SET fired_at = fired_at WHERE id = :id"
@@ -786,6 +1368,46 @@ def test_proof_10_plane_parity_no_clock_and_append_only_terminal_history(
         delete_statement = "DELETE FROM mod_timers.timers WHERE id = :id"
     try:
         with Session(engine) as session:
+            stale_identity = _identity(1000 if platform else 1001)
+            observed = schedule_timer(
+                session,
+                scope=scope,
+                identity=stale_identity,
+                due_at=PAST,
+                output=OUTPUT,
+                recorded_at=NOW,
+                expected_source_version=7,
+            )
+            current = schedule_timer(
+                session,
+                scope=scope,
+                identity=stale_identity,
+                due_at=PAST,
+                output=OUTPUT,
+                recorded_at=NOW,
+                expected_source_version=8,
+            )
+            session.commit()
+            stale = accept_trigger(
+                session,
+                scope=scope,
+                trigger=TimerTrigger.for_scheduled(observed),
+                accepted_at=NOW,
+            )
+            assert stale.outcome is AcceptanceOutcome.STALE
+            assert stale.current_generation == current.generation == 2
+            assert stale.expected_source_version == 7
+            rejection = session.scalar(
+                select(rejection_model).where(
+                    rejection_model.timer_id == observed.timer_id
+                )
+            )
+            assert rejection is not None
+            assert rejection.observed_generation == 1
+            assert rejection.current_generation == 2
+            assert rejection.expected_source_version == 7
+            session.commit()
+
             scheduled = schedule_timer(
                 session,
                 scope=scope,
@@ -828,6 +1450,56 @@ def test_proof_10_plane_parity_no_clock_and_append_only_terminal_history(
             )
             session.commit()
     finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("platform", [False, True])
+def test_proof_10_sensitivity_update_grant_rewrites_timer_history(
+    scratch, platform: bool
+) -> None:
+    tenant_id = _make_tenant(scratch["admin"])
+    identity = _identity(1010 if platform else 1011)
+    if platform:
+        scheduled = _schedule_platform(scratch["platform"], identity)
+        table = "mod_timers.platform_timers"
+        role = "platform_api"
+        engine = create_engine(scratch["platform"])
+        update_statement = text(
+            "UPDATE mod_timers.platform_timers "
+            "SET due_at = due_at + interval '1 minute' WHERE id = :id"
+        )
+        read_statement = text(
+            "SELECT due_at FROM mod_timers.platform_timers WHERE id = :id"
+        )
+    else:
+        scheduled = _schedule_tenant(scratch["tenant"], tenant_id, identity)
+        table = "mod_timers.timers"
+        role = "app_user"
+        engine = _tenant_engine(scratch["tenant"], tenant_id)
+        update_statement = text(
+            "UPDATE mod_timers.timers "
+            "SET due_at = due_at + interval '1 minute' WHERE id = :id"
+        )
+        read_statement = text("SELECT due_at FROM mod_timers.timers WHERE id = :id")
+
+    admin = create_engine(scratch["admin"])
+    with admin.begin() as connection:
+        connection.execute(text(f"GRANT UPDATE (due_at) ON {table} TO {role}"))
+    try:
+        with engine.begin() as connection:
+            changed = connection.execute(
+                update_statement,
+                {"id": scheduled.timer_id},
+            ).rowcount
+        assert changed == 1
+        with admin.connect() as connection:
+            rewritten = connection.scalar(
+                read_statement,
+                {"id": scheduled.timer_id},
+            )
+        assert rewritten == PAST + timedelta(minutes=1)
+    finally:
+        admin.dispose()
         engine.dispose()
 
     admin = create_engine(scratch["admin"])

@@ -45,6 +45,10 @@ from dotmac_kernel.flag_models import install_flag_cache
 from dotmac_kernel.flags import FlagCatalogue, install_flags
 from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
 from dotmac_kernel.models import Base, Party, PartyPerson, PartyType, Tenant
+from dotmac_kernel.outbox_event_types import (
+    OutboxEventTypeRegistry,
+    install_outbox_event_types,
+)
 from dotmac_kernel.permissions import PermissionCatalogue, install_permissions
 from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
@@ -117,6 +121,7 @@ def _default_declaration_catalogues():
     manifests = _all_manifests()
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
     # Capabilities too (step 4). Re-installed per test for the same reason:
     # a test that installs a narrower probe catalogue must not leave it
     # behind for the next one.

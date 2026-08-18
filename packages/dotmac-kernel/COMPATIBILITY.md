@@ -100,6 +100,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.assembly` | `ProductAssemblySpec`, `ProductSecurityPolicy`, `ModulePlaneSelection`, `StartupCheck`, `StartupHook` |
 | `dotmac_kernel.audit` | `ACTOR_TYPES`, `AuditEvent`, `MissingAuditActorError`, `UnknownAuditActorTypeError`, `resolve_audit_actor`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
+| `dotmac_kernel.outbox_event_types` | `OutboxEventTypeRegistry`, `OutboxEventTypesNotInstalledError`, `DuplicateOutboxEventTypeError`, `UndeclaredOutboxEventTypeError`, `install_outbox_event_types`, `active_outbox_event_types` (outbox routing vocabulary; also top-level) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `RETIRED_BRAND_KEYS`, `reject_retired_brand_keys` (`sanitize_branding_css` was REMOVED in 0.1.0a47 — see CHANGELOG) |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
 | `dotmac_kernel.channel_policy` | `CHANNEL_POLICY_KEY`, `ChannelPolicyError`, `make_spec`, `resolve_channels`, `validate_policy_document` |
@@ -180,7 +181,7 @@ it never grants entitlement and it never deploys anything.
 
 - **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
   `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
-  `permissions`, `audit_actions`, `feature_flags`, `setting_domains`,
+  `permissions`, `audit_actions`, `outbox_event_types`, `feature_flags`, `setting_domains`,
   `short_code`, `migration_prefix`,
   `migration_branch`, `tables`, `platform_tables`, `core`, `enabled_by_default`,
   `seed`. `code`
@@ -430,7 +431,7 @@ revision ids are already recorded in live `alembic_version` rows, so
 exempts them from the strict id and `schema=` rules. Their tables legitimately
 live in `public`. Every installable module gets the strict rules.
 
-### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`, `dotmac_kernel.setting_domains`)
+### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`, `dotmac_kernel.outbox_event_types`, `dotmac_kernel.setting_domains`)
 
 Siblings of `dotmac_kernel.capabilities.CapabilityCatalogue` and
 `dotmac_kernel.flags.FlagCatalogue` — same shape, same fail-closed posture, same
@@ -455,6 +456,10 @@ constraint on the backing column. If you are adding a sixth, copy
   free-text-no-longer `audit_events.action` vocabulary:
   `DuplicateAuditActionError` on two owners, `require(action)` raising
   `UndeclaredAuditActionError`, plus `is_declared`/`owner`/`actions`.
+- **`OutboxEventTypeRegistry.from_manifests(manifests)`** — the same for durable
+  routing codes. The consuming module declares the code; producers call
+  `require(event_type)` before enqueueing so a typo cannot create an event no
+  installed consumer owns. The outbox column remains plain text.
 - **`SettingDomainRegistry.from_manifests(manifests)`** — the same again, for
   `domain_settings.domain`: `DuplicateSettingDomainError`, `require(domain)`
   returning a `SettingDomain` or raising `UndeclaredSettingDomainError`, plus
@@ -465,13 +470,14 @@ constraint on the backing column. If you are adding a sixth, copy
   domains are bound as class attributes (`SettingDomain.branding`); a product
   constructs its own (`SettingDomain("payroll")`).
 - **Process-active install.** `install_permissions` / `install_audit_actions` /
-  `install_setting_domains` set the process-active catalogue and registries;
-  `active_permissions` / `active_audit_actions` / `active_setting_domains` read
+  `install_outbox_event_types` / `install_setting_domains` set the process-active
+  catalogue and registries; `active_permissions` / `active_audit_actions` /
+  `active_outbox_event_types` / `active_setting_domains` read
   them. `create_app` installs all of them from the INSTALLED module set before
   mounting anything. Permissions default to EMPTY so an uninstalled
-  authorization catalogue denies safely. Audit actions and setting domains
+  authorization catalogue denies safely. Audit actions, outbox event types and setting domains
   distinguish NOT INSTALLED (`AuditActionsNotInstalledError` /
-  `SettingDomainsNotInstalledError`) from INSTALLED-EMPTY (every write is
+  `OutboxEventTypesNotInstalledError` / `SettingDomainsNotInstalledError`) from INSTALLED-EMPTY (every write is
   undeclared) — an uninstalled write-path registry would otherwise reject writes
   inside the caller's transaction and turn a wiring mistake into a failed
   business operation. A consumer that builds an app by hand (a test mounting a
@@ -516,6 +522,10 @@ constraint on the backing column. If you are adding a sixth, copy
   the session, so a rejected write leaves no partial state. Platform actions
   are owned by the installable control-plane modules that call the writer and
   are declared through their `ModuleManifest.audit_actions` entries.
+- `dotmac_durable_timers.schedule_timer` validates its output routing code
+  against `active_outbox_event_types()` before it takes a lock or adds rows.
+  Timer mechanics therefore remain provider-neutral while the consuming
+  module remains the sole owner of whether an event type exists.
 
 #### Audit actor and time contract
 

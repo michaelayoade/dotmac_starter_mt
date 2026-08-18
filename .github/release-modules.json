@@ -527,6 +527,47 @@
           "python"
         ]
       }
+    },
+    "dotmac-durable-timers": {
+      "$comment": [
+        "Generation-safe due work on separately selectable tenant and platform",
+        "planes. The allowlist entry lands with the exact PostgreSQL proof",
+        "revision: the module reuses the kernel outbox relay rather than",
+        "shipping a second claim, lease, retry or dead-letter engine.",
+        "",
+        "kernel_floor is a72. That release allocates mod_timers / dt /",
+        "durable_timers and publishes the manifest-owned outbox-event-type",
+        "registry that schedule_timer resolves before it writes timer or outbox",
+        "state. The root migration requires outbox_relay.v1 and verifies it in",
+        "the adopting database before creating either selected plane."
+      ],
+      "package_dir": "packages/dotmac-durable-timers",
+      "import_name": "dotmac_durable_timers",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a72",
+      "db_schema": "mod_timers",
+      "tag_prefix": "dotmac-durable-timers-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_durable_timers/py.typed",
+          "dotmac_durable_timers/manifest.py",
+          "dotmac_durable_timers/models.py",
+          "dotmac_durable_timers/service.py",
+          "dotmac_durable_timers/migrations/__init__.py",
+          "dotmac_durable_timers/migrations/versions/dt_0001_durable_timers.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

@@ -75,11 +75,12 @@ specifics) points here and must never fork these rules.
     dynamically by `tests/test_rls_catalog.py` plus the per-feature
     isolation canaries — Postgres only (`make test-db-up &&
     make test-integration`); SQLite cannot enforce RLS.
-12. **Manifest declarations are unique, referenced, and consumed.** FIVE
+12. **Manifest declarations are unique, referenced, and consumed.** SIX
     vocabularies work this way — permissions, capabilities, audit actions,
-    feature flags, setting domains — and a vocabulary whose members belong to
-    modules must be a SIXTH declaration registry, never an enum or a fixed
-    list. ADR-0008 is a FLEET-WIDE standard: it binds every Dotmac
+    outbox event types, feature flags, setting domains — and every later
+    vocabulary whose members belong to modules must be another declaration
+    registry, never an enum or a fixed list. ADR-0008 is a FLEET-WIDE standard:
+    it binds every Dotmac
     repository, not only this one, and applies wherever one layer holds a
     vocabulary another layer owns members of. Each member is declared by
     exactly ONE module's manifest; a consumer may only reference a DECLARED

@@ -911,19 +911,23 @@ schema_version = 1
 package = "dotmac-durable-timers"
 classification = "optional-module"
 status = "audit-complete"
-source_mode = "product-first-with-mandatory-port-delta"
+source_mode = "product-first"
 owner = "Timer identity, generation allocation, scheduling and rescheduling, supersession, cancellation, current-generation verification, stale-trigger rejection, append-only timer history and terminal-history retention"
 contract = "Given an explicit tenant or platform scope, an opaque (owner, entity_kind, entity_id, purpose) identity, a required timezone-aware due_at, a declared output code and optional opaque source evidence, atomically allocate the next generation, supersede the prior current generation, append history and enqueue one kernel outbox event whose available_at equals due_at. Cancellation returns one of Canceled, AlreadyFired, NothingScheduled or Stale. Trigger acceptance locks and re-derives the current identity state and returns both observed_generation and current_generation when stale, before the caller may run its effect. Retention never deletes a scheduled timer. The module declares and reuses outbox_relay.v1 for all claiming, leasing, stale-lease recovery, retry, backoff, dead-letter handling and dispatcher privileges; it contains no due-row scanner, claim loop, retry engine, consumer decision or ambient clock read."
 source_repositories = [
+  "dotmac_erp",
   "dotmac_sub",
   "dotmac_starter_mt",
 ]
 source_revisions = [
+  "dotmac_erp:9d67c3990e01e20409ab118badb5dfdf7ce045a7",
   "dotmac_sub:4489ca1712f3c263d914f2af0ebfcf044aa70605",
   "dotmac_starter_mt:7e0543004864845f0035c9ec325e3f5064c281cc",
   "dotmac-kernel-v0.1.0a67:ed3ac864b350d4556808a69496f999f764682442",
 ]
 source_paths = [
+  # inventoried scheduling false positive; reference constraint, not code source
+  "dotmac_erp:app/models/scheduler.py",
   # identity, generation, one-current-per-identity, decision-free fire
   "dotmac_sub:app/models/durable_timer.py",
   "dotmac_sub:app/services/runtime_durable_timers.py",
