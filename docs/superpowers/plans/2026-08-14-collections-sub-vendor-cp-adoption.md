@@ -2,13 +2,39 @@
 
 - **Status:** execution plan; non-authoritative intent and not evidence that the
   module exists or either product has adopted it
-- **Decision boundary:** ADR-0020 and its 2026-08-14 amendment
+- **Decision boundary:** ADR-0020 and its 2026-08-14 amendment, as amended for
+  Collections contracts and initial plane selection by ADR-0032
 - **Parent plan:**
   `docs/superpowers/plans/2026-08-11-billing-subscriptions-collections.md`
 - **Order:** Sub tenant-plane cutover first; Vendor Control Plane platform-plane
   cutover only after it has real production overdue cases
-- **Current blocker:** ADR-0017 P11, followed by the demand-pulled P3 durable-
-  timer slice
+- **Current execution state:** P11 is met. The active `starter-billing` session
+  still owns overlapping namespace/kernel metadata/lockfile edits, so the
+  stateful package allocation waits for that exact head. The separately owned
+  `dotmac-durable-timers` release is required before timer-backed behavior,
+  shadow due-step parity, or live cutover.
+
+## Amendment, 2026-08-18
+
+ADR-0032 resolves the contract and plane questions left open when this plan was
+written:
+
+- `AssessCollectionExposureV1` carries identity, explicit scope, and trigger
+  provenance, never money. `ReceivablesReader` supplies the authoritative
+  current position at every decision point.
+- The outbound contract is `CollectionActionRequestedV1`; the owning product
+  returns `CollectionActionReceiptV1`, which Collections records as evidence.
+- Revision one is tenant-only because Sub is the only real adopter. Its
+  manifest explicitly declares only tenant tables; the atomic one-plane
+  contract takes no assembly selector. A platform plane is a later additive
+  release only after Vendor CP has a real authoritative reader, overdue
+  exposure, and named action consumers.
+- Timers are a separate selectable Starter-owned module, not a kernel facility
+  and not Collections infrastructure. Collections ships only its timer port,
+  fake, and conformance suite.
+
+The 2026-08-14 measurements below remain historical characterization. Current
+source revalidation is recorded in the extraction dossier.
 
 ## Exit condition
 
@@ -17,16 +43,16 @@ This programme is complete only when:
 1. Sub pins a released `dotmac-collections` version, composes its independently
    owned lineage, runs the tenant plane in production, and deletes the local
    collections decision paths it replaced;
-2. the same module version or a compatible later exact release is installed by
-   Vendor CP only after a production receivable actually becomes overdue;
-3. both products use the same persistence-free policy/case/arrangement engine
-   through their separate declared persistence planes, without sharing rows;
-4. every policy step is immutable versioned data, every time transition has one
+2. every policy step is immutable versioned data, every time transition has one
    current durable timer, and every external effect is an idempotent request to
    the service that owns the consequence; and
-5. the dossier moves from `audit-complete` to `adopted` only after Sub's live
-   cutover, and to `reuse-proven` only after Vendor CP completes a real overdue
-   case lifecycle.
+3. the dossier moves from `audit-complete` to `adopted` only after Sub's live
+   cutover and duplicate postpaid/prepaid Collections authorities are removed.
+
+A later Vendor CP adoption is a separate reuse proof. It must use the same
+persistence-free behavior through an additively released platform repository,
+without sharing rows, and moves the dossier to `reuse-proven` only after a real
+overdue case lifecycle.
 
 Installing empty platform tables in Vendor CP is not adoption. Running Sub and
 the module as permanent parallel writers is not adoption either.
@@ -109,21 +135,21 @@ It does not own:
 - PSP/provider transport, credentials, webhooks, retries, or checkpoints;
 - ERP's GL, journals, periods, tax returns, or statutory collections reporting;
   or
-- durable-timer infrastructure. P3 owns timer generations and firing;
-  collections only requests a timer within its transaction and consumes the
-  resulting trigger.
+- durable-timer infrastructure. `dotmac-durable-timers` owns timer identity,
+  generations and firing; Collections only requests a timer within its
+  transaction and consumes the resulting trigger.
 
 The boundary in one flow:
 
 ```text
 local billing/financial owner
-  -- exact versioned collection exposure --> assembly adapter
-  -- AssessCollectionExposure -----------> dotmac-collections
-  -- notice/action request ---------------> assembly adapter
+  -- AssessCollectionExposureV1 identity -> assembly adapter
+  -- ReceivablesReader current position --> dotmac-collections
+  -- CollectionActionRequestedV1 --------> assembly adapter
   -- owner-specific command --------------> Sub or Vendor CP owning service
-  -- consequence receipt -----------------> dotmac-collections
+  -- CollectionActionReceiptV1 -----------> dotmac-collections
 
-P3 timer owner -- generation trigger -----> dotmac-collections
+dotmac-durable-timers -- generation trigger -> dotmac-collections
 settlement/correction fact ---------------> dotmac-collections closes/replans
 ```
 
@@ -137,33 +163,40 @@ not a prerequisite for the first collections cutover.
 
 ### Inbound exposure
 
-The module accepts one versioned `AssessCollectionExposure` command. Its typed
+The module accepts one versioned `AssessCollectionExposureV1` command. Its typed
 payload carries, at minimum:
 
-- command, correlation, source event, and business idempotency identities;
-- source owner, source exposure identity, and monotonically increasing source
-  version;
-- local subject and service/contract opaque references;
+- command, correlation, causal source-event, and business idempotency
+  identities;
+- source owner, opaque exposure reference, local subject reference, and
+  optional service/contract reference;
+- explicit `TenantScope` in revision one;
 - collection timing (`advance` or `arrears`) and a typed reason input;
-- currency and exact amount — never float and never a generic account balance;
-- arrears due time or advance coverage start, whichever is meaningful;
-- exact resolved/corrected/cancelled state;
-- the selected policy code/version or the declared setting scope from which the
-  module must resolve it; and
-- the observation time and source-state fingerprint.
+- trigger provenance, including the source event, timer, or
+  reconciliation identity that caused the assessment; and
+- an aware assessment time.
 
-Arrears supplies an exact collectible receivable. Advance supplies an exact
-uncovered obligation and typed funding result; it does not invent an invoice so
-collections can act. Stale source versions are ignored, same-version changed
-fingerprints are conflicts, and a later correction replans only the affected
-case.
+It carries no source-position version, currency, amount, balance, credit,
+funding result, due time, coverage time, resolved state, policy choice, or
+source-state fingerprint. The module calls `ReceivablesReader` using the
+identity and explicit scope, and the
+reader supplies the current exact per-currency position, anchors, resolved
+state, monotonic source version, and state fingerprint. The same read occurs
+again before every delayed action. `Unavailable(retryable=True)` advances
+nothing and emits no action request.
+
+Arrears positions expose an exact collectible receivable. Advance positions
+expose an exact uncovered obligation and typed funding result; they do not
+invent an invoice so Collections can act. Stale source versions are ignored,
+same-version changed fingerprints are conflicts, and a later correction replans
+only the affected case.
 
 The module never queries a billing sibling's tables and never reconstructs a
 receivable from invoices, payments, credit, or provider state.
 
 ### Outbound action request
 
-Every external action is an immutable `CollectionActionRequested` output with:
+Every external action is an immutable `CollectionActionRequestedV1` output with:
 
 - request, case, policy-version, policy-step, subject, and exposure identities;
 - action code and schema version;
@@ -173,8 +206,9 @@ Every external action is an immutable `CollectionActionRequested` output with:
 
 The consuming assembly maps that request to a locally owned command. The owner
 locks and revalidates its own state, applies or refuses its consequence, and
-returns a typed receipt. A delivery acknowledgement is not proof that a service
-was suspended; only the owning service's receipt is.
+returns `CollectionActionReceiptV1`. Collections records that typed receipt as
+evidence. A delivery acknowledgement is not proof that a service was suspended;
+only the owning service's receipt is.
 
 Action codes are an ADR-0008 declaration registry, not an enum or JSON free-for-
 all. The initial kernel/module slice adds the registry and its declaration,
@@ -196,9 +230,10 @@ grace, and a notice suppression cannot silently authorize a consequence.
 
 ## Domain model
 
-The first package dossier must lock exact table names. The required logical
-records are below; tenant tables are unprefixed and platform twins use the
-established `platform_` naming pattern.
+The package-creation diff must lock exact table names. The required logical
+records are below. Revision one creates tenant tables only; any later platform
+repository is an additive release with separately declared tables and a real
+adopter.
 
 ### Policy
 
@@ -269,21 +304,25 @@ validates exact totals, ordering, currency, and bounds before persisting it.
 
 ### Persistence planes
 
-The module ships one pure behavior engine and two repository families:
+Revision one ships one behavior engine and one tenant repository family for the
+real Sub adopter:
 
-| Tenant plane — Sub | Platform plane — Vendor CP |
-|---|---|
-| Every table has `tenant_id UUID NOT NULL` | No table has `tenant_id` |
-| Composite unique keys and composite FKs | Control-plane-wide unique keys |
-| RLS ENABLEd and FORCEd in the creating migration | No RLS at all |
-| Tenant scope is a `TenantScope`, never nullable | Scope is `PlatformScope()` |
-| Product links use `link_tenant_collection_subject()` | Product links use `link_platform_collection_subject()` |
-| Cross-tenant canaries | `app_user` REVOKEd across all table and column privileges; online platform role has schema `USAGE` plus row DML |
+- every table has `tenant_id UUID NOT NULL`;
+- every tenant-relative unique key and foreign key includes `tenant_id`;
+- RLS is ENABLEd and FORCEd, with the policy and exact grants in the creating
+  migration;
+- scope is a `TenantScope`, never nullable; and
+- `platform_tables` and `supported_plane_sets` are empty, so ADR-0028 treats the
+  tenant plane as atomic and rejects a ceremonial assembly selector.
 
-No foreign key crosses planes. No module table points at a Sub or Vendor table.
-The product-owned link helper creates the local relation on the correct plane
-and refuses an unusable configuration. Nullable tenant, sentinel tenant, and a
-polymorphic plane column are forbidden.
+No module table points at a Sub table. The product-owned tenant link helper
+creates any local relation and refuses an unusable configuration. Nullable or
+sentinel tenants and polymorphic plane columns are forbidden.
+
+Vendor CP does not receive empty tables. Once its demand gate has a real adopter,
+an additive release may declare a platform repository with no tenant column, no
+RLS, exact online-platform reachability, all seven table privileges plus
+column-level forms revoked from `app_user`, and no cross-plane foreign key.
 
 ## Invariants and conformance gates
 
@@ -298,8 +337,8 @@ following:
 3. **Versioned policy.** Published policy versions and steps are immutable;
    cases pin the exact version and re-policy is an explicit audited command.
 4. **Data-driven time.** No numeric overdue/grace threshold or hardcoded notice
-   ladder occurs in service control flow. P3 owns exact timer generations;
-   stale fires cannot advance a case.
+   ladder occurs in service control flow. `dotmac-durable-timers` owns exact
+   timer generations; stale fires cannot advance a case.
 5. **Exact money.** No float and no fuzzy tolerance. A de-minimis exception, if
    ever approved, is a capped audited waiver fact rather than an epsilon.
 6. **Separate quantities.** Receivable, credit, prepaid funding, arranged amount,
@@ -315,8 +354,10 @@ following:
 10. **Entity-scoped failure.** Bad or ambiguous input blocks the exact case and
     creates owned correction evidence. It never pauses the fleet. First durable
     detection starts the non-resettable one-cycle correction deadline.
-11. **Two real planes.** The manifest declares every tenant and platform table;
-    live-catalog tests prove both security contracts and refuse crossing FKs.
+11. **Only real selected planes.** Revision one's manifest declares every
+    tenant table and its atomic tenant-only contract; live-catalog tests
+    prove that security contract. A later platform plane must arrive with its
+    real adopter and prove its separate security contract and no crossing FKs.
 12. **No secrets or environment resolution.** Settings read rows/defaults only;
     actions contain references or names, never a secret value.
 
@@ -329,38 +370,51 @@ updates. This focused plan adds no authority by itself.
 
 ### G1 — Clear P11
 
-The kernel lineage must be composed and running in Sub's production database,
-recorded in Sub's `PLATFORM_ADOPTION_LEDGER.md`. A prepared branch, copied
-migration, or stamped revision does not satisfy the gate.
+**Met.** ADR-0017's 2026-08-18 amendment records the qualifying immutable
+production deployment at Vendor CP head
+`f8f8c3fd636e663e4a17275c19e82fc1667aa52a`, image digest
+`sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc`,
+and GitHub Actions run `32022599873`. The exact source composes five independent
+lineages, applies composed heads, verifies role contracts, and reaches healthy.
+This meets ADR-0017's platform-reference-adopter gate; it does not waive Sub's
+tenant/RLS, release, CI, shadow, or cutover proofs.
 
-### G2 — Extract P3 as its own adopted facility
+### G2 — Release `dotmac-durable-timers` as its own adopted module
 
-Once the Sub collections cutover is actively blocked on scheduling, port
-`runtime.durable_timers` and its tests from Sub into the appropriate kernel
-facility. Its contract is owner/entity/purpose/generation/due-at/expected-source-
-version/output-event; it scans only due timer rows and makes no collections
-decision.
+Port `runtime.durable_timers` and its tests from Sub into the independently
+released selectable `dotmac-durable-timers` module. Its contract owns
+owner/entity/purpose/generation/due-at/expected-source-version/output-event and
+reuses kernel `outbox_relay.v1`; it makes no Collections decision and implements
+no second claim, leasing, retry, or dead-letter engine.
 
-P3 lands as a separate reviewable release and Sub consumes it. Do not put
+The module lands as a separate reviewable release and Sub consumes it. Do not put
 `durable_timers` inside the collections schema, and do not bundle numbering,
 rendering, or unrelated scheduling use cases into this slice.
 
+Collections can land pure schemas, ports, fakes, and persistence proofs before
+this release. Timer-backed behavior, due-step shadow parity, and live cutover
+cannot.
+
 ### G3 — Create the module and dossier
 
-Only after G1, with G2 available for the live slice:
+Only after the active `starter-billing` session settles its overlapping
+namespace/kernel metadata/lockfile edits, integrate that exact head and then:
 
 - allocate one namespace, migration prefix, and branch label in
   `MIGRATION_OWNER_LEDGER` in the package-creation diff;
 - create `packages/dotmac-collections/EXTRACTION.toml` before behavior code,
   status `audit-complete`, with Sub as source and first cutover, ERP as exclusion
   evidence, Vendor CP as demand-gated candidate, and no contract consumers;
-- declare both persistence planes from revision 1;
+- declare tenant tables only, empty `platform_tables` and an atomic plane
+  contract; add selectable subsets only with a later real platform adopter;
 - add the package to release metadata only when its wheel, migrations, and
   kernel floor are verifiable; and
 - add the owner row and public surface to `docs/ARCHITECTURE.md` in the same
   change.
 
-Do not reserve a namespace or create an empty package ahead of this gate.
+Do not reserve a namespace or create an empty package ahead of this gate. G2
+must be available before the live timer-backed slice, but its absence does not
+justify timer infrastructure inside Collections.
 
 ## Cutover 1 — Sub tenant plane
 
@@ -386,6 +440,40 @@ The classifier must be total. Ambiguous source rows become explicit entity-
 scoped work items with a one-cycle deadline; they do not stop unaffected cases.
 
 ### S1 — Port the contract and canaries first
+
+The exact public types, fake semantics, revision-one table names and pure plus
+PostgreSQL canary matrix are pinned in
+`docs/superpowers/specs/2026-08-18-collections-canary-first-surface.md`.
+
+Working-slice progress (2026-08-18): the first five executable RED gates now
+exist before the package. The contract canary pins the identity-only assessment,
+current position, typed reader outcomes, reader fake, arbitrary policy ladders,
+notice/action requests and typed owner receipts. A pure-domain canary pins
+immutable deterministic publication, one arbitrary-ladder evaluator, typed
+missing anchors, exact arrangement membership/schedules, explicit grace and
+receipt replay/conflict behavior. A separate timer-port canary pins
+scoped identity, supplied instants, supersession, exact cancellation, all four
+typed cancellation outcomes and observed/current stale evidence without
+importing the timer sibling. The alias-hardened architecture canary
+has twelve passing planted/clean sensitivity cases and refuses a missing
+package root. A second stateful scanner has twelve passing complete-fixture and
+planted-defect cases covering the extraction dossier, atomic tenant manifest,
+logical prerequisites, exact tables, independent lineage, composite tenancy,
+RLS/grants, enum/search-path refusal and unused platform access; its live gate
+also refuses the absent package. Observe at exact Starter base
+`8d4ddfd9e285da06ce1fdd29b59f1b483d6ea38c` therefore proves both that the
+detector fires and that implementation remains absent; turning those tests
+green is the first package behavior after the Billing overlap clears.
+
+The same slice now also carries an executable product-first preservation
+corpus: 17 normalized scenarios reference 22 exact pytest nodes in Sub at
+`d1a1a913e287ffadaf21b7da7be448f2c28b5483`. A sensitivity-proven architecture
+guard keeps the pin, scenario inventory, exact-money/aware-time shape,
+product-neutral seam, explicit grace anchors and exact arrangement totals from
+drifting. Observe passed the primary plus five mutations (`6 passed`), and a
+separate AST check confirmed that all 22 referenced nodes exist in the pinned
+Sub test files. This corpus becomes behavior input when the package exists; it
+does not claim that absent behavior is green.
 
 Port behavior and tests before models or routes. At minimum preserve:
 
@@ -413,7 +501,7 @@ violation.
 First coherent module slice:
 
 - pure ladder evaluator;
-- tenant/platform policy, case, and case-action models;
+- tenant policy, case, and case-action models;
 - published inbound/outbound contracts and fakes;
 - declared action-code registry;
 - case/timer transaction integration; and
@@ -517,6 +605,19 @@ communication, and consequence execution. Add two-directional ratchets with
 sensitivity proofs for old imports/writers/sweeps, lowering the baseline in the
 same change as every retirement.
 
+Working-slice evidence (2026-08-18): the uncommitted Sub adoption worktree now
+contains a separate syntax-only Collections retirement scanner, exact count
+baseline, and sensitivity suite for R1-R12. It freezes the current legacy
+surface across `app/` and `scripts/`, including ambient clocks, direct
+access-owner and notice-queue calls, and module-alias consumers of legacy access
+and receivable APIs; it does not lower a count or move writer authority. On
+Observe at exact Sub base
+`d1a1a913e287ffadaf21b7da7be448f2c28b5483`, both formatter and linter passed,
+the focused suite passed (`4 passed`). Planted direct credential and aliased
+legacy-access calls made the primary ratchet fail at `radius_profile_id: 4 ->
+5` and `restore_account_services: 9 -> 10`; each clean rerun passed. Each S7
+removal still owes its matching baseline reduction.
+
 Sub acceptance evidence is: fresh and upgraded composed migrations, cross-
 tenant RLS, full-cycle parity, bounded cutover results, exact timer coverage or
 typed no-timer reasons, consequence receipt replay, settlement/restoration,
@@ -608,7 +709,8 @@ evidence, not reuse evidence.
 
 ## Explicitly out of scope
 
-- starting the package before P11;
+- treating the historical pre-P11 state as current, or using P11 as a waiver of
+  the remaining package, PostgreSQL, release, CI, shadow, or cutover gates;
 - reserving a namespace in a plan;
 - making billing or subscriptions a Python dependency;
 - migrating ERP reminders into this module;

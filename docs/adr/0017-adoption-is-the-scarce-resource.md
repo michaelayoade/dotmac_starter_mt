@@ -8,6 +8,27 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-18: P11 is met by the platform reference adopter
+
+P11 closed on 2026-08-17. GitHub Actions run `32022599873` completed
+successfully for Vendor Control Plane `main` at
+`f8f8c3fd636e663e4a17275c19e82fc1667aa52a`, deploying immutable image digest
+`sha256:56ec553139c449dc7da46a8873b3c03e95a61e43c970cd1675e28a202b2991cc`
+to the explicitly named `vendor-cp-prod` target.
+
+That exact source composes the kernel, Release Catalog, Entitlement Allocation,
+Approvals and Vendor migration lineages programmatically. Its production
+adapter verifies the migration/online role contract, applies the composed
+`heads` target before replacing the application, and requires the database and
+application health checks to pass. The successful run is therefore the
+production execution evidence this ADR's 2026-08-14 amendment required; it is
+not a stamp, copied migration or prepared branch.
+
+Earlier statements in this ADR that P11 is `UNMET` are retained as historical
+gate state and superseded by this amendment. Closing P11 does not waive Sub's
+separate tenant/RLS adoption proof, a module's PostgreSQL and live-catalog
+gates, a real-adopter cutover, or release/CI requirements.
+
 ## Amendment, 2026-08-14: the lineage gate splits by plane, and two facilities get owners
 
 Decided after the commercial-module evidence batch, whose P11 dashboard is
