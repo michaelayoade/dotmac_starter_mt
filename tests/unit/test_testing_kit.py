@@ -70,10 +70,10 @@ def test_isolated_session_rolls_back_between_uses() -> None:
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────
-def test_harness_can_select_the_module_schemas_owned_by_its_test_assembly() -> None:
+def test_harness_can_select_the_exact_tables_owned_by_its_test_assembly() -> None:
     """Unrelated package imports must not exhaust SQLite's attachment limit."""
 
-    engine = create_test_engine(module_schemas=())
+    engine = create_test_engine(tables=_public_tables())
     try:
         with engine.connect() as connection:
             attached = {
