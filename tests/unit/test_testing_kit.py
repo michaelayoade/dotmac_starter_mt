@@ -10,7 +10,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+import sqlalchemy as sa
 from dotmac_kernel import ProductAssemblySpec, create_app
+from dotmac_kernel.models import Base
 from dotmac_kernel.providers.provisioning import (
     ProvisioningProvider,
     ProvisioningRequest,
@@ -30,6 +32,42 @@ from dotmac_kernel.testing import (
 
 
 # ── harness ──────────────────────────────────────────────────────────────────
+def test_engine_scales_past_sqlites_ten_attached_namespace_limit() -> None:
+    """The fast lane remains usable as the module registry grows past ten.
+
+    This is an end-to-end sensitivity canary: the former attach-every-schema
+    harness raises ``sqlite3.OperationalError: too many attached databases``
+    with this exact metadata shape.
+    """
+    existing = {
+        table.schema for table in Base.metadata.tables.values() if table.schema
+    }
+    probe_tables = [
+        sa.Table(
+            f"sqlite_namespace_capacity_probe_{index}",
+            Base.metadata,
+            sa.Column("id", sa.Integer, primary_key=True),
+            schema=f"mod_capacityprobe{index}",
+        )
+        for index in range(max(0, 11 - len(existing)))
+    ]
+    try:
+        schemas = {
+            table.schema for table in Base.metadata.tables.values() if table.schema
+        }
+        assert len(schemas) > 10
+        engine = create_test_engine()
+        try:
+            with engine.connect() as connection:
+                for table in probe_tables:
+                    assert connection.execute(sa.select(table)).all() == []
+        finally:
+            engine.dispose()
+    finally:
+        for table in reversed(probe_tables):
+            Base.metadata.remove(table)
+
+
 def test_assembly_test_client_boots_and_serves_health() -> None:
     """The kit boots a real create_app assembly and overrides its DB deps onto
     an isolated session — the same path a consumer's integration-ish unit test

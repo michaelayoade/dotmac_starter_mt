@@ -18,6 +18,14 @@ installable `dotmac-media-observations` module.
   media behavior to the kernel; it only lets the package register its own
   namespace and lineage without collision.
 
+### Changed
+
+- The supported SQLite unit-test harness now keeps up to ten module namespaces
+  as attached databases and maps only collision-free overflow to SQLite's
+  qualified `main` namespace. This preserves the fast service-logic lane after
+  the module registry crosses SQLite's hard attachment limit; namespace and
+  isolation proofs remain PostgreSQL gates.
+
 ## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known
