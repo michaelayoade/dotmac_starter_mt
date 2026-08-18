@@ -7,6 +7,10 @@ revision (ADR-0006 D1 amendment).
 
 ### Changed
 
+- Exposes the installed Alembic lineage through the fleet-standard public
+  `versions_dir()` locator. This completes composition readiness without
+  publishing or selecting an adopter; a2 remains intentionally unreleased
+  until ERP is ready for the coordinated cohort cutover.
 - `im_0001_import_runs` previously read
   `depends_on = ("0001_initial_tenant_schema",)`. That edge is true only in an
   assembly that runs the kernel lineage: ERP hosts `public.tenants` in its own
