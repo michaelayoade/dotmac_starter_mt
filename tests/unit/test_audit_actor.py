@@ -2,7 +2,7 @@
 
 Measured across ERP and Sub production, 93-98% of audit rows have a non-party
 actor, so these tests exist to keep a party-primary model from creeping back in
-while pinning the one temporary compatibility rule still used by Workspace.
+while proving that Party enrichment can never manufacture the canonical pair.
 """
 
 import uuid
@@ -51,25 +51,33 @@ def test_an_undeclared_kind_is_refused() -> None:
     assert "robot" in str(exc.value)
 
 
-def test_a_party_alone_derives_the_temporary_workspace_user_actor() -> None:
-    """The compatibility shim remains until Workspace's two callers migrate."""
+def test_a_party_alone_does_not_manufacture_a_user_actor() -> None:
     party = uuid.uuid4()
 
-    assert _resolve(actor_party_id=party) == ("user", str(party))
+    with pytest.raises(MissingAuditActorError) as exc:
+        _resolve(actor_party_id=party)
+    assert "actor_party_id is accountability enrichment" in str(exc.value)
 
 
-def test_an_identifier_survives_the_temporary_workspace_derivation() -> None:
-    """The shim fills the kind; it never overwrites a supplied identifier."""
+def test_an_identifier_and_party_still_need_an_explicit_kind() -> None:
     party = uuid.uuid4()
 
-    assert _resolve(actor_party_id=party, actor_id="alice") == ("user", "alice")
+    with pytest.raises(MissingAuditActorError):
+        _resolve(actor_party_id=party, actor_id="alice")
 
 
-def test_an_explicit_user_may_derive_its_party_identifier() -> None:
-    """A Party UUID is itself a stable user-principal identifier."""
+def test_an_explicit_user_must_not_derive_its_party_identifier() -> None:
     party = uuid.uuid4()
 
-    assert _resolve(actor_type="user", actor_party_id=party) == (
+    with pytest.raises(MissingAuditActorError) as exc:
+        _resolve(actor_type="user", actor_party_id=party)
+    assert "does not substitute" in str(exc.value)
+
+
+def test_an_explicit_user_pair_may_carry_party_enrichment() -> None:
+    party = uuid.uuid4()
+
+    assert _resolve(actor_type="user", actor_id=str(party), actor_party_id=party) == (
         "user",
         str(party),
     )

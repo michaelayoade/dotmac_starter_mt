@@ -234,6 +234,7 @@ def test_an_audit_event_with_an_undeclared_action_fails() -> None:
                     db,
                     tenant_id=uuid4(),
                     actor_party_id=None,
+                    actor_type="system",
                     action="probe.undeclared",
                     entity_type="probe",
                 )

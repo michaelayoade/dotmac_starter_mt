@@ -93,6 +93,8 @@ def test_declared_action_is_written(
         db,
         tenant_id=tenant_row.id,
         actor_party_id=party_row.id,
+        actor_type="user",
+        actor_id=str(party_row.id),
         action="probe.ok",
         entity_type="probe",
     )
@@ -111,6 +113,8 @@ def test_explicit_domain_time_is_preserved(
         db,
         tenant_id=tenant_row.id,
         actor_party_id=party_row.id,
+        actor_type="user",
+        actor_id=str(party_row.id),
         action="probe.ok",
         entity_type="probe",
         occurred_at=domain_time,
@@ -131,6 +135,8 @@ def test_undeclared_action_is_rejected_and_writes_nothing(
             db,
             tenant_id=tenant_row.id,
             actor_party_id=party_row.id,
+            actor_type="user",
+            actor_id=str(party_row.id),
             action="probe.typo",
             entity_type="probe",
         )

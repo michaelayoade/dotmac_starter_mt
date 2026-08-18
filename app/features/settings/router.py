@@ -51,6 +51,8 @@ def update_setting(
         db,
         tenant_id=tenant.id,
         actor_party_id=actor.id,
+        actor_type="user",
+        actor_id=str(actor.id),
         action="settings.update",
         entity_type="setting",
         entity_id=key,
