@@ -20,6 +20,7 @@ from dotmac_media_observations import (
     CountValue,
     DecimalValue,
     DerivedRatio,
+    DurationValue,
     EntityDisposition,
     EntityObservation,
     ExactMoney,
@@ -36,6 +37,7 @@ from dotmac_media_observations import (
     ProviderRestatement,
     RatioValue,
     RecordStatus,
+    UnsupportedObservation,
     declare_metric,
     declare_node_type,
     derive_ratio,
@@ -226,6 +228,29 @@ def test_exact_replay_is_idempotent_and_attaches_each_transport_receipt(
     assert db.scalar(select(func.count()).select_from(ObservationReceipt)) == 2
 
 
+def test_replayed_transport_receipt_identity_requires_the_same_receipt_time(
+    db: Session,
+) -> None:
+    _node(db)
+    command = _entity("same", receipt="transport-a")
+    record_entity(db, command)
+
+    with pytest.raises(ObservationConflict) as caught:
+        record_entity(
+            db,
+            replace(
+                command,
+                source=replace(
+                    command.source,
+                    received_at=command.source.received_at + timedelta(seconds=1),
+                ),
+            ),
+        )
+
+    assert caught.value.report.code == "transport_receipt_conflict"
+    assert db.scalar(select(func.count()).select_from(ObservationReceipt)) == 1
+
+
 def test_reusing_source_identity_with_changed_content_is_a_conflict(
     db: Session,
 ) -> None:
@@ -392,6 +417,26 @@ def test_count_values_refuse_float_and_bool() -> None:
             CountValue(value)  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("value_type", [CountValue, DurationValue])
+def test_integral_metric_values_refuse_numbers_outside_signed_64_bit_storage(
+    value_type: type[CountValue] | type[DurationValue],
+) -> None:
+    with pytest.raises(InvalidObservation, match="signed 64-bit"):
+        value_type(2**63)
+
+
+@pytest.mark.parametrize("value_type", [DecimalValue, RatioValue])
+@pytest.mark.parametrize(
+    "value",
+    [Decimal("100000000000000000000"), Decimal("0.0000000000000000001")],
+)
+def test_decimal_metric_values_refuse_values_that_storage_would_round_or_overflow(
+    value_type: type[DecimalValue] | type[RatioValue], value: Decimal
+) -> None:
+    with pytest.raises(InvalidObservation, match=r"NUMERIC\(38,18\)"):
+        value_type(value)
+
+
 def test_money_retains_exact_amount_currency_and_minor_unit_provenance() -> None:
     money = ExactMoney(amount=Decimal("50000.00"), currency="NGN", minor_unit=2)
     assert money.minor_units == 5_000_000
@@ -540,6 +585,14 @@ def test_provider_conversion_claim_remains_labelled_and_is_not_attribution(
         db, tenant_id=TENANT, observation_id=result.observation_id
     )
     assert fact.claim_status is ClaimStatus.PROVIDER_REPORTED
+    assert fact.content_fingerprint == result.fingerprint
+    assert fact.restates_observation_id is None
+    assert fact.payload.metric_code == "reported_conversion_value"
+    assert fact.payload.semantic is MetricSemantic.CONVERSION_VALUE
+    assert fact.payload.unit == "currency"
+    assert fact.payload.value == ExactMoney(
+        amount=Decimal("50000.00"), currency="NGN", minor_unit=2
+    )
     assert fact.attribution_status == "not_attribution"
     assert not hasattr(fact, "lead_id")
     assert not hasattr(fact, "customer_id")
@@ -605,17 +658,26 @@ def test_metric_reads_include_complete_provenance(db: Session) -> None:
     _node(db)
     _metric(db)
     record_entity(db, _entity("entity"))
-    result = record_metric(
+    command = MetricObservation(
+        source=_source("metric", receipt="receipt-metric-a"),
+        external_account_ref="account-7",
+        entity_ref="campaign-42",
+        metric_code="reported_impressions",
+        metric_version=1,
+        period_start=T0,
+        period_end=T0 + timedelta(days=1),
+        value=CountValue(9),
+    )
+    result = record_metric(db, command)
+    record_metric(
         db,
-        MetricObservation(
-            source=_source("metric", receipt="receipt-metric"),
-            external_account_ref="account-7",
-            entity_ref="campaign-42",
-            metric_code="reported_impressions",
-            metric_version=1,
-            period_start=T0,
-            period_end=T0 + timedelta(days=1),
-            value=CountValue(9),
+        replace(
+            command,
+            source=replace(
+                command.source,
+                transport_receipt_ref="receipt-metric-b",
+                received_at=T0 + timedelta(minutes=3),
+            ),
         ),
     )
 
@@ -633,8 +695,97 @@ def test_metric_reads_include_complete_provenance(db: Session) -> None:
     assert metric.source_observation_id == "metric"
     assert metric.source_observed_at == T0
     assert metric.received_at == T0 + timedelta(minutes=2)
-    assert metric.transport_receipt_refs == ("receipt-metric",)
+    assert metric.content_fingerprint == result.fingerprint
+    assert metric.restates_observation_id is None
+    assert [
+        (receipt.transport_receipt_ref, receipt.received_at)
+        for receipt in metric.transport_receipts
+    ] == [
+        ("receipt-metric-a", T0 + timedelta(minutes=2)),
+        ("receipt-metric-b", T0 + timedelta(minutes=3)),
+    ]
+    assert metric.transport_receipt_refs == (
+        "receipt-metric-a",
+        "receipt-metric-b",
+    )
     assert metric.normalization_version == 1
+
+
+def test_analytics_entity_and_hierarchy_facts_preserve_the_normalized_payload(
+    db: Session,
+) -> None:
+    _node(db)
+    parent = record_entity(db, _entity("parent", entity_ref="parent"))
+    child = record_entity(db, _entity("child", entity_ref="child"))
+    edge = record_hierarchy(
+        db,
+        HierarchyObservation(
+            source=_source("edge"),
+            external_account_ref="account-7",
+            child_entity_ref="child",
+            parent_entity_ref="parent",
+        ),
+    )
+
+    entity_fact = emit_analytics_fact(
+        db, tenant_id=TENANT, observation_id=child.observation_id
+    )
+    assert entity_fact.content_fingerprint == child.fingerprint
+    assert entity_fact.payload.entity_ref == "child"
+    assert entity_fact.payload.node_code == "campaign"
+    assert entity_fact.payload.node_version == 1
+    assert entity_fact.payload.name == "North launch"
+    assert entity_fact.payload.state == "enabled"
+    assert entity_fact.payload.disposition is EntityDisposition.PRESENT
+    assert entity_fact.payload.properties == {"objective": "awareness"}
+    assert entity_fact.transport_receipts[0].transport_receipt_ref == "receipt-child"
+
+    hierarchy_fact = emit_analytics_fact(
+        db, tenant_id=TENANT, observation_id=edge.observation_id
+    )
+    assert hierarchy_fact.content_fingerprint == edge.fingerprint
+    assert hierarchy_fact.payload.child_entity_ref == "child"
+    assert hierarchy_fact.payload.parent_entity_ref == "parent"
+    assert parent.observation_id != child.observation_id
+
+
+def test_exact_decimal_entity_properties_round_trip_without_type_loss(
+    db: Session,
+) -> None:
+    _node(db)
+    properties = {
+        "daily_budget": Decimal("123.4500"),
+        "configuration": [Decimal("0.125"), {"threshold": Decimal("7.00")}],
+    }
+    outcome = record_entity(
+        db, replace(_entity("decimal-state"), properties=properties)
+    )
+
+    current = read_current_entity(
+        db,
+        tenant_id=TENANT,
+        installation_ref="installation-alpha",
+        source_system="external-media",
+        external_account_ref="account-7",
+        entity_ref="campaign-42",
+    )
+    emitted = emit_analytics_fact(
+        db, tenant_id=TENANT, observation_id=outcome.observation_id
+    )
+    assert current is not None and current.properties == properties
+    assert emitted.payload.properties == properties
+
+
+def test_all_refused_observations_expose_a_typed_rejection_report(
+    db: Session,
+) -> None:
+    with pytest.raises(InvalidObservation) as invalid:
+        CountValue(1.5)  # type: ignore[arg-type]
+    assert invalid.value.report.code == "invalid_observation"
+
+    with pytest.raises(UnsupportedObservation) as unsupported:
+        record_entity(db, _entity("undeclared"))
+    assert unsupported.value.report.code == "unsupported_observation"
 
 
 def test_derived_ratio_is_explicitly_not_a_provider_observation() -> None:
