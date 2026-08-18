@@ -622,6 +622,8 @@ def _require_numeric_38_18(name: str, value: Decimal) -> None:
         raise InvalidObservation(f"{name} exceeds NUMERIC(38,18) storage")
     digits = list(value.as_tuple().digits)
     exponent = value.as_tuple().exponent
+    if not isinstance(exponent, int):  # narrowed by _require_decimal for runtime
+        raise InvalidObservation(f"{name} must be finite")
     while digits and digits[-1] == 0:
         digits.pop()
         exponent += 1
