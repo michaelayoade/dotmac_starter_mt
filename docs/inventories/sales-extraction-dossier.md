@@ -1,7 +1,7 @@
 # `dotmac-sales` extraction dossier
 
-**Status:** Source audit and contract complete; package creation blocked by P11
-**As of:** 2026-08-17
+**Status:** Source audit and contract complete; P11 met; implementation authorized
+**As of:** 2026-08-18
 **Owner:** Dotmac Sales domain; decision owner Michael
 **Source mode:** `product-first`
 **Qualifying source:** Sub
@@ -15,11 +15,11 @@
 **First consumer/cutover:** Sub
 **Decision:** [ADR-0033](../adr/0033-sales-authority-stops-at-an-accepted-quote.md)
 
-This is the pre-package equivalent of the future
+This is the pre-package input to
 `packages/dotmac-sales/EXTRACTION.toml`. Rule 24 requires this evidence before
-implementation. Once P11 is met and the package is created, the TOML dossier
-must carry these exact pins/paths/tests/consumers and may change them only
-through a reviewed source re-audit.
+implementation. P11 is now met, so the package dossier must carry these exact
+pins/paths/tests/consumers and may change them only through a reviewed source
+re-audit.
 
 ## Owned contract
 
@@ -176,11 +176,12 @@ Extraction is incomplete until:
 | Ownership boundary | **MET** | ADR-0033 and approved Sub SOT amendment |
 | Campaign owner | **NOT APPLICABLE / UNVERIFIED** | separate audit; cannot block or be absorbed into sales |
 | Retention owner | **UNRESOLVED / OUT OF SCOPE** | explicit future owner decision |
-| P11 product production lineage | **UNMET — BLOCKING IMPLEMENTATION** | accepted checked-in platform/adoption evidence; do not edit from this workstream |
-| Package/lineage/canaries | **NOT STARTED** | begins red-first only after P11 |
+| P11 product production lineage | **MET** | accepted checked-in record in `p11-adoption-status.md`; Starter merge `ae508e1173b8643a4031936cc32cc411a6395f26` |
+| Package/lineage/canaries | **AUTHORIZED / NOT STARTED** | begins red-first from the frozen C-SALES contract |
 | Sub adoption | **NOT STARTED** | released package plus backfill/shadow/sealed cutover |
 | CRM writer retirement | **PLANNED** | adoption plus ledger gates and source deletion |
 | Production cutover/deletion | **NOT AUTHORIZED** | separate explicit authorization |
 
-No empty `packages/dotmac-sales` directory or placeholder `EXTRACTION.toml` is
-created to make an unmet gate look like progress.
+The pre-P11 prohibition correctly prevented an empty placeholder package. The
+accepted P11 record now authorizes canary-first implementation; it does not
+advance any module-specific release, adoption, cutover or retirement gate.

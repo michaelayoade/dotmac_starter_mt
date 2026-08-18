@@ -197,6 +197,31 @@ def test_each_entry_matches_the_package_it_names(distribution: str) -> None:
 
 
 @pytest.mark.parametrize("distribution", sorted(_allowlist()))
+def test_runtime_dependency_policy_matches_each_package_before_release(
+    distribution: str,
+) -> None:
+    """PR-time twin of the wheel metadata check.
+
+    The release workflow reads dependencies from built METADATA. Waiting until
+    then to discover that a reviewed runtime dependency is absent from the
+    allowlist turns publication into the first integration test. Both surfaces
+    come from checked-in files, so drift is a pull-request failure instead.
+    """
+    entry = _allowlist()[distribution]
+    package = PROJECT_ROOT / entry["package_dir"]
+    manifest = tomllib.loads((package / "pyproject.toml").read_text(encoding="utf-8"))[
+        "tool"
+    ]["poetry"]
+
+    declared = set(manifest["dependencies"])
+    permitted = set(entry["wheel_contents"]["allowed_requires"])
+    assert declared == permitted, (
+        f"{distribution} declares {sorted(declared)}, but its release policy "
+        f"permits {sorted(permitted)}"
+    )
+
+
+@pytest.mark.parametrize("distribution", sorted(_allowlist()))
 def test_required_wheel_contents_exist_in_the_source_tree(
     distribution: str,
 ) -> None:

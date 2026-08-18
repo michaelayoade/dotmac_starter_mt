@@ -73,11 +73,11 @@ def _enabled(db: Session, registry) -> tuple:
     installation = create_draft(
         db, registry=registry, connector_key="conformance_fake", name="primary"
     )
-    put_config_revision(db, installation, config={"a": 1})
-    enable(db, installation, registry=registry)
     binding = add_binding(
         db, installation, registry=registry, capability_id=FAKE_CAPABILITY
     )
+    put_config_revision(db, installation, registry=registry, config={"a": 1})
+    enable(db, installation, registry=registry)
     set_binding_enabled(db, installation, binding, registry=registry, enabled=True)
     return installation, binding
 

@@ -692,8 +692,8 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     """Every kind of change the lineage makes, accounted for.
 
     `ig_0003` and `ig_0005` add COLUMNS to existing tables; `ig_0004` and
-    `ig_0006` add exactly one table each. Asserted from both sides — the
-    declaration says nine and the live schema holds exactly those nine — plus
+    `ig_0006` and `ig_0010` add exactly one table each. Asserted from both sides
+    — the declaration says ten and the live schema holds exactly those ten — plus
     the ADR-0023 contract, which either a new column or a new table could break
     by carrying a tenant scope.
 
@@ -706,9 +706,10 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     from dotmac_kernel.migrations.catalog import audit_live_schemas
     from dotmac_kernel.namespaces import NamespaceRegistry
 
-    assert len(module.platform_tables) == 9
+    assert len(module.platform_tables) == 10
     assert "capability_destination_revisions" in module.platform_tables
     assert "receipt_legal_holds" in module.platform_tables
+    assert "shadow_comparison_evidence" in module.platform_tables
     assert module.tables == ()
 
     admin_url, _ = migrated_scratch
@@ -735,6 +736,38 @@ def test_the_ig_lineage_added_exactly_what_it_declared(
     assert live == set(module.platform_tables)
     assert column.is_nullable == "YES", "an unminted binding must stay unminted"
     assert not violations, "platform-plane violations:\n" + "\n".join(violations)
+
+
+def test_shadow_evidence_is_append_reachable_without_tenant_sequence_access(
+    migrated_scratch: tuple[str, str],
+) -> None:
+    """A BIGSERIAL sequence is a second privilege object, not table INSERT."""
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.connect() as conn:
+        platform_table = conn.execute(
+            text(
+                "SELECT has_table_privilege('platform_api', "
+                "'mod_intg.shadow_comparison_evidence', 'INSERT')"
+            )
+        ).scalar_one()
+        platform_sequence = conn.execute(
+            text(
+                "SELECT has_sequence_privilege('platform_api', "
+                "'mod_intg.shadow_comparison_evidence_id_seq', 'USAGE')"
+            )
+        ).scalar_one()
+        tenant_sequence = conn.execute(
+            text(
+                "SELECT has_sequence_privilege('app_user', "
+                "'mod_intg.shadow_comparison_evidence_id_seq', 'USAGE')"
+            )
+        ).scalar_one()
+    engine.dispose()
+
+    assert platform_table and platform_sequence
+    assert not tenant_sequence
 
 
 @pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "DELETE"])
@@ -768,6 +801,76 @@ def test_a_route_is_not_reachable_by_the_tenant_application_role(
         f"app_user holds {privilege} on capability_destination_revisions — a "
         "tenant-facing role can reach the table that decides where traffic goes"
     )
+
+
+def test_a_product_descriptor_snapshot_is_group_complete_in_postgres(
+    migrated_scratch: tuple[str, str], request: pytest.FixtureRequest
+) -> None:
+    """A partial provenance record must be impossible through direct SQL."""
+    from sqlalchemy.exc import IntegrityError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    revision_id = uuid.uuid4()
+    product_binding_id = uuid.uuid4()
+    with engine.begin() as conn:
+        _, binding_id = _installation_and_binding(conn, request)
+        with pytest.raises(IntegrityError):
+            with conn.begin_nested():
+                conn.execute(
+                    text(
+                        "INSERT INTO mod_intg.capability_destination_revisions ("
+                        "id, capability_binding_id, revision, application, "
+                        "scope_kind, scope_ref, contract_version, descriptor_digest) "
+                        "VALUES (:id, :binding, 1, 'sub', 'inbox', 'support', 1, "
+                        ":digest)"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "binding": binding_id,
+                        "digest": "a" * 64,
+                    },
+                )
+
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.capability_destination_revisions ("
+                "id, capability_binding_id, revision, application, scope_kind, "
+                "scope_ref, contract_version, descriptor_schema_version, "
+                "descriptor_owner_module, descriptor_capability_summary, "
+                "product_binding_id, delivery_path, mirror_path, "
+                "product_activation_state, descriptor_source_revision, "
+                "descriptor_digest) VALUES ("
+                ":id, :binding, 1, 'sub', 'inbox', 'support', 1, :schema, "
+                ":owner, :summary, :product_binding, :delivery, :mirror, "
+                "'configured_disabled', :source_revision, :digest)"
+            ),
+            {
+                "id": revision_id,
+                "binding": binding_id,
+                "schema": "dotmac.io/product-port-descriptor/v1",
+                "owner": "communications.team_inbox_integrator_envelope",
+                "summary": "Inbound provider observations",
+                "product_binding": product_binding_id,
+                "delivery": f"/api/v1/integration/observations/{product_binding_id}",
+                "mirror": (
+                    f"/api/v1/integration/observations/{product_binding_id}/mirror"
+                ),
+                "source_revision": "b" * 64,
+                "digest": "c" * 64,
+            },
+        )
+        persisted = conn.execute(
+            text(
+                "SELECT product_binding_id, product_activation_state "
+                "FROM mod_intg.capability_destination_revisions WHERE id=:id"
+            ),
+            {"id": revision_id},
+        ).one()
+    engine.dispose()
+
+    assert persisted.product_binding_id == product_binding_id
+    assert persisted.product_activation_state == "configured_disabled"
 
 
 def test_the_unique_index_is_the_one_the_mint_retry_depends_on(

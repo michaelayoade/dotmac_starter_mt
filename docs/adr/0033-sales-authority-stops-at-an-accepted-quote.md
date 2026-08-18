@@ -169,3 +169,17 @@ prevents independent composition.
 
 **Create the package now and leave it unused.** Rejected by ADR-0017, the
 product-first extraction rule and the zero-consumer rule.
+
+## Amendment — 2026-08-18: P11 is met
+
+The P11 status in decision 6 was the correct gate state at this ADR's pinned
+Starter revision. It is now superseded by the accepted checked-in record in
+[`p11-adoption-status.md`](../inventories/p11-adoption-status.md), merged on
+Starter `main` as `ae508e1173b8643a4031936cc32cc411a6395f26` after the
+Approvals release-record prerequisite merged as
+`f10b19ae863b3867cbbb630eeaf4a33393efe7a8`.
+
+Package, lineage and red-first canary implementation may therefore begin from
+the completed product-first dossier. This amendment changes no ownership
+boundary and advances no sales-specific release, Sub tenant/RLS, adoption,
+cutover, CRM retirement, deployment or production-data gate.

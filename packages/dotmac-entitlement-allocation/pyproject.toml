@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-entitlement-allocation"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
 authors = ["DotMac"]
 readme = "README.md"
@@ -25,9 +25,11 @@ python = ">=3.11,<3.14"
 #
 # The FLOOR is higher than the allocation, and has been twice. a56 published
 # `ModuleManifest.platform_tables` (ADR-0023), which this module declares. a66
-# published `idempotency_ledger.v1`, which `0.1.0a5` declares: every kernel
+# published `idempotency_ledger.v1`; a68 published `platform_audit_log.v1`.
+# `0.1.0a6` declares both request-time effects. Every kernel
 # from a18 HAS `public.platform_idempotency_records` — `0018` created it — but
-# one below a66 does not know the NAME, so `ModuleManifest.__post_init__` ->
+# one below the corresponding release does not know the NAME, so
+# `ModuleManifest.__post_init__` ->
 # `validate_prerequisites` raises `UnknownPrerequisiteError` while the manifest
 # is being constructed, before the allocation check is ever reached. Capability
 # outranks allocation, so the floor is the highest capability actually consumed.
@@ -35,7 +37,7 @@ python = ">=3.11,<3.14"
 # This raise is VISIBLE to consumers: a1..a4 are all published and all install
 # on a56..a65; a5 will not. That is the correct trade — every one of those
 # installs against a kernel whose ledger it silently requires and cannot state.
-dotmac-kernel = ">=0.1.0a66"
+dotmac-kernel = ">=0.1.0a68"
 sqlalchemy = "^2.0"
 
 [build-system]

@@ -2,24 +2,25 @@
 
 ## The enforceable premise (ADR-0018)
 
-`dotmac-integration` has been published four times and
-`dotmac-entitlement-allocation` four. Every migration file present at any of
-those eight tags is inside a wheel on the registry, and has therefore RUN,
+`dotmac-approvals` has been published five times, `dotmac-integration` eight,
+and `dotmac-entitlement-allocation` five. Every migration file present at any
+of those eighteen tags is inside a wheel on the registry, and has therefore RUN,
 unmodified, in at least one database this repository does not own and cannot
 inspect.
 
 Allocation is the sharper case, and the reason the guard grew a second
-distribution rather than staying a one-module special. Its four releases hold
-ONE migration with ONE digest: a2 exposed `versions_dir()`, a3 made the ORM
+distribution rather than staying a one-module special. Its first four releases
+hold ONE migration with ONE digest: a2 exposed `versions_dir()`, a3 made the ORM
 relationships class-bound, a4 moved a manifest declaration between plane slots.
-Four tags and nothing to show for them in the versions directory reads, to the
-next author, as "the migration is still ours to edit". It is not.
+a6 then shipped the two prerequisite verifier revisions after deliberately
+skipping a5. A quiet directory is not evidence its released bytes remain ours.
 
 The integration a3 entry was added while #204 was open: a3 was tagged from `b14f66e`
 after the branch was cut, which is exactly the event the map has to absorb
 rather than be surprised by. The six files did not move — a3 is a Python fix —
-so the entry repeats a2's digests, and `test_two_tags_agree_about_a_file_they_
-both_shipped` is what proves that repetition is a fact rather than a paste.
+so the entry repeats a2's digests, and
+`test_two_tags_agree_unless_the_divergence_is_exactly_grandfathered` is what
+proves that repetition is a fact rather than a paste.
 
 Editing such a file does not migrate anything. It changes what a future
 installation builds while every existing installation keeps whatever the old
@@ -63,9 +64,17 @@ is repaired by a new revision that alters the result — the same discipline as
 and does not touch `ig_0001` to do it. This guard only insists the repair be
 additive.
 
+Approvals is the measured exception to one-byte-history: `ap_0001` shipped
+three byte sets across a1-a4 before enrolment. `GRANDFATHERED_DIVERGENCES`
+records that closed historical set and the canonical bytes retained by the
+tree; it is not permission for a fourth edit. The static census is paired with
+`tests/test_approvals_released_migration_upgrades.py`, which reconstructs each
+tagged meaning and proves its additive upgrade on PostgreSQL.
+
 ## Scope
 
-Two distributions: `dotmac-integration` and `dotmac-entitlement-allocation`.
+Three distributions: `dotmac-approvals`, `dotmac-integration`, and
+`dotmac-entitlement-allocation`.
 Each was added by the change that was tempted to edit its released bytes —
 integration's by `ig_0007`, allocation's by `ea_0002` — and each entry's
 digests were read out of the tags in that same change. That is the enrolment
@@ -89,11 +98,14 @@ import hashlib
 import json
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 
 #: The distributions this file monitors, and where each keeps its lineage.
 #:
@@ -101,6 +113,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: unmonitored and named as such by
 #: `test_the_unmonitored_distributions_are_named`.
 DISTRIBUTIONS: dict[str, Path] = {
+    "dotmac-approvals": (
+        REPO_ROOT / "packages/dotmac-approvals/src/dotmac_approvals/migrations/versions"
+    ),
     "dotmac-integration": (
         REPO_ROOT
         / "packages/dotmac-integration/src/dotmac_integration/migrations/versions"
@@ -116,8 +131,15 @@ DISTRIBUTIONS: dict[str, Path] = {
 #: the module's migration prefix, so the ratchet cannot be defeated by a file
 #: the pattern happens not to match.
 LINEAGE_GLOBS: dict[str, str] = {
+    "dotmac-approvals": "ap_*.py",
     "dotmac-integration": "ig_*.py",
     "dotmac-entitlement-allocation": "ea_*.py",
+}
+
+TAG_PREFIXES: dict[str, str] = {
+    "dotmac-approvals": "dotmac-approvals-v",
+    "dotmac-integration": "dotmac-integration-v",
+    "dotmac-entitlement-allocation": "dotmac-entitlement-allocation-v",
 }
 
 #: Kept for the many call sites that only need integration's directory.
@@ -129,6 +151,58 @@ VERSIONS = DISTRIBUTIONS["dotmac-integration"]
 #: `origin`; the commit is recorded so a reviewer can locate the release without
 #: resolving the tag object.
 RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
+    # ── dotmac-approvals ────────────────────────────────────────────────────
+    # ap_0001 was edited in place twice before this guard enrolled the module.
+    # The exact three historical byte sets are recorded here; the explicit
+    # grandfathered-divergence ledger below decides which one the tree retains.
+    "dotmac-approvals-v0.1.0a1": (
+        "dotmac-approvals",
+        "221f686",
+        {
+            "ap_0001_approvals.py": (
+                "ec5e1aa9e504de8143eebaafacb0615cf24b6ea930648f5b9cfd1a9afc2db70e"
+            ),
+        },
+    ),
+    "dotmac-approvals-v0.1.0a2": (
+        "dotmac-approvals",
+        "3e1f801",
+        {
+            "ap_0001_approvals.py": (
+                "6c7b3263e05f860982dda125439171f62bba716d36d95b21e2c3a3224f19ad6a"
+            ),
+        },
+    ),
+    "dotmac-approvals-v0.1.0a3": (
+        "dotmac-approvals",
+        "16f11a9",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+        },
+    ),
+    "dotmac-approvals-v0.1.0a4": (
+        "dotmac-approvals",
+        "f013c7e",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+        },
+    ),
+    "dotmac-approvals-v0.1.0a5": (
+        "dotmac-approvals",
+        "8d4ddfd",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+            "ap_0002_outbox_relay.py": (
+                "6aace60a4925ad5f5c693b81a356807c1ad2b9ffe1664fdfcd1417429d127e2d"
+            ),
+        },
+    ),
     "dotmac-integration-v0.1.0a1": (
         "dotmac-integration",
         "1b1d62b",
@@ -221,6 +295,144 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # a5 is a Python/SPI release. It repeats a4's seven migration digests, which
+    # is still a release-history fact rather than permission to omit the tag.
+    "dotmac-integration-v0.1.0a5": (
+        "dotmac-integration",
+        "7828697",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+        },
+    ),
+    # a6 adds the DDL-free platform-audit prerequisite verifier. It was
+    # published from main before the product-port branch merged, so ig_0009 is
+    # deliberately absent from this immutable release record.
+    "dotmac-integration-v0.1.0a6": (
+        "dotmac-integration",
+        "7e05430",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+            "ig_0008_platform_audit_log.py": (
+                "1e2cb215be0e71edf1af33b41cd53630ba9583168c2ff270c568483fdff15825"
+            ),
+        },
+    ),
+    # a7 adds immutable product-port descriptor provenance and receipt-owned
+    # provider identity. It was published from main while the independent
+    # shadow-evidence branch was being rebased, so only ig_0010 remains
+    # editable after this release record is reconciled.
+    "dotmac-integration-v0.1.0a7": (
+        "dotmac-integration",
+        "c669b24",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+            "ig_0008_platform_audit_log.py": (
+                "1e2cb215be0e71edf1af33b41cd53630ba9583168c2ff270c568483fdff15825"
+            ),
+            "ig_0009_product_port_descriptors.py": (
+                "f95ec953d0ec9d561b5d7d438d1865e817fc4d15b2178c87e5f67350a07ab2d9"
+            ),
+        },
+    ),
+    # a8 adds the module-owned, indexed shadow-comparison evidence table. The
+    # release workflow installed the exact published wheel from the private
+    # index, registered its manifest and only then created this tag.
+    "dotmac-integration-v0.1.0a8": (
+        "dotmac-integration",
+        "4b1e867",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+            "ig_0008_platform_audit_log.py": (
+                "1e2cb215be0e71edf1af33b41cd53630ba9583168c2ff270c568483fdff15825"
+            ),
+            "ig_0009_product_port_descriptors.py": (
+                "f95ec953d0ec9d561b5d7d438d1865e817fc4d15b2178c87e5f67350a07ab2d9"
+            ),
+            "ig_0010_shadow_evidence.py": (
+                "eb897df97435c63ec4844753d8afa497391fa2eabfa0673312725995c231b4ed"
+            ),
+        },
+    ),
     # ── dotmac-entitlement-allocation ───────────────────────────────────────
     #
     # Four tags, one migration, one digest. `ea_0001` has not moved a byte
@@ -270,23 +482,88 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # a5 was never published. a6 is the next release and freezes both DDL-free
+    # verifier revisions alongside the unchanged allocation table revision.
+    "dotmac-entitlement-allocation-v0.1.0a6": (
+        "dotmac-entitlement-allocation",
+        "7e05430",
+        {
+            "ea_0001_allocations.py": (
+                "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
+            ),
+            "ea_0002_idempotency_ledger.py": (
+                "56076edb3f086b6e00b510df95d7af3b35153e8795f7b66754c89a2ad90032c2"
+            ),
+            "ea_0003_platform_audit_log.py": (
+                "63027541404d7f9c824cade44c247098aa5f19bdb6d70cf321c1452974e0e072"
+            ),
+        },
+    ),
 }
+
+
+@dataclass(frozen=True)
+class GrandfatheredDivergence:
+    """A released filename whose historical tags do not contain one byte set."""
+
+    canonical_digest: str
+    variants: tuple[tuple[str, frozenset[str]], ...]
+    reason: str
+
+
+#: The ONLY accepted released-byte divergence. This records damage already in
+#: the registry; it does not authorize another in-place edit. The canonical
+#: digest is the latest shipped shape and is the only byte set the current tree
+#: may retain. Each historical variant is still exercised by the PostgreSQL
+#: upgrade matrix in `tests/test_approvals_released_migration_upgrades.py`.
+GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
+    ("dotmac-approvals", "ap_0001_approvals.py"): GrandfatheredDivergence(
+        canonical_digest=(
+            "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+        ),
+        variants=(
+            (
+                "ec5e1aa9e504de8143eebaafacb0615cf24b6ea930648f5b9cfd1a9afc2db70e",
+                frozenset({"dotmac-approvals-v0.1.0a1"}),
+            ),
+            (
+                "6c7b3263e05f860982dda125439171f62bba716d36d95b21e2c3a3224f19ad6a",
+                frozenset({"dotmac-approvals-v0.1.0a2"}),
+            ),
+            (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb",
+                frozenset(
+                    {
+                        "dotmac-approvals-v0.1.0a3",
+                        "dotmac-approvals-v0.1.0a4",
+                        "dotmac-approvals-v0.1.0a5",
+                    }
+                ),
+            ),
+        ),
+        reason=(
+            "a1 built both planes; a2 inferred tenant installation from a "
+            "binding; a3/a4/a5 require explicit plane selection. These releases "
+            "already exist, so the divergence is preserved as evidence and "
+            "each variant must upgrade to the canonical current lineage."
+        ),
+    ),
+}
+
 
 #: Migration files that exist in the tree and have NOT shipped in any tag, so
 #: are still editable. This is the second direction of the ratchet: a new
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: Integration has no editable migration after a4: `ig_0007` is now released.
-#: `ea_0002` moves when allocation's `0.1.0a5` is tagged. That move is the same
-#: commit that removes its
-#: distribution's row from `docs/inventories/declared-publication-baseline
-#: .json`. The release lane does not wait for an open branch, which is the
-#: whole reason "released" is read from tags and not from a version number
-#: somebody intended.
+#: Approvals a5, Integration a8 and Allocation a6 are published, so their
+#: editable sets are empty; the next migration must enter this map before it
+#: can ship. The release lane does not wait for an open branch, which is why
+#: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
+    "dotmac-approvals": frozenset(),
     "dotmac-integration": frozenset(),
-    "dotmac-entitlement-allocation": frozenset({"ea_0002_idempotency_ledger.py"}),
+    "dotmac-entitlement-allocation": frozenset(),
 }
 
 
@@ -304,10 +581,36 @@ def _drift(versions: Path, distribution: str = "dotmac-integration") -> list[str
     several.
     """
     problems: list[str] = []
+    checked_divergences: set[tuple[str, str]] = set()
     for tag, (owner, commit, files) in sorted(RELEASED_TAGS.items()):
         if owner != distribution:
             continue
         for name, expected in sorted(files.items()):
+            key = (owner, name)
+            divergence = GRANDFATHERED_DIVERGENCES.get(key)
+            if divergence is not None:
+                if key in checked_divergences:
+                    continue
+                checked_divergences.add(key)
+                path = versions / name
+                if not path.is_file():
+                    shipping_tags = sorted(
+                        tag_name for _, tags in divergence.variants for tag_name in tags
+                    )
+                    problems.append(
+                        f"{name} shipped with grandfathered variants in "
+                        f"{shipping_tags} and is now MISSING — released history "
+                        "cannot be withdrawn"
+                    )
+                    continue
+                actual = _digest(path)
+                if actual != divergence.canonical_digest:
+                    problems.append(
+                        f"{name} has grandfathered released variants but the "
+                        "current tree must retain canonical sha256 "
+                        f"{divergence.canonical_digest}; found {actual}"
+                    )
+                continue
             path = versions / name
             if not path.is_file():
                 problems.append(
@@ -366,28 +669,34 @@ def test_no_released_migration_has_been_edited(distribution: str) -> None:
     )
 
 
-def test_two_tags_agree_about_a_file_they_both_shipped() -> None:
-    """The map's own honesty check.
-
-    `ig_0001` and `ig_0002` appear under three tags each and
-    `ea_0001_allocations.py` under four. If the recorded digests ever
-    disagreed, the map would be asserting that one file had two sets of released
-    bytes — which is either a transcription error here or the very edit this
-    file exists to forbid, already committed and then papered over by updating
-    only one entry.
-    """
-    seen: dict[str, tuple[str, str]] = {}
-    for tag, (_, _, files) in sorted(RELEASED_TAGS.items()):
+def test_two_tags_agree_unless_the_divergence_is_exactly_grandfathered() -> None:
+    """No second byte history can hide behind the approvals exception."""
+    seen: dict[tuple[str, str], tuple[str, str]] = {}
+    divergent: dict[tuple[str, str], dict[str, set[str]]] = {}
+    for tag, (owner, _, files) in sorted(RELEASED_TAGS.items()):
         for name, digest in sorted(files.items()):
-            if name in seen:
-                first_tag, first_digest = seen[name]
-                assert digest == first_digest, (
-                    f"{name} is recorded as {first_digest} in {first_tag} and "
-                    f"{digest} in {tag} — one file, two release histories"
-                )
-            else:
-                seen[name] = (tag, digest)
+            key = (owner, name)
+            divergent.setdefault(key, {}).setdefault(digest, set()).add(tag)
+            seen.setdefault(key, (tag, digest))
     assert seen, "no shared files to compare"
+
+    actual_divergences = {
+        key: variants for key, variants in divergent.items() if len(variants) > 1
+    }
+    assert set(actual_divergences) == set(GRANDFATHERED_DIVERGENCES), (
+        "released-byte divergence is either undeclared or its exception is stale: "
+        f"actual={sorted(actual_divergences)}, "
+        f"declared={sorted(GRANDFATHERED_DIVERGENCES)}"
+    )
+    for key, actual in actual_divergences.items():
+        declaration = GRANDFATHERED_DIVERGENCES[key]
+        declared = {digest: set(tags) for digest, tags in declaration.variants}
+        assert actual == declared, f"{key}: variant/tag census drifted"
+        assert declaration.canonical_digest in actual
+        assert declaration.reason.strip()
+        assert _digest(DISTRIBUTIONS[key[0]] / key[1]) == (
+            declaration.canonical_digest
+        ), f"{key}: current tree no longer retains the canonical released bytes"
 
 
 @pytest.mark.parametrize("distribution", sorted(DISTRIBUTIONS))
@@ -514,21 +823,18 @@ def test_the_guard_catches_a_deleted_released_migration(tmp_path: Path) -> None:
         assert "MISSING" in problem
 
 
-@pytest.mark.parametrize(
-    "distribution",
-    sorted(owner for owner, files in UNRELEASED.items() if files),
-)
-def test_an_unreleased_migration_is_free_to_change(
-    tmp_path: Path, distribution: str
-) -> None:
+def test_an_unreleased_migration_is_free_to_change(tmp_path: Path) -> None:
     """Specificity for the two above: `_drift` must fire on RELEASED bytes, not
     on any change at all. A guard that refused every edit to the directory would
     pass both proofs above and block all future work."""
-    assert any(UNRELEASED.values()), "no editable migration exists; proof is vacuous"
+    distribution = "dotmac-integration"
     copy = tmp_path / "versions"
     shutil.copytree(DISTRIBUTIONS[distribution], copy)
-    victim = copy / next(iter(UNRELEASED[distribution]))
-    victim.write_bytes(victim.read_bytes() + b"\n# still being written\n")
+    victim = copy / "ig_9999_still_being_written.py"
+    victim.write_text("revision = 'ig_9999_still_being_written'\n", encoding="utf-8")
+    assert all(
+        victim.name not in files for _, _, files in RELEASED_TAGS.values()
+    ), "the sensitivity file must not be classified as released"
     assert not _drift(copy, distribution)
 
 
@@ -537,10 +843,10 @@ def test_the_guard_catches_an_edit_to_the_second_distributions_bytes(
 ) -> None:
     """Enrolment is only real if the new rows are actually compared.
 
-    `ea_0001` shipped in four tags with one digest, and every proof above walks
+    `ea_0001` shipped in five tags with one digest, and every proof above walks
     integration's directory — so all of them would pass with the allocation
     rows present and never read. This damages the file `ea_0002` exists to
-    avoid editing, and requires all four releases to be named.
+    avoid editing, and requires all five releases to be named.
     """
     distribution = "dotmac-entitlement-allocation"
     copy = tmp_path / "versions"
@@ -551,7 +857,7 @@ def test_the_guard_catches_an_edit_to_the_second_distributions_bytes(
     victim.write_bytes(victim.read_bytes() + b"\n# a formatter ran\n")
 
     shipped_in = _shipping_tags("ea_0001_allocations.py")
-    assert len(shipped_in) == 4, shipped_in
+    assert len(shipped_in) == 5, shipped_in
     problems = _drift(copy, distribution)
     assert len(problems) == len(shipped_in), problems
     for problem, tag in zip(problems, shipped_in, strict=True):
@@ -561,6 +867,28 @@ def test_the_guard_catches_an_edit_to_the_second_distributions_bytes(
             "a06682b221ac454a4e6df778c3184be59b63bde4bb527eacb27977c940425e22"
             in problem
         ), "the message must name the digest that shipped, not just 'differs'"
+
+
+def test_the_grandfathered_divergence_refuses_a_fourth_byte_set(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity: grandfathering history is not permission to edit again."""
+    distribution = "dotmac-approvals"
+    copy = tmp_path / "versions"
+    shutil.copytree(DISTRIBUTIONS[distribution], copy)
+    assert not _drift(copy, distribution), "the canonical copy must start clean"
+
+    victim = copy / "ap_0001_approvals.py"
+    victim.write_bytes(victim.read_bytes() + b"\n# a fourth byte set\n")
+
+    problems = _drift(copy, distribution)
+    assert len(problems) == 1, problems
+    assert "grandfathered released variants" in problems[0]
+    assert "canonical sha256" in problems[0]
+    assert (
+        "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+        in problems[0]
+    )
 
 
 def test_one_distributions_damage_is_not_attributed_to_the_other(
@@ -632,7 +960,28 @@ def _blob_digest(tag: str, name: str) -> str:
     return hashlib.sha256(result.stdout).hexdigest()
 
 
-def test_the_tag_oracle_is_usable_rather_than_absent() -> None:
+def _tag_inventory_problems(tags: set[str]) -> list[str]:
+    """Recorded and published tags must agree in both directions."""
+    problems: list[str] = []
+    recorded = set(RELEASED_TAGS)
+    missing = sorted(recorded - tags)
+    if missing:
+        problems.append(f"recorded tags absent from checkout: {missing}")
+    for distribution, prefix in sorted(TAG_PREFIXES.items()):
+        published = {tag for tag in tags if tag.startswith(prefix)}
+        recorded_for_distribution = {
+            tag for tag, (owner, _, _) in RELEASED_TAGS.items() if owner == distribution
+        }
+        unrecorded = sorted(published - recorded_for_distribution)
+        if unrecorded:
+            problems.append(
+                f"{distribution}: published tags missing from RELEASED_TAGS: "
+                f"{unrecorded}"
+            )
+    return problems
+
+
+def test_the_tag_oracle_is_usable_and_complete() -> None:
     """Fail closed, exactly as `test_declared_publication.py` now does.
 
     A shallow or tagless checkout cannot answer what a release contained. The
@@ -643,15 +992,67 @@ def test_the_tag_oracle_is_usable_rather_than_absent() -> None:
     sweep = _tag_oracle()
     assert not sweep.is_shallow(REPO_ROOT), (  # type: ignore[attr-defined]
         "shallow checkout: the released-migration cross-check needs full "
-        "history and tags — the `unit` job sets fetch-depth: 0 for this reason"
+        "history and tags — every CI job that reads release history must set "
+        "fetch-depth: 0"
     )
     tags = set(sweep.git_tags(REPO_ROOT))  # type: ignore[attr-defined]
-    missing = sorted(set(RELEASED_TAGS) - tags)
+    problems = _tag_inventory_problems(tags)
+    assert not problems, "released-tag inventory:\n" + "\n".join(problems)
+
+
+def _job_fetches_full_history(workflow: dict[str, object], job_name: str) -> bool:
+    jobs = workflow.get("jobs")
+    if not isinstance(jobs, dict):
+        return False
+    job = jobs.get(job_name)
+    if not isinstance(job, dict):
+        return False
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        if not isinstance(step, dict) or not str(step.get("uses", "")).startswith(
+            "actions/checkout@"
+        ):
+            continue
+        checkout_with = step.get("with")
+        return isinstance(checkout_with, dict) and checkout_with.get("fetch-depth") == 0
+    return False
+
+
+def test_every_ci_job_that_reads_release_history_fetches_tags() -> None:
+    """The unit oracle and PostgreSQL upgrade proofs both execute git show."""
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    missing = [
+        job_name
+        for job_name in ("unit", "integration")
+        if not _job_fetches_full_history(workflow, job_name)
+    ]
     assert not missing, (
-        f"tag(s) {missing} are recorded here but absent from this checkout — "
-        "either the tags were not fetched, or the map names a release that "
-        "does not exist"
+        f"CI jobs {missing} execute release-history proofs without a full checkout; "
+        "set actions/checkout fetch-depth: 0 so published tags are evidence"
     )
+
+
+def test_the_ci_tag_checkout_guard_detects_a_missing_fetch_depth() -> None:
+    """Sensitivity: the detector must fail when a checkout loses its tag oracle."""
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    checkout = next(
+        step
+        for step in workflow["jobs"]["integration"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    checkout.pop("with", None)
+    assert not _job_fetches_full_history(workflow, "integration")
+
+
+def test_the_tag_inventory_rejects_an_unrecorded_future_release() -> None:
+    """Sensitivity: adding a real tag without its byte history must fail."""
+    fake = "dotmac-integration-v99.0.0"
+    problems = _tag_inventory_problems(set(RELEASED_TAGS) | {fake})
+    assert problems == [
+        "dotmac-integration: published tags missing from RELEASED_TAGS: " f"['{fake}']"
+    ]
 
 
 @pytest.mark.parametrize("tag", sorted(RELEASED_TAGS))
@@ -700,10 +1101,11 @@ def test_the_cross_check_would_catch_a_doctored_map() -> None:
     """
     for tag, name in (
         ("dotmac-integration-v0.1.0a1", "ig_0001_connector_control_plane.py"),
-        # Both distributions, because `_blob_digest` now resolves the directory
-        # from the tag's owner. Reading only integration's would leave the
-        # allocation rows compared against a path nothing checks.
+        # Every enrolled distribution, because `_blob_digest` resolves the
+        # directory from the tag's owner. Reading only integration's would
+        # leave the other rows compared against a path nothing checks.
         ("dotmac-entitlement-allocation-v0.1.0a1", "ea_0001_allocations.py"),
+        ("dotmac-approvals-v0.1.0a1", "ap_0001_approvals.py"),
     ):
         actual = _blob_digest(tag, name)
         assert actual == RELEASED_TAGS[tag][2][name]

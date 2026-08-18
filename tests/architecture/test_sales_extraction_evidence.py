@@ -1,4 +1,4 @@
-"""Guard the pre-implementation sales extraction and its P11 stop condition."""
+"""Guard the product-first sales evidence and accepted P11 transition."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ INVENTORIES = PROJECT_ROOT / "docs" / "inventories"
 ADR = (
     PROJECT_ROOT / "docs" / "adr" / "0033-sales-authority-stops-at-an-accepted-quote.md"
 )
-PACKAGE = PROJECT_ROOT / "packages" / "dotmac-sales"
-
 PINS = {
     "starter": "7828697ef11fb1ae765a5397dfa7dc221ae6207a",
     "sub": "f64946fc451ba94a1d4c8f0a61b7831367d5b598",
@@ -67,7 +65,7 @@ def test_sales_extraction_evidence_is_complete_and_pinned() -> None:
 
     assert "product-first from Sub with mandatory port deltas" in source_evidence
     assert "CRM supplies parity and retirement evidence only" in source_evidence
-    assert "No empty `packages/dotmac-sales`" in dossier
+    assert "P11 is now met" in dossier
 
 
 def test_sales_boundary_is_explicit_and_product_neutral() -> None:
@@ -107,11 +105,14 @@ def test_all_sales_canaries_are_declared_before_implementation() -> None:
     assert "sensitivity test" in text
 
 
-def test_unmet_p11_forbids_a_placeholder_sales_package() -> None:
+def test_canonical_p11_authorizes_sales_implementation_only() -> None:
     p11 = (INVENTORIES / "p11-adoption-status.md").read_text(encoding="utf-8")
+    dossier = (INVENTORIES / "sales-extraction-dossier.md").read_text(encoding="utf-8")
 
-    assert "**P11 is not met, and no document in the fleet claims it is.**" in p11
-    assert not PACKAGE.exists(), (
-        "packages/dotmac-sales exists while the accepted checked-in P11 evidence "
-        "still says UNMET"
+    assert "**Status:** **P11 is MET.**" in p11
+    assert "package and lineage implementation may now begin" in _normalized(p11)
+    assert "P11 product production lineage | **MET**" in dossier
+    assert (
+        "does not advance any module-specific release, adoption, cutover or "
+        "retirement gate" in _normalized(dossier)
     )

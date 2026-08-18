@@ -8,12 +8,18 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | `0.1.0a1` through **`0.1.0a5`**; a2–a4 implement **SPI 1.1**, a5 implements **SPI 1.2** |
+| Released | `0.1.0a1` through **`0.1.0a8`**; a2–a4 implement **SPI 1.1**, a5–a8 implement **SPI 1.2** |
+| Declared | `0.1.0a8`, SPI 1.2 |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
 new result. That obligation is discharged by tests, not by this sentence — see
 "SPI 1.0 still works" and "Verification evidence" below.
+
+The `InboundEvent.disposition` field declared for a7 defaults to `deliver`.
+Existing connectors therefore keep their behaviour; connectors may explicitly
+mark transport-only evidence `record_only` so the engine persists and closes it
+without scheduling a product consequence.
 
 ## Two version axes, and only one of them is this package's version
 
@@ -43,6 +49,14 @@ after discovery ran, and a binding activated long after startup.
 Every plugin satisfies `ConnectorPlugin`: `manifest`, `historical_manifests`,
 `modes`, `validate_connection`. Identity and metadata only — nothing on the base
 moves data.
+
+Each capability's `config_schema` is Draft 2020-12 JSON Schema and is enforced
+by the module. Malformed schemas fail at declaration; configuration is checked
+before revision write, binding, and activation. An empty schema remains the
+explicit "no capability-specific constraint" declaration. A connector's
+validation `detail` is diagnostic material and may contain resolved values, so
+the module never persists or renders it; only a bounded machine `code` crosses
+that boundary.
 
 ### One protocol per mode
 

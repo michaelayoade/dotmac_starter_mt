@@ -192,9 +192,9 @@ def test_the_three_version_surfaces_agree(distribution: str) -> None:
 # ── Sensitivity proof ────────────────────────────────────────────────────────
 
 _ALIGNED = {
-    "distribution_version": "0.1.0a7",
-    "runtime_version": "0.1.0a7",
-    "manifest_version": "0.1.0a7",
+    "distribution_version": "0.1.0a8",
+    "runtime_version": "0.1.0a8",
+    "manifest_version": "0.1.0a8",
 }
 
 

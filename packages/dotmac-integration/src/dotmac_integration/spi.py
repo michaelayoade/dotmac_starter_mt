@@ -86,6 +86,9 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Final, Protocol, runtime_checkable
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
 __all__ = [
     "CURRENT_SPI_VERSION",
     "MODE_PROTOCOLS",
@@ -98,6 +101,7 @@ __all__ = [
     "DeliveryPlugin",
     "Diagnostic",
     "DispatchRequest",
+    "InboundDisposition",
     "InboundEvent",
     "IngressHandler",
     "IngressPlugin",
@@ -155,6 +159,7 @@ class ModeNotDeclaredError(RuntimeError):
 
 
 _KEY_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{1,118}$")
+_DIAGNOSTIC_CODE_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 #: `domain.noun.vN` — e.g. `ticket.observation.v1`. A capability id is a
 #: CONTRACT name, so the version is part of the identity rather than a
 #: separate column: `ticket.observation.v1` and `.v2` are different contracts a
@@ -285,6 +290,12 @@ class CapabilityDeclaration:
                 f"capability id {self.capability_id!r} must look like "
                 "`domain.noun.vN`, e.g. 'ticket.observation.v1'"
             )
+        try:
+            Draft202012Validator.check_schema(self.config_schema)
+        except SchemaError:
+            raise InvalidManifestError(
+                f"capability {self.capability_id!r} declares an invalid config schema"
+            ) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,11 +392,29 @@ class ConnectorMode(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class Diagnostic:
-    """One finding from validation. `ok=False` blocks enablement."""
+    """One finding from validation. `ok=False` blocks enablement.
+
+    Only ``code`` may cross a persistence or operator boundary. ``detail`` is
+    connector-owned diagnostic material, hidden from the default repr and
+    deliberately ignored by the lifecycle owner because it may contain values
+    that were materialized solely for this connection check.
+    """
 
     ok: bool
     code: str
-    detail: str = ""
+    detail: str = field(default="", repr=False)
+
+    def __post_init__(self) -> None:
+        if not _DIAGNOSTIC_CODE_RE.fullmatch(self.code):
+            # Do not echo a connector-controlled code in an exception: it may
+            # itself contain materialized configuration. Normalising keeps the
+            # existing constructor total while making the value safe wherever
+            # a caller persists or renders the machine code.
+            object.__setattr__(
+                self,
+                "code",
+                "invalid_diagnostic_code",
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,6 +436,19 @@ class DispatchRequest:
     idempotency_key: str
 
 
+class InboundDisposition(str, Enum):
+    """Whether a verified provider fact is eligible for product delivery.
+
+    Provider errors, malformed entries and unsupported wire types remain
+    durable transport evidence without becoming product-domain observations.
+    ``RECORD_ONLY`` lets the generic engine close those receipts after writing
+    them; no connector-specific worker or payload convention is involved.
+    """
+
+    DELIVER = "deliver"
+    RECORD_ONLY = "record_only"
+
+
 @dataclass(frozen=True, slots=True)
 class InboundEvent:
     """One normalized provider fact, ready to be recorded.
@@ -418,6 +460,7 @@ class InboundEvent:
     provider_event_id: str
     event_type: str
     payload: dict[str, object]
+    disposition: InboundDisposition = InboundDisposition.DELIVER
 
 
 @dataclass(frozen=True, slots=True, repr=False)

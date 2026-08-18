@@ -426,15 +426,18 @@ def test_the_release_entry_matches_the_allocation_it_publishes() -> None:
     assert "alembic" not in entry["wheel_contents"]["allowed_requires"]
 
 
-def test_the_dossier_claims_no_adoption_yet() -> None:
+def test_the_dossier_records_the_production_adopter() -> None:
     dossier = tomllib.loads(
         (REPO_ROOT / "packages/dotmac-approvals/EXTRACTION.toml").read_text(
             encoding="utf-8"
         )
     )
-    assert dossier["status"] == "audit-complete"
-    assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == [
-        "dotmac_vendor_control_plane",
-        "dotmac_erp",
-    ]
+    assert dossier["status"] == "adopted"
+    assert dossier["contract_consumers"] == ["dotmac_vendor_control_plane"]
+    assert dossier["candidate_consumers"] == ["dotmac_erp"]
+    evidence = set(dossier["adoption_evidence"])
+    assert {
+        "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
+        "dotmac_vendor_control_plane:production-deploy#32022599873",
+        "dotmac_vendor_control_plane:migration:v013_approvals_authority",
+    } <= evidence

@@ -1,14 +1,14 @@
 # Sales parity matrix and implementation canaries
 
-**Status:** Contract frozen; implementation gated by P11
+**Status:** Contract frozen; P11 met; red-first implementation authorized
 **Source:** Sub `f64946fc451ba94a1d4c8f0a61b7831367d5b598`
 **Parity/retirement:** CRM `57e112f0757edcee6b9ad625ee3e13ebff5c7d71`
 **Requirements-only:** ERP `2749ec5396cbbd7a1132b394e85855a1d133a7cd`
 **Owner decision:** [ADR-0033](../adr/0033-sales-authority-stops-at-an-accepted-quote.md)
 
 This is the TDD input for `dotmac-sales`. Each `C-SALES-*` canary is written
-red before its behavior. No package or placeholder test is created while P11
-is unmet.
+red before its behavior. The accepted checked-in P11 record now permits the
+package and lineage; it does not waive any canary or adoption gate below.
 
 ## Behavior parity
 

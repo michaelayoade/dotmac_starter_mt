@@ -195,5 +195,6 @@ and its `EXTRACTION.toml`, exactly as rule 24 requires.
 Port Sub behavior and parity tests first. Generalize only the tenant boundary,
 the typed product seams, the database immutability/RLS guarantees and the
 accepted-Quote owner output specified by ADR-0033. Treat CRM as a writer to
-retire and ERP as a requirements/negative-test source. Do not create the
-package until the accepted P11 evidence is checked in.
+retire and ERP as a requirements/negative-test source. The accepted P11
+evidence is now checked in. Create the package canary-first from this ruling;
+P11 does not waive parity, tenancy, release or adoption proof.

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,23 @@ _AUTHORIZATION_VOCABULARY = (
 # is the strongest form of this rule, and re-introducing one requires arguing
 # for it here.
 _ROLE_COLUMN_EXEMPTIONS: frozenset[str] = frozenset()
+
+
+def test_the_dossier_records_the_workspace_production_adopter() -> None:
+    dossier = tomllib.loads(
+        (REPO_ROOT / "packages/dotmac-application-directory/EXTRACTION.toml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert dossier["status"] == "adopted"
+    assert dossier["contract_consumers"] == ["dotmac_workspace"]
+    assert dossier["candidate_consumers"] == []
+    evidence = set(dossier["adoption_evidence"])
+    assert {
+        "dotmac_workspace:main@bfc121f33013a93c5eceb6d18a8c2417acc11e0d",
+        "dotmac_workspace:production-pilot@workspace.dotmac.io:2026-08-16",
+        "dotmac_workspace:dependency:dotmac-application-directory==0.1.0a3",
+    } <= evidence
 
 
 # ── The property the module exists to protect ────────────────────────────────

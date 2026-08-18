@@ -126,11 +126,15 @@ from dotmac_integration.destination_binding import (
     DestinationProfile,
     DestinationProfileMissing,
     LocalScope,
+    ProductPortDescriptorInvalid,
+    ProductPortDescriptorSnapshot,
     UntrustedDestination,
     corroborate,
     destination_client,
     establish_destination,
     install_destination_profiles,
+    product_port_descriptor_digest,
+    reconcile_product_port_descriptor,
     require_corroborated,
     require_profile,
     resolve_destination,
@@ -303,6 +307,20 @@ from dotmac_integration.selection import (
     SelectionError,
     resolve_binding,
 )
+from dotmac_integration.shadow import (
+    RETRYABLE_SHADOW_VERDICTS,
+    SHADOW_PLATFORM_TABLES,
+    SafeShadowVerdict,
+    ShadowComparisonEvidence,
+    ShadowEvidenceCorrupt,
+    ShadowObservation,
+    ShadowReport,
+    due_shadow_receipt_ids,
+    normalize_shadow_verdict,
+    record_shadow_observation,
+    shadow_report,
+    unreadable_shadow_verdict,
+)
 from dotmac_integration.spi import (
     CURRENT_SPI_VERSION,
     MODE_PROTOCOLS,
@@ -315,6 +333,7 @@ from dotmac_integration.spi import (
     DeliveryPlugin,
     Diagnostic,
     DispatchRequest,
+    InboundDisposition,
     InboundEvent,
     IngressHandler,
     IngressPlugin,
@@ -335,7 +354,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a5"
+__version__ = "0.1.0a8"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -352,6 +371,7 @@ __all__ = [
     "EndpointUnknown",
     "EventIdentityCollision",
     "HandlerUnavailable",
+    "InboundDisposition",
     "InboundEvent",
     "IngressCode",
     "IngressError",
@@ -400,6 +420,8 @@ __all__ = [
     "DestinationProfileMissing",
     "DuplicateCapabilityDeclaration",
     "LocalScope",
+    "ProductPortDescriptorInvalid",
+    "ProductPortDescriptorSnapshot",
     "OrphanCapabilityError",
     "UnknownCapabilityError",
     "UntrustedDestination",
@@ -409,6 +431,8 @@ __all__ = [
     "destination_client",
     "install_capability_registry",
     "install_destination_profiles",
+    "product_port_descriptor_digest",
+    "reconcile_product_port_descriptor",
     "require_corroborated",
     "require_declared_for_binding",
     "require_governable",
@@ -436,6 +460,20 @@ __all__ = [
     "idempotency_key_for",
     "request_fingerprint_for",
     "require_stable_fingerprint",
+    # ── Revisioned product-port shadow evidence ────────────────────────────
+    "RETRYABLE_SHADOW_VERDICTS",
+    "SHADOW_PLATFORM_TABLES",
+    "SafeShadowVerdict",
+    "ShadowComparisonEvidence",
+    "ShadowEvidenceCorrupt",
+    "ShadowObservation",
+    "ShadowReport",
+    "due_shadow_receipt_ids",
+    "normalize_shadow_verdict",
+    "record_shadow_observation",
+    "shadow_report",
+    "unreadable_shadow_verdict",
+    # ── Payload retention ──────────────────────────────────────────────────
     "REDACTION_MARKER",
     "RETENTION_DAYS_VAR",
     "RETENTION_LEGAL_POLICY_OWNER_VAR",

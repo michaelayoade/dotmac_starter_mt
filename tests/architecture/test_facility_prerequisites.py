@@ -323,12 +323,13 @@ def test_frozen_facilities_gain_no_new_callers(key: str) -> None:
     )
 
 
-def test_the_platform_audit_freeze_names_its_built_successor() -> None:
-    """The release boundary is explicit, not an indefinite exception."""
-    reason, callers = FROZEN["audit:write_platform_audit_event"]
-    assert "platform_audit_log.v1" in reason
-    assert "published" in reason
-    assert callers, "the freeze claims callers exist; it must name them"
+def test_the_platform_audit_successor_is_mapped_and_has_real_callers() -> None:
+    """The former freeze became an enforced prerequisite, not an omission."""
+    facility = next(
+        item for item in MAPPED if item.key == "audit:write_platform_audit_event"
+    )
+    assert facility.prerequisite == "platform_audit_log.v1"
+    assert _callers_of(facility.key), "a mapped facility with no caller is dead policy"
 
 
 # ── Sensitivity ─────────────────────────────────────────────────────────────

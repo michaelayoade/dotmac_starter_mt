@@ -1,6 +1,6 @@
 # Sales authority migration and retirement ledger
 
-**As of:** 2026-08-17
+**As of:** 2026-08-18
 **Authority target:** `dotmac-sales` through accepted Quote
 **Current authority:** Sub at
 `f64946fc451ba94a1d4c8f0a61b7831367d5b598`
@@ -21,8 +21,8 @@ advanced by a branch name, similar route, passing unit suite or old report.
 | S1 | Sales ownership contradiction reconciled | **MET** | ADR-0033 plus Sub `SALES_TO_SERVICE_LIFECYCLE_SOT.md` amendment: Sub current owner, module target ends at acceptance, Orders separate |
 | S2 | Missing CRM owner map repaired | **MET** | Sub `MARKETING_SALES_SOT.md`; campaign rows explicitly unverified, retention unresolved; architecture guard |
 | S3 | Product-first source/caller/parity audit | **MET** | `sales-sources.md`, `sales-caller-inventory.md`, `sales-parity-and-canaries.md`, `sales-extraction-dossier.md` |
-| S4 | P11 accepted production-lineage gate | **UNMET — EXTERNAL BLOCKER** | pinned `p11-adoption-status.md` says no product has run the kernel lineage in production. Only platform/adoption checked-in accepted evidence can advance this row |
-| S5 | Module package and red-first canaries | **NOT STARTED; BLOCKED BY S4** | package manifest/namespace/lineage/EXTRACTION plus C-SALES-01..11 red, then green |
+| S4 | P11 accepted production-lineage gate | **MET** | accepted `p11-adoption-status.md`; Approvals release record merged as `f10b19ae863b3867cbbb630eeaf4a33393efe7a8`, then P11 reconciliation merged as `ae508e1173b8643a4031936cc32cc411a6395f26` |
+| S5 | Module package and red-first canaries | **AUTHORIZED / NOT STARTED** | package manifest/namespace/lineage/EXTRACTION plus C-SALES-01..11 red, then green |
 | S6 | Released module installed in Sub | **NOT STARTED** | pinned release, composed lineage, migration gate and full prescribed validation green |
 | S7 | Backfill and report-only reconciliation | **NOT STARTED** | repeatable backfill; count/key/full-column typed digest equality; no source writes in report mode |
 | S8 | Shadow verification | **NOT STARTED** | named window; read/command-result/money/state/handoff parity; observed drift zero or dispositioned |
@@ -32,20 +32,20 @@ advanced by a branch name, similar route, passing unit suite or old report.
 | S12 | CRM route/traffic retirement | **NOT STARTED / PRODUCTION EVIDENCE REQUIRED** | route ledger parity/data/caller/cutover/fallback gates; healthy 30-day Loki+metrics zero traffic; route/source deletion |
 | S13 | Production data retirement | **NOT AUTHORIZED** | separate retention/legal/backup approval and explicit production operation |
 
-S4 is a stop condition, not completion. S5–S13 must remain unchanged until the
-gate and their own prerequisites are actually met.
+S4 removes only the fleet-wide implementation stop. S5–S13 advance solely on
+their own named evidence; P11 is not adoption or cutover proof.
 
 ## Sub writer retirement rows
 
 | Slice | Old writer(s) | New path | State |
 | --- | --- | --- | --- |
-| Pipelines/Stages | `sales.service::Pipelines/PipelineStages` | module commands | blocked by S4 |
-| Staff Leads | `sales.lead_authoring` plus legacy `sales.service::Leads` | module Lead commands with Party/actor adapters | blocked by S4 |
-| Captured origin | `sales.lifecycle`, `sales.capture`, `sales.lead_intake` | module origin command invoked by Sub intake adapter | blocked by S4 |
-| Quote authoring/lines/discount | `sales.quote_authoring` plus legacy `sales.service` CRUD | module Quote commands | blocked by S4 |
-| Quote send/status | `sales.quote_delivery` and service update paths | delivery adapter calls module lifecycle command | blocked by S4 |
-| Acceptance | `sales.quote_acceptance` | module acceptance + accepted-Quote handoff; Sub downstream consumer outside transaction | blocked by S4 |
-| Mirrors/out-of-domain writes | `quotes_mirror`, Inbox merge metadata writer | delete projection writer or call typed module command | blocked by S4; no Inbox behavior change authorized |
+| Pipelines/Stages | `sales.service::Pipelines/PipelineStages` | module commands | awaits S5–S9 |
+| Staff Leads | `sales.lead_authoring` plus legacy `sales.service::Leads` | module Lead commands with Party/actor adapters | awaits S5–S9 |
+| Captured origin | `sales.lifecycle`, `sales.capture`, `sales.lead_intake` | module origin command invoked by Sub intake adapter | awaits S5–S9 |
+| Quote authoring/lines/discount | `sales.quote_authoring` plus legacy `sales.service` CRUD | module Quote commands | awaits S5–S9 |
+| Quote send/status | `sales.quote_delivery` and service update paths | delivery adapter calls module lifecycle command | awaits S5–S9 |
+| Acceptance | `sales.quote_acceptance` | module acceptance + accepted-Quote handoff; Sub downstream consumer outside transaction | awaits S5–S9 |
+| Mirrors/out-of-domain writes | `quotes_mirror`, Inbox merge metadata writer | delete projection writer or call typed module command | awaits S5–S9; no Inbox behavior change authorized |
 
 No row advances to cut over until its source writer is gated against new calls
 and the complete caller inventory is verified. A dual-write phase is forbidden;

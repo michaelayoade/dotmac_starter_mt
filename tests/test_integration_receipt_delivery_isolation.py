@@ -129,6 +129,7 @@ def _receipt(  # type: ignore[no-untyped-def]
     *,
     state: str = "verified",
     attempt_count: int = 0,
+    provider_event_id: str | None = None,
 ) -> uuid.UUID:
     """One receipt in a state of the caller's choosing, ready to be claimed.
 
@@ -152,13 +153,29 @@ def _receipt(  # type: ignore[no-untyped-def]
             "id": receipt_id,
             "inst": installation_id,
             "binding": binding_id,
-            "event": f"evt_{uuid.uuid4().hex[:10]}",
+            "event": provider_event_id or f"evt_{uuid.uuid4().hex[:10]}",
             "digest": "a" * 64,
             "state": state,
             "attempt_count": attempt_count,
         },
     )
     return receipt_id
+
+
+def test_claim_returns_the_receipts_provider_identity(
+    migrated_scratch: tuple[str, str],  # noqa: F811
+    request: pytest.FixtureRequest,
+) -> None:
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.begin() as conn:
+        receipt_id = _receipt(
+            conn, request, provider_event_id="wamid.PROVIDER-IDENTITY-1"
+        )
+        claimed = conn.execute(CLAIM_SQL, {"id": receipt_id}).one()
+    engine.dispose()
+
+    assert claimed.provider_event_id == "wamid.PROVIDER-IDENTITY-1"
 
 
 # ── The ratchet ─────────────────────────────────────────────────────────────
