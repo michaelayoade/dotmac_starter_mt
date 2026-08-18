@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -11,9 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.capabilities import CAPABILITY_CODE_ATTR, active_capabilities
-from dotmac_kernel.db import get_db, get_platform_db
 from dotmac_kernel.entitlements import EntitlementDecision, is_entitled
-from dotmac_kernel.idempotency import MAX_KEY_LENGTH as MAX_IDEMPOTENCY_KEY_LENGTH
 from dotmac_kernel.models import (
     AuthSession,
     Party,
@@ -24,6 +22,28 @@ from dotmac_kernel.models import (
 )
 from dotmac_kernel.permissions import PERMISSION_CODE_ATTR, active_permissions
 from dotmac_kernel.security import decode_access_token, hash_token
+
+
+def get_db(request: Request) -> Generator[Session, None, None]:
+    """Thin FastAPI adapter over the database transaction owner.
+
+    The function-local import is load-bearing. Route manifests are imported to
+    discover and register modules before an assembly has resolved deployment
+    configuration; importing ``dotmac_kernel.db`` here at module scope would
+    construct an engine and make package discovery require ``DATABASE_URL``.
+    The request still enters the one owner unchanged when FastAPI resolves this
+    dependency.
+    """
+    from dotmac_kernel.db import get_db as transaction_owner
+
+    yield from transaction_owner(request)
+
+
+def get_platform_db() -> Generator[Session, None, None]:
+    """Thin FastAPI adapter over the platform database transaction owner."""
+    from dotmac_kernel.db import get_platform_db as transaction_owner
+
+    yield from transaction_owner()
 
 
 def require_tenant(request: Request) -> Tenant:
@@ -359,6 +379,11 @@ def idempotency_key(
     `dotmac_kernel.idempotency.execute_once`. Routes stay thin (ADR-0010): the
     dependency reads a header, it does not decide anything.
     """
+    # Local for the same reason as the DB adapters above: the idempotency owner
+    # imports `conflict_savepoint`, which imports the eager engine. Reading a
+    # header must not make every package importing route guards require a DSN.
+    from dotmac_kernel.idempotency import MAX_KEY_LENGTH
+
     if idempotency_key is None:
         return None
     trimmed = idempotency_key.strip()
@@ -367,13 +392,10 @@ def idempotency_key(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Idempotency-Key must not be blank",
         )
-    if len(trimmed) > MAX_IDEMPOTENCY_KEY_LENGTH:
+    if len(trimmed) > MAX_KEY_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Idempotency-Key must be at most "
-                f"{MAX_IDEMPOTENCY_KEY_LENGTH} characters"
-            ),
+            detail=("Idempotency-Key must be at most " f"{MAX_KEY_LENGTH} characters"),
         )
     return trimmed
 
