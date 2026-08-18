@@ -1032,12 +1032,19 @@ def _expected_projections(
         ) > _effective_key(metric_previous[1]):
             metric_candidates[metric_key] = (metric_fact, metric_envelope)
     metrics: dict[tuple[str, ...], dict[str, object]] = {}
-    for metric_key, (metric_fact, metric_envelope) in metric_candidates.items():
-        metrics[metric_key] = {
-            "observation_id": metric_envelope.id,
-            "period_id": metric_fact.period_id,
-            "source_observed_at": _aware(metric_envelope.source_observed_at),
-            "projection_fingerprint": metric_envelope.content_fingerprint,
+    for projected_metric_key, (
+        projected_metric_fact,
+        projected_metric_envelope,
+    ) in metric_candidates.items():
+        metrics[projected_metric_key] = {
+            "observation_id": projected_metric_envelope.id,
+            "period_id": projected_metric_fact.period_id,
+            "source_observed_at": _aware(
+                projected_metric_envelope.source_observed_at
+            ),
+            "projection_fingerprint": (
+                projected_metric_envelope.content_fingerprint
+            ),
         }
     return {"entities": entities, "hierarchy": hierarchy, "metrics": metrics}
 
