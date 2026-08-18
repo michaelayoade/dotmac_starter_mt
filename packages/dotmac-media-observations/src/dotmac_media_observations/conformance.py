@@ -72,7 +72,8 @@ def run_normalized_conformance(
     systems = {source.source_system for source in sources}
     if len(tenant_ids) != 1 or len(installations) != 1 or len(systems) != 1:
         raise InvalidObservation(
-            "one conformance case must target one tenant, installation and source system"
+            "one conformance case must target one tenant, installation and "
+            "source system"
         )
     for declaration in first.node_declarations:
         if declaration.tenant_id not in tenant_ids:

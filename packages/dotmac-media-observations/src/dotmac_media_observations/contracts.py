@@ -13,11 +13,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
-from typing import TypeAlias
 from uuid import UUID
 
-JsonScalar: TypeAlias = str | int | bool | Decimal | None
-JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+JsonScalar = str | int | bool | Decimal | None
+JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
 _CODE = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
@@ -284,9 +283,7 @@ class ExactMoney:
         object.__setattr__(self, "minor_units", minor_units)
 
 
-MetricValue: TypeAlias = (
-    CountValue | DecimalValue | ExactMoney | DurationValue | RatioValue
-)
+MetricValue = CountValue | DecimalValue | ExactMoney | DurationValue | RatioValue
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,9 +351,7 @@ class MetricObservation:
             )
 
 
-ObservationCommand: TypeAlias = (
-    EntityObservation | HierarchyObservation | MetricObservation
-)
+ObservationCommand = EntityObservation | HierarchyObservation | MetricObservation
 
 
 @dataclass(frozen=True, slots=True)

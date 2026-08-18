@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, TypeAlias, cast
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
@@ -45,9 +45,9 @@ from dotmac_media_observations.contracts import (
     PeriodMetric,
     ProviderRestatement,
     RatioValue,
+    ReconciliationResult,
     RecordOutcome,
     RecordStatus,
-    ReconciliationResult,
     UnsupportedObservation,
 )
 from dotmac_media_observations.models import (
@@ -65,8 +65,8 @@ from dotmac_media_observations.models import (
     ReconciliationEvidence,
 )
 
-_EntityKey: TypeAlias = tuple[str, str, str, str]
-_HierarchyKey: TypeAlias = tuple[str, str, str, str]
+_EntityKey = tuple[str, str, str, str]
+_HierarchyKey = tuple[str, str, str, str]
 
 
 def declare_node_type(db: Session, command: NodeTypeDeclaration) -> NodeDefinition:
@@ -329,7 +329,8 @@ def record_restatement(db: Session, command: ProviderRestatement) -> RecordOutco
     expected_kind = _kind_of(replacement)
     if original.kind != expected_kind.value:
         raise InvalidObservation(
-            f"cannot restate {original.kind} evidence with {expected_kind.value} evidence"
+            f"cannot restate {original.kind} evidence with "
+            f"{expected_kind.value} evidence"
         )
     if (
         original.installation_ref != source.installation_ref
@@ -758,7 +759,7 @@ def _attach_receipt(
         with db.begin_nested():
             db.add(candidate)
             db.flush()
-    except IntegrityError:
+    except IntegrityError as exc:
         receipt = db.scalar(
             select(ObservationReceipt).where(
                 ObservationReceipt.tenant_id == source.tenant_id,
@@ -777,7 +778,7 @@ def _attach_receipt(
                     ),
                     source_observation_id=source.source_observation_id,
                 )
-            )
+            ) from exc
 
 
 def _source_identity(
@@ -1246,7 +1247,8 @@ def _require_same_restatement_subject(
         )
     if not same:
         raise InvalidObservation(
-            "a restatement must correct the same entity, hierarchy child or metric period"
+            "a restatement must correct the same entity, hierarchy child or "
+            "metric period"
         )
 
 
@@ -1375,7 +1377,7 @@ def _canonical(value: object) -> object:
         return format(value, "f")
     if isinstance(value, dict):
         return {str(key): _canonical(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_canonical(item) for item in value]
     return value
 

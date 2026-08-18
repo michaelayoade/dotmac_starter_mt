@@ -368,7 +368,8 @@ def test_concurrent_duplicate_ingest_returns_one_fact_and_two_receipts(
             observation_count = connection.execute(
                 text(
                     "SELECT count(*) FROM mod_mediaobs.observations "
-                    "WHERE tenant_id=:tenant AND source_observation_id='concurrent-identity'"
+                    "WHERE tenant_id=:tenant "
+                    "AND source_observation_id='concurrent-identity'"
                 ),
                 {"tenant": tenant_id},
             ).scalar_one()

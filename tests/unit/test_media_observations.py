@@ -53,8 +53,8 @@ from dotmac_media_observations import (
     run_normalized_conformance,
 )
 from dotmac_media_observations.models import (
-    APPEND_ONLY_TABLES,
     ALL_TABLES,
+    APPEND_ONLY_TABLES,
     CurrentEntity,
     CurrentHierarchy,
     CurrentMetric,

@@ -360,7 +360,8 @@ class MetricFact(Base):
             "AND money_amount IS NULL AND money_minor_units IS NULL "
             "AND money_currency IS NULL AND money_minor_unit IS NULL "
             "AND duration_value IS NULL AND ratio_value IS NULL) OR "
-            "(value_type='decimal' AND count_value IS NULL AND decimal_value IS NOT NULL "
+            "(value_type='decimal' AND count_value IS NULL "
+            "AND decimal_value IS NOT NULL "
             "AND money_amount IS NULL AND money_minor_units IS NULL "
             "AND money_currency IS NULL AND money_minor_unit IS NULL "
             "AND duration_value IS NULL AND ratio_value IS NULL) OR "
@@ -392,7 +393,11 @@ class MetricFact(Base):
             name="ck_media_metric_facts_currency",
         ),
         CheckConstraint(
-            "(value_type!='money') OR (money_amount * CASE money_minor_unit WHEN 0 THEN 1 WHEN 1 THEN 10 WHEN 2 THEN 100 WHEN 3 THEN 1000 WHEN 4 THEN 10000 WHEN 5 THEN 100000 WHEN 6 THEN 1000000 WHEN 7 THEN 10000000 WHEN 8 THEN 100000000 WHEN 9 THEN 1000000000 END = money_minor_units)",
+            "(value_type!='money') OR (money_amount * CASE money_minor_unit "
+            "WHEN 0 THEN 1 WHEN 1 THEN 10 WHEN 2 THEN 100 WHEN 3 THEN 1000 "
+            "WHEN 4 THEN 10000 WHEN 5 THEN 100000 WHEN 6 THEN 1000000 "
+            "WHEN 7 THEN 10000000 WHEN 8 THEN 100000000 "
+            "WHEN 9 THEN 1000000000 END = money_minor_units)",
             name="ck_media_metric_facts_exact_money",
         ),
         Index("ix_media_metric_facts_period", "tenant_id", "period_id"),

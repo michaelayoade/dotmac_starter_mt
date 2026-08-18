@@ -21,8 +21,8 @@ from dotmac_kernel.namespaces import (
 )
 from dotmac_media_observations.manifest import module
 from dotmac_media_observations.models import (
-    APPEND_ONLY_TABLES,
     ALL_TABLES,
+    APPEND_ONLY_TABLES,
     TENANT_TABLES,
 )
 from sqlalchemy import ForeignKeyConstraint, UniqueConstraint
@@ -98,7 +98,7 @@ def test_append_only_tables_have_trigger_and_read_append_grants_only() -> None:
                 f"GRANT SELECT, INSERT ON mod_mediaobs.{table.name} TO {role};" in sql
             )
         assert (
-            f"GRANT SELECT, INSERT, UPDATE"
+            "GRANT SELECT, INSERT, UPDATE"
             not in sql.split(f"mod_mediaobs.{table.name}", 1)[0][-80:]
         )
 
