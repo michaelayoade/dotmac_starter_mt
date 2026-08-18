@@ -6,7 +6,39 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a69 — UNRELEASED
+## 0.1.0a70 — UNRELEASED
+
+Removes the tenant-audit actor compatibility derivation after every known
+production caller migrated to the canonical identity pair.
+
+### Breaking
+
+- `write_audit_event` now requires `actor_type` explicitly. For every
+  non-system actor, `actor_id` must also be explicit. `actor_party_id` remains
+  optional accountability enrichment but no longer manufactures either
+  canonical field.
+- `resolve_audit_actor` now raises `MissingAuditActorError` for both former
+  fallback shapes: Party-only, and `actor_type="user"` plus Party without an
+  `actor_id`. This prevents a Party that owns an API key from being silently
+  recorded as the acting user.
+
+### Changed
+
+- Migrates all nine remaining Starter assembly callers in Licensing, RBAC and
+  Settings. Template Studio's nine callers were migrated earlier, and
+  `dotmac_workspace` PR #10 migrated the last two external callers before this
+  public contract changed.
+- Replaces the Template-Studio-only caller guard with a 20-call production
+  census across the assembly and every shipped package. The guard requires a
+  literal actor kind and the applicable explicit identifier, with negative
+  controls for prose, Party-only calls and kind-only user calls.
+- Corrects the a42 compatibility rationale: Template Studio had never been
+  released. That false premise was removed first; Workspace then exposed two
+  real independently deployed consumers, and Starter's broader sweep exposed
+  nine local callers the narrower guard had missed. No compatibility claim is
+  now inferred from one package's caller list.
+
+## 0.1.0a69 — 2026-08-18
 
 Makes route-guard imports safe during package discovery without moving
 transaction authority out of `dotmac_kernel.db`.
