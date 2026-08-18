@@ -55,6 +55,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a68` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
+| [`dotmac-sales`](../packages/dotmac-sales/README.md) | optional module | [`audit-complete`](../packages/dotmac-sales/EXTRACTION.toml) | [tenant · `mod_sales`](../packages/dotmac-sales/src/dotmac_sales/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a68` | — | `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`reuse-proven`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
@@ -152,6 +153,14 @@ and the next gate.
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-release-catalog/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** `dotmac_vendor_control_plane`.
 - **Candidate consumers:** —.
+
+### [`dotmac-sales`](../packages/dotmac-sales/README.md)
+
+- **Owner:** Commercial intent from Lead qualification through an immutable accepted Quote and its versioned owner-output handoff
+- **Contract:** Own tenant-scoped pipelines, stages, Leads, append-only Lead-origin evidence, Quote authoring, exact money, discount revisions, Quote lifecycle and exactly-once acceptance. Acceptance freezes one canonical snapshot and publishes sales.accepted-quote.v1. Stop there: never create, import or identify a subscriber, SalesOrder, project, work order, invoice, service or campaign; never own delivery transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-sales/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_crm`, `dotmac_sub`.
 
 ### [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md)
 

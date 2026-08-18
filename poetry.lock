@@ -712,6 +712,24 @@ type = "directory"
 url = "packages/dotmac-release-catalog"
 
 [[package]]
+name = "dotmac-sales"
+version = "0.1.0a1"
+description = "DotMac leads, pipelines and immutable accepted-Quote handoff"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a68"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-sales"
+
+[[package]]
 name = "dotmac-template-studio"
 version = "0.2.0a3"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
@@ -2926,4 +2944,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d0019ca0b487fac0194b87d8d2224207442f79853b5250a6e0ae3d47eafbe285"
+content-hash = "00ce75b7bb603b0c8ca1763dfea9ac407c90d1e723fdee03a643a31a310ffa84"
