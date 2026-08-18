@@ -27,6 +27,7 @@ from dotmac_imports.contracts import (
     normalize_column,
 )
 from dotmac_imports.manifest import module
+from dotmac_imports.migrations import versions_dir
 from dotmac_imports.models import ImportRun, ImportRunRow
 from dotmac_imports.service import (
     DEFAULT_CHUNK_SIZE,
@@ -92,4 +93,5 @@ __all__ = [
     "preview",
     "promote",
     "validate_next_chunk",
+    "versions_dir",
 ]
