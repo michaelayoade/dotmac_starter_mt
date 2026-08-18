@@ -43,7 +43,9 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-KERNEL_VERSIONS = REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
+KERNEL_VERSIONS = (
+    REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
+)
 CAMPAIGNS_VERSIONS = (
     REPO_ROOT / "packages/dotmac-campaigns/src/dotmac_campaigns/migrations/versions"
 )
@@ -319,9 +321,7 @@ def test_changed_replay_conflicts_on_postgres(
             create_campaign(
                 db,
                 tenant_id=tenant,
-                command=CreateCampaign(
-                    **{**_command().as_dict(), "name": "different"}
-                ),
+                command=CreateCampaign(**{**_command().as_dict(), "name": "different"}),
                 idempotency_key="same-key",
                 idempotency_expires_at=NOW + timedelta(days=7),
                 recorded_at=NOW,
@@ -369,9 +369,10 @@ def test_suppression_race_prevents_an_already_scheduled_intent(
         )
         db.commit()
         assert result.status == "suppressed"
-        assert db.execute(
-            text("SELECT count(*) FROM public.outbox_events")
-        ).scalar_one() == 0
+        assert (
+            db.execute(text("SELECT count(*) FROM public.outbox_events")).scalar_one()
+            == 0
+        )
 
 
 def test_a_forged_delayed_step_cannot_skip_its_unresolved_predecessor(
@@ -471,12 +472,15 @@ def test_missing_outbox_publication_is_reported_and_repaired_once(
             repaired_at=NOW + timedelta(minutes=1),
         )
         assert repaired == 1
-        assert repair_missing_publications(
-            db,
-            tenant_id=tenant,
-            campaign_id=campaign_id,
-            repaired_at=NOW + timedelta(minutes=2),
-        ) == 0
+        assert (
+            repair_missing_publications(
+                db,
+                tenant_id=tenant,
+                campaign_id=campaign_id,
+                repaired_at=NOW + timedelta(minutes=2),
+            )
+            == 0
+        )
         db.commit()
         intent = db.get(CampaignDeliveryIntent, accepted.delivery_intent_id)
         assert intent is not None

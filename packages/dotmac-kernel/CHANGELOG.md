@@ -11,6 +11,16 @@ here.
 Removes the tenant-audit actor compatibility derivation after every known
 production caller migrated to the canonical identity pair.
 
+Also allocates the independent tenant-only campaigns lineage accepted by
+ADR-0032. This is a physical namespace allocation, not campaign behavior in the
+kernel.
+
+### Added
+
+- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
+  branch label `campaigns`. The module owns provider-neutral campaign
+  progression and consumes the kernel's consent, idempotency and outbox owners.
+
 ### Breaking
 
 - `write_audit_event` now requires `actor_type` explicitly. For every

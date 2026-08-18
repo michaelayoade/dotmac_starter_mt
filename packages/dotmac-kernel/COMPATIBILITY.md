@@ -301,6 +301,10 @@ retired prefix is never reused.
 | `application_directory` | `mod_appdir` | `ad` | `application_directory` |
 | `files` | `mod_files` | `fi` | `files` |
 | `imports` | `mod_imports` | `im` | `imports` |
+| `integration` | `mod_intg` | `ig` | `integration` |
+| `approvals` | `mod_approvals` | `ap` | `approvals` |
+| `numbering` | `mod_numbering` | `nu` | `numbering` |
+| `campaigns` | `mod_campaigns` | `ca` | `campaigns` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an

@@ -585,6 +585,18 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-campaigns` — the tenant-only outbound campaign progression owner
+# accepted by ADR-0032. `campaigns` is intentionally explicit in live catalog
+# dumps; the compact `ca` prefix leaves the lineage's revision ids readable.
+# No platform plane was allocated by inference: the audit found no named
+# control-plane consumer, and the module manifest declares tenant tables only.
+CAMPAIGNS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="campaigns",
+    prefix="ca",
+    branch_label="campaigns",
+    db_schema=module_schema("campaigns"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -597,6 +609,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    CAMPAIGNS_MIGRATION_OWNER,
 )
 
 
@@ -930,6 +943,7 @@ __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
+    "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",

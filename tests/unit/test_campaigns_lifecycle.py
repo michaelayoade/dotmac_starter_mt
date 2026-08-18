@@ -29,8 +29,8 @@ from dotmac_campaigns import (
     cancel_campaign,
     create_campaign,
     ingest_audience,
-    record_observation,
     rebuild_counters,
+    record_observation,
     report_drift,
     schedule_campaign,
 )
@@ -226,9 +226,12 @@ def test_later_suppression_wins_before_delayed_delivery(db: Session) -> None:
 
     assert outcome.status == "suppressed"
     assert db.scalars(select(OutboxEvent)).all() == []
-    assert campaign_snapshot(
-        db, tenant_id=TENANT_ID, campaign_id=campaign.id
-    ).counters.suppressed == 1
+    assert (
+        campaign_snapshot(
+            db, tenant_id=TENANT_ID, campaign_id=campaign.id
+        ).counters.suppressed
+        == 1
+    )
 
 
 def test_snapshot_and_steps_cannot_change_once_sending_begins(db: Session) -> None:
@@ -461,7 +464,9 @@ def test_cancellation_stops_new_intents_without_erasing_history(db: Session) -> 
         accepted_at=NOW,
     )
     assert outcome.status == "cancelled"
-    assert db.scalar(select(CampaignRecipient).where(CampaignRecipient.campaign_id == campaign.id))
+    assert db.scalar(
+        select(CampaignRecipient).where(CampaignRecipient.campaign_id == campaign.id)
+    )
     assert db.scalars(select(OutboxEvent)).all() == []
 
 
@@ -489,6 +494,4 @@ def test_counter_drift_is_reported_then_rebuilt_from_recipient_facts(
     assert drift.has_drift
     assert drift.fields["total_recipients"] == (99, 1)
     rebuild_counters(db, tenant_id=TENANT_ID, campaign_id=campaign.id, rebuilt_at=NOW)
-    assert not report_drift(
-        db, tenant_id=TENANT_ID, campaign_id=campaign.id
-    ).has_drift
+    assert not report_drift(db, tenant_id=TENANT_ID, campaign_id=campaign.id).has_drift

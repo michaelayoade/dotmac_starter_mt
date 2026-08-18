@@ -189,6 +189,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # first enabling owner of the Cloud commerce programme, and dual-plane for
     # the same reason approvals is: a tenant allocates its own document series
     # and the control plane allocates vendor-side series no tenant may read.
+    # `campaigns` (ADR-0032) is the eleventh and tenant-only because the source
+    # audit found no real named platform consumer.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -201,6 +203,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "imports",
         "integration",
         "approvals",
+        "campaigns",
     }
 
 

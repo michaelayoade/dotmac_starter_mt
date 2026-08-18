@@ -559,6 +559,24 @@ type = "directory"
 url = "packages/dotmac-auth-oidc"
 
 [[package]]
+name = "dotmac-campaigns"
+version = "0.1.0a1"
+description = "Provider-neutral outbound campaign lifecycle, immutable audiences and ordered recipient progression"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a70"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-campaigns"
+
+[[package]]
 name = "dotmac-connector-whatsapp"
 version = "0.1.0a1"
 description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
@@ -2926,4 +2944,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d0019ca0b487fac0194b87d8d2224207442f79853b5250a6e0ae3d47eafbe285"
+content-hash = "3ece4a692fcf94e83c19b56465fbde8f431b8367db75ef3aac90ce4c10ced06c"

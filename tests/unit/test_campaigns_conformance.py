@@ -44,9 +44,7 @@ def test_rendering_returns_an_exact_revision_and_fingerprint() -> None:
 
 def test_sender_resolution_returns_no_provider_credentials() -> None:
     sender = FakeSenderResolver().resolve(
-        SenderRequest(
-            tenant_id=uuid.uuid4(), channel="email", sender_key="growth"
-        )
+        SenderRequest(tenant_id=uuid.uuid4(), channel="email", sender_key="growth")
     )
     assert sender.sender_key == "growth"
     assert sender.address
@@ -83,14 +81,18 @@ def test_timer_generations_supersede_and_cancel_stale_work() -> None:
     )
     assert first.generation == 1
     assert second.generation == 2
-    assert timers.accept(None, tenant_id=tenant, trigger=first.trigger()).current is False
+    assert (
+        timers.accept(None, tenant_id=tenant, trigger=first.trigger()).current is False
+    )
     assert timers.cancel(
         None,
         tenant_id=tenant,
         identity=identity,
         recorded_at=datetime(2026, 8, 17, tzinfo=UTC) + timedelta(seconds=2),
     ).cancelled
-    assert timers.accept(None, tenant_id=tenant, trigger=second.trigger()).current is False
+    assert (
+        timers.accept(None, tenant_id=tenant, trigger=second.trigger()).current is False
+    )
 
 
 def test_conformance_refuses_a_renderer_without_stable_fingerprint() -> None:
