@@ -49,10 +49,11 @@ PROJECTS_SRC ?= packages/dotmac-projects/src/dotmac_projects
 WORK_ORDERS_SRC ?= packages/dotmac-work-orders/src/dotmac_work_orders
 POSITIONING_SRC ?= packages/dotmac-positioning/src/dotmac_positioning
 WEB_ANALYTICS_SRC ?= packages/dotmac-web-analytics/src/dotmac_web_analytics
+ANALYTICS_SRC ?= packages/dotmac-analytics/src/dotmac_analytics
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(DURABLE_TIMERS_SRC) $(ORDERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(BILLING_SRC) $(COLLECTIONS_SRC) $(SUBSCRIPTIONS_SRC) $(SALES_SRC) $(INBOX_SRC) $(SURVEYS_SRC) $(PROJECTS_SRC) $(WORK_ORDERS_SRC) $(POSITIONING_SRC) $(WEB_ANALYTICS_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(DURABLE_TIMERS_SRC) $(ORDERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(BILLING_SRC) $(COLLECTIONS_SRC) $(SUBSCRIPTIONS_SRC) $(SALES_SRC) $(INBOX_SRC) $(SURVEYS_SRC) $(PROJECTS_SRC) $(WORK_ORDERS_SRC) $(POSITIONING_SRC) $(WEB_ANALYTICS_SRC) $(ANALYTICS_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(DURABLE_TIMERS_SRC) $(ORDERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(BILLING_SRC) $(COLLECTIONS_SRC) $(SUBSCRIPTIONS_SRC) $(SALES_SRC) $(INBOX_SRC) $(SURVEYS_SRC) $(PROJECTS_SRC) $(WORK_ORDERS_SRC) $(POSITIONING_SRC) $(WEB_ANALYTICS_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(DURABLE_TIMERS_SRC) $(ORDERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(BILLING_SRC) $(COLLECTIONS_SRC) $(SUBSCRIPTIONS_SRC) $(SALES_SRC) $(INBOX_SRC) $(SURVEYS_SRC) $(PROJECTS_SRC) $(WORK_ORDERS_SRC) $(POSITIONING_SRC) $(WEB_ANALYTICS_SRC) $(ANALYTICS_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py

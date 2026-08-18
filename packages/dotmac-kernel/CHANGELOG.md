@@ -21,10 +21,10 @@ no domain behavior moves into Kernel and none is composed into Starter.
   owners and do not share its lineage.
 - Permanent namespace identities for Billing (`bi`), Durable Timers (`dt`),
   Collections (`cl`), Orders (`or`), Sales (`sa`), Inbox (`ib`), Surveys
-  (`sv`), Projects (`pj`), Work Orders (`wo`), Positioning (`po`) and Web
-  Analytics (`wa`). Each package owns an independent lineage; Positioning uses
-  `mod_pos`, Work Orders uses `mod_workorders`, and Web Analytics uses
-  `mod_webanalytics` as their declared short-code schemas.
+  (`sv`), Projects (`pj`), Work Orders (`wo`), Positioning (`po`), Web
+  Analytics (`wa`) and aggregate Analytics (`ay`). Each package owns an
+  independent lineage with its declared short-code schema, including
+  `mod_pos`, `mod_workorders`, `mod_webanalytics` and `mod_analytics`.
 - `tenant_audit_log.v1`, the live-catalog contract for the existing
   tenant-scoped `public.audit_events` writer, including canonical actor shape,
   tenant FK/index, FORCE RLS and append-only online privileges.

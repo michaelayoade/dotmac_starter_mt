@@ -703,6 +703,16 @@ WEB_ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("webanalytics"),
 )
 
+# `dotmac-analytics` owns tenant-scoped declared aggregate evidence and its
+# rebuildable metric projection. Domain calculations remain with their source
+# owners; no named control-plane adopter exists (ADR-0040).
+ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="analytics",
+    prefix="ay",
+    branch_label="analytics",
+    db_schema=module_schema("analytics"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -727,6 +737,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     WORK_ORDERS_MIGRATION_OWNER,
     POSITIONING_MIGRATION_OWNER,
     WEB_ANALYTICS_MIGRATION_OWNER,
+    ANALYTICS_MIGRATION_OWNER,
 )
 
 
@@ -1057,6 +1068,7 @@ class NamespaceRegistry:
 
 
 __all__ = [
+    "ANALYTICS_MIGRATION_OWNER",
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "BILLING_MIGRATION_OWNER",

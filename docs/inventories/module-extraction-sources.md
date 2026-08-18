@@ -73,6 +73,7 @@ review branch is not composition, release or authority cutover.
 | `dotmac-projects` | [`projects-sources.md`](projects-sources.md), ADR-0037; work structure/scheduling only | Sub one-writer cutover, then ERP |
 | `dotmac-work-orders` | [`work-orders-sources.md`](work-orders-sources.md), ADR-0038; physical execution only | Sub first; Vendor InstallationProject stays excluded |
 | `dotmac-web-analytics` | [`web-analytics-sources.md`](web-analytics-sources.md), ADR-0039; first-party observations/projections only | Backoffice first, Sub second; caller owns privacy/retention policy |
+| `dotmac-analytics` | [`analytics-sources.md`](analytics-sources.md), ADR-0040; declared aggregate evidence and rebuildable projections only | Prove on Observe, then shadow ERP metric families before retiring its snapshot/store paths; Backoffice second |
 
 ## Template Studio source audit
 

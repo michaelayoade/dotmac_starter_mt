@@ -140,6 +140,7 @@ from dotmac_kernel.money import (
     currency,
 )
 from dotmac_kernel.namespaces import (
+    ANALYTICS_MIGRATION_OWNER,
     BILLING_MIGRATION_OWNER,
     COLLECTIONS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
@@ -374,6 +375,7 @@ __all__ = [
     "ModuleDependencyCycleError",
     "UnknownModuleError",
     # database namespaces + migration lineage identity (ADR-0006 D1)
+    "ANALYTICS_MIGRATION_OWNER",
     "HOST_SCHEMA",
     "DURABLE_TIMERS_MIGRATION_OWNER",
     "MAX_REVISION_ID_LENGTH",
