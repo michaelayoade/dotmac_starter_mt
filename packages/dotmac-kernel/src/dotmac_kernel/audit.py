@@ -138,28 +138,21 @@ def resolve_audit_actor(
 ) -> tuple[str, str | None]:
     """Return the `(actor_type, actor_id)` to record, or raise.
 
-    Carries one temporary compatibility rule. `dotmac_workspace` still has two
-    live callers that pass only `actor_party_id`; removing the fallback in this
-    repository would break that independently released consumer. When a party
-    is supplied with no kind, this derives `user` and uses the party id as the
-    principal identifier, which is exactly what those call sites mean.
-
-    The rule retires only after both Workspace callers pass the explicit pair.
-    Starter's nine Template Studio callers already do so and may not regress.
-    What is NOT temporary: supplying neither raises. Defaulting a missing actor
-    to `system` would be indistinguishable, forever, from a genuine system
-    action.
+    The canonical pair must be explicit. `actor_party_id` is optional
+    accountability enrichment and never substitutes for either member: a
+    Party can own an API key, while the actor that performed the operation is
+    still that key. Deriving `user` from the mere presence of a Party destroys
+    that distinction and records a caller defect as forensic fact.
     """
     resolved_id = actor_id if actor_id is not None and actor_id.strip() else None
 
     if actor_type is None:
-        if actor_party_id is None:
-            raise MissingAuditActorError(
-                "an audit event needs an actor: pass actor_type (one of "
-                f"{sorted(ACTOR_TYPES)}) or actor_party_id. Refusing to default "
-                "to 'system' — that would record a caller defect as a real actor."
-            )
-        return "user", resolved_id or str(actor_party_id)
+        raise MissingAuditActorError(
+            "an audit event needs an explicit actor_type (one of "
+            f"{sorted(ACTOR_TYPES)}). actor_party_id is accountability "
+            "enrichment, not an actor type. Refusing to default to 'system' or "
+            "derive 'user' — either would record a caller defect as fact."
+        )
 
     if actor_type not in ACTOR_TYPES:
         raise UnknownAuditActorTypeError(
@@ -169,12 +162,10 @@ def resolve_audit_actor(
     if actor_type == "system":
         return actor_type, resolved_id
 
-    if actor_type == "user" and resolved_id is None and actor_party_id is not None:
-        resolved_id = str(actor_party_id)
-
     if resolved_id is None:
         raise MissingAuditActorError(
-            f"audit actor type {actor_type!r} needs a non-empty actor_id"
+            f"audit actor type {actor_type!r} needs an explicit non-empty actor_id; "
+            "actor_party_id does not substitute for the canonical identifier"
         )
 
     return actor_type, resolved_id
@@ -185,7 +176,7 @@ def write_audit_event(
     *,
     tenant_id: UUID,
     actor_party_id: UUID | None = None,
-    actor_type: str | None = None,
+    actor_type: str,
     actor_id: str | None = None,
     actor_label: str | None = None,
     action: str,
@@ -207,11 +198,11 @@ def write_audit_event(
     state. See this module's docstring for why the trail's vocabulary is a
     declaration rather than free text.
 
-    The actor is resolved by `resolve_audit_actor`: pass `actor_type` (with
-    `actor_id` where the kind has one), or pass `actor_party_id` alone and get
-    the temporary `user` derivation. Passing neither raises
-    `MissingAuditActorError` — validated with `action`, before anything is
-    added to the session, for the same reason.
+    The actor is resolved by `resolve_audit_actor`: pass `actor_type` and, for
+    every non-system actor, an explicit `actor_id`. `actor_party_id` is optional
+    accountability enrichment and never supplies the canonical pair. An
+    incomplete pair raises `MissingAuditActorError` — validated with `action`,
+    before anything is added to the session, for the same reason.
 
     `occurred_at` is the DOMAIN time and is optional; leave it unset for an
     ordinary current event and the database supplies `now()`. Supply it for a

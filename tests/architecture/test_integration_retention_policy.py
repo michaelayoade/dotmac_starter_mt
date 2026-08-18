@@ -106,7 +106,11 @@ def _declared_receipt_states() -> set[str]:
 
 def test_the_policy_demands_both_decisions_from_its_caller() -> None:
     required = _fields_without_a_default(RetentionPolicy)
-    assert {"payload_retention_days", "legal_policy_owner"} <= required, (
+    assert {
+        "payload_retention_days",
+        "replay_evidence_retention_days",
+        "legal_policy_owner",
+    } <= required, (
         "a default retention period or legal-policy owner appeared on "
         "RetentionPolicy. A default here IS the deployment's data-retention "
         "policy, decided by whoever typed the number rather than by whoever is "
@@ -143,7 +147,9 @@ def test_the_module_offers_no_ready_made_policy_object() -> None:
 def test_the_ready_made_detector_bites() -> None:
     class _Namespace:
         DEFAULT_RETENTION = RetentionPolicy(
-            payload_retention_days=90, legal_policy_owner="legal@example"
+            payload_retention_days=90,
+            replay_evidence_retention_days=180,
+            legal_policy_owner="legal@example",
         )
 
     caught = {
@@ -182,7 +188,11 @@ def test_every_state_the_schema_admits_has_a_retention_disposition() -> None:
     it. Failing here is this guard working: the fix is one line in
     `classify_receipt`, and the alternative is a new state quietly inheriting
     "safe to redact"."""
-    policy = RetentionPolicy(payload_retention_days=30, legal_policy_owner="owner")
+    policy = RetentionPolicy(
+        payload_retention_days=30,
+        replay_evidence_retention_days=180,
+        legal_policy_owner="owner",
+    )
     now = datetime.now(UTC)
 
     for state in _declared_receipt_states() | {UNKNOWN_STATE}:

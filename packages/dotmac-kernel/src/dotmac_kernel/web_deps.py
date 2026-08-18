@@ -32,8 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dotmac_kernel.branding import get_request_branding
-from dotmac_kernel.db import get_db
-from dotmac_kernel.deps import authenticate_request
+from dotmac_kernel.deps import authenticate_request, get_db
 from dotmac_kernel.display import get_request_display
 from dotmac_kernel.models import PartyRoleGrant, Role
 

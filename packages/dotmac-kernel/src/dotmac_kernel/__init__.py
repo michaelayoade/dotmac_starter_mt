@@ -8,9 +8,9 @@ Task 2). Two ways to consume the kernel, both governed here:
    I/O at import time), listed in ``__all__``.
 2. Supported submodules (``from dotmac_kernel.db import get_db``) — every
    module in ``SUPPORTED_MODULES``, each exporting its own ``__all__``. The
-   DB-session / guard / middleware APIs are submodule-only because importing
-   them constructs the SQLAlchemy engine from ``DATABASE_URL``; keeping them
-   out of the top level lets ``import dotmac_kernel`` succeed without a database.
+   eager DB-session owner remains submodule-only. Guard imports through
+   ``dotmac_kernel.deps`` are database-configuration-safe: its request
+   dependencies enter that owner only when FastAPI resolves a request.
 
 Anything NOT in a supported module's ``__all__`` (or in ``INTERNAL_MODULES``)
 is private and may change without notice. The compatibility policy and the
@@ -198,7 +198,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a68"
+__version__ = "0.1.0a70"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
