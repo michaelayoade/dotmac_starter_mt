@@ -35,7 +35,11 @@ from dotmac_media_observations.contracts import (
     MetricValue,
     MetricValueType,
     NodeTypeDeclaration,
+    NormalizedEntityPayload,
+    NormalizedHierarchyPayload,
     NormalizedMediaFact,
+    NormalizedMediaPayload,
+    NormalizedMetricPayload,
     ObservationCommand,
     ObservationConflict,
     ObservationKind,
@@ -48,6 +52,7 @@ from dotmac_media_observations.contracts import (
     ReconciliationResult,
     RecordOutcome,
     RecordStatus,
+    TransportReceiptProvenance,
     UnsupportedObservation,
 )
 from dotmac_media_observations.models import (
@@ -67,6 +72,8 @@ from dotmac_media_observations.models import (
 
 _EntityKey = tuple[str, str, str, str]
 _HierarchyKey = tuple[str, str, str, str]
+_JSON_TYPE = "__dotmac_media_json_type__"
+_JSON_VALUE = "value"
 
 
 def declare_node_type(db: Session, command: NodeTypeDeclaration) -> NodeDefinition:
@@ -381,7 +388,7 @@ def read_current_entity(
         name=row.name,
         state=row.state,
         disposition=EntityDisposition(row.disposition),
-        properties=cast(dict[str, JsonValue], row.properties),
+        properties=cast(dict[str, JsonValue], _json_restore(row.properties)),
         source_observed_at=_aware(row.source_observed_at),
     )
 
@@ -472,16 +479,7 @@ def read_period_metrics(
     )
     out: list[PeriodMetric] = []
     for _current, fact, period, definition, envelope in db.execute(query).all():
-        receipts = tuple(
-            db.scalars(
-                select(ObservationReceipt.transport_receipt_ref)
-                .where(
-                    ObservationReceipt.tenant_id == tenant_id,
-                    ObservationReceipt.observation_id == envelope.id,
-                )
-                .order_by(ObservationReceipt.transport_receipt_ref)
-            ).all()
-        )
+        receipts = _receipt_provenance(db, tenant_id, envelope.id)
         out.append(
             PeriodMetric(
                 observation_id=envelope.id,
@@ -500,8 +498,10 @@ def read_period_metrics(
                 claim_status=ClaimStatus(fact.claim_status),
                 source_observed_at=_aware(envelope.source_observed_at),
                 received_at=_aware(envelope.received_at),
-                transport_receipt_refs=receipts,
                 normalization_version=envelope.normalization_version,
+                content_fingerprint=envelope.content_fingerprint,
+                restates_observation_id=envelope.restates_observation_id,
+                transport_receipts=receipts,
             )
         )
     return tuple(out)
@@ -593,22 +593,28 @@ def emit_analytics_fact(
     if envelope is None:
         raise InvalidObservation(f"observation {observation_id} was not found")
     kind = ObservationKind(envelope.kind)
-    account_ref: str
-    entity_ref: str
-    metric_code: str | None = None
-    metric_version: int | None = None
-    period_start: datetime | None = None
-    period_end: datetime | None = None
-    value: MetricValue | None = None
-    claim_status: ClaimStatus | None = None
+    payload: NormalizedMediaPayload
     if kind is ObservationKind.ENTITY:
         entity_fact = _entity_fact(db, tenant_id, observation_id)
-        account_ref = entity_fact.external_account_ref
-        entity_ref = entity_fact.entity_ref
+        payload = NormalizedEntityPayload(
+            external_account_ref=entity_fact.external_account_ref,
+            entity_ref=entity_fact.entity_ref,
+            node_code=entity_fact.node_code,
+            node_version=entity_fact.node_version,
+            name=entity_fact.name,
+            state=entity_fact.state,
+            disposition=EntityDisposition(entity_fact.disposition),
+            properties=cast(
+                dict[str, JsonValue], _json_restore(entity_fact.properties)
+            ),
+        )
     elif kind is ObservationKind.HIERARCHY:
         hierarchy_fact = _hierarchy_fact(db, tenant_id, observation_id)
-        account_ref = hierarchy_fact.external_account_ref
-        entity_ref = hierarchy_fact.child_entity_ref
+        payload = NormalizedHierarchyPayload(
+            external_account_ref=hierarchy_fact.external_account_ref,
+            child_entity_ref=hierarchy_fact.child_entity_ref,
+            parent_entity_ref=hierarchy_fact.parent_entity_ref,
+        )
     else:
         metric_fact = _metric_fact(db, tenant_id, observation_id)
         period = db.scalar(
@@ -619,14 +625,24 @@ def emit_analytics_fact(
         )
         if period is None:  # pragma: no cover - protected by composite FK
             raise InvalidObservation("metric period is missing")
-        account_ref, entity_ref = period.external_account_ref, period.entity_ref
-        metric_code, metric_version = period.metric_code, period.metric_version
-        period_start, period_end = (
-            _aware(period.period_start),
-            _aware(period.period_end),
+        definition = _require_metric_definition(
+            db,
+            tenant_id=tenant_id,
+            code=period.metric_code,
+            version=period.metric_version,
         )
-        value = _value_from_fact(metric_fact)
-        claim_status = ClaimStatus(metric_fact.claim_status)
+        payload = NormalizedMetricPayload(
+            external_account_ref=period.external_account_ref,
+            entity_ref=period.entity_ref,
+            metric_code=period.metric_code,
+            metric_version=period.metric_version,
+            semantic=MetricSemantic(definition.semantic),
+            unit=definition.unit,
+            period_start=_aware(period.period_start),
+            period_end=_aware(period.period_end),
+            value=_value_from_fact(metric_fact),
+            claim_status=ClaimStatus(metric_fact.claim_status),
+        )
     return NormalizedMediaFact(
         observation_id=envelope.id,
         kind=kind,
@@ -636,14 +652,10 @@ def emit_analytics_fact(
         source_observed_at=_aware(envelope.source_observed_at),
         received_at=_aware(envelope.received_at),
         normalization_version=envelope.normalization_version,
-        external_account_ref=account_ref,
-        entity_ref=entity_ref,
-        metric_code=metric_code,
-        metric_version=metric_version,
-        period_start=period_start,
-        period_end=period_end,
-        value=value,
-        claim_status=claim_status,
+        content_fingerprint=envelope.content_fingerprint,
+        restates_observation_id=envelope.restates_observation_id,
+        transport_receipts=_receipt_provenance(db, tenant_id, envelope.id),
+        payload=payload,
     )
 
 
@@ -727,6 +739,26 @@ def _record_envelope(
     return envelope, status, created
 
 
+def _receipt_provenance(
+    db: Session, tenant_id: UUID, observation_id: UUID
+) -> tuple[TransportReceiptProvenance, ...]:
+    receipts = db.scalars(
+        select(ObservationReceipt)
+        .where(
+            ObservationReceipt.tenant_id == tenant_id,
+            ObservationReceipt.observation_id == observation_id,
+        )
+        .order_by(ObservationReceipt.transport_receipt_ref)
+    ).all()
+    return tuple(
+        TransportReceiptProvenance(
+            transport_receipt_ref=receipt.transport_receipt_ref,
+            received_at=_aware(receipt.received_at),
+        )
+        for receipt in receipts
+    )
+
+
 def _attach_receipt(
     db: Session, envelope: ObservationEnvelope, source: ObservationSource
 ) -> None:
@@ -738,18 +770,7 @@ def _attach_receipt(
         )
     )
     if receipt is not None:
-        if receipt.observation_id != envelope.id:
-            raise ObservationConflict(
-                ObservationRejection(
-                    code="transport_receipt_conflict",
-                    message=(
-                        f"transport receipt {source.transport_receipt_ref!r} is "
-                        "already attached to a different observation"
-                    ),
-                    source_observation_id=source.source_observation_id,
-                    observation_id=receipt.observation_id,
-                )
-            )
+        _require_same_receipt(receipt, envelope, source)
         return
     candidate = ObservationReceipt(
         tenant_id=source.tenant_id,
@@ -771,7 +792,7 @@ def _attach_receipt(
                 == source.transport_receipt_ref,
             )
         )
-        if receipt is None or receipt.observation_id != envelope.id:
+        if receipt is None:
             raise ObservationConflict(
                 ObservationRejection(
                     code="transport_receipt_conflict",
@@ -782,6 +803,31 @@ def _attach_receipt(
                     source_observation_id=source.source_observation_id,
                 )
             ) from exc
+        _require_same_receipt(receipt, envelope, source)
+
+
+def _require_same_receipt(
+    receipt: ObservationReceipt,
+    envelope: ObservationEnvelope,
+    source: ObservationSource,
+) -> None:
+    wrong_observation = receipt.observation_id != envelope.id
+    changed_time = _aware(receipt.received_at) != _aware(source.received_at)
+    if not wrong_observation and not changed_time:
+        return
+    detail = (
+        "is already attached to a different observation"
+        if wrong_observation
+        else "was replayed with a different receipt time"
+    )
+    raise ObservationConflict(
+        ObservationRejection(
+            code="transport_receipt_conflict",
+            message=f"transport receipt {source.transport_receipt_ref!r} {detail}",
+            source_observation_id=source.source_observation_id,
+            observation_id=receipt.observation_id,
+        )
+    )
 
 
 def _source_identity(
@@ -1400,17 +1446,53 @@ def _canonical(value: object) -> object:
         return str(value)
     if isinstance(value, datetime):
         return _aware(value).astimezone(UTC).isoformat()
-    if isinstance(value, Decimal):
-        return format(value, "f")
-    if isinstance(value, dict):
-        return {str(key): _canonical(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [_canonical(item) for item in value]
+    if isinstance(value, Decimal | dict | list | tuple):
+        return _json_storage(value)
     return value
 
 
 def _json_storage(value: object) -> object:
-    return _canonical(value)
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return _aware(value).astimezone(UTC).isoformat()
+    if isinstance(value, Decimal):
+        return {_JSON_TYPE: "decimal", _JSON_VALUE: format(value, "f")}
+    if isinstance(value, dict):
+        return {
+            _JSON_TYPE: "mapping",
+            _JSON_VALUE: [
+                [str(key), _json_storage(item)]
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            ],
+        }
+    if isinstance(value, list | tuple):
+        return [_json_storage(item) for item in value]
+    return value
+
+
+def _json_restore(value: object) -> object:
+    if isinstance(value, list):
+        return [_json_restore(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    kind = value.get(_JSON_TYPE)
+    encoded = value.get(_JSON_VALUE)
+    if kind == "decimal" and isinstance(encoded, str):
+        return Decimal(encoded)
+    if kind == "mapping" and isinstance(encoded, list):
+        restored: dict[str, object] = {}
+        for entry in encoded:
+            if not isinstance(entry, list) or len(entry) != 2:
+                raise InvalidObservation("stored normalized mapping is malformed")
+            key, item = entry
+            if not isinstance(key, str):
+                raise InvalidObservation("stored normalized mapping key is malformed")
+            restored[key] = _json_restore(item)
+        return restored
+    raise InvalidObservation("stored normalized JSON value is malformed")
 
 
 def _utc(value: datetime) -> datetime:

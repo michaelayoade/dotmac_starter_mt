@@ -20,6 +20,7 @@ JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
 _CODE = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
+_MAX_SIGNED_64 = 9_223_372_036_854_775_807
 _FORBIDDEN_AGGREGATE_TOKENS = frozenset(
     {
         "audience",
@@ -35,18 +36,6 @@ _FORBIDDEN_AGGREGATE_TOKENS = frozenset(
 )
 
 
-class MediaObservationError(ValueError):
-    """Base for a refused normalized media command."""
-
-
-class InvalidObservation(MediaObservationError):
-    """The command is malformed or violates an aggregate-fact invariant."""
-
-
-class UnsupportedObservation(MediaObservationError):
-    """The command is well formed but V1 does not support its requested shape."""
-
-
 @dataclass(frozen=True, slots=True)
 class ObservationRejection:
     """Safe, transport-neutral description of a refused command."""
@@ -55,6 +44,28 @@ class ObservationRejection:
     message: str
     source_observation_id: str | None = None
     observation_id: UUID | None = None
+
+
+class MediaObservationError(ValueError):
+    """Base for a refused normalized media command with a safe report."""
+
+    code = "media_observation_error"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.report = ObservationRejection(code=self.code, message=message)
+
+
+class InvalidObservation(MediaObservationError):
+    """The command is malformed or violates an aggregate-fact invariant."""
+
+    code = "invalid_observation"
+
+
+class UnsupportedObservation(MediaObservationError):
+    """The command is well formed but V1 does not support its requested shape."""
+
+    code = "unsupported_observation"
 
 
 class ObservationConflict(MediaObservationError):
@@ -212,6 +223,8 @@ class CountValue:
             raise InvalidObservation("count value must be an integer, never a float")
         if self.value < 0:
             raise InvalidObservation("count value cannot be negative")
+        if self.value > _MAX_SIGNED_64:
+            raise InvalidObservation("count value exceeds signed 64-bit storage")
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,7 +235,7 @@ class DecimalValue:
     )
 
     def __post_init__(self) -> None:
-        _require_decimal("decimal value", self.value)
+        _require_numeric_38_18("decimal value", self.value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +246,7 @@ class RatioValue:
     )
 
     def __post_init__(self) -> None:
-        _require_decimal("ratio value", self.value)
+        _require_numeric_38_18("ratio value", self.value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,6 +261,8 @@ class DurationValue:
             raise InvalidObservation("duration value must be an integer")
         if self.value < 0:
             raise InvalidObservation("duration value cannot be negative")
+        if self.value > _MAX_SIGNED_64:
+            raise InvalidObservation("duration value exceeds signed 64-bit storage")
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,7 +293,7 @@ class ExactMoney:
                 "money amount must be exactly representable in its minor unit"
             )
         minor_units = int(integral)
-        if minor_units > 9_223_372_036_854_775_807:
+        if minor_units > _MAX_SIGNED_64:
             raise InvalidObservation("money minor units exceed signed 64-bit storage")
         object.__setattr__(self, "minor_units", minor_units)
 
@@ -396,6 +411,18 @@ class ObservedHierarchyEdge:
 
 
 @dataclass(frozen=True, slots=True)
+class TransportReceiptProvenance:
+    transport_receipt_ref: str
+    received_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_text(
+            "transport_receipt_ref", self.transport_receipt_ref, maximum=255
+        )
+        _require_aware("received_at", self.received_at)
+
+
+@dataclass(frozen=True, slots=True)
 class PeriodMetric:
     observation_id: UUID
     installation_ref: str
@@ -413,8 +440,18 @@ class PeriodMetric:
     claim_status: ClaimStatus
     source_observed_at: datetime
     received_at: datetime
-    transport_receipt_refs: tuple[str, ...]
     normalization_version: int
+    content_fingerprint: str
+    restates_observation_id: UUID | None
+    transport_receipts: tuple[TransportReceiptProvenance, ...]
+
+    @property
+    def transport_receipt_refs(self) -> tuple[str, ...]:
+        """Compatibility view over the timestamped receipt provenance."""
+
+        return tuple(
+            receipt.transport_receipt_ref for receipt in self.transport_receipts
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,6 +480,44 @@ class ReconciliationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class NormalizedEntityPayload:
+    external_account_ref: str
+    entity_ref: str
+    node_code: str
+    node_version: int
+    name: str | None
+    state: str
+    disposition: EntityDisposition
+    properties: dict[str, JsonValue]
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedHierarchyPayload:
+    external_account_ref: str
+    child_entity_ref: str
+    parent_entity_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizedMetricPayload:
+    external_account_ref: str
+    entity_ref: str
+    metric_code: str
+    metric_version: int
+    semantic: MetricSemantic
+    unit: str
+    period_start: datetime
+    period_end: datetime
+    value: MetricValue
+    claim_status: ClaimStatus
+
+
+NormalizedMediaPayload = (
+    NormalizedEntityPayload | NormalizedHierarchyPayload | NormalizedMetricPayload
+)
+
+
+@dataclass(frozen=True, slots=True)
 class NormalizedMediaFact:
     observation_id: UUID
     kind: ObservationKind
@@ -452,15 +527,38 @@ class NormalizedMediaFact:
     source_observed_at: datetime
     received_at: datetime
     normalization_version: int
-    external_account_ref: str
-    entity_ref: str
-    metric_code: str | None
-    metric_version: int | None
-    period_start: datetime | None
-    period_end: datetime | None
-    value: MetricValue | None
-    claim_status: ClaimStatus | None
-    attribution_status: str = "not_attribution"
+    content_fingerprint: str
+    restates_observation_id: UUID | None
+    transport_receipts: tuple[TransportReceiptProvenance, ...]
+    payload: NormalizedMediaPayload
+    attribution_status: str = field(default="not_attribution", init=False)
+
+    def __post_init__(self) -> None:
+        expected = {
+            ObservationKind.ENTITY: NormalizedEntityPayload,
+            ObservationKind.HIERARCHY: NormalizedHierarchyPayload,
+            ObservationKind.METRIC: NormalizedMetricPayload,
+        }[self.kind]
+        if not isinstance(self.payload, expected):
+            raise InvalidObservation(
+                f"{self.kind.value} analytics fact has the wrong payload type"
+            )
+
+    @property
+    def external_account_ref(self) -> str:
+        return self.payload.external_account_ref
+
+    @property
+    def entity_ref(self) -> str:
+        if isinstance(self.payload, NormalizedHierarchyPayload):
+            return self.payload.child_entity_ref
+        return self.payload.entity_ref
+
+    @property
+    def claim_status(self) -> ClaimStatus | None:
+        if isinstance(self.payload, NormalizedMetricPayload):
+            return self.payload.claim_status
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -518,6 +616,19 @@ def _require_decimal(name: str, value: Decimal) -> None:
         raise InvalidObservation(f"{name} cannot be negative")
 
 
+def _require_numeric_38_18(name: str, value: Decimal) -> None:
+    _require_decimal(name, value)
+    if value != 0 and value.adjusted() >= 20:
+        raise InvalidObservation(f"{name} exceeds NUMERIC(38,18) storage")
+    digits = list(value.as_tuple().digits)
+    exponent = value.as_tuple().exponent
+    while digits and digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    if digits and exponent < -18:
+        raise InvalidObservation(f"{name} exceeds NUMERIC(38,18) storage")
+
+
 def _validate_aggregate_mapping(values: dict[str, JsonValue]) -> None:
     if not isinstance(values, dict):
         raise InvalidObservation("normalized properties must be a mapping")
@@ -573,7 +684,11 @@ __all__ = [
     "MetricValue",
     "MetricValueType",
     "NodeTypeDeclaration",
+    "NormalizedEntityPayload",
+    "NormalizedHierarchyPayload",
     "NormalizedMediaFact",
+    "NormalizedMediaPayload",
+    "NormalizedMetricPayload",
     "ObservationCommand",
     "ObservationConflict",
     "ObservationKind",
@@ -587,5 +702,6 @@ __all__ = [
     "RecordStatus",
     "ReconciliationResult",
     "UnsupportedObservation",
+    "TransportReceiptProvenance",
     "derive_ratio",
 ]

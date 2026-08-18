@@ -8,6 +8,13 @@ time, opaque installation and receipt references, normalization version, replay
 identity and correction chain. Current entity, hierarchy and period-metric rows
 are rebuildable projections over append-only facts.
 
+Period reads and emitted analytics facts retain the observation fingerprint,
+restatement link and every opaque transport receipt together with its own receipt
+time. Analytics facts use a kind-matched entity, hierarchy or metric payload, so
+the normalized state is not discarded at the reporting boundary. Exact Decimal
+configuration values are type-preserving; values destined for fixed database
+numeric columns are refused when they cannot fit without rounding or overflow.
+
 It does not perform provider I/O, store raw payloads, import audiences, identify
 people, assign Leads or customers, decide campaign effectiveness, or turn
 provider conversion claims into official attribution or revenue.

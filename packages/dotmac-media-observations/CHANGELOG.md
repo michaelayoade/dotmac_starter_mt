@@ -15,5 +15,11 @@
   provenance; integral counts; decimal duration/ratio separation.
 - Reconciliation preview/apply evidence and normalized analytics facts that
   label provider conversion claims without assigning attribution.
+- Complete read/emission provenance with fingerprint, correction ancestry and
+  timestamped transport receipts; kind-matched analytics payloads preserve full
+  normalized entity, hierarchy and metric content.
+- Typed invalid/unsupported/conflict rejection reports, strict receipt replay
+  conflicts and lossless exact-Decimal configuration-state round trips.
+- Pre-persistence signed-64-bit and `NUMERIC(38,18)` bounds so normalized metric
+  values are refused instead of being rounded or overflowing in storage.
 - Provider-free normalized-observation conformance kit.
-
