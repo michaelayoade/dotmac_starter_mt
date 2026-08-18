@@ -224,7 +224,7 @@ def record_entity(db: Session, command: EntityObservation) -> RecordOutcome:
 
 
 def record_hierarchy(db: Session, command: HierarchyObservation) -> RecordOutcome:
-    content = {
+    content: dict[str, object] = {
         "external_account_ref": command.external_account_ref,
         "child_entity_ref": command.child_entity_ref,
         "parent_entity_ref": command.parent_entity_ref,
@@ -602,11 +602,13 @@ def emit_analytics_fact(
     value: MetricValue | None = None
     claim_status: ClaimStatus | None = None
     if kind is ObservationKind.ENTITY:
-        fact = _entity_fact(db, tenant_id, observation_id)
-        account_ref, entity_ref = fact.external_account_ref, fact.entity_ref
+        entity_fact = _entity_fact(db, tenant_id, observation_id)
+        account_ref = entity_fact.external_account_ref
+        entity_ref = entity_fact.entity_ref
     elif kind is ObservationKind.HIERARCHY:
-        fact = _hierarchy_fact(db, tenant_id, observation_id)
-        account_ref, entity_ref = fact.external_account_ref, fact.child_entity_ref
+        hierarchy_fact = _hierarchy_fact(db, tenant_id, observation_id)
+        account_ref = hierarchy_fact.external_account_ref
+        entity_ref = hierarchy_fact.child_entity_ref
     else:
         metric_fact = _metric_fact(db, tenant_id, observation_id)
         period = db.scalar(
@@ -709,9 +711,10 @@ def _record_envelope(
             db.flush()
     except IntegrityError:
         created = False
-        envelope = _source_identity(db, source)
-        if envelope is None:  # pragma: no cover - defensive database race branch
+        concurrent_envelope = _source_identity(db, source)
+        if concurrent_envelope is None:  # pragma: no cover - defensive race branch
             raise
+        envelope = concurrent_envelope
         _require_same_observation(envelope, fingerprint)
     _attach_receipt(db, envelope, source)
     status = (
@@ -908,33 +911,35 @@ def _expected_projections(
         )
         .where(EntityFact.tenant_id == tenant_id)
     ).all()
-    for fact, envelope in entity_rows:
-        key = (
-            envelope.installation_ref,
-            envelope.source_system,
-            fact.external_account_ref,
-            fact.entity_ref,
+    for entity_fact, entity_envelope in entity_rows:
+        entity_key = (
+            entity_envelope.installation_ref,
+            entity_envelope.source_system,
+            entity_fact.external_account_ref,
+            entity_fact.entity_ref,
         )
-        previous = entity_candidates.get(key)
-        if previous is None or _effective_key(envelope) > _effective_key(previous[1]):
-            entity_candidates[key] = (fact, envelope)
+        entity_previous = entity_candidates.get(entity_key)
+        if entity_previous is None or _effective_key(
+            entity_envelope
+        ) > _effective_key(entity_previous[1]):
+            entity_candidates[entity_key] = (entity_fact, entity_envelope)
 
     entities: dict[tuple[str, ...], dict[str, object]] = {}
-    for key, (fact, envelope) in entity_candidates.items():
-        entities[key] = {
-            "observation_id": envelope.id,
-            "installation_ref": key[0],
-            "source_system": key[1],
-            "external_account_ref": key[2],
-            "entity_ref": key[3],
-            "node_code": fact.node_code,
-            "node_version": fact.node_version,
-            "name": fact.name,
-            "state": fact.state,
-            "disposition": fact.disposition,
-            "properties": fact.properties,
-            "source_observed_at": _aware(envelope.source_observed_at),
-            "projection_fingerprint": envelope.content_fingerprint,
+    for entity_key, (entity_fact, entity_envelope) in entity_candidates.items():
+        entities[entity_key] = {
+            "observation_id": entity_envelope.id,
+            "installation_ref": entity_key[0],
+            "source_system": entity_key[1],
+            "external_account_ref": entity_key[2],
+            "entity_ref": entity_key[3],
+            "node_code": entity_fact.node_code,
+            "node_version": entity_fact.node_version,
+            "name": entity_fact.name,
+            "state": entity_fact.state,
+            "disposition": entity_fact.disposition,
+            "properties": entity_fact.properties,
+            "source_observed_at": _aware(entity_envelope.source_observed_at),
+            "projection_fingerprint": entity_envelope.content_fingerprint,
         }
 
     hierarchy_candidates: dict[
@@ -949,16 +954,21 @@ def _expected_projections(
         )
         .where(HierarchyFact.tenant_id == tenant_id)
     ).all()
-    for fact, envelope in hierarchy_rows:
-        key = (
-            envelope.installation_ref,
-            envelope.source_system,
-            fact.external_account_ref,
-            fact.child_entity_ref,
+    for hierarchy_fact, hierarchy_envelope in hierarchy_rows:
+        hierarchy_key = (
+            hierarchy_envelope.installation_ref,
+            hierarchy_envelope.source_system,
+            hierarchy_fact.external_account_ref,
+            hierarchy_fact.child_entity_ref,
         )
-        previous = hierarchy_candidates.get(key)
-        if previous is None or _effective_key(envelope) > _effective_key(previous[1]):
-            hierarchy_candidates[key] = (fact, envelope)
+        hierarchy_previous = hierarchy_candidates.get(hierarchy_key)
+        if hierarchy_previous is None or _effective_key(
+            hierarchy_envelope
+        ) > _effective_key(hierarchy_previous[1]):
+            hierarchy_candidates[hierarchy_key] = (
+                hierarchy_fact,
+                hierarchy_envelope,
+            )
 
     active = {
         key
@@ -967,27 +977,38 @@ def _expected_projections(
     }
     cycle_children = _cycle_children(hierarchy_candidates, active)
     hierarchy: dict[tuple[str, ...], dict[str, object]] = {}
-    for key, (fact, envelope) in hierarchy_candidates.items():
-        parent_key = (key[0], key[1], key[2], fact.parent_entity_ref)
-        if key not in active:
+    for hierarchy_key, (
+        hierarchy_fact,
+        hierarchy_envelope,
+    ) in hierarchy_candidates.items():
+        parent_key = (
+            hierarchy_key[0],
+            hierarchy_key[1],
+            hierarchy_key[2],
+            hierarchy_fact.parent_entity_ref,
+        )
+        if hierarchy_key not in active:
             drift_code: str | None = "missing_child"
         elif parent_key not in active:
             drift_code = "missing_parent"
-        elif key in cycle_children:
+        elif hierarchy_key in cycle_children:
             drift_code = "cycle"
         else:
             drift_code = None
-        hierarchy[key] = {
-            "observation_id": envelope.id,
-            "installation_ref": key[0],
-            "source_system": key[1],
-            "external_account_ref": key[2],
-            "child_entity_ref": key[3],
-            "parent_entity_ref": fact.parent_entity_ref,
+        hierarchy[hierarchy_key] = {
+            "observation_id": hierarchy_envelope.id,
+            "installation_ref": hierarchy_key[0],
+            "source_system": hierarchy_key[1],
+            "external_account_ref": hierarchy_key[2],
+            "child_entity_ref": hierarchy_key[3],
+            "parent_entity_ref": hierarchy_fact.parent_entity_ref,
             "drift_code": drift_code,
-            "source_observed_at": _aware(envelope.source_observed_at),
+            "source_observed_at": _aware(hierarchy_envelope.source_observed_at),
             "projection_fingerprint": _fingerprint(
-                {"fact": envelope.content_fingerprint, "drift_code": drift_code}
+                {
+                    "fact": hierarchy_envelope.content_fingerprint,
+                    "drift_code": drift_code,
+                }
             ),
         }
 
@@ -1003,18 +1024,20 @@ def _expected_projections(
         )
         .where(MetricFact.tenant_id == tenant_id)
     ).all()
-    for fact, envelope in metric_rows:
-        key = (str(fact.period_id),)
-        previous = metric_candidates.get(key)
-        if previous is None or _effective_key(envelope) > _effective_key(previous[1]):
-            metric_candidates[key] = (fact, envelope)
+    for metric_fact, metric_envelope in metric_rows:
+        metric_key = (str(metric_fact.period_id),)
+        metric_previous = metric_candidates.get(metric_key)
+        if metric_previous is None or _effective_key(
+            metric_envelope
+        ) > _effective_key(metric_previous[1]):
+            metric_candidates[metric_key] = (metric_fact, metric_envelope)
     metrics: dict[tuple[str, ...], dict[str, object]] = {}
-    for key, (fact, envelope) in metric_candidates.items():
-        metrics[key] = {
-            "observation_id": envelope.id,
-            "period_id": fact.period_id,
-            "source_observed_at": _aware(envelope.source_observed_at),
-            "projection_fingerprint": envelope.content_fingerprint,
+    for metric_key, (metric_fact, metric_envelope) in metric_candidates.items():
+        metrics[metric_key] = {
+            "observation_id": metric_envelope.id,
+            "period_id": metric_fact.period_id,
+            "source_observed_at": _aware(metric_envelope.source_observed_at),
+            "projection_fingerprint": metric_envelope.content_fingerprint,
         }
     return {"entities": entities, "hierarchy": hierarchy, "metrics": metrics}
 
@@ -1219,22 +1242,23 @@ def _require_same_restatement_subject(
 ) -> None:
     tenant_id = replacement.source.tenant_id
     if isinstance(replacement, EntityObservation):
-        fact = _entity_fact(db, tenant_id, original.id)
+        entity_fact = _entity_fact(db, tenant_id, original.id)
         same = (
-            fact.external_account_ref == replacement.external_account_ref
-            and fact.entity_ref == replacement.entity_ref
+            entity_fact.external_account_ref == replacement.external_account_ref
+            and entity_fact.entity_ref == replacement.entity_ref
         )
     elif isinstance(replacement, HierarchyObservation):
-        fact = _hierarchy_fact(db, tenant_id, original.id)
+        hierarchy_fact = _hierarchy_fact(db, tenant_id, original.id)
         same = (
-            fact.external_account_ref == replacement.external_account_ref
-            and fact.child_entity_ref == replacement.child_entity_ref
+            hierarchy_fact.external_account_ref == replacement.external_account_ref
+            and hierarchy_fact.child_entity_ref == replacement.child_entity_ref
         )
     else:
-        fact = _metric_fact(db, tenant_id, original.id)
+        metric_fact = _metric_fact(db, tenant_id, original.id)
         period = db.scalar(
             select(MetricPeriod).where(
-                MetricPeriod.tenant_id == tenant_id, MetricPeriod.id == fact.period_id
+                MetricPeriod.tenant_id == tenant_id,
+                MetricPeriod.id == metric_fact.period_id,
             )
         )
         same = period is not None and (

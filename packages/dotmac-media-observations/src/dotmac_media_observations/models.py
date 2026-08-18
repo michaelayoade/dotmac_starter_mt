@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -562,37 +563,46 @@ class ReconciliationEvidence(Base):
     )
 
 
-APPEND_ONLY_TABLES: tuple[sa.Table, ...] = (
-    NodeDefinition.__table__,
-    MetricDefinition.__table__,
-    ObservationEnvelope.__table__,
-    ObservationReceipt.__table__,
-    EntityFact.__table__,
-    HierarchyFact.__table__,
-    MetricPeriod.__table__,
-    MetricFact.__table__,
-    ReconciliationEvidence.__table__,
+APPEND_ONLY_TABLES: tuple[sa.Table, ...] = cast(
+    tuple[sa.Table, ...],
+    (
+        NodeDefinition.__table__,
+        MetricDefinition.__table__,
+        ObservationEnvelope.__table__,
+        ObservationReceipt.__table__,
+        EntityFact.__table__,
+        HierarchyFact.__table__,
+        MetricPeriod.__table__,
+        MetricFact.__table__,
+        ReconciliationEvidence.__table__,
+    ),
 )
 
-PROJECTION_TABLES: tuple[sa.Table, ...] = (
-    CurrentEntity.__table__,
-    CurrentHierarchy.__table__,
-    CurrentMetric.__table__,
+PROJECTION_TABLES: tuple[sa.Table, ...] = cast(
+    tuple[sa.Table, ...],
+    (
+        CurrentEntity.__table__,
+        CurrentHierarchy.__table__,
+        CurrentMetric.__table__,
+    ),
 )
 
-ALL_TABLES: tuple[sa.Table, ...] = (
-    NodeDefinition.__table__,
-    MetricDefinition.__table__,
-    ObservationEnvelope.__table__,
-    ObservationReceipt.__table__,
-    EntityFact.__table__,
-    HierarchyFact.__table__,
-    MetricPeriod.__table__,
-    MetricFact.__table__,
-    CurrentEntity.__table__,
-    CurrentHierarchy.__table__,
-    CurrentMetric.__table__,
-    ReconciliationEvidence.__table__,
+ALL_TABLES: tuple[sa.Table, ...] = cast(
+    tuple[sa.Table, ...],
+    (
+        NodeDefinition.__table__,
+        MetricDefinition.__table__,
+        ObservationEnvelope.__table__,
+        ObservationReceipt.__table__,
+        EntityFact.__table__,
+        HierarchyFact.__table__,
+        MetricPeriod.__table__,
+        MetricFact.__table__,
+        CurrentEntity.__table__,
+        CurrentHierarchy.__table__,
+        CurrentMetric.__table__,
+        ReconciliationEvidence.__table__,
+    ),
 )
 
 TENANT_TABLES: tuple[str, ...] = tuple(table.name for table in ALL_TABLES)

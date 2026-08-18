@@ -75,18 +75,18 @@ def run_normalized_conformance(
             "one conformance case must target one tenant, installation and "
             "source system"
         )
-    for declaration in first.node_declarations:
-        if declaration.tenant_id not in tenant_ids:
+    for node_declaration in first.node_declarations:
+        if node_declaration.tenant_id not in tenant_ids:
             raise InvalidObservation(
                 "node declaration tenant differs from observations"
             )
-        declare_node_type(db, declaration)
-    for declaration in first.metric_declarations:
-        if declaration.tenant_id not in tenant_ids:
+        declare_node_type(db, node_declaration)
+    for metric_declaration in first.metric_declarations:
+        if metric_declaration.tenant_id not in tenant_ids:
             raise InvalidObservation(
                 "metric declaration tenant differs from observations"
             )
-        declare_metric(db, declaration)
+        declare_metric(db, metric_declaration)
 
     for observation in first.observations:
         _record(db, observation)
