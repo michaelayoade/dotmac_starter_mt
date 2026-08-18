@@ -141,8 +141,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE`, `DEFAULT_PLATFORM_ROLE`, `TABLE_PRIVILEGES` (the post-migration live-catalog contract, both planes — see the same section) |
-| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
-| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_party_person_catalog`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `PARTY_PERSON_CATALOG_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
@@ -358,7 +358,8 @@ aliased provider fails there, because stamping writes no columns.
 
 The vocabulary is an open **registry, never an enum** (ADR-0008): the kernel
 ships `tenant_scope_catalog.v1`, `module_database_roles.v1`,
-`idempotency_ledger.v1` and `outbox_relay.v1`; a product adds its own with
+`party_person_catalog.v1`, `idempotency_ledger.v1`, `outbox_relay.v1` and
+`platform_audit_log.v1`; a product adds its own with
 `register_prerequisites()`, and `register_verifier()` for the proof — an effect
 that cannot be proven must not be silently assumed. A changed contract is a new
 `.vN`, never a redefinition, because every existing binding was accepted against
@@ -700,10 +701,14 @@ document's SemVer policy (its HTTP helper needs the `testing` extra:
 fakes work without it). The package re-exports everything from three submodules:
 
 - **`harness`** — the in-memory-SQLite + savepoint-isolation wiring:
-  - `create_test_engine() -> Engine` — a fresh in-memory SQLite engine with
-    `Base.metadata` created. The **assembly must import its own feature models
-    first** so `Base.metadata` is fully populated (SQLite has no RLS — this is
-    for service-logic/unit tests; tenancy is proven separately on Postgres).
+  - `create_test_engine(*, tables=...) -> Engine` — a fresh in-memory SQLite
+    engine with the selected `Base.metadata` tables created. The **assembly
+    must import its own feature models first** so `Base.metadata` is populated;
+    a large shared test process should pass its exact table slice so unrelated
+    independently installable packages do not consume SQLite's ten schema
+    attachments. Omitting `tables` retains the all-imported-tables behavior.
+    SQLite has no RLS, so this is for service-logic/unit tests; tenancy is
+    proven separately on Postgres.
   - `isolated_session(engine)` — a context-managed session wrapped in an outer
     transaction + restarting SAVEPOINT, so a test rolls back even if service
     code commits.

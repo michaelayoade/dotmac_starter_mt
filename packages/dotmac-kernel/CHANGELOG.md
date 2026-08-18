@@ -8,7 +8,8 @@ here.
 
 ## 0.1.0a71 — UNRELEASED
 
-Allocates the independent tenant-only campaigns lineage accepted by ADR-0032
+Allocates the independent tenant-only people and campaigns lineages, names and
+proves the Party-person catalogue consumed by employment-directory modules,
 and keeps optional-package imports and large test assemblies independent of
 database configuration and SQLite's ten-attachment ceiling.
 
@@ -17,15 +18,25 @@ database configuration and SQLite's ten-attachment ceiling.
 - `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
   branch label `campaigns`. The module owns provider-neutral campaign
   progression and consumes the kernel's consent, idempotency and outbox owners.
+- `party_person_catalog.v1`, covering the required `public.parties` and
+  `public.party_persons` columns, keys, relationship, forced tenant RLS,
+  tenant-policy marker, and `app_user` read posture without coupling consumers
+  to unrelated Party extensions.
+- `verify_party_person_catalog`, a live-catalog verifier that refuses a stamped,
+  aliased, unprotected, unusable, or structurally incompatible provider.
+- `PEOPLE_MIGRATION_OWNER`: `pe`, branch `people`, schema `mod_people`.
 
 ### Changed
 
 - Defers the canonical conflict-savepoint import in consent and idempotency
   write paths until execution, so independently installable module contracts
   can be imported before an assembly configures `DATABASE_URL`.
-- Lets `create_test_engine` select exactly the module schemas composed by its
-  test assembly; omitted selection retains the existing all-imported-models
-  behavior.
+- `dotmac_kernel.testing.create_test_engine(tables=...)` can now create an
+  explicit assembly/package metadata slice. This keeps qualified SQLite module
+  schemas while preventing test collection of uncomposed packages from
+  exhausting SQLite's ten attached-database slots.
+- The reference assembly binds the effect to kernel `0003_party_identity`;
+  installable modules continue to name only the effect.
 
 ## 0.1.0a70 — 2026-08-18
 

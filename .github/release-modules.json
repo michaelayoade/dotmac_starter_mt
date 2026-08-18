@@ -492,6 +492,41 @@
           "python"
         ]
       }
+    },
+    "dotmac-people": {
+      "$comment": [
+        "Tenant employment-directory owner extracted product-first from ERP.",
+        "Kernel a71 allocates mod_people and names party_person_catalog.v1;",
+        "Backoffice is the first exact-pin consumer after this a1 release."
+      ],
+      "package_dir": "packages/dotmac-people",
+      "import_name": "dotmac_people",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a71",
+      "db_schema": "mod_people",
+      "tag_prefix": "dotmac-people-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_people/py.typed",
+          "dotmac_people/manifest.py",
+          "dotmac_people/contracts.py",
+          "dotmac_people/models.py",
+          "dotmac_people/service.py",
+          "dotmac_people/migrations/__init__.py",
+          "dotmac_people/migrations/versions/pe_0001_people_directory.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

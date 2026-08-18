@@ -1,0 +1,39 @@
+schema_version = 1
+package = "dotmac-people"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Tenant employment directory, positions, temporal assignments, and date-aware reporting resolution"
+contract = "Link a kernel Party person to one tenant employment relationship; own employee code and lifecycle state/dates, departments, designations, employment types, positions, temporal occupancy, and derived manager/direct-report/approval resolution. NOT personal identity, authentication, RBAC, attendance, leave, scheduling, discipline, performance, training, compensation, payroll, banking, tax, GL dimensions, physical locations, files, notifications, or external provisioning."
+source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_backoffice", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_erp:app/models/people/hr/employee.py",
+  "dotmac_erp:app/models/people/hr/department.py",
+  "dotmac_erp:app/models/people/hr/designation.py",
+  "dotmac_erp:app/models/people/hr/employment_type.py",
+  "dotmac_erp:app/models/people/hr/position.py",
+  "dotmac_erp:app/models/people/hr/position_assignment.py",
+  "dotmac_erp:app/services/people/hr/employees.py",
+  "dotmac_erp:app/services/people/hr/organization.py",
+  "dotmac_erp:app/services/people/hr/positions.py",
+  "dotmac_erp:app/services/people/hr/org_resolver.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/models.py",
+]
+preserved_tests = [
+  "dotmac_erp:tests/people/hr/test_position_assignments.py",
+  "dotmac_erp:tests/people/hr/test_position_role_summary.py",
+  "dotmac_erp:tests/people/hr/test_employee_rehire.py",
+  "dotmac_erp:tests/people/hr/test_employee_search.py",
+  "dotmac_erp:tests/integration/test_person_services.py",
+  "dotmac_starter_mt:tests/unit/test_people_service.py",
+  "dotmac_starter_mt:tests/architecture/test_people_module.py",
+  "dotmac_starter_mt:tests/test_people_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_backoffice"]
+composition_boundary = "Each adopting application pins the released package, runs the pe lineage in its own database, binds party_person_catalog.v1 to its own qualifying Party provider, and owns its sessions and authorization. The module imports only dotmac-kernel, never an assembly, sibling module, ERP model, or product adapter."
+inventory_evidence = ["docs/inventories/people-directory-sources.md"]
+first_cutover = "dotmac_backoffice is the first exact-pin consumer and replacement authority. ERP remains sole writer during backfill and read-only shadow. A separately authorized sealed switch makes Backoffice sole writer and reduces ERP employment-lifecycle writers to zero; the existing ERP employee key then remains only as a rebuildable compatibility projection for the measured 131 foreign-key declarations while dependent domains move."
+shadow_and_drift = "Backfill kernel Party identities first, then module catalogues, employees, positions and assignments from a narrow versioned ERP read projection. Reconcile missing, extra, conflicting and stale rows plus employee codes, lifecycle state/dates, hierarchy, active assignments, vacancy routing and explicit-date manager results. Shadow is read-only; it cannot write either owner."
+local_copy_retirement = "A two-directional ERP writer ratchet reaches zero for employee identity, code, lifecycle state/dates, organization catalogues, positions and assignments at cutover. ERP's compatibility projection has a separate writer/fallback ratchet and cannot originate decisions. Delete the legacy hr.employee and related tables only after all 131 foreign-key dependants have moved or been retired; zero ledger rows without zero authority is not success."
+next_action = "Complete the module's PostgreSQL isolation and temporal-overlap proofs, publish kernel a71 and dotmac-people a1 after merge authorization, then compose the exact releases in dotmac_backoffice. Build the narrow ERP projection/backfill/shadow contract before requesting the irreversible sole-writer cutover."

@@ -432,6 +432,18 @@ packages/dotmac-imports/         optional bulk-import run ledger
                  TESTED HERE, NOT COMPOSED by this reference assembly. The
                  domain owns the field vocabulary, validation and mutation;
                  `dotmac-files` owns the bytes the run reads.
+packages/dotmac-people/          optional tenant employment directory
+  pyproject.toml                 distribution dotmac-people; audit-complete,
+  EXTRACTION.toml                with ERP as the qualifying source and clean
+                                 Backoffice as the first exact-pin consumer
+  src/dotmac_people/             narrow employee lifecycle, organization
+                 catalogues, positions, temporal assignments and date-aware
+                 reporting resolution; manifest plus independent `pe` lineage
+                 in schema `mod_people`. Tenant plane only, forced RLS, and
+                 linked to kernel Party through `party_person_catalog.v1`.
+                 BUILT AND TESTED HERE, NOT COMPOSED by this reference
+                 assembly. No ERP identity, payroll, attendance, finance,
+                 integration, notification or persisted vacancy cache ports.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1277,6 +1289,12 @@ made concrete — every model has exactly one declared owner.
 | `CampaignRecipientStep` / `CampaignDeliveryIntent` | `mod_campaigns.campaign_recipient_steps`, `campaign_delivery_intents` | `dotmac-campaigns` optional module | One unique recipient/step progression fact and one provider-neutral intent. The package emits deterministic timer identities through a port and writes the kernel outbox atomically; it owns no scheduler, relay, provider credentials, I/O or retry. |
 | `CampaignObservation` / `CampaignResponse` | `mod_campaigns.campaign_observations`, `campaign_responses` | `dotmac-campaigns` optional module | Append-only deduplicated delivery/open/click/reply observations and response/conversion-correlation facts. Delivery projection is precedence-checked; the assembly asks Sales about a Lead and Inbox remains the message/conversation owner. |
 | `CampaignUnsubscribeRequest` / `CampaignCounter` | `mod_campaigns.campaign_unsubscribe_requests`, `campaign_counters` | `dotmac-campaigns` optional module | Request evidence around a kernel-consent write, plus rebuildable aggregate projection. The counter is never authoritative and the drift/rebuild service derives it from recipient facts. |
+| `Employee` | `mod_people.employees` | `dotmac-people` optional module | Product-first port of ERP's narrow employment relationship: one kernel Party person per tenant, stable code, lifecycle state/dates, and optional catalogue references. Personal identity, auth, reporting caches, compensation, payroll, attendance, finance and integrations are excluded ([`people-directory-sources.md`](inventories/people-directory-sources.md)). |
+| `Department` | `mod_people.departments` | `dotmac-people` optional module | Tenant department identity and hierarchy. ERP's competing `head_id` employee pointer and cost-centre FK do not port; department head is derived through one declared head position and its dated incumbent. |
+| `Designation` | `mod_people.designations` | `dotmac-people` optional module | Tenant job-title catalogue. ERP's NCC reporting category remains with its regulatory consumer rather than widening the directory contract. |
+| `EmploymentType` | `mod_people.employment_types` | `dotmac-people` optional module | Tenant employment-arrangement catalogue with no payroll or product-integration fields. |
+| `Position` | `mod_people.positions` | `dotmac-people` optional module | Canonical reporting hierarchy and vacancy-routing policy. Vacancy is derived from dated assignments; ERP's persisted `is_vacant` cache is deliberately not ported. |
+| `PositionAssignment` | `mod_people.position_assignments` | `dotmac-people` optional module | Historical PRIMARY/ACTING/INTERIM occupancy. Service checks preserve ERP behavior and a PostgreSQL trigger serializes and rejects all overlapping primary intervals, including the finite intervals ERP's open-ended partial indexes missed. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

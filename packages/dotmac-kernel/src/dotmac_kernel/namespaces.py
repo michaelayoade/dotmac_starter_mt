@@ -90,6 +90,7 @@ from dotmac_kernel.planes import (
 )
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
+    PARTY_PERSON_CATALOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     validate_prerequisites,
 )
@@ -388,7 +389,11 @@ KERNEL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     branch_label="kernel",
     db_schema=None,
     legacy_revision_pattern=r"^\d{4}_[a-z0-9_]+$",
-    provides=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
+    provides=(
+        TENANT_SCOPE_CATALOG_V1.name,
+        MODULE_DATABASE_ROLES_V1.name,
+        PARTY_PERSON_CATALOG_V1.name,
+    ),
 )
 
 # The one host assembly composing the kernel (`a001_adopt_cfd` … ), branch label
@@ -585,6 +590,17 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-people` — the ELEVENTH allocated installable module. It owns a tenant
+# employment directory and references, but does not duplicate, the kernel Party
+# person catalogue. `people` stays readable in catalog dumps and `pe` leaves
+# the revision-id budget for the lineage's descriptive slugs.
+PEOPLE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="people",
+    prefix="pe",
+    branch_label="people",
+    db_schema=module_schema("people"),
+)
+
 # `dotmac-campaigns` — the tenant-only outbound campaign progression owner
 # accepted by ADR-0032. `campaigns` is intentionally explicit in live catalog
 # dumps; the compact `ca` prefix leaves the lineage's revision ids readable.
@@ -609,6 +625,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
 )
 
@@ -954,6 +971,7 @@ __all__ = [
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "PEOPLE_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

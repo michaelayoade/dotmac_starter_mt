@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-people"
+version = "0.1.0a1"
+description = "Tenant employment directory, positions, and temporal reporting resolution"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_people", from = "src" }]
+include = [
+    { path = "src/dotmac_people/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_people/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -712,6 +712,24 @@ type = "directory"
 url = "packages/dotmac-numbering"
 
 [[package]]
+name = "dotmac-people"
+version = "0.1.0a1"
+description = "Tenant employment directory, positions, and temporal reporting resolution"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-people"
+
+[[package]]
 name = "dotmac-release-catalog"
 version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
