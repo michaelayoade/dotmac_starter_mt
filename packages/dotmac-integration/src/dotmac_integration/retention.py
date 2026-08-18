@@ -6,7 +6,7 @@ digested to `payload_digest`, and this is what it caused — and it is
 **content**, the provider's message body and transport headers. The first must
 outlive the second, and this module is the seam where they part company.
 
-## Why deleting the row is the wrong answer
+## Why deleting the row at the content boundary is the wrong answer
 
 Providers redeliver. Meta retries a webhook for days, and a replayed queue or a
 restored backup can resurface a months-old event at any time. Deduplication
@@ -16,11 +16,12 @@ receipt whose redelivery becomes a **new** event. The product then processes a
 customer conversation a second time, months late, with no record that it had
 already answered.
 
-So retention here never deletes a row and never touches a single column that
-deduplication, ordering or outcome comparison reads:
+The content sweep never deletes a row and never touches a single column that
+deduplication, ordering or outcome comparison reads. A separate evidence sweep
+deletes the CLOSED row only after its longer, independently ruled period:
 
 ======================== ====================================================
-preserved, always        why
+preserved after content  why
 ======================== ====================================================
 ``capability_binding_id`` half of the deduplication key
 ``provider_event_id``     the other half
@@ -63,10 +64,10 @@ structure that looks like schema. Only the digest and the key count survive.
 There is no default retention period in this file, and there must never be
 one. A period baked into a library is a policy decision smuggled past the
 person who is accountable for it — and "90 days" would become the fleet's
-data-retention posture by accident. :func:`resolve_retention_policy` reads two
-variables and REFUSES when either is absent; it never invents a value, in any
-environment. The same is true of `legal_policy_owner`: a hold has to be
-answerable to someone, and a library cannot name that person.
+data-retention posture by accident. :func:`resolve_retention_policy` reads both
+periods and the accountable owner, and REFUSES when any is absent; it never
+invents a value, in any environment. A hold has to be answerable to someone,
+and a library cannot name that person.
 
 ## Legal hold refuses, loudly
 
@@ -99,7 +100,6 @@ from dotmac_kernel.models import Base, uuid_pk
 from dotmac_kernel.namespaces import module_schema, schema_table_args
 from sqlalchemy import (
     DateTime,
-    ForeignKey,
     Index,
     String,
     Text,
@@ -116,11 +116,13 @@ __all__ = [
     "RETENTION_AUDIT_ACTIONS",
     "RETENTION_DAYS_VAR",
     "RETENTION_LEGAL_POLICY_OWNER_VAR",
+    "RETENTION_REPLAY_EVIDENCE_DAYS_VAR",
     "RETENTION_PLATFORM_TABLES",
     "REDACTABLE_COLUMNS",
     "REFUSAL_REASONS",
     "ReceiptLegalHold",
     "RetentionBacklog",
+    "ReplayEvidenceSweep",
     "RetentionNotConfigured",
     "RetentionPolicy",
     "RetentionRefusal",
@@ -131,6 +133,7 @@ __all__ = [
     "is_redacted",
     "place_legal_hold",
     "purge_expired_payloads",
+    "purge_expired_replay_evidence",
     "redact_receipt",
     "release_legal_hold",
     "resolve_retention_policy",
@@ -205,6 +208,7 @@ _RESOLVED_STATE: Final = "processed"
 #: Environment variable names. Values are Michael's to set; this module only
 #: knows what to call them.
 RETENTION_DAYS_VAR: Final = "INTEGRATION_PAYLOAD_RETENTION_DAYS"
+RETENTION_REPLAY_EVIDENCE_DAYS_VAR: Final = "INTEGRATION_REPLAY_EVIDENCE_RETENTION_DAYS"
 RETENTION_LEGAL_POLICY_OWNER_VAR: Final = "INTEGRATION_RETENTION_LEGAL_POLICY_OWNER"
 RETENTION_BATCH_SIZE_VAR: Final = "INTEGRATION_RETENTION_BATCH_SIZE"
 
@@ -237,9 +241,9 @@ class RetentionRefused(RuntimeError):
 class RetentionPolicy:
     """How long a payload is kept, and who is accountable for holds.
 
-    Neither field has a default, and that is the design. `RetentionPolicy()`
+    No field has a default, and that is the design. `RetentionPolicy()`
     is a `TypeError`, so there is no way to obtain a policy without stating
-    both decisions — which is what keeps a period out of this library and in
+    every decision — which is what keeps a period out of this library and in
     the deployment that has to answer for it.
     """
 
@@ -247,6 +251,10 @@ class RetentionPolicy:
     #: processed: a receipt that never processed still ages, and keying on
     #: `processed_at` would make a permanently stuck receipt immortal.
     payload_retention_days: int
+    #: Days the deduplication identity and delivery outcome survive after the
+    #: content is redacted. This is a separate legal decision, not an extension
+    #: of the content period.
+    replay_evidence_retention_days: int
     #: Who authorises and reviews legal holds. A hold with no accountable owner
     #: is a row nobody will ever dare release.
     legal_policy_owner: str
@@ -261,6 +269,13 @@ class RetentionPolicy:
                 "retention period. Zero would redact a payload the moment the "
                 "receipt was processed, before any replay could use it"
             )
+        if self.replay_evidence_retention_days <= self.payload_retention_days:
+            raise ValueError(
+                "replay_evidence_retention_days must outlive "
+                "payload_retention_days. Otherwise a provider redelivery can "
+                "arrive after its identity was destroyed but while its content "
+                "period still says the event is known"
+            )
         if not self.legal_policy_owner.strip():
             raise ValueError(
                 "legal_policy_owner must name an accountable owner. A hold "
@@ -274,6 +289,10 @@ class RetentionPolicy:
     def cutoff(self, now: datetime) -> datetime:
         """The instant before which a payload has aged out."""
         return now - timedelta(days=self.payload_retention_days)
+
+    def evidence_cutoff(self, now: datetime) -> datetime:
+        """The instant before which closed replay evidence has aged out."""
+        return now - timedelta(days=self.replay_evidence_retention_days)
 
 
 def resolve_retention_policy(source: Mapping[str, str]) -> RetentionPolicy:
@@ -290,7 +309,11 @@ def resolve_retention_policy(source: Mapping[str, str]) -> RetentionPolicy:
     """
     missing = [
         name
-        for name in (RETENTION_DAYS_VAR, RETENTION_LEGAL_POLICY_OWNER_VAR)
+        for name in (
+            RETENTION_DAYS_VAR,
+            RETENTION_REPLAY_EVIDENCE_DAYS_VAR,
+            RETENTION_LEGAL_POLICY_OWNER_VAR,
+        )
         if not str(source.get(name, "")).strip()
     ]
     if missing:
@@ -303,11 +326,14 @@ def resolve_retention_policy(source: Mapping[str, str]) -> RetentionPolicy:
         )
 
     raw_days = str(source[RETENTION_DAYS_VAR]).strip()
+    raw_evidence_days = str(source[RETENTION_REPLAY_EVIDENCE_DAYS_VAR]).strip()
     try:
         days = int(raw_days)
+        evidence_days = int(raw_evidence_days)
     except ValueError as exc:
         raise RetentionNotConfigured(
-            f"{RETENTION_DAYS_VAR}={raw_days!r} is not a whole number of days"
+            "payload and replay-evidence retention periods must both be whole "
+            "numbers of days"
         ) from exc
 
     raw_batch = str(source.get(RETENTION_BATCH_SIZE_VAR, "") or "").strip()
@@ -321,6 +347,7 @@ def resolve_retention_policy(source: Mapping[str, str]) -> RetentionPolicy:
     try:
         return RetentionPolicy(
             payload_retention_days=days,
+            replay_evidence_retention_days=evidence_days,
             legal_policy_owner=str(source[RETENTION_LEGAL_POLICY_OWNER_VAR]).strip(),
             batch_size=batch,
         )
@@ -361,15 +388,12 @@ class ReceiptLegalHold(Base):
     )
 
     id: Mapped[UUID] = uuid_pk()
-    receipt_id: Mapped[UUID] = mapped_column(
-        Uuid(),
-        ForeignKey(
-            f"{SCHEMA}.inbox_receipts.id",
-            ondelete="CASCADE",
-            name="fk_receipt_legal_holds_receipt",
-        ),
-        nullable=False,
-    )
+    # A deliberate durable reference, not a cascading FK. `ig_0011` adds two
+    # database triggers: a hold may only be created for a live receipt, and an
+    # actively held receipt may not be deleted. Once a hold is released, the
+    # receipt's replay evidence may reach its own retention limit and disappear
+    # while this exact UUID and the hold history survive.
+    receipt_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     #: Why. Required — a hold with no stated reason cannot be reviewed, and the
     #: person who could explain it has left by the time anyone asks.
     reason: Mapped[str] = mapped_column(Text, nullable=False)
@@ -428,6 +452,7 @@ def active_hold_for(db: Any, receipt_id: UUID) -> ReceiptLegalHold | None:
 #: listed here and written nowhere, or written and not listed, is what the
 #: manifest-declaration rule exists to catch.
 RETENTION_AUDIT_ACTIONS: tuple[str, ...] = (
+    "retention.evidence.purged",
     "retention.payloads.redacted",
     "retention.hold.placed",
     "retention.hold.released",
@@ -904,6 +929,150 @@ def purge_expired_payloads(
                 # from the ledger and not only from today's configuration.
                 "legal_policy_owner": policy.legal_policy_owner,
                 "retention_days": policy.payload_retention_days,
+            },
+        )
+    return sweep
+
+
+# ── Replay-evidence sweep ──────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayEvidenceSweep:
+    """Closed receipt evidence removed after its separately ruled period."""
+
+    cutoff: datetime
+    batch_size: int
+    purged: int = 0
+    purged_ids: tuple[UUID, ...] = ()
+    refused_by_reason: Mapping[str, int] = field(default_factory=dict)
+
+    @property
+    def refused_total(self) -> int:
+        return sum(self.refused_by_reason.values())
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "cutoff": self.cutoff.isoformat(),
+            "batch_size": self.batch_size,
+            "purged": self.purged,
+            "refused_total": self.refused_total,
+            "refused_by_reason": dict(self.refused_by_reason),
+        }
+
+
+def _has_redaction_marker() -> Any:
+    """SQL predicate for a payload whose content-retention sweep completed."""
+
+    return InboxReceipt.payload_json[REDACTION_MARKER].as_string().is_not(None)
+
+
+def _evidence_refusal_counts(db: Any, cutoff: datetime) -> dict[str, int]:
+    """Explain why aged replay evidence remains instead of hiding the backlog."""
+
+    expired = InboxReceipt.received_at < cutoff
+    held = _active_hold_exists()
+
+    def _count(*where: Any) -> int:
+        return int(
+            db.execute(
+                sa.select(sa.func.count())
+                .select_from(InboxReceipt)
+                .where(expired, *where)
+            ).scalar_one()
+            or 0
+        )
+
+    counts = {
+        "legal_hold": _count(held),
+        "unresolved": _count(~held, InboxReceipt.state != _RESOLVED_STATE),
+        "not_redacted": _count(
+            ~held,
+            InboxReceipt.state == _RESOLVED_STATE,
+            ~_has_redaction_marker(),
+        ),
+    }
+    return {reason: count for reason, count in counts.items() if count}
+
+
+def purge_expired_replay_evidence(
+    db: Any,
+    *,
+    policy: RetentionPolicy,
+    now: datetime | None = None,
+    actor_admin_id: UUID | None = None,
+) -> ReplayEvidenceSweep:
+    """Delete one batch of closed replay evidence after its finite lifetime.
+
+    A row is eligible only after the content sweep has written its tombstone,
+    the receipt reached its final outcome, its independently ruled evidence
+    period elapsed, and no active legal hold exists. The DELETE repeats every
+    predicate, so a hold placed after selection still wins in the database.
+
+    Released legal-hold rows deliberately survive. ``ig_0011`` replaces their
+    cascading FK with triggers that preserve both structural guarantees: a new
+    hold must name an existing receipt, and an active hold blocks receipt
+    deletion. A released hold is history, so its receipt UUID remains after the
+    receipt evidence reaches this limit.
+    """
+
+    moment = now or datetime.now(UTC)
+    cutoff = policy.evidence_cutoff(moment)
+    candidate_ids = tuple(
+        db.execute(
+            sa.select(InboxReceipt.id)
+            .where(
+                InboxReceipt.received_at < cutoff,
+                InboxReceipt.state == _RESOLVED_STATE,
+                _has_redaction_marker(),
+                ~_active_hold_exists(),
+            )
+            .order_by(InboxReceipt.received_at, InboxReceipt.id)
+            .limit(policy.batch_size)
+        )
+        .scalars()
+        .all()
+    )
+
+    purged_ids: tuple[UUID, ...] = ()
+    if candidate_ids:
+        purged_ids = tuple(
+            db.execute(
+                sa.delete(InboxReceipt)
+                .where(
+                    InboxReceipt.id.in_(candidate_ids),
+                    InboxReceipt.received_at < cutoff,
+                    InboxReceipt.state == _RESOLVED_STATE,
+                    _has_redaction_marker(),
+                    ~_active_hold_exists(),
+                )
+                .returning(InboxReceipt.id)
+                .execution_options(synchronize_session="fetch")
+            )
+            .scalars()
+            .all()
+        )
+
+    sweep = ReplayEvidenceSweep(
+        cutoff=cutoff,
+        batch_size=policy.batch_size,
+        purged=len(purged_ids),
+        purged_ids=purged_ids,
+        refused_by_reason=_evidence_refusal_counts(db, cutoff),
+    )
+    if purged_ids:
+        record_operation(
+            db,
+            action="retention.evidence.purged",
+            entity_type="inbox_receipt",
+            actor_admin_id=actor_admin_id,
+            details={
+                **sweep.as_dict(),
+                "receipt_ids": [str(identifier) for identifier in purged_ids],
+                "legal_policy_owner": policy.legal_policy_owner,
+                "replay_evidence_retention_days": (
+                    policy.replay_evidence_retention_days
+                ),
             },
         )
     return sweep

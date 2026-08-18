@@ -329,7 +329,8 @@
           "dotmac_integration/migrations/versions/ig_0007_idempotency_ledger.py",
           "dotmac_integration/migrations/versions/ig_0008_platform_audit_log.py",
           "dotmac_integration/migrations/versions/ig_0009_product_port_descriptors.py",
-          "dotmac_integration/migrations/versions/ig_0010_shadow_evidence.py"
+          "dotmac_integration/migrations/versions/ig_0010_shadow_evidence.py",
+          "dotmac_integration/migrations/versions/ig_0011_replay_retention.py"
         ],
         "forbidden_prefixes": [
           "app/",

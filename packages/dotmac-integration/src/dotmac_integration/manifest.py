@@ -42,7 +42,7 @@ from dotmac_integration.shadow import SHADOW_PLATFORM_TABLES
 
 module = ModuleManifest(
     code="integration",
-    version="0.1.0a8",
+    version="0.1.0a9",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="intg",
@@ -134,6 +134,7 @@ module = ModuleManifest(
         # destroyed and under whose retention period; a hold leaves a record of
         # who forbade it. None of these details carries a payload or a
         # `provider_event_id` — see `retention.py`.
+        "integration.retention.evidence.purged",
         "integration.retention.payloads.redacted",
         "integration.retention.hold.placed",
         "integration.retention.hold.released",

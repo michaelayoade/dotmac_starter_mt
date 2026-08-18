@@ -65,14 +65,16 @@ destination application must be the one that DECLARED the capability, so neither
 a payload nor a lone edited configuration can redirect a stream.
 ## And payload retention (slice 3)
 
-A receipt is evidence and it is content, and the first must outlive the second.
+A receipt is evidence and it is content, and the first must outlive the second
+without becoming permanent.
 :mod:`dotmac_integration.retention` ages out `payload_json`, `headers_json` and
 the values inside `consequence_json` while touching NOTHING deduplication reads
 — so a provider's redelivery months later is still recognised as the event it
 is, rather than processed a second time as a new one.
 
-Two refusals define it. There is no default retention period and no default
-legal-policy owner: :func:`resolve_retention_policy` refuses rather than guess,
+Two refusals define it. There is no default content or replay-evidence period
+and no default legal-policy owner: :func:`resolve_retention_policy` refuses
+rather than guess,
 because a period baked into a library becomes a deployment's data-retention
 posture without anyone deciding it. And a receipt under legal hold, claimed by
 a worker, unresolved, or awaiting reconciliation is refused BY NAME and counted,
@@ -272,7 +274,9 @@ from dotmac_integration.retention import (
     REDACTION_MARKER,
     RETENTION_DAYS_VAR,
     RETENTION_LEGAL_POLICY_OWNER_VAR,
+    RETENTION_REPLAY_EVIDENCE_DAYS_VAR,
     ReceiptLegalHold,
+    ReplayEvidenceSweep,
     RetentionBacklog,
     RetentionNotConfigured,
     RetentionPolicy,
@@ -284,6 +288,7 @@ from dotmac_integration.retention import (
     is_redacted,
     place_legal_hold,
     purge_expired_payloads,
+    purge_expired_replay_evidence,
     redact_receipt,
     release_legal_hold,
     resolve_retention_policy,
@@ -354,7 +359,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a8"
+__version__ = "0.1.0a9"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -477,6 +482,8 @@ __all__ = [
     "REDACTION_MARKER",
     "RETENTION_DAYS_VAR",
     "RETENTION_LEGAL_POLICY_OWNER_VAR",
+    "RETENTION_REPLAY_EVIDENCE_DAYS_VAR",
+    "ReplayEvidenceSweep",
     "ReceiptLegalHold",
     "RetentionBacklog",
     "RetentionNotConfigured",
@@ -489,6 +496,7 @@ __all__ = [
     "is_redacted",
     "place_legal_hold",
     "purge_expired_payloads",
+    "purge_expired_replay_evidence",
     "redact_receipt",
     "release_legal_hold",
     "resolve_retention_policy",

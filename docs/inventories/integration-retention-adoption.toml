@@ -54,10 +54,11 @@ replay_evidence_retained = [
 ]
 replay_evidence_period_days = 180
 replay_evidence_period_anchor = "received_at"
-replay_evidence_period_note = "Ruled by Michael 2026-08-16, and a SEPARATE decision from the 30-day content period rather than an extension of it. Content is destroyed at 30 days; the identity, digest, outcome evidence and tombstone that make a replay recognisable survive to 180. Justification: a provider redelivery arriving after the identity has been destroyed is indistinguishable from a new event, so the consequence is applied twice — the window has to outlast realistic provider retry and backfill behaviour, not merely the content period. IMPLEMENTATION IS NOT DONE: no second sweep enforces this yet, so today the evidence is retained indefinitely, which is longer than the ruling permits."
-replay_evidence_implemented = false
+replay_evidence_period_note = "Ruled by Michael 2026-08-16, and a SEPARATE decision from the 30-day content period rather than an extension of it. Content is destroyed at 30 days; the identity, digest, outcome evidence and tombstone that make a replay recognisable survive to 180. Justification: a provider redelivery arriving after the identity has been destroyed is indistinguishable from a new event, so the consequence is applied twice — the window has to outlast realistic provider retry and backfill behaviour, not merely the content period. Implemented by purge_expired_replay_evidence and ig_0011 in declared dotmac-integration 0.1.0a9; production execution remains blocked on the accepted notice revision below."
+replay_evidence_implemented = true
+replay_evidence_released = false
 
-[known_defects]
+[resolved_defects]
 # Found 2026-08-16 while recording the standards, and verified in source rather
 # than inferred.
 
@@ -72,9 +73,9 @@ replay_evidence_implemented = false
 # receipt. It becomes live the moment anything does — an operator purge, an
 # adopter's own cleanup, a future purge feature — and it fails silently, which
 # is why it is recorded here rather than left to be rediscovered.
-legal_hold_history_cascades_on_receipt_delete = true
+legal_hold_history_cascades_on_receipt_delete = false
 legal_hold_cascade_evidence = "packages/dotmac-integration/src/dotmac_integration/migrations/versions/ig_0006_retention.py:81"
-legal_hold_cascade_disposition = "Blocks production adoption, not the release. Fix belongs in the version that adds any receipt-delete path, and must be in place BEFORE one exists."
+legal_hold_cascade_disposition = "Resolved by ig_0011 before the first receipt-delete path: released hold history retains its exact receipt UUID; an insert for a nonexistent receipt and deletion under an active hold both fail in PostgreSQL."
 
 [notice]
 # The adoption gate. `revision` stays "PENDING" until Michael accepts a privacy
@@ -93,10 +94,10 @@ document = "Dotmac privacy notice / record of processing (owner: DPO role)"
 # Two independent things, deliberately not collapsed. The code shipped; the
 # authority to destroy content under it has not.
 code_released = true
-code_released_as = "dotmac-integration 0.1.0a3"
+code_released_as = "dotmac-integration 0.1.0a8"
+code_declared_as = "dotmac-integration 0.1.0a9"
 adopted = false
 blocked_on = [
   "notice.revision is PENDING",
-  "known_defects.legal_hold_history_cascades_on_receipt_delete",
-  "behaviour.replay_evidence_implemented is false — the 180-day period is ruled but nothing enforces it, so evidence is currently kept indefinitely",
+  "behaviour.replay_evidence_released is false — the enforcing a9 wheel is declared but not yet published",
 ]

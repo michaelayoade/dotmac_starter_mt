@@ -562,7 +562,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-approvals": frozenset(),
-    "dotmac-integration": frozenset(),
+    "dotmac-integration": frozenset({"ig_0011_replay_retention.py"}),
     "dotmac-entitlement-allocation": frozenset(),
 }
 
