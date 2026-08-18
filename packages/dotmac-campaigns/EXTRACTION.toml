@@ -6,6 +6,7 @@ source_mode = "product-first"
 owner = "Provider-neutral outbound campaign identity, immutable audience/recipient evidence and ordered recipient progression"
 contract = "Create and revise a tenant campaign; freeze one active revision, its ordered one-time/nurture steps, its audience and recipient snapshots when sending begins; record consent decisions without making policy; schedule due work through a typed Durable Timers seam; publish one provider-neutral delivery intent per recipient/step through the kernel outbox; consume deduplicated delivery/open/click/reply facts without regressing terminal state; record unsubscribe and response/correlation facts; rebuild counters, report drift, reconcile missing publication and scrub PII at explicit retention deadlines. NOT Party/customer identity, audience business rules, Leads/Sales conversion, orders/subscriptions/billing/collections, consent policy, Inbox messages/conversations, provider I/O/retry/credentials, templates, advertising hierarchy/raw metrics, attribution, retention cases or service cancellation."
 source_repositories = [
+  "dotmac_erp",
   "dotmac_sub",
   "dotmac_crm",
   "dotmac_mkt",

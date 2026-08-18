@@ -6,13 +6,16 @@
 - **CRM:** `60daaa2dd305696636632f48505ab784110a55d2`
 - **dotmac_mkt:** `1a185b9f9d3ee102255bd57ce4bc62a587c08552`
 - **Backoffice:** `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d`
+- **ERP:** `0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf`
 - **Method:** fresh detached audit checkouts at the commits above, followed by
   model/service/task/migration/test call-graph inspection. The dotmac_mkt remote
   was refreshed successfully; its current default-branch commit is the pin
-  above. No source working tree was used as evidence.
+  above. ERP was inspected from its pinned Git tree because its checkout had
+  unrelated local changes; no working-tree content was used as evidence.
 - **Decision:** product-first from Sub. CRM supplies parity and negative
-  evidence. dotmac_mkt supplies media requirements only. Backoffice has no
-  campaign owner and is the independent reuse proof, not a source.
+  evidence. dotmac_mkt supplies media requirements only. ERP and Backoffice
+  have no campaign owner; Backoffice is the independent reuse proof, not a
+  source.
 
 This inventory is characterization evidence, not authority. ADR-0032 owns the
 campaign boundary and cutover sequence. `packages/dotmac-campaigns/EXTRACTION.toml`
@@ -189,6 +192,16 @@ implementation or parity test. Its value is stronger and narrower: after Sub's
 cutover and the exact module release, Backoffice composes the tenant lineage and
 implements its own audience/template/sender/timer adapters without a product
 branch inside the package. That is the second-consumer proof.
+
+## Required fleet negative evidence — ERP
+
+The pinned ERP Git tree was searched repository-wide for campaign, nurture,
+unsubscribe and engagement-tracking implementations. It contains no outbound
+campaign model, lifecycle, scheduler or parity suite; the only matches were
+unrelated prose and fiscal-period reopen tracking. ERP therefore contributes
+neither a qualifying implementation nor behavior to port. This closes the
+ADR-0006 product inventory requirement without promoting absence into a
+greenfield source or adding ERP as an adopter for this slice.
 
 ## Relevant Starter facilities
 
