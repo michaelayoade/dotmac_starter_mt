@@ -1,0 +1,98 @@
+"""Dotmac Inbox: tenant-scoped, trait-driven conversation ownership.
+
+The package owns durable conversation threads, messages, lifecycle, and
+per-operator read cursors. Products retain contact resolution, routing,
+assignment, delivery, attachments, and every transport/provider decision.
+"""
+
+from dotmac_inbox.channels import (
+    AddressForm,
+    ChannelSpec,
+    MessageIdScope,
+    ThreadIdentity,
+    Transport,
+    UnknownChannelError,
+    channel_spec,
+    register_channels,
+    registered_channels,
+    reset_channel_registry_for_tests,
+)
+from dotmac_inbox.lifecycle import (
+    Direction,
+    InvalidTransitionError,
+    ReasonSpec,
+    Status,
+    UnknownReasonError,
+    is_open,
+    register_reasons,
+    registered_reasons,
+    reset_reason_registry_for_tests,
+    validate_reason,
+    validate_transition,
+)
+from dotmac_inbox.manifest import module
+from dotmac_inbox.migrations import versions_dir
+from dotmac_inbox.models import (
+    SCHEMA,
+    TENANT_MODELS,
+    TENANT_TABLES,
+    Conversation,
+    ConversationReadState,
+    Message,
+)
+from dotmac_inbox.service import (
+    ConversationConflict,
+    ConversationNotFound,
+    StaleConversationState,
+    create_conversation,
+    mark_conversation_read,
+    record_message,
+    transition_conversation_status,
+)
+from dotmac_inbox.threading import DedupKey, InboundIdentity, dedup_key, thread_key
+
+__version__ = "0.1.0a1"
+
+__all__ = [
+    "SCHEMA",
+    "TENANT_MODELS",
+    "TENANT_TABLES",
+    "AddressForm",
+    "ChannelSpec",
+    "Conversation",
+    "ConversationConflict",
+    "ConversationNotFound",
+    "ConversationReadState",
+    "DedupKey",
+    "Direction",
+    "InboundIdentity",
+    "InvalidTransitionError",
+    "Message",
+    "MessageIdScope",
+    "ReasonSpec",
+    "StaleConversationState",
+    "Status",
+    "ThreadIdentity",
+    "Transport",
+    "UnknownChannelError",
+    "UnknownReasonError",
+    "__version__",
+    "channel_spec",
+    "create_conversation",
+    "dedup_key",
+    "is_open",
+    "mark_conversation_read",
+    "module",
+    "record_message",
+    "register_channels",
+    "register_reasons",
+    "registered_channels",
+    "registered_reasons",
+    "reset_channel_registry_for_tests",
+    "reset_reason_registry_for_tests",
+    "thread_key",
+    "transition_conversation_status",
+    "validate_reason",
+    "validate_transition",
+    "versions_dir",
+]
