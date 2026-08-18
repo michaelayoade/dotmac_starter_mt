@@ -531,11 +531,7 @@ def report_hierarchy_drift(db: Session, *, tenant_id: UUID) -> DriftReport:
 def report_metric_drift(db: Session, *, tenant_id: UUID) -> DriftReport:
     expected = _expected_projections(db, tenant_id)["metrics"]
     return DriftReport(
-        tuple(
-            _compare_projection(
-                "metric", expected, _actual_metrics(db, tenant_id)
-            )
-        )
+        tuple(_compare_projection("metric", expected, _actual_metrics(db, tenant_id)))
     )
 
 
@@ -557,9 +553,7 @@ def reconcile_projections(
     }
     drift = [
         *_compare_projection("entity", expected["entities"], actual["entities"]),
-        *_compare_projection(
-            "hierarchy", expected["hierarchy"], actual["hierarchy"]
-        ),
+        *_compare_projection("hierarchy", expected["hierarchy"], actual["hierarchy"]),
         *_compare_projection("metric", expected["metrics"], actual["metrics"]),
     ]
     before_digest = _fingerprint(actual)
@@ -624,7 +618,10 @@ def emit_analytics_fact(
             raise InvalidObservation("metric period is missing")
         account_ref, entity_ref = period.external_account_ref, period.entity_ref
         metric_code, metric_version = period.metric_code, period.metric_version
-        period_start, period_end = _aware(period.period_start), _aware(period.period_end)
+        period_start, period_end = (
+            _aware(period.period_start),
+            _aware(period.period_end),
+        )
         value = _value_from_fact(metric_fact)
         claim_status = ClaimStatus(metric_fact.claim_status)
     return NormalizedMediaFact(
@@ -733,8 +730,7 @@ def _attach_receipt(
         select(ObservationReceipt).where(
             ObservationReceipt.tenant_id == source.tenant_id,
             ObservationReceipt.installation_ref == source.installation_ref,
-            ObservationReceipt.transport_receipt_ref
-            == source.transport_receipt_ref,
+            ObservationReceipt.transport_receipt_ref == source.transport_receipt_ref,
         )
     )
     if receipt is not None:
@@ -797,9 +793,7 @@ def _source_identity(
     )
 
 
-def _require_same_observation(
-    existing: ObservationEnvelope, fingerprint: str
-) -> None:
+def _require_same_observation(existing: ObservationEnvelope, fingerprint: str) -> None:
     if existing.content_fingerprint != fingerprint:
         raise ObservationConflict(
             ObservationRejection(
@@ -996,7 +990,9 @@ def _expected_projections(
             ),
         }
 
-    metric_candidates: dict[tuple[str, ...], tuple[MetricFact, ObservationEnvelope]] = {}
+    metric_candidates: dict[
+        tuple[str, ...], tuple[MetricFact, ObservationEnvelope]
+    ] = {}
     metric_rows = db.execute(
         select(MetricFact, ObservationEnvelope)
         .join(

@@ -20,4 +20,3 @@ module = ModuleManifest(
 )
 
 __all__ = ["module"]
-

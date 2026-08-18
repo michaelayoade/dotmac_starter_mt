@@ -20,7 +20,11 @@ from dotmac_kernel.namespaces import (
     revision_id_pattern,
 )
 from dotmac_media_observations.manifest import module
-from dotmac_media_observations.models import APPEND_ONLY_TABLES, ALL_TABLES, TENANT_TABLES
+from dotmac_media_observations.models import (
+    APPEND_ONLY_TABLES,
+    ALL_TABLES,
+    TENANT_TABLES,
+)
 from sqlalchemy import ForeignKeyConstraint, UniqueConstraint
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -93,9 +97,10 @@ def test_append_only_tables_have_trigger_and_read_append_grants_only() -> None:
             assert (
                 f"GRANT SELECT, INSERT ON mod_mediaobs.{table.name} TO {role};" in sql
             )
-        assert f"GRANT SELECT, INSERT, UPDATE" not in sql.split(
-            f"mod_mediaobs.{table.name}", 1
-        )[0][-80:]
+        assert (
+            f"GRANT SELECT, INSERT, UPDATE"
+            not in sql.split(f"mod_mediaobs.{table.name}", 1)[0][-80:]
+        )
 
 
 def test_provider_and_product_names_do_not_enter_package_code() -> None:
@@ -115,9 +120,7 @@ def test_provider_and_product_names_do_not_enter_package_code() -> None:
     for path, source in _python_sources().items():
         tree = ast.parse(source)
         identifiers = {
-            node.id.lower()
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Name)
+            node.id.lower() for node in ast.walk(tree) if isinstance(node, ast.Name)
         } | {
             node.attr.lower()
             for node in ast.walk(tree)
@@ -163,7 +166,10 @@ def test_no_raw_payload_or_person_profile_column_exists() -> None:
         "revenue",
     }
     for table in ALL_TABLES:
-        assert not forbidden & set(table.c.keys()), (table.fullname, set(table.c.keys()))
+        assert not forbidden & set(table.c.keys()), (
+            table.fullname,
+            set(table.c.keys()),
+        )
 
 
 def test_node_and_metric_codes_are_columns_not_fixed_enums() -> None:
@@ -285,9 +291,7 @@ def test_attribution_boundary_detector_fires_on_a_planted_violation() -> None:
     def violations(source: str) -> set[str]:
         tree = ast.parse(source)
         names = {
-            node.id.lower()
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Name)
+            node.id.lower() for node in ast.walk(tree) if isinstance(node, ast.Name)
         }
         return names & {"lead_id", "customer_id", "authoritative_revenue"}
 

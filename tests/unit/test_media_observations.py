@@ -535,13 +535,13 @@ def test_provider_conversion_claim_remains_labelled_and_is_not_attribution(
             metric_version=1,
             period_start=T0,
             period_end=T0 + timedelta(days=1),
-            value=ExactMoney(
-                amount=Decimal("50000.00"), currency="NGN", minor_unit=2
-            ),
+            value=ExactMoney(amount=Decimal("50000.00"), currency="NGN", minor_unit=2),
         ),
     )
 
-    fact = emit_analytics_fact(db, tenant_id=TENANT, observation_id=result.observation_id)
+    fact = emit_analytics_fact(
+        db, tenant_id=TENANT, observation_id=result.observation_id
+    )
     assert fact.claim_status is ClaimStatus.PROVIDER_REPORTED
     assert fact.attribution_status == "not_attribution"
     assert not hasattr(fact, "lead_id")
@@ -671,11 +671,14 @@ def test_append_only_model_set_excludes_only_rebuildable_projections() -> None:
         "metric_observations",
         "reconciliation_evidence",
     } <= names
-    assert not {
-        CurrentEntity.__tablename__,
-        CurrentHierarchy.__tablename__,
-        CurrentMetric.__tablename__,
-    } & names
+    assert (
+        not {
+            CurrentEntity.__tablename__,
+            CurrentHierarchy.__tablename__,
+            CurrentMetric.__tablename__,
+        }
+        & names
+    )
 
 
 def test_provider_free_normalization_conformance_replays_a_stable_fixture(

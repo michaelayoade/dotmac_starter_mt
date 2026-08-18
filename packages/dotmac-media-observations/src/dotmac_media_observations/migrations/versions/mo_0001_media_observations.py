@@ -141,7 +141,9 @@ def upgrade() -> None:
         sa.Column("received_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("normalization_version", sa.Integer(), nullable=False),
         sa.Column("restates_observation_id", sa.Uuid(), nullable=True),
-        sa.Column("restatement_depth", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column(
+            "restatement_depth", sa.Integer(), nullable=False, server_default="0"
+        ),
         _created_at(),
         sa.UniqueConstraint(
             "tenant_id",

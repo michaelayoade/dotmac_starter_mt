@@ -129,7 +129,10 @@ class ObservationSource:
             _require_text(name, getattr(self, name), maximum=255)
         _require_aware("observed_at", self.observed_at)
         _require_aware("received_at", self.received_at)
-        if type(self.normalization_version) is not int or self.normalization_version < 1:
+        if (
+            type(self.normalization_version) is not int
+            or self.normalization_version < 1
+        ):
             raise InvalidObservation("normalization_version must be a positive integer")
 
 
@@ -171,20 +174,28 @@ class MetricDefinitionDeclaration:
         _require_code("metric unit", self.unit)
         _require_text("declared_by", self.declared_by, maximum=255)
         _require_aware("declared_at", self.declared_at)
-        if self.semantic in {
-            MetricSemantic.IMPRESSIONS,
-            MetricSemantic.REACH,
-            MetricSemantic.CLICKS,
-            MetricSemantic.ENGAGEMENTS,
-            MetricSemantic.CONVERSION_COUNT,
-        } and self.value_type is not MetricValueType.COUNT:
+        if (
+            self.semantic
+            in {
+                MetricSemantic.IMPRESSIONS,
+                MetricSemantic.REACH,
+                MetricSemantic.CLICKS,
+                MetricSemantic.ENGAGEMENTS,
+                MetricSemantic.CONVERSION_COUNT,
+            }
+            and self.value_type is not MetricValueType.COUNT
+        ):
             raise InvalidObservation(
                 f"metric semantic {self.semantic} requires count value_type"
             )
-        if self.semantic in {
-            MetricSemantic.SPEND,
-            MetricSemantic.CONVERSION_VALUE,
-        } and self.value_type is not MetricValueType.MONEY:
+        if (
+            self.semantic
+            in {
+                MetricSemantic.SPEND,
+                MetricSemantic.CONVERSION_VALUE,
+            }
+            and self.value_type is not MetricValueType.MONEY
+        ):
             raise InvalidObservation(
                 f"metric semantic {self.semantic} requires money value_type"
             )
@@ -338,7 +349,9 @@ class MetricObservation:
         _require_aware("period_start", self.period_start)
         _require_aware("period_end", self.period_end)
         if self.period_start >= self.period_end:
-            raise InvalidObservation("metric period requires start < end under [start,end)")
+            raise InvalidObservation(
+                "metric period requires start < end under [start,end)"
+            )
 
 
 ObservationCommand: TypeAlias = (
@@ -462,7 +475,9 @@ class DerivedRatio:
     claim_status: ClaimStatus = ClaimStatus.DERIVED_PROJECTION
 
 
-def derive_ratio(numerator: Decimal, denominator: Decimal, *, unit: str) -> DerivedRatio:
+def derive_ratio(
+    numerator: Decimal, denominator: Decimal, *, unit: str
+) -> DerivedRatio:
     _require_decimal("ratio numerator", numerator)
     _require_decimal("ratio denominator", denominator)
     _require_code("ratio unit", unit)
@@ -491,7 +506,11 @@ def _require_version(value: int) -> None:
 
 
 def _require_aware(name: str, value: datetime) -> None:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
         raise InvalidObservation(f"{name} must be timezone-aware")
 
 
@@ -509,7 +528,9 @@ def _validate_aggregate_mapping(values: dict[str, JsonValue]) -> None:
         raise InvalidObservation("normalized properties must be a mapping")
     for key, value in values.items():
         if not isinstance(key, str) or not key.strip():
-            raise InvalidObservation("normalized property names must be non-empty strings")
+            raise InvalidObservation(
+                "normalized property names must be non-empty strings"
+            )
         tokens = {token for token in re.split(r"[^a-z0-9]+", key.lower()) if token}
         if tokens & _FORBIDDEN_AGGREGATE_TOKENS:
             raise InvalidObservation(

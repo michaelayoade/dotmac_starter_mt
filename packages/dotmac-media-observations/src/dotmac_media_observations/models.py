@@ -63,7 +63,9 @@ class NodeDefinition(Base):
     traits: Mapped[dict[str, object]] = mapped_column(_JSON, nullable=False)
     definition_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     declared_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    declared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    declared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -99,7 +101,9 @@ class MetricDefinition(Base):
     )
     definition_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     declared_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    declared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    declared_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -148,7 +152,9 @@ class ObservationEnvelope(Base):
     source_observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     normalization_version: Mapped[int] = mapped_column(Integer, nullable=False)
     restates_observation_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
     restatement_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -171,9 +177,7 @@ class ObservationReceipt(Base):
             ondelete="RESTRICT",
             name="fk_media_receipts_observation",
         ),
-        Index(
-            "ix_media_receipts_tenant_observation", "tenant_id", "observation_id"
-        ),
+        Index("ix_media_receipts_tenant_observation", "tenant_id", "observation_id"),
         schema_table_args(SCHEMA),
     )
 
@@ -182,7 +186,9 @@ class ObservationReceipt(Base):
     observation_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     installation_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     transport_receipt_ref: Mapped[str] = mapped_column(String(255), nullable=False)
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -239,9 +245,7 @@ class EntityFact(Base):
 class HierarchyFact(Base):
     __tablename__ = "hierarchy_observations"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "id", name="uq_media_hierarchy_facts_tenant_id"
-        ),
+        UniqueConstraint("tenant_id", "id", name="uq_media_hierarchy_facts_tenant_id"),
         UniqueConstraint(
             "tenant_id",
             "observation_id",
@@ -315,8 +319,12 @@ class MetricPeriod(Base):
     entity_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     metric_code: Mapped[str] = mapped_column(String(80), nullable=False)
     metric_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    period_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    period_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -397,7 +405,9 @@ class MetricFact(Base):
     period_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     value_type: Mapped[str] = mapped_column(String(16), nullable=False)
     count_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    decimal_value: Mapped[Decimal | None] = mapped_column(Numeric(38, 18), nullable=True)
+    decimal_value: Mapped[Decimal | None] = mapped_column(
+        Numeric(38, 18), nullable=True
+    )
     money_amount: Mapped[Decimal | None] = mapped_column(Numeric(38, 18), nullable=True)
     money_minor_units: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     money_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)

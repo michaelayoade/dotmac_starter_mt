@@ -76,16 +76,22 @@ def run_normalized_conformance(
         )
     for declaration in first.node_declarations:
         if declaration.tenant_id not in tenant_ids:
-            raise InvalidObservation("node declaration tenant differs from observations")
+            raise InvalidObservation(
+                "node declaration tenant differs from observations"
+            )
         declare_node_type(db, declaration)
     for declaration in first.metric_declarations:
         if declaration.tenant_id not in tenant_ids:
-            raise InvalidObservation("metric declaration tenant differs from observations")
+            raise InvalidObservation(
+                "metric declaration tenant differs from observations"
+            )
         declare_metric(db, declaration)
 
     for observation in first.observations:
         _record(db, observation)
-    replays = tuple(_record(db, observation).status for observation in second.observations)
+    replays = tuple(
+        _record(db, observation).status for observation in second.observations
+    )
     if any(status is not RecordStatus.REPLAYED for status in replays):
         raise InvalidObservation(
             "normalized producer replay created new facts for an identical fixture"
@@ -99,7 +105,8 @@ def run_normalized_conformance(
 
 
 def _record(
-    db: Session, observation: EntityObservation | HierarchyObservation | MetricObservation
+    db: Session,
+    observation: EntityObservation | HierarchyObservation | MetricObservation,
 ) -> RecordOutcome:
     if isinstance(observation, EntityObservation):
         return record_entity(db, observation)

@@ -127,7 +127,11 @@ def _seed_tenants(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:
                         "INSERT INTO public.tenants (id, slug, name) "
                         "VALUES (:id, :slug, :name)"
                     ),
-                    {"id": tenant_id, "slug": f"{slug}-{tenant_id.hex[:6]}", "name": slug},
+                    {
+                        "id": tenant_id,
+                        "slug": f"{slug}-{tenant_id.hex[:6]}",
+                        "name": slug,
+                    },
                 )
     finally:
         engine.dispose()
@@ -246,18 +250,26 @@ def test_online_role_sees_only_its_tenant(
                 text("SELECT set_config('app.current_tenant', :tenant, false)"),
                 {"tenant": str(tenant_a)},
             )
-            visible = connection.execute(
-                text("SELECT tenant_id FROM mod_mediaobs.observations")
-            ).scalars().all()
+            visible = (
+                connection.execute(
+                    text("SELECT tenant_id FROM mod_mediaobs.observations")
+                )
+                .scalars()
+                .all()
+            )
             assert visible == [tenant_a]
 
             connection.execute(
                 text("SELECT set_config('app.current_tenant', :tenant, false)"),
                 {"tenant": str(tenant_b)},
             )
-            visible = connection.execute(
-                text("SELECT tenant_id FROM mod_mediaobs.observations")
-            ).scalars().all()
+            visible = (
+                connection.execute(
+                    text("SELECT tenant_id FROM mod_mediaobs.observations")
+                )
+                .scalars()
+                .all()
+            )
             assert visible == [tenant_b]
     finally:
         engine.dispose()
