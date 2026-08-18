@@ -1219,7 +1219,8 @@ def record_observation(
         session.add(row)
         session.flush()
         if observation.kind == ObservationKind.DELIVERY:
-            assert observation.delivery_state is not None
+            if observation.delivery_state is None:
+                raise CampaignError("delivery observation lost its typed state")
             candidate = observation.delivery_state.value
             if (
                 _DELIVERY_PRECEDENCE[candidate]

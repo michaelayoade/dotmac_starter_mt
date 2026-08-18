@@ -30,6 +30,11 @@ from dotmac_campaigns.contracts import (
 _TEST_TENANT: Final[UUID] = UUID("00000000-0000-0000-0000-000000000001")
 
 
+def _check(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
 class FakeRenderer(Renderer):
     def render(self, request: RenderRequest) -> RenderedMessage:
         body = f"Rendered {request.template_slug}"
@@ -164,10 +169,10 @@ def assert_renderer_conformance(renderer: Renderer) -> None:
     )
     first = renderer.render(request)
     second = renderer.render(request)
-    assert first == second, "the same exact revision/context must render identically"
-    assert first.template_revision
-    assert len(first.fingerprint_sha256) == 64
-    assert first.body
+    _check(first == second, "the same exact revision/context must render identically")
+    _check(bool(first.template_revision), "renderer did not return a revision")
+    _check(len(first.fingerprint_sha256) == 64, "renderer digest is not SHA-256")
+    _check(bool(first.body), "renderer returned an empty body")
 
 
 def assert_sender_resolver_conformance(resolver: SenderResolver) -> None:
@@ -176,12 +181,12 @@ def assert_sender_resolver_conformance(resolver: SenderResolver) -> None:
     )
     first = resolver.resolve(request)
     second = resolver.resolve(request)
-    assert first == second, "sender selection must be deterministic for a snapshot"
-    assert first.sender_key == request.sender_key
-    assert first.address
-    assert len(first.fingerprint_sha256) == 64
-    assert not hasattr(first, "password")
-    assert not hasattr(first, "token")
+    _check(first == second, "sender selection must be deterministic for a snapshot")
+    _check(first.sender_key == request.sender_key, "sender key changed")
+    _check(bool(first.address), "sender address is empty")
+    _check(len(first.fingerprint_sha256) == 64, "sender digest is not SHA-256")
+    _check(not hasattr(first, "password"), "sender snapshot leaked a password")
+    _check(not hasattr(first, "token"), "sender snapshot leaked a token")
 
 
 def assert_timer_port_conformance(timers: TimerPort) -> None:
@@ -210,16 +215,22 @@ def assert_timer_port_conformance(timers: TimerPort) -> None:
         recorded_at=due_at,
         expires_at=None,
     )
-    assert second.generation == first.generation + 1
-    assert not timers.accept(
+    _check(
+        second.generation == first.generation + 1,
+        "timer generation did not advance",
+    )
+    stale = timers.accept(
         None, tenant_id=_TEST_TENANT, trigger=first.trigger(), accepted_at=due_at
-    ).current
-    assert timers.accept(
+    )
+    _check(not stale.current, "superseded timer was accepted")
+    current = timers.accept(
         None, tenant_id=_TEST_TENANT, trigger=second.trigger(), accepted_at=due_at
-    ).current
-    assert timers.accept(
+    )
+    _check(current.current, "current timer was refused")
+    replay = timers.accept(
         None, tenant_id=_TEST_TENANT, trigger=second.trigger(), accepted_at=due_at
-    ).replayed
+    )
+    _check(replay.replayed, "timer replay was not identified")
 
 
 __all__ = [
