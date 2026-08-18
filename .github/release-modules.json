@@ -549,6 +549,34 @@
           "python"
         ]
       }
+    },
+    "dotmac-collections": {
+      "package_dir": "packages/dotmac-collections",
+      "import_name": "dotmac_collections",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a70",
+      "db_schema": "mod_coll",
+      "tag_prefix": "dotmac-collections-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_collections/py.typed",
+          "dotmac_collections/manifest.py",
+          "dotmac_collections/models.py",
+          "dotmac_collections/migrations/__init__.py",
+          "dotmac_collections/migrations/versions/cl_0001_collections.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

@@ -47,6 +47,8 @@ production caller migrated to the canonical identity pair.
   label `durable_timers`, schema `mod_timers`, prefix `dt`. The module consumes
   the existing `outbox_relay.v1` prerequisite but owns timer identity,
   generation and terminal evidence outside the kernel.
+- Allocated the permanent `cl` / `collections` / `mod_coll` tenant-only
+  Collections lineage alongside the integrated commerce modules.
 
 ### Changed
 

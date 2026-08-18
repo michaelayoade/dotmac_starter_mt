@@ -67,6 +67,11 @@
       "reason": "AWAITING FIRST RELEASE, not missing release metadata. a1 is the first complete dual-plane operational-receivables owner and is intentionally never-published while its focused Starter PR and the Vendor CP/Sub adoption-preparation PRs collect review and CI evidence. Michael authorized draft PR preparation but explicitly did not authorize publishing a release. Remove this row only when the exact dotmac-billing-v0.1.0a1 tag has been produced by the verified module release workflow after separate release authorization; never repair it by editing the declared version down or by publishing before the adopter evidence is reviewable.",
       "state": "never-published"
     },
+    "dotmac-collections": {
+      "declared": "0.1.0a1",
+      "reason": "AWAITING FIRST RELEASE. a1 is the tenant-only Collections policy and case owner integrated with Billing and Durable Timers on the shared a70 foundation. It is intentionally unpublished while the single Starter PR and Sub adoption-preparation PR collect review, migration and shadow-reconciliation evidence. Remove this row only when the exact dotmac-collections-v0.1.0a1 tag has been produced by the verified module release workflow after separate release authorization; never edit the declared version down or treat integration as a production authority switch.",
+      "state": "never-published"
+    },
     "dotmac-durable-timers": {
       "declared": "0.1.0a1",
       "reason": "AWAITING FIRST RELEASE. The previously overlapping provisional kernel allocation is reconciled into the integrated commerce branch at a70. The module remains intentionally unpublished while the combined Starter PR and the typed Sub adoption sequence collect review and CI evidence. Remove this row only when the exact dotmac-durable-timers-v0.1.0a1 tag has been produced by the verified module release workflow after separate authorization; never edit the declared version down or publish before the adopter evidence is reviewable.",

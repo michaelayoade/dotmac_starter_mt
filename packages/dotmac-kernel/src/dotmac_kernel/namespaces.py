@@ -607,6 +607,17 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-collections` — the tenant-only delinquency-policy and case owner.
+# `cl`, `collections`, and `mod_coll` are its permanent lineage identities.
+# Receivable money remains outside this schema and is consumed through a typed
+# reader; consequence and timer mechanics remain separately owned ports.
+COLLECTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="collections",
+    prefix="cl",
+    branch_label="collections",
+    db_schema=module_schema("coll"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -621,6 +632,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     NUMBERING_MIGRATION_OWNER,
     BILLING_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    COLLECTIONS_MIGRATION_OWNER,
 )
 
 
@@ -954,6 +966,7 @@ __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "BILLING_MIGRATION_OWNER",
+    "COLLECTIONS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",

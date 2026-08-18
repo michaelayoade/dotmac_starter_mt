@@ -52,6 +52,7 @@ on:
           - dotmac-numbering
           - dotmac-billing
           - dotmac-durable-timers
+          - dotmac-collections
           - dotmac-integration
           - dotmac-approvals
           - dotmac-application-directory

@@ -1,0 +1,20 @@
+package = "dotmac-collections"
+status = "audit-complete"
+source_mode = "product-first"
+source_repositories = ["dotmac_sub"]
+source_revisions = ["dotmac_sub:d1a1a913e287ffadaf21b7da7be448f2c28b5483"]
+source_paths = [
+  "dotmac_sub/app/services/dunning_service.py",
+  "dotmac_sub/app/tasks/dunning_runner.py",
+  "dotmac_sub/app/tasks/prepaid_balance_sweep.py",
+]
+source_tests = [
+  "dotmac_sub/tests/test_dunning_service.py",
+  "dotmac_sub/tests/test_prepaid_balance_sweep.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_sub"]
+first_cutover = "dotmac_sub tenant plane after backfill, shadow comparison, reconciliation and one coupled authority watermark"
+drift_proof = "preserved-scenario fixture plus two-directional legacy-path ratchets and sensitivity proofs"
+local_copy_retirement = "Retire dunning_runner and prepaid_balance_sweep decision paths only after dotmac_sub shadow parity, rollback proof, zero divergent writes, and sensitivity-proven two-directional ratchets."
+next_action = "Prepare dotmac_sub adoption without production authority switch or legacy deletion."
