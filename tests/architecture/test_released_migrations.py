@@ -559,6 +559,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-files-v0.1.0a3": (
+        "dotmac-files",
+        "c6ef6cd",
+        {
+            "fi_0001_stored_files.py": (
+                "58976eab44ccfaaa77af255c52f92ef333e650e89ee3f6808211820b3c3b4fd0"
+            ),
+            "fi_0002_selectable_planes.py": (
+                "9cdaf0da282402777d6c2e694c60d29f8078a0d48c64211e9a6a67dc1ac05581"
+            ),
+        },
+    ),
 }
 
 
@@ -616,7 +628,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: Approvals a5, Integration a9 and Allocation a6 are published, so their
+#: Approvals a5, Integration a9, Allocation a6 and Files a3 are published, so their
 #: editable sets are empty; the next migration must enter this map before it
 #: can ship. The release lane does not wait for an open branch, which is why
 #: "released" is read from tags rather than from an intended version number.
@@ -624,7 +636,7 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-approvals": frozenset(),
     "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
-    "dotmac-files": frozenset({"fi_0002_selectable_planes.py"}),
+    "dotmac-files": frozenset(),
 }
 
 
