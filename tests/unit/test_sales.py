@@ -6,54 +6,144 @@ import uuid
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from dotmac_kernel.idempotency_models import IdempotencyRecord
-from dotmac_sales import (
-    AcceptedQuoteImmutable,
-    AcceptQuoteCommand,
-    AuthorQuoteCommand,
-    CaptureLeadOriginCommand,
-    ChangeQuoteDiscountCommand,
-    CreateLeadCommand,
-    CreatePipelineCommand,
-    CreateStageCommand,
-    DiscountInput,
-    DiscountType,
-    LeadStatus,
-    QuoteLineDraft,
-    QuoteStatus,
-    SalesActorRef,
-    SalesActorSnapshot,
-    SalesSubjectRef,
-    SalesSubjectSnapshot,
-    accept_quote,
-    author_quote,
-    capture_lead_origin,
-    change_quote_discount,
-    create_lead,
-    create_pipeline,
-    create_stage,
-    transition_lead,
-    transition_quote,
-    update_quote,
-)
-from dotmac_sales.models import (
-    Lead,
-    LeadOrigin,
-    Pipeline,
-    PipelineStage,
-    Quote,
-    QuoteDiscountRevision,
-    QuoteLine,
-)
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+if TYPE_CHECKING:
+    from dotmac_sales import (
+        AcceptedQuoteImmutable,
+        AcceptQuoteCommand,
+        AuthorQuoteCommand,
+        CaptureLeadOriginCommand,
+        ChangeQuoteDiscountCommand,
+        CreateLeadCommand,
+        CreatePipelineCommand,
+        CreateStageCommand,
+        DiscountInput,
+        DiscountType,
+        LeadStatus,
+        QuoteLineDraft,
+        QuoteStatus,
+        SalesActorRef,
+        SalesActorSnapshot,
+        SalesSubjectRef,
+        SalesSubjectSnapshot,
+        accept_quote,
+        author_quote,
+        capture_lead_origin,
+        change_quote_discount,
+        create_lead,
+        create_pipeline,
+        create_stage,
+        transition_lead,
+        transition_quote,
+        update_quote,
+    )
+    from dotmac_sales.models import (
+        Lead,
+        LeadOrigin,
+        Pipeline,
+        PipelineStage,
+        Quote,
+        QuoteDiscountRevision,
+        QuoteLine,
+    )
+
 TENANT = uuid.uuid4()
 OTHER_TENANT = uuid.uuid4()
-ACTOR = SalesActorRef("staff", "staff-7")
-SUBJECT = SalesSubjectRef("party", "party-9", "3")
+ACTOR = cast("SalesActorRef", None)
+SUBJECT = cast("SalesSubjectRef", None)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _load_sales_after_reference_engine(unit_engine: object) -> Iterator[None]:
+    """Importing an optional package is not composing it into Starter.
+
+    The shared fixture still uses the released kernel harness, which discovers
+    the ten module schemas present when it is built.  Load this candidate only
+    after that fixture exists so the sales tests cannot make unrelated Starter
+    tests pretend they compose an eleventh package.  The active Timer workstream
+    owns the generic explicit-composition harness change.
+    """
+    del unit_engine
+    from dotmac_kernel.models import Base
+
+    baseline_tables = set(Base.metadata.tables)
+    import dotmac_sales as sales
+    from dotmac_sales import models
+
+    public_names = (
+        "AcceptedQuoteImmutable",
+        "AcceptQuoteCommand",
+        "AuthorQuoteCommand",
+        "CaptureLeadOriginCommand",
+        "ChangeQuoteDiscountCommand",
+        "CreateLeadCommand",
+        "CreatePipelineCommand",
+        "CreateStageCommand",
+        "DiscountInput",
+        "DiscountType",
+        "LeadStatus",
+        "QuoteLineDraft",
+        "QuoteStatus",
+        "SalesActorRef",
+        "SalesActorSnapshot",
+        "SalesSubjectRef",
+        "SalesSubjectSnapshot",
+        "accept_quote",
+        "author_quote",
+        "capture_lead_origin",
+        "change_quote_discount",
+        "create_lead",
+        "create_pipeline",
+        "create_stage",
+        "transition_lead",
+        "transition_quote",
+        "update_quote",
+    )
+    model_names = (
+        "Lead",
+        "LeadOrigin",
+        "Pipeline",
+        "PipelineStage",
+        "Quote",
+        "QuoteDiscountRevision",
+        "QuoteLine",
+    )
+    globals().update({name: getattr(sales, name) for name in public_names})
+    globals().update({name: getattr(models, name) for name in model_names})
+    globals()["ACTOR"] = sales.SalesActorRef("staff", "staff-7")
+    globals()["SUBJECT"] = sales.SalesSubjectRef("party", "party-9", "3")
+    sales_tables = {
+        key
+        for key, table in Base.metadata.tables.items()
+        if key not in baseline_tables and table.schema == "mod_sales"
+    }
+    assert sales_tables == {
+        f"mod_sales.{name}"
+        for name in (
+            "pipelines",
+            "pipeline_stages",
+            "leads",
+            "lead_origins",
+            "quotes",
+            "quote_lines",
+            "quote_discount_revisions",
+        )
+    }
+    try:
+        yield
+    finally:
+        # The candidate is tested with its own engine below. Restore global
+        # kernel metadata so later legacy harness tests do not infer that the
+        # reference assembly composes this optional module. The Timer-owned
+        # explicit-composition harness will remove the need for this isolation.
+        for key in sales_tables:
+            Base.metadata.remove(Base.metadata.tables[key])
 
 
 class FixedClock:

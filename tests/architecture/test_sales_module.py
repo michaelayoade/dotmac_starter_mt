@@ -6,11 +6,6 @@ import ast
 from dataclasses import fields
 from pathlib import Path
 
-import dotmac_sales
-from dotmac_sales import AcceptedQuoteHandoffV1
-from dotmac_sales.manifest import module
-from dotmac_sales.models import SCHEMA, TENANT_TABLES
-
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "packages" / "dotmac-sales"
 SOURCE = PACKAGE / "src" / "dotmac_sales"
@@ -18,6 +13,9 @@ MIGRATION = SOURCE / "migrations" / "versions" / "sa_0001_sales.py"
 
 
 def test_manifest_owns_only_the_tenant_sales_lineage() -> None:
+    from dotmac_sales.manifest import module
+    from dotmac_sales.models import SCHEMA, TENANT_TABLES
+
     assert module.code == "sales"
     assert module.short_code == "sales"
     assert module.migration_prefix == "sa"
@@ -34,6 +32,8 @@ def test_manifest_owns_only_the_tenant_sales_lineage() -> None:
 
 
 def test_public_surface_exposes_the_installed_lineage() -> None:
+    import dotmac_sales
+
     assert "versions_dir" in dotmac_sales.__all__
     assert dotmac_sales.versions_dir() == MIGRATION.parent
     assert MIGRATION.is_file()
@@ -41,6 +41,7 @@ def test_public_surface_exposes_the_installed_lineage() -> None:
 
 def test_every_sales_model_is_tenant_scoped_in_its_own_schema() -> None:
     from dotmac_sales.models import (
+        TENANT_TABLES,
         Lead,
         LeadOrigin,
         Pipeline,
@@ -71,6 +72,8 @@ def test_every_sales_model_is_tenant_scoped_in_its_own_schema() -> None:
 
 
 def test_handoff_cannot_carry_downstream_owner_ids() -> None:
+    from dotmac_sales import AcceptedQuoteHandoffV1
+
     names = {field.name for field in fields(AcceptedQuoteHandoffV1)}
     forbidden = {
         "sales_order_id",
