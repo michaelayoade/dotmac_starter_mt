@@ -14,6 +14,7 @@ from dotmac_files.contracts import (
     UnsafeFile,
 )
 from dotmac_files.manifest import module
+from dotmac_files.migrations import versions_dir
 from dotmac_files.models import PlatformStoredFile, TenantStoredFile
 from dotmac_files.physical import (
     delete_object,
@@ -45,7 +46,7 @@ from dotmac_files.service import (
     stage_file,
 )
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0a3"
 
 __all__ = [
     "FileError",
@@ -86,4 +87,5 @@ __all__ = [
     "record_presence",
     "request_deletion",
     "stage_file",
+    "versions_dir",
 ]

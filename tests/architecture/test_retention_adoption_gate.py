@@ -114,6 +114,13 @@ def test_replay_evidence_has_a_period_and_says_whether_it_is_enforced() -> None:
             "number without enforcing it leaves evidence retained indefinitely "
             "while the record reads as though a limit applies"
         )
+    if not behaviour["replay_evidence_released"]:
+        assert "replay_evidence_released" in " ".join(
+            _record()["adoption"]["blocked_on"]
+        ), (
+            "implemented-but-unpublished retention code cannot authorize an "
+            "adopter that can only install the previous wheel"
+        )
 
 
 def test_the_code_released_flag_is_not_the_adoption_flag() -> None:

@@ -2,13 +2,14 @@
 
 ## Release state — read this before pinning
 
-**Eight versions have been released. Pin `0.1.0a8`.** Tags
-`dotmac-integration-v0.1.0a1` … `-v0.1.0a8`, from `1b1d62b`, `aaa3b54`,
-`b14f66e`, `306a40e`, `7828697`, `7e05430`, `c669b24` and `4b1e867`.
+**Nine versions have been released. Pin `0.1.0a9`.** Tags
+`dotmac-integration-v0.1.0a1` … `-v0.1.0a9`, from `1b1d62b`, `aaa3b54`,
+`b14f66e`, `306a40e`, `7828697`, `7e05430`, `c669b24`, `4b1e867` and
+`92ae7a6`.
 
-`0.1.0a8` is the latest published version. It retains SPI 1.2 and adds the
-module-owned indexed shadow-evidence store needed for the first capability
-cutover.
+`0.1.0a9` is the latest published version. It retains SPI 1.2, implements the
+separately ruled replay-evidence lifetime and preserves released legal-hold
+history when an eligible receipt is deleted.
 
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
@@ -36,6 +37,9 @@ dependency explicit and restores installation/configuration lifecycle parity.
 `0.1.0a8` was published, installed back from the private index, registered and
 tagged on 2026-08-17 from `4b1e867` by release run `32050382156`.
 
+`0.1.0a9` was published, installed back from the private index, registered and
+tagged on 2026-08-18 from `92ae7a6` by release run `32102257979`.
+
 This section exists because the `0.1.0a2` heading previously carried a date and
 read exactly like a release entry while being unreleased — and a changelog that
 misdescribes what is installable is how a consumer comes to pin something that
@@ -50,6 +54,23 @@ receipt delivery, retention, the type gate) and each wrote its own section
 before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
+
+## 0.1.0a9 — released 2026-08-18
+
+### Finite replay evidence and durable legal-hold history
+
+- Adds a separately required replay-evidence period to `RetentionPolicy`; it
+  must outlive the content period and neither period has a library default.
+- Adds `purge_expired_replay_evidence`, which deletes only closed receipts whose
+  content was already redacted, whose evidence period elapsed and which have no
+  active legal hold. The conditional delete repeats those predicates so a
+  concurrent hold still wins.
+- Adds additive revision `ig_0011`. Released migrations remain byte-frozen.
+  The old cascading hold FK is replaced by PostgreSQL triggers that reject an
+  invented hold and reject deletion under an active hold, while allowing a
+  released hold row and its exact receipt UUID to outlive the receipt.
+- Records purged internal receipt UUIDs in the module's existing platform audit
+  facility. Provider event ids, payloads and header values never enter it.
 
 ## 0.1.0a8 — released 2026-08-17
 

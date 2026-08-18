@@ -120,16 +120,15 @@ def test_an_allowlisted_module_resolves_and_emits_its_facts() -> None:
 
 
 def test_files_is_release_allowlisted_with_its_schema_allocation() -> None:
-    result = _resolve("dotmac-files", version="0.1.0a2")
+    result = _resolve("dotmac-files", version="0.1.0a3")
     assert result.returncode == 0, result.stderr
     emitted = dict(line.split("=", 1) for line in result.stdout.strip().splitlines())
-    # `mod_files` is allocated in a54, but the floor is now a56: the lineage
-    # declares `requires` and calls `resolve_depends_on` / `require_prerequisites`
-    # (ADR-0006 D1 amendment), all added in a56, so an earlier kernel cannot
-    # import the manifest at all. Capability over allocation, as with ticketing.
-    assert emitted["kernel_floor"] == "0.1.0a56"
+    # `mod_files` is allocated in a54; a56 added its prerequisite contract,
+    # and a3 now consumes ADR-0028's explicit selection surface from a61.
+    # The highest capability actually imported sets the floor.
+    assert emitted["kernel_floor"] == "0.1.0a61"
     assert emitted["db_schema"] == "mod_files"
-    assert emitted["tag"] == "dotmac-files-v0.1.0a2"
+    assert emitted["tag"] == "dotmac-files-v0.1.0a3"
 
 
 def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:

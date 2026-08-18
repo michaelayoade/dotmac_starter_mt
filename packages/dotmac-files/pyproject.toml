@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "dotmac-files"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane stored-object lifecycle and validation"
 authors = ["DotMac"]
 readme = "README.md"
@@ -12,7 +12,7 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a56"
+dotmac-kernel = ">=0.1.0a61"
 sqlalchemy = "^2.0"
 
 [build-system]

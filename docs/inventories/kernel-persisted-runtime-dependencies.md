@@ -898,6 +898,16 @@ editable in this repository. Whether the derivation should stay on its own
 merits is a separate question and is not decided here; what is established is
 that the premise recorded in the kernel's own docstring is false.
 
+**Resolution note — 2026-08-18.** PR #234 migrated those nine Template Studio
+callers and replaced the false premise with two measured `dotmac_workspace`
+callers. Workspace PR #10 then migrated both. The retirement sweep also found
+nine Starter assembly callers in Licensing, RBAC and Settings that the
+Template-Studio-only guard had never observed; kernel a69 migrates those and
+removes both Party-to-kind and Party-to-identifier derivation. The original
+finding above remains the dated evidence; this note records why its then-open
+decision is now closed and why the replacement guard scans every shipped
+production root rather than one package.
+
 ### 8.3 `migration-collisions.md` is stale on Sub, in the direction that matters
 
 `docs/inventories/migration-collisions.md:260` records that Sub's

@@ -14,13 +14,22 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from dotmac_files import models, physical, service
 from dotmac_files.manifest import module
 from dotmac_kernel.namespaces import FILES_MIGRATION_OWNER, MIGRATION_OWNER_LEDGER
+from dotmac_kernel.planes import (
+    ModulePlane,
+    ModulePlaneSelection,
+    ModulePlaneSelectionError,
+    supported_plane_sets,
+    validate_module_plane_selections,
+)
 
 MODULE_ROOT = Path(inspect.getfile(service)).parent
 MIGRATIONS = MODULE_ROOT / "migrations/versions"
 MIGRATION = MIGRATIONS / "fi_0001_stored_files.py"
+PLANE_MIGRATION = MIGRATIONS / "fi_0002_selectable_planes.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -34,6 +43,61 @@ def test_manifest_matches_the_immutable_namespace_allocation() -> None:
     assert tuple(module.tables) == ("stored_files",)
     assert tuple(module.platform_tables) == ("platform_stored_files",)
     assert module.core is False
+
+
+def test_files_supports_only_the_plane_sets_with_named_candidates() -> None:
+    """ERP and Academy target TENANT; nobody targets PLATFORM alone today."""
+    assert supported_plane_sets(module) == (
+        (ModulePlane.TENANT,),
+        (ModulePlane.PLATFORM, ModulePlane.TENANT),
+    )
+
+    assert validate_module_plane_selections(
+        [module],
+        [ModulePlaneSelection(module="files", planes=(ModulePlane.TENANT,))],
+    )
+    assert validate_module_plane_selections(
+        [module],
+        [
+            ModulePlaneSelection(
+                module="files",
+                planes=(ModulePlane.TENANT, ModulePlane.PLATFORM),
+            )
+        ],
+    )
+
+
+def test_files_refuses_an_unclaimed_platform_only_installation() -> None:
+    with pytest.raises(ModulePlaneSelectionError, match="does not support"):
+        validate_module_plane_selections(
+            [module],
+            [ModulePlaneSelection(module="files", planes=(ModulePlane.PLATFORM,))],
+        )
+
+
+def test_files_refuses_an_omitted_plane_selection() -> None:
+    with pytest.raises(ModulePlaneSelectionError, match="has no plane selection"):
+        validate_module_plane_selections([module], [])
+
+
+def test_selectable_plane_migration_is_additive_to_the_released_root() -> None:
+    """The published fi_0001 stays immutable; fi_0002 converges final shape."""
+    source = PLANE_MIGRATION.read_text(encoding="utf-8")
+    assigned = {
+        target.id: node.value
+        for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+
+    assert ast.literal_eval(assigned["revision"]) == "fi_0002_selectable_planes"
+    assert ast.literal_eval(assigned["down_revision"]) == "fi_0001_stored_files"
+    assert "selected_module_planes(MODULE_CODE)" in source
+    assert (
+        "LOCK TABLE mod_files.platform_stored_files IN ACCESS EXCLUSIVE MODE" in source
+    )
+    assert "DROP TABLE mod_files.platform_stored_files" in source
 
 
 def test_tenant_stored_file_is_scoped_and_has_no_domain_attachment_columns() -> None:
@@ -230,7 +294,7 @@ def test_public_package_import_needs_no_database_configuration() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "0.1.0a2"
+    assert result.stdout.strip() == "0.1.0a3"
 
 
 def test_lineage_passes_the_composed_migration_gate() -> None:
@@ -254,6 +318,9 @@ def test_lineage_passes_the_composed_migration_gate() -> None:
             MIGRATIONS,
         ],
         bindings=ASSEMBLY_PREREQUISITE_BINDINGS,
+        module_planes=(
+            ModulePlaneSelection(module="files", planes=(ModulePlane.TENANT,)),
+        ),
     )
     assert report.ok, f"composed gate violations: {report.violations}"
 
@@ -272,6 +339,9 @@ def test_the_gate_refuses_this_module_in_an_assembly_that_binds_nothing() -> Non
             MIGRATIONS,
         ],
         bindings=(),
+        module_planes=(
+            ModulePlaneSelection(module="files", planes=(ModulePlane.TENANT,)),
+        ),
     )
     assert not report.ok
     assert any("binds no provider" in v for v in report.violations)

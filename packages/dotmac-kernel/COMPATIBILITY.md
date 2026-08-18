@@ -86,9 +86,11 @@ and may change or disappear without a deprecation cycle**.
    dotmac_kernel` succeeds without `DATABASE_URL`. It covers models, exceptions,
    feature manifests, config, identity/query helpers, security primitives, audit,
    and the settings read/declare contract.
-2. **Supported submodules** — `from dotmac_kernel.<module> import ...`. The DB
-   session/guard/middleware/platform-auth APIs live here (not at the top level)
-   because importing them constructs the SQLAlchemy engine from `DATABASE_URL`.
+2. **Supported submodules** — `from dotmac_kernel.<module> import ...`. The
+   eager DB session owner and engine live here (not at the top level). Route
+   guards in `dotmac_kernel.deps` are safe to import before database
+   configuration: `get_db` and `get_platform_db` defer entry into the owner
+   until FastAPI resolves the dependency for a request.
 
 ### Supported modules and their public names
 
@@ -526,10 +528,12 @@ require PostgreSQL enum surgery in every product database.
 - `system` may omit an identifier when no component or job can be named;
 - `user`, `service`, and `api_key` require a non-empty stable identifier;
 - `api_key` stores a key ID, never the credential or token;
-- an explicit or legacy `user` with only `actor_party_id` derives the Party UUID
-  as its identifier; and
-- omitting both actor kind and Party raises `MissingAuditActorError` instead of
-  fabricating a `system` actor.
+- `actor_type` is always explicit; every non-system kind also supplies an
+  explicit `actor_id`;
+- `actor_party_id` never substitutes for either member of the canonical pair —
+  it remains optional accountability enrichment; and
+- omitting the kind, or omitting a required identifier, raises
+  `MissingAuditActorError` instead of fabricating a `system` or `user` actor.
 
 `occurred_at` is domain time. The database supplies `now()` for an ordinary new
 event, while a caller supplies an earlier or later value for a reconstruction or

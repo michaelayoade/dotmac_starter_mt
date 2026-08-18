@@ -770,6 +770,128 @@ def test_shadow_evidence_is_append_reachable_without_tenant_sequence_access(
     assert not tenant_sequence
 
 
+def test_released_legal_hold_history_outlives_replay_evidence(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The exact failure `ig_0006` encoded: CASCADE erased the hold record.
+
+    This drives the live PostgreSQL catalogue, not the SQLite ORM fixture where
+    foreign keys are disabled. A released hold must survive deletion with its
+    original receipt UUID, while a newly invented orphan is still refused by
+    the replacement trigger.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn, request)
+        receipt_id, hold_id = uuid.uuid4(), uuid.uuid4()
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.inbox_receipts ("
+                "id, installation_id, capability_binding_id, provider_event_id, "
+                "event_type, payload_digest, state) VALUES ("
+                ":id, :installation, :binding, 'released-hold', 'message', "
+                ":digest, 'processed')"
+            ),
+            {
+                "id": receipt_id,
+                "installation": installation_id,
+                "binding": binding_id,
+                "digest": "a" * 64,
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.receipt_legal_holds ("
+                "id, receipt_id, reason, policy_owner, placed_by, released_at, "
+                "released_by, release_reason) VALUES ("
+                ":id, :receipt, 'regulator', 'DPO', 'ops', now(), 'legal', "
+                "'matter closed')"
+            ),
+            {"id": hold_id, "receipt": receipt_id},
+        )
+
+        conn.execute(
+            text("DELETE FROM mod_intg.inbox_receipts WHERE id=:id"),
+            {"id": receipt_id},
+        )
+        preserved = conn.execute(
+            text(
+                "SELECT receipt_id, released_by FROM mod_intg.receipt_legal_holds "
+                "WHERE id=:id"
+            ),
+            {"id": hold_id},
+        ).one()
+        assert preserved.receipt_id == receipt_id
+        assert preserved.released_by == "legal"
+
+        with pytest.raises(IntegrityError), conn.begin_nested():
+            conn.execute(
+                text(
+                    "INSERT INTO mod_intg.receipt_legal_holds ("
+                    "id, receipt_id, reason, policy_owner, placed_by) VALUES ("
+                    ":id, :receipt, 'invented', 'DPO', 'ops')"
+                ),
+                {"id": uuid.uuid4(), "receipt": uuid.uuid4()},
+            )
+    engine.dispose()
+
+
+def test_active_legal_hold_refuses_even_a_direct_receipt_delete(
+    migrated_scratch: tuple[str, str],
+    request: pytest.FixtureRequest,
+) -> None:
+    """The service predicate is not the only thing protecting a live hold."""
+    from sqlalchemy.exc import IntegrityError
+
+    admin_url, _ = migrated_scratch
+    engine = create_engine(admin_url)
+    with engine.begin() as conn:
+        installation_id, binding_id = _installation_and_binding(conn, request)
+        receipt_id = uuid.uuid4()
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.inbox_receipts ("
+                "id, installation_id, capability_binding_id, provider_event_id, "
+                "event_type, payload_digest, state) VALUES ("
+                ":id, :installation, :binding, 'active-hold', 'message', "
+                ":digest, 'processed')"
+            ),
+            {
+                "id": receipt_id,
+                "installation": installation_id,
+                "binding": binding_id,
+                "digest": "b" * 64,
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO mod_intg.receipt_legal_holds ("
+                "id, receipt_id, reason, policy_owner, placed_by) VALUES ("
+                ":id, :receipt, 'regulator', 'DPO', 'ops')"
+            ),
+            {"id": uuid.uuid4(), "receipt": receipt_id},
+        )
+
+        with pytest.raises(IntegrityError), conn.begin_nested():
+            conn.execute(
+                text("DELETE FROM mod_intg.inbox_receipts WHERE id=:id"),
+                {"id": receipt_id},
+            )
+
+        assert (
+            conn.execute(
+                text("SELECT count(*) FROM mod_intg.inbox_receipts WHERE id=:id"),
+                {"id": receipt_id},
+            ).scalar_one()
+            == 1
+        )
+    engine.dispose()
+
+
 @pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "DELETE"])
 def test_a_route_is_not_reachable_by_the_tenant_application_role(
     migrated_scratch: tuple[str, str], privilege: str
