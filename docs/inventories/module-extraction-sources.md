@@ -5,6 +5,11 @@
 **ERP:** `4c9f492c` (`origin/main`)  
 **Sub:** `4790737c` (`origin/dev`)
 
+**2026-08-18 marketing addendum:** Starter `c6ef6cd7`, Mkt `1a185b47`,
+Sub `510b80ca`, ERP `dd6416cd`, CRM `60daaa2d`, Backoffice `fcdd8270`.
+Exact revisions and evidence paths are in
+[`marketing-suite-sources.md`](marketing-suite-sources.md).
+
 This inventory is the evidence input to ADR-0006's product-first extraction
 amendment. It answers a narrower question than the feature-surface inventories:
 before Dotmac creates or extends a shared distribution, which product code and
@@ -52,6 +57,27 @@ shared package, or maintaining two implementations.
 | Candidate | Evidence status | Product-first reading | Next gate |
 |---|---|---|---|
 | `dotmac-people` | **Audit complete; a1 released and uncomposed** | ERP is the only qualifying source for the narrow employment-directory contract. Kernel Party remains the identity owner; ERP Person, credentials, payroll, attendance, finance and integration fields do not port. The six-table `mod_people` plane, Party prerequisite, forced-RLS canaries, temporal primary-overlap enforcement and ERP parity behavior now live in `packages/dotmac-people`; no authority has moved. Full evidence in [`people-directory-sources.md`](people-directory-sources.md). | Compose exact kernel a71 and dotmac-people a1 in clean Backoffice and implement the narrow ERP projection/backfill/shadow contract. ERP's 131 FK declarations require a rebuildable compatibility projection after the sealed writer cutover; its projection ratchet remains separate from the lifecycle-writer ratchet. Backoffice composition alone moves no authority. |
+
+## Decomposed marketing suite candidates
+
+Michael activated this suite as a goal on 2026-08-18. These are audited
+candidates, not existing distributions or completed adoptions. Backoffice is
+the first adopter; Sub may later adopt selected exact releases independently.
+
+| Candidate distribution | Source mode and selected source | First implementation gate |
+|---|---|---|
+| `dotmac-content` | product-first from Mkt planning/content models, services and parity tests | Define the editorial owner without stored bytes, provider channels or generic tasks; port the canary first. |
+| `dotmac-sites` | greenfield-after-inventory; no qualifying implementation in the five audited repositories | Check in the greenfield proof and Backoffice canary; preserve a local immutable snapshot before `SiteRelease`. |
+| `dotmac-publishing` | product-first from Mkt post-delivery lifecycle and partial-success behavior | Replace direct provider adapters with a typed outbox contract owned by Integrator transport. |
+| `dotmac-media-observations` | product-first from Mkt remote-post/ad hierarchy and idempotent metric upserts | Keep every imported value observational and rebuildable; no provider SDK or authoritative campaign transition. |
+| `dotmac-web-analytics` | product-first from Mkt's normalized daily sessions/pageviews/users/bounce-rate behavior | Port normalization/aggregation only; OAuth, fetch scheduling and checkpoints stay in Integrator. |
+| `dotmac-forms` | product-first from ERP's versioned form definition/submission engine | Replace Organization and recruitment coupling with Tenant scope, typed schemas and opaque subjects. |
+| `dotmac-campaigns` | product-first from Sub, not Mkt or CRM | Port the suppression, unsubscribe, ordered-sequence, send-window and attempt/outcome canaries before implementation. |
+
+Every distribution gets its own `EXTRACTION.toml`, manifest, namespace,
+lineage, tenant-isolation canary and cutover/retirement evidence. The modules do
+not import one another; applications bind typed ports and synchronize across
+application boundaries only through versioned APIs/webhooks.
 
 ## Template Studio source audit
 
