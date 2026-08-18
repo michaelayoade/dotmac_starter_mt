@@ -24,11 +24,13 @@ from dotmac_campaigns import (
     ObservationKind,
     SequenceStep,
     SnapshotImmutable,
+    UnsubscribeRequest,
     accept_due_work,
     authorize_delivery,
     campaign_snapshot,
     cancel_campaign,
     create_campaign,
+    delivery_intent,
     ingest_audience,
     next_send_at,
     purge_expired_pii,
@@ -36,6 +38,7 @@ from dotmac_campaigns import (
     record_observation,
     report_drift,
     request_unsubscribe,
+    response_facts,
     schedule_campaign,
 )
 from dotmac_campaigns.fakes import FakeRenderer, FakeSenderResolver, FakeTimerPort
@@ -654,18 +657,29 @@ def test_click_implies_open_and_reply_emits_a_fact_for_the_sales_adapter(
     assert db.scalar(
         select(OutboxEvent).where(OutboxEvent.event_type == "campaigns.response.v1")
     )
+    facts = response_facts(db, tenant_id=TENANT_ID, campaign_id=campaign.id)
+    assert facts[0].correlation_ref == "conversation:opaque-9"
+    assert facts[0].kind == ObservationKind.REPLY
+
+    published = delivery_intent(
+        db, tenant_id=TENANT_ID, dispatch_id=accepted.dispatch_id
+    )
+    assert published.address_hash
+    assert not hasattr(published, "address")
 
 
 def test_unsubscribe_blocks_marketing_without_silencing_billing(db: Session) -> None:
     request_unsubscribe(
         db,
         tenant_id=TENANT_ID,
-        channel="email",
-        address="person@example.com",
-        source_owner="campaigns.unsubscribe_edge",
-        source_event_id="unsubscribe-1",
-        source_fingerprint="f" * 64,
-        requested_at=NOW,
+        command=UnsubscribeRequest(
+            channel="email",
+            address="person@example.com",
+            source_owner="campaigns.unsubscribe_edge",
+            source_event_id="unsubscribe-1",
+            source_fingerprint="f" * 64,
+            requested_at=NOW,
+        ),
         idempotency_expires_at=NOW + timedelta(days=365),
     )
 

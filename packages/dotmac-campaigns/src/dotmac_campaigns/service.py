@@ -30,6 +30,7 @@ from dotmac_campaigns.contracts import (
     CounterView,
     CreateCampaign,
     DeliveryGateResult,
+    DeliveryIntentView,
     DeliveryState,
     DriftReport,
     DueWorkResult,
@@ -42,12 +43,15 @@ from dotmac_campaigns.contracts import (
     RecipientView,
     Renderer,
     RenderRequest,
+    ResponseFact,
     ReviseCampaign,
     SenderRequest,
     SenderResolver,
     TimerIdentity,
     TimerOutput,
     TimerPort,
+    UnsubscribeRequest,
+    UnsubscribeResult,
     fingerprint,
 )
 from dotmac_campaigns.models import (
@@ -1007,6 +1011,35 @@ def authorize_delivery(
     )
 
 
+def delivery_intent(
+    db: Session, *, tenant_id: UUID, dispatch_id: UUID
+) -> DeliveryIntentView:
+    """Read the provider-neutral publication fact without exposing stored PII."""
+
+    row = db.scalar(
+        select(CampaignDeliveryIntent).where(
+            CampaignDeliveryIntent.tenant_id == tenant_id,
+            CampaignDeliveryIntent.dispatch_id == dispatch_id,
+        )
+    )
+    if row is None:
+        raise DeliveryIntentNotFound(f"dispatch {dispatch_id} was not found")
+    return DeliveryIntentView(
+        id=row.id,
+        campaign_id=row.campaign_id,
+        recipient_step_id=row.recipient_step_id,
+        dispatch_id=row.dispatch_id,
+        channel=row.channel,
+        address_hash=row.address_hash,
+        sender_key=row.sender_key,
+        template_revision=row.template_revision,
+        rendered_fingerprint=row.rendered_fingerprint,
+        outbox_event_id=row.outbox_event_id,
+        published_at=_as_utc(row.published_at),
+        scrubbed_at=_as_utc(row.scrubbed_at) if row.scrubbed_at is not None else None,
+    )
+
+
 _DELIVERY_PRECEDENCE: Final[dict[str, int]] = {
     DeliveryState.PENDING.value: 0,
     DeliveryState.INTENT_PUBLISHED.value: 10,
@@ -1488,25 +1521,14 @@ def request_unsubscribe(
     db: Session,
     *,
     tenant_id: UUID,
-    channel: str,
-    address: str,
-    source_owner: str,
-    source_event_id: str,
-    source_fingerprint: str,
-    requested_at: datetime,
+    command: UnsubscribeRequest,
     idempotency_expires_at: datetime,
-    campaign_id: UUID | None = None,
-    recipient_id: UUID | None = None,
-) -> CampaignUnsubscribeRequest:
+) -> UnsubscribeResult:
     request_fp = fingerprint(
         {
-            "channel": channel,
-            "address_hash": _address_hash(channel, address),
-            "source_owner": source_owner,
-            "source_event_id": source_event_id,
-            "source_fingerprint": source_fingerprint,
-            "campaign_id": campaign_id,
-            "recipient_id": recipient_id,
+            **command.fingerprint_payload(),
+            "address": None,
+            "address_hash": _address_hash(command.channel, command.address),
         }
     )
 
@@ -1514,22 +1536,22 @@ def request_unsubscribe(
         suppress(
             session,
             tenant_id,
-            channel=channel,
-            address=address,
+            channel=command.channel,
+            address=command.address,
             reason="unsubscribe",
         )
         row = CampaignUnsubscribeRequest(
             tenant_id=tenant_id,
-            campaign_id=campaign_id,
-            recipient_id=recipient_id,
-            channel=channel,
-            destination_hash=_address_hash(channel, address),
-            source_owner=source_owner,
-            source_event_id=source_event_id,
-            source_fingerprint=source_fingerprint,
+            campaign_id=command.campaign_id,
+            recipient_id=command.recipient_id,
+            channel=command.channel,
+            destination_hash=_address_hash(command.channel, command.address),
+            source_owner=command.source_owner,
+            source_event_id=command.source_event_id,
+            source_fingerprint=command.source_fingerprint,
             reason="unsubscribe",
-            requested_at=requested_at,
-            created_at=requested_at,
+            requested_at=command.requested_at,
+            created_at=command.requested_at,
         )
         session.add(row)
         session.flush()
@@ -1539,7 +1561,7 @@ def request_unsubscribe(
         db,
         tenant_id=tenant_id,
         scope="campaigns.unsubscribe",
-        key=f"{source_owner}:{source_event_id}",
+        key=f"{command.source_owner}:{command.source_event_id}",
         operation=operation,
         fingerprint=request_fp,
         expires_at=idempotency_expires_at,
@@ -1547,7 +1569,37 @@ def request_unsubscribe(
     row = db.get(CampaignUnsubscribeRequest, UUID(str(outcome.result["request_id"])))
     if row is None or row.tenant_id != tenant_id:
         raise CampaignError("unsubscribe replay evidence is missing")
-    return row
+    return UnsubscribeResult(request_id=row.id, replayed=outcome.replayed)
+
+
+def response_facts(
+    db: Session, *, tenant_id: UUID, campaign_id: UUID
+) -> tuple[ResponseFact, ...]:
+    """Return facts an assembly may submit to Sales without making its decision."""
+
+    _campaign(db, tenant_id, campaign_id)
+    rows = db.scalars(
+        select(CampaignResponse)
+        .where(
+            CampaignResponse.tenant_id == tenant_id,
+            CampaignResponse.campaign_id == campaign_id,
+        )
+        .order_by(CampaignResponse.occurred_at, CampaignResponse.id)
+    )
+    return tuple(
+        ResponseFact(
+            id=row.id,
+            campaign_id=row.campaign_id,
+            recipient_id=row.recipient_id,
+            recipient_step_id=row.recipient_step_id,
+            observation_id=row.observation_id,
+            kind=ObservationKind(row.kind),
+            correlation_ref=row.correlation_ref,
+            fingerprint_sha256=row.fingerprint,
+            occurred_at=_as_utc(row.occurred_at),
+        )
+        for row in rows
+    )
 
 
 def _audience_suppressed_ids(

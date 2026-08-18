@@ -529,6 +529,100 @@ class ObservationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class UnsubscribeRequest:
+    channel: str
+    address: str
+    source_owner: str
+    source_event_id: str
+    source_fingerprint: str
+    requested_at: datetime
+    campaign_id: UUID | None = None
+    recipient_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "channel", _required("channel", self.channel, 40).lower()
+        )
+        object.__setattr__(self, "address", _required("address", self.address, 500))
+        object.__setattr__(
+            self, "source_owner", _required("source_owner", self.source_owner, 120)
+        )
+        object.__setattr__(
+            self,
+            "source_event_id",
+            _required("source_event_id", self.source_event_id, 255),
+        )
+        object.__setattr__(
+            self,
+            "source_fingerprint",
+            _sha256("source_fingerprint", self.source_fingerprint),
+        )
+        _aware("requested_at", self.requested_at)
+
+    def fingerprint_payload(self) -> dict[str, object]:
+        return {
+            "channel": self.channel,
+            "address": self.address,
+            "source_owner": self.source_owner,
+            "source_event_id": self.source_event_id,
+            "source_fingerprint": self.source_fingerprint,
+            "requested_at": self.requested_at,
+            "campaign_id": self.campaign_id,
+            "recipient_id": self.recipient_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class UnsubscribeResult:
+    request_id: UUID
+    replayed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryIntentView:
+    id: UUID
+    campaign_id: UUID
+    recipient_step_id: UUID
+    dispatch_id: UUID
+    channel: str
+    address_hash: str
+    sender_key: str
+    template_revision: str
+    rendered_fingerprint: str
+    outbox_event_id: UUID
+    published_at: datetime
+    scrubbed_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class ResponseFact:
+    id: UUID
+    campaign_id: UUID
+    recipient_id: UUID
+    recipient_step_id: UUID
+    observation_id: UUID
+    kind: ObservationKind
+    correlation_ref: str | None
+    fingerprint_sha256: str
+    occurred_at: datetime
+
+    def __post_init__(self) -> None:
+        if self.kind not in {
+            ObservationKind.REPLY,
+            ObservationKind.CONVERSION_CORRELATION,
+        }:
+            raise ContractError(
+                "a response fact must be reply or conversion correlation"
+            )
+        object.__setattr__(
+            self,
+            "fingerprint_sha256",
+            _sha256("fingerprint_sha256", self.fingerprint_sha256),
+        )
+        _aware("occurred_at", self.occurred_at)
+
+
+@dataclass(frozen=True, slots=True)
 class ConsentReceiptView:
     phase: str
     allowed: bool
@@ -613,6 +707,7 @@ __all__ = [
     "CounterView",
     "CreateCampaign",
     "DeliveryGateResult",
+    "DeliveryIntentView",
     "DeliveryState",
     "DriftReport",
     "DueWorkResult",
@@ -623,6 +718,7 @@ __all__ = [
     "RecipientStepStatus",
     "RecipientStepView",
     "RecipientView",
+    "ResponseFact",
     "RenderRequest",
     "RenderedMessage",
     "Renderer",
@@ -637,5 +733,7 @@ __all__ = [
     "TimerIdentity",
     "TimerOutput",
     "TimerPort",
+    "UnsubscribeRequest",
+    "UnsubscribeResult",
     "fingerprint",
 ]
