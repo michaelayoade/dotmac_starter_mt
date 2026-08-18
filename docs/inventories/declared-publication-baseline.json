@@ -71,11 +71,6 @@
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
       "state": "never-published"
-    },
-    "dotmac-files": {
-      "declared": "0.1.0a3",
-      "reason": "AWAITING REVIEW AND DISPATCH. a3 makes the published atomic files lineage tenant-selectable for the deferred ERP cohort and Academy without editing fi_0001. The additive fi_0002 convergence revision locks the historical platform table, refuses to discard any row, and drops it only for an explicit TENANT selection; TENANT+PLATFORM preserves the a2 catalogue. The manifest deliberately refuses PLATFORM-only because no named adopter needs it. The floor rises to kernel a61 because both the manifest and migration consume ADR-0028's explicit plane-selection surface. DELETE THIS ROW in the change that verifies and tags dotmac-files-v0.1.0a3; do not repair the temporary declared-unpublished state by reverting its version.",
-      "state": "declared-unpublished"
     }
   }
 }
