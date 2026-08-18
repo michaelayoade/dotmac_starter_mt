@@ -8,6 +8,23 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
+## Amendment, 2026-08-18: Backoffice replacement retires ERP authority first
+
+ADR-0006's 2026-08-18 vertical-replacement amendment resolves how
+product-first applies to the accepted ERP -> Backoffice programme. ERP remains
+the qualifying source and the first **authority retired**; Backoffice is the
+first exact-pin runtime consumer. Merely composing a module in the greenfield
+assembly earns no credit. Evidence moves to `adopted` only when the same sealed
+cutover makes Backoffice the sole writer and fails closed the corresponding ERP
+mutations.
+
+This is narrower than an in-place adoption and is not permission to build a
+parallel ERP. Backfill and shadow input cross only a versioned API/webhook;
+Backoffice never reads ERP's database; ERP stays sole writer until cutover; and
+the ERP writer/fallback/table retirement ratchets remain mandatory. The first
+source ruling under this amendment is
+[`../inventories/people-directory-sources.md`](../inventories/people-directory-sources.md).
+
 ## Amendment, 2026-08-17: P11 is met by Vendor production
 
 Michael accepted the production-lineage evidence recorded below. This
