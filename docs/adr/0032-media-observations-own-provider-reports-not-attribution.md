@@ -175,5 +175,11 @@ authority, but it follows that proof under this repository's release policy.
 - Future publication requires the exact kernel allocation release, Observer
   unit, architecture, PostgreSQL, concurrency, clean-wheel and sensitivity
   gates plus the authorized first-adopter proof.
+- Candidate commit `8aed76cdbb677d5f286b701546b8d84130bbc5c6`
+  passed the module-owned Observer gates and every dispatched job in CI run
+  `32148037659`, including unit coverage, PostgreSQL teardown, Python 3.11/3.12
+  floors, consumer boot and Docker smoke. This is candidate validation, not the
+  missing first-adopter proof; a later release commit must still pass the
+  PR-only Engineering Standards gate and the protected release workflow.
 - Completion of the larger programme remains open while the adoption pause is
   in force.

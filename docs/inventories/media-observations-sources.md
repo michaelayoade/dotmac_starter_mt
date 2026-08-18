@@ -24,6 +24,25 @@ Therefore:
 The module is an immutable aggregate-fact owner, not an attribution engine or a
 connector control plane.
 
+## Candidate validation evidence
+
+Implementation commit `8aed76cdbb677d5f286b701546b8d84130bbc5c6`
+passed, from a fresh detached Observer worktree:
+
+- `make check` with Poetry 2.4.1 from the committed hash-locked bootstrap;
+- the full unit and architecture suite, including the clean-wheel installation,
+  public-surface, import-independence and provider-free fake conformance proofs;
+- the full disposable PostgreSQL suite, including tenant isolation, forced RLS,
+  append-only grants/triggers, duplicate ingest, replay conflict, restatement,
+  hierarchy and projection-repair canaries; and
+- database container, network and volume teardown.
+
+[GitHub CI run 32148037659](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32148037659)
+passed on the same implementation commit: all quality jobs, unit coverage,
+PostgreSQL integration and teardown, Python 3.11/3.12 floors, consumer boot and
+Docker smoke. No release job or product adoption ran. Engineering Standards is
+PR-only and remains pending because Michael did not authorize a PR.
+
 ## Exact audit pins
 
 | Repository | Exact source inspected | Finding |
@@ -178,4 +197,3 @@ None of those steps is authorized by the present change.
 - Archive/deletion is observed state, never local destructive deletion.
 - Current projections and drift reports rebuild from immutable facts.
 - No raw payload, imported audience, person profile or attribution writer.
-

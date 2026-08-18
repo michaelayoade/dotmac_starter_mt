@@ -46,3 +46,10 @@ provider-free fixture, independently of Integration SPI conformance.
 No product has adopted the package. Michael paused Backoffice and Sub adoption
 on 2026-08-18; `EXTRACTION.toml` therefore has no contract consumer and no
 product composition, publication or writer retirement is part of this change.
+
+The uncomposed candidate passed exact-revision Observer static, unit,
+architecture, clean-wheel and PostgreSQL gates and all jobs in
+[CI run 32148037659](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32148037659).
+That evidence proves candidate quality, not first-adopter or release readiness:
+the PR-only Engineering Standards gate, Backoffice shadow/cutover proof and any
+Mkt writer retirement remain deliberately unperformed.

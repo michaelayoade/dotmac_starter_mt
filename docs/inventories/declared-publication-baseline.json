@@ -64,7 +64,7 @@
   "unpublished": {
     "dotmac-kernel": {
       "declared": "0.1.0a71",
-      "reason": "OUTSTANDING 2026-08-18: this source release allocates mod_mediaobs for the validated but intentionally unadopted dotmac-media-observations candidate. It cannot be tagged until the exact committed revision passes Observer and CI. Michael's adoption pause leaves the dependent module outside its release allowlist, so the kernel allocation may remain unpublished with the package until adoption resumes; never edit the version back to the already-published a70.",
+      "reason": "OUTSTANDING 2026-08-18: this source release allocates mod_mediaobs for the validated but intentionally unadopted dotmac-media-observations candidate. Exact-commit Observer and CI evidence now exists, but Michael's adoption pause leaves the dependent module outside its release allowlist and without the required first-adopter/PR proof. The kernel allocation therefore remains unpublished with the package until adoption resumes; never edit the version back to the already-published a70.",
       "state": "declared-unpublished"
     },
     "dotmac-media-observations": {
