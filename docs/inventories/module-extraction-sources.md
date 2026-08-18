@@ -60,19 +60,27 @@ shared package, or maintaining two implementations.
 
 ## Decomposed marketing suite candidates
 
-Michael activated this suite as a goal on 2026-08-18. These are audited
-candidates, not existing distributions or completed adoptions. Backoffice is
-the first adopter; Sub may later adopt selected exact releases independently.
+Michael activated this suite as a goal on 2026-08-18. Campaigns is implemented
+and merged but remains unreleased and unadopted. Media observations is a
+complete candidate with validated milestone
+`c548ef02aca10b421d1ebf4158b9c4fdf72e6025` and evidence-only head
+`abf1b9ad4c3889aa6c40ed2e01419e440452f565`; local unpushed test hardening is
+at `56517abc7f05cb6e20f9b0e5fdb6a492dbf0fdd2`. Published a72 lacks the media
+allocation, so the branch requires rebase and a new kernel floor; it still has
+no release or adoption. The other entries remain audit or implementation
+candidates. Backoffice is the default first adopter;
+campaigns is the ADR-0032 exception, with Sub cutover 1 and Backoffice cutover
+2 as the independent reuse proof.
 
 | Candidate distribution | Source mode and selected source | First implementation gate |
 |---|---|---|
 | `dotmac-content` | product-first from Mkt planning/content models, services and parity tests | Define the editorial owner without stored bytes, provider channels or generic tasks; port the canary first. |
 | `dotmac-sites` | greenfield-after-inventory; no qualifying implementation in the five audited repositories | Check in the greenfield proof and Backoffice canary; preserve a local immutable snapshot before `SiteRelease`. |
 | `dotmac-publishing` | product-first from Mkt post-delivery lifecycle and partial-success behavior | Replace direct provider adapters with a typed outbox contract owned by Integrator transport. |
-| `dotmac-media-observations` | product-first from Mkt remote-post/ad hierarchy and idempotent metric upserts | Keep every imported value observational and rebuildable; no provider SDK or authoritative campaign transition. |
+| `dotmac-media-observations` | product-first from Mkt remote-post/ad hierarchy and idempotent metric upserts | Candidate complete and parked; Mkt evidence was refreshed at `abf1b9a`, with unpushed test hardening at `56517ab`. Rebase onto current main, preserve its campaigns and Durable Timers owners, allocate media in a new immutable kernel alpha, and keep release/adoption gated on that artifact and an explicit adopter. Every imported value stays observational and rebuildable; no provider SDK or authoritative campaign transition. |
 | `dotmac-web-analytics` | product-first from Mkt's normalized daily sessions/pageviews/users/bounce-rate behavior | Port normalization/aggregation only; OAuth, fetch scheduling and checkpoints stay in Integrator. |
 | `dotmac-forms` | product-first from ERP's versioned form definition/submission engine | Replace Organization and recruitment coupling with Tenant scope, typed schemas and opaque subjects. |
-| `dotmac-campaigns` | product-first from Sub, not Mkt or CRM | Port the suppression, unsubscribe, ordered-sequence, send-window and attempt/outcome canaries before implementation. |
+| `dotmac-campaigns` | product-first from Sub, not Mkt or CRM | Implementation merged at Starter main `300ebd7`; published a71 lacks the campaigns namespace allocation, while registry-verified a72 contains campaigns and Durable Timers a1 is published. Correct the package floor/lock, then satisfy Sub's S7 ownership, lineage and timer-adoption gates before cutting over Sub ahead of Backoffice. |
 
 Every distribution gets its own `EXTRACTION.toml`, manifest, namespace,
 lineage, tenant-isolation canary and cutover/retirement evidence. The modules do

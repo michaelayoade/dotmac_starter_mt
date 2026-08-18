@@ -122,11 +122,36 @@ def test_merged_campaigns_is_not_misreported_as_released_or_adopted() -> None:
     normalized = _normalized()
     required = (
         "300ebd7523e85dff7e94efcdf81d8c1f34b80de5",
+        "f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685",
         "campaigns `0.1.0a1` remains unallowlisted, unpublished",
         "dossier status `audit-complete` with no contract consumer",
         "sub cutover 1 for campaigns",
         "backoffice is cutover 2",
         "kernel `0.1.0a71` is published",
+        "tagged kernel `0.1.0a71` does not contain",
+        "campaigns must not be released against a71",
+        "kernel a72 and durable timers `0.1.0a1` are now tagged and registry-verified",
+        "campaigns declared floor and lock still need correction from a71 to a72",
+        "the timer publication gate itself is now closed",
+    )
+    assert [phrase for phrase in required if phrase not in normalized] == []
+
+
+def test_parked_media_observations_is_not_misreported_as_released_or_adopted() -> None:
+    normalized = _normalized()
+    required = (
+        "c548ef02aca10b421d1ebf4158b9c4fdf72e6025",
+        "abf1b9ad4c3889aa6c40ed2e01419e440452f565",
+        "56517abc7f05cb6e20f9b0e5fdb6a492dbf0fdd2",
+        "that commit is not validation or release evidence",
+        "candidate package is `0.1.0a1`",
+        "still declares `dotmac-kernel >=0.1.0a72`",
+        "published a72 lacks its allocation",
+        "rebase and a new kernel floor are mandatory",
+        "deliberately **parked**",
+        "has not been allowlisted, tagged, published, composed or adopted",
+        "no authority has moved",
+        "the stale media evidence-coordinate gate is therefore closed",
     )
     assert [phrase for phrase in required if phrase not in normalized] == []
 

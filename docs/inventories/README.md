@@ -25,7 +25,7 @@ across repos.
 
 | Inventory | Scope | File |
 |---|---|---|
-| **Decomposed marketing suite sources** | the seven-module source ruling across `dotmac_mkt`, Sub, ERP, CRM and Backoffice; the Integrator/provider boundary; the greenfield sites proof; and the Backoffice-first, Sub-later independent-adoption sequence | `marketing-suite-sources.md` |
+| **Decomposed marketing suite sources** | the seven-module source ruling across `dotmac_mkt`, Sub, ERP, CRM and Backoffice; the Integrator/provider boundary; the greenfield sites proof; campaigns' Sub-first exception; and the release/adoption gates for the merged campaigns and parked media-observations candidates | `marketing-suite-sources.md` |
 | **Editorial content extraction dossier** | the first marketing-suite slice: Mkt `Campaign`/`Post`/asset-link parity, the `ContentPlan` rename, editorial-vs-publishing and authorization boundaries, the proposed five-table tenant contract, lifecycle corrections and Backoffice writer-retirement gates | `content-extraction-dossier.md` + `content-writer-retirement.toml` |
 | Starter surfaces | `dotmac_starter_mt` routes, UI surfaces, templates, CSS/static, navigation, brand leakage | `starter-surfaces.md` |
 | Sub surfaces | `dotmac_sub` portals, templates, CSS/static, navigation, branding mechanisms, kernel adoption | `sub-surfaces.md` |
