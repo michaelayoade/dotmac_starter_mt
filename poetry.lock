@@ -594,6 +594,24 @@ type = "directory"
 url = "packages/dotmac-connector-whatsapp"
 
 [[package]]
+name = "dotmac-durable-timers"
+version = "0.1.0a1"
+description = "DotMac dual-plane durable timer identity and generation lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a72"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-durable-timers"
+
+[[package]]
 name = "dotmac-entitlement-allocation"
 version = "0.1.0a6"
 description = "DotMac Entitlement Allocation — an immutable projection of what an activated contract entitles, validated against the product's manifest-declared capability catalogue (ADR-0006 M4)"
@@ -668,7 +686,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a71"
+version = "0.1.0a72"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2962,4 +2980,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "5d21d4da47145203e863597bcb66287406b7bc367cf738a8144cd2ee7f90422b"
+content-hash = "ed99a2e87bb4b5046cb3d62c0f98fd4c7b4326fd52f5a0321088fcef6a7a3e02"

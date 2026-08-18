@@ -45,6 +45,10 @@ from dotmac_kernel import (
 )
 from dotmac_kernel.deps import require_permission, require_tenant
 from dotmac_kernel.models import Base, Party
+from dotmac_kernel.outbox_event_types import (
+    OutboxEventTypeRegistry,
+    install_outbox_event_types,
+)
 from dotmac_kernel.setting_domains import (
     DuplicateSettingDomainError,
     SettingDomainRegistry,
@@ -129,6 +133,7 @@ def _restore_process_declarations() -> None:
     manifests = _assembly_manifests()
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
     install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
     install_surface_globals(manifests, disabled=set(), web_enabled=True)
 

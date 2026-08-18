@@ -49,6 +49,10 @@ from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
 from dotmac_kernel.modules import AnyManifest, ModuleRegistry
+from dotmac_kernel.outbox_event_types import (
+    OutboxEventTypeRegistry,
+    install_outbox_event_types,
+)
 from dotmac_kernel.permissions import (
     PERMISSION_CODE_ATTR,
     PermissionCatalogue,
@@ -378,6 +382,7 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     permission_catalogue = PermissionCatalogue.from_manifests(manifests)
     install_permissions(permission_catalogue)
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
     # Capabilities join them (step 4). Same installed-not-enabled rule, and the
     # same reason it matters more here: a tenant's entitlement GRANT references a
     # capability code and outlives any deployment's enabled set, so a disabled

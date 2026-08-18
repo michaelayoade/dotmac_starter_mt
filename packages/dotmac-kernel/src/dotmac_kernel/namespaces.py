@@ -613,6 +613,17 @@ CAMPAIGNS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("campaigns"),
 )
 
+# `dotmac-durable-timers` — an optional dual-plane timing-mechanics owner.
+# `timers` keeps the physical catalog readable, while `dt` and
+# `durable_timers` permanently identify its independent Alembic lineage.
+# The module writes the kernel outbox but owns no relay state or dispatcher.
+DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="durable_timers",
+    prefix="dt",
+    branch_label="durable_timers",
+    db_schema=module_schema("timers"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -627,6 +638,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     NUMBERING_MIGRATION_OWNER,
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
+    DURABLE_TIMERS_MIGRATION_OWNER,
 )
 
 
@@ -982,6 +994,7 @@ __all__ = [
     "DuplicateMigrationPrefixError",
     "DuplicateSchemaError",
     "DuplicateTableOwnerError",
+    "DURABLE_TIMERS_MIGRATION_OWNER",
     "HostSchemaClaimError",
     "InvalidMigrationPrefixError",
     "InvalidRevisionIdError",

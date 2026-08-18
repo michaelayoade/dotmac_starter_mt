@@ -76,6 +76,16 @@
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
       "state": "never-published"
+    },
+    "dotmac-durable-timers": {
+      "declared": "0.1.0a1",
+      "reason": "RELEASE SEQUENCED 2026-08-18: the accepted contract, all ten PostgreSQL proofs, their sensitivity companions, full static/unit/architecture/integration validation and the release allowlist are green at exact candidate a3c82cd266141d80fdd0a128e74cc5b276bc04a4. Publication still waits for this revision to reach protected main and for its exact dotmac-kernel 0.1.0a72 allocation artifact to be published and verified first. Delete this row only in the follow-up release-record change after dotmac-durable-timers 0.1.0a1 is registry-verified and tagged; an allowlist row is not publication evidence.",
+      "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a72",
+      "reason": "OUTSTANDING 2026-08-18: a72 is reserved after the open a71 People allocation and allocates mod_timers/dt/durable_timers plus the declared output-routing surface required by the accepted timer dossier. Delete this row only when the exact protected-main a72 artifact is verified and tagged.",
+      "state": "declared-unpublished"
     }
   }
 }

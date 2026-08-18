@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-durable-timers"
+version = "0.1.0a1"
+description = "DotMac dual-plane durable timer identity and generation lifecycle"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_durable_timers", from = "src" }]
+include = [
+    { path = "src/dotmac_durable_timers/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_durable_timers/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a72"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
