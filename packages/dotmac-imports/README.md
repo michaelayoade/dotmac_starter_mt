@@ -92,7 +92,9 @@ for content owned by `dotmac-files`.
 ## Persistence
 
 One tenant plane, schema `mod_imports`, lineage prefix `im`, kernel floor
-`0.1.0a55`. Both tables carry `tenant_id NOT NULL`, tenant-composite identity
+`0.1.0a56` (the first published release carrying the prerequisite contract).
+Assemblies compose the installed lineage through the public `versions_dir()`
+locator. Both tables carry `tenant_id NOT NULL`, tenant-composite identity
 and FORCEd RLS. No platform plane is declared: the audit found no control-plane
 import capability anywhere in the fleet, and declaring a plane no product uses
 would be speculative.
