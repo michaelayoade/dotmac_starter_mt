@@ -110,7 +110,9 @@ decision and transition.
 
 Sub is the qualifying product-first source and first real adopter. The first
 released manifest therefore declares only tenant tables. That declaration is
-the explicit plane contract; `platform_tables` is empty. Because revision one
+the explicit plane contract; `platform_tables=()` is a literal empty
+declaration so static composition and catalogue gates cannot mistake an opaque
+name for a populated platform plane. Because revision one
 has one atomic plane rather than selectable subsets, ADR-0028 and the current
 kernel correctly reject an assembly `ModulePlaneSelection` for it. Every tenant
 table has `tenant_id UUID NOT NULL`, tenant-composite uniqueness and foreign

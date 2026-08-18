@@ -308,11 +308,8 @@ def scan_collections_stateful_contract(package_root: Path) -> tuple[str, ...]:
         != "TENANT_TABLES"
     ):
         problems.append("manifest:tenant-tables-not-model-declaration")
-    if (
-        _dotted_name(manifest_keywords.get("platform_tables", ast.Constant(None)))
-        != "PLATFORM_TABLES"
-    ):
-        problems.append("manifest:platform-tables-not-model-declaration")
+    if _literal(manifest_keywords.get("platform_tables")) != ():
+        problems.append("manifest:platform-tables-must-be-explicit-empty")
     if _literal(manifest_keywords.get("supported_plane_sets")) != ():
         problems.append("manifest:tenant-plane-must-be-atomic")
 
@@ -545,7 +542,7 @@ from dotmac_kernel.prerequisites import (
     OUTBOX_RELAY_V1,
     TENANT_SCOPE_CATALOG_V1,
 )
-from dotmac_collections.models import PLATFORM_TABLES, TENANT_TABLES
+from dotmac_collections.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="collections",
@@ -555,7 +552,7 @@ module = ModuleManifest(
     migration_prefix="cl",
     migration_branch="collections",
     tables=TENANT_TABLES,
-    platform_tables=PLATFORM_TABLES,
+    platform_tables=(),
     requires=(MODULE_DATABASE_ROLES_V1.name, OUTBOX_RELAY_V1.name),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
     platform_requires=(),
@@ -639,6 +636,12 @@ def test_stateful_scanner_accepts_a_complete_tenant_only_fixture(
             "PLATFORM_TABLES = ()",
             'PLATFORM_TABLES = ("platform_cases",)',
             "models:platform-plane-must-be-empty",
+        ),
+        (
+            "src/dotmac_collections/manifest.py",
+            "platform_tables=()",
+            'platform_tables=("platform_cases",)',
+            "manifest:platform-tables-must-be-explicit-empty",
         ),
         (
             "src/dotmac_collections/manifest.py",

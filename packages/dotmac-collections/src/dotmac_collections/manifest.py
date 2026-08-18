@@ -7,7 +7,7 @@ from dotmac_kernel.prerequisites import (
     TENANT_SCOPE_CATALOG_V1,
 )
 
-from dotmac_collections.models import PLATFORM_TABLES, TENANT_TABLES
+from dotmac_collections.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="collections",
@@ -17,7 +17,9 @@ module = ModuleManifest(
     migration_prefix="cl",
     migration_branch="collections",
     tables=TENANT_TABLES,
-    platform_tables=PLATFORM_TABLES,
+    # Keep the empty plane literal: static composition and catalogue gates
+    # cannot safely infer that a name imported from models resolves to ().
+    platform_tables=(),
     requires=(MODULE_DATABASE_ROLES_V1.name, OUTBOX_RELAY_V1.name),
     tenant_requires=(TENANT_SCOPE_CATALOG_V1.name,),
     platform_requires=(),
