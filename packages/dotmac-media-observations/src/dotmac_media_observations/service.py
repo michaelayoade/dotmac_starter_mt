@@ -919,9 +919,9 @@ def _expected_projections(
             entity_fact.entity_ref,
         )
         entity_previous = entity_candidates.get(entity_key)
-        if entity_previous is None or _effective_key(
-            entity_envelope
-        ) > _effective_key(entity_previous[1]):
+        if entity_previous is None or _effective_key(entity_envelope) > _effective_key(
+            entity_previous[1]
+        ):
             entity_candidates[entity_key] = (entity_fact, entity_envelope)
 
     entities: dict[tuple[str, ...], dict[str, object]] = {}
@@ -1027,9 +1027,9 @@ def _expected_projections(
     for metric_fact, metric_envelope in metric_rows:
         metric_key = (str(metric_fact.period_id),)
         metric_previous = metric_candidates.get(metric_key)
-        if metric_previous is None or _effective_key(
-            metric_envelope
-        ) > _effective_key(metric_previous[1]):
+        if metric_previous is None or _effective_key(metric_envelope) > _effective_key(
+            metric_previous[1]
+        ):
             metric_candidates[metric_key] = (metric_fact, metric_envelope)
     metrics: dict[tuple[str, ...], dict[str, object]] = {}
     for projected_metric_key, (
@@ -1039,12 +1039,8 @@ def _expected_projections(
         metrics[projected_metric_key] = {
             "observation_id": projected_metric_envelope.id,
             "period_id": projected_metric_fact.period_id,
-            "source_observed_at": _aware(
-                projected_metric_envelope.source_observed_at
-            ),
-            "projection_fingerprint": (
-                projected_metric_envelope.content_fingerprint
-            ),
+            "source_observed_at": _aware(projected_metric_envelope.source_observed_at),
+            "projection_fingerprint": (projected_metric_envelope.content_fingerprint),
         }
     return {"entities": entities, "hierarchy": hierarchy, "metrics": metrics}
 
