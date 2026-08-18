@@ -1,0 +1,78 @@
+schema_version = 1
+package = "dotmac-positioning"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Dotmac position observation, projection, collection-grant, retention and geofence-fact lifecycle"
+contract = "Tenant-scoped provider-neutral position observations with stable client identity and provenance; rebuildable current-position and trail projections; server-enforced collection/share grants and retention; and circle/polygon entry/exit facts. Products own tracked subjects, authorization, business consequences and presentation."
+
+source_repositories = [
+  "dotmac_sub",
+  "dotmac_crm",
+  "dotmac_erp",
+  "dotmac_workspace",
+  "dotmac_vendor_control_plane",
+  "dotmac_backoffice",
+  "dotmac_integrator",
+  "dotmac_starter_mt",
+]
+
+source_paths = [
+  # Qualifying source and first cutover.
+  "dotmac_sub:app/models/field_location.py",
+  "dotmac_sub:app/services/field/location_tracking.py",
+  "dotmac_sub:app/services/field_maps.py",
+  "dotmac_sub:app/services/field/geofence.py",
+  "dotmac_sub:app/services/field/routing.py",
+  "dotmac_sub:app/services/customer_work_order_selfcare.py",
+  "dotmac_sub:field_mobile/lib/core/location/device_location.dart",
+  "dotmac_sub:field_mobile/lib/features/location/location_cadence.dart",
+  "dotmac_sub:field_mobile/lib/features/location/location_ping_service.dart",
+  # Same retiring product lineage, but source of mandatory parity deltas.
+  "dotmac_crm:app/models/field_location.py",
+  "dotmac_crm:app/services/field/location_tracking.py",
+  "dotmac_crm:app/services/field/tracking.py",
+  "dotmac_crm:app/services/field/geofence.py",
+  "dotmac_crm:app/services/field/routing.py",
+  "dotmac_crm:app/tasks/field.py",
+  "dotmac_crm:app/models/crm/presence.py",
+  # Candidate adopter and requirement input; not a qualifying observation source.
+  "dotmac_erp:app/models/fleet/vehicle.py",
+  "dotmac_erp:app/services/people/attendance/attendance_service.py",
+  "dotmac_erp:app/services/people/hr/web/location_web.py",
+]
+
+preserved_tests = [
+  "dotmac_sub:tests/test_field_location_tracking.py",
+  "dotmac_sub:tests/test_field_routing.py",
+  "dotmac_sub:tests/test_admin_maps_web.py",
+  "dotmac_sub:tests/test_customer_work_order_selfcare.py",
+  "dotmac_crm:tests/test_field_location_tracking.py",
+  "dotmac_crm:tests/test_field_recent_tracks.py",
+  "dotmac_crm:tests/test_field_location_retention_task.py",
+  "dotmac_crm:tests/test_field_tracking.py",
+  "dotmac_crm:tests/test_field_geofence.py",
+  "dotmac_crm:tests/test_field_routing.py",
+  "dotmac_starter_mt:tests/architecture/test_positioning_boundary.py",
+]
+
+# No application imports or runs the package yet. Sub/CRM being forked does not
+# count as two, and a declared ERP GPS column does not count as one.
+contract_consumers = []
+candidate_consumers = ["dotmac_sub", "dotmac_erp"]
+
+authority_boundary = "ADR-0032. dotmac-positioning owns only observation identity/provenance, current and trail projections, collection/share grants, retention and geofence facts. Sub keeps technician, shift, dispatch, route and work-order lifecycle plus customer-sharing decisions. ERP keeps vehicle lifecycle and attendance consequences. Plant/GIS owners keep static asset and qualification geometry. Integrator connector plugins keep provider transport, credentials and wire mappings. dotmac-ui and each product keep map presentation, endpoint authorization, popups and actions. Product-owned link tables map local subjects to opaque tracked-unit ids; the module imports no product or sibling module."
+
+inventory_evidence = [
+  "docs/inventories/positioning-sources.md",
+  "docs/inventories/fleet-decomposition-matrix.md",
+  "docs/inventories/fleet-fact-level-decomposition.md",
+]
+
+first_cutover = "dotmac_sub is cutover 1 after defects D1-D7 in positioning-sources.md are corrected canary-first. The module is then installed in Sub's tenant plane, local and module ingest/read results are shadow-compared, ADR-0031 cutover evidence is sealed, and Sub's local ping/current writer is retired. dotmac_crm is the same retiring product lineage and routes its deletion into this cutover; it is never counted as an independent adopter. dotmac_erp is cutover 2 through a product-owned vehicle-to-tracked-unit link and moves the contract to reuse-proven only after a real released adoption."
+
+shadow_and_drift = "Before Sub cutover, feed the same typed observations to the corrected local owner and the module in a bounded shadow. Compare accepted/rejected/replay/conflict counts; current-position identity, captured/received time, coordinates and accuracy; ordered trail digests; expiry/prune outcomes; collection/share-grant refusals; and geofence entry/exit facts. A business consequence is compared by Sub's owning service, never emitted by the module. Seal the full-column typed digest and effective privileges under ADR-0031 before switching reads/writes. The shadow is removed at cutover and cannot become a permanent dual writer."
+
+local_copy_retirement = "Sub deletes or migration-seals the FieldTechLocationPing writer and removes current coordinates from the mixed FieldTechPresence authority after module cutover; shift/work status and customer-sharing policy remain product-owned. Direct service commits and post-commit best-effort geofence consequences are retired. CRM's field-location fork and retention task are deleted through the existing CRM-to-Sub retirement, not copied into Sub. ERP removes any future/current direct writer to Vehicle.last_known_location and last_location_update when the vehicle link adopts the module; its fleet and attendance owners remain."
+
+next_action = "Do not allocate a namespace or write module behavior yet. First land the Sub RED canaries and corrections for status/work-context contract drift, rejected-row persistence, client_observation_id replay/conflict, device captured_at/accuracy, server-side collection/share grants, customer freshness, retention and geofence consequence separation. Then port the corrected behavior and CRM parity tests, add the tenant-plane manifest/models/migration and allocate its immutable namespace in the same change. The initial dossier remains audit-complete until Sub actually cuts over; map presentation remains deferred until Sub and ERP are released consumers."
