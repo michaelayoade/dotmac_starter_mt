@@ -44,6 +44,8 @@ def apply_licence(
         db,
         tenant_id=tenant.id,
         actor_party_id=actor.id,
+        actor_type="user",
+        actor_id=str(actor.id),
         action="licence.applied" if result.applied else "licence.rejected",
         entity_type="licence",
         entity_id=ack.licence_id,
@@ -90,6 +92,8 @@ def import_revocation_list(
         db,
         tenant_id=tenant.id,
         actor_party_id=actor.id,
+        actor_type="user",
+        actor_id=str(actor.id),
         action=(
             "licence.revocation_imported"
             if result.accepted
