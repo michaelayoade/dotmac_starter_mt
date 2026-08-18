@@ -1,18 +1,17 @@
 # `dotmac-billing` — the authority profile and the published contracts
 
-> **Review status: PROPOSED — not reviewed, not frozen.** Appearing in the tree
-> does not freeze a contract. Every inter-module contract below is a proposal
-> until the integration owner's contract matrix accepts it, and
-> `InvoiceDocumentFactV1` additionally requires agreement with the Documents
-> workstream (see "the official-artifact relation" note in § on document facts).
-> A team may not treat any version or field list here as settled.
+> **Review status: FROZEN FOR BILLING V1 — 2026-08-17.** ADR-0020's 2026-08-17
+> amendment resolves the obligation name, receivable-position shape,
+> due-date-basis evidence and official-artifact relation. `AcceptSettlementV1`
+> and `InvoiceDocumentFactV1` are frozen as described here. Allocation and
+> coverage remain internal Billing contracts and are deliberately not published.
 >
 > **Status:** specification of intent. Non-authoritative
 > (`docs/superpowers/specs/`); the accepted decision is ADR-0020 and its
-> 2026-08-14 amendment. **Nothing here authorizes implementation.** ADR-0017's
-> P11 lineage gate is closed and no owner-directed exception exists for
-> `dotmac-billing`; `packages/dotmac-billing/` does not exist and this document
-> does not create it.
+> 2026-08-14 and 2026-08-17 amendments. ADR-0030 § 6 grants the named
+> owner-directed implementation exception for `dotmac-billing`; P11 remains an
+> adoption/cutover gate rather than permission to weaken PostgreSQL, migration
+> or plane proofs.
 > **Date:** 2026-08-14
 > **Governed by:** ADR-0016 (coverage is derived), ADR-0014 (at-most-once has one
 > owner), ADR-0008 (declaration registries), ADR-0011/0012 (settings),
@@ -115,14 +114,12 @@ in a fail-closed direction.
    `CommercialAuthorityUnbound`. Unbound is a legitimate *state* only for an
    assembly that composes billing's contracts but mounts no surface — which is
    the shadow-runner shape in § 1.5.
-3. **The legacy-writer premise.** The binder takes a required
-   `legacy_financial_writer: bool` supplied by the product assembly.
-   `INTERNAL` together with `legacy_financial_writer=True` is
-   `TwoFinancialWriters`. This is the mechanism that makes the coupled authority
-   switch atomic (§ 1.5) — and it is stated as a *required* argument rather than
-   a defaulted one precisely because ADR-0023 § 5's reasoning about flags
-   applies: whichever value a default took would be the answer a product got by
-   forgetting to think.
+3. **The adopter premise stays outside Billing.** The binder deliberately has
+   no `legacy_financial_writer` flag. A module cannot prove whether a separately
+   deployed application still has a writer, and accepting its boolean claim
+   would manufacture a second cross-application authority registry. Vendor CP
+   proves absence before activation; Sub proves the coupled watermark switch
+   and retirement through adopter-owned two-directional ratchets (§ 1.5).
 4. **The plane premise.** The binder takes exactly one of a tenant repository
    factory or a platform repository factory, never both (ADR-0023). Supplying
    both is `AmbiguousPlane`. Supplying neither is `NoPlaneBound`.
@@ -156,7 +153,7 @@ bites, in both directions:
 |---|---|---|
 | `test_a_second_binding_is_refused` | two `bind_commercial_authority` calls | `DuplicateCommercialAuthority`, message names both values |
 | `test_rebinding_the_same_authority_is_still_refused` | two identical calls | still refused — sameness is not an exemption |
-| `test_internal_plus_legacy_writer_is_refused` | `INTERNAL`, `legacy_financial_writer=True` | `TwoFinancialWriters` |
+| `test_two_simultaneously_active_billing_bindings_are_refused` | two authority bindings, even with the same value | `DuplicateCommercialAuthority` |
 | `test_a_mounted_surface_with_no_binding_is_refused` | router mounted, no bind | `CommercialAuthorityUnbound` |
 | `test_both_planes_bound_is_refused` | tenant + platform factories | `AmbiguousPlane` |
 | `test_the_authority_enum_has_exactly_one_reader_module` | a planted `from ... import CommercialAuthority` inside a service module | the import scan fails the build |
@@ -184,9 +181,9 @@ them is "both":
 
 | Phase | Production assembly | Shadow assembly | Why two writers are impossible |
 |---|---|---|---|
-| **Pre-switch (S1 shadow)** | billing composed but **unbound**, no billing surface mounted, `legacy_financial_writer=True` | a *separate process* against a *separate shadow database*, bound `INTERNAL`, `legacy_financial_writer=False` | The production process has no bound authority, so `NoInvoiceAuthority` refuses every write; the shadow process cannot reach the production database. The shadow is not a dual-write. |
-| **Switch (S3)** | one deployment change sets `legacy_financial_writer=False` **and** binds `INTERNAL` | retired | The two values move in one config change. Any ordering that briefly left both true is refused by `TwoFinancialWriters` — the process would not start, which is the correct outcome inside a declared money-write maintenance window. |
-| **Post-switch** | bound `INTERNAL`, legacy writer deleted or reduced to a read-only archive reader | — | S4's two-directional ratchet drives the legacy import/caller count to zero; the binder's premise is what holds the line until it does. |
+| **Pre-switch (S1 shadow)** | legacy production writer remains sole authority; Billing surfaces are unmounted | a *separate process* against a *separate shadow database*, bound `INTERNAL` | The shadow process cannot reach the production database and no financial command is dual-written. |
+| **Switch (S3)** | one deployment-wide watermark disables the legacy invoice, settlement and allocation writers and activates Billing | retired | The cutover lock proves no command crossed the watermark twice; any partial switch fails the adopter's startup gate. |
+| **Post-switch** | bound `INTERNAL`, legacy rows retained read-only | — | S4's two-directional ratchets drive all displaced writer/import/caller paths to zero before retirement is declared complete. |
 
 Three points the boot check makes explicit that the prose plan leaves implicit:
 
@@ -195,19 +192,14 @@ Three points the boot check makes explicit that the prose plan leaves implicit:
   not the production database. That is why S1's "do not dual-write financial
   commands" is a property of the deployment topology rather than a discipline
   someone must remember.
-- **A partially applied config is a refused boot, not a half-switched
-  deployment.** This is the concrete answer to "what happens mid-cutover": if
-  the config change lands one variable at a time, the process refuses to start
-  between them. A brief refusal inside an announced money-write window is
-  cheaper by orders of magnitude than a minute of two allocation writers.
-- **Rollback is roll-forward, and the binder cannot express the rollback.**
-  Once billing has accepted a fact after the watermark, re-enabling the legacy
-  writer means setting `legacy_financial_writer=True` while `INTERNAL` is bound
-  — which is `TwoFinancialWriters` and refuses to boot. The cutover plan's S3
-  rule ("re-enabling the old writer would create two owners") is therefore
-  enforced by the same check rather than by a runbook sentence, and unbinding to
-  roll back is only possible while no post-watermark fact exists, which is the
-  premise the cutover lock already proves.
+- **A partially applied cutover is a refused adopter boot.** The adopter owns
+  the coupled watermark and proves its legacy routes/jobs are disabled before
+  it mounts Billing mutation surfaces. Billing separately refuses a duplicate
+  module binding; neither mechanism claims to inspect the other's database.
+- **Rollback becomes roll-forward after the first post-watermark fact.** The
+  runbook may restore the old deployment only while reconciliation proves zero
+  accepted Billing facts beyond the watermark. Afterwards correction appends
+  Billing evidence; re-enabling the old writer would create two authorities.
 
 ### 1.6 What the profile is *not* allowed to select
 
@@ -343,13 +335,15 @@ billing and never queries `mod_<billing>` tables (ADR-0024 § 2).
 
 | Facet | Specification |
 |---|---|
-| **Identity + version** | `billing.receivable.position.v1`. Identity is `(scope, billing_account_id, currency)` plus `as_of_version` — a monotonic per-account counter incremented by each posting group, so a consumer can discard a stale message without comparing timestamps. |
-| **Idempotency** | scope `billing.position.read`, key = `f"{billing_account_id}:{currency}:{as_of_version}"`, `fingerprint = None` — the key alone identifies the state, which is ADR-0014's stated correct reading for a producer-generated identity. |
+| **Identity + version** | `billing.receivable.position.v1`. Identity is `(scope, source_owner, exposure_ref, billing_account_id, currency)` plus `source_version` — a monotonic per-account counter incremented by each posting group, so a consumer can discard a stale message without comparing timestamps. `exposure_ref` is opaque to Billing consumers; it does not become a cross-application foreign key. |
+| **Idempotency** | scope `billing.position.read`, key = a stable digest of identity plus `source_version`, `fingerprint = None` — the producer-generated version alone identifies the snapshot. |
 | **Scope** | tenant message carries `tenant_id`; platform message has no tenant field. |
 | **Money** | **three separate `Money` values per currency, and no fourth field that combines them**: `collectible_receivable`, `available_credit`, `prepaid_funding`. |
-| **Provenance** | `derived_from` = `"posting_groups"` under `internal`, `"projection"` under `provider_owned`; `source_authority`; `computed_at`; `posting_group_watermark`. A collections ladder may be configured to refuse to act on a `"projection"`-derived position whose drift report is stale. |
+| **Provenance** | `derived_from` = `"posting_groups"` under `internal`, `"projection"` under `provider_owned`; `source_authority`; `completeness`; `state_fingerprint`; `observed_at`; `posting_group_watermark`. A collections ladder refuses an incomplete or stale projection rather than inferring missing money. |
+| **Service-period evidence** | `service_period_status` is exactly `not_applicable`, `verified`, or `unknown_unverified`. Start/end are required and ordered only for `verified`; absent otherwise. This is immutable source evidence needed to prevent a future-period consequence, not cadence or recurrence logic in Billing. |
+| **Due-date evidence** | `due_at` plus immutable `DueDateBasisV1`: payment-term source/version, source authority, issued/effective instant and timezone, derivation policy/version, and typed override/correction evidence. Native collectible issuance requires `verified`; legacy/imported `unknown_unverified` remains reportable but is never automatically collectible. |
 | **Correction** | Positions are **rebuildable projections of immutable posting groups**, never stored balances with writers. A correction is a replay: recompute from effects and re-emit at a higher `as_of_version`. A replay that produces a different value at the same watermark is a defect, and the position rebuild hash-compare (cutover plan V3/S2) is what detects it. |
-| **Errors** | consumer-side: `UnknownContractVersion` (no retry), `StalePosition` (drop, not retry). Producer-side there is no error class — a position that cannot be computed is a missing message, and its absence is a drift signal. |
+| **Errors** | `Ok`, `Unavailable(retryable)`, `Unknown` and `AuthorityMismatch` are typed `ReceivablesReader` outcomes around this same snapshot, not a second contract. Event consumers additionally use `UnknownContractVersion` (no retry) and `StalePosition` (drop). A position that cannot be rebuilt is a loud reconciliation failure, never an invented balance. |
 | **Compatibility** | § 2.0. **Adding a fourth money field is a `V2` and requires an accounting decision**, because the whole point of the shape is that three quantities do not collapse. |
 
 **C9 is the reason this contract exists in this shape.** A single `balance`
@@ -450,7 +444,7 @@ fact; nothing here is a presentation decision.
 | tax snapshots — treatment, jurisdiction, rate components, taxable basis, exact tax amounts, tax policy identity and version | billing, via the `TaxProvider` seam |
 | totals — exact subtotal, tax total, grand total, and the FX observation snapshot if one was used | billing |
 | `currency` (ISO-4217) **plus `minor_units`** | billing. **The code and its fraction digits only** — how it is *displayed* is the renderer's. `minor_units` is already on `dotmac_kernel.money.Currency`; emitting it stops rendering needing a currency table, which is P9's and does not exist (Team 4 R6). |
-| payment terms and `due_date` | billing |
+| `due_at` plus immutable `DueDateBasisV1` | billing; new native collectible invoices require verified basis. `unknown_unverified` is legacy/import-only, reportable but non-collectible by automation. |
 | **`payment_instructions` snapshot** — bank name, account name, account number, sort code, as at issuance | billing, frozen at issuance (Team 4 R1). **Not resolved live.** Sub resolves these at render time (`billing_invoice_pdf.py:266`, `:865`), so re-rendering a two-year-old invoice prints today's bank account — a money-misdirection defect rendering cannot fix, because rendering must not read settings. |
 | **brand/presentation-asset reference** — an opaque `dotmac-files` UUID, or an explicit "no asset" | billing, frozen at issuance (Team 4 R3). *Which* asset the document was issued with is a snapshot decision even though a logo is presentation. Billing holds the opaque UUID and never dereferences it — the same ADR-0022 § 2 shape as Part 5. |
 | `document_kind` — `invoice`, `credit_note`, `receipt` | billing (Team 4 R4). `statement` is deferred: it spans a period, so its immutable fact is a period fact with its own producer contract (Part 6, Q3). |
@@ -469,12 +463,10 @@ which is impossible if billing froze the template into the invoice's own
 immutable snapshot. If the rendering owner needs a template binding it is an
 assembly declaration keyed on `document_profile_code`, not a billing column.
 
-**Agreed with the Documents workstream, 2026-08-14.** Both specs reached this
-split independently and for the same reason; it is closed as a boundary question
-(Part 6, Q1). What remains open is only the field *name* — Team 4 proposes
-`template_profile_code`, this spec proposes `document_profile_code` on the
-grounds that a `template_`-prefixed name reintroduces at the wire the coupling
-both sides just removed. Recorded as D1; a rename, not a boundary.
+**Frozen 2026-08-17.** The field names are `document_profile_code` and
+`document_profile_version`. A `template_` prefix would reintroduce at the wire
+the coupling both sides removed; concrete template identity stays on the
+rendering owner's contract.
 
 **Two invariants that constrain billing specifically:**
 
@@ -919,20 +911,18 @@ properly his to accept or overrule; each is flagged where it appears above.
    `provider_owned`** (§ 1.3). This makes the profile a migration-composition
    input, not only a runtime binding — which is stronger, and also means
    changing profile is a migration.
-3. **`legacy_financial_writer` as a required binder argument** (§ 1.3). It puts a
-   product-side fact into a module-side check. The alternative is a purely
-   product-owned assertion, which is weaker but keeps the module ignorant of the
-   legacy writer's existence.
+3. ~~**`legacy_financial_writer` as a required binder argument**~~ — **REMOVED
+   2026-08-17 (ADR-0020 A13).** Billing cannot verify a writer in another
+   application. Adopters enforce their watermark and retirement ratchets; the
+   module enforces only its one binding slot.
 4. **A non-`None` fingerprint on obligation acceptance** (§ 2.1) — it makes a
    rerate a loud conflict rather than a silent replay, at the cost of requiring
    the assembly to park poison messages.
 5. **Three positions and no fourth field, forever** (§ 2.3) — accepting this
    means every consumer that wants a single number writes the arithmetic itself.
 6. ~~**`document_profile_code` is billing's, template identity is the rendering
-   owner's**~~ — **RESOLVED by agreement, 2026-08-14.** Both workstreams reached
-   the same split independently and for the same reason (Part 6, Q1). Only the
-   field *name* remains open, as D1, and it is a rename rather than a boundary
-   question.
+   owner's**~~ — **RESOLVED 2026-08-17 (ADR-0020 A12).** The field names are
+   `document_profile_code` and `document_profile_version`.
 
 ### Raised by the artifact-relation gate (Part 5)
 

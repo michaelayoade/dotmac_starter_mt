@@ -154,17 +154,18 @@ def test_ticketing_is_release_allowlisted_with_its_schema_allocation() -> None:
     assert emitted["tag"] == "dotmac-ticketing-v0.1.0a4"
 
 
-def test_only_ticketing_may_require_alembic_at_runtime() -> None:
+def test_only_linking_modules_may_require_alembic_at_runtime() -> None:
     """Specificity for the allowlist entry's widened `allowed_requires`.
 
-    `dotmac_ticketing.linking`'s per-plane link helpers emit DDL into a
+    `dotmac_ticketing.linking` and `dotmac_billing.linking` emit DDL into a
     CONSUMING product's migration, which makes Alembic a real runtime import.
-    That reasoning applies to this module and no other, so the exception must
-    not spread by copy-paste into the next entry.
+    That reasoning applies to those modules and no others, so the exception
+    must not spread by copy-paste into the next entry.
     """
+    linking_modules = {"dotmac-billing", "dotmac-ticketing"}
     for distribution, entry in _allowlist().items():
         permits_alembic = "alembic" in entry["wheel_contents"]["allowed_requires"]
-        assert permits_alembic == (distribution == "dotmac-ticketing"), distribution
+        assert permits_alembic == (distribution in linking_modules), distribution
 
 
 def test_a_mismatched_version_is_refused_rather_than_inferred() -> None:

@@ -1,5 +1,31 @@
 # `dotmac-billing` — extraction dossier content
 
+> **Implementation amendment — 2026-08-18.** P11 is now met by the accepted
+> Vendor CP production-lineage evidence; Michael's named Billing goal separately
+> authorizes this implementation and adoption preparation. The package,
+> namespace, `bi` lineage and dual persistence planes now exist together at
+> `packages/dotmac-billing`; its colocated `EXTRACTION.toml` is authoritative
+> for current source dispositions and pins Starter
+> `7828697ef11fb1ae765a5397dfa7dc221ae6207a`, Sub
+> `0f3d26ecec4ace6ed7504f17f21aa3d8e3b4107f`, ERP
+> `2749ec5396cbbd7a1132b394e85855a1d133a7cd`, Vendor CP
+> `f8f8c3fd636e663e4a17275c19e82fc1667aa52a`, and Integrator
+> `35167813c83ab0ec29c683259ad31479503d812f`. The prior statements below that
+> the package did not exist and that no exception had been granted are retained
+> as audit history and are superseded by this amendment. The current source mode
+> is **greenfield-after-inventory**: proven scenarios and negative tests were
+> ported, but no shadow/dead financial owner was copied.
+>
+> The current revalidation heads are Starter
+> `c6b403faa5136e06f8219bbbb7cf5e4ddfed724f`, Sub
+> `a9da920926a9d9212a8cf03a4744b48a1d4e14f2`, and the ERP, Vendor CP and
+> Integrator pins above. Durable Timers is pinned as read-only dependency
+> evidence at Starter `7e0543004864845f0035c9ec325e3f5064c281cc` and Sub
+> `4489ca1712f3c263d914f2af0ebfcf044aa70605`; released kernel `0.1.0a67`
+> provides its verified `outbox_relay.v1` effect. It is required before Sub
+> enables effective recurring-charge occurrences, not by `dotmac-billing`, the
+> Vendor platform adopter, or Sub's backfill/shadow preparation.
+
 **As of:** 2026-08-14
 **starter:** working tree on `docs/whatsapp-connector-extraction-dossier`
 (`b55c9a5`), carrying the uncommitted ADR-0020 2026-08-14 amendment
@@ -18,7 +44,7 @@ ADR-0024, ADR-0022, ADR-0016, ADR-0014
 
 ---
 
-## Why this is a markdown document and not `packages/dotmac-billing/EXTRACTION.toml`
+## Historical pre-implementation dossier staging
 
 Repository convention locates a dossier at its package root. **`packages/dotmac-billing/`
 does not exist and this document does not create it.** ADR-0017's P11 lineage

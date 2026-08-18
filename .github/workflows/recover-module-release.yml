@@ -38,6 +38,7 @@ on:
           - dotmac-files
           - dotmac-ticketing
           - dotmac-numbering
+          - dotmac-billing
           - dotmac-integration
           - dotmac-approvals
           - dotmac-application-directory

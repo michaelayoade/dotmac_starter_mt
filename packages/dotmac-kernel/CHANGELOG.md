@@ -38,6 +38,19 @@ production caller migrated to the canonical identity pair.
   nine local callers the narrower guard had missed. No compatibility claim is
   now inferred from one package's caller list.
 
+### Added
+
+- Allocated the permanent `dotmac-billing` migration identity: owner
+  `billing`, schema `mod_billing`, prefix `bi`, branch label `billing`. This is
+  an allocation only; operational receivables remain in the optional module.
+
+### Changed
+
+- Made reusable SQLite test composition explicit: importing an optional module
+  populates metadata but does not silently install its schema. Callers name the
+  module schemas a unit-test assembly actually composes; PostgreSQL remains the
+  authority for exact namespaces, row-level security and grants.
+
 ## 0.1.0a69 — 2026-08-18
 
 Makes route-guard imports safe during package discovery without moving
@@ -67,9 +80,8 @@ control-plane modules.
 
 - `platform_audit_log.v1`, covering the full `public.platform_audit_events`
   shape and usable defaults, actor foreign key and non-unique/non-partial lookup
-  index, absence of RLS, complete tenant
-  role isolation, and the online `platform_api` role's append-only
-  `SELECT`+`INSERT` posture.
+  index, absence of RLS, complete tenant role isolation, and the online
+  `platform_api` role's append-only `SELECT`+`INSERT` posture.
 - `verify_platform_audit_log`, with real-PostgreSQL proofs that break each
   observable individually and a sensitivity companion showing a table-name
   check misses every nonexistence defect.
@@ -80,10 +92,8 @@ control-plane modules.
 ### Fixed
 
 - Publishes the named contract required for `dotmac-integration` and
-  `dotmac-entitlement-allocation` to declare and verify the audit table in the
-  immediately following consumer slice. Their floors stay unchanged until
-  this kernel version is released and therefore resolvable.
-- `write_platform_audit_event` now rejects action codes absent from the active
+  `dotmac-entitlement-allocation` to declare and verify the audit table.
+- `write_platform_audit_event` rejects action codes absent from the active
   manifest registry before adding a row; platform modules' `audit_actions`
   declarations are therefore an enforced vocabulary rather than documentation.
 

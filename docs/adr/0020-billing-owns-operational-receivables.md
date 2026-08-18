@@ -8,7 +8,8 @@ module-lineage rules, ADR-0008's declaration registries, ADR-0016's derived
 coverage rule, and ADR-0017's adoption sequence
 **Amended by its own 2026-08-14 amendment** under ADR-0023 (dual-plane module
 persistence), ADR-0024 (apps compose by synchronizing data; the Integrator owns
-provider transport), and ADR-0022 (`dotmac-files` owns stored bytes)
+provider transport), and ADR-0022 (`dotmac-files` owns stored bytes), and by
+the 2026-08-17 contract-freeze amendment below
 **Evidence:** `docs/inventories/billing-sources.md`
 **Implementation plan:**
 `docs/superpowers/plans/2026-08-11-billing-subscriptions-collections.md`
@@ -232,12 +233,100 @@ dual-plane `dotmac-numbering` module, extracted product-first from ERP.
 reusing the kernel outbox/relay for claiming — ADR-0017's 2026-08-15 amendment
 and ADR-0030 § 4a. P4 shipped as described.)
 
-### What this amendment does not do
+## Amendment, 2026-08-17: Billing V1 contract freeze
 
-It does not lift ADR-0017's moratorium, does not claim P11, does not create a
-package, namespace, lineage, or dossier, and does not grant these modules the
-owner-directed exception `dotmac-approvals` received under ADR-0026. § 6
-remains the gate.
+This amendment closes the contract contradictions recorded by ADR-0030 § 5e
+before Billing behaviour is implemented. It does not publish allocation or
+coverage as cross-application contracts; both remain internal derivations of
+Billing's immutable effects.
+
+### A8. Obligation output and accepted input
+
+Subscriptions' single output is **`RatedObligationOutputV1`**. The assembly
+translates it into Billing's **`AcceptRatedObligationV1`** command; there is no
+`RecurringObligationDueV1` peer. The V1 output carries the C10 natural identity,
+`collection_timing`, exact `pre_tax_amount`, uppercase ISO currency, persisted
+minor-unit precision, service-period evidence, source version and price
+version. A Subscriptions occurrence never stores receivable, settlement,
+allocation or coverage state.
+
+### A9. Settlement acceptance
+
+**`AcceptSettlementV1` is frozen.** Its identity is
+`(source_system, source_settlement_key)`. Its fingerprint covers exact amount,
+currency, `occurred_at` and `source_version`. The command carries independently
+verified confirmation evidence from an open assembly registry. Same key and
+same fingerprint is replay; the same key with changed content is a conflict.
+A pending checkout, uploaded proof, UI approval or unverified provider
+acknowledgement moves no money. Accepted settlement evidence is immutable;
+refunds and reversals append offsetting effects.
+
+### A10. One receivable position contract
+
+**`ReceivablePositionV1` is one Billing-owned versioned snapshot**, whether it
+travels as a published fact or is returned synchronously through an assembly
+adapter implementing Collections' `ReceivablesReader`. Reader outcomes such as
+Unavailable or AuthorityMismatch describe delivery, not a second position
+shape. The snapshot identifies the source owner, opaque exposure reference,
+billing account, currency, monotonic source version and posting watermark; it
+carries authority, completeness, state fingerprint and observation time. Its
+only money members are `collectible_receivable`, `available_credit` and
+`prepaid_funding`, each in the same currency and precision. No combined balance
+exists.
+
+The snapshot also carries service-period evidence as one of `not_applicable`,
+`verified` or `unknown_unverified`, with start/end required only when verified.
+This lets Collections refuse a future-period consequence without importing
+Subscriptions or inventing recurrence state.
+
+### A11. Due-date basis is immutable evidence
+
+An issued receivable carries immutable `due_at` plus **`DueDateBasisV1`**:
+payment-term source and version, source authority, issued/effective instant and
+timezone, derivation policy and version, and any override actor, reason,
+evidence or superseding correction. A new native collectible invoice fails
+closed without verified basis. `unknown_unverified` is lawful for legacy or
+imported evidence, and remains reportable, but automated collections may not
+dun, suspend, rank it overdue or request a consequence from it. Collections
+consumes the evidence and never invents a due date.
+
+### A12. Document fact and official artifact relation
+
+**`InvoiceDocumentFactV1` is frozen** with
+`document_profile_code`/`document_profile_version`; a template identity is not
+a Billing field. It contains immutable document, money, line, applied tax/FX,
+party-tax-identity, payment-instruction and due-date-basis snapshots, never
+rendered bytes.
+
+Billing owns the append-only relation from one fact version and media type to
+an opaque file identifier. The current row is protected by a partial unique
+constraint. A repair appends a row with a declared supersession reason and a
+checksum-bearing idempotency key; it never mutates the prior artifact. A
+different `presentation_model_digest` for the same fact version is
+`ArtifactContentMismatch`, with no cosmetic exception. The assembly-owned
+`InvoiceArtifactReconciler` is the sole caller of Billing's typed
+`RecordDocumentArtifactV1` command; events only wake it. There is no foreign key
+or package import to Rendering or Files.
+
+### A13. Authority binding and adopter retirement
+
+Billing exposes one process-local binding slot over the closed authority
+vocabulary `internal`, `provider_owned`, `external_finance`. A second binding,
+including the same value twice, is refused. The binder has no
+`legacy_financial_writer` boolean: Billing cannot verify a writer in another
+application, and such a flag would be an invented cross-application control
+plane. Vendor CP proves there is no pre-existing writer before activation. Sub
+uses a separate shadow database, a coupled invoice/settlement/allocation
+watermark switch, and two-directional retirement ratchets over its displaced
+writers. Production cutover never runs both authorities.
+
+### What the 2026-08-14 amendment did not do
+
+At the time, it did not lift ADR-0017's moratorium, claim P11, create a package,
+namespace, lineage or dossier, or grant an owner-directed exception. ADR-0030
+§ 6 subsequently granted Billing's named implementation exception. P11 remains
+an adoption gate, and this 2026-08-17 contract freeze does not execute a
+production cutover or weaken any live PostgreSQL proof.
 
 ## Context
 

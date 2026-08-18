@@ -27,6 +27,7 @@ from dotmac_kernel.testing import (
     fake_branding,
     isolated_session,
 )
+from sqlalchemy import Column, Integer, MetaData, Table, select
 
 
 # ── harness ──────────────────────────────────────────────────────────────────
@@ -59,6 +60,35 @@ def test_isolated_session_rolls_back_between_uses() -> None:
             assert session.query(Tenant).count() == 1
         with isolated_session(engine) as session:
             assert session.query(Tenant).count() == 0
+    finally:
+        engine.dispose()
+
+
+def test_test_engine_supports_more_schemas_than_sqlite_can_attach() -> None:
+    """Package growth must not make the shared unit lane unbootable.
+
+    SQLite is commonly compiled with ``MAX_ATTACHED=10``.  The Starter
+    catalogue now exceeds that count, so the harness must preserve the largest
+    qualified namespaces and safely co-locate only collision-free spillover.
+    PostgreSQL remains the live proof for exact schemas, RLS and grants.
+    """
+    metadata = MetaData()
+    tables = tuple(
+        Table(
+            f"probe_{index}",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            schema=f"mod_probe_{index:02d}",
+        )
+        for index in range(12)
+    )
+
+    engine = create_test_engine(metadata=metadata)
+    try:
+        with engine.begin() as connection:
+            for index, table in enumerate(tables):
+                connection.execute(table.insert().values(id=index))
+                assert connection.execute(select(table.c.id)).scalar_one() == index
     finally:
         engine.dispose()
 

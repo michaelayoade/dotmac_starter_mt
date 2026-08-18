@@ -585,6 +585,17 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-billing` — the operational-receivables owner on declared tenant and
+# platform planes. Allocated with the first complete package in kernel a69;
+# `bi` and `mod_billing` are permanent physical identities, never deployment
+# configuration.
+BILLING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="billing",
+    prefix="bi",
+    branch_label="billing",
+    db_schema=module_schema("billing"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -597,6 +608,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
+    BILLING_MIGRATION_OWNER,
 )
 
 
@@ -929,6 +941,7 @@ class NamespaceRegistry:
 __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
+    "BILLING_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",

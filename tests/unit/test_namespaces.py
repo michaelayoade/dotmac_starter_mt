@@ -189,6 +189,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # first enabling owner of the Cloud commerce programme, and dual-plane for
     # the same reason approvals is: a tenant allocates its own document series
     # and the control plane allocates vendor-side series no tenant may read.
+    # `billing` is the eleventh, allocating the single dual-plane owner of
+    # operational receivables under ADR-0020 without composing it into Starter.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -201,6 +203,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "imports",
         "integration",
         "approvals",
+        "billing",
     }
 
 
@@ -280,7 +283,9 @@ def test_the_registry_also_refuses_a_table_smuggled_into_both_planes() -> None:
 
 def test_an_unallocated_module_cannot_own_a_namespace() -> None:
     with pytest.raises(UnallocatedNamespaceError) as exc:
-        NamespaceRegistry.from_manifests([_module()])
+        NamespaceRegistry.from_manifests(
+            [_module(code="unallocated", short_code="unalloc", prefix="ux")]
+        )
     assert "MIGRATION_OWNER_LEDGER" in str(exc.value)
 
 

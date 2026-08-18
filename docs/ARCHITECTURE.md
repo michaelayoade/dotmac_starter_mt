@@ -63,6 +63,32 @@ local owning record; a separate locally owned ticket may be created only by the
 local ticket owner. Synchronization never makes either application a writer of
 the other's lifecycle.
 
+### Operational receivables module (as built)
+
+`packages/dotmac-billing` is the single reusable operational-receivables owner
+defined by ADR-0020. One provider-neutral service and rule engine runs over two
+explicitly selected persistence planes: tenant tables carry `tenant_id UUID NOT
+NULL` with composite identities and `ENABLE` + `FORCE` RLS; platform tables
+carry no tenant column or RLS, revoke every table and column privilege from
+`app_user`, and grant only the online privileges the platform service uses. No
+foreign key crosses the planes.
+
+The module accepts immutable rated obligations and independently confirmed
+settlements, owns draft/issue/void/credit document meaning, appends allocation,
+deallocation, reallocation, refund and reversal posting groups, and rebuilds
+separate per-currency receivable, available-credit and prepaid-funding
+positions. It freezes applied tax, FX, party identity, due-date-basis and
+document facts, emits fully typed `AccountingFactV1`, `ReceivablePositionV1`
+and `InvoiceDocumentFactV1` payloads through the kernel outbox, and owns only
+the official relation from a document fact to an opaque file UUID. Rendering
+owns bytes; Files stores them.
+
+The package owns no offer, cadence, proration, collections policy, PSP
+transport, provider credential, numbering-series state, rendered byte, product
+access consequence, account mapping, journal, chart of accounts, fiscal period,
+treasury decision, statutory accounting or tax return. Applications adopt one
+released package and synchronize typed facts; they never share its tables.
+
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
 The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
@@ -74,8 +100,10 @@ grants/evaluation, and WS8 licence verification, revocation, and authenticated
 applied-state contracts. The reference assembly owns the durable
 licence/revocation receiver state and thin apply/import adapters. It does
 **not** yet implement runtime profile/provider selection, the complete
-effective-capability availability lifecycle, subscriptions, billing, or
-metering. The target architecture is authoritative in
+effective-capability availability lifecycle, subscriptions, or metering. The
+repository now ships the complete `dotmac-billing` module described above, but
+this reference assembly has not activated a financial-authority cutover. The
+target architecture is authoritative in
 [`ADR-0003`](adr/0003-unified-deployment-profiles.md); ADR-0006 owns its package
 and presentation boundaries, with delivery gates in the
 [`deployment profiles and commercial platform plan`](superpowers/plans/2026-07-18-deployment-profiles-commercial-platform.md).
@@ -1264,6 +1292,22 @@ made concrete — every model has exactly one declared owner.
 | `CustomFieldDefinition` | `custom_field_definitions` | custom_fields | dotmac_erp (`app/models/finance/automation/custom_field.py`, generalized: string `entity_type` registry instead of a finance-only enum, `tenant_id` instead of `organization_id`) |
 | `TenantAppliedLicence` | `tenant_applied_licences` | licensing | native (WS8 reference receiver, assembly migration `a002`) — the receiver-owned durable replay record the kernel verifier deliberately does not store; one row per `(tenant_id, licence_id)` lineage, upserted on each applied version |
 | `TenantRevocationList` | `tenant_revocation_lists` | licensing | native (WS8 revocation import, assembly migration `a003`) — the last imported list version + the revoked set, one row per tenant. Persisted (not just applied) because the set is fed into every subsequent `verify_licence` offline; accepted imports must be a SUPERSET of the stored set, since a well-ordered newer list that omits an id is silent un-revocation |
+| `BillingAccount` / `PlatformBillingAccount` | `mod_billing.billing_accounts` / `platform_billing_accounts` | `dotmac-billing` optional module | Per-currency serialization identity only; contains no mutable balance. Tenant/platform counterparts share behavior, never rows. Greenfield-after-inventory from the Sub/ERP scenario dossier. |
+| `RatedObligation` / `PlatformRatedObligation` | `mod_billing.rated_obligations` / `platform_rated_obligations` | `dotmac-billing` optional module | Immutable accepted rated occurrence under the C10 natural identity and changed-fingerprint conflict rule. |
+| `BillingDocument` / `PlatformBillingDocument` | `mod_billing.documents` / `platform_documents` | `dotmac-billing` optional module | Draft/issued invoice and credit-note meaning; issuance freezes number, due-date basis, parties, payment instructions, profile, locale and presentation-asset reference. Coverage is not lifecycle. |
+| `DocumentLine` / `PlatformDocumentLine` | `mod_billing.document_lines` / `platform_document_lines` | `dotmac-billing` optional module | Exact line amounts and price provenance; frozen structurally with the issued document. |
+| `DocumentEvent` / `PlatformDocumentEvent` | `mod_billing.document_events` / `platform_document_events` | `dotmac-billing` optional module | Append-only issuance/void evidence; corrections append and never rewrite the issued document. |
+| `ConfirmedSettlement` / `PlatformConfirmedSettlement` | `mod_billing.confirmed_settlements` / `platform_confirmed_settlements` | `dotmac-billing` optional module | Independently confirmed, provider-neutral money evidence keyed by source settlement identity and fingerprint. |
+| `PostingGroup` / `PlatformPostingGroup` | `mod_billing.posting_groups` / `platform_posting_groups` | `dotmac-billing` optional module | Immutable operational-receivable mutation group and monotonic per-account source version; reversal points backward and appends. |
+| `PostingEffect` / `PlatformPostingEffect` | `mod_billing.posting_effects` / `platform_posting_effects` | `dotmac-billing` optional module | Exact signed effect in one of the three closed lanes: receivable, available credit or prepaid funding. |
+| `AllocationEffect` / `PlatformAllocationEffect` | `mod_billing.allocation_effects` / `platform_allocation_effects` | `dotmac-billing` optional module | Internal immutable settlement→document allocation/deallocation/reallocation/refund/reversal detail; intentionally not a published peer contract. |
+| `AppliedTaxSnapshot` / `PlatformAppliedTaxSnapshot` | `mod_billing.applied_tax_snapshots` / `platform_applied_tax_snapshots` | `dotmac-billing` optional module | Immutable source-supplied tax treatment, jurisdiction, policy version, rate and exact basis/amount; no hardcoded jurisdiction or return ownership. |
+| `AppliedFxSnapshot` / `PlatformAppliedFxSnapshot` | `mod_billing.applied_fx_snapshots` / `platform_applied_fx_snapshots` | `dotmac-billing` optional module | Immutable observation identity/version, exact rate, purpose, instants, rounding and provenance; no FX provider client. |
+| `PartyTaxIdentitySnapshot` / `PlatformPartyTaxIdentitySnapshot` | `mod_billing.party_tax_identity_snapshots` / `platform_party_tax_identity_snapshots` | `dotmac-billing` optional module | Seller/customer tax identity as frozen for one document; an imported value never mutates a party owner. |
+| `InvoiceDocumentFact` / `PlatformInvoiceDocumentFact` | `mod_billing.invoice_document_facts` / `platform_invoice_document_facts` | `dotmac-billing` optional module | Immutable, fully typed `InvoiceDocumentFactV1` presentation model and semantic digest emitted to the separate rendering owner. |
+| `DocumentArtifact` / `PlatformDocumentArtifact` | `mod_billing.document_artifacts` / `platform_document_artifacts` | `dotmac-billing` optional module | Append-only official relation from fact version/media type to opaque Files UUID plus exact renderer/byte provenance. Repairs supersede; cancellation withdraws; Billing stores no bytes. |
+| `AccountingFact` / `PlatformAccountingFact` | `mod_billing.accounting_facts` / `platform_accounting_facts` | `dotmac-billing` optional module | Immutable typed operational effects for ERP intake; no account code, journal, period or GL state. |
+| `ReceivablePositionFact` / `PlatformReceivablePositionFact` | `mod_billing.receivable_position_facts` / `platform_receivable_position_facts` | `dotmac-billing` optional module | Immutable rebuild/hash attestation and full `ReceivablePositionV1`; no authoritative mutable balance and no combined cross-lane amount. |
 | `TenantTicket` | `mod_tkt.tickets` | `dotmac-ticketing` optional module | Tenant-plane product-neutral lifecycle record, product-first from Sub's authoritative support lifecycle after the fleet inventory separated standard status from product reason. Forced RLS; each adopter owns a separate installation and only local workflow rows (ADR-0023/0024). |
 | `TenantTicketComment` | `mod_tkt.ticket_comments` | `dotmac-ticketing` optional module | Tenant-plane comment trail owned with its local ticket; never a cross-application conversation store. |
 | `PlatformTicket` | `mod_tkt.platform_tickets` | `dotmac-ticketing` optional module | Platform-plane form of the same persistence-free lifecycle for a control-plane installation: no tenant column/RLS, platform grants, `app_user` revoked (ADR-0023). |
@@ -1287,6 +1331,11 @@ write:
 
 | Resource | Owning write path(s) |
 |---|---|
+| Billing accounts and rated obligations | `dotmac_billing.service.create_billing_account` and `accept_rated_obligation`. The account is a per-currency identity/lock root, never a balance; obligation acceptance is immutable and idempotent. |
+| Billing documents, lines, lifecycle evidence and document facts | `dotmac_billing.service.create_draft_document`, `issue_document`, `issue_credit_note` and `void_document`. Numbering is an injected typed provider; issued rows are database-frozen; corrections append credit/void evidence and new facts. |
+| Confirmed settlement and allocation evidence | `dotmac_billing.service.accept_settlement`, `allocate_settlement`, `deallocate_settlement`, `reallocate_settlement`, `refund_settlement` and `reverse_posting_group`. Only confirmed evidence enters, every money movement is an immutable posting group, and the kernel owns commit/rollback. |
+| Operational receivable positions and accounting facts | `_post_group` in `dotmac_billing.service` is the sole writer. It rebuilds the three lanes from source effects, stores the hash attestation, and enqueues the complete typed `ReceivablePositionV1` and `AccountingFactV1` in the same transaction. ERP alone maps those effects into journals/GL. |
+| Official invoice artifact relation | `dotmac_billing.service.record_document_artifact` is the only recorder and accepts only the assembly reconciler's fully typed command. Exact semantic mismatch is refused; repairs append and supersede; `void_document` withdraws without deleting. Rendering produces bytes and Files stores the opaque UUID. |
 | Tenants | `app.features.tenants.service.provision_tenant` (platform-only, control-plane security Task 2 — one transaction creating tenant + owner party/person/credential + `admin` role grant + two audit events; no update/delete service yet) |
 | Platform admins | `scripts/create_platform_admin.py::upsert_admin` (CLI-only, platform/migration DB credentials — the same trust boundary as migrations; deliberately NO HTTP write path, see ADR-0004) |
 | Platform sessions | `dotmac_kernel.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |

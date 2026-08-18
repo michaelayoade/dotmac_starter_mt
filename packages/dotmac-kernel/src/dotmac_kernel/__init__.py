@@ -140,6 +140,7 @@ from dotmac_kernel.money import (
     currency,
 )
 from dotmac_kernel.namespaces import (
+    BILLING_MIGRATION_OWNER,
     HOST_SCHEMA,
     MAX_REVISION_ID_LENGTH,
     MIGRATION_OWNER_LEDGER,
@@ -365,6 +366,7 @@ __all__ = [
     "HOST_SCHEMA",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "BILLING_MIGRATION_OWNER",
     "MigrationOwner",
     "NamespaceRegistry",
     "module_schema",

@@ -87,6 +87,12 @@ its tenant-scope decisions, RLS/FORCE/grant proof, backfill, shadow comparison,
 reconciliation, and writer-retirement gates. A module targeting Sub must prove
 those properties in Sub even though the fleet-wide P11 gate is met.
 
+For `dotmac-billing`, P11 permits package and lineage implementation but does
+not prove the module's dual-plane contract or either adopter cutover. Vendor
+Control Plane must still prove its Billing platform-plane composition without a
+fake tenant, and Sub must separately prove the tenant-plane backfill, shadow
+comparison, reconciliation, coupled authority watermark, and retirement gates.
+
 For `dotmac-sales`, this means package and lineage implementation may now begin
 from the accepted Sub source audit and red canaries. It does not waive the
 product-first dossier, accepted-quote boundary, tenant isolation, exactly-once

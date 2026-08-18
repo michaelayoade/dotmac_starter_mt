@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "dotmac-billing"
+version = "0.1.0a1"
+description = "DotMac dual-plane operational receivables owner"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_billing", from = "src" }]
+include = [
+    { path = "src/dotmac_billing/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_billing/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a70"
+sqlalchemy = "^2.0"
+alembic = ">=1.13"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

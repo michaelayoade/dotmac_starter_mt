@@ -559,6 +559,25 @@ type = "directory"
 url = "packages/dotmac-auth-oidc"
 
 [[package]]
+name = "dotmac-billing"
+version = "0.1.0a1"
+description = "DotMac dual-plane operational receivables owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+alembic = ">=1.13"
+dotmac-kernel = ">=0.1.0a70"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-billing"
+
+[[package]]
 name = "dotmac-connector-whatsapp"
 version = "0.1.0a1"
 description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
@@ -2926,4 +2945,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d0019ca0b487fac0194b87d8d2224207442f79853b5250a6e0ae3d47eafbe285"
+content-hash = "9e84445e120e8712e09cf083b91130d4d5052be7aafff96a598dada870883608"

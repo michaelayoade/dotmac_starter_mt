@@ -1,5 +1,32 @@
 # Billing source variance
 
+> **Implementation revalidation — 2026-08-17.** Rechecked against Starter
+> `7828697ef11fb1ae765a5397dfa7dc221ae6207a`, Sub
+> `0f3d26ecec4ace6ed7504f17f21aa3d8e3b4107f`, ERP
+> `2749ec5396cbbd7a1132b394e85855a1d133a7cd`, Vendor CP
+> `f8f8c3fd636e663e4a17275c19e82fc1667aa52a`, and Integrator
+> `35167813c83ab0ec29c683259ad31479503d812f`. The verdict remains
+> **greenfield-after-inventory**. ADR-0020's 2026-08-17 A8–A13 amendments close
+> the contract gaps this document recorded: the output is
+> `RatedObligationOutputV1`; `AcceptSettlementV1`, `InvoiceDocumentFactV1`,
+> `RecordDocumentArtifactV1` and one `ReceivablePositionV1` are frozen;
+> allocation/coverage stay internal; due-date basis has an explicit
+> reportable-but-non-collectible `unknown_unverified` state; and semantic
+> artifact mismatch is a hard refusal. The earlier “no code/no package” next
+> actions below are historical findings, not the current execution gate.
+>
+> **Execution evidence — 2026-08-18.** The revalidation heads are Starter
+> `c6b403faa5136e06f8219bbbb7cf5e4ddfed724f`, Sub
+> `a9da920926a9d9212a8cf03a4744b48a1d4e14f2`, ERP
+> `2749ec5396cbbd7a1132b394e85855a1d133a7cd`, Vendor CP
+> `f8f8c3fd636e663e4a17275c19e82fc1667aa52a`, and Integrator
+> `35167813c83ab0ec29c683259ad31479503d812f`. The Durable Timers candidates are
+> read-only evidence at Starter `7e0543004864845f0035c9ec325e3f5064c281cc`
+> and Sub `4489ca1712f3c263d914f2af0ebfcf044aa70605`; released kernel `0.1.0a67`
+> supplies `outbox_relay.v1`. This resolves the historical “no timer owner”
+> finding for Subscriptions' effective recurring-charge cutover, without adding
+> timers to Billing or changing the greenfield-after-inventory verdict.
+
 **As of:** 2026-08-15
 
 **Baseline documents revalidated** (all three last written by starter `96dd4cb`,

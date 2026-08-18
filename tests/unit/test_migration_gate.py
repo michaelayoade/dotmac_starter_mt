@@ -240,9 +240,22 @@ def test_the_gate_reports_a_namespace_fault_instead_of_raising(
 ) -> None:
     """`run_gate` never raises for a composition problem — an operator should
     see every fault in one CI run, not one per run."""
-    location = tmp_path / "billing"
-    _billing_root(location)
-    report = run_gate([BILLING_MANIFEST], [location])  # unallocated in the ledger
+    location = tmp_path / "unallocated_probe"
+    _write(
+        location,
+        "up_0001_probe",
+        revision="up_0001_probe",
+        branch_labels=("unallocated_probe",),
+    )
+    manifest = ModuleManifest(
+        code="unallocated_probe",
+        version="1.0.0",
+        short_code="unallocated_probe",
+        migration_prefix="up",
+        migration_branch="unallocated_probe",
+        tables=("probe_rows",),
+    )
+    report = run_gate([manifest], [location])
     assert not report.ok
     assert "namespace composition:" in _messages(report)
     assert "MIGRATION_OWNER_LEDGER" in _messages(report)

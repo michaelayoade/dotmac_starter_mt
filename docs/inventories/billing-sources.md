@@ -1,5 +1,29 @@
 # Billing, dunning and subscription sources
 
+> **Revalidated 2026-08-17 for implementation.** The original measurement below
+> remains the historical product-first inventory. The current canonical pins
+> are Starter `7828697ef11fb1ae765a5397dfa7dc221ae6207a`, Sub
+> `0f3d26ecec4ace6ed7504f17f21aa3d8e3b4107f`, ERP
+> `2749ec5396cbbd7a1132b394e85855a1d133a7cd`, Vendor CP
+> `f8f8c3fd636e663e4a17275c19e82fc1667aa52a`, and Integrator
+> `35167813c83ab0ec29c683259ad31479503d812f`. The ownership evidence still
+> holds, but no qualifying complete shared implementation exists: the accepted
+> disposition is **greenfield-after-inventory**, porting the proven Sub/ERP
+> scenarios and negative tests without copying their product-owned cadence,
+> transport, collections or GL paths. `packages/dotmac-billing/EXTRACTION.toml`
+> is now the machine-checked current dossier.
+>
+> **Execution revalidation — 2026-08-18.** Canonical heads were rechecked at
+> Starter `c6b403faa5136e06f8219bbbb7cf5e4ddfed724f`, Sub
+> `a9da920926a9d9212a8cf03a4744b48a1d4e14f2`, ERP and Vendor CP at the pins
+> above, and Integrator `35167813c83ab0ec29c683259ad31479503d812f`.
+> Durable Timers is no longer an unowned gap: its Starter candidate is pinned
+> read-only at `7e0543004864845f0035c9ec325e3f5064c281cc`, its Sub adoption candidate at
+> `4489ca1712f3c263d914f2af0ebfcf044aa70605`, and released kernel `0.1.0a67`
+> supplies the verified `outbox_relay.v1` effect. Timers gate enabling effective
+> recurring-charge occurrences in Subscriptions; they are not a Billing runtime
+> dependency and do not block Billing or either adopter's preparation stages.
+
 **As of:** 2026-08-11
 **starter:** `c8237bd` (`origin/main`)
 **Sub:** `9f6f9f36b` (`origin/dev`)
