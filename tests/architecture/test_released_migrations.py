@@ -2,9 +2,9 @@
 
 ## The enforceable premise (ADR-0018)
 
-`dotmac-approvals` has been published four times, `dotmac-integration` eight,
+`dotmac-approvals` has been published five times, `dotmac-integration` eight,
 and `dotmac-entitlement-allocation` five. Every migration file present at any
-of those seventeen tags is inside a wheel on the registry, and has therefore RUN,
+of those eighteen tags is inside a wheel on the registry, and has therefore RUN,
 unmodified, in at least one database this repository does not own and cannot
 inspect.
 
@@ -188,6 +188,18 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
         {
             "ap_0001_approvals.py": (
                 "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+        },
+    ),
+    "dotmac-approvals-v0.1.0a5": (
+        "dotmac-approvals",
+        "8d4ddfd",
+        {
+            "ap_0001_approvals.py": (
+                "102110e3e50c2ebfe0e73c5eb5e77bafe014e4835edad45a41a91a9ae0c144cb"
+            ),
+            "ap_0002_outbox_relay.py": (
+                "6aace60a4925ad5f5c693b81a356807c1ad2b9ffe1664fdfcd1417429d127e2d"
             ),
         },
     ),
@@ -524,13 +536,14 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
                     {
                         "dotmac-approvals-v0.1.0a3",
                         "dotmac-approvals-v0.1.0a4",
+                        "dotmac-approvals-v0.1.0a5",
                     }
                 ),
             ),
         ),
         reason=(
             "a1 built both planes; a2 inferred tenant installation from a "
-            "binding; a3/a4 require explicit plane selection. These releases "
+            "binding; a3/a4/a5 require explicit plane selection. These releases "
             "already exist, so the divergence is preserved as evidence and "
             "each variant must upgrade to the canonical current lineage."
         ),
@@ -543,13 +556,12 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: Approvals' additive repair remains editable until a5 is published.
-#: Integration a8 and Allocation a6 are published, so their editable sets are
-#: empty; the next migration must enter this map before it can ship. The release
-#: lane does not wait for an open branch, which is why "released" is read from
-#: tags rather than from an intended version number.
+#: Approvals a5, Integration a8 and Allocation a6 are published, so their
+#: editable sets are empty; the next migration must enter this map before it
+#: can ship. The release lane does not wait for an open branch, which is why
+#: "released" is read from tags rather than from an intended version number.
 UNRELEASED: dict[str, frozenset[str]] = {
-    "dotmac-approvals": frozenset({"ap_0002_outbox_relay.py"}),
+    "dotmac-approvals": frozenset(),
     "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
 }
