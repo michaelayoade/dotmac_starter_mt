@@ -31,6 +31,11 @@ from dotmac_kernel.testing import (
 )
 
 
+def _public_tables():
+    """Kernel/host tables needed by the generic harness examples."""
+    return tuple(table for table in Base.metadata.tables.values() if not table.schema)
+
+
 # ── harness ──────────────────────────────────────────────────────────────────
 def test_engine_scales_past_sqlites_ten_attached_namespace_limit() -> None:
     """The fast lane remains usable as the module registry grows past ten.
@@ -70,7 +75,7 @@ def test_assembly_test_client_boots_and_serves_health() -> None:
     """The kit boots a real create_app assembly and overrides its DB deps onto
     an isolated session — the same path a consumer's integration-ish unit test
     takes."""
-    engine = create_test_engine()
+    engine = create_test_engine(tables=_public_tables())
     try:
         with isolated_session(engine) as session:
             app = create_app(ProductAssemblySpec(name="kit-test", modules=()))
@@ -87,7 +92,7 @@ def test_assembly_test_client_boots_and_serves_health() -> None:
 def test_isolated_session_rolls_back_between_uses() -> None:
     from dotmac_kernel.models import Tenant
 
-    engine = create_test_engine()
+    engine = create_test_engine(tables=_public_tables())
     try:
         with isolated_session(engine) as session:
             session.add(Tenant(slug="acme", name="Acme"))

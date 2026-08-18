@@ -19,12 +19,12 @@ the TestClient helper, which is building a real app anyway, pays that cost.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, Table, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from dotmac_kernel.models import Base
@@ -33,22 +33,22 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 
-def _module_schemas() -> tuple[str, ...]:
-    """Every distinct non-default schema bound to a table in `Base.metadata`.
+def _module_schemas(tables: Iterable[Table]) -> tuple[str, ...]:
+    """Every distinct non-default schema bound to the selected tables.
 
-    Read off the metadata rather than off `MIGRATION_OWNER_LEDGER` on purpose:
-    the harness must represent exactly what the caller actually imported, and
-    it must not care whether a schema belongs to an installed module, so it
-    never needs to import one.
+    Read off the tables rather than off `MIGRATION_OWNER_LEDGER` on purpose:
+    the harness must attach exactly what the caller actually imported, and it
+    must not care whether a schema belongs to an installed module, so it never
+    needs to import one.
     """
-    return tuple(sorted({t.schema for t in Base.metadata.tables.values() if t.schema}))
+    return tuple(sorted({table.schema for table in tables if table.schema}))
 
 
 _SQLITE_MAX_ATTACHED_SCHEMAS = 10
 
 
 def _sqlite_schema_plan(
-    schemas: tuple[str, ...],
+    schemas: tuple[str, ...], tables: tuple[Table, ...]
 ) -> tuple[dict[str, str], tuple[str, ...]]:
     """Fit module namespaces inside SQLite's ten-attachment hard limit.
 
@@ -63,15 +63,9 @@ def _sqlite_schema_plan(
     if overflow == 0:
         return {}, schemas
 
-    occupied = {
-        table.name for table in Base.metadata.tables.values() if table.schema is None
-    }
+    occupied = {table.name for table in tables if table.schema is None}
     names_by_schema = {
-        schema: {
-            table.name
-            for table in Base.metadata.tables.values()
-            if table.schema == schema
-        }
+        schema: {table.name for table in tables if table.schema == schema}
         for schema in schemas
     }
     translated: list[str] = []
@@ -95,11 +89,21 @@ def _sqlite_schema_plan(
     return {schema: "main" for schema in translated}, attached
 
 
-def create_test_engine() -> Engine:
-    """A fresh in-memory SQLite engine with the full `Base.metadata` schema
-    created. `check_same_thread=False` because a TestClient runs sync route
-    dependencies on a worker thread while the test holds one connection —
-    sequential use only, never concurrent.
+def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
+    """A fresh in-memory SQLite engine with the selected `Base.metadata` tables.
+
+    `check_same_thread=False` because a TestClient runs sync route dependencies
+    on a worker thread while the test holds one connection — sequential use
+    only, never concurrent.
+
+    `tables` defaults to every table currently registered on `Base.metadata`.
+    A large shared test process SHOULD pass the exact assembly/package table
+    snapshot it is exercising: test collection may import many uncomposed
+    packages into the shared metadata, while SQLite supports at most ten
+    attached databases. Selection is explicit rather than pretending an
+    uncomposed package belongs to the assembly. If the selected surface itself
+    crosses SQLite's attachment limit, collision-free overflow namespaces are
+    translated deterministically to SQLite's qualified ``main`` namespace.
 
     **Module schemas (ADR-0006 D1).** A stateful module binds its models to
     `mod_<short_code>` via `namespaces.schema_table_args`, so the ORM emits
@@ -115,8 +119,9 @@ def create_test_engine() -> Engine:
     required PostgreSQL lane remain the proof of the original namespace and
     isolation; SQLite remains a service-logic lane.
     """
-    schemas = _module_schemas()
-    translated, attached = _sqlite_schema_plan(schemas)
+    selected_tables = tuple(Base.metadata.tables.values() if tables is None else tables)
+    schemas = _module_schemas(selected_tables)
+    translated, attached = _sqlite_schema_plan(schemas, selected_tables)
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         future=True,
@@ -137,7 +142,7 @@ def create_test_engine() -> Engine:
             finally:
                 cursor.close()
 
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine, tables=selected_tables)
     return engine
 
 

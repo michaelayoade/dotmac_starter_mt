@@ -63,13 +63,18 @@
   ],
   "unpublished": {
     "dotmac-kernel": {
-      "declared": "0.1.0a71",
-      "reason": "OUTSTANDING 2026-08-18: this source release allocates mod_mediaobs for the validated but intentionally unadopted dotmac-media-observations candidate. Exact-commit Observer and CI evidence now exists, but Michael's adoption pause leaves the dependent module outside its release allowlist and without the required first-adopter/PR proof. The kernel allocation therefore remains unpublished with the package until adoption resumes; never edit the version back to the already-published a70.",
+      "declared": "0.1.0a72",
+      "reason": "OUTSTANDING 2026-08-18: kernel a71 was independently published for the People allocation while this branch was validating, so the media-observations allocation moved to a72 rather than reusing released identity for different content. Exact-commit Observer and CI evidence exists for the unadopted media candidate, but Michael's adoption pause leaves the dependent module outside its release allowlist and without required first-adopter/PR proof. Keep a72 unpublished with that package until adoption resumes; never edit it back to the already-published a71.",
       "state": "declared-unpublished"
     },
     "dotmac-media-observations": {
       "declared": "0.1.0a1",
       "reason": "INTENDED 2026-08-18: Michael paused adoption after directing the product-first module programme. The repository's closed release policy requires a new module's allowlist entry to land with first-adopter proof, and this programme's own execution order places release after Backoffice shadow/cutover. The package is built and validated as an uncomposed tenant-only candidate, but remains absent from .github/release-modules.json until Michael resumes adoption. Do not dispatch a release, count Backoffice/Sub as consumers, or reorder publication ahead of the paused proof.",
+      "state": "never-published"
+    },
+    "dotmac-people": {
+      "declared": "0.1.0a1",
+      "reason": "OUTSTANDING 2026-08-18: kernel a71 is now tagged and verified. The first product-first employment-directory release remains deliberately declared before publication so the root migration, RLS canaries, ERP parity tests, wheel boundary, and Backoffice first-consumer contract can be reviewed together. Publish a1 only after its exact-head PostgreSQL validation passes; then remove this row in the release-record change.",
       "state": "never-published"
     },
     "dotmac-imports": {

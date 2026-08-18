@@ -74,19 +74,15 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# EMPTY today, and that is a fact about the fleet rather than an oversight:
-# every releasable module has now outlived its own allocation floor. The last
-# occupant was `dotmac-integration`, which held a58 — its own ledger row,
-# higher than `platform_tables` (a53) and the a56 prerequisite contract — until
-# integration `0.1.0a4` declared `idempotency_ledger.v1` and moved to a66.
-#
-# An empty map is a parametrize over nothing, and a test that collects nothing
-# passes for the wrong reason. `test_every_releasable_module_has_a_floor_rule`
-# below is what keeps this map watched while it is empty: a module may not be
-# absent from BOTH maps, so emptying this one is only ever safe because the
-# other one grew.
+# `dotmac-people` consumes the Party-person capability introduced with its own
+# a71 allocation. Media observations was allocated next in a72 after the a71
+# tag made that version immutable. `test_every_releasable_module_has_a_floor_rule`
+# below keeps both maps watched: a module may not be absent from BOTH maps.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
-    "dotmac-media-observations": "0.1.0a71",
+    # `dotmac-people` and the Party-person prerequisite it consumes arrive in
+    # the same a71 release, so capability does not raise the allocation floor.
+    "dotmac-people": "0.1.0a71",
+    "dotmac-media-observations": "0.1.0a72",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

@@ -63,6 +63,7 @@ from dotmac_ui.color import OKLCH, ClampedColor, hex_to_oklch, oklch_to_hex
 from dotmac_ui.components import (
     COMPONENTS,
     EMPTY_STATE,
+    MAP_FRAME,
     TEMPLATE_NAMESPACE,
     ComponentContract,
     component_classes,
@@ -149,6 +150,7 @@ __all__ = [
     "INTERNAL_MODULES",
     "MANIFEST_RELPATH",
     "MODES",
+    "MAP_FRAME",
     "NON_TEXT_CONTRAST_MINIMUM",
     "PUBLISHED_COMPONENT_CLASSES",
     "SEMANTIC_INTENTS",

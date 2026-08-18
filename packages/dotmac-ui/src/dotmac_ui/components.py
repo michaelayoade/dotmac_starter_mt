@@ -97,8 +97,36 @@ EMPTY_STATE: Final[ComponentContract] = ComponentContract(
     ),
 )
 
+MAP_FRAME: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/map_frame.html",
+    macro="map_frame",
+    parameters=(
+        "canvas_id",
+        "label",
+        "state",
+        "status_title",
+        "status_message",
+    ),
+    classes=frozenset(
+        {
+            "dmui-map-frame",
+            "dmui-map-frame--ready",
+            "dmui-map-frame--loading",
+            "dmui-map-frame--empty",
+            "dmui-map-frame--error",
+            "dmui-map-frame__canvas",
+            "dmui-map-frame__state",
+            "dmui-map-frame__state-panel",
+            "dmui-map-frame__state-indicator",
+            "dmui-map-frame__state-title",
+            "dmui-map-frame__state-message",
+            "dmui-map-frame__live",
+        }
+    ),
+)
+
 #: Every component this contract version publishes.
-COMPONENTS: Final[tuple[ComponentContract, ...]] = (EMPTY_STATE,)
+COMPONENTS: Final[tuple[ComponentContract, ...]] = (EMPTY_STATE, MAP_FRAME)
 
 
 @lru_cache(maxsize=1)
@@ -120,6 +148,7 @@ def component_classes() -> frozenset[str]:
 __all__ = [
     "COMPONENTS",
     "EMPTY_STATE",
+    "MAP_FRAME",
     "TEMPLATE_NAMESPACE",
     "ComponentContract",
     "component_classes",

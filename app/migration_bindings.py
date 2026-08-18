@@ -27,6 +27,7 @@ from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
+    PARTY_PERSON_CATALOG_V1,
     PLATFORM_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     PrerequisiteBinding,
@@ -46,6 +47,14 @@ ASSEMBLY_PREREQUISITE_BINDINGS: Final[tuple[PrerequisiteBinding, ...]] = (
     PrerequisiteBinding(
         prerequisite=MODULE_DATABASE_ROLES_V1.name,
         provider_revision="0001_initial_tenant_schema",
+        provider_owner="kernel",
+    ),
+    # Kernel `0003` replaces the former Person table with Party plus the person
+    # subtype and applies the inherited RLS/grant contract.  A module names the
+    # effect; this assembly alone names the physical provider revision.
+    PrerequisiteBinding(
+        prerequisite=PARTY_PERSON_CATALOG_V1.name,
+        provider_revision="0003_party_identity",
         provider_owner="kernel",
     ),
     # The at-most-once ledger arrives later in the same lineage — kernel `0018`
