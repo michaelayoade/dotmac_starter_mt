@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
@@ -72,9 +73,167 @@ def migrated_scratch() -> Iterator[tuple[str, str]]:
             "version_locations",
             f"{KERNEL_VERSIONS} {ASSEMBLY_VERSIONS} {FILES_VERSIONS}",
         )
+        cfg.attributes["module_plane_selections"] = (
+            ModulePlaneSelection(
+                module="files",
+                planes=(ModulePlane.TENANT, ModulePlane.PLATFORM),
+            ),
+        )
         os.environ["MIGRATION_DATABASE_URL"] = admin_url
         command.upgrade(cfg, "heads")
         yield admin_url, _url_for(superuser, name, user="app_user")
+    finally:
+        with server.connect() as conn:
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :n AND pid <> pg_backend_pid()"
+                ),
+                {"n": name},
+            )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        server.dispose()
+
+
+@pytest.fixture
+def tenant_only_scratch() -> Iterator[tuple[str, str]]:
+    """The ERP/Academy target: the tenant table and no platform write surface."""
+    superuser = _superuser_url()
+    name = f"files_tenant_{uuid.uuid4().hex[:12]}"
+    server = create_engine(superuser, isolation_level="AUTOCOMMIT")
+    with server.connect() as conn:
+        conn.execute(text(f'CREATE DATABASE "{name}"'))
+
+    setup = create_engine(_url_for(superuser, name), isolation_level="AUTOCOMMIT")
+    with setup.connect() as conn:
+        conn.execute(text("ALTER SCHEMA public OWNER TO app_admin"))
+        conn.execute(text(f'GRANT CREATE ON DATABASE "{name}" TO app_admin'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO app_user'))
+        conn.execute(text(f'GRANT CONNECT ON DATABASE "{name}" TO platform_api'))
+        conn.execute(text("GRANT USAGE ON SCHEMA public TO app_user"))
+    setup.dispose()
+
+    admin_url = _url_for(superuser, name, user="app_admin")
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config(str(REPO_ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        cfg.set_main_option(
+            "version_locations",
+            f"{KERNEL_VERSIONS} {ASSEMBLY_VERSIONS} {FILES_VERSIONS}",
+        )
+        cfg.attributes["module_plane_selections"] = (
+            ModulePlaneSelection(module="files", planes=(ModulePlane.TENANT,)),
+        )
+        os.environ["MIGRATION_DATABASE_URL"] = admin_url
+        command.upgrade(cfg, "heads")
+        yield admin_url, _url_for(superuser, name, user="app_user")
+    finally:
+        with server.connect() as conn:
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :n AND pid <> pg_backend_pid()"
+                ),
+                {"n": name},
+            )
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        server.dispose()
+
+
+def test_tenant_only_selection_builds_exactly_the_tenant_catalog(
+    tenant_only_scratch: tuple[str, str],
+) -> None:
+    from dotmac_files.manifest import module
+    from dotmac_kernel.migrations.catalog import audit_live_schemas
+    from dotmac_kernel.namespaces import NamespaceRegistry
+
+    admin_url, _ = tenant_only_scratch
+    selection = ModulePlaneSelection(module="files", planes=(ModulePlane.TENANT,))
+    registry = NamespaceRegistry.from_manifests([module], module_planes=(selection,))
+    engine = create_engine(admin_url)
+    try:
+        with engine.connect() as conn:
+            assert conn.execute(
+                text("SELECT to_regclass(:table)"), {"table": _TABLE}
+            ).scalar()
+            assert (
+                conn.execute(
+                    text("SELECT to_regclass(:table)"),
+                    {"table": _PLATFORM_TABLE},
+                ).scalar()
+                is None
+            )
+            assert audit_live_schemas(conn, registry) == ()
+    finally:
+        engine.dispose()
+
+
+def test_tenant_only_convergence_refuses_to_discard_platform_rows() -> None:
+    """A released atomic installation may narrow only when its unused plane is empty."""
+    superuser = _superuser_url()
+    name = f"files_refusal_{uuid.uuid4().hex[:12]}"
+    server = create_engine(superuser, isolation_level="AUTOCOMMIT")
+    with server.connect() as conn:
+        conn.execute(text(f'CREATE DATABASE "{name}"'))
+
+    setup = create_engine(_url_for(superuser, name), isolation_level="AUTOCOMMIT")
+    with setup.connect() as conn:
+        conn.execute(text("ALTER SCHEMA public OWNER TO app_admin"))
+        conn.execute(text(f'GRANT CREATE ON DATABASE "{name}" TO app_admin'))
+    setup.dispose()
+
+    admin_url = _url_for(superuser, name, user="app_admin")
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config(str(REPO_ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        cfg.set_main_option(
+            "version_locations",
+            f"{KERNEL_VERSIONS} {ASSEMBLY_VERSIONS} {FILES_VERSIONS}",
+        )
+        cfg.attributes["module_plane_selections"] = (
+            ModulePlaneSelection(module="files", planes=(ModulePlane.TENANT,)),
+        )
+        os.environ["MIGRATION_DATABASE_URL"] = admin_url
+        command.upgrade(cfg, "fi_0001_stored_files")
+
+        file_id = uuid.uuid4()
+        engine = create_engine(admin_url)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO mod_files.platform_stored_files ("
+                    "id, provider_code, storage_key, original_filename, "
+                    "size_bytes, declared_media_type, detected_media_type, "
+                    "checksum_sha256, state) VALUES ("
+                    ":id, 'memory', :key, 'existing.pdf', 9, "
+                    "'application/pdf', 'application/pdf', :digest, 'available')"
+                ),
+                {
+                    "id": file_id,
+                    "key": f"platform/files/{file_id}",
+                    "digest": f"sha256:{'0' * 64}",
+                },
+            )
+        engine.dispose()
+
+        with pytest.raises(DBAPIError, match="platform.*not empty"):
+            command.upgrade(cfg, "heads")
+
+        engine = create_engine(admin_url)
+        with engine.connect() as conn:
+            assert (
+                conn.execute(
+                    text("SELECT count(*) FROM mod_files.platform_stored_files")
+                ).scalar_one()
+                == 1
+            )
+        engine.dispose()
     finally:
         with server.connect() as conn:
             conn.execute(

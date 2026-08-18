@@ -1,5 +1,26 @@
 # Changelog — dotmac-files
 
+## 0.1.0a3 — 2026-08-18
+
+Makes the released dual-plane lineage explicitly tenant-selectable for the
+deferred ERP cohort and Academy without changing the published `fi_0001` bytes
+or claiming either as a current consumer.
+
+### Changed
+
+- The manifest supports TENANT and TENANT+PLATFORM installations. PLATFORM-only
+  remains refused because no named adopter needs it and the released root needs
+  the tenant catalogue.
+- New `fi_0002_selectable_planes` consumes the assembly's ADR-0028 selection.
+  A TENANT installation locks the historical platform table, refuses if it has
+  any row, and drops it only while still holding that lock. The full selection
+  preserves the a2 catalogue unchanged.
+- Kernel floor raised to `>=0.1.0a61`, the first release carrying the explicit
+  module-plane selection surface this manifest and migration consume.
+- Adds `dotmac_files.versions_dir()` and the matching migrations-submodule
+  export, so an independently installed ERP or Academy wheel can compose the
+  `fi` lineage without knowing the package's private filesystem layout.
+
 ## 0.1.0a2 — 2026-08-13
 
 Declares the database EFFECTS this lineage needs instead of naming a foreign

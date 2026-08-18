@@ -171,6 +171,29 @@ extraction rule already forbids.
 - `dotmac-files` remains unadopted in Vendor CP. A generic installation mechanism
   does not create a stored-byte consumer or lift ADR-0017's demand gate.
 
+## Amendment, 2026-08-18: a published atomic root converges additively
+
+`dotmac-files` made the evolution case concrete. Its published
+`fi_0001_stored_files` creates both declared planes and those bytes cannot be
+rewritten after `0.1.0a2`. ERP and Academy are named tenant-only candidates
+with qualifying stored-file flows, but neither is yet a module consumer. Module
+readiness therefore makes the lineage selectable through a new revision, never
+by mutating the root or moving either product's authority:
+
+- the manifest supports TENANT and TENANT+PLATFORM; PLATFORM-only remains
+  unsupported until a named adopter needs it;
+- `fi_0002_selectable_planes` reads the explicit selection;
+- TENANT takes an ACCESS EXCLUSIVE lock on the historical platform table,
+  refuses if any row exists, and drops it before releasing the lock;
+- TENANT+PLATFORM retains the historical catalogue unchanged.
+
+This is the migration rule for a released atomic lineage: final live catalogue
+must exactly match the selection, existing data is never discarded to make it
+match, and a released revision is never edited to make a fresh install look
+cleaner than an upgrade. The module's upgrade still runs before application
+startup under hard rule 13; no assembly may treat the historical transient
+table as an online write surface.
+
 ## Alternatives rejected
 
 **Keep absence of a binding as the selector.** It cannot distinguish intent from

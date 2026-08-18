@@ -28,6 +28,13 @@ from `app_user`. Object keys are similarly disjoint:
 planes. `service.py` selects the explicitly declared table from the scope type.
 The tables share behavior, never rows or foreign keys (ADR-0023).
 
+The lineage supports two explicit installation shapes (ADR-0028): TENANT for
+ERP and Academy, and TENANT+PLATFORM to preserve the original a2 catalogue.
+There is no PLATFORM-only promise because no named adopter needs it and the
+released root requires a tenant catalogue. A TENANT upgrade from a2 refuses to
+discard a populated platform table; those rows require an explicit ownership
+and data-migration decision first.
+
 Provider codes and endpoints are assembly declarations/configuration. A
 provider-specific SDK or wire mapping belongs in the product's
 `StorageProvider` adapter, not in this package's execution paths.
@@ -63,4 +70,5 @@ transaction. Downloads and presence checks use the same target/action/record
 split, so a provider stream or network call never holds a database transaction.
 
 The module never commits or rolls back. A consuming assembly composes its own
-`fi` Alembic lineage from `src/dotmac_files/migrations/versions`.
+`fi` Alembic lineage through the public `dotmac_files.versions_dir()` locator;
+it never hard-codes a source-checkout path.

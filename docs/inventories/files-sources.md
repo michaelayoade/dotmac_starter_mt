@@ -148,9 +148,10 @@ platform-only product will ever write.
 
 Three facts make "just install the platform half" unavailable today:
 
-1. **`fi_0001_stored_files` is atomic across both planes.** One `upgrade()`, no
-   conditional; the platform table cannot be created without the tenant table and
-   its foreign key to `public.tenants`.
+1. **Published `fi_0001_stored_files` is atomic across both planes.** Its bytes
+   stay immutable. `0.1.0a3` adds `fi_0002_selectable_planes`, which converges a
+   TENANT selection only after locking and proving the historical platform table
+   empty; TENANT+PLATFORM preserves the a2 catalogue.
 2. **`mod_files` is allocated to exactly one migration owner** (hard rule 14), so
    a second distribution owning a platform-only files schema is not permitted.
 3. **Vendor CP has no stored-byte requirement at all.** Licence envelopes are
@@ -168,8 +169,9 @@ unblocked by making it installable.**
 If Vendor CP ever acquires real platform-owned stored bytes — signed artefacts
 persisted rather than streamed, evidence bundles retained — then, and only then:
 
-- `dotmac-files` declares the independently supported plane combinations and
-  makes `fi_0001` consume ADR-0028's explicit `ModulePlaneSelection`; and
+- `dotmac-files` adds PLATFORM-only as an independently supported combination
+  through a new additive convergence revision; the published `fi_0001` is never
+  edited; and
 - Vendor CP declares PLATFORM for that module and adds a real domain-owned
   relation to `platform_stored_files.id`.
 
