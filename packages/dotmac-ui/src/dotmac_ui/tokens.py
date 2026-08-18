@@ -163,6 +163,7 @@ CATEGORIES: Final[tuple[str, ...]] = (
     "focus",
     "breakpoint",
     "motion",
+    "component",
 )
 
 
@@ -796,6 +797,18 @@ def _build_tokens() -> tuple[DesignToken, ...]:
             ease_value,
             f"Easing curve `{ease_name}`.",
         )
+
+    # ── component roles ───────────────────────────────────────────────────
+    # A component default becomes a token when consumers need a direct,
+    # supported override seam. This is a portable fallback, not a product
+    # viewport: a host can re-declare the variable in its own surface scope.
+    add(
+        "map-frame-min-block-size",
+        "component",
+        "24rem",
+        "Minimum map-frame block size. Consumers may override it for the "
+        "surface that composes the frame.",
+    )
 
     return tuple(tokens)
 
