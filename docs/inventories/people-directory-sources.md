@@ -255,3 +255,23 @@ employment-directory owner. Start with the replacement-cutover ADR amendment
 and dossier; then add the Party prerequisite and the six-table tenant-plane
 module canary-first. Do not start workforce, payroll or a broad HR port beside
 it.
+
+## Implementation checkpoint — 2026-08-18
+
+The canary-first module foundation now exists on the stacked implementation
+branch: kernel a71 names and proves `party_person_catalog.v1` and allocates
+`pe`/`mod_people`; `dotmac-people` a1 owns the six tables above with forced RLS,
+tenant-composite relations and exact `app_user` grants. The extracted service
+preserves code normalization, rehire rules, assignment priority, explicit-date
+resolution and vacancy routing without porting delivery side effects.
+
+One source defect is intentionally strengthened rather than copied. ERP's two
+partial unique indexes reject only open-ended primary assignments. The module
+also checks intervals in its service and its PostgreSQL trigger serializes both
+employee and position identities before rejecting any overlapping finite or
+open-ended primary interval. Vacancy is derived from those dated assignments;
+there is no `is_vacant` column to drift.
+
+This checkpoint is implementation evidence only. The kernel/module versions
+remain unreleased, Backoffice has not composed them, no backfill or shadow has
+run, and ERP remains the sole authoritative employment writer.

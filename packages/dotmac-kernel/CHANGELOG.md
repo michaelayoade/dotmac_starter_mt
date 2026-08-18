@@ -6,7 +6,29 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a70 — UNRELEASED
+## 0.1.0a71 — UNRELEASED
+
+Names and proves the narrow Party-person catalogue consumed by installable
+employment-directory modules, and allocates the first such module's physical
+namespace.
+
+### Added
+
+- `party_person_catalog.v1`, covering the required `public.parties` and
+  `public.party_persons` columns, keys, relationship, forced tenant RLS,
+  tenant-policy marker, and `app_user` read posture without coupling consumers
+  to unrelated Party extensions.
+- `verify_party_person_catalog`, a live-catalog verifier that refuses a stamped,
+  aliased, unprotected, unusable, or structurally incompatible provider.
+- `PEOPLE_MIGRATION_OWNER`: `pe`, branch `people`, schema `mod_people`.
+- `dotmac_kernel.testing.create_test_engine(tables=...)` can now create an
+  explicit assembly/package metadata slice. This keeps qualified SQLite module
+  schemas while preventing test collection of uncomposed packages from
+  exhausting SQLite's ten attached-database slots.
+- The reference assembly binds the effect to kernel `0003_party_identity`;
+  installable modules continue to name only the effect.
+
+## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known
 production caller migrated to the canonical identity pair.

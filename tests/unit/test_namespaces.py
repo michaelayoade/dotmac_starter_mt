@@ -189,6 +189,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # first enabling owner of the Cloud commerce programme, and dual-plane for
     # the same reason approvals is: a tenant allocates its own document series
     # and the control plane allocates vendor-side series no tenant may read.
+    # `people` is the eleventh: a tenant-only employment directory that links
+    # to, and never duplicates, the kernel Party-person catalogue.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -201,6 +203,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "imports",
         "integration",
         "approvals",
+        "people",
     }
 
 
