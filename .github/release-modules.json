@@ -214,15 +214,15 @@
     },
     "dotmac-files": {
       "$comment": [
-        "mod_files is allocated in kernel a54, and that allocation is ALSO the",
-        "floor: ADR-0023's dual-plane platform_tables landed earlier, in a53, so",
-        "the module's own namespace row is the higher of the two requirements.",
-        "This is the ordinary case; dotmac-ticketing is the exception."
+        "mod_files is allocated in a54; a56 is the first published kernel with",
+        "the prerequisite contract consumed by fi_0001. a3 raises the operative",
+        "floor to a61 because the manifest declares supported_plane_sets and",
+        "fi_0002 consumes selected_module_planes. Capability outranks allocation."
       ],
       "package_dir": "packages/dotmac-files",
       "import_name": "dotmac_files",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a56",
+      "kernel_floor": "0.1.0a61",
       "db_schema": "mod_files",
       "tag_prefix": "dotmac-files-v",
       "wheel_contents": {
@@ -235,7 +235,8 @@
           "dotmac_files/providers.py",
           "dotmac_files/service.py",
           "dotmac_files/migrations/__init__.py",
-          "dotmac_files/migrations/versions/fi_0001_stored_files.py"
+          "dotmac_files/migrations/versions/fi_0001_stored_files.py",
+          "dotmac_files/migrations/versions/fi_0002_selectable_planes.py"
         ],
         "forbidden_prefixes": [
           "app/",

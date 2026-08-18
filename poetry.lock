@@ -595,7 +595,7 @@ url = "packages/dotmac-entitlement-allocation"
 
 [[package]]
 name = "dotmac-files"
-version = "0.1.0a2"
+version = "0.1.0a3"
 description = "DotMac dual-plane stored-object lifecycle and validation"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -604,7 +604,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a56"
+dotmac-kernel = ">=0.1.0a61"
 sqlalchemy = "^2.0"
 
 [package.source]
