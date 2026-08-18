@@ -15,7 +15,7 @@ slices add layouts and navigation primitives that ADR-0006 § 2 assigns here.
 
 ## What it is, in one paragraph
 
-A vocabulary of 191 role-named CSS custom properties (`--dmui-surface-primary`,
+A vocabulary of 192 role-named CSS custom properties (`--dmui-surface-primary`,
 `--dmui-action-destructive-hover`, `--dmui-status-warning-foreground`), compiled
 into one plain stylesheet that any product can link. Each colour also publishes a
 channel form (`--dmui-color-brand-500-rgb: 59 130 246`) so opacity modifiers like
@@ -50,6 +50,24 @@ host's Jinja loader and import from the namespaced path:
 
 Jinja remains the host's dependency; installing `dotmac-ui` does not install a
 template engine.
+
+The provider-neutral map frame is also inert template data:
+
+```jinja
+{% from "dotmac_ui/components/map_frame.html" import map_frame %}
+{{ map_frame(
+    canvas_id="operations-map",
+    label="Operations map",
+    state="loading",
+    status_title="Loading map",
+    status_message="Locations are being prepared.",
+) }}
+```
+
+The host mounts its map runtime into the canvas and owns providers, tiles,
+coordinates, layers, endpoints, polling and domain behavior. The package owns
+only the frame and generic view-state presentation. This unreleased contract is
+audit-complete but intentionally has no product adopter yet.
 
 **There is no build step for consumers.** No Tailwind, no PostCSS, no bundler,
 no npm, and no requirement to match a Tailwind major — ERP's v3.4 and the
