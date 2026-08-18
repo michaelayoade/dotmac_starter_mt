@@ -645,6 +645,64 @@ SUBSCRIPTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("subscriptions"),
 )
 
+# The remaining tenant-only product-first owners allocated in the integrated
+# a71 train. Each row lands with a complete manifest, migration and first
+# adopter dossier; none composes behavior into the kernel or shares a schema.
+SALES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="sales",
+    prefix="sa",
+    branch_label="sales",
+    db_schema=module_schema("sales"),
+)
+
+INBOX_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="inbox",
+    prefix="ib",
+    branch_label="inbox",
+    db_schema=module_schema("inbox"),
+)
+
+SURVEYS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="surveys",
+    prefix="sv",
+    branch_label="surveys",
+    db_schema=module_schema("surveys"),
+)
+
+PROJECTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="projects",
+    prefix="pj",
+    branch_label="projects",
+    db_schema=module_schema("projects"),
+)
+
+WORK_ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="work_orders",
+    prefix="wo",
+    branch_label="work_orders",
+    db_schema=module_schema("workorders"),
+)
+
+# `dotmac-positioning` owns tenant-scoped, provider-neutral location evidence.
+# `pos` keeps the catalog compact while the independent `po` lineage leaves
+# room for readable revision slugs. Products retain subject links and every
+# business consequence (ADR-0036).
+POSITIONING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="positioning",
+    prefix="po",
+    branch_label="positioning",
+    db_schema=module_schema("pos"),
+)
+
+# `dotmac-web-analytics` owns tenant-scoped first-party observation evidence
+# and deterministic projections, never websites, consent policy or transport.
+WEB_ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="web_analytics",
+    prefix="wa",
+    branch_label="web_analytics",
+    db_schema=module_schema("webanalytics"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -662,6 +720,13 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     COLLECTIONS_MIGRATION_OWNER,
     ORDERS_MIGRATION_OWNER,
     SUBSCRIPTIONS_MIGRATION_OWNER,
+    SALES_MIGRATION_OWNER,
+    INBOX_MIGRATION_OWNER,
+    SURVEYS_MIGRATION_OWNER,
+    PROJECTS_MIGRATION_OWNER,
+    WORK_ORDERS_MIGRATION_OWNER,
+    POSITIONING_MIGRATION_OWNER,
+    WEB_ANALYTICS_MIGRATION_OWNER,
 )
 
 

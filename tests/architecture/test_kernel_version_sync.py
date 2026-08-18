@@ -90,6 +90,13 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-collections": "0.1.0a71",
     "dotmac-orders": "0.1.0a71",
     "dotmac-subscriptions": "0.1.0a71",
+    "dotmac-sales": "0.1.0a71",
+    "dotmac-inbox": "0.1.0a71",
+    "dotmac-surveys": "0.1.0a71",
+    "dotmac-projects": "0.1.0a71",
+    "dotmac-work-orders": "0.1.0a71",
+    "dotmac-positioning": "0.1.0a71",
+    "dotmac-web-analytics": "0.1.0a71",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

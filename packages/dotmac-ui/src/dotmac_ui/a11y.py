@@ -174,6 +174,13 @@ def _build_requirements() -> tuple[ContrastRequirement, ...]:
         TEXT_CONTRAST_MINIMUM,
         "labels in table headers and sidebars sit on the recessed surface",
     )
+    for text_role in ("text-secondary", "text-tertiary"):
+        require(
+            text_role,
+            "surface-elevated",
+            TEXT_CONTRAST_MINIMUM,
+            "catalog metadata and descriptions sit on elevated cards (SC 1.4.3)",
+        )
     require(
         "text-inverted",
         "action-neutral-default",

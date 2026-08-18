@@ -170,6 +170,11 @@ def _required_slice_names(directory_name: str) -> set[str]:
     # contract's weaker evidence level.
     if dotmac_ui.MAP_FRAME in dotmac_ui.COMPONENTS:
         required.add("map-frame")
+    # The catalog grid has its own product sources and adoption evidence. It is
+    # a separate slice from the already reuse-proven empty-state component, so
+    # folding it into `components` would falsely inherit ERP/Sub adoption.
+    if dotmac_ui.CATALOG_GRID in dotmac_ui.COMPONENTS:
+        required.add("catalog-grid")
     return required
 
 
@@ -917,6 +922,23 @@ def test_deleting_the_map_frame_slice_cannot_overstate_the_package() -> None:
     dossier["status"] = "reuse-proven"
 
     with pytest.raises(ExtractionDossierError, match="no slice"):
+        _validate_ui(dossier)
+
+
+def test_catalog_grid_cannot_inherit_empty_state_adoption() -> None:
+    """Sensitivity proof for the new weaker component contract.
+
+    Workspace and Academy are audited candidates, not catalog-grid consumers.
+    Deleting that row must not let the older components row lend it ERP/Sub's
+    reuse evidence.
+    """
+    dossier = _ui_dossier()
+    dossier["slices"] = [
+        entry for entry in dossier["slices"] if entry["name"] != "catalog-grid"
+    ]
+    dossier["status"] = "reuse-proven"
+
+    with pytest.raises(ExtractionDossierError, match="catalog-grid"):
         _validate_ui(dossier)
 
 

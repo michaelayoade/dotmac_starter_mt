@@ -61,10 +61,12 @@ from dotmac_ui.brand import (
 )
 from dotmac_ui.color import OKLCH, ClampedColor, hex_to_oklch, oklch_to_hex
 from dotmac_ui.components import (
+    CATALOG_GRID,
     COMPONENTS,
     EMPTY_STATE,
     MAP_FRAME,
     TEMPLATE_NAMESPACE,
+    CatalogItem,
     ComponentContract,
     component_classes,
     template_dir,
@@ -107,7 +109,7 @@ from dotmac_ui.tokens import (
 #: `test_declared_version_matches_pyproject` — `importlib.metadata` is not used
 #: because the package must be importable straight from a source checkout (an
 #: air-gapped or vendored consumer) where no distribution is installed.
-__version__: Final[str] = "0.1.0a7"
+__version__: Final[str] = "0.1.0a8"
 
 #: Public submodules. `from dotmac_ui.<module> import X` is supported for any
 #: `X` in that module's `__all__`.
@@ -140,6 +142,7 @@ __all__ = [
     "ACTION_INTENTS",
     "ACTION_STATES",
     "CATEGORIES",
+    "CATALOG_GRID",
     "CLASS_PREFIX",
     "COMPONENTS",
     "CONTRAST_REQUIREMENTS",
@@ -167,6 +170,7 @@ __all__ = [
     "TOKEN_PREFIX",
     "UI_CONTRACT_VERSION",
     "ComponentContract",
+    "CatalogItem",
     "ContrastFailure",
     "ContrastRequirement",
     "DesignToken",

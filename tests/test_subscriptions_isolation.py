@@ -11,10 +11,13 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
+from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.planes import ModulePlane, ModulePlaneSelection
+from dotmac_subscriptions import list_effective_offers
 from dotmac_subscriptions.models import PLATFORM_TABLES, TENANT_TABLES
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 KERNEL_VERSIONS = (
@@ -159,6 +162,77 @@ def test_tenant_rows_are_invisible_across_tenant_contexts(
     with right_engine.connect() as conn:
         assert conn.scalar(text("SELECT count(*) FROM mod_subscriptions.offers")) == 0
     right_engine.dispose()
+
+
+def test_offer_catalog_read_cannot_cross_tenant_scope(
+    subscriptions_scratch: tuple[str, str, str],
+) -> None:
+    admin_url, user_url, _ = subscriptions_scratch
+    left, right = _make_tenants(admin_url)
+    owner = create_engine(admin_url)
+    now = datetime(2026, 8, 18, tzinfo=UTC)
+    with owner.begin() as conn:
+        for tenant_id, code, name in (
+            (left, "left.offer", "Left offer"),
+            (right, "right.offer", "Right offer"),
+        ):
+            offer_id = uuid.uuid4()
+            version_id = uuid.uuid4()
+            conn.execute(
+                text(
+                    "INSERT INTO mod_subscriptions.offers "
+                    "(id, tenant_id, code, name, status) "
+                    "VALUES (:offer, :tenant, :code, :name, 'published')"
+                ),
+                {
+                    "offer": offer_id,
+                    "tenant": tenant_id,
+                    "code": code,
+                    "name": name,
+                },
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_subscriptions.offer_versions "
+                    "(id, tenant_id, offer_id, version, state, effective_from, "
+                    "source_code, source_id, source_version, command_id, "
+                    "content_digest) VALUES "
+                    "(:version, :tenant, :offer, 1, 'published', :now, "
+                    "'accepted_order_line', :source, 1, :command, :digest)"
+                ),
+                {
+                    "version": version_id,
+                    "tenant": tenant_id,
+                    "offer": offer_id,
+                    "now": now,
+                    "source": uuid.uuid4(),
+                    "command": uuid.uuid4(),
+                    "digest": tenant_id.hex * 2,
+                },
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO mod_subscriptions.offer_version_prices "
+                    "(id, tenant_id, offer_version_id, price_key, "
+                    "charge_model_code, amount, currency, scale, quantity) "
+                    "VALUES (:id, :tenant, :version, 'base', "
+                    "'recurring_access', 100, 'EUR', 2, 1)"
+                ),
+                {"id": uuid.uuid4(), "tenant": tenant_id, "version": version_id},
+            )
+    owner.dispose()
+
+    right_engine = _tenant_engine(user_url, right)
+    with Session(right_engine) as db:
+        page = list_effective_offers(
+            db,
+            scope=TenantScope(right),
+            effective_at=now,
+        )
+    right_engine.dispose()
+
+    assert page.total == 1
+    assert [item.code for item in page.items] == ["right.offer"]
 
 
 def test_rls_canary_is_sensitive_to_the_policy(

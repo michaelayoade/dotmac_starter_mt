@@ -8,8 +8,8 @@ here.
 
 ## 0.1.0a71 — UNRELEASED
 
-Adds subscriptions' declaration and namespace seams for the coordinated
-commercial-module landing.
+Allocates the independent reusable owners in the coordinated module landing;
+no domain behavior moves into Kernel and none is composed into Starter.
 
 ### Added
 
@@ -19,7 +19,22 @@ commercial-module landing.
 - The permanent `subscriptions` / `su` / `mod_subscriptions` migration-owner
   allocation. Billing, collections, durable timers and orders remain peer
   owners and do not share its lineage.
+- Permanent namespace identities for Billing (`bi`), Durable Timers (`dt`),
+  Collections (`cl`), Orders (`or`), Sales (`sa`), Inbox (`ib`), Surveys
+  (`sv`), Projects (`pj`), Work Orders (`wo`), Positioning (`po`) and Web
+  Analytics (`wa`). Each package owns an independent lineage; Positioning uses
+  `mod_pos`, Work Orders uses `mod_workorders`, and Web Analytics uses
+  `mod_webanalytics` as their declared short-code schemas.
+- `tenant_audit_log.v1`, the live-catalog contract for the existing
+  tenant-scoped `public.audit_events` writer, including canonical actor shape,
+  tenant FK/index, FORCE RLS and append-only online privileges.
 
+### Changed
+
+- Reusable SQLite test composition is explicit: importing an optional module
+  populates metadata but does not install its schema. Unit assemblies name
+  their module schemas; PostgreSQL remains authoritative for exact namespaces,
+  row-level security and grants.
 ## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known
@@ -51,33 +66,6 @@ production caller migrated to the canonical identity pair.
   real independently deployed consumers, and Starter's broader sweep exposed
   nine local callers the narrower guard had missed. No compatibility claim is
   now inferred from one package's caller list.
-
-### Added
-
-- Allocated the permanent `dotmac-billing` migration identity: owner
-  `billing`, schema `mod_billing`, prefix `bi`, branch label `billing`. This is
-  an allocation only; operational receivables remain in the optional module.
-- Allocated the independent `dotmac-durable-timers` identity: owner and branch
-  label `durable_timers`, schema `mod_timers`, prefix `dt`. The module consumes
-  the existing `outbox_relay.v1` prerequisite but owns timer identity,
-  generation and terminal evidence outside the kernel.
-- Allocated the permanent `cl` / `collections` / `mod_coll` tenant-only
-  Collections lineage. Receivable, timer, product, and delivery authority stay
-  outside that package behind typed contracts.
-- Allocated the tenant-only Orders lineage: owner and short code `orders`,
-  schema `mod_orders`, migration prefix `or`, and branch label `orders`. It
-  reserves no speculative control-plane storage.
-- Added `tenant_audit_log.v1`, the live-catalog contract for the existing
-  tenant-scoped `public.audit_events` writer. It proves the canonical actor and
-  forensic shape, tenant foreign key/index, FORCE RLS, and the online role's
-  append-only `SELECT`+`INSERT` posture before a module may use that writer.
-
-### Changed
-
-- Made reusable SQLite test composition explicit: importing an optional module
-  populates metadata but does not silently install its schema. Callers name the
-  module schemas a unit-test assembly actually composes; PostgreSQL remains the
-  authority for exact namespaces, row-level security and grants.
 
 ## 0.1.0a69 — 2026-08-18
 

@@ -80,6 +80,26 @@ class ComponentContract:
     classes: frozenset[str]
 
 
+@dataclass(frozen=True, slots=True)
+class CatalogItem:
+    """Display-only data for one catalog card.
+
+    Products remain responsible for membership, authorization, availability,
+    price formatting, state labels, and action targets. Keeping those values as
+    optional display strings prevents the presentation package from becoming a
+    second commercial or operational decision owner.
+    """
+
+    title: str
+    meta: str | None = None
+    description: str | None = None
+    media_url: str | None = None
+    media_alt: str = ""
+    notice: str | None = None
+    action_label: str | None = None
+    action_url: str | None = None
+
+
 EMPTY_STATE: Final[ComponentContract] = ComponentContract(
     template="dotmac_ui/components/empty_state.html",
     macro="empty_state",
@@ -125,8 +145,38 @@ MAP_FRAME: Final[ComponentContract] = ComponentContract(
     ),
 )
 
+CATALOG_GRID: Final[ComponentContract] = ComponentContract(
+    template="dotmac_ui/components/catalog_grid.html",
+    macro="catalog_grid",
+    parameters=(
+        "items",
+        "empty_title",
+        "empty_message",
+        "empty_action_label",
+        "empty_action_url",
+    ),
+    classes=frozenset(
+        {
+            "dmui-catalog-grid",
+            "dmui-catalog-grid__item",
+            "dmui-catalog-grid__media",
+            "dmui-catalog-grid__body",
+            "dmui-catalog-grid__title",
+            "dmui-catalog-grid__meta",
+            "dmui-catalog-grid__description",
+            "dmui-catalog-grid__notice",
+            "dmui-catalog-grid__action",
+            "dmui-catalog-grid__action-icon",
+        }
+    ),
+)
+
 #: Every component this contract version publishes.
-COMPONENTS: Final[tuple[ComponentContract, ...]] = (EMPTY_STATE, MAP_FRAME)
+COMPONENTS: Final[tuple[ComponentContract, ...]] = (
+    EMPTY_STATE,
+    MAP_FRAME,
+    CATALOG_GRID,
+)
 
 
 @lru_cache(maxsize=1)
@@ -146,10 +196,12 @@ def component_classes() -> frozenset[str]:
 
 
 __all__ = [
+    "CATALOG_GRID",
     "COMPONENTS",
     "EMPTY_STATE",
     "MAP_FRAME",
     "TEMPLATE_NAMESPACE",
+    "CatalogItem",
     "ComponentContract",
     "component_classes",
     "template_dir",

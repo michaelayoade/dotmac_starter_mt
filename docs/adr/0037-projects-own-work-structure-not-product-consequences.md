@@ -1,4 +1,4 @@
-# ADR-0033: Projects own work structure, not product consequences
+# ADR-0037: Projects own work structure, not product consequences
 
 **Status:** Accepted
 **Date:** 2026-08-18

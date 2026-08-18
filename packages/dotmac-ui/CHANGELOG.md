@@ -7,9 +7,25 @@ separate axis from the package version. Pre-1.0 (`0.x`, incl. this alpha) the
 surface is still settling — a `0.MINOR` bump may carry breaking changes, each
 called out here.
 
-## Unreleased
+## 0.1.0a8 — UNRELEASED
+
+Two additive, unadopted presentation candidates—the provider-neutral map frame
+and display-only catalog grid; `UI_CONTRACT_VERSION` stays **1**.
 
 ### Added
+
+- `catalog_grid` and its display-only `CatalogItem` contract, extracted from
+  Workspace application discovery and Academy course discovery. It renders a
+  responsive token-native grid, optional media and notices, a paired action,
+  and the published empty state without depending on host filters or globals.
+- Accessibility requirements for secondary and tertiary text on elevated card
+  surfaces.
+
+### Evidence
+
+- This slice is `audit-complete`, not adopted. Workspace and Academy remain the
+  local markup/CSS owners until a later coordinated cutover; this package
+  change does not alter either product or any assembly composition.
 
 - `map_frame`, a provider-neutral inert Jinja component for an accessible map
   canvas and generic ready/loading/empty/error presentation. It accepts only a
@@ -19,8 +35,6 @@ called out here.
 - `map-frame-min-block-size`, the role-named, scoped override seam replacing
   product-specific fixed map heights in a future adoption. The compiled default
   is `24rem`; no viewport, device or geographic assumption enters the package.
-
-### Evidence
 
 - The map-frame slice is `audit-complete`, not adopted. Sub live-map/playback,
   CRM degraded/list behavior and ERP geofence editing are inventoried in

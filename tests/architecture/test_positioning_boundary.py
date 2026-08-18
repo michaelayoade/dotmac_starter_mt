@@ -1,6 +1,6 @@
 """Position evidence is shared mechanics; products own its consequences.
 
-ADR-0032 deliberately cuts a narrow positioning unit out of the broader
+ADR-0036 deliberately cuts a narrow positioning unit out of the broader
 ``field-workforce`` and ``assets-fleet`` families.  These canaries keep the
 measurement classifier, accepted decision and product-first inventory aligned.
 """
@@ -16,7 +16,7 @@ from types import ModuleType
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ADR = (
     PROJECT_ROOT
-    / "docs/adr/0032-positioning-owns-location-evidence-not-business-consequences.md"
+    / "docs/adr/0036-positioning-owns-location-evidence-not-business-consequences.md"
 )
 INVENTORY = PROJECT_ROOT / "docs/inventories/positioning-sources.md"
 DOSSIER = PROJECT_ROOT / "packages/dotmac-positioning/EXTRACTION.toml"

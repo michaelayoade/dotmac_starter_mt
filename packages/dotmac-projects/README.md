@@ -7,7 +7,7 @@ assignment membership.
 It does not know what a project is *about*. A consuming product owns subscriber,
 customer, buildout, quote, order, work-order, ticket, finance, location, and
 provider relations in its own schema and invokes its own services for those
-consequences. See ADR-0033 and `docs/inventories/projects-sources.md`.
+consequences. See ADR-0037 and `docs/inventories/projects-sources.md`.
 
 The module is tenant-only. Every table lives in `mod_projects`, carries a
 non-null `tenant_id`, uses composite foreign keys for internal relationships,

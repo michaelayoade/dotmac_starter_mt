@@ -4,8 +4,8 @@ classification = "presentation-foundation"
 status = "audit-complete"
 source_mode = "product-first"
 owner = "Dotmac design system"
-contract = "Three published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) the reuse-proven empty-state inert Jinja component; (map-frame) an audit-complete provider-neutral accessible map canvas and generic view-state presentation. The headline status is the weakest of the three."
-source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_starter_mt", "dotmac_erp"]
+contract = "Four published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) the reuse-proven empty-state inert Jinja component; (map-frame) an audit-complete provider-neutral accessible map canvas and generic view-state presentation; (catalog-grid) an audit-complete display-only catalog card/grid contract. The headline status is the weakest of the four."
+source_repositories = ["dotmac_sub", "dotmac_crm", "dotmac_starter_mt", "dotmac_erp", "dotmac_workspace", "dotmac_academy_app"]
 source_paths = [
   "dotmac_sub:static/css/design-system.css",
   "dotmac_starter_mt:packages/dotmac-ui/src/dotmac_ui/tokens.py",
@@ -18,6 +18,10 @@ source_paths = [
   "dotmac_crm:templates/admin/operations/field-live-map.html",
   "dotmac_crm:templates/admin/operations/field-movement-playback.html",
   "dotmac_erp:templates/people/hr/geofence_editor.html",
+  "dotmac_workspace:src/dotmac_workspace/launcher/web.py",
+  "dotmac_workspace:src/dotmac_workspace/static/css/workspace.css",
+  "dotmac_academy_app:templates/public/courses.html",
+  "dotmac_academy_app:static/public.css",
 ]
 preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_ui_public_surface.py",
@@ -32,6 +36,8 @@ preserved_tests = [
   "dotmac_sub:tests/architecture/test_field_live_map_boundary.py",
   "dotmac_crm:tests/test_field_live_map_feed.py",
   "dotmac_crm:tests/test_field_recent_tracks.py",
+  "dotmac_workspace:tests/test_launcher_is_not_authorization.py",
+  "dotmac_academy_app:tests/web/test_public_catalog.py",
 ]
 # INDEPENDENT consumers only. The starter is the assembly that owns this
 # package: its consumption proves the wiring works, not that anyone independent
@@ -39,7 +45,7 @@ preserved_tests = [
 # (ADR-0006 section 5).
 contract_consumers = ["dotmac_sub", "dotmac_academy_app", "dotmac_erp"]
 reference_consumers = ["dotmac_starter_mt"]
-candidate_consumers = ["dotmac_crm"]
+candidate_consumers = ["dotmac_crm", "dotmac_workspace"]
 inventory_evidence = [
   "docs/inventories/starter-surfaces.md",
   "docs/inventories/sub-surfaces.md",
@@ -47,14 +53,15 @@ inventory_evidence = [
   "docs/inventories/branding-settings.md",
   "docs/inventories/ui-surface-inventory.md",
   "docs/inventories/map-ui-sources.md",
+  "docs/inventories/catalog-card-sources.md",
 ]
-first_cutover = "Per slice. tokens: done -- dotmac_sub and dotmac_academy_app are merged external consumers on their default branches, serving the packaged asset through assembly-owned composition rather than copied stylesheets. components: done twice over -- dotmac_erp main at 462b6fa and dotmac_sub main at 73c35f4 both pin released 0.1.0a7, resolve the package-owned empty_state template through their real Jinja loaders, and exercise it through product-owned adoption tests. map-frame: not begun by owner direction; the audited candidates are dotmac_sub dispatch live-map/playback and dotmac_erp geofence editing, and neither is changed or counted by this slice. The starter remains reference proof rather than an independent cutover."
-shadow_and_drift = "Per slice. tokens: consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface; dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py. components: clean-host, installed-wheel, registry-installed, escaping, token-native and product-seam sensitivity proofs guard the shared core; ERP and Sub each pin the release, assert the declared empty_state contract, resolve it through the product loader, and reject a vendored package template. Their local compatibility adapters contain no component markup, so the package remains the one renderer. map-frame: clean-host rendering, exact state/signature checks, provider/product-policy sensitivity proof, token-native sizing and state contrast protect the candidate; no cross-product drift claim is made before adoption."
-local_copy_retirement = "Per slice. tokens: dotmac_erp still builds its own live src/css tree; dotmac_sub's sanctioned green role-token overrides are a deliberate outcome rather than debt. components: ERP replaced its former empty_state body with a thin legacy-call-shape adapter over the package macro, and Sub replaced its byte-identical renderer with a thin include-context adapter; neither retains a second markup owner. The starter's table macro copy is already retired. CRM's local template remains an optional future cleanup and is not required for the ERP + Sub reuse proof. map-frame: no product copy retires in this change; an authorized adoption must replace only the local outer frame and sizing rule while leaving provider and domain behavior local."
-next_action = "Tokens and the empty-state component remain reuse-proven. The map-frame slice is audit-complete and deliberately unadopted: do not publish or call it reuse-proven until a product cutover is authorized. Its first adoption replaces only a local outer frame and sizing rule; provider runtime, viewport, data, domain policy and fallback lists remain product-owned. Keep the 851 hardcoded-palette baseline as a two-directional maintenance ratchet; create a theme package only on proven non-token structural demand."
+first_cutover = "Per slice. tokens: done -- dotmac_sub and dotmac_academy_app are merged external consumers on their default branches, serving the packaged asset through assembly-owned composition rather than copied stylesheets. components: done twice over -- dotmac_erp main at 462b6fa and dotmac_sub main at 73c35f4 both pin released 0.1.0a7, resolve the package-owned empty_state template through their real Jinja loaders, and exercise it through product-owned adoption tests. map-frame: not begun by owner direction; the audited candidates are dotmac_sub dispatch live-map/playback and dotmac_erp geofence editing, and neither is changed or counted by this slice. catalog-grid: pending -- this branch publishes no release and changes neither Workspace nor Academy. The starter remains reference proof rather than an independent cutover."
+shadow_and_drift = "Per slice. tokens: consumer visual, accessibility, two-brand, CSP, and compiled-asset checks compare the package with the product surface; dotmac_sub additionally carries tests/architecture/test_dotmac_ui_adoption.py. components: clean-host, installed-wheel, registry-installed, escaping, token-native and product-seam sensitivity proofs guard the shared empty-state core; ERP and Sub each pin the release and reject a vendored package template. map-frame: clean-host rendering, exact state/signature checks, provider/product-policy sensitivity proof, token-native sizing and state contrast protect the candidate; no cross-product drift claim is made before adoption. catalog-grid: clean-host, escaping, display-only-field, optional-action, empty-state, token-native CSS, responsive and contrast proofs exist here; Workspace and Academy must add product-loader parity tests before either local renderer can retire."
+local_copy_retirement = "Per slice. tokens: dotmac_erp still builds its own live src/css tree; dotmac_sub's sanctioned green role-token overrides are deliberate. components: ERP and Sub retain only thin empty-state adapters, not markup owners; CRM remains optional. map-frame: no product copy retires in this change; an authorized adoption must replace only the local outer frame and sizing rule while leaving provider and domain behavior local. catalog-grid: no retirement is claimed -- Workspace still owns dmws-tile markup/CSS and Academy still owns its course-card markup/CSS until coordinated product cutovers prove parity and delete the overlaps."
+next_action = "Keep both audit-complete slices on the integration train without composing or releasing them. Map-frame adoption may replace only a local outer frame and sizing rule; provider runtime, viewport, data and domain policy remain product-owned. Catalog adoption maps product-owned listing results to CatalogItem without moving commercial eligibility, stock, selection or money decisions into dotmac-ui. Each adopter must prove loader and behavior parity and retire only the displaced local renderer/CSS. Keep the 851 hardcoded-palette baseline as a two-directional maintenance ratchet."
 
 # ── Contract slices (schema 2) ──────────────────────────────────────────────
-# This package publishes THREE contracts whose evidence differs. A single
+# This package publishes FOUR contracts whose evidence differs. A single
 # package-level state cannot describe that honestly: report the stronger and the
 # weaker contract is overstated; report the weaker and the stronger is
 # understated. The gate validates each slice independently and DERIVES the
@@ -132,3 +139,23 @@ contract_consumers = []
 reference_consumers = []
 candidate_consumers = ["dotmac_sub", "dotmac_erp"]
 local_copy_retirement = "No local copy retires in this change because product adoption is explicitly out of scope. The first authorized adopter replaces only its outer map frame and hardcoded sizing with MAP_FRAME plus a scoped --dmui-map-frame-min-block-size override, proves resolution through its real loader, and rejects a vendored template. It does not move provider code, endpoints, polling, coordinates, entity vocabulary, markers, trails, geofences, popups, controls, legends or fallback lists. A second independent adopter must complete the same cutover before this slice becomes reuse-proven."
+
+[[slices]]
+name = "catalog-grid"
+contract = "Display-only responsive catalog card/grid values, inert Jinja markup and token-native CSS"
+status = "audit-complete"
+source_paths = [
+  "dotmac_workspace:src/dotmac_workspace/launcher/web.py",
+  "dotmac_workspace:src/dotmac_workspace/static/css/workspace.css",
+  "dotmac_academy_app:templates/public/courses.html",
+  "dotmac_academy_app:static/public.css",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_dotmac_ui_components.py",
+  "dotmac_workspace:tests/test_launcher_is_not_authorization.py",
+  "dotmac_academy_app:tests/web/test_public_catalog.py",
+]
+contract_consumers = []
+reference_consumers = ["dotmac_starter_mt"]
+candidate_consumers = ["dotmac_workspace", "dotmac_academy_app"]
+local_copy_retirement = "Pending. Workspace's _tile plus dmws-tile* rules and Academy's public course-card markup plus overlapping card/grid rules remain authoritative. A later cutover must replace each with a thin CatalogItem mapping and delete the overlapping local renderer/CSS; this implementation branch does neither."

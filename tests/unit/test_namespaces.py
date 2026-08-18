@@ -196,6 +196,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # delinquency-policy owner.
     # `orders` is tenant-only: Sub is its qualifying source and first cutover,
     # while Vendor CP owns no control-plane order today.
+    # Sales, Inbox, Surveys, Projects, Work Orders, Positioning and Web
+    # Analytics complete a71 without composing any into this assembly.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -213,6 +215,13 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "collections",
         "orders",
         "subscriptions",
+        "sales",
+        "inbox",
+        "surveys",
+        "projects",
+        "work_orders",
+        "positioning",
+        "web_analytics",
     }
 
 

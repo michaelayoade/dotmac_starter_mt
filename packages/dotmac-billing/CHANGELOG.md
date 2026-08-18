@@ -2,7 +2,7 @@
 
 All notable changes follow Semantic Versioning.
 
-## 0.1.0a1 — 2026-08-17
+## 0.1.0a1 — UNRELEASED
 
 - First complete Billing V1: frozen obligation, settlement, receivable,
   accounting and invoice-document contracts; one pure financial engine; two
@@ -19,7 +19,7 @@ All notable changes follow Semantic Versioning.
 - Ships the `bi_0001_billing` migration with exact tenant RLS and platform
   revokes/grants, including column-only account lock permission, plus live
   concurrency, immutability, isolation and rebuild/hash canaries.
-- Declares the exact `dotmac-kernel>=0.1.0a70` and `alembic>=1.13` floors so a
+- Declares the exact `dotmac-kernel>=0.1.0a71` and `alembic>=1.13` floors so a
   clean wheel install can import the published migration/linking surface.
 - Includes no provider connector, rendering, byte storage, cadence, collections
   policy, product consequence, numbering engine, GL or ERP posting path.

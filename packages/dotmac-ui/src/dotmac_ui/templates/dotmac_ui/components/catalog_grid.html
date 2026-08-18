@@ -1,0 +1,30 @@
+{% from "dotmac_ui/components/empty_state.html" import empty_state %}
+{% macro catalog_grid(items=(), empty_title="No items available", empty_message=none, empty_action_label=none, empty_action_url=none) -%}
+  {% if items %}
+  <ul class="dmui-catalog-grid">
+    {% for item in items %}
+    <li class="dmui-catalog-grid__item">
+      {% if item.media_url %}
+      <img class="dmui-catalog-grid__media" src="{{ item.media_url }}" alt="{{ item.media_alt }}" loading="lazy">
+      {% endif %}
+      <div class="dmui-catalog-grid__body">
+        <h3 class="dmui-catalog-grid__title">{{ item.title }}</h3>
+        {% if item.meta %}<p class="dmui-catalog-grid__meta">{{ item.meta }}</p>{% endif %}
+        {% if item.description %}<p class="dmui-catalog-grid__description">{{ item.description }}</p>{% endif %}
+        {% if item.notice %}<p class="dmui-catalog-grid__notice">{{ item.notice }}</p>{% endif %}
+        {% if item.action_label and item.action_url %}
+        <a class="dmui-catalog-grid__action" href="{{ item.action_url }}" rel="noopener">
+          {{ item.action_label }}
+          <svg class="dmui-catalog-grid__action-icon" aria-hidden="true" focusable="false" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75">
+            <path d="M7 4l6 6-6 6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </a>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+    {{ empty_state(empty_title, empty_message, empty_action_label, empty_action_url) }}
+  {% endif %}
+{%- endmacro %}

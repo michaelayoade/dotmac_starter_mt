@@ -1,4 +1,4 @@
-# ADR-0032: Positioning owns location evidence, not business consequences
+# ADR-0036: Positioning owns location evidence, not business consequences
 
 **Status:** Accepted  
 **Date:** 2026-08-18  
@@ -57,7 +57,7 @@ The module owns:
 - collection sessions and server-enforced purpose/time grants;
 - one rebuildable current-position projection and ordered trail reads;
 - retention expiry and idempotent pruning;
-- product-neutral circle/polygon geometry evaluation; and
+- product-selected, product-neutral circle/polygon geometry evaluation; and
 - deduplicated geofence entry/exit observations.
 
 It owns no person, technician, vehicle, work order, customer, subscriber,
@@ -78,6 +78,13 @@ fuel, incidents, documents and attendance consequences. Sub's plant owners
 remain authoritative for fiber/network assets, routes, as-built geometry and
 qualification. A geofence entry is an observation; it is not permission to
 start a work order or accept an attendance punch.
+
+Position ingest never infers that every active tenant geofence applies to every
+tracked unit. The product passes an explicit typed set of relevant opaque
+geofence ids after resolving its own work, fleet or attendance context. An
+unselected fence is neither evaluated nor given state. Evaluation may run in
+the same caller-owned transaction, but only the observation backing the current
+projection may advance geofence state; late evidence cannot reverse it.
 
 The positioning service validates and flushes inside the caller-owned
 transaction and returns typed derived facts. The local owning service decides
@@ -107,6 +114,12 @@ pending for the final commit.
 may remain valid trail evidence without rolling back the current projection. A
 future or implausibly stale observation cannot freeze or advance that
 projection merely because it arrived last.
+
+Current-position ordering is one public rule used by both live writes and the
+idempotent repair operation: later capture time wins; at equal capture time,
+better accuracy wins; remaining ties use later receipt time and then immutable
+observation id. A product never implements its own competing latest-position
+rule.
 
 ### 4. Privacy is a server-side contract and retention is product policy
 

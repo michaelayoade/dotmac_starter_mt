@@ -17,6 +17,7 @@ looks fine in this repo and breaks for a consumer:
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import subprocess
 import sys
@@ -25,8 +26,17 @@ from pathlib import Path
 
 import dotmac_ui
 import pytest
-from dotmac_ui.a11y import NON_TEXT_CONTRAST_MINIMUM, token_contrast
-from dotmac_ui.components import COMPONENTS, ComponentContract
+from dotmac_ui.a11y import (
+    NON_TEXT_CONTRAST_MINIMUM,
+    TEXT_CONTRAST_MINIMUM,
+    token_contrast,
+)
+from dotmac_ui.components import (
+    CATALOG_GRID,
+    COMPONENTS,
+    CatalogItem,
+    ComponentContract,
+)
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -113,6 +123,116 @@ def test_empty_state_publishes_the_proven_product_signature() -> None:
         "action_label",
         "action_url",
     )
+
+
+def test_catalog_grid_publishes_only_the_display_contract() -> None:
+    assert CATALOG_GRID.parameters == (
+        "items",
+        "empty_title",
+        "empty_message",
+        "empty_action_label",
+        "empty_action_url",
+    )
+    assert {field.name for field in dataclasses.fields(CatalogItem)} == {
+        "title",
+        "meta",
+        "description",
+        "media_url",
+        "media_alt",
+        "notice",
+        "action_label",
+        "action_url",
+    }
+    forbidden_business_inputs = {
+        "currency",
+        "price",
+        "eligible",
+        "selected",
+        "stock",
+        "quantity",
+        "status",
+    }
+    assert not forbidden_business_inputs & {
+        field.name for field in dataclasses.fields(CatalogItem)
+    }
+
+
+def test_catalog_grid_renders_the_workspace_and_academy_call_shapes() -> None:
+    rendered = _render(
+        CATALOG_GRID,
+        items=(
+            CatalogItem(
+                title="Sub <Control>",
+                meta="sub.eu-west-1",
+                notice="Details may be out of date.",
+                action_label="Open",
+                action_url='/?next=" onclick="alert(1)',
+            ),
+            CatalogItem(
+                title="Fiber Foundations",
+                meta="8 chapters · chapter tests + final assessment",
+                description="Build practical fiber skills.",
+                media_url='/covers/fiber.webp?caption="unsafe',
+                media_alt="Fiber technician at work",
+            ),
+        ),
+    )
+
+    assert rendered.count('class="dmui-catalog-grid__item"') == 2
+    assert "Sub &lt;Control&gt;" in rendered
+    assert "Details may be out of date." in rendered
+    assert 'rel="noopener"' in rendered
+    assert "&#34; onclick=&#34;" in rendered
+    assert 'loading="lazy"' in rendered
+    assert 'alt="Fiber technician at work"' in rendered
+    assert "8 chapters · chapter tests + final assessment" in rendered
+    assert "Build practical fiber skills." in rendered
+
+
+def test_catalog_grid_requires_both_action_values() -> None:
+    for item in (
+        CatalogItem(title="No action"),
+        CatalogItem(title="Label only", action_label="Open"),
+        CatalogItem(title="URL only", action_url="/open"),
+    ):
+        assert "dmui-catalog-grid__action" not in _render(
+            CATALOG_GRID, items=(item,)
+        )
+
+    rendered = _render(
+        CATALOG_GRID,
+        items=(CatalogItem(title="Application", action_label="Open", action_url="/"),),
+    )
+    assert 'class="dmui-catalog-grid__action"' in rendered
+
+
+def test_empty_catalog_reuses_the_published_empty_state() -> None:
+    rendered = _render(
+        CATALOG_GRID,
+        empty_title="No services available",
+        empty_message="Try another region.",
+        empty_action_label="Clear filters",
+        empty_action_url="/services",
+    )
+
+    assert 'class="dmui-empty-state"' in rendered
+    assert "No services available" in rendered
+    assert "Try another region." in rendered
+    assert 'href="/services"' in rendered
+
+
+def test_catalog_grid_text_roles_meet_contrast() -> None:
+    for mode in ("light", "dark"):
+        assert (
+            token_contrast("text-secondary", "surface-elevated", mode)
+            >= TEXT_CONTRAST_MINIMUM
+        )
+        assert (
+            token_contrast(
+                "status-warning-foreground", "status-warning-surface", mode
+            )
+            >= TEXT_CONTRAST_MINIMUM
+        )
 
 
 def test_empty_state_preserves_the_product_call_shape() -> None:

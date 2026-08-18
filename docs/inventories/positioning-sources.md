@@ -10,12 +10,18 @@
 **Backoffice:** `fcdd8270262d`  
 **Integrator:** `783baf23cbf5`
 
+**Starter implementation reconciliation base:** `4b285cb` on 2026-08-18
+
+**ERP adoption readiness rechecked:** `dd6416cd981f` on 2026-08-18
+
 Sub, CRM and ERP had unrelated local modifications during the audit. None of
 the paths cited below was modified, so the pinned commits describe the audited
 positioning behavior. The remaining repositories were clean.
 
-This inventory is the evidence required by ADR-0006 before
-`dotmac-positioning` behavior is implemented. It distinguishes position
+This inventory is the evidence ADR-0006 required before
+`dotmac-positioning` behavior was implemented. The audit is preserved as the
+source record; the resulting audit-complete package now ports the corrected
+Sub behavior into a product-neutral tenant module. It distinguishes position
 evidence from three nearby but separately owned capabilities: field-work
 lifecycle, asset/fleet lifecycle and map presentation.
 
@@ -26,7 +32,8 @@ The candidate contract is:
 > Tenant-scoped, provider-neutral ingestion of time-stamped position
 > observations with stable client identity and provenance; rebuildable current
 > position and trail projections; explicit collection/sharing grants and
-> retention; and product-neutral geofence evaluation facts. Products own the
+> retention; and explicitly product-selected, product-neutral geofence
+> evaluation facts. Products own the
 > tracked subject, authorization, business consequences and presentation.
 
 The contract does **not** include a technician or vehicle registry, shifts,
@@ -141,6 +148,21 @@ ERP retains attendance acceptance/rejection and its Location configuration; it
 calls the module for geometry facts. ERP retains the complete fleet lifecycle;
 its product-owned vehicle link references an opaque tracked-unit id.
 
+ERP already has the right assembly mechanics to build on: it composes the
+installed `dotmac-files` lineage through `version_locations`, installs logical
+prerequisite bindings before migration discovery, binds
+`tenant_scope_catalog.v1` and `module_database_roles.v1` to revisions in its own
+lineage, and requires a separate `MIGRATION_DATABASE_URL` whose executor is
+`app_admin`. That does not make ERP ready to consume positioning. At the
+readiness recheck it pinned `dotmac-kernel` `0.1.0a56`, while positioning a1
+requires a71; no immutable positioning wheel existed; and its development and
+generated deployment runtime still used the PostgreSQL `postgres` superuser.
+ERP's accepted RLS boundary records 72 cross-organization callers as blocked
+before the application can cut over to `app_user`. Positioning must therefore
+join ERP only after the released dependency pin and the existing least-privilege
+programme reach their own gates. A module-specific superuser exception would
+invalidate, not accelerate, the adoption proof.
+
 ## Defects the extraction must not carry forward
 
 ### D1 — client/API vocabulary and context drift
@@ -194,8 +216,23 @@ Sub commits the batch, then best-effort evaluates geofences that can start work.
 Required proof: positioning returns typed entry/exit facts while the product
 owner applies any work/attendance consequence in its own transaction or emits a
 durable outbox request. The module never imports work-order or attendance code.
+Position ingest also cannot select every active tenant fence implicitly: the
+product resolves and supplies only the opaque fence ids applicable to that
+observation, and stale observations cannot regress per-unit/per-fence state.
 
 ## First-cutover and retirement plan
+
+### Adoption hold — 2026-08-18
+
+Michael instructed that positioning is **not to be adopted yet**. The package
+therefore remains `audit-complete`, unallowlisted and unreleased, with Sub and
+ERP recorded only as candidate consumers. No product may compose the `po`
+lineage, add subject links or shadow writers, switch reads, retire a local
+writer, claim a contract consumer, or begin shared map extraction while this
+hold is active. Sub's canary-first local corrections remain reference
+hardening, not module adoption. Resume the sequence below only after an
+explicit adoption instruction; do not infer authorization from package
+readiness or a green Observer run.
 
 **First cutover: `dotmac_sub`.** The order is fixed:
 
@@ -215,12 +252,49 @@ The shadow is bounded and read-verified; it is not a permanent dual writer.
 Rollback before the seal returns reads to the corrected Sub owner. After the
 seal, fallback does not restore the retired writer.
 
+### Consumer composition readiness is a cutover gate
+
+The module passing its own migration and RLS suite does not make an application
+a consumer. A candidate application must first prove all of the following from
+its own checked-in assembly and deployed-schema rehearsal:
+
+- an immutable released `dotmac-positioning` pin and its public
+  `versions_dir()` are used; no source checkout, copied migration or editable
+  path is a production dependency;
+- one Alembic graph composes the product lineage and the `po` lineage, installs
+  assembly-owned prerequisite bindings before revision discovery; positioning
+  has one atomic tenant-only shape and therefore rejects a redundant
+  `ModulePlaneSelection` rather than pretending the only plane is a choice;
+- the bound product revisions really provide `tenant_scope_catalog.v1` and
+  `module_database_roles.v1`; the module's live verifier, rather than a stamp or
+  assertion, is the acceptance gate;
+- the online application session runs as the non-superuser, non-BYPASSRLS
+  `app_user` role and installs `app.current_tenant` transaction-locally; and
+- migrations run through the separate `app_admin` authority. A superuser
+  application DSN is not accepted as RLS evidence even in a single-operator
+  topology.
+
+Sub is not yet at that gate. Its current `alembic.ini` has no composed
+`version_locations`; its adoption ledger explicitly keeps kernel/module
+migrations inert; migration 508 supplies only part of the tenant catalogue and
+does not supply the verified `app_current_tenant_id()` contract; and the
+checked-in development DSN still uses the PostgreSQL superuser. Those are
+product assembly prerequisites, not reasons to weaken the module or add a
+single-tenant bypass. Sub cutover therefore requires an accepted assembly
+migration decision, the released package/kernel pins, least-privilege role
+provisioning, and a real predecessor-to-head rehearsal before any local writer
+is retired.
+
 **Second candidate: `dotmac_erp`.** ERP adopts the same released contract for
 vehicle observations through a product-owned vehicle-to-tracked-unit link. It
 must characterize its attendance geometry behavior and add real geometry
 canaries before replacing either duplicated evaluator. ERP adoption moves the
 positioning contract from `adopted` to `reuse-proven`; its presence in the
-dossier before cutover is candidate evidence only.
+dossier before cutover is candidate evidence only. ERP's existing module
+composition and prerequisite bindings should be extended rather than forked,
+but the positioning pin and lineage stay absent until kernel a71 and
+positioning a1 are immutable releases and ERP's ordinary runtime can exercise
+the tenant plane under `app_user`.
 
 ## Map presentation gate
 

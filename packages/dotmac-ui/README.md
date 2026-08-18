@@ -69,6 +69,19 @@ coordinates, layers, endpoints, polling and domain behavior. The package owns
 only the frame and generic view-state presentation. This unreleased contract is
 audit-complete but intentionally has no product adopter yet.
 
+For discovery collections, map product-owned results to display-only values and
+render the catalog grid:
+
+```jinja
+{% from "dotmac_ui/components/catalog_grid.html" import catalog_grid %}
+{{ catalog_grid(items=catalog_items, empty_title="No services available") }}
+```
+
+`catalog_items` is a sequence of `dotmac_ui.CatalogItem`; the product still
+owns membership, authorization, eligibility, availability, price formatting
+and actions. Workspace and Academy are the audited sources, but neither has cut
+over to this candidate yet.
+
 **There is no build step for consumers.** No Tailwind, no PostCSS, no bundler,
 no npm, and no requirement to match a Tailwind major — ERP's v3.4 and the
 starter's v4 consume the identical file. See COMPATIBILITY.md § "The

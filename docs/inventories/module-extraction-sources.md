@@ -53,6 +53,27 @@ shared package, or maintaining two implementations.
 |---|---|---|---|
 | `dotmac-people` | **Audit complete; package does not exist** | ERP is the only qualifying source for the narrow employment-directory contract. Kernel Party remains the identity owner; ERP Person, credentials, payroll, attendance, finance and integration fields do not port. Sub has Party/staff but no employment directory; CRM is a single-tenant projection consumer; Backoffice has zero domain tables. Full evidence in [`people-directory-sources.md`](people-directory-sources.md). | Land the vertical-replacement amendment, then create the Party-catalog logical prerequisite and six-table tenant-plane module canary-first. Fix the employee reference/projection contract before moving behaviour: ERP has 131 FK declarations targeting its employee hub, so cutover retires its lifecycle writers while retaining only a rebuildable compatibility projection until those dependants move. Backoffice composition alone moves no authority. |
 
+## Integrated unreleased module cohort — 2026-08-18
+
+The integrated a71 candidate also builds the distributions below. Every row is
+still zero-consumer unless its dossier says otherwise; co-location in one
+review branch is not composition, release or authority cutover.
+
+| Distribution | Evidence and owner boundary | Adoption gate |
+|---|---|---|
+| `dotmac-billing` | [`billing-sources.md`](billing-sources.md), ADR-0020; operational receivables only | Vendor CP platform preparation, then coupled Sub receivable cutover |
+| `dotmac-durable-timers` | [`durable-timers-sources.md`](durable-timers-sources.md); timing identity/generation only | Adopt through typed product policy; kernel relay remains the claim/retry owner |
+| `dotmac-collections` | [`collections-sources.md`](collections-sources.md), ADR-0032; delinquency policy/cases only | Complete the missing canonical persistence service before Sub preparation |
+| `dotmac-orders` | [`orders-sources.md`](orders-sources.md); customer-order aggregate only | Complete Sales→Orders typed handoff, then shadow Sub |
+| `dotmac-subscriptions` | [`subscriptions-sources.md`](subscriptions-sources.md); offers/contracts/cadence/proration/occurrences | Vendor CP platform preparation and Sub tenant shadow, no financial authority |
+| `dotmac-sales` | [`sales-sources.md`](sales-sources.md), ADR-0033; authority stops at accepted Quote | Sub first handoff cutover; CRM retires through Sub |
+| `dotmac-inbox` | [`inbox-sources.md`](inbox-sources.md), ADR-0034; conversations/messages/read cursors | Sub one-writer cutover before release eligibility |
+| `dotmac-surveys` | [`surveys-sources.md`](surveys-sources.md), ADR-0035; feedback evidence only | Sub shadow and local-writer retirement |
+| `dotmac-positioning` | [`positioning-sources.md`](positioning-sources.md), ADR-0036; location evidence/projections only | Explicit adoption hold; no Sub/ERP composition yet |
+| `dotmac-projects` | [`projects-sources.md`](projects-sources.md), ADR-0037; work structure/scheduling only | Sub one-writer cutover, then ERP |
+| `dotmac-work-orders` | [`work-orders-sources.md`](work-orders-sources.md), ADR-0038; physical execution only | Sub first; Vendor InstallationProject stays excluded |
+| `dotmac-web-analytics` | [`web-analytics-sources.md`](web-analytics-sources.md), ADR-0039; first-party observations/projections only | Backoffice first, Sub second; caller owns privacy/retention policy |
+
 ## Template Studio source audit
 
 **Run 2026-08-10. Outcome and full comparison:

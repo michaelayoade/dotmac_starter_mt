@@ -71,6 +71,9 @@ from dotmac_subscriptions.linking import (
 from dotmac_subscriptions.manifest import module
 from dotmac_subscriptions.migrations import versions_dir
 from dotmac_subscriptions.service import (
+    OfferCatalogItem,
+    OfferCatalogPage,
+    OfferCatalogPrice,
     OfferVersionSnapshot,
     acknowledge_output,
     cadence_of,
@@ -78,6 +81,7 @@ from dotmac_subscriptions.service import (
     end_contract_version,
     entitlement_projections_for_version,
     generate_recurring_charge,
+    list_effective_offers,
     occurrences_for_contract,
     offer_version_snapshot,
     publish_offer_version,
@@ -95,7 +99,7 @@ from dotmac_subscriptions.values import (
 )
 from dotmac_subscriptions.vocabulary import SubscriptionVocabularyRegistry
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"
 
 __all__ = [
     "BillingCadence",
@@ -123,6 +127,9 @@ __all__ = [
     "OccurrenceState",
     "OfferPriceInput",
     "OfferState",
+    "OfferCatalogItem",
+    "OfferCatalogPage",
+    "OfferCatalogPrice",
     "OfferVersionSnapshot",
     "ProrationPolicy",
     "PublishOfferVersionCommand",
@@ -152,6 +159,7 @@ __all__ = [
     "entitlement_projections_for_version",
     "entitlement_projection_fingerprint",
     "generate_recurring_charge",
+    "list_effective_offers",
     "invoice_period",
     "link_platform_contract_subject",
     "link_platform_offer_subject",
