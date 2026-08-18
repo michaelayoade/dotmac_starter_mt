@@ -233,6 +233,7 @@ def test_online_role_cannot_read_or_write_across_tenants(
     tenant_a, tenant_b = _seed_tenants(admin_url)
     with _tenant_session(app_url, tenant_a) as db:
         campaign = _seed_campaign(db, tenant_a)
+        campaign_tenant_id = campaign.tenant_id
         db.commit()
     with _tenant_session(app_url, tenant_b) as db:
         for model in ALL_MODELS:
@@ -246,7 +247,7 @@ def test_online_role_cannot_read_or_write_across_tenants(
                 idempotency_expires_at=NOW + timedelta(days=7),
                 recorded_at=NOW,
             )
-    assert campaign.tenant_id == tenant_a
+    assert campaign_tenant_id == tenant_a
 
 
 def test_concurrent_schedule_materializes_one_recipient_step(
