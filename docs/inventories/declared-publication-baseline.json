@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-integration": {
+      "declared": "0.1.0a9",
+      "reason": "Outstanding release owed to the Integrator: a9 adds the ruled 180-day replay-evidence sweep and ig_0011, which preserves released legal-hold history before the first receipt-delete path. The implementation PR deliberately records this state rather than pretending the existing a8 tag contains it. This is NOT to be repaired by editing the version down. Remove this row only after the release workflow installs and verifies dotmac-integration==0.1.0a9 and creates dotmac-integration-v0.1.0a9.",
+      "state": "declared-unpublished"
+    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",

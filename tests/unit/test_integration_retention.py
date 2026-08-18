@@ -26,6 +26,7 @@ from dotmac_integration import (
     REDACTION_MARKER,
     RETENTION_DAYS_VAR,
     RETENTION_LEGAL_POLICY_OWNER_VAR,
+    RETENTION_REPLAY_EVIDENCE_DAYS_VAR,
     CapabilityBinding,
     ConnectorInstallation,
     InboxReceipt,
@@ -39,6 +40,7 @@ from dotmac_integration import (
     is_redacted,
     place_legal_hold,
     purge_expired_payloads,
+    purge_expired_replay_evidence,
     receive_verified,
     redact_receipt,
     release_legal_hold,
@@ -52,6 +54,7 @@ from sqlalchemy.orm import Session
 #: deliberately ships none. If this constant could be imported from
 #: `dotmac_integration`, the slice would have failed.
 TEST_RETENTION_DAYS = 30
+TEST_REPLAY_EVIDENCE_DAYS = 180
 TEST_LEGAL_OWNER = "test-legal-owner"
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
@@ -67,6 +70,7 @@ CONSEQUENCE = {"ticket_id": "TCK-4471", "subscriber_ref": "SUB-99"}
 def policy() -> RetentionPolicy:
     return RetentionPolicy(
         payload_retention_days=TEST_RETENTION_DAYS,
+        replay_evidence_retention_days=TEST_REPLAY_EVIDENCE_DAYS,
         legal_policy_owner=TEST_LEGAL_OWNER,
     )
 
@@ -194,6 +198,7 @@ def test_retention_refuses_to_run_until_it_is_configured() -> None:
         resolve_retention_policy({})
     message = str(excinfo.value)
     assert RETENTION_DAYS_VAR in message
+    assert RETENTION_REPLAY_EVIDENCE_DAYS_VAR in message
     assert RETENTION_LEGAL_POLICY_OWNER_VAR in message
 
 
@@ -237,19 +242,35 @@ def test_the_policy_cannot_be_constructed_without_stating_both_decisions() -> No
 
 def test_a_zero_day_period_is_refused() -> None:
     with pytest.raises(ValueError, match="not a retention period"):
-        RetentionPolicy(payload_retention_days=0, legal_policy_owner="legal@example")
+        RetentionPolicy(
+            payload_retention_days=0,
+            replay_evidence_retention_days=180,
+            legal_policy_owner="legal@example",
+        )
 
 
 def test_a_configured_policy_is_used_verbatim() -> None:
     resolved = resolve_retention_policy(
         {
             RETENTION_DAYS_VAR: "45",
+            RETENTION_REPLAY_EVIDENCE_DAYS_VAR: "210",
             RETENTION_LEGAL_POLICY_OWNER_VAR: " legal@example ",
         }
     )
     assert resolved.payload_retention_days == 45
+    assert resolved.replay_evidence_retention_days == 210
     assert resolved.legal_policy_owner == "legal@example"
     assert resolved.cutoff(NOW) == NOW - timedelta(days=45)
+    assert resolved.evidence_cutoff(NOW) == NOW - timedelta(days=210)
+
+
+def test_replay_evidence_must_outlive_payload_content() -> None:
+    with pytest.raises(ValueError, match="must outlive"):
+        RetentionPolicy(
+            payload_retention_days=30,
+            replay_evidence_retention_days=30,
+            legal_policy_owner="legal@example",
+        )
 
 
 # ── The identity survives its content ───────────────────────────────────────
@@ -622,6 +643,7 @@ def test_the_sweep_is_batched_and_takes_the_oldest_first(
     retired the OLDEST content."""
     batched = RetentionPolicy(
         payload_retention_days=TEST_RETENTION_DAYS,
+        replay_evidence_retention_days=TEST_REPLAY_EVIDENCE_DAYS,
         legal_policy_owner=TEST_LEGAL_OWNER,
         batch_size=2,
     )
@@ -759,3 +781,97 @@ def test_the_backlog_falls_to_zero_once_the_sweep_has_run(
     backlog = retention_backlog(db, policy=policy, now=NOW)
     assert backlog.expired_with_payload == 0
     assert backlog.active_legal_holds == 0
+
+
+# ── Replay evidence has its own finite lifetime ─────────────────────────────
+
+
+def test_replay_evidence_is_purged_only_after_content_was_redacted(
+    db: Session, binding: CapabilityBinding, policy: RetentionPolicy, audit: _AuditSpy
+) -> None:
+    old = _receipt(db, binding)
+    recent = _receipt(
+        db,
+        binding,
+        provider_event_id="wamid.RECENT-EVIDENCE",
+        received_at=NOW - timedelta(days=100),
+    )
+    purge_expired_payloads(db, policy=policy, now=NOW)
+
+    sweep = purge_expired_replay_evidence(db, policy=policy, now=NOW)
+
+    assert sweep.purged_ids == (old.id,)
+    assert db.get(InboxReceipt, old.id) is None
+    assert db.get(InboxReceipt, recent.id) is not None
+
+
+def test_replay_evidence_sweep_refuses_unredacted_or_open_receipts(
+    db: Session, binding: CapabilityBinding, policy: RetentionPolicy, audit: _AuditSpy
+) -> None:
+    unredacted = _receipt(db, binding, provider_event_id="wamid.UNREDACTED")
+    unresolved = _receipt(
+        db,
+        binding,
+        provider_event_id="wamid.UNRESOLVED-EVIDENCE",
+        state="retryable",
+    )
+
+    sweep = purge_expired_replay_evidence(db, policy=policy, now=NOW)
+
+    assert sweep.purged == 0
+    assert sweep.refused_by_reason == {"not_redacted": 1, "unresolved": 1}
+    assert db.get(InboxReceipt, unredacted.id) is not None
+    assert db.get(InboxReceipt, unresolved.id) is not None
+
+
+def test_replay_evidence_sweep_preserves_released_legal_hold_history(
+    db: Session, binding: CapabilityBinding, policy: RetentionPolicy, audit: _AuditSpy
+) -> None:
+    receipt = _receipt(db, binding)
+    hold = place_legal_hold(
+        db,
+        receipt,
+        policy=policy,
+        reason="regulator",
+        placed_by="ops@example",
+    )
+    release_legal_hold(db, hold, released_by="legal@example", reason="closed")
+    purge_expired_payloads(db, policy=policy, now=NOW)
+
+    sweep = purge_expired_replay_evidence(db, policy=policy, now=NOW)
+
+    assert sweep.purged_ids == (receipt.id,)
+    assert db.get(InboxReceipt, receipt.id) is None
+    preserved = db.get(ReceiptLegalHold, hold.id)
+    assert preserved is not None
+    assert preserved.receipt_id == receipt.id
+    assert preserved.released_by == "legal@example"
+
+
+def test_an_active_legal_hold_refuses_replay_evidence_purge(
+    db: Session, binding: CapabilityBinding, policy: RetentionPolicy, audit: _AuditSpy
+) -> None:
+    receipt = _receipt(db, binding)
+    hold = place_legal_hold(
+        db,
+        receipt,
+        policy=policy,
+        reason="regulator",
+        placed_by="ops@example",
+    )
+    # Redact directly to create the strongest possible race-shaped fixture: an
+    # active hold must still win even if the content marker already exists.
+    receipt.payload_json = {
+        REDACTION_MARKER: {
+            "redacted_at": NOW.isoformat(),
+            "payload_digest": receipt.payload_digest,
+        }
+    }
+    db.flush()
+
+    sweep = purge_expired_replay_evidence(db, policy=policy, now=NOW)
+
+    assert sweep.purged == 0
+    assert sweep.refused_by_reason == {"legal_hold": 1}
+    assert db.get(InboxReceipt, receipt.id) is not None
+    assert db.get(ReceiptLegalHold, hold.id) is not None
