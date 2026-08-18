@@ -19,7 +19,7 @@ the TestClient helper, which is building a real app anyway, pays that cost.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -44,7 +44,7 @@ def _module_schemas() -> tuple[str, ...]:
     return tuple(sorted({t.schema for t in Base.metadata.tables.values() if t.schema}))
 
 
-def create_test_engine() -> Engine:
+def create_test_engine(*, module_schemas: Iterable[str] | None = None) -> Engine:
     """A fresh in-memory SQLite engine with the full `Base.metadata` schema
     created. `check_same_thread=False` because a TestClient runs sync route
     dependencies on a worker thread while the test holds one connection —
@@ -57,6 +57,14 @@ def create_test_engine() -> Engine:
     therefore ATTACHed as its own in-memory database before `create_all`, on
     every connection.
 
+    ``module_schemas`` selects the module schemas this ASSEMBLY fixture actually
+    composes. ``None`` preserves the historical auto-discovery behavior; an
+    explicit iterable is required for a large test process that has imported
+    optional modules it does not compose. This matters because pytest collects
+    every test module before a session fixture runs, while SQLite supports only
+    ten attached databases. Treating every collected optional package as part
+    of the assembly made the eleventh extraction break unrelated unit tests.
+
     ATTACH rather than a `schema_translate_map`: translating the schema away
     would make the unit lane exercise UNQUALIFIED SQL that no deployment ever
     runs, quietly hiding exactly the qualification defects D1's gate exists to
@@ -67,7 +75,16 @@ def create_test_engine() -> Engine:
         future=True,
         connect_args={"check_same_thread": False},
     )
-    schemas = _module_schemas()
+    available = _module_schemas()
+    schemas = (
+        available if module_schemas is None else tuple(sorted(set(module_schemas)))
+    )
+    unknown = set(schemas).difference(available)
+    if unknown:
+        raise ValueError(
+            "test engine requested module schemas absent from Base.metadata: "
+            f"{sorted(unknown)}"
+        )
     if schemas:
 
         @event.listens_for(engine, "connect")
@@ -82,7 +99,12 @@ def create_test_engine() -> Engine:
             finally:
                 cursor.close()
 
-    Base.metadata.create_all(engine)
+    selected_tables = [
+        table
+        for table in Base.metadata.tables.values()
+        if table.schema is None or table.schema in schemas
+    ]
+    Base.metadata.create_all(engine, tables=selected_tables)
     return engine
 
 

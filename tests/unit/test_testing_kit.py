@@ -34,7 +34,7 @@ def test_assembly_test_client_boots_and_serves_health() -> None:
     """The kit boots a real create_app assembly and overrides its DB deps onto
     an isolated session — the same path a consumer's integration-ish unit test
     takes."""
-    engine = create_test_engine()
+    engine = create_test_engine(module_schemas=())
     try:
         with isolated_session(engine) as session:
             app = create_app(ProductAssemblySpec(name="kit-test", modules=()))
@@ -51,7 +51,7 @@ def test_assembly_test_client_boots_and_serves_health() -> None:
 def test_isolated_session_rolls_back_between_uses() -> None:
     from dotmac_kernel.models import Tenant
 
-    engine = create_test_engine()
+    engine = create_test_engine(module_schemas=())
     try:
         with isolated_session(engine) as session:
             session.add(Tenant(slug="acme", name="Acme"))
@@ -61,6 +61,29 @@ def test_isolated_session_rolls_back_between_uses() -> None:
             assert session.query(Tenant).count() == 0
     finally:
         engine.dispose()
+
+
+def test_test_engine_attaches_only_explicitly_composed_module_schemas() -> None:
+    """Sensitivity proof for the SQLite attachment ceiling.
+
+    Collection has already imported app-directory and Template Studio models.
+    Selecting one must not silently attach the other as if it were composed.
+    """
+    engine = create_test_engine(module_schemas=("mod_tstudio",))
+    try:
+        with engine.connect() as connection:
+            attached = {
+                row[1] for row in connection.exec_driver_sql("PRAGMA database_list")
+            }
+        assert "mod_tstudio" in attached
+        assert "mod_appdir" not in attached
+    finally:
+        engine.dispose()
+
+
+def test_test_engine_refuses_an_unknown_explicit_schema() -> None:
+    with pytest.raises(ValueError, match="absent from Base.metadata"):
+        create_test_engine(module_schemas=("mod_not_imported",))
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────

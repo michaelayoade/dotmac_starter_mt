@@ -165,7 +165,12 @@ def unit_engine():
     # runs create_all over the (now fully imported) Base.metadata — same engine
     # this conftest used to hand-build, including the check_same_thread=False
     # relaxation TestClient needs. See dotmac_kernel.testing.harness.
-    engine = create_test_engine()
+    # Pytest has imported every optional package by collection time, but this
+    # fixture is the reference assembly plus app-directory's shared service
+    # tests — not every package in the repository. Name the three schemas it
+    # genuinely exercises so SQLite's ten-attachment ceiling cannot turn
+    # unrelated future extractions into assembly setup failures.
+    engine = create_test_engine(module_schemas=("mod_appdir", "mod_tkt", "mod_tstudio"))
     yield engine
     engine.dispose()
 

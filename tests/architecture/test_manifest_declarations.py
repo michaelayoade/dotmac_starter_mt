@@ -227,7 +227,7 @@ def test_an_audit_event_with_an_undeclared_action_fails() -> None:
         )
     )
     try:
-        engine = create_test_engine()
+        engine = create_test_engine(module_schemas=())
         with isolated_session(engine) as db:
             with pytest.raises(UndeclaredAuditActionError) as exc:
                 write_audit_event(
@@ -250,7 +250,7 @@ def test_a_setting_write_to_an_undeclared_domain_fails() -> None:
         )
     )
     try:
-        engine = create_test_engine()
+        engine = create_test_engine(module_schemas=())
         with isolated_session(engine) as db:
             with pytest.raises(UndeclaredSettingDomainError) as exc:
                 upsert_by_key(
