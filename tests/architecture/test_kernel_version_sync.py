@@ -74,15 +74,24 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# `dotmac-people` consumes the Party-person capability introduced with its own
-# a71 allocation. Media observations was allocated next in a72 after the a71
-# tag made that version immutable. `test_every_releasable_module_has_a_floor_rule`
-# below keeps both maps watched: a module may not be absent from BOTH maps.
+# People and campaigns consume no kernel feature newer than their allocation
+# release. Their required Party-person or consent/idempotency/outbox facilities
+# are present in a71, so the allocation itself is the floor. If either adopts a
+# newer capability, move its row to CAPABILITY_RAISED_FLOORS while retaining
+# the allocation release as evidence there. Durable timers was allocated in
+# a72; media observations follows it in a73 because the a72 tag is immutable.
+# `test_every_releasable_module_has_a_floor_rule` keeps both maps watched: a
+# module may not be absent from BOTH maps.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
-    # `dotmac-people` and the Party-person prerequisite it consumes arrive in
-    # the same a71 release, so capability does not raise the allocation floor.
+    "dotmac-campaigns": "0.1.0a71",
     "dotmac-people": "0.1.0a71",
-    "dotmac-media-observations": "0.1.0a72",
+    # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
+    # plane-selection contract lands in a61, so its row lives in
+    # CAPABILITY_RAISED_FLOORS below rather than here.
+    # Durable timers consumes a67's relay contract, but its own namespace is
+    # allocated later, so the allocation remains the effective floor.
+    "dotmac-durable-timers": "0.1.0a72",
+    "dotmac-media-observations": "0.1.0a73",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -258,13 +267,11 @@ def test_a_module_has_exactly_one_floor_rule() -> None:
 def test_every_releasable_module_has_a_floor_rule() -> None:
     """The other half of "exactly one" — and what keeps an EMPTY map watched.
 
-    `LEDGER_ALLOCATION_RELEASES` is currently empty, so the test parametrized
-    over it collects nothing and reports green having asserted nothing. That is
-    only tolerable because a module cannot fall out of both maps: this reads
-    the release allowlist — the closed set of things that may be PUBLISHED, so
-    the set whose floors are public facts — and requires each one to be
-    somewhere. Discovery, not enumeration: adding an allowlist entry enrols it
-    here, the way `test_module_version_sync.py` already does for versions.
+    The map has been empty before, so this does not trust parametrization alone:
+    it reads the release allowlist — the closed set of things that may be
+    PUBLISHED — and requires every member to appear in exactly one floor map.
+    Discovery, not enumeration: adding an allowlist entry enrols it here, the
+    way `test_module_version_sync.py` already does for versions.
 
     The union may legitimately be a superset. `dotmac-imports` and
     `dotmac-template-studio` carry floors while still unpublishable, which is

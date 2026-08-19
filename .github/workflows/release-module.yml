@@ -54,6 +54,7 @@ on:
           - dotmac-approvals
           - dotmac-application-directory
           - dotmac-people
+          - dotmac-durable-timers
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true

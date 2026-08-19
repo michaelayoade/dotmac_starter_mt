@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a72 — UNRELEASED
+## 0.1.0a73 — UNRELEASED
 
 Allocates the immutable tenant-plane database identity for the independently
 installable `dotmac-media-observations` module.
@@ -26,14 +26,33 @@ installable `dotmac-media-observations` module.
   the module registry crosses SQLite's hard attachment limit; namespace and
   isolation proofs remain PostgreSQL gates.
 
-## 0.1.0a71 — 2026-08-18
+## 0.1.0a72 — 2026-08-19
 
-Names and proves the narrow Party-person catalogue consumed by installable
-employment-directory modules, and allocates the first such module's physical
-namespace.
+Allocates the independent durable-timer module lineage and adds the declaration
+surface its output routing contract requires. This is an allocation and a
+vocabulary guard, not a second timer engine in the kernel.
 
 ### Added
 
+- `DURABLE_TIMERS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_timers`, revision prefix `dt`, branch label `durable_timers`. The module
+  owns timer identity, generation and terminal evidence; it consumes the
+  existing `outbox_relay.v1` prerequisite for delivery mechanics.
+- A manifest-declared outbox event-type registry so timer outputs fail closed
+  on an undeclared routing code instead of enqueueing work no consumer owns.
+
+## 0.1.0a71 — 2026-08-18
+
+Allocates the independent tenant-only people and campaigns lineages, names and
+proves the Party-person catalogue consumed by employment-directory modules,
+and keeps optional-package imports and large test assemblies independent of
+database configuration and SQLite's ten-attachment ceiling.
+
+### Added
+
+- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
+  branch label `campaigns`. The module owns provider-neutral campaign
+  progression and consumes the kernel's consent, idempotency and outbox owners.
 - `party_person_catalog.v1`, covering the required `public.parties` and
   `public.party_persons` columns, keys, relationship, forced tenant RLS,
   tenant-policy marker, and `app_user` read posture without coupling consumers
@@ -41,6 +60,12 @@ namespace.
 - `verify_party_person_catalog`, a live-catalog verifier that refuses a stamped,
   aliased, unprotected, unusable, or structurally incompatible provider.
 - `PEOPLE_MIGRATION_OWNER`: `pe`, branch `people`, schema `mod_people`.
+
+### Changed
+
+- Defers the canonical conflict-savepoint import in consent and idempotency
+  write paths until execution, so independently installable module contracts
+  can be imported before an assembly configures `DATABASE_URL`.
 - `dotmac_kernel.testing.create_test_engine(tables=...)` can now create an
   explicit assembly/package metadata slice. This keeps qualified SQLite module
   schemas while preventing test collection of uncomposed packages from

@@ -104,13 +104,14 @@ def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
     uncomposed package belongs to the assembly. If the selected surface itself
     crosses SQLite's attachment limit, collision-free overflow namespaces are
     translated deterministically to SQLite's qualified ``main`` namespace.
-
     **Module schemas (ADR-0006 D1).** A stateful module binds its models to
     `mod_<short_code>` via `namespaces.schema_table_args`, so the ORM emits
     fully qualified `mod_x.thing` — which is the entire point of D1, and which
     plain SQLite rejects because it has no schemas. Each such schema is
     therefore ATTACHed as its own in-memory database before `create_all`, on
-    every connection.
+    every connection. SQLite permits at most ten attached databases in the
+    standard build, so inference from every model imported during pytest
+    collection is both architecturally wrong and eventually unexecutable.
 
     ATTACH keeps emitted SQL identical to production's until SQLite's hard
     limit of ten attached databases is reached. Beyond that limit, the smallest

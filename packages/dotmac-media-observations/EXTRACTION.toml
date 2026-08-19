@@ -41,7 +41,7 @@ preserved_tests = [
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_backoffice", "dotmac_sub"]
-authority_boundary = "ADR-0032. The module owns only provider-neutral immutable aggregate external-media observations and rebuildable projections. Integrator and connector plugins own every provider transport concern. Sub owns immutable Lead origin and the customer lifecycle. CRM's Lead/ROI writers are negative evidence, not behavior to port. Provider conversion claims remain provider_reported and never become official acquisition, customer identity or authoritative revenue."
+authority_boundary = "ADR-0033. The module owns only provider-neutral immutable aggregate external-media observations and rebuildable projections. Integrator and connector plugins own every provider transport concern. Sub owns immutable Lead origin and the customer lifecycle. CRM's Lead/ROI writers are negative evidence, not behavior to port. Provider conversion claims remain provider_reported and never become official acquisition, customer identity or authoritative revenue."
 inventory_evidence = [
   "docs/inventories/media-observations-sources.md",
   "docs/inventories/module-extraction-sources.md",

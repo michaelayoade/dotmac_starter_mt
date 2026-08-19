@@ -101,6 +101,7 @@ def test_from_feature_carries_every_field_across() -> None:
         core=False,
         enabled_by_default=False,
         capabilities=["legacy.use"],
+        outbox_event_types=["legacy.wake"],
         seed=lambda: seed_calls.append(1),
     )
     adapted = ModuleManifest.from_feature(feature)
@@ -112,6 +113,7 @@ def test_from_feature_carries_every_field_across() -> None:
     assert adapted.core is False
     assert adapted.enabled_by_default is False
     assert adapted.capabilities == ("legacy.use",)
+    assert adapted.outbox_event_types == ("legacy.wake",)
     assert adapted.seed is not None
     adapted.seed()
     assert seed_calls == [1]

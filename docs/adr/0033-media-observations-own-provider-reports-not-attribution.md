@@ -1,4 +1,4 @@
-# ADR-0032: Media observations own provider reports, not attribution
+# ADR-0033: Media observations own provider reports, not attribution
 
 **Status:** Accepted  
 **Date:** 2026-08-18  

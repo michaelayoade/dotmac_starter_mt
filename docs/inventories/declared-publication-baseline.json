@@ -62,19 +62,24 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-kernel": {
-      "declared": "0.1.0a72",
-      "reason": "OUTSTANDING 2026-08-18: kernel a71 was independently published for the People allocation while this branch was validating, so the media-observations allocation moved to a72 rather than reusing released identity for different content. Exact-commit Observer and CI evidence exists for the unadopted media candidate, but Michael's adoption pause leaves the dependent module outside its release allowlist and without required first-adopter/PR proof. Keep a72 unpublished with that package until adoption resumes; never edit it back to the already-published a71.",
-      "state": "declared-unpublished"
-    },
-    "dotmac-media-observations": {
+    "dotmac-campaigns": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED 2026-08-18: Michael paused adoption after directing the product-first module programme. The repository's closed release policy requires a new module's allowlist entry to land with first-adopter proof, and this programme's own execution order places release after Backoffice shadow/cutover. The package is built and validated as an uncomposed tenant-only candidate, but remains absent from .github/release-modules.json until Michael resumes adoption. Do not dispatch a release, count Backoffice/Sub as consumers, or reorder publication ahead of the paused proof.",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
+      "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a73",
+      "reason": "OUTSTANDING 2026-08-19: the immutable a72 tag already contains the Campaigns and Durable Timers allocations. Media observations is therefore the fourteenth allocation in a new a73 candidate rather than reusing a published identity for different content. Keep a73 unpublished while its dependent media module remains intentionally unadopted and outside the release allowlist; remove this row only with an explicitly authorized, verified kernel release.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-media-observations": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED 2026-08-19: Michael explicitly paused adoption. The package remains an uncomposed tenant-only candidate, absent from .github/release-modules.json, with Backoffice and Sub listed only as candidates. Do not dispatch a release, count either product as a consumer, or begin shadow/cutover/local-writer retirement until Michael resumes adoption.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

@@ -191,9 +191,13 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # and the control plane allocates vendor-side series no tenant may read.
     # `people` is the eleventh: a tenant-only employment directory that links
     # to, and never duplicates, the kernel Party-person catalogue.
-    # `media_observations` is the twelfth allocation and remains tenant-only;
-    # it owns provider-neutral immutable external-media facts.
-    # None of these allocations installs behaviour in the kernel.
+    # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
+    # audit found no real named platform consumer.
+    # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
+    # than adding another due-work engine. `media_observations` is the
+    # fourteenth and remains tenant-only; it owns provider-neutral immutable
+    # external-media facts. None of these allocations installs behaviour in
+    # the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -206,6 +210,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "integration",
         "approvals",
         "people",
+        "campaigns",
+        "durable_timers",
         "media_observations",
     }
 

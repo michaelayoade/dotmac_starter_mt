@@ -592,7 +592,7 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 
 # `dotmac-people` — the ELEVENTH allocated installable module. It owns a tenant
 # employment directory and references, but does not duplicate, the kernel Party
-# person catalogue.  `people` stays readable in catalog dumps and `pe` leaves
+# person catalogue. `people` stays readable in catalog dumps and `pe` leaves
 # the revision-id budget for the lineage's descriptive slugs.
 PEOPLE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="people",
@@ -601,7 +601,30 @@ PEOPLE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("people"),
 )
 
-# `dotmac-media-observations` — the TWELFTH allocated installable module.
+# `dotmac-campaigns` — the tenant-only outbound campaign progression owner
+# accepted by ADR-0032. `campaigns` is intentionally explicit in live catalog
+# dumps; the compact `ca` prefix leaves the lineage's revision ids readable.
+# No platform plane was allocated by inference: the audit found no named
+# control-plane consumer, and the module manifest declares tenant tables only.
+CAMPAIGNS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="campaigns",
+    prefix="ca",
+    branch_label="campaigns",
+    db_schema=module_schema("campaigns"),
+)
+
+# `dotmac-durable-timers` — an optional dual-plane timing-mechanics owner.
+# `timers` keeps the physical catalog readable, while `dt` and
+# `durable_timers` permanently identify its independent Alembic lineage.
+# The module writes the kernel outbox but owns no relay state or dispatcher.
+DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="durable_timers",
+    prefix="dt",
+    branch_label="durable_timers",
+    db_schema=module_schema("timers"),
+)
+
+# `dotmac-media-observations` — the FOURTEENTH allocated installable module.
 # External media hierarchy, configuration and provider-reported aggregate
 # performance are tenant data-plane observations; the source audit found no
 # platform-plane adopter. `mediaobs` remains legible in catalog output and the
@@ -626,6 +649,8 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
     PEOPLE_MIGRATION_OWNER,
+    CAMPAIGNS_MIGRATION_OWNER,
+    DURABLE_TIMERS_MIGRATION_OWNER,
     MEDIA_OBSERVATIONS_MIGRATION_OWNER,
 )
 
@@ -960,6 +985,7 @@ __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
+    "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
@@ -982,6 +1008,7 @@ __all__ = [
     "DuplicateMigrationPrefixError",
     "DuplicateSchemaError",
     "DuplicateTableOwnerError",
+    "DURABLE_TIMERS_MIGRATION_OWNER",
     "HostSchemaClaimError",
     "InvalidMigrationPrefixError",
     "InvalidRevisionIdError",
