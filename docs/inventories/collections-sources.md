@@ -11,6 +11,17 @@ arrangement, grace, timer, dunning, prepaid, and preserved behavior-test owners
 remain unchanged. The exact revalidation commands and path list are recorded in
 `collections-extraction-dossier.md`.
 
+**2026-08-19 implementation follow-up.** The revision-pinned source measurement
+below remains the extraction evidence, but its pre-package implementation state
+is no longer current. Starter candidate
+`e072cca5a4778ece25397b54a5b8122511c4b6f8` contains the allocated `coll`/`cl`
+tenant-only package, canonical fully typed flush-only persistence services and
+four passing fresh-PostgreSQL RLS/concurrency/immutability proofs on Observe.
+The complete unit/architecture suite passed at
+`3b1983f2bb98ebf280f274f86024a6c13e489f07`. Adoption remains pending and the
+historical product writers measured below remain authoritative until the Sub
+shadow/cutover gates retire them; no production authority changed.
+
 ADR-0032 is now authoritative for the previously open contract and plane
 questions: `AssessCollectionExposureV1` carries identity/scope/trigger
 provenance and no money; `ReceivablesReader` supplies current authoritative

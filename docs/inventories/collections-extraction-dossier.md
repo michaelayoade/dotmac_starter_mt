@@ -1,6 +1,6 @@
 # `dotmac-collections` extraction dossier (content, not a package)
 
-**As of:** 2026-08-18
+**As of:** 2026-08-19
 **starter:** `8d4ddfd9` · **Sub:** `d1a1a913` · **ERP:** `0f4b1698` · **vendor CP source evidence:** `8984801`
 **Evidence:** `docs/inventories/collections-sources.md`
 **Contracts:** `docs/superpowers/specs/2026-08-14-collections-policy-consequence-and-timer-contracts.md`
@@ -23,6 +23,33 @@ creation was blocked. It is retained as revision-pinned audit history, not as a
 second live manifest; the package-root `EXTRACTION.toml` owns current field
 values. Both remain `audit-complete`: adoption evidence can advance only through
 the cutovers in the adoption plan, never through documentation alone.
+
+## 2026-08-19 implementation status
+
+The canonical tenant-plane persistence path now exists in
+`dotmac_collections.service`: seven typed service owners cover immutable policy
+publication, case membership/lifecycle, arrangements and settlement evidence,
+grace, notice/action requests and receipts, and reconciliation observations.
+They use explicit `TenantScope`, the kernel idempotency ledger and caller-owned
+transactions; no service commits, rolls back, constructs a session, calculates
+a receivable balance or implements timer infrastructure.
+
+At Starter candidate `e072cca5a4778ece25397b54a5b8122511c4b6f8`, Observe
+passed the 18 focused unit/architecture canaries and all four fresh-PostgreSQL
+proofs: declared tenant catalog plus FORCE RLS, cross-tenant hiding/refusal,
+concurrent first-case convergence, and immutable policy publication with fresh
+reopen after resolution. Repository `make check` also passed at that revision.
+After adding the explicit idempotency prerequisite and synchronizing its
+architecture snapshot, the complete unit/architecture suite passed on Observe
+at `3b1983f2bb98ebf280f274f86024a6c13e489f07`.
+
+This closes the earlier missing-writer implementation gap. It does not change
+the dossier status to reuse-proven: Sub still has no installed adapter, backfill,
+shadow parity evidence, coupled Billing watermark or retired local writer, and
+Vendor CP still fails the platform-plane demand gate. The TOML block below is
+retained as the pre-integration audit record; its historical `next_action` and
+"missing package" canary state are superseded by this section and the live
+package-root `EXTRACTION.toml`.
 
 Every `source_paths` and `preserved_tests` entry below was reconfirmed at Sub
 `d1a1a913e287ffadaf21b7da7be448f2c28b5483`. From the previous clean pin
