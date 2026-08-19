@@ -18,7 +18,11 @@ down_revision = None
 branch_labels = ("collections",)
 
 MODULE_CODE = "collections"
-COMMON_REQUIRES = ("module_database_roles.v1", "outbox_relay.v1")
+COMMON_REQUIRES = (
+    "module_database_roles.v1",
+    "idempotency_ledger.v1",
+    "outbox_relay.v1",
+)
 TENANT_REQUIRES = ("tenant_scope_catalog.v1",)
 PLATFORM_REQUIRES = ()
 REQUIRES = COMMON_REQUIRES + TENANT_REQUIRES
