@@ -16,6 +16,12 @@ identity, fingerprint coverage, period semantics, exact value representation,
 restatement ordering, table identity, schema, prefix or branch label is a
 breaking contract change and requires explicit migration evidence.
 
+A restatement link retains the same installation, source system and subject:
+entity identity, hierarchy child, or exact metric period as appropriate. All
+public recording functions enforce that rule, including commands whose
+`restates_observation_id` is set directly. Period-metric read windows use aware
+`[start,end)` instants and reject naive or reversed bounds.
+
 Metric decimals must be exactly representable by `NUMERIC(38,18)` and integral
 values by signed 64-bit storage. Generic normalized entity properties use a
 private tagged JSON representation so public reads restore Decimal values without

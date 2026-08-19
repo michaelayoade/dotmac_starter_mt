@@ -23,3 +23,13 @@
 - Pre-persistence signed-64-bit and `NUMERIC(38,18)` bounds so normalized metric
   values are refused instead of being rounded or overflowing in storage.
 - Provider-free normalized-observation conformance kit.
+
+### Fixed
+
+- Every public recording path now validates that a restatement retains its
+  installation, source system and entity, hierarchy-child or metric-period
+  subject; callers cannot bypass that boundary by setting the link directly.
+- Reused observation identities report changed-fingerprint conflicts before
+  changed content is interpreted against the declaration registry.
+- Period-metric read windows refuse naive or reversed instants under the same
+  aware `[start,end)` contract as stored metric periods.
