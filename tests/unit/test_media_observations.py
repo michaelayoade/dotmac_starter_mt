@@ -293,6 +293,28 @@ def test_source_identity_cannot_be_reused_for_another_observation_kind(
     assert db.scalar(select(func.count()).select_from(MetricPeriod)) == 0
 
 
+def test_changed_identity_conflicts_before_new_content_is_interpreted(
+    db: Session,
+) -> None:
+    _node(db)
+    command = _entity("shared-source-id")
+    record_entity(db, command)
+
+    with pytest.raises(ObservationConflict) as caught:
+        record_entity(
+            db,
+            replace(
+                command,
+                node_code="undeclared_node",
+                node_version=99,
+            ),
+        )
+
+    assert caught.value.report.code == "observation_identity_conflict"
+    assert caught.value.report.source_observation_id == "shared-source-id"
+    assert db.scalar(select(func.count()).select_from(ObservationEnvelope)) == 1
+
+
 def test_restatement_appends_history_and_moves_only_the_projection(db: Session) -> None:
     _node(db)
     original = record_entity(db, _entity("entity-v1", name="Old name"))
@@ -326,6 +348,96 @@ def test_restatement_appends_history_and_moves_only_the_projection(db: Session) 
     assert current.observation_id == corrected.observation_id
 
 
+def test_direct_entity_restatement_cannot_cross_subject_or_source(db: Session) -> None:
+    _node(db)
+    original = record_entity(db, _entity("entity-original", entity_ref="entity-a"))
+
+    for forged in (
+        replace(
+            _entity("entity-other-subject", entity_ref="entity-b"),
+            restates_observation_id=original.observation_id,
+        ),
+        replace(
+            _entity("entity-other-installation", entity_ref="entity-a"),
+            source=replace(
+                _source("entity-other-installation"),
+                installation_ref="installation-beta",
+            ),
+            restates_observation_id=original.observation_id,
+        ),
+        replace(
+            _entity("entity-other-source", entity_ref="entity-a"),
+            source=replace(
+                _source("entity-other-source"),
+                source_system="another-media-source",
+            ),
+            restates_observation_id=original.observation_id,
+        ),
+    ):
+        with pytest.raises(InvalidObservation, match="restatement"):
+            record_entity(db, forged)
+
+    assert db.scalar(select(func.count()).select_from(ObservationEnvelope)) == 1
+
+
+def test_direct_hierarchy_restatement_cannot_change_its_child(db: Session) -> None:
+    original = record_hierarchy(
+        db,
+        HierarchyObservation(
+            source=_source("edge-original"),
+            external_account_ref="account-7",
+            child_entity_ref="child-a",
+            parent_entity_ref="parent-a",
+        ),
+    )
+
+    with pytest.raises(InvalidObservation, match="restatement"):
+        record_hierarchy(
+            db,
+            HierarchyObservation(
+                source=_source("edge-other-child"),
+                external_account_ref="account-7",
+                child_entity_ref="child-b",
+                parent_entity_ref="parent-a",
+                restates_observation_id=original.observation_id,
+            ),
+        )
+
+    assert db.scalar(select(func.count()).select_from(ObservationEnvelope)) == 1
+
+
+def test_direct_metric_restatement_cannot_change_its_period_subject(
+    db: Session,
+) -> None:
+    _metric(db)
+    original_command = MetricObservation(
+        source=_source("metric-original"),
+        external_account_ref="account-7",
+        entity_ref="campaign-42",
+        metric_code="reported_impressions",
+        metric_version=1,
+        period_start=T0,
+        period_end=T0 + timedelta(days=1),
+        value=CountValue(10),
+    )
+    original = record_metric(db, original_command)
+
+    with pytest.raises(InvalidObservation, match="restatement"):
+        record_metric(
+            db,
+            replace(
+                original_command,
+                source=_source("metric-other-period"),
+                period_start=T0 + timedelta(days=1),
+                period_end=T0 + timedelta(days=2),
+                restates_observation_id=original.observation_id,
+            ),
+        )
+
+    assert db.scalar(select(func.count()).select_from(ObservationEnvelope)) == 1
+    assert db.scalar(select(func.count()).select_from(MetricPeriod)) == 1
+
+
 def test_out_of_order_delivery_has_a_deterministic_projection(db: Session) -> None:
     _node(db)
     newer = _entity(
@@ -354,6 +466,35 @@ def test_naive_provider_or_receipt_timestamp_is_refused(db: Session) -> None:
     for field_name in ("observed_at", "received_at"):
         with pytest.raises(InvalidObservation, match="timezone-aware"):
             replace(aware, **{field_name: T0.replace(tzinfo=None)})
+
+
+def test_period_read_window_refuses_naive_or_reversed_instants(db: Session) -> None:
+    common = {
+        "tenant_id": TENANT,
+        "installation_ref": "installation-alpha",
+        "source_system": "external-media",
+        "external_account_ref": "account-7",
+        "entity_ref": "campaign-42",
+    }
+    for period_start, period_end in (
+        (T0.replace(tzinfo=None), T0 + timedelta(days=1)),
+        (T0, (T0 + timedelta(days=1)).replace(tzinfo=None)),
+    ):
+        with pytest.raises(InvalidObservation, match="timezone-aware"):
+            read_period_metrics(
+                db,
+                period_start=period_start,
+                period_end=period_end,
+                **common,
+            )
+
+    with pytest.raises(InvalidObservation, match=r"\[start,end\)"):
+        read_period_metrics(
+            db,
+            period_start=T0 + timedelta(days=1),
+            period_end=T0,
+            **common,
+        )
 
 
 def test_a_missing_parent_is_not_silently_re_rooted(db: Session) -> None:
