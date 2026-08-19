@@ -247,12 +247,6 @@ def test_arrangement_protects_only_its_exact_exposure_membership() -> None:
         {"installments": (_installment(1, "149.99"),)},
         {"installments": (_installment(2, "150.00"),)},
         {
-            "installments": (
-                replace(_installment(1, "75.00"), due_at=AT.replace(tzinfo=None)),
-                _installment(2, "75.00"),
-            )
-        },
-        {
             "exposures": (
                 _exposure("invoice:inv-1", "100.00"),
                 _exposure("invoice:inv-1", "50.00"),
@@ -265,6 +259,11 @@ def test_arrangement_rejects_inexact_totals_implicit_order_and_duplicates(
 ) -> None:
     with pytest.raises(ValueError):
         _arrangement(**overrides)
+
+
+def test_installment_rejects_a_naive_due_at_at_its_contract_boundary() -> None:
+    with pytest.raises(ValueError, match="due_at must be timezone-aware"):
+        replace(_installment(1, "75.00"), due_at=AT.replace(tzinfo=None))
 
 
 def _grace(**overrides: object) -> GraceGrantV1:
