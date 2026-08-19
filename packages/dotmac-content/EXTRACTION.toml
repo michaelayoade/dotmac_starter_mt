@@ -40,9 +40,9 @@ contract_consumers = []
 candidate_consumers = ["dotmac_backoffice", "dotmac_sub"]
 authority_boundary = "dotmac-content owns editorial decisions only. Backoffice owns actor authentication, permissions and collaboration policy. dotmac-files owns stored bytes. dotmac-publishing owns target selection, requested delivery time, immutable publication snapshots and reconciled remote publication state. dotmac-campaigns owns audiences, recipients, consent/suppression checks and campaign execution. Integrator owns credentials, OAuth, provider clients, webhooks, retries, checkpoints and remote transport evidence. Applications install independent lineages and synchronize only typed data; no sibling-module import, cross-application database access or shared writer is permitted."
 inventory_evidence = [
-  "dotmac_starter_mt:docs/inventories/marketing-suite-sources.md",
-  "dotmac_starter_mt:docs/inventories/content-extraction-dossier.md",
-  "dotmac_starter_mt:docs/inventories/content-writer-retirement.toml",
+  "docs/inventories/marketing-suite-sources.md",
+  "docs/inventories/content-extraction-dossier.md",
+  "docs/inventories/content-writer-retirement.toml",
 ]
 first_cutover = "Backoffice is cutover 1. It must pin a released dotmac-content version, compose and migrate its own tenant plane, backfill Mkt editorial rows, shadow every selected read and write, switch one writer at a time, and retire the corresponding Mkt writer. Installing the package without deleting a source writer is not adoption. Sub is a later independent adopter with its own database, rows and lineage."
 shadow_and_drift = "Before writer cutover, compare every Mkt Campaign selected as editorial planning data with one ContentPlan and every non-published Post editorial record with one ContentItem. Prove identifiers, text, dates, editorial state, creator reference, ordering and creative references. Classify every published Post and every channel/delivery field into the publishing migration with no default bucket. Reconcile opaque file references against the files adapter without adding a cross-module foreign key. Run shadow reads for a complete editorial planning cycle and require zero unexplained mismatches."
