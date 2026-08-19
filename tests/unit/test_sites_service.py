@@ -210,9 +210,7 @@ def test_ready_selection_retires_the_previous_revision_and_is_idempotent(
         site_revision_id=first.id,
     )
     assert first.state == SiteRevisionState.READY
-    release = get_ready_release(
-        db, scope=TenantScope(TENANT_A), site_id=site.id
-    )
+    release = get_ready_release(db, scope=TenantScope(TENANT_A), site_id=site.id)
     assert release.site_revision_ref == first.id
     assert release.digest == first.snapshot_digest
 
@@ -228,9 +226,12 @@ def test_ready_selection_retires_the_previous_revision_and_is_idempotent(
     )
     assert first.state == SiteRevisionState.RETIRED
     assert second.state == SiteRevisionState.READY
-    assert get_ready_release(
-        db, scope=TenantScope(TENANT_A), site_id=site.id
-    ).site_revision_ref == second.id
+    assert (
+        get_ready_release(
+            db, scope=TenantScope(TENANT_A), site_id=site.id
+        ).site_revision_ref
+        == second.id
+    )
 
 
 def test_archived_site_refuses_new_pages_and_release_changes(db: Session) -> None:

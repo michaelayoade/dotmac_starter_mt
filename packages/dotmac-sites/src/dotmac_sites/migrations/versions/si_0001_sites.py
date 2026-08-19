@@ -66,9 +66,7 @@ def upgrade() -> None:
             ondelete="CASCADE",
             name="fk_sites_tenant",
         ),
-        sa.CheckConstraint(
-            "state IN ('active', 'archived')", name="ck_sites_state"
-        ),
+        sa.CheckConstraint("state IN ('active', 'archived')", name="ck_sites_state"),
         sa.UniqueConstraint("tenant_id", "id", name="uq_sites_tenant_id_id"),
         sa.UniqueConstraint("tenant_id", "slug", name="uq_sites_tenant_slug"),
         schema=_SCHEMA,
@@ -147,9 +145,7 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "length(content_digest) = 64", name="ck_page_revisions_digest"
         ),
-        sa.UniqueConstraint(
-            "tenant_id", "id", name="uq_page_revisions_tenant_id_id"
-        ),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_page_revisions_tenant_id_id"),
         sa.UniqueConstraint(
             "tenant_id",
             "site_id",
@@ -213,9 +209,7 @@ def upgrade() -> None:
             "(state = 'retired' AND ready_at IS NOT NULL AND retired_at IS NOT NULL)",
             name="ck_site_revisions_state_times",
         ),
-        sa.UniqueConstraint(
-            "tenant_id", "id", name="uq_site_revisions_tenant_id_id"
-        ),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_site_revisions_tenant_id_id"),
         sa.UniqueConstraint(
             "tenant_id",
             "site_id",
@@ -429,16 +423,13 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
-        "DROP TRIGGER site_revisions_immutable_snapshot "
-        "ON mod_sites.site_revisions;"
+        "DROP TRIGGER site_revisions_immutable_snapshot " "ON mod_sites.site_revisions;"
     )
     op.execute(
         "DROP TRIGGER site_revision_pages_append_only "
         "ON mod_sites.site_revision_pages;"
     )
-    op.execute(
-        "DROP TRIGGER page_revisions_append_only ON mod_sites.page_revisions;"
-    )
+    op.execute("DROP TRIGGER page_revisions_append_only ON mod_sites.page_revisions;")
     op.execute("DROP FUNCTION mod_sites.protect_site_revision_snapshot();")
     op.execute("DROP FUNCTION mod_sites.refuse_append_only_mutation();")
     op.drop_table("site_revision_pages", schema=_SCHEMA)

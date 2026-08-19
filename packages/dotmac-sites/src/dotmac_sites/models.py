@@ -63,9 +63,7 @@ class Page(Base, TimestampMixin):
     __tablename__ = "pages"
     __table_args__ = (
         UniqueConstraint("tenant_id", "id", name="uq_pages_tenant_id_id"),
-        UniqueConstraint(
-            "tenant_id", "site_id", "id", name="uq_pages_tenant_site_id"
-        ),
+        UniqueConstraint("tenant_id", "site_id", "id", name="uq_pages_tenant_site_id"),
         UniqueConstraint(
             "tenant_id", "site_id", "page_key", name="uq_pages_tenant_site_key"
         ),
@@ -91,9 +89,7 @@ class Page(Base, TimestampMixin):
 class PageRevision(Base, TimestampMixin):
     __tablename__ = "page_revisions"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "id", name="uq_page_revisions_tenant_id_id"
-        ),
+        UniqueConstraint("tenant_id", "id", name="uq_page_revisions_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
             "site_id",
@@ -120,9 +116,7 @@ class PageRevision(Base, TimestampMixin):
         CheckConstraint(
             "revision_number > 0", name="ck_page_revisions_positive_number"
         ),
-        CheckConstraint(
-            "length(content_digest) = 64", name="ck_page_revisions_digest"
-        ),
+        CheckConstraint("length(content_digest) = 64", name="ck_page_revisions_digest"),
         Index("ix_page_revisions_tenant_page", "tenant_id", "page_id"),
         schema_table_args(SCHEMA),
     )
@@ -146,9 +140,7 @@ class PageRevision(Base, TimestampMixin):
 class SiteRevision(Base, TimestampMixin):
     __tablename__ = "site_revisions"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "id", name="uq_site_revisions_tenant_id_id"
-        ),
+        UniqueConstraint("tenant_id", "id", name="uq_site_revisions_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
             "site_id",
@@ -217,9 +209,7 @@ class SiteRevision(Base, TimestampMixin):
 class SiteRevisionPage(Base, TimestampMixin):
     __tablename__ = "site_revision_pages"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "id", name="uq_site_revision_pages_tenant_id_id"
-        ),
+        UniqueConstraint("tenant_id", "id", name="uq_site_revision_pages_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
             "site_revision_id",

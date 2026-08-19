@@ -113,7 +113,9 @@ class NavigationItemV1:
     children: tuple[NavigationItemV1, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "label", _required("navigation label", self.label, 200))
+        object.__setattr__(
+            self, "label", _required("navigation label", self.label, 200)
+        )
         object.__setattr__(self, "path", validate_path(self.path))
 
     def as_dict(self) -> dict[str, object]:

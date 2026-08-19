@@ -62,27 +62,21 @@ def _flush_new(db: Session, record: _Model, *, detail: str) -> _Model:
     return record
 
 
-def _site(
-    db: Session, tenant_id: UUID, site_id: UUID, *, lock: bool = False
-) -> Site:
+def _site(db: Session, tenant_id: UUID, site_id: UUID, *, lock: bool = False) -> Site:
     statement = select(Site).where(Site.tenant_id == tenant_id, Site.id == site_id)
     if lock:
         statement = statement.with_for_update()
     return _one(db, statement, detail=f"site {site_id} was not found")
 
 
-def _page(
-    db: Session, tenant_id: UUID, page_id: UUID, *, lock: bool = False
-) -> Page:
+def _page(db: Session, tenant_id: UUID, page_id: UUID, *, lock: bool = False) -> Page:
     statement = select(Page).where(Page.tenant_id == tenant_id, Page.id == page_id)
     if lock:
         statement = statement.with_for_update()
     return _one(db, statement, detail=f"page {page_id} was not found")
 
 
-def _site_revision(
-    db: Session, tenant_id: UUID, revision_id: UUID
-) -> SiteRevision:
+def _site_revision(db: Session, tenant_id: UUID, revision_id: UUID) -> SiteRevision:
     return _one(
         db,
         select(SiteRevision).where(
