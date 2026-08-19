@@ -369,7 +369,14 @@ def scan_collections_stateful_contract(package_root: Path) -> tuple[str, ...]:
         problems.append("migration:depends-on-must-use-logical-binding")
 
     for name, expected in (
-        ("COMMON_REQUIRES", ("module_database_roles.v1", "outbox_relay.v1")),
+        (
+            "COMMON_REQUIRES",
+            (
+                "module_database_roles.v1",
+                "idempotency_ledger.v1",
+                "outbox_relay.v1",
+            ),
+        ),
         ("TENANT_REQUIRES", ("tenant_scope_catalog.v1",)),
         ("PLATFORM_REQUIRES", ()),
         ("TENANT_TABLES", TENANT_TABLES),
@@ -484,7 +491,11 @@ revision = "cl_0001_collections"
 down_revision = None
 branch_labels = ("collections",)
 MODULE_CODE = "collections"
-COMMON_REQUIRES = ("module_database_roles.v1", "outbox_relay.v1")
+COMMON_REQUIRES = (
+    "module_database_roles.v1",
+    "idempotency_ledger.v1",
+    "outbox_relay.v1",
+)
 TENANT_REQUIRES = ("tenant_scope_catalog.v1",)
 PLATFORM_REQUIRES = ()
 TENANT_TABLES = {tables}
