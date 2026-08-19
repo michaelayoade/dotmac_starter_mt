@@ -29,6 +29,17 @@ The failure mode is the same in both cases: a convenient integration silently
 becomes authority. The result cannot be repaired reliably because nobody can
 say which writer wins.
 
+**Decision amendment — 2026-08-19 (caller-owned runtime).** A reusable kernel
+service that accepts an application's SQLAlchemy `Session` must use only that
+session and must not import an eager kernel engine/session owner as a side
+effect of an operation. Otherwise an independently assembled adopter gets two
+database runtimes even though the service's typed contract appears
+caller-owned. Shared transaction mechanics may be private, import-safe helpers
+that operate on the supplied session, but they construct no session, own no
+boundary, and never commit or roll back the outer transaction. The canonical
+public transaction authority remains `dotmac_kernel.db`; moving its pure
+SAVEPOINT implementation behind such a helper is not a second authority.
+
 ## Decision
 
 ### 1. Every application is an independent authority boundary

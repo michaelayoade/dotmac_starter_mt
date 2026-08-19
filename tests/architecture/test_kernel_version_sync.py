@@ -74,13 +74,10 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# People and campaigns consume no kernel feature newer than their allocation
-# release. Their required Party-person or consent/idempotency/outbox facilities
-# are present in a71, so the allocation itself is the floor. If either adopts a
-# newer capability, move its row to CAPABILITY_RAISED_FLOORS while retaining
-# the allocation release as evidence there.
+# People consumes no kernel feature newer than its allocation release. If it
+# adopts a newer capability, move its row to CAPABILITY_RAISED_FLOORS while
+# retaining the allocation release as evidence there.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
-    "dotmac-campaigns": "0.1.0a71",
     "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
@@ -99,6 +96,13 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # Immutable tag inspection is the evidence here: a71's changelog described
+    # the campaign allocation early, but CAMPAIGNS_MIGRATION_OWNER first exists
+    # in published tag a72. a73 is the operative floor because Sub-first
+    # adoption invokes consent, idempotency and delivery with Sub's assembly-
+    # owned Session; before a73 those services imported dotmac_kernel.db and
+    # constructed a second engine/session runtime.
+    "dotmac-campaigns": ("0.1.0a73", "0.1.0a72"),
     # ADR-0006 D1 amendment: every lineage below declares `ModuleManifest
     # .requires` and its root calls `resolve_depends_on` /
     # `require_prerequisites`. All three arrived in a56, so a kernel below that
