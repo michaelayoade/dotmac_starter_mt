@@ -19,7 +19,6 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-
 from dotmac_kernel.namespaces import MIGRATION_OWNER_LEDGER, NUMBERING_MIGRATION_OWNER
 from dotmac_numbering import models, service
 from dotmac_numbering.manifest import module

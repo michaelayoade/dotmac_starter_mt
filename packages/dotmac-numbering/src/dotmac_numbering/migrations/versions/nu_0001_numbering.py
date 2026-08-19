@@ -151,7 +151,7 @@ def _freeze_function_sql(name: str, counters: str, receipts: str, scope: str) ->
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-    """  # nosec B608 -- identifiers are constrained by _ALLOWED_FREEZE_ARGUMENTS.
+    """  # noqa: S608  # nosec B608 -- identifiers use the enforced allowlist.
 
 
 def _series_columns() -> list[sa.Column[Any]]:
