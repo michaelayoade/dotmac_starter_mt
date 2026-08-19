@@ -46,6 +46,3 @@ def conflict_savepoint(db: Session) -> Generator[None, None, None]:
     """
     with db.begin_nested():
         yield
-
-
-__all__ = ["conflict_savepoint"]
