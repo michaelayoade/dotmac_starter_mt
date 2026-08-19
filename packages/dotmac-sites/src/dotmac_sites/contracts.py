@@ -206,12 +206,12 @@ class SiteReleaseV1:
             raise ContractError("site release requires a home page")
         paths = [page.path for page in self.pages]
         page_refs = [page.page_ref for page in self.pages]
-        if paths.count("/") != 1:
-            raise ContractError("site release requires exactly one home path")
         if len(set(paths)) != len(paths):
             raise ContractError("site release contains a duplicate page path")
         if len(set(page_refs)) != len(page_refs):
             raise ContractError("site release contains a duplicate page identity")
+        if paths.count("/") != 1:
+            raise ContractError("site release requires exactly one home path")
 
         navigation_paths = _navigation_paths(self.navigation)
         if len(set(navigation_paths)) != len(navigation_paths):
