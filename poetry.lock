@@ -578,7 +578,7 @@ url = "packages/dotmac-campaigns"
 
 [[package]]
 name = "dotmac-connector-whatsapp"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -587,7 +587,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a5"
+dotmac-integration = ">=0.1.0a10"
 
 [package.source]
 type = "directory"
