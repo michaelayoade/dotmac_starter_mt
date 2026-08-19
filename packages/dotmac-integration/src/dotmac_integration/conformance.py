@@ -45,6 +45,7 @@ from dotmac_integration.spi import (
     ConnectorPlugin,
     Diagnostic,
     DispatchRequest,
+    EgressDeclaration,
     InboundEvent,
     IngressHandler,
     IngressRequest,
@@ -90,6 +91,8 @@ def fake_manifest(
         capabilities=tuple(
             CapabilityDeclaration(capability_id=c) for c in capabilities
         ),
+        secret_bindings=(),
+        egress=EgressDeclaration(),
     )
 
 

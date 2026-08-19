@@ -11,6 +11,11 @@
 separately ruled replay-evidence lifetime and preserves released legal-hold
 history when an eligible receipt is deleted.
 
+`0.1.0a10` is DECLARED but not yet published. It raises the additive SPI to
+1.3 and makes named secret bindings plus exact provider egress hosts part of
+the connector manifest contract. Do not pin it until the release workflow has
+installed it back from the registry and written the release tag.
+
 **Do not pin `0.1.0a1` or `0.1.0a2`.** Their discovery path renders a
 connector's own exception message into `ModeContractError` and chains it as
 `__cause__`, so any secret a connector interpolates into its error reaches the
@@ -54,6 +59,23 @@ receipt delivery, retention, the type gate) and each wrote its own section
 before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
+
+## 0.1.0a10 — unreleased
+
+### Manifest-owned runtime boundaries (SPI 1.3)
+
+- Adds immutable secret-binding and exact-host egress declarations to
+  `ConnectorManifest`; an empty egress declaration is explicit deny-all.
+- Refuses URL, path, wildcard, IP-literal, mixed-case, local and duplicate
+  egress entries before discovery can trust them.
+- Covers secret names, requiredness and egress hosts in the manifest digest.
+  Pre-1.3 manifests remain readable and keep their historical digest so an
+  upgrade does not invalidate persisted installation pins.
+- Adds `derive_runtime_policy`, the deterministic projection of the installed
+  manifest set. It refuses a legacy omission and exposes the exact egress union,
+  named secret bindings and a stable policy digest to the composing runtime.
+- Carries no provider list and performs no network I/O. The independently
+  deployed Integrator projects the declarations into its runtime policy.
 
 ## 0.1.0a9 — released 2026-08-18
 
