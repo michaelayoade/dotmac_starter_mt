@@ -199,6 +199,31 @@ def test_persisted_totals_have_structural_balance_checks() -> None:
     assert "extended_price - discount_amount + tax_amount = line_total" in migration
 
 
+def _unqualified_snapshot_aggregates(source: str) -> tuple[str, ...]:
+    columns = ("id", "extended_price", "discount_amount", "tax_amount", "line_total")
+    return tuple(
+        column
+        for column in columns
+        if f"count({column})" in source or f"sum({column})" in source
+    )
+
+
+def test_snapshot_trigger_qualifies_columns_that_can_shadow_plpgsql_variables() -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+    assert "order_line_snapshots AS frozen_lines" in migration
+    assert _unqualified_snapshot_aggregates(migration) == ()
+
+
+def test_snapshot_trigger_qualification_canary_detects_a_planted_ambiguity() -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+    planted = migration.replace(
+        "sum(frozen_lines.line_total)",
+        "sum(line_total)",
+        1,
+    )
+    assert _unqualified_snapshot_aggregates(planted) == ("line_total",)
+
+
 def test_lifecycle_and_refusal_audit_actions_are_declared_and_consumed() -> None:
     expected = {
         "orders.submitted",

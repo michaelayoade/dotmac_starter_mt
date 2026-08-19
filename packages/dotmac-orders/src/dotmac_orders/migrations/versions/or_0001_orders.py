@@ -802,14 +802,15 @@ def _install_deferred_snapshot_checks() -> None:
                 RAISE EXCEPTION 'order % snapshot was not finalized', NEW.id
                     USING ERRCODE = 'check_violation';
             END IF;
-            SELECT count(*),
-                   COALESCE(sum(extended_price), 0),
-                   COALESCE(sum(discount_amount), 0),
-                   COALESCE(sum(tax_amount), 0),
-                   COALESCE(sum(line_total), 0)
+            SELECT count(frozen_lines.id),
+                   COALESCE(sum(frozen_lines.extended_price), 0),
+                   COALESCE(sum(frozen_lines.discount_amount), 0),
+                   COALESCE(sum(frozen_lines.tax_amount), 0),
+                   COALESCE(sum(frozen_lines.line_total), 0)
               INTO line_count, line_subtotal, line_discount, line_tax, line_total
-              FROM mod_orders.order_line_snapshots
-             WHERE tenant_id = NEW.tenant_id AND order_id = NEW.id;
+              FROM mod_orders.order_line_snapshots AS frozen_lines
+             WHERE frozen_lines.tenant_id = NEW.tenant_id
+               AND frozen_lines.order_id = NEW.id;
             IF line_count = 0 OR ROW(
                 current_order.subtotal_amount,
                 current_order.discount_amount,
