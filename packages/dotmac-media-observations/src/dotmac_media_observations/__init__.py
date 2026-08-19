@@ -1,6 +1,7 @@
 """Public surface for provider-neutral immutable media observations."""
 
 from dotmac_media_observations.conformance import (
+    CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION,
     ConformanceReport,
     NormalizedObservationCase,
     NormalizedObservationProducer,
@@ -70,6 +71,7 @@ from dotmac_media_observations.service import (
 __version__ = "0.1.0a1"
 
 __all__ = [
+    "CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION",
     "ClaimStatus",
     "ConformanceReport",
     "CountValue",

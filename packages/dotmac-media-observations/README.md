@@ -39,7 +39,11 @@ Connector plugins construct the typed commands exported here. They retain
 credentials, endpoints, wire mapping, verification, polling, retry/checkpoint
 and raw transport evidence in Integrator. The package exposes
 `run_normalized_conformance` so a plugin can prove its domain handoff with a
-provider-free fixture, independently of Integration SPI conformance.
+provider-free fixture, independently of Integration SPI conformance. A producer
+declares `normalized_observation_spi_version`; V1 is exported as
+`CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION`. Conformance fails closed on a
+missing, malformed or incompatible version and returns the immutable normalized
+facts proving stable observation ids, fingerprints and receipt provenance.
 
 ## Adoption status
 

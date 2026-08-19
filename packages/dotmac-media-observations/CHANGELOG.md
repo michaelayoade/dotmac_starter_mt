@@ -23,6 +23,9 @@
 - Pre-persistence signed-64-bit and `NUMERIC(38,18)` bounds so normalized metric
   values are refused instead of being rounded or overflowing in storage.
 - Provider-free normalized-observation conformance kit.
+- Explicit normalized-observation SPI V1 with fail-closed producer version
+  checks and conformance evidence carrying observation ids, fingerprints and
+  immutable normalized facts with receipt provenance.
 
 ### Fixed
 

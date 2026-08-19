@@ -16,6 +16,7 @@ from decimal import Decimal
 
 import pytest
 from dotmac_media_observations import (
+    CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION,
     ClaimStatus,
     CountValue,
     DecimalValue,
@@ -184,7 +185,7 @@ def _conformance_case() -> NormalizedObservationCase:
 
 
 class _FakeNormalizedProducer:
-    normalized_observation_spi_version = 1
+    normalized_observation_spi_version = CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
 
     def normalized_case(self) -> NormalizedObservationCase:
         return _conformance_case()
@@ -1020,7 +1021,7 @@ def test_provider_free_normalization_conformance_replays_a_stable_fixture(
 ) -> None:
     report = run_normalized_conformance(db, _FakeNormalizedProducer())
 
-    assert report.spi_version == 1
+    assert report.spi_version == CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
     assert report.observation_count == 1
     assert report.replay_count == 1
     assert report.installation_ref == "installation-alpha"

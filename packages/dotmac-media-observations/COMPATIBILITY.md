@@ -4,6 +4,8 @@ The unreleased `0.1.0a1` candidate defines:
 
 - the dataclass command/read contracts exported by `dotmac_media_observations`;
 - the provider-free `NormalizedObservationProducer` conformance seam;
+- normalized-observation SPI V1, identified by
+  `CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION` and declared by every producer;
 - kind-matched normalized analytics payloads and timestamped receipt-provenance
   read contracts;
 - the `ModuleManifest` named `module`;
@@ -15,6 +17,11 @@ Pre-1.0 additions may be backward compatible; any change to observation
 identity, fingerprint coverage, period semantics, exact value representation,
 restatement ordering, table identity, schema, prefix or branch label is a
 breaking contract change and requires explicit migration evidence.
+
+The normalized-observation SPI version is separate from Integration's connector
+SPI version. A connector must satisfy both independently. Conformance refuses a
+missing, malformed or incompatible media SPI version and reports the exact
+observation ids, fingerprints and immutable normalized facts used as evidence.
 
 A restatement link retains the same installation, source system and subject:
 entity identity, hierarchy child, or exact metric period as appropriate. All
