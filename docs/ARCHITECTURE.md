@@ -54,6 +54,19 @@ The first concrete plugin follows that split exactly:
 | Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
 
+External advertising and social-media observations use the same application
+boundary with a separate domain owner. The tenant-only
+`dotmac-media-observations` package owns immutable normalized entity,
+hierarchy, declaration and aggregate period-metric facts plus rebuildable
+projections. It imports neither Integration nor a provider package and stores
+only opaque installation and transport-receipt references. Integrator and its
+plugins retain credentials, wire payloads, endpoints, polling/webhooks,
+checkpoints and retry evidence. Provider conversion claims remain explicitly
+`provider_reported`; Lead origin, customer identity, attribution, authoritative
+revenue and business consequences remain outside the module (ADR-0033). The
+package is built here but is not composed or release-allowlisted while Michael's
+2026-08-18 adoption pause is active.
+
 For ticketing this means separate local installations: Sub owns operational
 customer/service tickets, ERP owns only its internal back-office tickets, and
 the vendor control plane owns vendor-support tickets. A remotely owned ticket
@@ -1315,6 +1328,18 @@ made concrete — every model has exactly one declared owner.
 | `PublicationRelease` | `mod_publishing.publication_releases` | `dotmac-publishing` optional module | One tenant publication intent with an immutable, digested snapshot, requested delivery time and actor/source provenance held as opaque references. Editorial content and site revisions remain with their source owners; Backoffice owns authorization and target-selection policy ([publishing dossier](inventories/publishing-extraction-dossier.md)). |
 | `PublicationDelivery` | `mod_publishing.publication_deliveries` | `dotmac-publishing` optional module | One selected opaque target per release and its normalized local delivery state. A target reference identifies an Integrator binding without importing its registry or storing provider, credential, endpoint or channel vocabulary. |
 | `PublicationAttempt` / `PublicationObservation` | `mod_publishing.publication_attempts`, `publication_observations` | `dotmac-publishing` optional module | Monotonic attempt evidence joined to one transactional outbox intent, plus immutable receipt-deduplicated normalized outcomes. Integrator owns connector execution, raw transport evidence, retry/checkpoints and remote systems; publishing derives explicit partial, published, failed or cancelled aggregate state from local observations. |
+| `NodeDefinition` | `mod_mediaobs.node_definitions` | `dotmac-media-observations` optional module | Tenant-scoped versioned external-node vocabulary, product-first from Mkt's hierarchy shape but open to connector declarations rather than a provider enum (ADR-0033). |
+| `MetricDefinition` | `mod_mediaobs.metric_definitions` | `dotmac-media-observations` optional module | Tenant-scoped versioned metric code with explicit value type, unit, semantic and `provider_reported` origin. |
+| `ObservationEnvelope` | `mod_mediaobs.observations` | `dotmac-media-observations` optional module | Append-only domain identity, normalized fingerprint, source instant, first receipt instant, normalization revision and optional restatement link. Identity is global across fact kinds within its tenant/installation/source scope. |
+| `ObservationReceipt` | `mod_mediaobs.observation_receipts` | `dotmac-media-observations` optional module | Append-only opaque transport-receipt provenance with its distinct receipt instant; reusing one receipt identity with a changed instant or observation is a conflict. The module never dereferences or replaces Integrator evidence. |
+| `EntityFact` | `mod_mediaobs.entity_observations` | `dotmac-media-observations` optional module | Append-only provider-reported entity name/state/disposition and aggregate properties. Exact Decimal configuration values use a private type-preserving JSON encoding and are restored on public reads. Archive/deletion is observed state, not destructive local deletion. |
+| `HierarchyFact` | `mod_mediaobs.hierarchy_observations` | `dotmac-media-observations` optional module | Append-only reported parent edge. Missing parents and cycles remain visible drift rather than silently re-rooting the child. |
+| `MetricPeriod` | `mod_mediaobs.metric_periods` | `dotmac-media-observations` optional module | Canonical append-only half-open period, non-overlapping for one installation/source/account/entity/versioned metric series. |
+| `MetricFact` | `mod_mediaobs.metric_observations` | `dotmac-media-observations` optional module | Append-only typed provider claim. Counts remain integer; exact money retains decimal amount, currency, minor-unit scale and integer minor units; conversion claims are never authoritative attribution or revenue. |
+| `CurrentEntity` | `mod_mediaobs.current_entities` | `dotmac-media-observations` optional module | Disposable deterministic effective-entity projection rebuilt from immutable source time/restatement ordering. |
+| `CurrentHierarchy` | `mod_mediaobs.current_hierarchy` | `dotmac-media-observations` optional module | Disposable effective-edge projection with explicit missing-child, missing-parent or cycle drift code. |
+| `CurrentMetric` | `mod_mediaobs.current_metrics` | `dotmac-media-observations` optional module | Disposable effective metric-period pointer; the full value and provenance remain in immutable rows. |
+| `ReconciliationEvidence` | `mod_mediaobs.reconciliation_evidence` | `dotmac-media-observations` optional module | Append-only preview/repair evidence recording actor, reason, drift count and before/expected digests. |
 | `Campaign` / `CampaignRevision` / `CampaignStep` | `mod_campaigns.campaigns`, `campaign_revisions`, `campaign_steps` | `dotmac-campaigns` optional module | Tenant-only provider-neutral campaign identity and its immutable active execution plan. Product audience, financial and sender business rules are typed inputs; Template Studio and Durable Timers remain assembly-bound owners (ADR-0032; [`campaigns-sources.md`](inventories/campaigns-sources.md)). |
 | `CampaignAudience` / `CampaignRecipient` / `CampaignConsentReceipt` | `mod_campaigns.campaign_audiences`, `campaign_recipients`, `campaign_consent_receipts` | `dotmac-campaigns` optional module | Immutable source-versioned audience and delivery snapshots plus observations of the kernel consent owner's decision at audience, delayed-step and final-delivery gates. They do not become Party/customer or consent-policy records. PII carries an explicit deadline and can only move to the database-enforced scrubbed form after sending begins. |
 | `CampaignRecipientStep` / `CampaignDeliveryIntent` | `mod_campaigns.campaign_recipient_steps`, `campaign_delivery_intents` | `dotmac-campaigns` optional module | One unique recipient/step progression fact and one provider-neutral intent. The package emits deterministic timer identities through a port and writes the kernel outbox atomically; it owns no scheduler, relay, provider credentials, I/O or retry. |
@@ -1355,6 +1380,7 @@ write:
 | Audit events | `dotmac_kernel.audit.write_audit_event` — the only function that constructs an `AuditEvent`. It enforces two distinct contracts before anything reaches the session: the open ACTION VOCABULARY is declared by installed modules through `AuditActionRegistry`, while the actor is the closed kernel-owned `(actor_type, actor_id)` identity pair (`system` may omit an id; `user`/`service`/`api_key` may not). Both members are explicit at every applicable caller; `actor_party_id` is optional accountability enrichment and never supplies the pair, while `actor_label` is a display snapshot. A production-source AST census covers all 20 writers across the assembly and shipped packages. `dotmac_workspace` PR #10 retired the final known external fallback callers before kernel a69 removed the derivation. `occurred_at` is domain time (database `now()` by default, caller-supplied for reconstruction), distinct from server-assigned persistence `created_at`. Tenant audit actor columns have no FK so attribution survives deletion. |
 | Platform audit events | `dotmac_kernel.audit.write_platform_audit_event` is the sole constructor/writer. Kernel owns the storage contract as `platform_audit_log.v1`; migration `0026_platform_audit_log` makes online history append-only, and the live verifier proves shape, FK/index, no RLS, tenant-role isolation, and `platform_api` `SELECT`+`INSERT` only. Consumer declarations and DDL-free verification revisions follow only after kernel a68 is published, so their declared floor is resolvable. Current limitation: deleting a `PlatformAdmin` nulls actor attribution, so immutable actor snapshotting remains a separate unresolved hardening slice. |
 | Integrator shadow-comparison evidence | `dotmac_integration.shadow.record_shadow_observation` is the sole writer; it appends and flushes a closed, privacy-safe outcome keyed by the module receipt UUID and explicit comparison revision. `due_shadow_receipt_ids` and `shadow_report` are the only scheduling/report readers. The destination product owns the comparison and its domain reads; the thin `dotmac_integrator` assembly owns only transaction boundaries and transport. This high-volume worker state is not projected from the kernel operator-audit ledger. |
+| External media observation facts and projections | `dotmac_media_observations.service` is the only package writer: declaration and `record_*` functions append normalized facts/receipts/restatements; `_refresh_projections` and `reconcile_projections` alone replace disposable current rows. A connector emits typed commands but never writes these tables. No product composes the module while adoption is paused (ADR-0033). |
 | Communication suppressions | `dotmac_kernel.consent.suppress`, `unsuppress`, and `unsuppress_marketing`; delivery never writes the table directly — a suppressing provider receipt delegates to `consent.suppress` in the same transaction |
 | Communication delivery receipts | `dotmac_kernel.delivery.record_receipt` — the only constructor/writer; it preserves each provider status transition, deduplicates repeated callbacks, and delegates suppressing consequences to the consent owner |
 | Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
@@ -1884,6 +1910,14 @@ There is exactly ONE transaction authority in this codebase:
   savepoint section below), and never constructs a session of its own.
 - **Expected conflicts use `conflict_savepoint`** — roll back the SAVEPOINT,
   not the transaction (next section).
+- **Caller-session services do not enter the engine owner.** Kernel domain
+  services such as consent, delivery, idempotency and external identity accept
+  the installing assembly's `Session`. Their savepoint mechanic lives in the
+  private, engine-free `dotmac_kernel._transactions`; `dotmac_kernel.db`
+  re-exports `conflict_savepoint` as the supported public spelling. This is an
+  implementation seam, not a second boundary or transaction authority: it
+  constructs no engine/session and never commits or rolls back the caller's
+  outer transaction (ADR-0024 amendment, 2026-08-19).
 - **No route, task, or service constructs an ad hoc session.** The old
   `dotmac_kernel/unit_of_work.py` (`UnitOfWork`, `ConcurrencyConflict`) was a
   second, zero-consumer transaction authority — DELETED under the stronger
@@ -1920,8 +1954,9 @@ under `FORCE ROW LEVEL SECURITY` that fails closed: either an
 result set (500s or blank re-renders, invisible on SQLite since it can't
 enforce RLS at all — this is why the canary requires Postgres).
 
-`dotmac_kernel.db.conflict_savepoint(db)` is the fix, a context manager around
-`Session.begin_nested()` (a `SAVEPOINT` scoped INSIDE the outer
+`dotmac_kernel.db.conflict_savepoint(db)` is the supported public spelling for
+the fix, a context manager around `Session.begin_nested()` (a `SAVEPOINT`
+scoped INSIDE the outer
 transaction): on clean exit it commits the SAVEPOINT (a no-op release, not
 the outer `COMMIT`); on any exception it rolls back ONLY the SAVEPOINT —
 leaving the outer transaction and its `SET LOCAL` fully intact — then
@@ -1955,6 +1990,13 @@ list still populated; edit form re-renders with the field error) rather
 than the pre-fix 500/empty-render. This canary was RED against pre-2b.1
 `main` by construction (the bug is invisible on SQLite, where these tests
 cannot even run).
+
+`tests/architecture/test_kernel_caller_session_independence.py` separately
+guards application composition: it rejects even a deferred
+`dotmac_kernel.db` import from caller-session services and runs consent,
+idempotency and delivery with a valid caller-owned session while the kernel
+`DATABASE_URL` is deliberately unparsable. This proves a service invocation
+cannot accidentally construct a second configured runtime.
 
 ## External-identity login: the decision and the session are one locked step (kernel `0.1.0a64`)
 

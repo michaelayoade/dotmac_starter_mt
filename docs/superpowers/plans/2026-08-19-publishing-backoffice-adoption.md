@@ -69,9 +69,10 @@ test files. Gate 2 may now implement the smallest owner.
 
 ## Gate 2 — implement the smallest owner
 
-1. On the current local suite line, allocate kernel a74 owner/short code/branch
+1. On the reconciled local suite line, allocate kernel a76 owner/short code/branch
    `publishing`, prefix `pb`, schema `mod_publishing`, in the same change as the
-   manifest and root migration. Re-evaluate the alpha after any rebase.
+   manifest and root migration. Immutable a73 is caller-session mechanics;
+   media observations and content precede publishing in a74 and a75.
 2. Add `packages/dotmac-publishing` a1 with an exact compatible kernel floor,
    public contracts, typed errors, pure lifecycle/reconciler and flush-only
    services.

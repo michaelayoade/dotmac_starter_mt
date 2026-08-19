@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a74 — UNRELEASED
+## 0.1.0a76 — UNRELEASED
 
 Allocates the independent tenant publication-lifecycle lineage. This is
 physical namespace identity only; publication behavior remains in the optional
@@ -17,7 +17,7 @@ module.
 - `PUBLISHING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
   `mod_publishing`, revision prefix `pb`, and branch label `publishing`.
 
-## 0.1.0a73 — UNRELEASED
+## 0.1.0a75 — UNRELEASED
 
 Allocates the independent tenant editorial-content lineage. This is physical
 namespace identity only; content behavior remains in the optional module.
@@ -27,12 +27,51 @@ namespace identity only; content behavior remains in the optional module.
 - `CONTENT_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_content`,
   revision prefix `ct`, and branch label `content`.
 
+## 0.1.0a74 — UNRELEASED
+
+Allocates the immutable tenant-plane database identity for the independently
+installable `dotmac-media-observations` module.
+
+### Added
+
+- `MEDIA_OBSERVATIONS_MIGRATION_OWNER`, owning schema `mod_mediaobs`, migration
+  prefix `mo`, and Alembic branch `media_observations`. The allocation adds no
+  media behavior to the kernel; it only lets the package register its own
+  namespace and lineage without collision.
+
+### Changed
+
+- The supported SQLite unit-test harness now keeps up to ten module namespaces
+  as attached databases and maps only collision-free overflow to SQLite's
+  qualified `main` namespace. This preserves the fast service-logic lane after
+  the module registry crosses SQLite's hard attachment limit; namespace and
+  isolation proofs remain PostgreSQL gates.
+
+## 0.1.0a73 — 2026-08-19
+
+Makes caller-session kernel services safe for independently assembled products.
+Consent, delivery, idempotency and external-identity operations no longer import
+the eager kernel database owner merely to create a SAVEPOINT, so an adopter can
+provide its own session without constructing a second engine/session runtime.
+
+### Changed
+
+- Moved the savepoint implementation to a private, engine-free transaction
+  mechanic. `dotmac_kernel.db.conflict_savepoint` remains the supported public
+  spelling and is re-exported unchanged; `dotmac_kernel.db` remains the sole
+  kernel session and transaction-boundary authority.
+- Raised `dotmac-campaigns`' kernel floor to this release because its Sub-first
+  adoption consumes consent, idempotency and delivery through Sub's own session.
+- Corrected the historical campaign allocation record: immutable tag a71 does
+  not contain `CAMPAIGNS_MIGRATION_OWNER`; a72 is the first published tag that
+  does, so a72 is the allocation floor beneath this capability raise.
+
 ## 0.1.0a72 — 2026-08-19
 
-Carries the campaigns allocation that landed after immutable a71, allocates the
-independent durable-timer lineage, and adds the declaration surface its output
-routing contract requires. These are allocations and vocabulary guards, not
-domain engines in the kernel.
+Allocates the independent campaign and durable-timer module lineages and adds
+the declaration surface the timer output-routing contract requires. These are
+allocations and a vocabulary guard, not second campaign or timer engines in the
+kernel.
 
 ### Added
 
@@ -40,8 +79,8 @@ domain engines in the kernel.
   branch label `campaigns`. The module owns provider-neutral campaign
   progression and consumes the kernel's consent, idempotency and outbox owners.
 - `DURABLE_TIMERS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
-  `mod_timers`, revision prefix `dt`, branch label `durable_timers`. The module
-  owns timer identity, generation and terminal evidence; it consumes the
+  `mod_timers`, revision prefix `dt`, and branch label `durable_timers`. The
+  module owns timer identity, generation and terminal evidence; it consumes the
   existing `outbox_relay.v1` prerequisite for delivery mechanics.
 - A manifest-declared outbox event-type registry so timer outputs fail closed
   on an undeclared routing code instead of enqueueing work no consumer owns.

@@ -46,7 +46,7 @@ snapshot/target references, but neither package imports the other.
 ## 2. Revision-1 contract
 
 The module is tenant-plane only. Its proposed allocation is owner/short code/
-branch `publishing`, prefix `pb`, schema `mod_publishing`, and kernel alpha a74
+branch `publishing`, prefix `pb`, schema `mod_publishing`, and kernel alpha a76
 on the current local suite branch. The allocation lands only with the manifest
 and root migration in Gate 2; this dossier does not reserve an empty namespace.
 
@@ -200,7 +200,7 @@ The executable Gate 2 candidate is frozen at exact local commit
 `5a1892c3aac30b607cc28baa52217870e97bc63c`. A fresh detached writable
 Observer checkout with all 84 tags installed the committed lock using Poetry
 2.4.1. That revision contains `dotmac-publishing 0.1.0a1`, the independent
-`pb_0001_publishing` lineage, and kernel a74's permanent
+`pb_0001_publishing` lineage, and kernel a76's permanent
 `publishing`/`pb`/`mod_publishing` allocation.
 
 Validation was green at that exact code revision:
@@ -222,10 +222,10 @@ Validation was green at that exact code revision:
 
 The full sweeps materially tightened the candidate before this milestone:
 persisted snapshots now fail closed on malformed stored fields, the namespace
-ratchet explicitly enumerates the fifteenth owner, and target order is a stored,
+ratchet explicitly enumerates the sixteenth owner, and target order is a stored,
 uniquely constrained release fact rather than timestamp/UUID accident.
 
-This closes implementation Gate 2 only. Publishing a1 and kernel a74 remain
+This closes implementation Gate 2 only. Publishing a1 and kernel a76 remain
 unpublished; publishing is absent from the release allowlist and from this
 reference assembly; Backoffice has not pinned, migrated, shadowed or retired a
 writer; and every `PUB-R*` row remains `not-started`. Release and adoption need

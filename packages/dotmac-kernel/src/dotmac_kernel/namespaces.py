@@ -624,7 +624,19 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
-# `dotmac-content` — the FOURTEENTH allocated installable module. It owns the
+# `dotmac-media-observations` — the FOURTEENTH allocated installable module.
+# External media hierarchy, configuration and provider-reported aggregate
+# performance are tenant data-plane observations; the source audit found no
+# platform-plane adopter. `mediaobs` remains legible in catalog output and the
+# short `mo` revision prefix preserves the readable-slug budget.
+MEDIA_OBSERVATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="media_observations",
+    prefix="mo",
+    branch_label="media_observations",
+    db_schema=module_schema("mediaobs"),
+)
+
+# `dotmac-content` — the FIFTEENTH allocated installable module. It owns the
 # tenant-only editorial plan and content plane extracted from Mkt. `content`
 # remains explicit in live catalogs; `ct` keeps the independent lineage's
 # revision ids compact. Publishing, outbound campaigns, files and provider
@@ -636,7 +648,7 @@ CONTENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("content"),
 )
 
-# `dotmac-publishing` — the FIFTEENTH allocated installable module. It owns
+# `dotmac-publishing` — the SIXTEENTH allocated installable module. It owns
 # tenant publication intent, immutable snapshots, per-target attempt history
 # and normalized outcome reconciliation. `publishing` stays explicit in live
 # catalogs; `pb` leaves the lineage enough revision-id budget. Integrator and
@@ -663,6 +675,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    MEDIA_OBSERVATIONS_MIGRATION_OWNER,
     CONTENT_MIGRATION_OWNER,
     PUBLISHING_MIGRATION_OWNER,
 )
@@ -1006,6 +1019,7 @@ __all__ = [
     "IMPORTS_MIGRATION_OWNER",
     "INTEGRATION_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
+    "MEDIA_OBSERVATIONS_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",

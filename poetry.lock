@@ -569,7 +569,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a72"
+dotmac-kernel = ">=0.1.0a73"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -728,6 +728,24 @@ testing = ["httpx (>=0.27,<0.28)"]
 [package.source]
 type = "directory"
 url = "packages/dotmac-kernel"
+
+[[package]]
+name = "dotmac-media-observations"
+version = "0.1.0a1"
+description = "Provider-neutral immutable external media observations and rebuildable projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a74"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-media-observations"
 
 [[package]]
 name = "dotmac-numbering"
@@ -3016,4 +3034,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "821fd2fcc443254be25cc0ec92cadf82d1823ced643698ef4e8b1689fccf30e9"
+content-hash = "d254b0e0e8f94bd2cabbf56fcd8e2091319b20710bcf5c3c2aee549816b5ed19"

@@ -165,6 +165,6 @@ write refusal, and unscoped-role fail-closed behavior. The disposable database
 container and network were removed; the test Compose file declares no volume.
 
 This proves the candidate's local contract, not publication or adoption.
-`dotmac-content 0.1.0a1` and kernel a73 remain unpublished; the module is absent
+`dotmac-content 0.1.0a1` and kernel a75 remain unpublished; the module is absent
 from the release allowlist and every Backoffice/Mkt writer-retirement row is
 still `not-started`.

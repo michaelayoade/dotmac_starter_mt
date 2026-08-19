@@ -12,9 +12,9 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-# a73 allocates mod_content/ct/content. The module also consumes the older
+# a75 allocates mod_content/ct/content. The module also consumes the older
 # tenant-scope and database-role prerequisite contracts.
-dotmac-kernel = ">=0.1.0a73"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [build-system]

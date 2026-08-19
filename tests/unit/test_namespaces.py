@@ -194,9 +194,11 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
     # audit found no real named platform consumer.
     # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
-    # than adding another due-work engine. `content` is the fourteenth and owns
+    # than adding another due-work engine. `media_observations` is the
+    # fourteenth and remains tenant-only; it owns provider-neutral immutable
+    # external-media facts. `content` is the fifteenth and owns
     # tenant editorial plans/items without absorbing publishing or campaign
-    # execution. `publishing` is the fifteenth and owns tenant publication
+    # execution. `publishing` is the sixteenth and owns tenant publication
     # releases, target attempts and normalized observations without provider
     # transport. None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
@@ -213,6 +215,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "people",
         "campaigns",
         "durable_timers",
+        "media_observations",
         "content",
         "publishing",
     }

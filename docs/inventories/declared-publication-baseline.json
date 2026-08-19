@@ -83,9 +83,14 @@
       "state": "never-published"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a74",
-      "reason": "OUTSTANDING MARKETING ALLOCATION PREREQUISITE. Kernel a73 allocates mod_content/ct/content and a74 additionally allocates mod_publishing/pb/publishing for the two unreleased marketing-suite candidates; both exist only on the local marketing-suite branch. Immutable published a72 contains neither owner, so content correctly floors at a73, publishing at a74, and none may be represented as installable yet. Remove this row only after an authorized protected-main kernel release workflow registry-verifies a74 and writes dotmac-kernel-v0.1.0a74; never move either allocation back onto an immutable tag or edit the version down.",
-      "state": "declared-unpublished"
+      "declared": "0.1.0a76",
+      "reason": "OUTSTANDING MARKETING ALLOCATION PREREQUISITE. Immutable published a73 contains caller-session transaction mechanics but none of the parked marketing allocations. This combined branch therefore allocates media observations in a74, content in a75 and publishing in a76; all three dependent packages remain unpublished, unallowlisted and unadopted. Keep a76 unpublished until an explicitly authorized protected-main kernel release is registry-verified; never repoint an immutable alpha or edit the version down.",
+      "state": "previous-version-published"
+    },
+    "dotmac-media-observations": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED 2026-08-19: Michael explicitly paused adoption. The package remains an uncomposed tenant-only candidate, absent from .github/release-modules.json, with Backoffice and Sub listed only as candidates. Do not dispatch a release, count either product as a consumer, or begin shadow/cutover/local-writer retirement until Michael resumes adoption.",
+      "state": "never-published"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
