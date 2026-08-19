@@ -21,6 +21,12 @@ CONTENT_DOSSIER = PROJECT_ROOT / "packages" / "dotmac-content" / "EXTRACTION.tom
 CONTENT_RETIREMENT = (
     PROJECT_ROOT / "docs" / "inventories" / "content-writer-retirement.toml"
 )
+PUBLISHING_DOSSIER = (
+    PROJECT_ROOT / "packages" / "dotmac-publishing" / "EXTRACTION.toml"
+)
+PUBLISHING_RETIREMENT = (
+    PROJECT_ROOT / "docs" / "inventories" / "publishing-writer-retirement.toml"
+)
 
 EXPECTED_SOURCES = {
     "dotmac-content": ("product-first", "dotmac_mkt"),
@@ -199,6 +205,42 @@ def test_content_retirement_ledger_freezes_nine_distinct_unstarted_writers() -> 
         "CNT-R7",
         "CNT-R8",
         "CNT-R9",
+    ]
+    assert {row["status"] for row in writers} == {"not-started"}
+    assert len({row["source_behavior"] for row in writers}) == len(writers)
+
+
+def test_publishing_slice_is_pre_registered_against_mkt_delivery_behavior() -> None:
+    dossier = tomllib.loads(PUBLISHING_DOSSIER.read_text(encoding="utf-8"))
+    assert dossier["package"] == "dotmac-publishing"
+    assert dossier["status"] == "audit-complete"
+    assert dossier["source_mode"] == "product-first"
+    assert dossier["contract_consumers"] == []
+    assert dossier["candidate_consumers"][0] == "dotmac_backoffice"
+    assert dossier["source_revisions"] == [
+        "dotmac_mkt:7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d"
+    ]
+    assert {
+        "dotmac_mkt:app/models/post_delivery.py",
+        "dotmac_mkt:app/services/publishing_service.py",
+        "dotmac_mkt:app/tasks/publish_scheduled.py",
+    } <= set(dossier["source_paths"])
+
+
+def test_publishing_retirement_ledger_freezes_ten_distinct_unstarted_writers() -> None:
+    ledger = tomllib.loads(PUBLISHING_RETIREMENT.read_text(encoding="utf-8"))
+    writers = ledger["writer"]
+    assert [row["id"] for row in writers] == [
+        "PUB-R1",
+        "PUB-R2",
+        "PUB-R3",
+        "PUB-R4",
+        "PUB-R5",
+        "PUB-R6",
+        "PUB-R7",
+        "PUB-R8",
+        "PUB-R9",
+        "PUB-R10",
     ]
     assert {row["status"] for row in writers} == {"not-started"}
     assert len({row["source_behavior"] for row in writers}) == len(writers)
