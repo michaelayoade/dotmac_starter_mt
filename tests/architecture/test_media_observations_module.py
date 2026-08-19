@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,38 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = ROOT / "packages/dotmac-media-observations"
 SOURCE = PACKAGE_ROOT / "src/dotmac_media_observations"
 MIGRATION = SOURCE / "migrations/versions/mo_0001_media_observations.py"
+_ALLOWED_IMPORT_ROOTS = frozenset(
+    {
+        "__future__",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "dotmac_kernel",
+        "dotmac_media_observations",
+        "enum",
+        "hashlib",
+        "json",
+        "re",
+        "sqlalchemy",
+        "typing",
+        "uuid",
+    }
+)
+_KNOWN_PROVIDER_TOKENS = frozenset(
+    {
+        "bing",
+        "facebook",
+        "google",
+        "linkedin",
+        "meta",
+        "microsoft",
+        "pinterest",
+        "reddit",
+        "snapchat",
+        "tiktok",
+        "twitter",
+    }
+)
 
 
 def _python_sources() -> dict[pathlib.Path, str]:
@@ -39,6 +72,55 @@ def _python_sources() -> dict[pathlib.Path, str]:
         for path in SOURCE.rglob("*.py")
         if "migrations" not in path.parts
     }
+
+
+def _provider_transport_violations(source: str) -> tuple[str, ...]:
+    """Return provider/transport implementation that crossed the domain seam.
+
+    The import allowlist is intentionally narrow: this package needs its own
+    contracts, the kernel and SQLAlchemy, but no HTTP client, connector engine
+    or provider SDK. Literal checks catch provider branches and embedded
+    endpoints even when no SDK is imported.
+    """
+
+    tree = ast.parse(source)
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots = {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            roots = {(node.module or "").split(".")[0]}
+        else:
+            roots = set()
+        for root in sorted(roots - _ALLOWED_IMPORT_ROOTS):
+            violations.append(f"forbidden import root {root!r}")
+
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        literal = node.value.lower()
+        literal_tokens = {token for token in re.split(r"[^a-z0-9]+", literal) if token}
+        providers = sorted(literal_tokens & _KNOWN_PROVIDER_TOKENS)
+        for provider in providers:
+            violations.append(f"provider literal {provider!r}")
+        if re.search(r"https?://", literal):
+            violations.append("embedded network endpoint")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare) or not any(
+            isinstance(comparator, ast.Constant) and isinstance(comparator.value, str)
+            for comparator in node.comparators
+        ):
+            continue
+        discriminators = {
+            child.id for child in ast.walk(node.left) if isinstance(child, ast.Name)
+        } | {
+            child.attr
+            for child in ast.walk(node.left)
+            if isinstance(child, ast.Attribute)
+        }
+        if discriminators & {"installation_ref", "source_system"}:
+            violations.append("provider-specific source discriminator")
+    return tuple(sorted(set(violations)))
 
 
 def test_manifest_matches_the_immutable_tenant_only_allocation() -> None:
@@ -129,26 +211,43 @@ def test_provider_and_product_names_do_not_enter_package_code() -> None:
         assert not forbidden & identifiers, (path, sorted(forbidden & identifiers))
 
 
-def test_module_imports_neither_assembly_sibling_modules_nor_provider_sdks() -> None:
-    forbidden_roots = {
-        "app",
-        "dotmac_integration",
-        "dotmac_campaigns",
-        "dotmac_content",
-        "dotmac_publishing",
-        "dotmac_files",
-        "dotmac_sites",
-        "dotmac_web_analytics",
-    }
+def test_module_imports_no_assembly_connector_network_or_provider_code() -> None:
     for path, source in _python_sources().items():
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Import):
-                imports = {alias.name.split(".")[0] for alias in node.names}
-            elif isinstance(node, ast.ImportFrom):
-                imports = {(node.module or "").split(".")[0]}
-            else:
-                continue
-            assert not forbidden_roots & imports, (path, imports)
+        assert _provider_transport_violations(source) == (), path
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (
+        ("from google.ads import Client\n", "forbidden import root 'google'"),
+        ("import requests\n", "forbidden import root 'requests'"),
+        (
+            "def route(source_system):\n" "    return source_system == 'acme_ads'\n",
+            "provider-specific source discriminator",
+        ),
+        (
+            "def endpoint():\n" "    return 'https://ads.example.test/v1'\n",
+            "embedded network endpoint",
+        ),
+        (
+            "def provider():\n" "    return 'linkedin'\n",
+            "provider literal 'linkedin'",
+        ),
+    ),
+)
+def test_provider_transport_detector_fires_on_planted_violations(
+    source: str, expected: str
+) -> None:
+    assert expected in _provider_transport_violations(source)
+
+
+def test_provider_transport_detector_accepts_provider_neutral_domain_code() -> None:
+    source = (
+        "from dataclasses import dataclass\n"
+        "def same_source(source_system, other_source_system):\n"
+        "    return source_system == other_source_system\n"
+    )
+    assert _provider_transport_violations(source) == ()
 
 
 def test_no_raw_payload_or_person_profile_column_exists() -> None:

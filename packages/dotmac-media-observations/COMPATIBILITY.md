@@ -30,3 +30,8 @@ conflating them with strings; that storage encoding is not a connector contract.
 Opaque installation and transport receipt references remain opaque. Provider
 names, raw payloads and attribution/customer identity are not compatibility
 surfaces because they are outside the package.
+
+Normalized entity properties are aggregate configuration only. Singular and
+plural person/audience fields, local Lead/opportunity/Party/customer/subscriber/
+Quote/Order identifiers, attribution claims and authoritative revenue labels
+are rejected recursively rather than retained as an untyped escape hatch.

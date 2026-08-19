@@ -33,3 +33,9 @@
   changed content is interpreted against the declaration registry.
 - Period-metric read windows refuse naive or reversed instants under the same
   aware `[start,end)` contract as stored metric periods.
+- Aggregate entity properties refuse singular and plural person/audience keys,
+  local Lead/opportunity/Party/customer/subscriber/Quote/Order identifiers,
+  attribution claims and authoritative revenue labels at the typed boundary.
+- The package architecture guard now allowlists domain imports and detects
+  planted provider SDKs, network clients, embedded endpoints and
+  provider-specific source conditionals.
