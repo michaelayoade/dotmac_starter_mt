@@ -10,6 +10,13 @@ No qualifying site-builder exists at the exact coordinates recorded in
 smallest product-neutral owner rather than pretending a landing route is a
 production implementation to port.
 
+Gate 1 is RED by design at exact commit
+`9f735b4ba5d7fd6c529c9d1d289aa0e245af2541`. A fresh detached writable
+Observer checkout using Poetry 2.4.1 produced 13 passing source/evidence cases
+and 40 controlled failures, all naming the absent `dotmac_sites` distribution.
+Ruff lint passed; its two formatting-only corrections are recorded in the next
+commit. Gate 2 may now add the smallest implementation.
+
 ## Revision-1 persistence contract
 
 | Table | Owned facts |
@@ -69,11 +76,12 @@ fields, that contract must be extended explicitly before remote cutover.
 
 ## Gate sequence
 
-1. Commit this dossier, the source inventory, ADR, plan, package dossier and
-   canaries while `dotmac-sites` is absent.
-2. On Observer at that exact commit, prove the focused suite is RED only because
-   the distribution is absent; record the command and counts.
-3. Add service and PostgreSQL isolation canaries before runtime code.
+1. **Complete:** commit this dossier, the source inventory, ADR, plan, package
+   dossier and canaries while `dotmac-sites` is absent.
+2. **Complete:** on Observer at exact commit `9f735b4`, the focused suite was
+   RED only because the distribution was absent: 13 passed, 40 failed.
+3. Add service canaries before runtime code; the PostgreSQL isolation canary was
+   already present in the Gate 1 commit.
 4. Allocate a77 only in the same slice as the manifest and `si_0001_sites`.
 5. Implement the five-table owner and local release contract; validate focused,
    full unit/architecture, full disposable PostgreSQL and live-catalog/RLS

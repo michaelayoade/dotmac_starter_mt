@@ -109,9 +109,7 @@ def test_navigation_must_point_to_a_page_in_the_same_snapshot() -> None:
             site_ref=SITE_ID,
             site_revision_ref=SITE_REVISION_ID,
             pages=(_page(contracts),),
-            navigation=(
-                contracts.NavigationItemV1(label="Missing", path="/missing"),
-            ),
+            navigation=(contracts.NavigationItemV1(label="Missing", path="/missing"),),
             redirects=(),
             seo=contracts.SeoMetadataV1(title="Dotmac"),
         )
@@ -133,9 +131,7 @@ def test_redirects_are_local_non_shadowing_and_use_a_safe_status() -> None:
             seo=contracts.SeoMetadataV1(title="Dotmac"),
         )
     with pytest.raises(contracts.ContractError, match="status_code"):
-        contracts.RedirectRuleV1(
-            source_path="/old", target_path="/", status_code=200
-        )
+        contracts.RedirectRuleV1(source_path="/old", target_path="/", status_code=200)
 
 
 def test_release_digest_is_deterministic_complete_and_order_sensitive() -> None:

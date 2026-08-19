@@ -75,9 +75,7 @@ def migrated_sites() -> Iterator[tuple[str, str]]:
 
         cfg = Config(str(REPO_ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
-        cfg.set_main_option(
-            "version_locations", f"{KERNEL_VERSIONS} {SITES_VERSIONS}"
-        )
+        cfg.set_main_option("version_locations", f"{KERNEL_VERSIONS} {SITES_VERSIONS}")
         os.environ["MIGRATION_DATABASE_URL"] = admin_url
         command.upgrade(cfg, "heads")
         yield admin_url, _url_for(superuser, name, user="app_user")

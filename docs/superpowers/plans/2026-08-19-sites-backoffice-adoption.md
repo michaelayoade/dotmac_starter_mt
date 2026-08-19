@@ -1,6 +1,7 @@
 # `dotmac-sites` implementation and Backoffice adoption plan
 
-**Status:** Gate 0 boundary and greenfield evidence frozen; Gate 1 RED pending.  
+**Status:** Gate 1 controlled RED recorded at exact commit
+`9f735b4ba5d7fd6c529c9d1d289aa0e245af2541`; Gate 2 may start.
 **First adopter:** Backoffice. **Second candidate:** Sub, independently.  
 **Release/adoption:** separately gated.
 
@@ -18,6 +19,22 @@ not build a hosting client, a second file/form owner, or a product-specific CMS.
    from the committed Poetry 2.4.1 lock and run the focused tests.
 3. Require controlled missing-package failures; a pass or skip is a defect.
 4. Record the exact commit, command and counts here and in the dossier.
+
+**Recorded 2026-08-19:** A fresh detached writable Observer checkout at
+`9f735b4ba5d7fd6c529c9d1d289aa0e245af2541`, installed from the committed lock
+with Poetry 2.4.1 and the bundle's complete tag set, ran:
+
+```text
+poetry run pytest -q tests/architecture/test_marketing_suite_source_audit.py \
+  tests/architecture/test_sites_module.py \
+  tests/unit/test_sites_lifecycle.py tests/unit/test_sites_contracts.py
+```
+
+Thirteen source/evidence cases passed and all 40 sites implementation canaries
+failed with their intended missing-`dotmac_sites` messages. Ruff lint passed;
+Ruff identified two formatting-only changes, which are recorded immediately
+after the RED commit and do not alter a canary. No runtime package existed in
+the tested tree.
 
 ## Gate 2 — implement the local owner
 
