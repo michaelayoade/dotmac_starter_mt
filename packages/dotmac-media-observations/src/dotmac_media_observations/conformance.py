@@ -21,6 +21,8 @@ from dotmac_media_observations.contracts import (
     MetricObservation,
     NodeTypeDeclaration,
     NormalizedMediaFact,
+    ObservationKind,
+    ObservationSource,
     RecordOutcome,
     RecordStatus,
     UnsupportedObservation,
@@ -62,6 +64,9 @@ class ConformanceReport:
     replay_count: int
     installation_ref: str
     source_system: str
+    node_declarations: tuple[NodeTypeDeclaration, ...]
+    metric_declarations: tuple[MetricDefinitionDeclaration, ...]
+    observation_kinds: tuple[ObservationKind, ...]
     observation_ids: tuple[UUID, ...]
     content_fingerprints: tuple[str, ...]
     facts: tuple[NormalizedMediaFact, ...]
@@ -72,8 +77,8 @@ def run_normalized_conformance(
 ) -> ConformanceReport:
     """Persist one SPI-v1 fixture twice and prove exact replay provenance."""
     spi_version = _require_spi_version(producer)
-    first = producer.normalized_case()
-    second = producer.normalized_case()
+    first = _normalized_case(producer)
+    second = _normalized_case(producer)
     if first != second:
         raise InvalidObservation(
             "normalized producer is non-deterministic for the same fixture"
@@ -157,6 +162,11 @@ def run_normalized_conformance(
         replay_count=len(replay_outcomes),
         installation_ref=next(iter(installations)),
         source_system=next(iter(systems)),
+        node_declarations=first.node_declarations,
+        metric_declarations=first.metric_declarations,
+        observation_kinds=tuple(
+            _observation_kind(observation) for observation in first.observations
+        ),
         observation_ids=tuple(outcome.observation_id for outcome in first_outcomes),
         content_fingerprints=tuple(outcome.fingerprint for outcome in first_outcomes),
         facts=facts,
@@ -182,6 +192,61 @@ def _require_spi_version(producer: NormalizedObservationProducer) -> int:
     return version
 
 
+def _normalized_case(
+    producer: NormalizedObservationProducer,
+) -> NormalizedObservationCase:
+    factory = getattr(producer, "normalized_case", None)
+    if not callable(factory):
+        raise UnsupportedObservation(
+            "normalized producer does not expose a normalized case factory"
+        )
+    case = factory()
+    if not isinstance(case, NormalizedObservationCase):
+        raise InvalidObservation(
+            "normalized producer must return a NormalizedObservationCase"
+        )
+    if type(case.node_declarations) is not tuple:
+        raise InvalidObservation("conformance node declarations must be a tuple")
+    if type(case.metric_declarations) is not tuple:
+        raise InvalidObservation("conformance metric declarations must be a tuple")
+    if type(case.observations) is not tuple:
+        raise InvalidObservation("conformance observations must be a tuple")
+    if any(
+        not isinstance(declaration, NodeTypeDeclaration)
+        for declaration in case.node_declarations
+    ):
+        raise InvalidObservation(
+            "every conformance node declaration must be a NodeTypeDeclaration"
+        )
+    if any(
+        not isinstance(declaration, MetricDefinitionDeclaration)
+        for declaration in case.metric_declarations
+    ):
+        raise InvalidObservation(
+            "every conformance metric declaration must be a "
+            "MetricDefinitionDeclaration"
+        )
+    if any(
+        not isinstance(
+            observation,
+            EntityObservation | HierarchyObservation | MetricObservation,
+        )
+        for observation in case.observations
+    ):
+        raise InvalidObservation(
+            "every conformance observation command must be an EntityObservation, "
+            "HierarchyObservation or MetricObservation"
+        )
+    if any(
+        not isinstance(observation.source, ObservationSource)
+        for observation in case.observations
+    ):
+        raise InvalidObservation(
+            "every conformance observation command must carry an ObservationSource"
+        )
+    return case
+
+
 def _record(
     db: Session,
     observation: EntityObservation | HierarchyObservation | MetricObservation,
@@ -190,7 +255,19 @@ def _record(
         return record_entity(db, observation)
     if isinstance(observation, HierarchyObservation):
         return record_hierarchy(db, observation)
-    return record_metric(db, observation)
+    if isinstance(observation, MetricObservation):
+        return record_metric(db, observation)
+    raise InvalidObservation("unsupported normalized observation command")
+
+
+def _observation_kind(
+    observation: EntityObservation | HierarchyObservation | MetricObservation,
+) -> ObservationKind:
+    if isinstance(observation, EntityObservation):
+        return ObservationKind.ENTITY
+    if isinstance(observation, HierarchyObservation):
+        return ObservationKind.HIERARCHY
+    return ObservationKind.METRIC
 
 
 __all__ = [

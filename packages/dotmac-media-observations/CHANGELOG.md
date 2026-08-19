@@ -26,6 +26,9 @@
 - Explicit normalized-observation SPI V1 with fail-closed producer version
   checks and conformance evidence carrying observation ids, fingerprints and
   immutable normalized facts with receipt provenance.
+- Provider-free conformance coverage over entity, hierarchy and metric commands,
+  with exact node/metric declaration and observation-kind evidence. Missing or
+  malformed case factories and members now return typed rejection reports.
 
 ### Fixed
 

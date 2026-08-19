@@ -21,7 +21,12 @@ breaking contract change and requires explicit migration evidence.
 The normalized-observation SPI version is separate from Integration's connector
 SPI version. A connector must satisfy both independently. Conformance refuses a
 missing, malformed or incompatible media SPI version and reports the exact
-observation ids, fingerprints and immutable normalized facts used as evidence.
+node/metric declarations, observation kinds, observation ids, fingerprints and
+immutable normalized facts used as evidence. A certifier can therefore compare
+the report's exact kind coverage with the connector capability it authorized;
+the module does not claim unexercised kinds. Missing or malformed case factories,
+declarations and commands fail through typed observation errors rather than raw
+attribute failures.
 
 A restatement link retains the same installation, source system and subject:
 entity identity, hierarchy child, or exact metric period as appropriate. All

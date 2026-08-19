@@ -1076,13 +1076,11 @@ def test_provider_free_normalization_conformance_replays_a_stable_fixture(
     assert len(report.observation_ids) == 4
     assert len(report.content_fingerprints) == 4
     assert len(report.facts) == 4
+    assert tuple(fact.observation_id for fact in report.facts) == report.observation_ids
     assert (
-        tuple(fact.observation_id for fact in report.facts)
-        == report.observation_ids
+        tuple(fact.content_fingerprint for fact in report.facts)
+        == report.content_fingerprints
     )
-    assert tuple(
-        fact.content_fingerprint for fact in report.facts
-    ) == report.content_fingerprints
     assert tuple(fact.source_observation_id for fact in report.facts) == (
         "conformance-parent",
         "conformance-child",
@@ -1131,9 +1129,7 @@ def test_normalized_conformance_refuses_missing_malformed_or_incompatible_spi(
 
 def test_normalized_conformance_refuses_a_missing_case_factory(db: Session) -> None:
     class Producer:
-        normalized_observation_spi_version = (
-            CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
-        )
+        normalized_observation_spi_version = CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
 
     with pytest.raises(UnsupportedObservation, match="normalized case"):
         run_normalized_conformance(db, Producer())  # type: ignore[arg-type]
@@ -1175,9 +1171,7 @@ def test_normalized_conformance_refuses_malformed_case_members_with_typed_errors
     message: str,
 ) -> None:
     class Producer:
-        normalized_observation_spi_version = (
-            CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
-        )
+        normalized_observation_spi_version = CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
 
         def normalized_case(self) -> object:
             return case

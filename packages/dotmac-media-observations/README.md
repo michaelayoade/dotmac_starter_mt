@@ -43,7 +43,11 @@ provider-free fixture, independently of Integration SPI conformance. A producer
 declares `normalized_observation_spi_version`; V1 is exported as
 `CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION`. Conformance fails closed on a
 missing, malformed or incompatible version and returns the immutable normalized
-facts proving stable observation ids, fingerprints and receipt provenance.
+facts proving stable observation ids, fingerprints and receipt provenance. The
+report also carries the exact versioned node/metric declarations and observation
+kinds exercised by the fixture, so an authorized certifier can see coverage
+rather than infer it. Missing or malformed case factories, declarations and
+commands fail with typed observation rejections.
 
 ## Adoption status
 
