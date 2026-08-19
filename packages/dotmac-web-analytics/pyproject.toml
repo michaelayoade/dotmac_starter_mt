@@ -15,7 +15,7 @@ python = ">=3.11,<3.14"
 # a71 is the first kernel release containing the immutable `web_analytics`
 # namespace/lineage allocation. The release workflow must not publish this
 # package until that exact kernel floor exists on the private index.
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 # Alembic is an assembly migration tool, not a package runtime dependency.

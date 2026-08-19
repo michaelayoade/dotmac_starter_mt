@@ -3,34 +3,47 @@ package = "dotmac-durable-timers"
 classification = "optional-module"
 status = "audit-complete"
 source_mode = "product-first"
-owner = "Durable timer identity, generation, supersession, cancellation, trigger acceptance and terminal-history retention on separately declared tenant and platform planes"
-contract = "Given a TenantScope or PlatformScope, an open TimerIdentity, an explicit timezone-aware due_at and recorded_at, and a typed TimerOutput, schedule exactly one current generation under a transaction-scoped advisory identity lock, supersede any previous current generation, and enqueue the output through the matching dotmac_kernel outbox with available_at=due_at in the same caller transaction. Trigger acceptance serializes on the same identity, refuses stale and canceled generations before the consumer effect, records one append-only acceptance for the current generation, and reports replay explicitly. Cancellation distinguishes canceled, already fired, already canceled and nothing scheduled. Retention deletes only terminal history older than caller-supplied evidence and never reads a clock. The module owns no due scan, claim loop, lease, retry, dead-letter policy, product command vocabulary, business deadline policy, or consumer effect."
+owner = "Timer identity, generation allocation, scheduling and rescheduling, supersession, cancellation, current-generation verification, stale-trigger rejection, append-only timer history and terminal-history retention"
+contract = "Given an explicit tenant or platform scope, an opaque (owner, entity_kind, entity_id, purpose) identity, a required timezone-aware due_at, a manifest-declared output code and optional opaque expected_source_version, atomically allocate the next generation, supersede the prior current generation, append history and enqueue one kernel outbox event whose available_at equals due_at. Cancellation returns one of Canceled, AlreadyFired, NothingScheduled or Stale and names both observed and current generations. Trigger acceptance locks and re-derives current identity state, records stale-rejection evidence, and returns observed_generation, current_generation and expected_source_version before the caller may run its effect. Retention never deletes a scheduled timer. The module declares and reuses outbox_relay.v1 for claiming, leasing, stale-lease recovery, retry, backoff, dead-letter handling and dispatcher privileges; it contains no due-row scanner, claim loop, retry engine, consumer decision or ambient clock read."
 source_repositories = [
   "dotmac_erp",
   "dotmac_sub",
+  "dotmac_starter_mt",
 ]
 source_revisions = [
-  "dotmac_erp:7fc1111f73ca926eb8729a0dff589a3dfad896a8",
+  "dotmac_erp:9d67c3990e01e20409ab118badb5dfdf7ce045a7",
   "dotmac_sub:4489ca1712f3c263d914f2af0ebfcf044aa70605",
+  "dotmac_starter_mt:7e0543004864845f0035c9ec325e3f5064c281cc",
+  "dotmac-kernel-v0.1.0a67:ed3ac864b350d4556808a69496f999f764682442",
 ]
 source_paths = [
+  "dotmac_erp:app/models/scheduler.py",
   "dotmac_sub:app/models/durable_timer.py",
   "dotmac_sub:app/services/runtime_durable_timers.py",
   "dotmac_sub:app/tasks/durable_timers.py",
+  "dotmac_sub:app/models/subscription_lifecycle_schedule.py",
+  "dotmac_sub:app/services/subscription_lifecycle_schedules.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/outbox.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/relay.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/platform_relay.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/models.py",
 ]
 preserved_tests = [
-  "dotmac_sub:tests/test_runtime_durable_timers.py",
-  "dotmac_sub:tests/test_durable_timer_tasks.py",
+  "dotmac_sub:tests/test_durable_timers.py",
+  "dotmac_starter_mt:tests/test_outbox_relay.py",
+  "dotmac_starter_mt:tests/test_platform_outbox_relay.py",
+  "dotmac_starter_mt:tests/test_outbox_dispatcher_grants.py",
+  "dotmac_starter_mt:tests/test_platform_outbox_dispatcher_grants.py",
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_sub", "dotmac_vendor_control_plane", "dotmac_crm"]
-composition_boundary = "ADR-0024: each adopter pins the package, selects its own plane set, runs the dt lineage in its own database and owns its own timer and outbox rows. Applications exchange only versioned observations through Integrator; they never share mod_timers tables or read another application's database. ADR-0028: tenant tables carry tenant_id NOT NULL with FORCE RLS and platform tables carry no tenant column and are fully revoked from app_user; the planes share behavior but never a row or foreign key. dotmac_kernel.outbox_relay.v1 is the sole claim/lease/retry/dead-letter owner. TimerIdentity and TimerOutput are provider-neutral open values; product command names and business policy remain in the adopter."
+composition_boundary = "ADR-0024: each adopter pins the package, selects its own plane set, runs the dt lineage in its own database and owns its own timer, rejection-evidence and outbox rows. Applications exchange only versioned observations through Integrator; they never share mod_timers tables or read another application's database. ADR-0028: tenant tables carry tenant_id NOT NULL with FORCE RLS and platform tables carry no tenant column and are fully revoked from app_user; the planes share behavior but never a row or foreign key. dotmac_kernel.outbox_relay.v1 is the sole claim/lease/retry/dead-letter owner. Output routing codes are declared by their consuming module and resolved from the installed manifest set before scheduling; product command names and business policy remain in the adopter."
 inventory_evidence = [
   "docs/inventories/durable-timers-sources.md",
   "docs/inventories/p11-adoption-status.md",
   "docs/adr/0024-apps-compose-by-synchronizing-data.md",
 ]
-first_cutover = "dotmac_sub tenant plane, financial.walled_account_healing first and billing.contracts second, after the package's ten PostgreSQL proofs pass on Observe and the exact released kernel/module revisions are pinned. Each family shadows the module output against the existing timer owner, proves stale-generation rejection and replay safety, then switches the sole schedule/cancel/accept writer before the local durable-timer copy and due scanner are retired."
+first_cutover = "dotmac_sub tenant plane, financial.walled_account_healing first and billing.contracts second. The package's ten PostgreSQL proofs and their sensitivity companions passed on the Dotmac Observer at exact candidate revision a3c82cd266141d80fdd0a128e74cc5b276bc04a4 on 2026-08-18; cutover begins only after the exact kernel/module releases are pinned. Each family shadows the module output against the existing timer owner, proves stale-generation rejection and replay safety, then switches the sole schedule/cancel/accept writer before the local durable-timer copy and due scanner are retired."
 shadow_and_drift = "For each Sub timer family, schedule through the module in shadow with the same explicit identity, due instant and source version while leaving the legacy owner authoritative. Compare generation, supersession, cancellation and emitted output for every transition; record divergence without allowing the shadow to cause the consumer effect. Exercise relay lease recovery and poison isolation against PostgreSQL. Cut over only after no divergence remains, then make the module acceptance verdict the gate immediately before the local consumer effect. A two-directional caller and import ratchet prevents either copy returning."
 local_copy_retirement = "dotmac_sub retires direct DurableTimer imports and queries, current_timer, schedule_timer, cancel_timer, fire_due_timers, the durable_timers table, app/tasks/durable_timers.py and the durable_timer_dispatch_runner after both named first families cut over. Product business vocabulary, command dispatch and source-state validation stay in Sub; only timing mechanics leave. The collections.case_action_due output moves with its collections owner or is removed. The lifecycle schedule command ledger remains a separate decision: only its duplicated timing claim/lease/retry behavior is eligible, not its commands. ERP has no qualifying durable timer implementation and gains no parallel local copy."
-next_action = "Review the integrated Starter module PR, where Billing and Durable Timers have independent namespace allocations on kernel 0.1.0a71. After separate release authorization, publish and verify that kernel and this module, pin their exact releases in Sub, and begin the typed shadow adoption. Production deployment and authority switching remain separately authorized."
+next_action = "Merge the reviewed exact proof revision, publish and verify dotmac-kernel 0.1.0a72 first, then publish and verify dotmac-durable-timers 0.1.0a1. Pin both exact artifacts in Sub, compose the tenant plane, and begin financial.walled_account_healing shadow adoption."

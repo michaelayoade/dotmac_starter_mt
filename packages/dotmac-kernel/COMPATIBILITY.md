@@ -100,6 +100,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.assembly` | `ProductAssemblySpec`, `ProductSecurityPolicy`, `ModulePlaneSelection`, `StartupCheck`, `StartupHook` |
 | `dotmac_kernel.audit` | `ACTOR_TYPES`, `AuditEvent`, `MissingAuditActorError`, `UnknownAuditActorTypeError`, `resolve_audit_actor`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
+| `dotmac_kernel.outbox_event_types` | `OutboxEventTypeRegistry`, `OutboxEventTypesNotInstalledError`, `DuplicateOutboxEventTypeError`, `UndeclaredOutboxEventTypeError`, `install_outbox_event_types`, `active_outbox_event_types` (outbox routing vocabulary; also top-level) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `RETIRED_BRAND_KEYS`, `reject_retired_brand_keys` (`sanitize_branding_css` was REMOVED in 0.1.0a47 — see CHANGELOG) |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
 | `dotmac_kernel.channel_policy` | `CHANNEL_POLICY_KEY`, `ChannelPolicyError`, `make_spec`, `resolve_channels`, `validate_policy_document` |
@@ -141,8 +142,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE`, `DEFAULT_PLATFORM_ROLE`, `TABLE_PRIVILEGES` (the post-migration live-catalog contract, both planes — see the same section) |
-| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
-| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_party_person_catalog`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `PARTY_PERSON_CATALOG_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
@@ -180,7 +181,7 @@ it never grants entitlement and it never deploys anything.
 
 - **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
   `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
-  `permissions`, `audit_actions`, `feature_flags`, `setting_domains`,
+  `permissions`, `audit_actions`, `outbox_event_types`, `feature_flags`, `setting_domains`,
   `setting_value_types`, `scope_kinds`, `charge_models`, `obligation_sources`,
   `short_code`, `migration_prefix`, `migration_branch`, `tables`,
   `platform_tables`, `requires`, `tenant_requires`, `platform_requires`,
@@ -289,7 +290,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a71`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a75`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -305,8 +306,10 @@ retired prefix is never reused.
 | `integration` | `mod_intg` | `ig` | `integration` |
 | `approvals` | `mod_approvals` | `ap` | `approvals` |
 | `numbering` | `mod_numbering` | `nu` | `numbering` |
-| `billing` | `mod_billing` | `bi` | `billing` |
+| `people` | `mod_people` | `pe` | `people` |
+| `campaigns` | `mod_campaigns` | `ca` | `campaigns` |
 | `durable_timers` | `mod_timers` | `dt` | `durable_timers` |
+| `billing` | `mod_billing` | `bi` | `billing` |
 | `collections` | `mod_coll` | `cl` | `collections` |
 | `orders` | `mod_orders` | `or` | `orders` |
 | `subscriptions` | `mod_subscriptions` | `su` | `subscriptions` |
@@ -371,7 +374,8 @@ aliased provider fails there, because stamping writes no columns.
 
 The vocabulary is an open **registry, never an enum** (ADR-0008): the kernel
 ships `tenant_scope_catalog.v1`, `module_database_roles.v1`,
-`idempotency_ledger.v1` and `outbox_relay.v1`; a product adds its own with
+`party_person_catalog.v1`, `idempotency_ledger.v1`, `outbox_relay.v1` and
+`platform_audit_log.v1`; a product adds its own with
 `register_prerequisites()`, and `register_verifier()` for the proof — an effect
 that cannot be proven must not be silently assumed. A changed contract is a new
 `.vN`, never a redefinition, because every existing binding was accepted against
@@ -469,6 +473,10 @@ and `obligation_sources` explicitly at each subscriptions service call.
   free-text-no-longer `audit_events.action` vocabulary:
   `DuplicateAuditActionError` on two owners, `require(action)` raising
   `UndeclaredAuditActionError`, plus `is_declared`/`owner`/`actions`.
+- **`OutboxEventTypeRegistry.from_manifests(manifests)`** — the same for durable
+  routing codes. The consuming module declares the code; producers call
+  `require(event_type)` before enqueueing so a typo cannot create an event no
+  installed consumer owns. The outbox column remains plain text.
 - **`SettingDomainRegistry.from_manifests(manifests)`** — the same again, for
   `domain_settings.domain`: `DuplicateSettingDomainError`, `require(domain)`
   returning a `SettingDomain` or raising `UndeclaredSettingDomainError`, plus
@@ -485,13 +493,14 @@ and `obligation_sources` explicitly at each subscriptions service call.
   contract, or occurrence use. The assembly passes it explicitly; there is no
   process-global commercial vocabulary or kernel enum.
 - **Process-active install.** `install_permissions` / `install_audit_actions` /
-  `install_setting_domains` set the process-active catalogue and registries;
-  `active_permissions` / `active_audit_actions` / `active_setting_domains` read
+  `install_outbox_event_types` / `install_setting_domains` set the process-active
+  catalogue and registries; `active_permissions` / `active_audit_actions` /
+  `active_outbox_event_types` / `active_setting_domains` read
   them. `create_app` installs all of them from the INSTALLED module set before
   mounting anything. Permissions default to EMPTY so an uninstalled
-  authorization catalogue denies safely. Audit actions and setting domains
+  authorization catalogue denies safely. Audit actions, outbox event types and setting domains
   distinguish NOT INSTALLED (`AuditActionsNotInstalledError` /
-  `SettingDomainsNotInstalledError`) from INSTALLED-EMPTY (every write is
+  `OutboxEventTypesNotInstalledError` / `SettingDomainsNotInstalledError`) from INSTALLED-EMPTY (every write is
   undeclared) — an uninstalled write-path registry would otherwise reject writes
   inside the caller's transaction and turn a wiring mistake into a failed
   business operation. A consumer that builds an app by hand (a test mounting a
@@ -536,6 +545,10 @@ and `obligation_sources` explicitly at each subscriptions service call.
   the session, so a rejected write leaves no partial state. Platform actions
   are owned by the installable control-plane modules that call the writer and
   are declared through their `ModuleManifest.audit_actions` entries.
+- `dotmac_durable_timers.schedule_timer` validates its output routing code
+  against `active_outbox_event_types()` before it takes a lock or adds rows.
+  Timer mechanics therefore remain provider-neutral while the consuming
+  module remains the sole owner of whether an event type exists.
 
 #### Audit actor and time contract
 
@@ -721,14 +734,14 @@ document's SemVer policy (its HTTP helper needs the `testing` extra:
 fakes work without it). The package re-exports everything from three submodules:
 
 - **`harness`** — the in-memory-SQLite + savepoint-isolation wiring:
-  - `create_test_engine(*, module_schemas: Iterable[str] = (), metadata:
-    MetaData | None = None) -> Engine` — a fresh in-memory SQLite engine with
-    public tables plus only the explicitly composed module schemas created.
-    The **assembly must import its own feature/module models first** so the
-    selected schemas are present in metadata. Unknown schemas and compositions
-    beyond SQLite's attachment ceiling fail closed; SQLite has no RLS, so
-    tenancy remains separately proven on PostgreSQL. `metadata` exists for
-    reusable-kernel canaries and defaults to `Base.metadata`.
+  - `create_test_engine(*, tables=...) -> Engine` — a fresh in-memory SQLite
+    engine with the selected `Base.metadata` tables created. The **assembly
+    must import its own feature models first** so `Base.metadata` is populated;
+    a large shared test process should pass its exact table slice so unrelated
+    independently installable packages do not consume SQLite's ten schema
+    attachments. Omitting `tables` retains the all-imported-tables behavior.
+    SQLite has no RLS, so this is for service-logic/unit tests; tenancy is
+    proven separately on Postgres.
   - `isolated_session(engine)` — a context-managed session wrapped in an outer
     transaction + restarting SAVEPOINT, so a test rolls back even if service
     code commits.

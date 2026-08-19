@@ -5,8 +5,10 @@ from __future__ import annotations
 import ast
 import inspect
 import tomllib
+from dataclasses import fields
 from pathlib import Path
 
+import dotmac_durable_timers
 from dotmac_durable_timers import models, service
 from dotmac_durable_timers.manifest import module
 from dotmac_kernel.namespaces import (
@@ -152,3 +154,39 @@ def test_extraction_dossier_is_the_reconciled_product_first_contract() -> None:
     assert "dotmac_sub" in dossier["source_repositories"]
     assert dossier["contract_consumers"] == []
     assert "dotmac_sub" in dossier["candidate_consumers"]
+
+
+def test_cancellation_and_source_evidence_match_the_accepted_contract() -> None:
+    assert {outcome.value for outcome in service.CancelOutcome} == {
+        "canceled",
+        "already_fired",
+        "nothing_scheduled",
+        "stale",
+    }
+    assert [field.name for field in fields(service.CancelResult)] == [
+        "outcome",
+        "observed_generation",
+        "current_generation",
+    ]
+    signature = inspect.signature(service.cancel_timer)
+    observed = signature.parameters["observed_generation"]
+    assert observed.default is inspect.Parameter.empty
+    assert "expected_source_version" in {
+        field.name for field in fields(service.TimerTrigger)
+    }
+    assert "expected_source_version" in {
+        field.name for field in fields(service.AcceptanceResult)
+    }
+
+
+def test_package_root_exports_ports_not_orm_models() -> None:
+    for private_model in (
+        "Timer",
+        "TimerAcceptance",
+        "TimerRejection",
+        "PlatformTimer",
+        "PlatformTimerAcceptance",
+        "PlatformTimerRejection",
+    ):
+        assert private_model not in dotmac_durable_timers.__all__
+        assert not hasattr(dotmac_durable_timers, private_model)

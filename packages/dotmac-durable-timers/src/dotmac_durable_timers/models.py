@@ -28,10 +28,15 @@ from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
 SCHEMA = module_schema("timers")
 
-TENANT_TABLES: tuple[str, ...] = ("timers", "timer_acceptances")
+TENANT_TABLES: tuple[str, ...] = (
+    "timers",
+    "timer_acceptances",
+    "timer_rejections",
+)
 PLATFORM_TABLES: tuple[str, ...] = (
     "platform_timers",
     "platform_timer_acceptances",
+    "platform_timer_rejections",
 )
 
 
@@ -69,6 +74,10 @@ class _TimerColumns:
         return mapped_column(String(120), nullable=False)
 
     @declared_attr
+    def expected_source_version(cls) -> Mapped[int | None]:
+        return mapped_column(Integer)
+
+    @declared_attr
     def outbox_event_id(cls) -> Mapped[UUID]:
         return mapped_column(Uuid(), nullable=False)
 
@@ -100,6 +109,44 @@ class _AcceptanceColumns:
 
     @declared_attr
     def accepted_at(cls) -> Mapped[datetime]:
+        return mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class _RejectionColumns:
+    @declared_attr
+    def timer_id(cls) -> Mapped[UUID]:
+        return mapped_column(Uuid(), nullable=False)
+
+    @declared_attr
+    def owner(cls) -> Mapped[str]:
+        return mapped_column(String(120), nullable=False)
+
+    @declared_attr
+    def entity_kind(cls) -> Mapped[str]:
+        return mapped_column(String(120), nullable=False)
+
+    @declared_attr
+    def entity_id(cls) -> Mapped[str]:
+        return mapped_column(String(255), nullable=False)
+
+    @declared_attr
+    def purpose(cls) -> Mapped[str]:
+        return mapped_column(String(120), nullable=False)
+
+    @declared_attr
+    def observed_generation(cls) -> Mapped[int]:
+        return mapped_column(Integer, nullable=False)
+
+    @declared_attr
+    def current_generation(cls) -> Mapped[int | None]:
+        return mapped_column(Integer)
+
+    @declared_attr
+    def expected_source_version(cls) -> Mapped[int | None]:
+        return mapped_column(Integer)
+
+    @declared_attr
+    def rejected_at(cls) -> Mapped[datetime]:
         return mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -160,6 +207,27 @@ class TimerAcceptance(Base, _AcceptanceColumns):
     )
 
 
+class TimerRejection(Base, _RejectionColumns):
+    """Append-only evidence that a tenant trigger was stale when observed."""
+
+    __tablename__ = "timer_rejections"
+    __table_args__ = (
+        Index(
+            "uq_timer_rejections_observed_current",
+            "tenant_id",
+            "timer_id",
+            text("COALESCE(current_generation, 0)"),
+            unique=True,
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(), ForeignKey(Tenant.__table__.c.id, ondelete="CASCADE"), nullable=False
+    )
+
+
 class PlatformTimer(Base, _TimerColumns):
     """One platform timer generation."""
 
@@ -206,7 +274,31 @@ class PlatformTimerAcceptance(Base, _AcceptanceColumns):
     id: Mapped[UUID] = uuid_pk()
 
 
-ALL_MODELS = (Timer, TimerAcceptance, PlatformTimer, PlatformTimerAcceptance)
+class PlatformTimerRejection(Base, _RejectionColumns):
+    """Append-only evidence that a platform trigger was stale when observed."""
+
+    __tablename__ = "platform_timer_rejections"
+    __table_args__ = (
+        Index(
+            "uq_platform_timer_rejections_observed_current",
+            "timer_id",
+            text("COALESCE(current_generation, 0)"),
+            unique=True,
+        ),
+        schema_table_args(SCHEMA),
+    )
+
+    id: Mapped[UUID] = uuid_pk()
+
+
+ALL_MODELS = (
+    Timer,
+    TimerAcceptance,
+    TimerRejection,
+    PlatformTimer,
+    PlatformTimerAcceptance,
+    PlatformTimerRejection,
+)
 
 __all__ = [
     "ALL_MODELS",
@@ -215,6 +307,8 @@ __all__ = [
     "TENANT_TABLES",
     "PlatformTimer",
     "PlatformTimerAcceptance",
+    "PlatformTimerRejection",
     "Timer",
     "TimerAcceptance",
+    "TimerRejection",
 ]

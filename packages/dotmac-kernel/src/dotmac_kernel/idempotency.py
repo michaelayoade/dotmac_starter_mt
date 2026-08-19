@@ -59,7 +59,6 @@ from sqlalchemy.orm import Session
 if TYPE_CHECKING:
     from sqlalchemy.engine import CursorResult
 
-from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import BadRequestError, ConflictError
 from dotmac_kernel.idempotency_models import (
     IdempotencyRecord,
@@ -203,6 +202,11 @@ def execute_once(
     `operation_name` records what the key was spent on, for operators reading
     the ledger; it defaults to `scope` and never participates in the key.
     """
+    # The DB module constructs the configured engine on import. Defer it until
+    # this write path runs so packages can import idempotency contracts and
+    # manifests before an application installs its database URL.
+    from dotmac_kernel.db import conflict_savepoint
+
     _validate(scope, key)
 
     existing = _lookup(db, tenant_id=tenant_id, scope=scope, key=key)
@@ -261,6 +265,8 @@ def execute_once_platform(
     The platform peer of `execute_once` — same contract, same guarantees,
     against the platform catalog table (no RLS; see ADR-0004).
     """
+    from dotmac_kernel.db import conflict_savepoint
+
     _validate(scope, key)
 
     existing = _lookup_platform(db, scope=scope, key=key)

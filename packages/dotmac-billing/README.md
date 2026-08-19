@@ -28,6 +28,6 @@ privileges from `app_user`.
 Services accept a caller-owned SQLAlchemy session, mutate and flush only.
 `dotmac_kernel.db` remains transaction authority.
 
-The first release is `0.1.0a1` and requires `dotmac-kernel>=0.1.0a71` plus
+The first release is `0.1.0a1` and requires `dotmac-kernel>=0.1.0a75` plus
 `alembic>=1.13` for its published migration/linking surface. Its wheel contains
 `py.typed`, the manifest and the complete `bi` migration lineage.

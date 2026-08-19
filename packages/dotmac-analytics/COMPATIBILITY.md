@@ -3,7 +3,7 @@
 ## `0.1.0a1`
 
 - Python: `>=3.11,<3.14`
-- `dotmac-kernel`: `>=0.1.0a71`
+- `dotmac-kernel`: `>=0.1.0a75`
 - persistence plane: tenant only
 - schema: `mod_analytics`
 - migration lineage: prefix `ay`, branch `analytics`

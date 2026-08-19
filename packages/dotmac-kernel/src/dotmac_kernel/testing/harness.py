@@ -6,9 +6,8 @@ consumer assembly gets the same fast unit-test setup without copying it.
 
 SQLite has no RLS — this harness is for service-logic/unit tests; tenancy
 enforcement is proven separately against real Postgres. `create_test_engine`
-creates public tables plus only explicitly named module schemas, so the
-ASSEMBLY must import its own feature/module models before calling it (that
-populates the shared `Base.metadata`).
+does `Base.metadata.create_all`, so the ASSEMBLY must import its own feature
+models before calling it (that populates the shared `Base.metadata`).
 
 `dotmac_kernel.deps` is imported INSIDE `assembly_test_client`, not at module
 scope. Importing it pulls `dotmac_kernel.db`, which constructs the SQLAlchemy
@@ -20,13 +19,12 @@ the TestClient helper, which is building a real app anyway, pays that cost.
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
-from sqlalchemy import Engine, MetaData, create_engine, event
+from sqlalchemy import Engine, Table, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from dotmac_kernel.models import Base
@@ -35,42 +33,30 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 
-def _sqlite_max_attached() -> int:
-    """Return this Python build's real SQLite attachment ceiling."""
-    connection = sqlite3.connect(":memory:")
-    try:
-        return connection.getlimit(sqlite3.SQLITE_LIMIT_ATTACHED)
-    finally:
-        connection.close()
+def _module_schemas(tables: Iterable[Table]) -> tuple[str, ...]:
+    """Every distinct non-default schema bound to the selected tables.
 
-
-def _module_schemas(metadata: MetaData) -> tuple[str, ...]:
-    """Every distinct non-default schema bound to a table in ``metadata``.
-
-    Read off the metadata rather than off `MIGRATION_OWNER_LEDGER` on purpose:
+    Read off the tables rather than off `MIGRATION_OWNER_LEDGER` on purpose:
     the harness must attach exactly what the caller actually imported, and it
     must not care whether a schema belongs to an installed module, so it never
     needs to import one.
     """
-    return tuple(
-        sorted({table.schema for table in metadata.tables.values() if table.schema})
-    )
+    return tuple(sorted({table.schema for table in tables if table.schema}))
 
 
-def create_test_engine(
-    *,
-    module_schemas: Iterable[str] = (),
-    metadata: MetaData | None = None,
-) -> Engine:
-    """A fresh in-memory SQLite engine for an explicit test composition.
+def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
+    """A fresh in-memory SQLite engine with the selected `Base.metadata` tables.
 
-    Public tables are always created. Module tables are created only for
-    ``module_schemas``; importing an optional module populates global
-    ``Base.metadata`` but does not compose it. ``check_same_thread=False``
-    because a TestClient runs sync route dependencies on a worker thread while
-    the test holds one connection —
-    sequential use only, never concurrent.
+    `check_same_thread=False` because a TestClient runs sync route dependencies
+    on a worker thread while the test holds one connection — sequential use
+    only, never concurrent.
 
+    `tables` defaults to every table currently registered on `Base.metadata`.
+    A large shared test process SHOULD pass the exact assembly/package table
+    snapshot it is exercising: test collection may import many uncomposed
+    packages into the shared metadata, while SQLite supports at most ten
+    attached databases. Selection is explicit rather than silently flattening
+    schemas or pretending an uncomposed package belongs to the assembly.
     **Module schemas (ADR-0006 D1).** A stateful module binds its models to
     `mod_<short_code>` via `namespaces.schema_table_args`, so the ORM emits
     fully qualified `mod_x.thing` — which is the entire point of D1, and which
@@ -80,35 +66,19 @@ def create_test_engine(
     standard build, so inference from every model imported during pytest
     collection is both architecturally wrong and eventually unexecutable.
 
-    ATTACH keeps emitted SQL identical to production's. A composition that
-    exceeds this Python build's attachment ceiling is refused rather than
-    silently translating module tables into another namespace. The static
-    migration gate and PostgreSQL lane remain the exact qualification, RLS and
-    grant authorities; SQLite is only the fast service-logic lane.
+    ATTACH rather than a `schema_translate_map`: translating the schema away
+    would make the unit lane exercise UNQUALIFIED SQL that no deployment ever
+    runs, quietly hiding exactly the qualification defects D1's gate exists to
+    catch. Attaching keeps the emitted SQL identical to production's.
 
-    ``metadata`` is injectable for reusable-kernel canaries. Assemblies omit it
-    and receive the shared declarative ``Base.metadata``.
     """
-    selected_metadata = Base.metadata if metadata is None else metadata
-    available = set(_module_schemas(selected_metadata))
-    schemas = tuple(sorted(set(module_schemas)))
-    unknown = set(schemas) - available
-    if unknown:
-        raise ValueError(
-            f"module schemas are not present in Base.metadata: {sorted(unknown)}"
-        )
-    max_attached = _sqlite_max_attached()
-    if len(schemas) > max_attached:
-        raise ValueError(
-            f"SQLite supports at most {max_attached} attached module schemas; "
-            "split this unit composition or use PostgreSQL"
-        )
-
+    selected_tables = tuple(Base.metadata.tables.values() if tables is None else tables)
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         future=True,
         connect_args={"check_same_thread": False},
     )
+    schemas = _module_schemas(selected_tables)
     if schemas:
 
         @event.listens_for(engine, "connect")
@@ -123,13 +93,7 @@ def create_test_engine(
             finally:
                 cursor.close()
 
-    selected = set(schemas)
-    tables = tuple(
-        table
-        for table in selected_metadata.tables.values()
-        if table.schema is None or table.schema in selected
-    )
-    selected_metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=selected_tables)
     return engine
 
 

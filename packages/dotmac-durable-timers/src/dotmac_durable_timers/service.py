@@ -1,9 +1,10 @@
 """One timer-generation lifecycle over two explicitly selected planes.
 
-Scheduling, cancellation and acceptance serialize on the same PostgreSQL
-transaction advisory lock derived from scope plus identity. That lock exists
-before the first row does, so concurrent initial schedules are covered as well
-as reschedules.
+Scheduling serializes on a PostgreSQL transaction advisory lock derived from
+scope plus identity; it exists before the first row does. Scheduling,
+cancellation and acceptance also lock the latest generation through a
+security-definer helper, so online roles can serialize transitions without
+receiving permission to rewrite timer history directly.
 
 The module writes the kernel outbox and moves its ``available_at`` to the
 requested due instant. Delivery mechanics stay entirely in the kernel relay.
@@ -21,14 +22,17 @@ from typing import Final
 from uuid import UUID, uuid4
 
 from dotmac_kernel.cache import Scope, TenantScope, scope_segment
+from dotmac_kernel.outbox_event_types import active_outbox_event_types
 from sqlalchemy import Select, func, select, text
 from sqlalchemy.orm import Session
 
 from dotmac_durable_timers.models import (
     PlatformTimer,
     PlatformTimerAcceptance,
+    PlatformTimerRejection,
     Timer,
     TimerAcceptance,
+    TimerRejection,
 )
 
 SCHEDULED: Final[str] = "scheduled"
@@ -65,6 +69,19 @@ def _aware(name: str, value: datetime) -> None:
         raise TimerError(f"naive_{name}", f"{name} must be timezone-aware")
 
 
+def _generation(name: str, value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise TimerError(f"invalid_{name}", f"{name} must be a positive integer")
+
+
+def _source_version(value: int | None) -> None:
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+        raise TimerError(
+            "invalid_expected_source_version",
+            "expected_source_version must be an integer or None",
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class TimerIdentity:
     """Open, provider-neutral identity of one logical timer stream."""
@@ -98,11 +115,12 @@ class TimerTrigger:
     generation: int
     due_at: datetime
     output: TimerOutput
+    expected_source_version: int | None = None
 
     def __post_init__(self) -> None:
-        if self.generation < 1:
-            raise TimerError("invalid_generation", "generation must be positive")
+        _generation("generation", self.generation)
         _aware("due_at", self.due_at)
+        _source_version(self.expected_source_version)
 
     def as_payload(self) -> dict[str, object]:
         return {
@@ -115,6 +133,7 @@ class TimerTrigger:
             "generation": self.generation,
             "due_at": self.due_at.isoformat(),
             "output_event_type": self.output.event_type,
+            "expected_source_version": self.expected_source_version,
         }
 
     @classmethod
@@ -134,6 +153,11 @@ class TimerTrigger:
                 purpose=str(payload["purpose"]),
             )
             output = TimerOutput(str(payload["output_event_type"]))
+            source_version = payload.get("expected_source_version")
+            if source_version is not None and (
+                isinstance(source_version, bool) or not isinstance(source_version, int)
+            ):
+                raise ValueError("expected_source_version must be an integer")
         except (KeyError, TypeError, ValueError) as exc:
             raise TimerError(
                 "invalid_trigger", "timer trigger payload is invalid"
@@ -144,6 +168,7 @@ class TimerTrigger:
             generation=generation,
             due_at=due_at,
             output=output,
+            expected_source_version=source_version,
         )
 
     @classmethod
@@ -154,6 +179,7 @@ class TimerTrigger:
             generation=scheduled.generation,
             due_at=scheduled.due_at,
             output=scheduled.output,
+            expected_source_version=scheduled.expected_source_version,
         )
 
 
@@ -165,6 +191,7 @@ class ScheduleResult:
     generation: int
     due_at: datetime
     output: TimerOutput
+    expected_source_version: int | None
 
 
 class AcceptanceOutcome(str, Enum):
@@ -179,20 +206,38 @@ class AcceptanceResult:
     outcome: AcceptanceOutcome
     observed_generation: int
     current_generation: int | None
+    expected_source_version: int | None
     replayed: bool = False
 
 
 class CancelOutcome(str, Enum):
     CANCELED = "canceled"
     ALREADY_FIRED = "already_fired"
-    ALREADY_CANCELED = "already_canceled"
     NOTHING_SCHEDULED = "nothing_scheduled"
+    STALE = "stale"
 
 
 @dataclass(frozen=True, slots=True)
 class CancelResult:
     outcome: CancelOutcome
-    generation: int | None
+    observed_generation: int
+    current_generation: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class TimerSnapshot:
+    timer_id: UUID
+    identity: TimerIdentity
+    generation: int
+    status: str
+    due_at: datetime
+    output: TimerOutput
+    expected_source_version: int | None
+    recorded_at: datetime
+    superseded_at: datetime | None
+    canceled_at: datetime | None
+    fired_at: datetime | None
+    expires_at: datetime | None
 
 
 def _identity_key(scope: Scope, identity: TimerIdentity) -> str:
@@ -241,34 +286,180 @@ def _platform_identity_query(
 
 
 def _latest(
-    db: Session, scope: Scope, identity: TimerIdentity
+    db: Session,
+    scope: Scope,
+    identity: TimerIdentity,
+    *,
+    for_update: bool,
 ) -> Timer | PlatformTimer | None:
     if isinstance(scope, TenantScope):
-        tenant_statement = _tenant_identity_query(identity).where(
-            Timer.tenant_id == scope.tenant_id
+        if for_update:
+            db.scalar(
+                text(
+                    "SELECT mod_timers.lock_timer_identity("
+                    ":tenant_id, :owner, :entity_kind, :entity_id, :purpose)"
+                ),
+                {
+                    "tenant_id": scope.tenant_id,
+                    "owner": identity.owner,
+                    "entity_kind": identity.entity_kind,
+                    "entity_id": identity.entity_id,
+                    "purpose": identity.purpose,
+                },
+            )
+        tenant_statement = (
+            _tenant_identity_query(identity)
+            .where(Timer.tenant_id == scope.tenant_id)
+            .order_by(Timer.generation.desc())
+            .limit(1)
         )
-        return db.scalar(tenant_statement.order_by(Timer.generation.desc()).limit(1))
-    platform_statement = _platform_identity_query(identity)
-    return db.scalar(
-        platform_statement.order_by(PlatformTimer.generation.desc()).limit(1)
+        return db.scalar(tenant_statement)
+    if for_update:
+        db.scalar(
+            text(
+                "SELECT mod_timers.lock_platform_timer_identity("
+                ":owner, :entity_kind, :entity_id, :purpose)"
+            ),
+            {
+                "owner": identity.owner,
+                "entity_kind": identity.entity_kind,
+                "entity_id": identity.entity_id,
+                "purpose": identity.purpose,
+            },
+        )
+    platform_statement = (
+        _platform_identity_query(identity)
+        .order_by(PlatformTimer.generation.desc())
+        .limit(1)
+    )
+    return db.scalar(platform_statement)
+
+
+def _snapshot(row: Timer | PlatformTimer) -> TimerSnapshot:
+    return TimerSnapshot(
+        timer_id=row.id,
+        identity=TimerIdentity(
+            owner=row.owner,
+            entity_kind=row.entity_kind,
+            entity_id=row.entity_id,
+            purpose=row.purpose,
+        ),
+        generation=row.generation,
+        status=row.status,
+        due_at=row.due_at,
+        output=TimerOutput(row.output_event_type),
+        expected_source_version=row.expected_source_version,
+        recorded_at=row.recorded_at,
+        superseded_at=row.superseded_at,
+        canceled_at=row.canceled_at,
+        fired_at=row.fired_at,
+        expires_at=row.expires_at,
     )
 
 
-def _timer_by_trigger(
-    db: Session, scope: Scope, trigger: TimerTrigger
-) -> Timer | PlatformTimer | None:
-    if isinstance(scope, TenantScope):
-        tenant_statement = _tenant_identity_query(trigger.identity).where(
-            Timer.id == trigger.timer_id,
-            Timer.generation == trigger.generation,
-            Timer.tenant_id == scope.tenant_id,
-        )
-        return db.scalar(tenant_statement.limit(1))
-    platform_statement = _platform_identity_query(trigger.identity).where(
-        PlatformTimer.id == trigger.timer_id,
-        PlatformTimer.generation == trigger.generation,
+def current_timer(
+    db: Session, *, scope: Scope, identity: TimerIdentity
+) -> TimerSnapshot | None:
+    """Read the latest generation without exporting the package's ORM models."""
+    row = _latest(db, scope, identity, for_update=False)
+    return None if row is None else _snapshot(row)
+
+
+def _trigger_matches_current(
+    trigger: TimerTrigger, current: Timer | PlatformTimer | None
+) -> bool:
+    return (
+        current is not None
+        and current.id == trigger.timer_id
+        and current.generation == trigger.generation
     )
+
+
+def _trigger_evidence_matches_current(
+    trigger: TimerTrigger, current: Timer | PlatformTimer
+) -> bool:
+    return (
+        current.due_at == trigger.due_at
+        and current.output_event_type == trigger.output.event_type
+        and current.expected_source_version == trigger.expected_source_version
+    )
+
+
+def _existing_rejection(
+    db: Session,
+    *,
+    scope: Scope,
+    trigger: TimerTrigger,
+    current_generation: int | None,
+) -> TimerRejection | PlatformTimerRejection | None:
+    if isinstance(scope, TenantScope):
+        statement = select(TimerRejection).where(
+            TimerRejection.tenant_id == scope.tenant_id,
+            TimerRejection.timer_id == trigger.timer_id,
+        )
+        if current_generation is None:
+            statement = statement.where(TimerRejection.current_generation.is_(None))
+        else:
+            statement = statement.where(
+                TimerRejection.current_generation == current_generation
+            )
+        return db.scalar(statement.limit(1))
+    platform_statement = select(PlatformTimerRejection).where(
+        PlatformTimerRejection.timer_id == trigger.timer_id
+    )
+    if current_generation is None:
+        platform_statement = platform_statement.where(
+            PlatformTimerRejection.current_generation.is_(None)
+        )
+    else:
+        platform_statement = platform_statement.where(
+            PlatformTimerRejection.current_generation == current_generation
+        )
     return db.scalar(platform_statement.limit(1))
+
+
+def _record_stale_rejection(
+    db: Session,
+    *,
+    scope: Scope,
+    trigger: TimerTrigger,
+    current_generation: int | None,
+    rejected_at: datetime,
+) -> None:
+    if (
+        _existing_rejection(
+            db,
+            scope=scope,
+            trigger=trigger,
+            current_generation=current_generation,
+        )
+        is not None
+    ):
+        return
+    values = {
+        "id": uuid4(),
+        "timer_id": trigger.timer_id,
+        "owner": trigger.identity.owner,
+        "entity_kind": trigger.identity.entity_kind,
+        "entity_id": trigger.identity.entity_id,
+        "purpose": trigger.identity.purpose,
+        "observed_generation": trigger.generation,
+        "current_generation": current_generation,
+        "expected_source_version": trigger.expected_source_version,
+        "rejected_at": rejected_at,
+    }
+    if isinstance(scope, TenantScope):
+        evidence: TimerRejection | PlatformTimerRejection = TimerRejection(
+            tenant_id=scope.tenant_id, **values
+        )
+    else:
+        evidence = PlatformTimerRejection(**values)
+    db.add(evidence)
+    db.flush()
+
+
+def _cancel_is_stale(observed_generation: int, current_generation: int) -> bool:
+    return observed_generation != current_generation
 
 
 def _transition(
@@ -318,16 +509,19 @@ def schedule_timer(
     due_at: datetime,
     output: TimerOutput,
     recorded_at: datetime,
+    expected_source_version: int | None = None,
     expires_at: datetime | None = None,
 ) -> ScheduleResult:
     """Append one generation and delay its kernel outbox row until ``due_at``."""
     _aware("due_at", due_at)
     _aware("recorded_at", recorded_at)
+    _source_version(expected_source_version)
     if expires_at is not None:
         _aware("expires_at", expires_at)
+    active_outbox_event_types().require(output.event_type)
 
     _lock_identity(db, scope, identity)
-    previous = _latest(db, scope, identity)
+    previous = _latest(db, scope, identity, for_update=True)
     generation = 1 if previous is None else previous.generation + 1
     if previous is not None and previous.status == SCHEDULED:
         if not _transition(
@@ -350,6 +544,7 @@ def schedule_timer(
         generation=generation,
         due_at=due_at,
         output=output,
+        expected_source_version=expected_source_version,
     )
     if isinstance(scope, TenantScope):
         # Function-local by design. Importing a Python submodule first executes
@@ -378,6 +573,7 @@ def schedule_timer(
             status=SCHEDULED,
             due_at=due_at,
             output_event_type=output.event_type,
+            expected_source_version=expected_source_version,
             outbox_event_id=tenant_outbox.id,
             recorded_at=recorded_at,
             expires_at=expires_at,
@@ -403,6 +599,7 @@ def schedule_timer(
             status=SCHEDULED,
             due_at=due_at,
             output_event_type=output.event_type,
+            expected_source_version=expected_source_version,
             outbox_event_id=platform_outbox.id,
             recorded_at=recorded_at,
             expires_at=expires_at,
@@ -416,6 +613,7 @@ def schedule_timer(
         generation=generation,
         due_at=due_at,
         output=output,
+        expected_source_version=expected_source_version,
     )
 
 
@@ -424,20 +622,43 @@ def cancel_timer(
     *,
     scope: Scope,
     identity: TimerIdentity,
+    observed_generation: int,
     recorded_at: datetime,
 ) -> CancelResult:
-    """Cancel the current generation, preserving a distinct terminal verdict."""
+    """Cancel exactly the generation the caller observed, or report staleness."""
     _aware("recorded_at", recorded_at)
-    _lock_identity(db, scope, identity)
-    current = _latest(db, scope, identity)
+    _generation("observed_generation", observed_generation)
+    current = _latest(db, scope, identity, for_update=True)
     if current is None:
-        return CancelResult(CancelOutcome.NOTHING_SCHEDULED, None)
+        return CancelResult(
+            CancelOutcome.NOTHING_SCHEDULED,
+            observed_generation,
+            None,
+        )
+    if _cancel_is_stale(observed_generation, current.generation):
+        return CancelResult(
+            CancelOutcome.STALE,
+            observed_generation,
+            current.generation,
+        )
     if current.status == FIRED:
-        return CancelResult(CancelOutcome.ALREADY_FIRED, current.generation)
+        return CancelResult(
+            CancelOutcome.ALREADY_FIRED,
+            observed_generation,
+            current.generation,
+        )
     if current.status == CANCELED:
-        return CancelResult(CancelOutcome.ALREADY_CANCELED, current.generation)
+        return CancelResult(
+            CancelOutcome.CANCELED,
+            observed_generation,
+            current.generation,
+        )
     if current.status != SCHEDULED:
-        return CancelResult(CancelOutcome.NOTHING_SCHEDULED, current.generation)
+        return CancelResult(
+            CancelOutcome.NOTHING_SCHEDULED,
+            observed_generation,
+            current.generation,
+        )
     generation = current.generation
     if not _transition(
         db,
@@ -451,7 +672,11 @@ def cancel_timer(
             "transition_conflict", "current generation changed unexpectedly"
         )
     db.expire(current)
-    return CancelResult(CancelOutcome.CANCELED, generation)
+    return CancelResult(
+        CancelOutcome.CANCELED,
+        observed_generation,
+        generation,
+    )
 
 
 def _accepted(
@@ -478,40 +703,66 @@ def accept_trigger(
 ) -> AcceptanceResult:
     """Accept only the current generation immediately before the local effect."""
     _aware("accepted_at", accepted_at)
-    _lock_identity(db, scope, trigger.identity)
-    timer = _timer_by_trigger(db, scope, trigger)
-    latest = _latest(db, scope, trigger.identity)
+    latest = _latest(db, scope, trigger.identity, for_update=True)
     current_generation = latest.generation if latest is not None else None
-    if timer is None or timer.status == SUPERSEDED:
+    if not _trigger_matches_current(trigger, latest):
+        _record_stale_rejection(
+            db,
+            scope=scope,
+            trigger=trigger,
+            current_generation=current_generation,
+            rejected_at=accepted_at,
+        )
         return AcceptanceResult(
             AcceptanceOutcome.STALE,
             trigger.generation,
             current_generation,
+            trigger.expected_source_version,
         )
-    if timer.status == CANCELED:
+    if latest is None:
+        raise TimerError(
+            "transition_conflict",
+            "current timer disappeared after current-generation verification",
+        )
+    if not _trigger_evidence_matches_current(trigger, latest):
+        raise TimerError(
+            "invalid_trigger_evidence",
+            "timer trigger evidence does not match the recorded generation",
+        )
+    if latest.status == CANCELED:
         return AcceptanceResult(
             AcceptanceOutcome.CANCELED,
             trigger.generation,
             current_generation,
+            latest.expected_source_version,
         )
-    if timer.status == FIRED:
-        replayed = _accepted(db, scope, timer.id) is not None
+    if latest.status == FIRED:
+        replayed = _accepted(db, scope, latest.id) is not None
         return AcceptanceResult(
             AcceptanceOutcome.CURRENT if replayed else AcceptanceOutcome.ALREADY_FIRED,
             trigger.generation,
             current_generation,
+            latest.expected_source_version,
             replayed=replayed,
         )
-    if timer.status != SCHEDULED or current_generation != trigger.generation:
+    if latest.status != SCHEDULED:
+        _record_stale_rejection(
+            db,
+            scope=scope,
+            trigger=trigger,
+            current_generation=current_generation,
+            rejected_at=accepted_at,
+        )
         return AcceptanceResult(
             AcceptanceOutcome.STALE,
             trigger.generation,
             current_generation,
+            latest.expected_source_version,
         )
     if not _transition(
         db,
         scope=scope,
-        timer_id=timer.id,
+        timer_id=latest.id,
         expected=SCHEDULED,
         target=FIRED,
         changed_at=accepted_at,
@@ -519,16 +770,16 @@ def accept_trigger(
         raise TimerError(
             "transition_conflict", "current generation changed unexpectedly"
         )
-    db.expire(timer)
+    db.expire(latest)
     if isinstance(scope, TenantScope):
         evidence: TimerAcceptance | PlatformTimerAcceptance = TimerAcceptance(
             tenant_id=scope.tenant_id,
-            timer_id=timer.id,
+            timer_id=latest.id,
             accepted_at=accepted_at,
         )
     else:
         evidence = PlatformTimerAcceptance(
-            timer_id=timer.id,
+            timer_id=latest.id,
             accepted_at=accepted_at,
         )
     db.add(evidence)
@@ -537,6 +788,7 @@ def accept_trigger(
         AcceptanceOutcome.CURRENT,
         trigger.generation,
         current_generation,
+        latest.expected_source_version,
     )
 
 
@@ -570,12 +822,14 @@ __all__ = [
     "CancelOutcome",
     "CancelResult",
     "ScheduleResult",
+    "TimerSnapshot",
     "TimerError",
     "TimerIdentity",
     "TimerOutput",
     "TimerTrigger",
     "accept_trigger",
     "cancel_timer",
+    "current_timer",
     "purge_history",
     "schedule_timer",
 ]

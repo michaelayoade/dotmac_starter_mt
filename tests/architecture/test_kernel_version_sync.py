@@ -74,30 +74,36 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# The coordinated modules are direct-allocation cases: released a70 contains
-# none of their permanent namespace rows. Their allocations, Subscriptions'
-# open manifest vocabularies, and the tenant audit prerequisite therefore land
-# together in a71. Other releasable modules are listed below when a later
-# capability raises the effective floor.
+# People and campaigns consume no kernel feature newer than their allocation
+# release. Their required Party-person or consent/idempotency/outbox facilities
+# are present in a71, so the allocation itself is the floor. If either adopts a
+# newer capability, move its row to CAPABILITY_RAISED_FLOORS while retaining
+# the allocation release as evidence there.
+# Durable Timers was allocated independently in a72. The remaining coordinated
+# reusable owners are direct-allocation cases in a75: their permanent namespace
+# rows, Subscriptions' open manifest vocabularies and the tenant-audit
+# prerequisite land together without moving domain behaviour into Kernel.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
+    "dotmac-campaigns": "0.1.0a71",
+    "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
     # CAPABILITY_RAISED_FLOORS below rather than here.
-    "dotmac-billing": "0.1.0a71",
     # Durable timers consumes a67's relay contract, but its own namespace is
     # allocated later, so the allocation remains the effective floor.
-    "dotmac-durable-timers": "0.1.0a71",
-    "dotmac-collections": "0.1.0a71",
-    "dotmac-orders": "0.1.0a71",
-    "dotmac-subscriptions": "0.1.0a71",
-    "dotmac-sales": "0.1.0a71",
-    "dotmac-inbox": "0.1.0a71",
-    "dotmac-surveys": "0.1.0a71",
-    "dotmac-projects": "0.1.0a71",
-    "dotmac-work-orders": "0.1.0a71",
-    "dotmac-positioning": "0.1.0a71",
-    "dotmac-web-analytics": "0.1.0a71",
-    "dotmac-analytics": "0.1.0a71",
+    "dotmac-durable-timers": "0.1.0a72",
+    "dotmac-billing": "0.1.0a75",
+    "dotmac-collections": "0.1.0a75",
+    "dotmac-orders": "0.1.0a75",
+    "dotmac-subscriptions": "0.1.0a75",
+    "dotmac-sales": "0.1.0a75",
+    "dotmac-inbox": "0.1.0a75",
+    "dotmac-surveys": "0.1.0a75",
+    "dotmac-projects": "0.1.0a75",
+    "dotmac-work-orders": "0.1.0a75",
+    "dotmac-positioning": "0.1.0a75",
+    "dotmac-web-analytics": "0.1.0a75",
+    "dotmac-analytics": "0.1.0a75",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

@@ -44,6 +44,8 @@ on:
           - dotmac-integration
           - dotmac-approvals
           - dotmac-application-directory
+          - dotmac-people
+          - dotmac-durable-timers
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

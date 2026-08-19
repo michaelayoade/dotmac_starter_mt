@@ -515,7 +515,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -588,12 +588,30 @@ develop = true
 
 [package.dependencies]
 alembic = ">=1.13"
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
 type = "directory"
 url = "packages/dotmac-billing"
+
+[[package]]
+name = "dotmac-campaigns"
+version = "0.1.0a1"
+description = "Provider-neutral outbound campaign lifecycle, immutable audiences and ordered recipient progression"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-campaigns"
 
 [[package]]
 name = "dotmac-collections"
@@ -606,7 +624,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -641,7 +659,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a72"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -713,7 +731,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -741,7 +759,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a71"
+version = "0.1.0a75"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -795,12 +813,30 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
 type = "directory"
 url = "packages/dotmac-orders"
+
+[[package]]
+name = "dotmac-people"
+version = "0.1.0a1"
+description = "Tenant employment directory, positions, and temporal reporting resolution"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-people"
 
 [[package]]
 name = "dotmac-positioning"
@@ -813,7 +849,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -831,7 +867,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -867,7 +903,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -885,7 +921,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -903,7 +939,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -974,7 +1010,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -993,7 +1029,7 @@ develop = true
 
 [package.dependencies]
 alembic = ">=1.13"
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a75"
 pydantic = "^2.9"
 sqlalchemy = "^2.0"
 
@@ -3163,4 +3199,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "10543340337665578846ab6db92bb1010c0ba7ca19b6ac15340de8ea6577b3c2"
+content-hash = "3f494e194e746b989d46153d4872070a54180c9eb5981208fb66db658d38d678"

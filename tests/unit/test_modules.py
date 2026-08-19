@@ -103,6 +103,7 @@ def test_from_feature_carries_every_field_across() -> None:
         capabilities=["legacy.use"],
         charge_models=["recurring_access"],
         obligation_sources=["accepted_order_line"],
+        outbox_event_types=["legacy.wake"],
         seed=lambda: seed_calls.append(1),
     )
     adapted = ModuleManifest.from_feature(feature)
@@ -116,6 +117,7 @@ def test_from_feature_carries_every_field_across() -> None:
     assert adapted.capabilities == ("legacy.use",)
     assert adapted.charge_models == ("recurring_access",)
     assert adapted.obligation_sources == ("accepted_order_line",)
+    assert adapted.outbox_event_types == ("legacy.wake",)
     assert adapted.seed is not None
     adapted.seed()
     assert seed_calls == [1]

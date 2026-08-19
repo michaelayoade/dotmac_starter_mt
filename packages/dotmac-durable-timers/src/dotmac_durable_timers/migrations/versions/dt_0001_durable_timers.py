@@ -38,8 +38,12 @@ depends_on = resolve_depends_on(
 )
 
 _SCHEMA = "mod_timers"
-_TENANT_TABLES = ("timers", "timer_acceptances")
-_PLATFORM_TABLES = ("platform_timers", "platform_timer_acceptances")
+_TENANT_TABLES = ("timers", "timer_acceptances", "timer_rejections")
+_PLATFORM_TABLES = (
+    "platform_timers",
+    "platform_timer_acceptances",
+    "platform_timer_rejections",
+)
 
 _TENANT_TRANSITION_SIG = (
     "mod_timers.transition_timer(uuid,uuid,text,text,timestamp with time zone)"
@@ -47,6 +51,8 @@ _TENANT_TRANSITION_SIG = (
 _PLATFORM_TRANSITION_SIG = (
     "mod_timers.transition_platform_timer(uuid,text,text,timestamp with time zone)"
 )
+_TENANT_LOCK_SIG = "mod_timers.lock_timer_identity(uuid,text,text,text,text)"
+_PLATFORM_LOCK_SIG = "mod_timers.lock_platform_timer_identity(text,text,text,text)"
 _TENANT_PURGE_SIG = (
     "mod_timers.purge_timer_history(uuid,timestamp with time zone,integer)"
 )
@@ -71,6 +77,7 @@ def _timer_columns(*, tenant: bool) -> list[sa.Column[Any]]:
             sa.Column("status", sa.String(20), nullable=False),
             sa.Column("due_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("output_event_type", sa.String(120), nullable=False),
+            sa.Column("expected_source_version", sa.Integer()),
             sa.Column("outbox_event_id", sa.Uuid(), nullable=False),
             sa.Column("recorded_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("superseded_at", sa.DateTime(timezone=True)),
@@ -164,6 +171,42 @@ def _create_tenant_plane() -> None:
         ),
         schema=_SCHEMA,
     )
+    op.create_table(
+        "timer_rejections",
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("tenant_id", sa.Uuid(), nullable=False),
+        sa.Column("timer_id", sa.Uuid(), nullable=False),
+        sa.Column("owner", sa.String(120), nullable=False),
+        sa.Column("entity_kind", sa.String(120), nullable=False),
+        sa.Column("entity_id", sa.String(255), nullable=False),
+        sa.Column("purpose", sa.String(120), nullable=False),
+        sa.Column("observed_generation", sa.Integer(), nullable=False),
+        sa.Column("current_generation", sa.Integer()),
+        sa.Column("expected_source_version", sa.Integer()),
+        sa.Column("rejected_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"],
+            ["public.tenants.id"],
+            ondelete="CASCADE",
+            name="fk_timer_rejections_tenant",
+        ),
+        sa.CheckConstraint(
+            "observed_generation > 0",
+            name="ck_timer_rejections_observed_generation",
+        ),
+        sa.CheckConstraint(
+            "current_generation IS NULL OR current_generation > 0",
+            name="ck_timer_rejections_current_generation",
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_index(
+        "uq_timer_rejections_observed_current",
+        "timer_rejections",
+        ["tenant_id", "timer_id", sa.text("COALESCE(current_generation, 0)")],
+        unique=True,
+        schema=_SCHEMA,
+    )
     for table in _TENANT_TABLES:
         op.execute(f"ALTER TABLE mod_timers.{table} ENABLE ROW LEVEL SECURITY;")
         op.execute(f"ALTER TABLE mod_timers.{table} FORCE ROW LEVEL SECURITY;")
@@ -221,6 +264,35 @@ def _create_platform_plane() -> None:
             name="fk_platform_timer_acceptances_timer",
         ),
         sa.UniqueConstraint("timer_id", name="uq_platform_timer_acceptances_timer"),
+        schema=_SCHEMA,
+    )
+    op.create_table(
+        "platform_timer_rejections",
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("timer_id", sa.Uuid(), nullable=False),
+        sa.Column("owner", sa.String(120), nullable=False),
+        sa.Column("entity_kind", sa.String(120), nullable=False),
+        sa.Column("entity_id", sa.String(255), nullable=False),
+        sa.Column("purpose", sa.String(120), nullable=False),
+        sa.Column("observed_generation", sa.Integer(), nullable=False),
+        sa.Column("current_generation", sa.Integer()),
+        sa.Column("expected_source_version", sa.Integer()),
+        sa.Column("rejected_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint(
+            "observed_generation > 0",
+            name="ck_platform_timer_rejections_observed_generation",
+        ),
+        sa.CheckConstraint(
+            "current_generation IS NULL OR current_generation > 0",
+            name="ck_platform_timer_rejections_current_generation",
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_index(
+        "uq_platform_timer_rejections_observed_current",
+        "platform_timer_rejections",
+        ["timer_id", sa.text("COALESCE(current_generation, 0)")],
+        unique=True,
         schema=_SCHEMA,
     )
     for table in _PLATFORM_TABLES:
@@ -316,6 +388,114 @@ def _create_transition_functions(planes: frozenset[ModulePlane]) -> None:
         op.execute(
             f"GRANT EXECUTE ON FUNCTION {_PLATFORM_TRANSITION_SIG} TO platform_api;"
         )
+
+
+def _create_lock_functions(planes: frozenset[ModulePlane]) -> None:
+    """Expose row locking without granting online roles history-rewrite rights."""
+    if ModulePlane.TENANT in planes:
+        op.execute(
+            """
+            CREATE FUNCTION mod_timers.lock_timer_identity(
+                p_tenant_id uuid,
+                p_owner text,
+                p_entity_kind text,
+                p_entity_id text,
+                p_purpose text
+            ) RETURNS uuid
+            LANGUAGE plpgsql
+            SECURITY DEFINER
+            SET search_path = ''
+            AS $fn$
+            DECLARE
+                locked_id uuid;
+                current_id uuid;
+            BEGIN
+                IF p_tenant_id IS DISTINCT FROM public.app_current_tenant_id() THEN
+                    RAISE EXCEPTION 'tenant context mismatch'
+                        USING ERRCODE = 'insufficient_privilege';
+                END IF;
+                LOOP
+                    SELECT id INTO locked_id
+                      FROM mod_timers.timers
+                     WHERE tenant_id = p_tenant_id
+                       AND owner = p_owner
+                       AND entity_kind = p_entity_kind
+                       AND entity_id = p_entity_id
+                       AND purpose = p_purpose
+                     ORDER BY generation DESC
+                     LIMIT 1
+                     FOR UPDATE;
+                    IF locked_id IS NULL THEN
+                        RETURN NULL;
+                    END IF;
+                    SELECT id INTO current_id
+                      FROM mod_timers.timers
+                     WHERE tenant_id = p_tenant_id
+                       AND owner = p_owner
+                       AND entity_kind = p_entity_kind
+                       AND entity_id = p_entity_id
+                       AND purpose = p_purpose
+                     ORDER BY generation DESC
+                     LIMIT 1;
+                    EXIT WHEN current_id = locked_id;
+                END LOOP;
+                RETURN locked_id;
+            END
+            $fn$;
+            """
+        )
+        op.execute(f"ALTER FUNCTION {_TENANT_LOCK_SIG} OWNER TO app_admin;")
+        op.execute(f"REVOKE ALL ON FUNCTION {_TENANT_LOCK_SIG} FROM PUBLIC;")
+        op.execute(f"GRANT EXECUTE ON FUNCTION {_TENANT_LOCK_SIG} TO app_user;")
+
+    if ModulePlane.PLATFORM in planes:
+        op.execute(
+            """
+            CREATE FUNCTION mod_timers.lock_platform_timer_identity(
+                p_owner text,
+                p_entity_kind text,
+                p_entity_id text,
+                p_purpose text
+            ) RETURNS uuid
+            LANGUAGE plpgsql
+            SECURITY DEFINER
+            SET search_path = ''
+            AS $fn$
+            DECLARE
+                locked_id uuid;
+                current_id uuid;
+            BEGIN
+                LOOP
+                    SELECT id INTO locked_id
+                      FROM mod_timers.platform_timers
+                     WHERE owner = p_owner
+                       AND entity_kind = p_entity_kind
+                       AND entity_id = p_entity_id
+                       AND purpose = p_purpose
+                     ORDER BY generation DESC
+                     LIMIT 1
+                     FOR UPDATE;
+                    IF locked_id IS NULL THEN
+                        RETURN NULL;
+                    END IF;
+                    SELECT id INTO current_id
+                      FROM mod_timers.platform_timers
+                     WHERE owner = p_owner
+                       AND entity_kind = p_entity_kind
+                       AND entity_id = p_entity_id
+                       AND purpose = p_purpose
+                     ORDER BY generation DESC
+                     LIMIT 1;
+                    EXIT WHEN current_id = locked_id;
+                END LOOP;
+                RETURN locked_id;
+            END
+            $fn$;
+            """
+        )
+        op.execute(f"ALTER FUNCTION {_PLATFORM_LOCK_SIG} OWNER TO app_admin;")
+        op.execute(f"REVOKE ALL ON FUNCTION {_PLATFORM_LOCK_SIG} FROM PUBLIC;")
+        op.execute(f"GRANT EXECUTE ON FUNCTION {_PLATFORM_LOCK_SIG} TO platform_api;")
 
 
 def _create_purge_functions(planes: frozenset[ModulePlane]) -> None:
@@ -421,6 +601,7 @@ def upgrade() -> None:
     if ModulePlane.PLATFORM in planes:
         op.execute("GRANT USAGE ON SCHEMA mod_timers TO platform_api;")
         _create_platform_plane()
+    _create_lock_functions(planes)
     _create_transition_functions(planes)
     _create_purge_functions(planes)
 
@@ -431,6 +612,8 @@ def downgrade() -> None:
         _PLATFORM_PURGE_SIG,
         _TENANT_TRANSITION_SIG,
         _PLATFORM_TRANSITION_SIG,
+        _TENANT_LOCK_SIG,
+        _PLATFORM_LOCK_SIG,
     ):
         op.execute(f"DROP FUNCTION IF EXISTS {signature};")
     for table in (*_PLATFORM_TABLES, *_TENANT_TABLES):

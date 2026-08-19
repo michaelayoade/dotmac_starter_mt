@@ -90,6 +90,7 @@ from dotmac_kernel.planes import (
 )
 from dotmac_kernel.prerequisites import (
     MODULE_DATABASE_ROLES_V1,
+    PARTY_PERSON_CATALOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     validate_prerequisites,
 )
@@ -388,7 +389,11 @@ KERNEL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     branch_label="kernel",
     db_schema=None,
     legacy_revision_pattern=r"^\d{4}_[a-z0-9_]+$",
-    provides=(TENANT_SCOPE_CATALOG_V1.name, MODULE_DATABASE_ROLES_V1.name),
+    provides=(
+        TENANT_SCOPE_CATALOG_V1.name,
+        MODULE_DATABASE_ROLES_V1.name,
+        PARTY_PERSON_CATALOG_V1.name,
+    ),
 )
 
 # The one host assembly composing the kernel (`a001_adopt_cfd` … ), branch label
@@ -585,8 +590,31 @@ NUMBERING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("numbering"),
 )
 
+# `dotmac-people` — the ELEVENTH allocated installable module. It owns a tenant
+# employment directory and references, but does not duplicate, the kernel Party
+# person catalogue. `people` stays readable in catalog dumps and `pe` leaves
+# the revision-id budget for the lineage's descriptive slugs.
+PEOPLE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="people",
+    prefix="pe",
+    branch_label="people",
+    db_schema=module_schema("people"),
+)
+
+# `dotmac-campaigns` — the tenant-only outbound campaign progression owner
+# accepted by ADR-0032. `campaigns` is intentionally explicit in live catalog
+# dumps; the compact `ca` prefix leaves the lineage's revision ids readable.
+# No platform plane was allocated by inference: the audit found no named
+# control-plane consumer, and the module manifest declares tenant tables only.
+CAMPAIGNS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="campaigns",
+    prefix="ca",
+    branch_label="campaigns",
+    db_schema=module_schema("campaigns"),
+)
+
 # `dotmac-billing` — the operational-receivables owner on declared tenant and
-# platform planes. Allocated with the first complete package in kernel a71;
+# platform planes. Allocated with the first complete package in kernel a75;
 # `bi` and `mod_billing` are permanent physical identities, never deployment
 # configuration.
 BILLING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
@@ -619,8 +647,8 @@ COLLECTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # `dotmac-orders` — the tenant-only owner of the customer-order aggregate
-# (ADR-0030 §5b), allocated in the same integrated kernel a71 as Billing,
-# Durable Timers, and Collections.
+# (ADR-0030 §5b), allocated in the same integrated kernel a75 as Billing and
+# Collections. Durable Timers was allocated independently in a72.
 #
 # Orders has no control-plane row set: Vendor CP owns no orders today, while
 # Sub is the qualifying tenant-plane source and first cutover.  The plain
@@ -646,7 +674,7 @@ SUBSCRIPTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 )
 
 # The remaining tenant-only product-first owners allocated in the integrated
-# a71 train. Each row lands with a complete manifest, migration and first
+# a75 train. Each row lands with a complete manifest, migration and first
 # adopter dossier; none composes behavior into the kernel or shares a schema.
 SALES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="sales",
@@ -725,8 +753,10 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     IMPORTS_MIGRATION_OWNER,
     APPROVALS_MIGRATION_OWNER,
     NUMBERING_MIGRATION_OWNER,
-    BILLING_MIGRATION_OWNER,
+    PEOPLE_MIGRATION_OWNER,
+    CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    BILLING_MIGRATION_OWNER,
     COLLECTIONS_MIGRATION_OWNER,
     ORDERS_MIGRATION_OWNER,
     SUBSCRIPTIONS_MIGRATION_OWNER,
@@ -1074,6 +1104,7 @@ __all__ = [
     "BILLING_MIGRATION_OWNER",
     "COLLECTIONS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
+    "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
@@ -1086,6 +1117,14 @@ __all__ = [
     "MIGRATION_OWNER_LEDGER",
     "ORDERS_MIGRATION_OWNER",
     "SUBSCRIPTIONS_MIGRATION_OWNER",
+    "PEOPLE_MIGRATION_OWNER",
+    "INBOX_MIGRATION_OWNER",
+    "POSITIONING_MIGRATION_OWNER",
+    "PROJECTS_MIGRATION_OWNER",
+    "SALES_MIGRATION_OWNER",
+    "SURVEYS_MIGRATION_OWNER",
+    "WEB_ANALYTICS_MIGRATION_OWNER",
+    "WORK_ORDERS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

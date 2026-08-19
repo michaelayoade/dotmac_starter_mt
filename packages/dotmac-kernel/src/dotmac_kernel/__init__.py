@@ -174,6 +174,14 @@ from dotmac_kernel.namespaces import (
     revision_id,
     schema_table_args,
 )
+from dotmac_kernel.outbox_event_types import (
+    DuplicateOutboxEventTypeError,
+    OutboxEventTypeRegistry,
+    OutboxEventTypesNotInstalledError,
+    UndeclaredOutboxEventTypeError,
+    active_outbox_event_types,
+    install_outbox_event_types,
+)
 from dotmac_kernel.permissions import (
     DuplicatePermissionError,
     PermissionCatalogue,
@@ -211,7 +219,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a71"
+__version__ = "0.1.0a75"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -272,6 +280,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.modules",
         "dotmac_kernel.money",
         "dotmac_kernel.namespaces",
+        "dotmac_kernel.outbox_event_types",
         "dotmac_kernel.permissions",
         "dotmac_kernel.planes",
         "dotmac_kernel.platform_auth",
@@ -445,6 +454,13 @@ __all__ = [
     "UndeclaredAuditActionError",
     "install_audit_actions",
     "active_audit_actions",
+    # outbox event-type registry
+    "DuplicateOutboxEventTypeError",
+    "OutboxEventTypeRegistry",
+    "OutboxEventTypesNotInstalledError",
+    "UndeclaredOutboxEventTypeError",
+    "active_outbox_event_types",
+    "install_outbox_event_types",
     # deployment-profile registry (WS1)
     "DeploymentProfileSpec",
     "DeploymentProfileRegistry",

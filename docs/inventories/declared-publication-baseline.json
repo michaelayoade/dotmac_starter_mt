@@ -74,18 +74,13 @@
     },
     "dotmac-collections": {
       "declared": "0.1.0a1",
-      "reason": "AWAITING FIRST RELEASE. a1 is the tenant-only Collections policy and case owner integrated with Billing and Durable Timers on the shared a71 foundation. It is intentionally unpublished while the single Starter PR and Sub adoption-preparation PR collect review, migration and shadow-reconciliation evidence. Remove this row only when the exact dotmac-collections-v0.1.0a1 tag has been produced by the verified module release workflow after separate release authorization; never edit the declared version down or treat integration as a production authority switch.",
+      "reason": "INTENDED pre-adoption state. a1 is the tenant-only Collections policy and case candidate on the shared a75 foundation. It remains unallowlisted and unpublished until its canonical flush-only persistence writer, concurrency proofs and Sub adoption preparation are complete. Never treat integration as a production authority switch.",
       "state": "never-published"
     },
-    "dotmac-durable-timers": {
+    "dotmac-campaigns": {
       "declared": "0.1.0a1",
-      "reason": "AWAITING FIRST RELEASE. The previously overlapping provisional kernel allocation is reconciled into the integrated module branch at a71. The module remains intentionally unpublished while the combined Starter PR and the typed Sub adoption sequence collect review and CI evidence. Remove this row only when the exact dotmac-durable-timers-v0.1.0a1 tag has been produced by the verified module release workflow after separate authorization; never edit the declared version down or publish before the adopter evidence is reviewable.",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
-    },
-    "dotmac-kernel": {
-      "declared": "0.1.0a71",
-      "reason": "AWAITING RELEASE AUTHORIZATION. Released a70 is the canonical audit-identity predecessor. The coordinated a71 allocates the independently owned reusable modules in this PR, publishes tenant_audit_log.v1 and the open Subscriptions vocabularies, and preserves explicit multi-module SQLite composition without moving domain behavior into Kernel. Michael authorized draft PR preparation but explicitly did not authorize publishing a release. Delete this row only when the exact dotmac-kernel-v0.1.0a71 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or reuse a70.",
-      "state": "declared-unpublished"
     },
     "dotmac-imports": {
       "declared": "0.1.0a2",
@@ -146,6 +141,11 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED pre-adoption state. The tenant-only physical-execution owner is audit-complete, while Vendor InstallationProject remains explicitly excluded and Sub adoption has not begun. Keep it unallowlisted and unpublished until the named Sub cutover supplies shadow, reconciliation and retirement evidence.",
       "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a75",
+      "reason": "AWAITING RELEASE AUTHORIZATION. Published a72 is the Durable Timers allocation predecessor. The coordinated a75 allocates the remaining independent reusable owners, adds the tenant_audit_log.v1 prerequisite and the open Subscriptions vocabularies without moving domain behavior into Kernel. Delete this row only when the exact dotmac-kernel-v0.1.0a75 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or reuse a73/a74.",
+      "state": "declared-unpublished"
     }
   }
 }

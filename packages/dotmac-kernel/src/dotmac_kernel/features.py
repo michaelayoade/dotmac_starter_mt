@@ -134,6 +134,10 @@ class FeatureManifest:
     # `dotmac_kernel.audit.write_audit_event` rejects one no module declares.
     # See `dotmac_kernel.audit_actions.AuditActionRegistry`.
     audit_actions: Sequence[str] = field(default_factory=tuple)
+    # Durable outbox event types this feature consumes and owns. Producers
+    # resolve these routing codes against the installed manifest set before
+    # enqueueing; see `dotmac_kernel.outbox_event_types`.
+    outbox_event_types: Sequence[str] = field(default_factory=tuple)
     # Setting domains this module DECLARES and OWNS. A domain groups settings
     # under one owner; `dotmac_kernel.settings_resolver` rejects a spec or a
     # write naming one no module declares. See

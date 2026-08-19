@@ -17,6 +17,7 @@ from dotmac_kernel.prerequisites import (
     BINDINGS_ENV_VAR,
     KERNEL_PREREQUISITES,
     MODULE_DATABASE_ROLES_V1,
+    PARTY_PERSON_CATALOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     DuplicateBindingError,
     DuplicatePrerequisiteError,
@@ -87,6 +88,7 @@ def test_the_kernel_ships_exactly_the_effects_modules_need() -> None:
         "outbox_relay.v1",
         "tenant_audit_log.v1",
         "platform_audit_log.v1",
+        "party_person_catalog.v1",
     }
 
 
@@ -432,6 +434,7 @@ def test_the_kernel_lineage_declares_what_it_supplies() -> None:
     assert set(KERNEL_MIGRATION_OWNER.provides) == {
         TENANT_SCOPE_CATALOG_V1.name,
         MODULE_DATABASE_ROLES_V1.name,
+        PARTY_PERSON_CATALOG_V1.name,
     }
 
 

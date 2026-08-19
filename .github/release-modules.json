@@ -493,19 +493,27 @@
         ]
       }
     },
-    "dotmac-billing": {
-      "package_dir": "packages/dotmac-billing",
-      "import_name": "dotmac_billing",
+    "dotmac-people": {
+      "$comment": [
+        "Tenant employment-directory owner extracted product-first from ERP.",
+        "Kernel a71 allocates mod_people and names party_person_catalog.v1;",
+        "Backoffice is the first exact-pin consumer after this a1 release."
+      ],
+      "package_dir": "packages/dotmac-people",
+      "import_name": "dotmac_people",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a70",
-      "db_schema": "mod_billing",
-      "tag_prefix": "dotmac-billing-v",
+      "kernel_floor": "0.1.0a71",
+      "db_schema": "mod_people",
+      "tag_prefix": "dotmac-people-v",
       "wheel_contents": {
         "required": [
-          "dotmac_billing/py.typed",
-          "dotmac_billing/manifest.py",
-          "dotmac_billing/migrations/__init__.py",
-          "dotmac_billing/migrations/versions/bi_0001_billing.py"
+          "dotmac_people/py.typed",
+          "dotmac_people/manifest.py",
+          "dotmac_people/contracts.py",
+          "dotmac_people/models.py",
+          "dotmac_people/service.py",
+          "dotmac_people/migrations/__init__.py",
+          "dotmac_people/migrations/versions/pe_0001_people_directory.py"
         ],
         "forbidden_prefixes": [
           "app/",
@@ -514,7 +522,6 @@
           "scripts/"
         ],
         "allowed_requires": [
-          "alembic",
           "dotmac-kernel",
           "sqlalchemy",
           "python"
@@ -522,10 +529,22 @@
       }
     },
     "dotmac-durable-timers": {
+      "$comment": [
+        "Generation-safe due work on separately selectable tenant and platform",
+        "planes. The allowlist entry lands with the exact PostgreSQL proof",
+        "revision: the module reuses the kernel outbox relay rather than",
+        "shipping a second claim, lease, retry or dead-letter engine.",
+        "",
+        "kernel_floor is a72. That release allocates mod_timers / dt /",
+        "durable_timers and publishes the manifest-owned outbox-event-type",
+        "registry that schedule_timer resolves before it writes timer or outbox",
+        "state. The root migration requires outbox_relay.v1 and verifies it in",
+        "the adopting database before creating either selected plane."
+      ],
       "package_dir": "packages/dotmac-durable-timers",
       "import_name": "dotmac_durable_timers",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a70",
+      "kernel_floor": "0.1.0a72",
       "db_schema": "mod_timers",
       "tag_prefix": "dotmac-durable-timers-v",
       "wheel_contents": {
@@ -536,34 +555,6 @@
           "dotmac_durable_timers/service.py",
           "dotmac_durable_timers/migrations/__init__.py",
           "dotmac_durable_timers/migrations/versions/dt_0001_durable_timers.py"
-        ],
-        "forbidden_prefixes": [
-          "app/",
-          "tests/",
-          "alembic/",
-          "scripts/"
-        ],
-        "allowed_requires": [
-          "dotmac-kernel",
-          "sqlalchemy",
-          "python"
-        ]
-      }
-    },
-    "dotmac-collections": {
-      "package_dir": "packages/dotmac-collections",
-      "import_name": "dotmac_collections",
-      "manifest_attr": "module",
-      "kernel_floor": "0.1.0a70",
-      "db_schema": "mod_coll",
-      "tag_prefix": "dotmac-collections-v",
-      "wheel_contents": {
-        "required": [
-          "dotmac_collections/py.typed",
-          "dotmac_collections/manifest.py",
-          "dotmac_collections/models.py",
-          "dotmac_collections/migrations/__init__.py",
-          "dotmac_collections/migrations/versions/cl_0001_collections.py"
         ],
         "forbidden_prefixes": [
           "app/",

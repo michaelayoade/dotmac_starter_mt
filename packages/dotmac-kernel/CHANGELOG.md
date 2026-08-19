@@ -6,10 +6,10 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a71 — UNRELEASED
+## 0.1.0a75 — UNRELEASED
 
-Allocates the independent reusable owners in the coordinated module landing;
-no domain behavior moves into Kernel and none is composed into Starter.
+Allocates the remaining independent reusable owners in the coordinated module
+landing; no domain behavior moves into Kernel and none is composed into Starter.
 
 ### Added
 
@@ -17,10 +17,10 @@ no domain behavior moves into Kernel and none is composed into Starter.
   consumed by `dotmac-subscriptions` as open ADR-0008 registries rather than
   fixed kernel enums.
 - The permanent `subscriptions` / `su` / `mod_subscriptions` migration-owner
-  allocation. Billing, collections, durable timers and orders remain peer
+  allocation. Billing, Collections, Durable Timers and Orders remain peer
   owners and do not share its lineage.
-- Permanent namespace identities for Billing (`bi`), Durable Timers (`dt`),
-  Collections (`cl`), Orders (`or`), Sales (`sa`), Inbox (`ib`), Surveys
+- Permanent namespace identities for Billing (`bi`), Collections (`cl`),
+  Orders (`or`), Sales (`sa`), Inbox (`ib`), Surveys
   (`sv`), Projects (`pj`), Work Orders (`wo`), Positioning (`po`), Web
   Analytics (`wa`) and aggregate Analytics (`ay`). Each package owns an
   independent lineage with its declared short-code schema, including
@@ -29,12 +29,53 @@ no domain behavior moves into Kernel and none is composed into Starter.
   tenant-scoped `public.audit_events` writer, including canonical actor shape,
   tenant FK/index, FORCE RLS and append-only online privileges.
 
+## 0.1.0a72 — UNRELEASED
+
+Allocates the independent durable-timer module lineage and adds the declaration
+surface its output routing contract requires. This is an allocation and a
+vocabulary guard, not a second timer engine in the kernel.
+
+### Added
+
+- `DURABLE_TIMERS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_timers`, revision prefix `dt`, branch label `durable_timers`. The module
+  owns timer identity, generation and terminal evidence; it consumes the
+  existing `outbox_relay.v1` prerequisite for delivery mechanics.
+- A manifest-declared outbox event-type registry so timer outputs fail closed
+  on an undeclared routing code instead of enqueueing work no consumer owns.
+
+## 0.1.0a71 — 2026-08-18
+
+Allocates the independent tenant-only people and campaigns lineages, names and
+proves the Party-person catalogue consumed by employment-directory modules,
+and keeps optional-package imports and large test assemblies independent of
+database configuration and SQLite's ten-attachment ceiling.
+
+### Added
+
+- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
+  branch label `campaigns`. The module owns provider-neutral campaign
+  progression and consumes the kernel's consent, idempotency and outbox owners.
+- `party_person_catalog.v1`, covering the required `public.parties` and
+  `public.party_persons` columns, keys, relationship, forced tenant RLS,
+  tenant-policy marker, and `app_user` read posture without coupling consumers
+  to unrelated Party extensions.
+- `verify_party_person_catalog`, a live-catalog verifier that refuses a stamped,
+  aliased, unprotected, unusable, or structurally incompatible provider.
+- `PEOPLE_MIGRATION_OWNER`: `pe`, branch `people`, schema `mod_people`.
+
 ### Changed
 
-- Reusable SQLite test composition is explicit: importing an optional module
-  populates metadata but does not install its schema. Unit assemblies name
-  their module schemas; PostgreSQL remains authoritative for exact namespaces,
-  row-level security and grants.
+- Defers the canonical conflict-savepoint import in consent and idempotency
+  write paths until execution, so independently installable module contracts
+  can be imported before an assembly configures `DATABASE_URL`.
+- `dotmac_kernel.testing.create_test_engine(tables=...)` can now create an
+  explicit assembly/package metadata slice. This keeps qualified SQLite module
+  schemas while preventing test collection of uncomposed packages from
+  exhausting SQLite's ten attached-database slots.
+- The reference assembly binds the effect to kernel `0003_party_identity`;
+  installable modules continue to name only the effect.
+
 ## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known

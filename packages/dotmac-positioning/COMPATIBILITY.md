@@ -2,7 +2,7 @@
 
 The stable surface is the names exported by `dotmac_positioning.__all__`.
 
-Version `0.1.0a1` requires `dotmac-kernel >=0.1.0a71`, which allocates the
+Version `0.1.0a1` requires `dotmac-kernel >=0.1.0a75`, which allocates the
 immutable `mod_pos` schema and `po` migration lineage. The module is tenant
 plane only and requires `tenant_scope_catalog.v1` plus
 `module_database_roles.v1` from its composing assembly.

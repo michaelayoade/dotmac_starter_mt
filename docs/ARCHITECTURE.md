@@ -478,6 +478,8 @@ packages/dotmac-imports/         optional bulk-import run ledger
                  TESTED HERE, NOT COMPOSED by this reference assembly. The
                  domain owns the field vocabulary, validation and mutation;
                  `dotmac-files` owns the bytes the run reads.
+packages/dotmac-people/          tenant employment-directory owner (`pe`)
+packages/dotmac-campaigns/       tenant outbound-progression owner (`ca`)
 packages/dotmac-billing/         dual-plane operational receivables (`bi`)
 packages/dotmac-durable-timers/  dual-plane durable timing mechanics (`dt`)
 packages/dotmac-collections/     tenant delinquency policy and cases (`cl`)
@@ -1394,6 +1396,17 @@ made concrete — every model has exactly one declared owner.
 | Web analytical projection/privacy rows | `mod_webanalytics.sessionization_rules`, `projection_generations`, `visitor_projections`, `session_projections`, `session_event_links`, `aggregate_metrics`, `funnel_definitions`, `funnel_results`, `privacy_deletion_evidence`, `projection_drift_evidence` | `dotmac-web-analytics` optional module | Deterministic rebuildable sessions/aggregates/funnels plus caller-directed retention/deletion and drift evidence. Consent, attribution, campaigns and dashboards remain outside. |
 | Aggregate metric declaration/evidence rows | `mod_analytics.metric_catalog_entries`, `metric_ingest_receipts`, `metric_observations`, `metric_projection_rebuilds` | `dotmac-analytics` optional module | Immutable tenant-local declaration snapshots, kernel-deduplicated source receipts, exact `NUMERIC(38,12)` aggregate observations and rebuild evidence. Domain owners calculate metrics; the receipt is evidence, not a second idempotency ledger. |
 | Aggregate metric point rows | `mod_analytics.metric_points` | `dotmac-analytics` optional module | Sole mutable analytical projection, deterministically rebuilt from observations by `(observed_at, received_at, observation_id)` rank. It is never authority for metric meaning or a source-domain lifecycle. |
+| `Campaign` / `CampaignRevision` / `CampaignStep` | `mod_campaigns.campaigns`, `campaign_revisions`, `campaign_steps` | `dotmac-campaigns` optional module | Tenant-only provider-neutral campaign identity and its immutable active execution plan. Product audience, financial and sender business rules are typed inputs; Template Studio and Durable Timers remain assembly-bound owners (ADR-0032; [`campaigns-sources.md`](inventories/campaigns-sources.md)). |
+| `CampaignAudience` / `CampaignRecipient` / `CampaignConsentReceipt` | `mod_campaigns.campaign_audiences`, `campaign_recipients`, `campaign_consent_receipts` | `dotmac-campaigns` optional module | Immutable source-versioned audience and delivery snapshots plus observations of the kernel consent owner's decision at audience, delayed-step and final-delivery gates. They do not become Party/customer or consent-policy records. PII carries an explicit deadline and can only move to the database-enforced scrubbed form after sending begins. |
+| `CampaignRecipientStep` / `CampaignDeliveryIntent` | `mod_campaigns.campaign_recipient_steps`, `campaign_delivery_intents` | `dotmac-campaigns` optional module | One unique recipient/step progression fact and one provider-neutral intent. The package emits deterministic timer identities through a port and writes the kernel outbox atomically; it owns no scheduler, relay, provider credentials, I/O or retry. |
+| `CampaignObservation` / `CampaignResponse` | `mod_campaigns.campaign_observations`, `campaign_responses` | `dotmac-campaigns` optional module | Append-only deduplicated delivery/open/click/reply observations and response/conversion-correlation facts. Delivery projection is precedence-checked; the assembly asks Sales about a Lead and Inbox remains the message/conversation owner. |
+| `CampaignUnsubscribeRequest` / `CampaignCounter` | `mod_campaigns.campaign_unsubscribe_requests`, `campaign_counters` | `dotmac-campaigns` optional module | Request evidence around a kernel-consent write, plus rebuildable aggregate projection. The counter is never authoritative and the drift/rebuild service derives it from recipient facts. |
+| `Employee` | `mod_people.employees` | `dotmac-people` optional module | Product-first port of ERP's narrow employment relationship: one kernel Party person per tenant, stable code, lifecycle state/dates, and optional catalogue references. Personal identity, auth, reporting caches, compensation, payroll, attendance, finance and integrations are excluded ([`people-directory-sources.md`](inventories/people-directory-sources.md)). |
+| `Department` | `mod_people.departments` | `dotmac-people` optional module | Tenant department identity and hierarchy. ERP's competing `head_id` employee pointer and cost-centre FK do not port; department head is derived through one declared head position and its dated incumbent. |
+| `Designation` | `mod_people.designations` | `dotmac-people` optional module | Tenant job-title catalogue. ERP's NCC reporting category remains with its regulatory consumer rather than widening the directory contract. |
+| `EmploymentType` | `mod_people.employment_types` | `dotmac-people` optional module | Tenant employment-arrangement catalogue with no payroll or product-integration fields. |
+| `Position` | `mod_people.positions` | `dotmac-people` optional module | Canonical reporting hierarchy and vacancy-routing policy. Vacancy is derived from dated assignments; ERP's persisted `is_vacant` cache is deliberately not ported. |
+| `PositionAssignment` | `mod_people.position_assignments` | `dotmac-people` optional module | Historical PRIMARY/ACTING/INTERIM occupancy. Service checks preserve ERP behavior and a PostgreSQL trigger serializes and rejects all overlapping primary intervals, including the finite intervals ERP's open-ended partial indexes missed. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -1452,8 +1465,9 @@ write:
 | Collections state rows | **Open release-readiness gap:** the integrated candidate declares persistent policy/case/arrangement/grace/notice/action/reconciliation models and pure typed engines, but currently exposes no flush-only persistence service that can be their canonical writer. It must not be released or adopted until that owner path and its concurrency proofs exist. |
 | Stored-file metadata and physical state | `dotmac_files.service.stage_file` / `request_deletion`, then the explicit target→external-action→record-result phases (`deletion_target` → `delete_object` → `finalize_purge`; `reconciliation_target` → `observe_object` → `record_presence`). DB phases filter explicit `TenantScope` and flush without commit/rollback; provider phases accept no `Session`, so no network call or download stream holds a DB transaction. The owner covers only provider/byte state. Domain attachment relations, read authorization, retention permission, document meaning, and import outcomes remain with the domain that references the opaque file UUID (ADR-0022). |
 | Import run and row outcomes | `dotmac_imports.service` — `create_dry_run`, `validate_next_chunk` (which takes no applier and therefore cannot mutate a domain), `promote` (digest-verified, uniquely constrained so a validated run applies once), `apply_next_chunk`, `mark_failed`. A chunk call locks the run, hashes and decodes the recorded bytes, resumes after the committed checkpoint, and returns without committing; `dotmac_kernel.db` remains the one transaction authority. Completed re-delivery is a no-op. Expected domain refusals are typed `RowRejected` outcomes; unexpected exceptions roll back the attempted chunk and escape. The importing domain remains the sole writer of its own rows through the `RowValidator`/`RowApplier` ports, and owns any reversal of what an import created (ADR-0025). |
-| Durable timer generations and acceptance evidence | `dotmac_durable_timers.service` is the sole lifecycle writer on both declared planes: `schedule_timer`, `cancel_timer`, `accept_trigger`, and `purge_history`. Identity-level PostgreSQL advisory locks serialize even the first schedule; database security-definer transitions keep online roles from directly rewriting or deleting terminal evidence. A schedule calls the kernel outbox writer in the same transaction and sets `available_at=due_at`; `dotmac_kernel.messaging.relay` remains the sole owner of claim, lease, retry and dead-letter behavior. Business deadline policy and the effect after an accepted trigger remain with the adopting product. This reference assembly builds and proves the optional package but does not compose its `dt` lineage. |
 | Customer orders, finite coverage readiness and fulfillment-request identity | `dotmac_orders.service`: `submit_order` is the only aggregate/snapshot constructor; `accept_order` and `cancel_order` own lifecycle transitions; `record_coverage_resolution` is the only coverage-receipt writer and derives readiness under a row lock; `acknowledge_fulfillment` records downstream acceptance; `reconcile_fulfillment_publications` repairs only missing/dead outbox projection from frozen authoritative inputs. `get_order_snapshot` and `get_order_timeline` are the typed readers for the aggregate and official trail. All commands take an explicit `TenantScope`, use the kernel at-most-once owner, flush without commit/rollback, and import no Billing, Subscription, Fulfillment or product implementation. The package is not composed here and owns no adapter until Sub's separate shadow/cutover change. |
+| Outbound campaign identity and recipient progression | `dotmac_campaigns.service` — `create_campaign`/`revise_campaign`, `ingest_audience`, `schedule_campaign`, `accept_due_work`, `record_observation`, pause/resume/cancel/complete, `authorize_delivery`, `request_unsubscribe`, counter rebuild and publication/privacy repair. Every path receives and flushes the caller session. Kernel consent decides eligibility, kernel idempotency owns replay, kernel outbox owns publication, Durable Timers owns due-work mechanics, and product adapters supply audience/render/sender/Sales facts; none is a parallel campaigns writer (ADR-0032). |
+| Durable timer generations, cancellation and acceptance/rejection evidence | `dotmac_durable_timers.service` is the sole lifecycle writer on both declared planes: `schedule_timer`, `cancel_timer`, `accept_trigger`, `current_timer`, and `purge_history`. Identity-level PostgreSQL advisory locks serialize even the first schedule; cancellation names the observed generation and refuses a newer current generation; trigger acceptance re-derives current state and records stale evidence with observed/current generations and the opaque source version. The package exports typed ports, never ORM models. A schedule resolves the consuming module's manifest-declared outbox event type, calls the kernel outbox writer in the same transaction and sets `available_at=due_at`; `dotmac_kernel.messaging.relay` remains the sole owner of claim, lease, retry and dead-letter behavior. Business deadline policy and the effect after an accepted trigger remain with the adopting product. This reference assembly builds and proves the optional package but does not compose its `dt` lineage. |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
 
 ### Known dual-writer: Parties (auth register vs. parties service)
@@ -1689,12 +1703,13 @@ inert fields would be exactly that. Its `settings` field is present only as
 
 ## Manifest declaration catalogues
 
-Six registries now work this way, and **ADR-0008 makes the shape the standard**:
+Seven declaration catalogues now work this way, and **ADR-0008 makes the shape
+the standard**:
 a kernel-level vocabulary whose members belong to modules is DECLARED on module
 manifests and validated by a registry — never enumerated by the kernel as an enum
 or a fixed list, and never pinned by a CHECK constraint on the backing column.
 Each one arrived WITH its consumer, under the directive's "a declaration has no
-consumer" rule. The sixth registry carries two related but independent member
+consumer" rule. The seventh registry carries two related but independent member
 sets — charge models and obligation sources — under one subscriptions boundary.
 
 | Declaration | Catalogue (owner) | Real consumer | When an undeclared reference fails |
@@ -1702,21 +1717,23 @@ sets — charge models and obligation sources — under one subscriptions bounda
 | `FeatureManifest`/`ModuleManifest.permissions` (`PermissionSpec`: `code`, `description`, `default_roles`) | `dotmac_kernel.permissions.PermissionCatalogue` | `dotmac_kernel.deps.require_permission(code)` — resolves the spec and requires the actor to hold one of its `default_roles`, 403 otherwise | at BOOT: `create_app` walks every mounted route's stamped code and raises `UndeclaredPermissionError` |
 | `...capabilities` (`CapabilitySpec`) | `dotmac_kernel.capabilities.CapabilityCatalogue` | `dotmac_kernel.deps.require_capability` | at the request (`UndeclaredCapabilityError`) |
 | `...audit_actions` (bare codes) | `dotmac_kernel.audit_actions.AuditActionRegistry` | `dotmac_kernel.audit.write_audit_event` | at the WRITE, before anything is added to the session (`UndeclaredAuditActionError`) |
+| `...outbox_event_types` (bare codes) | `dotmac_kernel.outbox_event_types.OutboxEventTypeRegistry` | `dotmac_durable_timers.schedule_timer` | before scheduling takes a lock or writes a timer/outbox row (`UndeclaredOutboxEventTypeError`) |
 | `...feature_flags` (`FeatureFlagSpec`) | `dotmac_kernel.flags.FlagCatalogue` | `dotmac_kernel.flags.resolve_flag` | at resolution (`UndeclaredFlagError`) |
 | `...setting_domains` (bare codes) | `dotmac_kernel.setting_domains.SettingDomainRegistry` | `dotmac_kernel.settings_resolver.upsert_by_key`/`ensure_by_key`, and the settings admin API's path-to-domain lookup | at the WRITE (`UndeclaredSettingDomainError`); an unknown domain in a URL is a 404 |
 | `...charge_models` + `...obligation_sources` (independent bare-code sets) | `dotmac_subscriptions.vocabulary.SubscriptionVocabularyRegistry` | offer publication, contract recording and occurrence generation | at the owning service call (`SubscriptionDataError`); duplicate ownership fails registry construction |
 
-Both are siblings of `CapabilityCatalogue` (WS1) in shape and posture, and gate
+They are siblings of `CapabilityCatalogue` (WS1) in shape and posture, and gate
 different questions — capability: "is this TENANT entitled?"; permission: "does
 this ACTOR hold it?". A code has exactly one owning module; two declarations of
 the same code raise on catalogue construction. Both catalogues are installed
 process-wide by `create_app` from the INSTALLED module set (not the enabled
 subset — disabling a module must not turn a real code into an undeclared one),
 the same pattern `install_surface_globals` uses. Permissions default to an EMPTY
-catalogue so a missing authorization installer denies safely. Audit actions and setting
-domains distinguish NOT INSTALLED from INSTALLED-EMPTY: the former raises
-`AuditActionsNotInstalledError` / `SettingDomainsNotInstalledError`, while the
-latter rejects every action or domain as undeclared. The asymmetry is about what
+catalogue so a missing authorization installer denies safely. Audit actions,
+outbox event types and setting domains distinguish NOT INSTALLED from
+INSTALLED-EMPTY: the former raises `AuditActionsNotInstalledError` /
+`OutboxEventTypesNotInstalledError` / `SettingDomainsNotInstalledError`, while
+the latter rejects every member as undeclared. The asymmetry is about what
 each default DOES — an uninstalled permission catalogue denies, the safe answer
 for an authorization check; an uninstalled write-path registry would reject
 writes inside the caller's transaction and turn a wiring mistake into a failed

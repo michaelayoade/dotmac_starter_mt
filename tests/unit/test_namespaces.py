@@ -189,17 +189,17 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # first enabling owner of the Cloud commerce programme, and dual-plane for
     # the same reason approvals is: a tenant allocates its own document series
     # and the control plane allocates vendor-side series no tenant may read.
-    # `billing` is the eleventh, allocating the single dual-plane owner of
-    # operational receivables under ADR-0020 without composing it into Starter.
-    # `durable_timers` is the twelfth and reuses the kernel outbox relay rather
-    # than adding another due-work engine. `collections` is the tenant-only
-    # delinquency-policy owner.
-    # `orders` is tenant-only: Sub is its qualifying source and first cutover,
-    # while Vendor CP owns no control-plane order today.
-    # Sales, Inbox, Surveys, Projects, Work Orders, Positioning, Web Analytics
-    # and aggregate Analytics complete a71 without composing any into this
-    # assembly.
-    # None of these allocations installs behaviour in the kernel.
+    # `people` is the eleventh: a tenant-only employment directory that links
+    # to, and never duplicates, the kernel Party-person catalogue.
+    # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
+    # audit found no real named platform consumer.
+    # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
+    # than adding another due-work engine. Billing is the single dual-plane
+    # operational-receivables owner; Collections and Orders are tenant-only;
+    # Subscriptions is dual-plane. Sales, Inbox, Surveys, Projects, Work Orders,
+    # Positioning, Web Analytics and aggregate Analytics complete a75 without
+    # composing any of them into this assembly. No allocation installs domain
+    # behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -211,6 +211,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "imports",
         "integration",
         "approvals",
+        "people",
+        "campaigns",
         "billing",
         "durable_timers",
         "collections",

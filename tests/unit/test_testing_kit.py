@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 import pytest
 from dotmac_kernel import ProductAssemblySpec, create_app
+from dotmac_kernel.models import Base
 from dotmac_kernel.providers.provisioning import (
     ProvisioningProvider,
     ProvisioningRequest,
@@ -30,12 +31,17 @@ from dotmac_kernel.testing import (
 from sqlalchemy import Column, Integer, MetaData, Table, inspect, text
 
 
+def _public_tables():
+    """Kernel/host tables needed by the generic harness examples."""
+    return tuple(table for table in Base.metadata.tables.values() if not table.schema)
+
+
 # ── harness ──────────────────────────────────────────────────────────────────
 def test_assembly_test_client_boots_and_serves_health() -> None:
     """The kit boots a real create_app assembly and overrides its DB deps onto
     an isolated session — the same path a consumer's integration-ish unit test
     takes."""
-    engine = create_test_engine()
+    engine = create_test_engine(tables=_public_tables())
     try:
         with isolated_session(engine) as session:
             app = create_app(ProductAssemblySpec(name="kit-test", modules=()))
@@ -52,7 +58,7 @@ def test_assembly_test_client_boots_and_serves_health() -> None:
 def test_isolated_session_rolls_back_between_uses() -> None:
     from dotmac_kernel.models import Tenant
 
-    engine = create_test_engine()
+    engine = create_test_engine(tables=_public_tables())
     try:
         with isolated_session(engine) as session:
             session.add(Tenant(slug="acme", name="Acme"))
@@ -115,6 +121,21 @@ def test_too_many_explicit_module_schemas_are_refused_without_translation() -> N
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────
+def test_harness_can_select_the_exact_tables_owned_by_its_test_assembly() -> None:
+    """Unrelated package imports must not exhaust SQLite's attachment limit."""
+
+    engine = create_test_engine(tables=_public_tables())
+    try:
+        with engine.connect() as connection:
+            attached = {
+                row[1]
+                for row in connection.exec_driver_sql("PRAGMA database_list").all()
+            }
+        assert not {name for name in attached if name.startswith("mod_")}
+    finally:
+        engine.dispose()
+
+
 def test_fake_clock_is_deterministic_and_advanceable() -> None:
     clock = FakeClock()
     start = clock.now()
