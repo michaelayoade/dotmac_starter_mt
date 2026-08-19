@@ -3,6 +3,8 @@
 **As of:** 2026-08-19  
 **Source mode:** greenfield after six-repository inventory  
 **Candidate allocation:** kernel a77, `si`, `sites`, `mod_sites`  
+**Gate 2 code/evidence revision:**
+`8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`
 **Release/adoption:** not authorized
 
 No qualifying site-builder exists at the exact coordinates recorded in
@@ -16,6 +18,30 @@ Observer checkout using Poetry 2.4.1 produced 13 passing source/evidence cases
 and 40 controlled failures, all naming the absent `dotmac_sites` distribution.
 Ruff lint passed; its two formatting-only corrections are recorded in the next
 commit. Gate 2 may now add the smallest implementation.
+
+Gate 2 is GREEN at exact revision
+`8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`. A fresh, detached, writable and
+tag-complete Observer checkout using Poetry 2.4.1 passed:
+
+- all 124 focused Sites, numbering-regression and quality-coverage cases;
+- `make check`, including nine import contracts, mypy over 365 source files,
+  Bandit, the migration gate, generated-catalogue and format checks;
+- all 4,028 collected unit/architecture cases; and
+- all 509 collected disposable-PostgreSQL integration cases, including all
+  five dedicated Sites RLS, same-tenant and immutability cases.
+
+The PostgreSQL 16 container used a unique loopback port and Compose project;
+its container and network were removed after the run. This is candidate
+evidence only: no package was published, allowlisted, composed or adopted.
+
+The complete-gate run also proved a reusable guard defect. Four typed packages
+were missing from one or both explicitly enumerated mypy/Bandit recipes. The
+new discovery-driven architecture test now requires every distribution that
+ships `py.typed` to appear in both recipes and includes a planted-omission
+sensitivity proof. Enabling the omitted `dotmac-numbering` scan exposed and
+fixed its previously unchecked strict typing and an ineffective Ruff-only SQL
+suppression; the migration now enforces its static identifier premise before
+using the narrow Ruff/Bandit annotations.
 
 ## Revision-1 persistence contract
 
@@ -80,11 +106,12 @@ fields, that contract must be extended explicitly before remote cutover.
    dossier and canaries while `dotmac-sites` is absent.
 2. **Complete:** on Observer at exact commit `9f735b4`, the focused suite was
    RED only because the distribution was absent: 13 passed, 40 failed.
-3. Add service canaries before runtime code; the PostgreSQL isolation canary was
-   already present in the Gate 1 commit.
-4. Allocate a77 only in the same slice as the manifest and `si_0001_sites`.
-5. Implement the five-table owner and local release contract; validate focused,
+3. **Complete:** service canaries preceded the runtime service; the PostgreSQL
+   isolation canary was already present in the Gate 1 commit.
+4. **Complete:** a77 was allocated in the same slice as the manifest and
+   `si_0001_sites`.
+5. **Complete:** the five-table owner and local release contract passed focused,
    full unit/architecture, full disposable PostgreSQL and live-catalog/RLS
-   suites on Observer.
-6. Keep release, allowlisting, Backoffice composition and remote deployment
+   suites on Observer at exact revision `8bf12dd`.
+6. **Still closed:** keep release, allowlisting, Backoffice composition and remote deployment
    closed until separately authorized.

@@ -1,7 +1,8 @@
 # `dotmac-sites` implementation and Backoffice adoption plan
 
 **Status:** Gate 1 controlled RED recorded at exact commit
-`9f735b4ba5d7fd6c529c9d1d289aa0e245af2541`; Gate 2 may start.
+`9f735b4ba5d7fd6c529c9d1d289aa0e245af2541`; Gate 2 is complete and GREEN at
+exact commit `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`.
 **First adopter:** Backoffice. **Second candidate:** Sub, independently.  
 **Release/adoption:** separately gated.
 
@@ -54,6 +55,15 @@ the tested tree.
 
 **Exit:** a validated local candidate that is still unpublished, unallowlisted,
 uncomposed and unadopted.
+
+**Recorded 2026-08-19:** A fresh detached, writable, tag-complete Observer
+checkout at `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`, installed from the committed
+lock with Poetry 2.4.1, passed 124 focused cases, `make check`, all 4,028
+collected unit/architecture cases and all 509 collected disposable-PostgreSQL
+integration cases. The latter included all five dedicated Sites isolation,
+same-tenant and database-immutability canaries. The PostgreSQL 16 container and
+network were removed after the run. The exit state remains unpublished,
+unallowlisted, uncomposed and unadopted.
 
 ## Gate 3 — remote release seam
 
