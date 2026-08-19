@@ -35,6 +35,7 @@ from dotmac_media_observations import (
     NodeTypeDeclaration,
     NormalizedObservationCase,
     ObservationConflict,
+    ObservationKind,
     ObservationSource,
     ProviderRestatement,
     RatioValue,
@@ -167,20 +168,57 @@ def _entity(
 
 
 def _conformance_case() -> NormalizedObservationCase:
+    node_declaration = NodeTypeDeclaration(
+        tenant_id=TENANT,
+        code="campaign",
+        version=1,
+        label="Campaign",
+        traits={"aggregate": True},
+        declared_by="conformance-fake",
+        declared_at=T0,
+    )
+    metric_declaration = MetricDefinitionDeclaration(
+        tenant_id=TENANT,
+        code="reported_impressions",
+        version=1,
+        label="Reported impressions",
+        value_type=MetricValueType.COUNT,
+        unit="impression",
+        semantic=MetricSemantic.IMPRESSIONS,
+        declared_by="conformance-fake",
+        declared_at=T0,
+    )
     return NormalizedObservationCase(
-        node_declarations=(
-            NodeTypeDeclaration(
-                tenant_id=TENANT,
-                code="campaign",
-                version=1,
-                label="Campaign",
-                traits={"aggregate": True},
-                declared_by="conformance-fake",
-                declared_at=T0,
+        node_declarations=(node_declaration,),
+        metric_declarations=(metric_declaration,),
+        observations=(
+            _entity(
+                "conformance-parent",
+                entity_ref="campaign-parent",
+                name="Parent campaign",
+            ),
+            _entity(
+                "conformance-child",
+                entity_ref="campaign-child",
+                name="Child campaign",
+            ),
+            HierarchyObservation(
+                source=_source("conformance-hierarchy"),
+                external_account_ref="account-7",
+                child_entity_ref="campaign-child",
+                parent_entity_ref="campaign-parent",
+            ),
+            MetricObservation(
+                source=_source("conformance-metric"),
+                external_account_ref="account-7",
+                entity_ref="campaign-child",
+                metric_code="reported_impressions",
+                metric_version=1,
+                period_start=T0,
+                period_end=T0 + timedelta(days=1),
+                value=CountValue(9),
             ),
         ),
-        metric_declarations=(),
-        observations=(_entity("conformance-entity"),),
     )
 
 
@@ -1019,25 +1057,50 @@ def test_append_only_model_set_excludes_only_rebuildable_projections() -> None:
 def test_provider_free_normalization_conformance_replays_a_stable_fixture(
     db: Session,
 ) -> None:
+    case = _conformance_case()
     report = run_normalized_conformance(db, _FakeNormalizedProducer())
 
     assert report.spi_version == CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
-    assert report.observation_count == 1
-    assert report.replay_count == 1
+    assert report.observation_count == 4
+    assert report.replay_count == 4
     assert report.installation_ref == "installation-alpha"
     assert report.source_system == "external-media"
-    assert len(report.observation_ids) == 1
-    assert len(report.content_fingerprints) == 1
-    assert len(report.facts) == 1
-    fact = report.facts[0]
-    assert fact.observation_id == report.observation_ids[0]
-    assert fact.content_fingerprint == report.content_fingerprints[0]
-    assert fact.source_observation_id == "conformance-entity"
-    assert fact.normalization_version == 1
+    assert report.node_declarations == case.node_declarations
+    assert report.metric_declarations == case.metric_declarations
+    assert report.observation_kinds == (
+        ObservationKind.ENTITY,
+        ObservationKind.ENTITY,
+        ObservationKind.HIERARCHY,
+        ObservationKind.METRIC,
+    )
+    assert len(report.observation_ids) == 4
+    assert len(report.content_fingerprints) == 4
+    assert len(report.facts) == 4
+    assert (
+        tuple(fact.observation_id for fact in report.facts)
+        == report.observation_ids
+    )
     assert tuple(
-        (receipt.transport_receipt_ref, receipt.received_at)
+        fact.content_fingerprint for fact in report.facts
+    ) == report.content_fingerprints
+    assert tuple(fact.source_observation_id for fact in report.facts) == (
+        "conformance-parent",
+        "conformance-child",
+        "conformance-hierarchy",
+        "conformance-metric",
+    )
+    assert {fact.kind for fact in report.facts} == set(ObservationKind)
+    assert all(fact.normalization_version == 1 for fact in report.facts)
+    assert tuple(
+        receipt.transport_receipt_ref
+        for fact in report.facts
         for receipt in fact.transport_receipts
-    ) == (("receipt-conformance-entity", T0 + timedelta(minutes=2)),)
+    ) == (
+        "receipt-conformance-parent",
+        "receipt-conformance-child",
+        "receipt-conformance-hierarchy",
+        "receipt-conformance-metric",
+    )
 
 
 @pytest.mark.parametrize(
@@ -1064,3 +1127,60 @@ def test_normalized_conformance_refuses_missing_malformed_or_incompatible_spi(
 
     with pytest.raises(expected_error, match="SPI version"):
         run_normalized_conformance(db, producer)  # type: ignore[arg-type]
+
+
+def test_normalized_conformance_refuses_a_missing_case_factory(db: Session) -> None:
+    class Producer:
+        normalized_observation_spi_version = (
+            CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
+        )
+
+    with pytest.raises(UnsupportedObservation, match="normalized case"):
+        run_normalized_conformance(db, Producer())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    (
+        (object(), "NormalizedObservationCase"),
+        (
+            NormalizedObservationCase(
+                node_declarations=(object(),),  # type: ignore[arg-type]
+                metric_declarations=(),
+                observations=(_entity("malformed-node-declaration"),),
+            ),
+            "node declaration",
+        ),
+        (
+            NormalizedObservationCase(
+                node_declarations=(),
+                metric_declarations=(object(),),  # type: ignore[arg-type]
+                observations=(_entity("malformed-metric-declaration"),),
+            ),
+            "metric declaration",
+        ),
+        (
+            NormalizedObservationCase(
+                node_declarations=(),
+                metric_declarations=(),
+                observations=(object(),),  # type: ignore[arg-type]
+            ),
+            "observation command",
+        ),
+    ),
+)
+def test_normalized_conformance_refuses_malformed_case_members_with_typed_errors(
+    db: Session,
+    case: object,
+    message: str,
+) -> None:
+    class Producer:
+        normalized_observation_spi_version = (
+            CURRENT_NORMALIZED_OBSERVATION_SPI_VERSION
+        )
+
+        def normalized_case(self) -> object:
+            return case
+
+    with pytest.raises(InvalidObservation, match=message):
+        run_normalized_conformance(db, Producer())  # type: ignore[arg-type]
