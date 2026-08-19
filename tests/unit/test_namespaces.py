@@ -197,7 +197,11 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # than adding another due-work engine. `commercial_agreements` (ADR-0033) is
     # the fourteenth: platform-only, because the vendor control plane is the one
     # consumer that exists today and no tenant data plane holds a vendor<->operator
-    # agreement. None of these allocations installs behaviour in the kernel.
+    # agreement. `licensing` (ADR-0033 § 2) is the fifteenth, and its plane is a
+    # SECURITY boundary rather than an absent consumer — issuance must not live
+    # inside the deployment it authorises, and the receiving half already verifies
+    # offline through `dotmac_kernel.licensing`.
+    # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -213,6 +217,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "campaigns",
         "durable_timers",
         "commercial_agreements",
+        "licensing",
     }
 
 

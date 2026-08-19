@@ -1,0 +1,39 @@
+[tool.poetry]
+name = "dotmac-licensing"
+version = "0.1.0a1"
+description = "DotMac Licensing — the issuer half of WS8: signed, versioned, revocable software-use authority derived from an active agreement's allocated entitlement (ADR-0033 § 2)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_licensing", from = "src" }]
+include = [
+    { path = "src/dotmac_licensing/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_licensing/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# The one runtime dependency (ADR-0006 § 2). Notably NOT
+# `dotmac-commercial-agreements` or `dotmac-entitlement-allocation`: both
+# couplings are cut at `LicensableGrant` in `ports.py`, which is what makes this
+# module independently releasable and what the `Modules are independent of each
+# other` import-linter contract enforces.
+#
+# Notably also NOT `cryptography`. This package signs nothing — `LicenceSigner`
+# is a port with no implementation here (ADR-0009, hard rule 20), so the
+# asymmetric-crypto dependency belongs to whichever product holds the key. What
+# this package DOES need from the kernel is the VERIFIER, which it round-trips
+# every envelope through before recording it.
+#
+# The floor is the ALLOCATION: a75 carries this module's `mod_licensing` ledger
+# row, and no earlier kernel can register the module at all —
+# `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError`. The two
+# declared request-time prerequisites are older (`idempotency_ledger.v1` in a66,
+# `platform_audit_log.v1` in a68), so a lower floor would fail on the allocation
+# rather than on a capability — a worse error message for the same defect, since
+# the manifest raises while it is being CONSTRUCTED.
+dotmac-kernel = ">=0.1.0a75"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
