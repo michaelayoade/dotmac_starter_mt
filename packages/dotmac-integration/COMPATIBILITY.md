@@ -8,8 +8,8 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | `0.1.0a1` through **`0.1.0a9`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2** |
-| Declared | `0.1.0a10`, SPI 1.3 |
+| Released | `0.1.0a1` through **`0.1.0a10`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3** |
+| Current | `0.1.0a10`, SPI 1.3 |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
