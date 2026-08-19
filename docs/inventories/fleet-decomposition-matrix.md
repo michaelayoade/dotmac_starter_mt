@@ -189,7 +189,7 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | campaigns-marketing | 0 | 4 | 4 | 1 | 0 | 1 | 3 | `dotmac-campaigns` ← Sub; CRM/Mkt copies retire |
 | notifications-comms | 7 | 14 | 18 | 1 | 0 | 11 | 1 | kernel (consent + outbox) + module ← Sub; Mkt copy retires |
 | content-publishing | 0 | 0 | 0 | 4 | 0 | 0 | 0 | `dotmac-content` + `dotmac-publishing` ← Mkt |
-| marketing-observations | 0 | 0 | 0 | 5 | 0 | 0 | 0 | `dotmac-media-observations` + `dotmac-web-analytics` ← Mkt |
+| marketing-observations | 0 | 0 | 0 | 5 | 0 | 0 | 0 | `dotmac-media-observations` ← Mkt + `dotmac-web-analytics` greenfield after audit |
 | engagement-inbox | 0 | 28 | 29 | 0 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
 | sales-agreements | 7 | 13 | 24 | 0 | 2 | 8 | 2 | consolidate CRM → Sub, then module ← Sub; vendor rows are a distinct module ← vendor CP (A2(a), ruled 2026-08-12) |
 | commercial-offers | 0 | 0 | 2 | 0 | 1 | 1 | 0 | module source **unassigned** (Sub or vendor CP) — A2 |
@@ -238,7 +238,9 @@ The 2026-08-18 Mkt addendum adds three measurement families:
 are measurement buckets, not packages. The source audit decomposes them into
 `dotmac-content`, `dotmac-publishing`, `dotmac-media-observations`,
 `dotmac-web-analytics` and `dotmac-campaigns`, with ERP-sourced `dotmac-forms`
-and greenfield `dotmac-sites` completing the suite. See
+and greenfield `dotmac-sites` completing the suite. Mkt qualifies for the media
+owner only; the later focused web audit found no qualifying first-party
+analytics source, so that owner is greenfield-after-inventory. See
 [`marketing-suite-sources.md`](marketing-suite-sources.md).
 
 Mkt has 39 class-mapped tables: 11 marketing tables and 28 inherited platform,
@@ -312,7 +314,7 @@ families and the ratchet applies.
 | notifications-comms | Sub `notification*`, `comms_*`; CRM `notification.py`, `comms.py`; ERP `notification.py`; Mkt inherited `notifications` | 4, 11 exact + 1 aliased | every surface | 4 product lineages | Consent/suppression exists only in Sub; delivery/outbox is the kernel outbox built repeatedly ([`consent-suppression-sources.md`](consent-suppression-sources.md), [`delivery-outbox-sources.md`](delivery-outbox-sources.md)) | consent + outbox → kernel; template rendering → template studio; channel policy → settings | **Consent before delivery.** Mkt's notification copy retires and campaigns stay a separate owner. |
 | campaigns-marketing | Sub `comms_campaigns`; CRM campaign services; Mkt `CampaignService` | 3 implementations, 1 exact + 3 aliased names | Backoffice first; Sub later independently | One `mod_*` lineage per adopter; no shared rows | Sub alone proves build-time and pre-send suppression, global marketing unsubscribe, sequences and send windows | `dotmac-campaigns` ← Sub | Port Sub parity tests, accept typed audience candidates, compose Backoffice, shadow/reconcile, then retire the selected old writer. CRM/Mkt are comparison and retirement inputs. |
 | content-publishing | Mkt campaign calendar, posts, assets and deliveries | 1 implementation, 4 class tables plus 3 association tables | Backoffice first | Separate content and publishing module lineages per adopter | Content lifecycle and publication intent are distinct; stored bytes stay in `dotmac-files`, remote delivery stays in Integrator | `dotmac-content` + `dotmac-publishing` ← Mkt | Preserve planning and partial-delivery parity, replace provider adapters with typed outbox commands, cut Backoffice over, then retire Mkt writers. |
-| marketing-observations | Mkt channel/ad metrics and GA4-normalized daily aggregates | 1 implementation, 5 class tables | Backoffice first | Separate media-observation and web-analytics lineages per adopter | Imported provider facts are observations and cannot decide content, campaign or publication lifecycle | `dotmac-media-observations` + `dotmac-web-analytics` ← Mkt | Port normalized upsert/aggregation parity only; Integrator owns OAuth, provider clients, fetch schedules and checkpoints. |
+| marketing-observations | Mkt channel/ad metrics and GA4-normalized daily aggregates; no qualifying first-party web ledger | 1 provider-observation implementation, 5 class tables; no first-party implementation | Backoffice first | Separate media-observation and web-analytics lineages per adopter | Imported provider facts are observations and cannot decide content, campaign or publication lifecycle; they are not first-party visitor/session evidence | `dotmac-media-observations` ← Mkt; `dotmac-web-analytics` greenfield after audit | Port normalized provider upsert/aggregation parity into media observations only. Reconcile Web Analytics' committed Starter engine from its greenfield proof. Integrator owns OAuth, provider clients, fetch schedules and checkpoints. |
 | forms-data-capture | ERP `forms` models and `FormEngineService` | 1 implementation, 7 tables | Backoffice first | `dotmac-forms` lineage in each adopter | Generic definition/submission authority is separable from recruitment and other product subjects | `dotmac-forms` ← ERP | Replace Organization/product FKs with tenant scope and opaque subject references; backfill/shadow before retiring each ERP form writer slice. |
 | sites | No qualifying implementation in the audited five repositories | none | Backoffice first | future `dotmac-sites` lineage | Local immutable site/page revisions own content; hosting execution is transport | `dotmac-sites` (greenfield-after-inventory) | Land greenfield proof and adopter canary first; store a local immutable snapshot before emitting `SiteRelease` to Integrator. |
 
@@ -485,7 +487,7 @@ track refines, rather than bypasses, the general waves above:
 | Wave | Work | Gate |
 |---|---|---|
 | **M0** | Pin the five-product audit, classify all seven owners and add Mkt to the fleet/fact measurements. | Complete in the source dossier; refresh the inaccessible Mkt remote before porting code. |
-| **M1** | Port parity canaries for Mkt content/publishing/media/web analytics, Sub campaigns and ERP forms; add the sites greenfield/adopter canary. | Tests first; campaigns retain the consent/suppression dependency. |
+| **M1** | Port parity canaries for Mkt content/publishing/media, Sub campaigns and ERP forms; add the sites and web-analytics greenfield/adopter canaries. | Tests first; campaigns retain the consent/suppression dependency. |
 | **M2** | Implement and release one independent module at a time, with manifest, lineage, RLS, typed ports/outbox and owner documentation. | No sibling imports, provider clients, product switches or zero-consumer code. |
 | **M3** | Compose exact releases in Backoffice, backfill, shadow, reconcile, flip writers and retire the selected Mkt/ERP/Sub local owner slice. | Backoffice is cutover 1; a copied source that still writes is not adoption. |
 | **M4** | Let Sub adopt selected releases independently. | Separate rows and lineages; API/webhook synchronization only; no shared database. |

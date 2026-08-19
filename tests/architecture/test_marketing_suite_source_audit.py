@@ -3,8 +3,7 @@
 The source audit deliberately decomposes the suite before any package exists.
 This guard prevents a future implementation from quietly turning the seven
 owners back into a marketing monolith, laundering provider transport into a
-domain module, or claiming a product-first source for the greenfield site
-builder.
+domain module, or claiming a product-first source for a greenfield owner.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ EXPECTED_SOURCES = {
     "dotmac-sites": ("greenfield-after-inventory", "none"),
     "dotmac-publishing": ("product-first", "dotmac_mkt"),
     "dotmac-media-observations": ("product-first", "dotmac_mkt"),
-    "dotmac-web-analytics": ("product-first", "dotmac_mkt"),
+    "dotmac-web-analytics": ("greenfield-after-inventory", "none"),
     "dotmac-forms": ("product-first", "dotmac_erp"),
     "dotmac-campaigns": ("product-first", "dotmac_sub"),
 }

@@ -6,6 +6,17 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a78 — UNRELEASED
+
+Allocates the independent tenant first-party web-observation lineage. This is
+physical namespace identity only; analytics behavior remains in the optional
+module.
+
+### Added
+
+- `WEB_ANALYTICS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_webanalytics`, revision prefix `wa`, and branch label `web_analytics`.
+
 ## 0.1.0a77 — UNRELEASED
 
 Allocates the independent tenant website-composition lineage. This is physical

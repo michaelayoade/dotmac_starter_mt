@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "dotmac-web-analytics"
+version = "0.1.0a1"
+description = "Privacy-first first-party website observations and deterministic analytical projections"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_web_analytics", from = "src" }]
+include = [
+  { path = "src/dotmac_web_analytics/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_web_analytics/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# a78 is the first kernel release containing the immutable `web_analytics`
+# namespace/lineage allocation. The release workflow must not publish this
+# package until that exact kernel floor exists on the private index.
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+# Alembic is an assembly migration tool, not a package runtime dependency.
+# Only the version file imports it, and that file runs inside the adopter's
+# migration process; the public module surface does not import Alembic.
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

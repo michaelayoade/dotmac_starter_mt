@@ -671,6 +671,17 @@ SITES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("sites"),
 )
 
+# `dotmac-web-analytics` — the EIGHTEENTH allocated installable module. It owns
+# tenant-scoped first-party observation evidence and deterministic analytical
+# projections. Websites, consent policy, attribution and transport remain with
+# their product or Integration owners.
+WEB_ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="web_analytics",
+    prefix="wa",
+    branch_label="web_analytics",
+    db_schema=module_schema("webanalytics"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -690,6 +701,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     CONTENT_MIGRATION_OWNER,
     PUBLISHING_MIGRATION_OWNER,
     SITES_MIGRATION_OWNER,
+    WEB_ANALYTICS_MIGRATION_OWNER,
 )
 
 
@@ -1039,6 +1051,7 @@ __all__ = [
     "PEOPLE_MIGRATION_OWNER",
     "PUBLISHING_MIGRATION_OWNER",
     "SITES_MIGRATION_OWNER",
+    "WEB_ANALYTICS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

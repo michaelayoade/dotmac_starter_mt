@@ -95,6 +95,9 @@ dotmac-publishing = { path = "packages/dotmac-publishing", develop = true }
 # Tenant-only website composition and immutable local release snapshots.
 # Greenfield after the fleet audit; Backoffice is the first candidate adopter.
 dotmac-sites = { path = "packages/dotmac-sites", develop = true }
+# Tenant-only privacy-minimised first-party observations and deterministic
+# projections. The committed candidate is reconciled here but remains parked.
+dotmac-web-analytics = { path = "packages/dotmac-web-analytics", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -177,6 +180,7 @@ module = [
     "dotmac_content.*",
     "dotmac_publishing.*",
     "dotmac_sites.*",
+    "dotmac_web_analytics.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -238,6 +242,7 @@ root_packages = [
     "dotmac_content",
     "dotmac_publishing",
     "dotmac_sites",
+    "dotmac_web_analytics",
 ]
 
 [[tool.importlinter.contracts]]
@@ -304,6 +309,7 @@ source_modules = [
     "dotmac_content",
     "dotmac_publishing",
     "dotmac_sites",
+    "dotmac_web_analytics",
 ]
 forbidden_modules = ["app"]
 
@@ -352,6 +358,7 @@ modules = [
     "dotmac_content",
     "dotmac_publishing",
     "dotmac_sites",
+    "dotmac_web_analytics",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -398,6 +405,7 @@ forbidden_modules = [
     "dotmac_content",
     "dotmac_publishing",
     "dotmac_sites",
+    "dotmac_web_analytics",
     "dotmac_auth_oidc",
 ]
 

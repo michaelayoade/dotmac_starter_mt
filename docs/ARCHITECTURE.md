@@ -67,6 +67,15 @@ revenue and business consequences remain outside the module (ADR-0033). The
 package is built here but is not composed or release-allowlisted while Michael's
 2026-08-18 adoption pause is active.
 
+First-party website measurement is a separate tenant-local owner. The
+`dotmac-web-analytics` package owns privacy-admitted append-only observations,
+typed event classification, deterministic session/route/source/device/event/
+funnel projections, retention/privacy deletion and drift repair (ADR-0035).
+Products retain websites, routes, event vocabularies, consent and retention
+policy, identity, attribution, campaigns and dashboards. Integrator retains
+remote transport, providers and credentials. The package is built here but is
+not composed, release-allowlisted or adopted.
+
 For ticketing this means separate local installations: Sub owns operational
 customer/service tickets, ERP owns only its internal back-office tickets, and
 the vendor control plane owns vendor-support tickets. A remotely owned ticket
@@ -1396,6 +1405,7 @@ write:
 | Platform audit events | `dotmac_kernel.audit.write_platform_audit_event` is the sole constructor/writer. Kernel owns the storage contract as `platform_audit_log.v1`; migration `0026_platform_audit_log` makes online history append-only, and the live verifier proves shape, FK/index, no RLS, tenant-role isolation, and `platform_api` `SELECT`+`INSERT` only. Consumer declarations and DDL-free verification revisions follow only after kernel a68 is published, so their declared floor is resolvable. Current limitation: deleting a `PlatformAdmin` nulls actor attribution, so immutable actor snapshotting remains a separate unresolved hardening slice. |
 | Integrator shadow-comparison evidence | `dotmac_integration.shadow.record_shadow_observation` is the sole writer; it appends and flushes a closed, privacy-safe outcome keyed by the module receipt UUID and explicit comparison revision. `due_shadow_receipt_ids` and `shadow_report` are the only scheduling/report readers. The destination product owns the comparison and its domain reads; the thin `dotmac_integrator` assembly owns only transaction boundaries and transport. This high-volume worker state is not projected from the kernel operator-audit ledger. |
 | External media observation facts and projections | `dotmac_media_observations.service` is the only package writer: declaration and `record_*` functions append normalized facts/receipts/restatements; `_refresh_projections` and `reconcile_projections` alone replace disposable current rows. A connector emits typed commands but never writes these tables. No product composes the module while adoption is paused (ADR-0033). |
+| First-party web observations and analytical projections | `dotmac_web_analytics.service`, `.projections` and `.retention` own admitted observation evidence, typed classification, deterministic rebuild/drift repair and caller-directed expiry/privacy deletion. Product and Integrator adapters supply policy and transport facts; no product composes the candidate yet (ADR-0035). |
 | Communication suppressions | `dotmac_kernel.consent.suppress`, `unsuppress`, and `unsuppress_marketing`; delivery never writes the table directly — a suppressing provider receipt delegates to `consent.suppress` in the same transaction |
 | Communication delivery receipts | `dotmac_kernel.delivery.record_receipt` — the only constructor/writer; it preserves each provider status transition, deduplicates repeated callbacks, and delegates suppressing consequences to the consent owner |
 | Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |

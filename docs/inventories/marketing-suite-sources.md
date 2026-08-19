@@ -1,6 +1,6 @@
 # Decomposed marketing suite source inventory
 
-**Status:** Source audit complete; campaigns is merged, while content, publishing and media observations are implemented and parked; none is adopted
+**Status:** Source audit complete; campaigns is merged, while content, publishing, media observations, sites and web analytics are implemented and parked; none is adopted
 **As of:** 2026-08-19
 **Decision owner:** Michael
 **Default first adopter:** Backoffice; campaigns is the Sub-first ADR-0032 exception
@@ -20,7 +20,7 @@ implementations at these exact revisions:
 | Repository | Revision | Audit role |
 | --- | --- | --- |
 | `dotmac_starter_mt` | `c6ef6cd7b13105bd95c3faf354ffee9032077625` | Target contracts, kernel facilities and extraction rules |
-| `dotmac_mkt` | `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d` | Candidate content, publishing, media-observation and web-analytics behavior |
+| `dotmac_mkt` | `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d` | Candidate content, publishing and media-observation behavior; provider-aggregate web requirements only |
 | `dotmac_sub` | `510b80ca7fab4f54a57f261872f94b5e972c8eb6` | Mandatory campaign, consent and suppression behavior |
 | `dotmac_erp` | `dd6416cd981ffdf48564e2770b87d3cd7201186c` | Generic versioned form engine and submission behavior |
 | `dotmac_crm` | `60daaa2dd305696636632f48505ab784110a55d2` | Competing campaign implementation and negative site/analytics census |
@@ -113,7 +113,7 @@ correction are also complete; release and adoption remain separate gates.
 | `dotmac-sites` | `greenfield-after-inventory` | `none` | No qualifying site-builder implementation was found in Starter, `dotmac_mkt`, ERP, CRM, Sub or Backoffice. The checked-in greenfield proof freezes its ownership of immutable page/site revisions and release readiness, not publication intent or hosting transport. Gate 1 produced 13 passing evidence cases and 40 intended missing-package failures at `9f735b4`. Gate 2 is complete at exact revision `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`: 124 focused cases, `make check`, 4,028 unit/architecture cases and 509 disposable-PostgreSQL cases passed, including all five Sites isolation/immutability canaries. The a77/a1 candidate remains unpublished, unallowlisted, uncomposed and unadopted. |
 | `dotmac-publishing` | `product-first` | `dotmac_mkt` | Gate 2 was Observer-green at `5a1892c3aac30b607cc28baa52217870e97bc63c`. The candidate owns immutable releases, ordered opaque-target deliveries, monotonic attempts, normalized observations and explicit partial/all-failed reconciliation. It preserves qualifying `PostDelivery` scheduling meaning while replacing direct provider adapters with kernel outbox intents and an assembly-supplied typed timer port. Its a76 allocation after immutable a73, media a74 and content a75 is combined-train green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`. Publishing a1 remains local, unpublished, unallowlisted, uncomposed and unadopted. |
 | `dotmac-media-observations` | `product-first` | `dotmac_mkt` | The complete parked candidate is reconciled through branch head `2ade09d16c3e2d246ad361129c4700de6eff819b`; immutable published kernel a73 lacks the media allocation, so the module keeps the next free kernel floor, a74. Its combined train is Observer-green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`; the package remains unreleased, unallowlisted, uncomposed and unadopted. Preserve normalized remote post/ad hierarchy and idempotent metric upserts from `AdSyncService`, `ChannelMetric`, `AdCampaign`, `AdGroup`, `Ad` and `AdMetric`. These are observations; they never assign another module's authoritative lifecycle. |
-| `dotmac-web-analytics` | `product-first` | `dotmac_mkt` | Preserve the provider-neutral daily web metric vocabulary and aggregation behavior for sessions, pageviews, users and bounce rate. GA4 HTTP/OAuth code is rejected; Integrator records typed observations that this local owner projects and reconciles. |
+| `dotmac-web-analytics` | `greenfield-after-inventory` | `none` | No audited product owns the complete first-party, privacy-minimising observation and deterministic-projection contract. Mkt's normalized daily provider metrics remain requirements for a separate observation boundary, not source code for this ledger. Reconcile the already-committed Starter candidate at `abef05ac5fd121ca254bb74eafcc7c9970e90dfd` onto kernel a78; do not rebuild it from the dirty prototype worktree. Release, composition and Backoffice/Sub adoption remain gated. |
 | `dotmac-forms` | `product-first` | `dotmac_erp` | Preserve organization-scoped definitions, immutable versions, sections, typed fields/options, validation, submissions and answer snapshots from ERP's `forms` models and `FormEngineService`. Replace Organization and domain entity coupling with Tenant scope and opaque subject references. |
 | `dotmac-campaigns` | `product-first` | `dotmac_sub` | Implemented on Starter main, but deliberately unreleased and unadopted. Registry-verified a72 contains its namespace allocation and Durable Timers a1; published a73 supplies the caller-session mechanics required by Sub and is therefore the effective package floor. Satisfy Sub's owner, lineage and timer-adoption gates before publication. Preserve audience building, sequences, send windows, canonical senders, attempt/outcome state, unsubscribe and pre-send suppression rechecks. Sub is the mandatory campaign source and cutover 1; Backoffice is cutover 2. CRM and `dotmac_mkt` are parity/retirement inputs, not competing owners. |
 
@@ -235,8 +235,10 @@ marketing suite and follow their independently selected project/work owner.
 1. Keep the verified `dotmac_mkt` pin current and freeze every source revision
    in its package dossier before the first code port.
 2. Extract source parity canaries before implementation: content/media/
-   publishing/web analytics from `dotmac_mkt`, campaigns from Sub, and forms
-   from ERP. `dotmac-sites` starts with its greenfield proof and adopter canary.
+   publishing from `dotmac_mkt`, campaigns from Sub, and forms from ERP.
+   `dotmac-sites` and web analytics start from their greenfield proofs and
+   adopter canaries; web analytics then reconciles its committed Starter
+   implementation rather than creating a second engine.
 3. Implement one module slice at a time with its manifest, `mod_*` namespace,
    independent migration lineage, RLS canary, typed ports and owner row in
    `docs/ARCHITECTURE.md`.

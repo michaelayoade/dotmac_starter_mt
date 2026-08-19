@@ -83,8 +83,8 @@
       "state": "never-published"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a77",
-      "reason": "OUTSTANDING MARKETING ALLOCATION PREREQUISITE. Immutable published a73 contains caller-session transaction mechanics but none of the parked marketing allocations. This combined branch therefore allocates media observations in a74, content in a75, publishing in a76 and sites in a77; all four dependent packages remain unpublished, unallowlisted and unadopted. Keep a77 unpublished until an explicitly authorized protected-main kernel release is registry-verified; never repoint an immutable alpha or edit the version down.",
+      "declared": "0.1.0a78",
+      "reason": "OUTSTANDING MARKETING ALLOCATION PREREQUISITE. Immutable published a73 contains caller-session transaction mechanics but none of the parked marketing allocations. This combined branch therefore allocates media observations in a74, content in a75, publishing in a76, sites in a77 and web analytics in a78; all five dependent packages remain unpublished, unallowlisted, uncomposed and unadopted. Keep a78 unpublished until an explicitly authorized protected-main kernel release is registry-verified; never repoint an immutable alpha or edit the version down.",
       "state": "previous-version-published"
     },
     "dotmac-media-observations": {
@@ -100,6 +100,11 @@
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "state": "never-published"
+    },
+    "dotmac-web-analytics": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED GATE-2 CANDIDATE, NOT A RELEASE. The committed tenant-only first-party observation and deterministic-projection implementation is being reconciled from Starter cohort head abef05ac5fd121ca254bb74eafcc7c9970e90dfd onto the marketing-suite a78 allocation. It remains absent from the release allowlist and reference assembly, and neither Backoffice nor Sub has begun shadow or cutover. Keep it unpublished, unallowlisted, uncomposed and unadopted until exact-commit Observer PostgreSQL and clean-wheel evidence is recorded and Michael separately authorizes release/adoption; never edit the declared version down.",
       "state": "never-published"
     }
   }
