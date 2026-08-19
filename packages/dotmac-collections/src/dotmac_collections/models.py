@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     Numeric,
     String,
@@ -26,6 +27,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 
@@ -177,11 +179,14 @@ class CollectionCase(Base, _TenantFact):
                 f"{SCHEMA}.collection_policy_versions.id",
             ],
         ),
-        UniqueConstraint(
+        Index(
+            "uq_collection_cases_exposure",
             "tenant_id",
             "source_owner",
             "exposure_ref",
-            name="uq_collection_cases_exposure",
+            unique=True,
+            postgresql_where=text("lifecycle IN ('active', 'paused')"),
+            sqlite_where=text("lifecycle IN ('active', 'paused')"),
         ),
         schema_table_args(SCHEMA),
     )
@@ -311,6 +316,7 @@ class PaymentArrangement(Base, _TenantFact):
     subject_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     minor_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    arrangement_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     lifecycle: Mapped[str] = mapped_column(String(32), nullable=False)
     proposed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -422,10 +428,25 @@ class CollectionGraceGrant(Base, _TenantFact):
             ],
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["tenant_id", "supersedes_grant_id"],
+            [
+                f"{SCHEMA}.collection_grace_grants.tenant_id",
+                f"{SCHEMA}.collection_grace_grants.id",
+            ],
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "supersedes_grant_id",
+            name="uq_collection_grace_grants_supersedes",
+        ),
         schema_table_args(SCHEMA),
     )
 
     case_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
+    grant_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    supersedes_grant_id: Mapped[UUID | None] = mapped_column(Uuid())
+    grant_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     anchor_kind: Mapped[str] = mapped_column(String(50), nullable=False)
     anchor_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)

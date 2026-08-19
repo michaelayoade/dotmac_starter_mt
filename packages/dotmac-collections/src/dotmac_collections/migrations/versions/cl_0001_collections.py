@@ -217,18 +217,20 @@ def _upgrade_tenant_plane() -> None:
             ],
         ),
         sa.UniqueConstraint("tenant_id", "id", name="uq_collection_cases_tenant_id_id"),
-        sa.UniqueConstraint(
-            "tenant_id",
-            "source_owner",
-            "exposure_ref",
-            name="uq_collection_cases_exposure",
-        ),
         sa.CheckConstraint(
-            "lifecycle IN ('open', 'paused', 'resolved', 'cancelled')",
+            "lifecycle IN ('active', 'paused', 'resolved', 'cancelled')",
             name="ck_collection_cases_lifecycle",
         ),
         sa.CheckConstraint("source_version > 0", name="ck_collection_cases_version"),
         schema=_SCHEMA,
+    )
+    op.create_index(
+        "uq_collection_cases_exposure",
+        "collection_cases",
+        ["tenant_id", "source_owner", "exposure_ref"],
+        schema=_SCHEMA,
+        unique=True,
+        postgresql_where=sa.text("lifecycle IN ('active', 'paused')"),
     )
     op.create_table(
         "collection_case_exposures",
@@ -360,6 +362,7 @@ def _upgrade_tenant_plane() -> None:
         sa.Column("subject_ref", sa.String(255), nullable=False),
         sa.Column("currency", sa.String(3), nullable=False),
         sa.Column("minor_units", sa.Integer(), nullable=False),
+        sa.Column("arrangement_fingerprint", sa.String(64), nullable=False),
         sa.Column("lifecycle", sa.String(32), nullable=False),
         sa.Column("proposed_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("accepted_at", sa.DateTime(timezone=True)),
@@ -535,6 +538,9 @@ def _upgrade_tenant_plane() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
         sa.Column("case_id", sa.Uuid(), nullable=False),
+        sa.Column("grant_kind", sa.String(32), nullable=False),
+        sa.Column("supersedes_grant_id", sa.Uuid()),
+        sa.Column("grant_fingerprint", sa.String(64), nullable=False),
         sa.Column("anchor_kind", sa.String(50), nullable=False),
         sa.Column("anchor_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("duration_seconds", sa.Integer(), nullable=False),
@@ -555,8 +561,30 @@ def _upgrade_tenant_plane() -> None:
             ["mod_coll.collection_cases.tenant_id", "mod_coll.collection_cases.id"],
             ondelete="CASCADE",
         ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "supersedes_grant_id"],
+            [
+                "mod_coll.collection_grace_grants.tenant_id",
+                "mod_coll.collection_grace_grants.id",
+            ],
+        ),
         sa.UniqueConstraint(
             "tenant_id", "id", name="uq_collection_grace_grants_tenant_id_id"
+        ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "supersedes_grant_id",
+            name="uq_collection_grace_grants_supersedes",
+        ),
+        sa.CheckConstraint(
+            "grant_kind IN ('grant', 'supersession', 'revocation')",
+            name="ck_collection_grace_grants_kind",
+        ),
+        sa.CheckConstraint(
+            "(grant_kind = 'grant' AND supersedes_grant_id IS NULL) OR "
+            "(grant_kind IN ('supersession', 'revocation') AND "
+            "supersedes_grant_id IS NOT NULL)",
+            name="ck_collection_grace_grants_supersession",
         ),
         sa.CheckConstraint(
             "duration_seconds >= 0", name="ck_collection_grace_grants_duration"
