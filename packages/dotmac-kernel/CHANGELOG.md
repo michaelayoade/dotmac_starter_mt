@@ -8,12 +8,23 @@ here.
 
 ## 0.1.0a76 — UNRELEASED
 
-Reconciles the network-module suite, which was built against an untagged a73,
-onto the coordinated a75 owner allocation. Nothing about the suite changed
-except the release that carries its namespaces: a73, a74 and a75 were never
-tagged, so the eleven lineages land here instead and the modules floor on a76.
+Reconciles the network-module suite onto the coordinated a75 owner allocation.
+Nothing about the suite changed except the release that carries its namespaces;
+the eleven lineages land here and the modules floor on this release.
+
 The allocations add no shared runtime behaviour, compose no sibling module, and
 do not claim that Sub has adopted the suite.
+
+**This version number is contested and must be reassigned before release.**
+`dotmac-kernel-v0.1.0a73` IS published (commit `cfa9df8a`) and contains neither
+this suite's owners nor the a75 cohort's — the snapshot allocated namespaces
+into a number that was published with different content. Independent unpushed
+lineages currently claim a74, a75, a76 and a78 with conflicting content, and
+the a75 this reconciliation builds on already collides with another lineage's
+a75. Allocating kernel versions is a release-owner decision across those
+branches, not something this branch can settle, so the literal here is a
+placeholder pending that decision. The substance of the reconciliation — the
+namespace union and the defect fixes — is version-agnostic.
 
 ### Added
 
