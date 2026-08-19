@@ -28,7 +28,7 @@ from dotmac_kernel.testing import (
     fake_branding,
     isolated_session,
 )
-from sqlalchemy import inspect, text
+from sqlalchemy import Column, Integer, MetaData, Table, inspect, text
 
 
 def _public_tables():
@@ -121,13 +121,16 @@ def test_an_explicit_table_slice_does_not_attach_unselected_schemas() -> None:
 
 
 def test_too_many_explicit_module_schemas_are_refused_without_translation() -> None:
-    by_schema = {
-        table.schema: table
-        for table in Base.metadata.tables.values()
-        if table.schema is not None
-    }
-    tables = tuple(by_schema[schema] for schema in sorted(by_schema)[:11])
-    assert len(tables) == 11
+    metadata = MetaData()
+    tables = tuple(
+        Table(
+            f"probe_{index}",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            schema=f"mod_probe_{index:02d}",
+        )
+        for index in range(11)
+    )
 
     with pytest.raises(ValueError, match="split this unit composition"):
         create_test_engine(tables=tables)

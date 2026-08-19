@@ -406,10 +406,14 @@ def test_dossier_source_paths_still_exist_at_pinned_revisions() -> None:
     assert dossier["source_repositories"] == [
         "dotmac_sub",
         "dotmac_vendor_control_plane",
+        "dotmac_erp",
+        "dotmac_crm",
     ]
     assert dossier["source_revisions"] == [
         "dotmac_sub:27c76aaeebb7",
         "dotmac_vendor_control_plane:89848017d6b8",
+        "dotmac_erp:0f4b1698ddbf",
+        "dotmac_crm:c64b5aa0f790",
     ]
-    assert len(dossier["source_paths"]) >= 11
+    assert len(dossier["source_paths"]) >= 16
     assert len(dossier["preserved_tests"]) >= 14

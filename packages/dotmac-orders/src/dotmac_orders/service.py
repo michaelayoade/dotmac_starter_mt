@@ -206,19 +206,66 @@ def _audit(
     details: Mapping[str, object] | None = None,
 ) -> None:
     actor_type, actor_id, actor_label = _actor_values(actor)
-    write_audit_event(
-        db,
-        tenant_id=scope.tenant_id,
-        actor_type=actor_type,
-        actor_id=actor_id,
-        actor_label=actor_label,
-        action=action,
-        entity_type="order",
-        entity_id=str(order_id),
-        is_success=is_success,
-        occurred_at=_aware(occurred_at, field="audit_occurred_at"),
-        details=dict(details or {}),
-    )
+    event_details = dict(details or {})
+    event_at = _aware(occurred_at, field="audit_occurred_at")
+    if actor_type == "system":
+        write_audit_event(
+            db,
+            tenant_id=scope.tenant_id,
+            actor_type="system",
+            actor_id=actor_id,
+            actor_label=actor_label,
+            action=action,
+            entity_type="order",
+            entity_id=str(order_id),
+            is_success=is_success,
+            occurred_at=event_at,
+            details=event_details,
+        )
+    elif actor_type == "service":
+        write_audit_event(
+            db,
+            tenant_id=scope.tenant_id,
+            actor_type="service",
+            actor_id=actor_id,
+            actor_label=actor_label,
+            action=action,
+            entity_type="order",
+            entity_id=str(order_id),
+            is_success=is_success,
+            occurred_at=event_at,
+            details=event_details,
+        )
+    elif actor_type == "api_key":
+        write_audit_event(
+            db,
+            tenant_id=scope.tenant_id,
+            actor_type="api_key",
+            actor_id=actor_id,
+            actor_label=actor_label,
+            action=action,
+            entity_type="order",
+            entity_id=str(order_id),
+            is_success=is_success,
+            occurred_at=event_at,
+            details=event_details,
+        )
+    else:
+        # `_actor_values` has already resolved the closed kernel vocabulary, so
+        # the only remaining kind is an authenticated user.
+        write_audit_event(
+            db,
+            tenant_id=scope.tenant_id,
+            actor_type="user",
+            actor_id=actor_id,
+            actor_label=actor_label,
+            action=action,
+            entity_type="order",
+            entity_id=str(order_id),
+            is_success=is_success,
+            occurred_at=event_at,
+            details=event_details,
+        )
 
 
 def _aware(value: datetime, *, field: str) -> datetime:
