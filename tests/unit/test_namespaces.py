@@ -197,9 +197,11 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # than adding another due-work engine. Billing is the single dual-plane
     # operational-receivables owner; Collections and Orders are tenant-only;
     # Subscriptions is dual-plane. Sales, Inbox, Surveys, Projects, Work Orders,
-    # Positioning, Web Analytics and aggregate Analytics complete a75 without
-    # composing any of them into this assembly. No allocation installs domain
-    # behaviour in the kernel.
+    # Positioning, Web Analytics and aggregate Analytics complete a75. Inventory
+    # and Assets are tenant-only foundations, and ADR-0043 adds the nine
+    # independently released tenant owners of network-suite-v1, reconciled onto
+    # the a76 kernel that carries their namespaces. No allocation composes a
+    # module into this assembly or installs domain behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -226,6 +228,17 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "positioning",
         "web_analytics",
         "analytics",
+        "inventory",
+        "assets",
+        "ipam",
+        "network_inventory",
+        "network_observability",
+        "network_topology",
+        "network_assurance",
+        "network_control",
+        "fiber_plant",
+        "network_access",
+        "pon_access",
     }
 
 

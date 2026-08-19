@@ -6,6 +6,36 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a76 — UNRELEASED
+
+Reconciles the network-module suite, which was built against an untagged a73,
+onto the coordinated a75 owner allocation. Nothing about the suite changed
+except the release that carries its namespaces: a73, a74 and a75 were never
+tagged, so the eleven lineages land here instead and the modules floor on a76.
+The allocations add no shared runtime behaviour, compose no sibling module, and
+do not claim that Sub has adopted the suite.
+
+### Added
+
+- `INVENTORY_MIGRATION_OWNER`: schema `mod_inventory`, revision prefix
+  `iv`, branch label `inventory`.
+- `ASSETS_MIGRATION_OWNER`: schema `mod_assets`, revision prefix `as`,
+  branch label `assets`.
+- Network suite owners: `IPAM_MIGRATION_OWNER` (`mod_ipam`/`ip`),
+  `NETWORK_INVENTORY_MIGRATION_OWNER` (`mod_netinv`/`ni`),
+  `NETWORK_OBSERVABILITY_MIGRATION_OWNER` (`mod_netobs`/`no`),
+  `NETWORK_TOPOLOGY_MIGRATION_OWNER` (`mod_nettop`/`nt`),
+  `NETWORK_ASSURANCE_MIGRATION_OWNER` (`mod_netassure`/`na`),
+  `NETWORK_CONTROL_MIGRATION_OWNER` (`mod_netctrl`/`nc`),
+  `FIBER_PLANT_MIGRATION_OWNER` (`mod_fiber`/`fp`),
+  `NETWORK_ACCESS_MIGRATION_OWNER` (`mod_netaccess`/`nac`), and
+  `PON_ACCESS_MIGRATION_OWNER` (`mod_pon`/`pn`).
+
+### Changed
+
+- The eleven network-suite distributions now require `dotmac-kernel>=0.1.0a76`,
+  the release that actually carries their namespace allocations.
+
 ## 0.1.0a75 — UNRELEASED
 
 Allocates the remaining independent reusable owners in the coordinated module
@@ -29,7 +59,7 @@ landing; no domain behavior moves into Kernel and none is composed into Starter.
   tenant-scoped `public.audit_events` writer, including canonical actor shape,
   tenant FK/index, FORCE RLS and append-only online privileges.
 
-## 0.1.0a72 — UNRELEASED
+## 0.1.0a72 — 2026-08-19
 
 Allocates the independent durable-timer module lineage and adds the declaration
 surface its output routing contract requires. This is an allocation and a

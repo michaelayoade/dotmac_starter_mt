@@ -104,6 +104,17 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-positioning": "0.1.0a75",
     "dotmac-web-analytics": "0.1.0a75",
     "dotmac-analytics": "0.1.0a75",
+    "dotmac-inventory": "0.1.0a76",
+    "dotmac-assets": "0.1.0a76",
+    "dotmac-ipam": "0.1.0a76",
+    "dotmac-network-inventory": "0.1.0a76",
+    "dotmac-network-observability": "0.1.0a76",
+    "dotmac-network-topology": "0.1.0a76",
+    "dotmac-network-assurance": "0.1.0a76",
+    "dotmac-network-control": "0.1.0a76",
+    "dotmac-fiber-plant": "0.1.0a76",
+    "dotmac-network-access": "0.1.0a76",
+    "dotmac-pon-access": "0.1.0a76",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

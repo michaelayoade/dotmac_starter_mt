@@ -10,7 +10,7 @@
     "`test_module_version_sync.py` proves a module's three version surfaces",
     "AGREE. It cannot prove the agreed version EXISTS. `dotmac-integration`",
     "reads 0.1.0a2 on all three surfaces and the version-identity guard passes,",
-    "while the newest tag is dotmac-integration-v0.1.0a1 \u2014 internal consistency",
+    "while the newest tag is dotmac-integration-v0.1.0a1 — internal consistency",
     "and publication are different questions, and only the first one had a",
     "guard. A consumer reading the repository, the changelog or",
     "docs/MODULE_CATALOG.md and pinning ==0.1.0a2 gets a resolver error.",
@@ -29,10 +29,10 @@
     "was that the allowlist row was the wrong half, and it was removed rather",
     "than the module published. Two states this file must keep distinct:",
     "",
-    "  * INTENDED \u2014 the distribution is meant to be unpublished right now",
+    "  * INTENDED — the distribution is meant to be unpublished right now",
     "    (`dotmac-auth-oidc`, `dotmac-imports`). The row records the decision so",
     "    the next reader does not undo it by dispatching a release.",
-    "  * OUTSTANDING \u2014 a version is genuinely owed to consumers. The row",
+    "  * OUTSTANDING — a version is genuinely owed to consumers. The row",
     "    records evidence a decision still needs. Two worked examples have now",
     "    passed through and been removed on release: `dotmac-integration`",
     "    0.1.0a2 (released as a3) and `dotmac-kernel` 0.1.0a67. A row that",
@@ -44,7 +44,7 @@
     "",
     "## Two directions, both failures",
     "",
-    "A distribution entering this state without a row fails \u2014 that is a version",
+    "A distribution entering this state without a row fails — that is a version",
     "silently promised to consumers. A row whose distribution has since been",
     "published ALSO fails and must be removed in the same change as the release,",
     "because a ledger that only grows stops describing anything (ADR-0018).",
@@ -54,11 +54,11 @@
     "The release workflows write a tag only after `verify-registry` has",
     "installed the exact published version from the private index and registered",
     "its manifest, so a tag is this repository's own assertion that a version is",
-    "installable \u2014 stronger than 'an upload succeeded'. The index is not queried",
+    "installable — stronger than 'an upload succeeded'. The index is not queried",
     "directly: that needs an authenticated URL, which makes the check",
     "un-runnable at PR time and offline, and a gate that cannot run is not a",
     "gate. The stated cost is that a publication whose tag step failed reads",
-    "here as unpublished \u2014 which is exactly the state",
+    "here as unpublished — which is exactly the state",
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
@@ -67,14 +67,14 @@
       "reason": "INTENDED pre-adoption state. The tenant-only declared aggregate evidence and rebuildable projection owner is audit-complete, but its exact bytes have not passed Observe PostgreSQL and wheel validation and ERP has not begun shadow comparison. Keep it unallowlisted and unpublished until those gates and source-writer retirement evidence exist.",
       "state": "never-published"
     },
+    "dotmac-assets": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED audit-complete state under ADR-0042 and ADR-0043. ERP remains the qualifying durable-asset source and first cutover; landing the candidate on the network-suite integration branch does not make Starter or Sub an adopter. Keep it unallowlisted and unpublished until its Observer proof, ERP Organization-to-Tenant mapping, composed lineage, full-state/lifecycle-digest shadow and one-writer retirement slice are ready. Network modules correlate assets opaquely and may not create a second physical-lifecycle owner. Add the module to a release lane only just in time for the approved product cutover.",
+      "state": "never-published"
+    },
     "dotmac-billing": {
       "declared": "0.1.0a1",
       "reason": "AWAITING FIRST RELEASE, not missing release metadata. a1 is the first complete dual-plane operational-receivables owner and is intentionally never-published while its focused Starter PR and the Vendor CP/Sub adoption-preparation PRs collect review and CI evidence. Michael authorized draft PR preparation but explicitly did not authorize publishing a release. Remove this row only when the exact dotmac-billing-v0.1.0a1 tag has been produced by the verified module release workflow after separate release authorization; never repair it by editing the declared version down or by publishing before the adopter evidence is reviewable.",
-      "state": "never-published"
-    },
-    "dotmac-collections": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED pre-adoption state. a1 is the tenant-only Collections policy and case candidate on the shared a75 foundation. It remains unallowlisted and unpublished until its canonical flush-only persistence writer, concurrency proofs and Sub adoption preparation are complete. Never treat integration as a production authority switch.",
       "state": "never-published"
     },
     "dotmac-campaigns": {
@@ -82,9 +82,19 @@
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-collections": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED pre-adoption state. a1 is the tenant-only Collections policy and case candidate on the shared a75 foundation. It remains unallowlisted and unpublished until its canonical flush-only persistence writer, concurrency proofs and Sub adoption preparation are complete. Never treat integration as a production authority switch.",
+      "state": "never-published"
+    },
+    "dotmac-fiber-plant": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. Keep unallowlisted and unpublished until the complete nine-module Observer proof and coordinated Sub cutover are approved; CRM outside-plant authority must first converge into Sub.",
+      "state": "never-published"
+    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
-      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
+      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
       "state": "never-published"
     },
     "dotmac-inbox": {
@@ -92,9 +102,59 @@
       "reason": "INTENDED pre-adoption state. The tenant-only conversation owner is audit-complete and integrated for validation, but Sub has not completed its one-writer cutover. Keep it unallowlisted and unpublished until the dossier's shadow, reconciliation and local-writer retirement evidence exists.",
       "state": "never-published"
     },
+    "dotmac-inventory": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED audit-complete state under ADR-0041 and ADR-0043. ERP remains the qualifying stock-ledger source and first cutover; landing the candidate on the network-suite integration branch does not make Starter or Sub an adopter. Keep it unallowlisted and unpublished until its Observer proof, ERP Organization-to-Tenant mapping, composed lineage and quantity/value/reservation/traceability shadow are ready. Network modules consume an explicit typed stock-issue handoff and may not write quantities, movements or valuation. Add the module to a release lane only just in time for the approved product cutover.",
+      "state": "never-published"
+    },
+    "dotmac-ipam": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. Keep unallowlisted and unpublished until all nine modules pass Observer validation and Sub completes one coordinated authority cutover; the existing Sub IP writer must be retired at that gate.",
+      "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a76",
+      "reason": "AWAITING RELEASE AUTHORIZATION. Published a72 is the Durable Timers allocation predecessor. a76 is the reconciliation of the coordinated a75 owner allocation with the network-suite snapshot that had been built against a73: it carries a75's allocations, the tenant_audit_log.v1 prerequisite and the open Subscriptions vocabularies, plus the immutable Inventory, Assets and nine network-suite schemas, revision prefixes and branch labels. a73/a74/a75 were never tagged and must not be reused or repointed to; the network modules floor on a76 because that is the release that carries their namespaces. Delete this row only when the exact dotmac-kernel-v0.1.0a76 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-network-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. Provider-neutral access projection and AAA evidence are built with the suite but have no adopter; publish only with the approved coordinated Sub cutover.",
+      "state": "never-published"
+    },
+    "dotmac-network-assurance": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. Network incident/impact/SLA ownership is built without ticket or work-order ownership; keep unpublished until complete-suite proof and coordinated Sub adoption.",
+      "state": "never-published"
+    },
+    "dotmac-network-control": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. The provider-neutral command lifecycle is not a provider client and has no adopter; keep unpublished until suite proof, Integrator seam proof and coordinated Sub cutover.",
+      "state": "never-published"
+    },
+    "dotmac-network-inventory": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. Managed-network identity reuses opaque Inventory/Assets handoffs and is neither composed nor adopted; publish only with the complete coordinated Sub cutover.",
+      "state": "never-published"
+    },
+    "dotmac-network-observability": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. Collector-neutral facts and health projections are built with no adopter; keep unpublished until complete-suite Observer proof and coordinated Sub adoption.",
+      "state": "never-published"
+    },
+    "dotmac-network-topology": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. Topology and rebuildable reachability are built with no adopter; keep unpublished until complete-suite Observer proof and coordinated Sub adoption.",
+      "state": "never-published"
+    },
     "dotmac-orders": {
       "declared": "0.1.0a1",
       "reason": "INTENDED pre-adoption state: dotmac-orders is audit-complete but has no contract consumer and is deliberately absent from every release allowlist. Its EXTRACTION.toml requires Dotmac Sub to run shadow parity and retire the displaced order, line, coverage and fulfillment writers before publication eligibility is claimed. Do not dispatch a release or add an allowlist row until that first-adopter change supplies the dossier's cutover evidence.",
+      "state": "never-published"
+    },
+    "dotmac-pon-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0043. OLT/ONT/PON lifecycle remains provider-neutral and unadopted; keep unpublished until complete-suite Observer proof, Integrator seam proof and coordinated Sub cutover.",
       "state": "never-published"
     },
     "dotmac-positioning": {
@@ -124,7 +184,7 @@
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
-      "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "reason": "Not in any release lane — absent from release-modules.json and release-adapters.json alike — so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
       "state": "never-published"
     },
     "dotmac-ui": {
@@ -141,11 +201,6 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED pre-adoption state. The tenant-only physical-execution owner is audit-complete, while Vendor InstallationProject remains explicitly excluded and Sub adoption has not begun. Keep it unallowlisted and unpublished until the named Sub cutover supplies shadow, reconciliation and retirement evidence.",
       "state": "never-published"
-    },
-    "dotmac-kernel": {
-      "declared": "0.1.0a75",
-      "reason": "AWAITING RELEASE AUTHORIZATION. Published a72 is the Durable Timers allocation predecessor. The coordinated a75 allocates the remaining independent reusable owners, adds the tenant_audit_log.v1 prerequisite and the open Subscriptions vocabularies without moving domain behavior into Kernel. Delete this row only when the exact dotmac-kernel-v0.1.0a75 tag has been produced by the verified kernel release workflow after separate authorization; never edit the version down or reuse a73/a74.",
-      "state": "declared-unpublished"
     }
   }
 }
