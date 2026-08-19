@@ -715,6 +715,8 @@ def _publish_request(
     occurred_at: datetime,
     correlation_id: str | None,
 ) -> None:
+    request.last_published_at = _aware(occurred_at, field="published_at")
+    request.publication_count += 1
     event = enqueue_event(
         db,
         tenant_id=scope.tenant_id,
@@ -723,8 +725,6 @@ def _publish_request(
         correlation_id=correlation_id,
     )
     request.last_outbox_event_id = event.id
-    request.last_published_at = _aware(occurred_at, field="published_at")
-    request.publication_count += 1
 
 
 def _stage_fulfillment_requests(
