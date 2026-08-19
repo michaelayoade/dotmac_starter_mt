@@ -187,12 +187,6 @@ def declare_metric(
 
 
 def record_entity(db: Session, command: EntityObservation) -> RecordOutcome:
-    _require_node_definition(
-        db,
-        tenant_id=command.source.tenant_id,
-        code=command.node_code,
-        version=command.node_version,
-    )
     content = {
         "external_account_ref": command.external_account_ref,
         "entity_ref": command.entity_ref,
@@ -203,6 +197,22 @@ def record_entity(db: Session, command: EntityObservation) -> RecordOutcome:
         "disposition": command.disposition,
         "properties": command.properties,
     }
+    replay = _replay_existing(
+        db,
+        source=command.source,
+        kind=ObservationKind.ENTITY,
+        fact_content=content,
+        restates_observation_id=command.restates_observation_id,
+    )
+    if replay is not None:
+        return replay
+    _require_valid_restatement_link(db, command)
+    _require_node_definition(
+        db,
+        tenant_id=command.source.tenant_id,
+        code=command.node_code,
+        version=command.node_version,
+    )
     envelope, status, created = _record_envelope(
         db,
         source=command.source,
@@ -236,6 +246,16 @@ def record_hierarchy(db: Session, command: HierarchyObservation) -> RecordOutcom
         "child_entity_ref": command.child_entity_ref,
         "parent_entity_ref": command.parent_entity_ref,
     }
+    replay = _replay_existing(
+        db,
+        source=command.source,
+        kind=ObservationKind.HIERARCHY,
+        fact_content=content,
+        restates_observation_id=command.restates_observation_id,
+    )
+    if replay is not None:
+        return replay
+    _require_valid_restatement_link(db, command)
     envelope, status, created = _record_envelope(
         db,
         source=command.source,
@@ -259,6 +279,26 @@ def record_hierarchy(db: Session, command: HierarchyObservation) -> RecordOutcom
 
 
 def record_metric(db: Session, command: MetricObservation) -> RecordOutcome:
+    content = {
+        "external_account_ref": command.external_account_ref,
+        "entity_ref": command.entity_ref,
+        "metric_code": command.metric_code,
+        "metric_version": command.metric_version,
+        "period_start": command.period_start,
+        "period_end": command.period_end,
+        "value": _value_content(command.value),
+        "claim_status": ClaimStatus.PROVIDER_REPORTED,
+    }
+    replay = _replay_existing(
+        db,
+        source=command.source,
+        kind=ObservationKind.METRIC,
+        fact_content=content,
+        restates_observation_id=command.restates_observation_id,
+    )
+    if replay is not None:
+        return replay
+    _require_valid_restatement_link(db, command)
     definition = _require_metric_definition(
         db,
         tenant_id=command.source.tenant_id,
@@ -270,29 +310,9 @@ def record_metric(db: Session, command: MetricObservation) -> RecordOutcome:
             f"metric {command.metric_code!r} v{command.metric_version} expects "
             f"{definition.value_type}, received {command.value.value_type.value}"
         )
-    content = {
-        "external_account_ref": command.external_account_ref,
-        "entity_ref": command.entity_ref,
-        "metric_code": command.metric_code,
-        "metric_version": command.metric_version,
-        "period_start": command.period_start,
-        "period_end": command.period_end,
-        "value": _value_content(command.value),
-        "claim_status": ClaimStatus.PROVIDER_REPORTED,
-    }
     # An already-stored identity is checked before period work. For a genuinely
     # new metric, one savepoint covers period + envelope + fact so a changed
     # identity racing on another metric series cannot strand a canonical period.
-    if _source_identity(db, command.source) is not None:
-        envelope, status, _created = _record_envelope(
-            db,
-            source=command.source,
-            kind=ObservationKind.METRIC,
-            fact_content=content,
-            restates_observation_id=command.restates_observation_id,
-        )
-        return RecordOutcome(envelope.id, envelope.content_fingerprint, status)
-
     with db.begin_nested():
         period = _get_or_create_period(db, command)
         envelope, status, created = _record_envelope(
@@ -321,34 +341,9 @@ def record_metric(db: Session, command: MetricObservation) -> RecordOutcome:
 
 
 def record_restatement(db: Session, command: ProviderRestatement) -> RecordOutcome:
-    replacement = command.replacement
-    source = replacement.source
-    original = db.scalar(
-        select(ObservationEnvelope).where(
-            ObservationEnvelope.tenant_id == source.tenant_id,
-            ObservationEnvelope.id == command.replaces_observation_id,
-        )
-    )
-    if original is None:
-        raise InvalidObservation(
-            f"restated observation {command.replaces_observation_id} was not found"
-        )
-    expected_kind = _kind_of(replacement)
-    if original.kind != expected_kind.value:
-        raise InvalidObservation(
-            f"cannot restate {original.kind} evidence with "
-            f"{expected_kind.value} evidence"
-        )
-    if (
-        original.installation_ref != source.installation_ref
-        or original.source_system != source.source_system
-    ):
-        raise InvalidObservation(
-            "a restatement must retain installation_ref and source_system"
-        )
-    _require_same_restatement_subject(db, original, replacement)
     replacement = replace(
-        replacement, restates_observation_id=command.replaces_observation_id
+        command.replacement,
+        restates_observation_id=command.replaces_observation_id,
     )
     if isinstance(replacement, EntityObservation):
         return record_entity(db, replacement)
@@ -437,6 +432,7 @@ def read_period_metrics(
     period_start: datetime,
     period_end: datetime,
 ) -> tuple[PeriodMetric, ...]:
+    _require_period_window(period_start, period_end)
     query = (
         select(
             CurrentMetric,
@@ -659,15 +655,14 @@ def emit_analytics_fact(
     )
 
 
-def _record_envelope(
-    db: Session,
+def _observation_fingerprint(
     *,
     source: ObservationSource,
     kind: ObservationKind,
     fact_content: dict[str, object],
     restates_observation_id: UUID | None,
-) -> tuple[ObservationEnvelope, RecordStatus, bool]:
-    fingerprint = _fingerprint(
+) -> str:
+    return _fingerprint(
         {
             "installation_ref": source.installation_ref,
             "source_system": source.source_system,
@@ -678,6 +673,55 @@ def _record_envelope(
             "restates_observation_id": restates_observation_id,
             "fact": fact_content,
         }
+    )
+
+
+def _replay_existing(
+    db: Session,
+    *,
+    source: ObservationSource,
+    kind: ObservationKind,
+    fact_content: dict[str, object],
+    restates_observation_id: UUID | None,
+) -> RecordOutcome | None:
+    """Resolve identity before interpreting changed normalized content.
+
+    The identity conflict rule is stronger than declaration support: once an
+    identity exists, changed content is always a conflict even when the changed
+    command also references a declaration this tenant does not support.
+    """
+
+    existing = _source_identity(db, source)
+    if existing is None:
+        return None
+    fingerprint = _observation_fingerprint(
+        source=source,
+        kind=kind,
+        fact_content=fact_content,
+        restates_observation_id=restates_observation_id,
+    )
+    _require_same_observation(existing, fingerprint)
+    _attach_receipt(db, existing, source)
+    return RecordOutcome(
+        observation_id=existing.id,
+        fingerprint=existing.content_fingerprint,
+        status=RecordStatus.REPLAYED,
+    )
+
+
+def _record_envelope(
+    db: Session,
+    *,
+    source: ObservationSource,
+    kind: ObservationKind,
+    fact_content: dict[str, object],
+    restates_observation_id: UUID | None,
+) -> tuple[ObservationEnvelope, RecordStatus, bool]:
+    fingerprint = _observation_fingerprint(
+        source=source,
+        kind=kind,
+        fact_content=fact_content,
+        restates_observation_id=restates_observation_id,
     )
     existing = _source_identity(db, source)
     if existing is not None:
@@ -1284,6 +1328,40 @@ def _require_same_definition(
         )
 
 
+def _require_valid_restatement_link(
+    db: Session,
+    replacement: ObservationCommand,
+) -> None:
+    replaces_observation_id = replacement.restates_observation_id
+    if replaces_observation_id is None:
+        return
+    source = replacement.source
+    original = db.scalar(
+        select(ObservationEnvelope).where(
+            ObservationEnvelope.tenant_id == source.tenant_id,
+            ObservationEnvelope.id == replaces_observation_id,
+        )
+    )
+    if original is None:
+        raise InvalidObservation(
+            f"restatement target {replaces_observation_id} was not found"
+        )
+    expected_kind = _kind_of(replacement)
+    if original.kind != expected_kind.value:
+        raise InvalidObservation(
+            f"cannot restate {original.kind} evidence with "
+            f"{expected_kind.value} evidence"
+        )
+    if (
+        original.installation_ref != source.installation_ref
+        or original.source_system != source.source_system
+    ):
+        raise InvalidObservation(
+            "a restatement must retain installation_ref and source_system"
+        )
+    _require_same_restatement_subject(db, original, replacement)
+
+
 def _require_same_restatement_subject(
     db: Session,
     original: ObservationEnvelope,
@@ -1497,6 +1575,23 @@ def _json_restore(value: object) -> object:
 
 def _utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
+
+
+def _require_period_window(period_start: datetime, period_end: datetime) -> None:
+    for name, value in (
+        ("period_start", period_start),
+        ("period_end", period_end),
+    ):
+        if (
+            not isinstance(value, datetime)
+            or value.tzinfo is None
+            or value.utcoffset() is None
+        ):
+            raise InvalidObservation(f"{name} must be timezone-aware")
+    if period_start >= period_end:
+        raise InvalidObservation(
+            "metric read window requires start < end under [start,end)"
+        )
 
 
 def _aware(value: datetime) -> datetime:
