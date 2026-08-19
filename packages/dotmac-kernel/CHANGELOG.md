@@ -6,6 +6,16 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a77 — UNRELEASED
+
+Allocates the independent tenant website-composition lineage. This is physical
+namespace identity only; site behavior remains in the optional module.
+
+### Added
+
+- `SITES_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_sites`,
+  revision prefix `si`, and branch label `sites`.
+
 ## 0.1.0a76 — UNRELEASED
 
 Allocates the independent tenant publication-lifecycle lineage. This is

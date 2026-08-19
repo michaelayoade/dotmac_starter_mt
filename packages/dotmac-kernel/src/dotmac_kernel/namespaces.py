@@ -660,6 +660,17 @@ PUBLISHING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("publishing"),
 )
 
+# `dotmac-sites` — the SEVENTEENTH allocated installable module. It owns the
+# tenant site/page composition plane and immutable local website revisions.
+# `sites` remains explicit in live catalogs; `si` keeps the lineage compact.
+# Publishing owns delivery intent/outcomes and Integrator owns hosting I/O.
+SITES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="sites",
+    prefix="si",
+    branch_label="sites",
+    db_schema=module_schema("sites"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -678,6 +689,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     MEDIA_OBSERVATIONS_MIGRATION_OWNER,
     CONTENT_MIGRATION_OWNER,
     PUBLISHING_MIGRATION_OWNER,
+    SITES_MIGRATION_OWNER,
 )
 
 
@@ -1026,6 +1038,7 @@ __all__ = [
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
     "PUBLISHING_MIGRATION_OWNER",
+    "SITES_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

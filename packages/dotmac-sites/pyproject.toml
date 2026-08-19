@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "dotmac-sites"
+version = "0.1.0a1"
+description = "Tenant sites, immutable page revisions, and local release snapshots"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_sites", from = "src" }]
+include = [
+  { path = "src/dotmac_sites/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_sites/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# a77 allocates mod_sites/si/sites. The module also consumes the older
+# tenant-scope and database-role prerequisite contracts.
+dotmac-kernel = ">=0.1.0a77"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

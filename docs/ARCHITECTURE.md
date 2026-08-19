@@ -482,6 +482,18 @@ packages/dotmac-publishing/      optional tenant publication lifecycle owner
                  Content, target-selection policy, durable timer storage,
                  provider identity, credentials and transport remain separate
                  owners.
+packages/dotmac-sites/           optional tenant website-composition owner
+  pyproject.toml                 distribution dotmac-sites; audit-complete,
+  EXTRACTION.toml                greenfield after the exact six-repository
+                                 census; Backoffice is candidate cutover 1
+  src/dotmac_sites/              stable site/page identity, append-only page
+                 revisions, immutable composed site revisions, typed
+                 navigation/SEO/redirects and deterministic SiteReleaseV1;
+                 manifest plus independent `si` lineage in schema `mod_sites`.
+                 Tenant plane only and forced RLS. BUILT AND TESTED HERE, NOT
+                 COMPOSED by this reference assembly. Files, forms,
+                 publication intent/outcomes and Integrator hosting transport
+                 remain separate owners.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1328,6 +1340,9 @@ made concrete — every model has exactly one declared owner.
 | `PublicationRelease` | `mod_publishing.publication_releases` | `dotmac-publishing` optional module | One tenant publication intent with an immutable, digested snapshot, requested delivery time and actor/source provenance held as opaque references. Editorial content and site revisions remain with their source owners; Backoffice owns authorization and target-selection policy ([publishing dossier](inventories/publishing-extraction-dossier.md)). |
 | `PublicationDelivery` | `mod_publishing.publication_deliveries` | `dotmac-publishing` optional module | One selected opaque target per release and its normalized local delivery state. A target reference identifies an Integrator binding without importing its registry or storing provider, credential, endpoint or channel vocabulary. |
 | `PublicationAttempt` / `PublicationObservation` | `mod_publishing.publication_attempts`, `publication_observations` | `dotmac-publishing` optional module | Monotonic attempt evidence joined to one transactional outbox intent, plus immutable receipt-deduplicated normalized outcomes. Integrator owns connector execution, raw transport evidence, retry/checkpoints and remote systems; publishing derives explicit partial, published, failed or cancelled aggregate state from local observations. |
+| `Site` / `Page` | `mod_sites.sites`, `pages` | `dotmac-sites` optional module | Tenant site and stable page identity. Site archive is terminal; Backoffice owns actor authorization. Landing routes and product templates are consumers or separate application presentation, not competing site owners ([sites dossier](inventories/sites-extraction-dossier.md)). |
+| `PageRevision` | `mod_sites.page_revisions` | `dotmac-sites` optional module | Append-only page title/body, SEO and opaque ordered file/form references. Files and forms retain their independent lifecycles and no sibling-module foreign key or import crosses the boundary. |
+| `SiteRevision` / `SiteRevisionPage` | `mod_sites.site_revisions`, `site_revision_pages` | `dotmac-sites` optional module | Immutable complete local website snapshot plus exact page-revision membership, routes, navigation, redirects and one guarded ready revision. `SiteReleaseV1` is usable locally; publishing owns later remote intent/outcomes and Integrator owns hosting transport (ADR-0034). |
 | `NodeDefinition` | `mod_mediaobs.node_definitions` | `dotmac-media-observations` optional module | Tenant-scoped versioned external-node vocabulary, product-first from Mkt's hierarchy shape but open to connector declarations rather than a provider enum (ADR-0033). |
 | `MetricDefinition` | `mod_mediaobs.metric_definitions` | `dotmac-media-observations` optional module | Tenant-scoped versioned metric code with explicit value type, unit, semantic and `provider_reported` origin. |
 | `ObservationEnvelope` | `mod_mediaobs.observations` | `dotmac-media-observations` optional module | Append-only domain identity, normalized fingerprint, source instant, first receipt instant, normalization revision and optional restatement link. Identity is global across fact kinds within its tenant/installation/source scope. |

@@ -78,14 +78,15 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # adopts a newer capability, move its row to CAPABILITY_RAISED_FLOORS while
 # retaining the allocation release as evidence there. Durable timers was
 # allocated in a72. Immutable a73 belongs to the caller-session transaction
-# release; media observations, content and publishing therefore follow in
-# a74, a75 and a76. Campaigns consumes the a73 capability and remains in
+# release; media observations, content, publishing and sites therefore follow
+# in a74, a75, a76 and a77. Campaigns consumes the a73 capability and remains in
 # CAPABILITY_RAISED_FLOORS.
 # `test_every_releasable_module_has_a_floor_rule` keeps both maps watched: a
 # module may not be absent from BOTH maps.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-content": "0.1.0a75",
     "dotmac-publishing": "0.1.0a76",
+    "dotmac-sites": "0.1.0a77",
     "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in

@@ -83,13 +83,18 @@
       "state": "never-published"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a76",
-      "reason": "OUTSTANDING MARKETING ALLOCATION PREREQUISITE. Immutable published a73 contains caller-session transaction mechanics but none of the parked marketing allocations. This combined branch therefore allocates media observations in a74, content in a75 and publishing in a76; all three dependent packages remain unpublished, unallowlisted and unadopted. Keep a76 unpublished until an explicitly authorized protected-main kernel release is registry-verified; never repoint an immutable alpha or edit the version down.",
+      "declared": "0.1.0a77",
+      "reason": "OUTSTANDING MARKETING ALLOCATION PREREQUISITE. Immutable published a73 contains caller-session transaction mechanics but none of the parked marketing allocations. This combined branch therefore allocates media observations in a74, content in a75, publishing in a76 and sites in a77; all four dependent packages remain unpublished, unallowlisted and unadopted. Keep a77 unpublished until an explicitly authorized protected-main kernel release is registry-verified; never repoint an immutable alpha or edit the version down.",
       "state": "previous-version-published"
     },
     "dotmac-media-observations": {
       "declared": "0.1.0a1",
       "reason": "INTENDED 2026-08-19: Michael explicitly paused adoption. The package remains an uncomposed tenant-only candidate, absent from .github/release-modules.json, with Backoffice and Sub listed only as candidates. Do not dispatch a release, count either product as a consumer, or begin shadow/cutover/local-writer retirement until Michael resumes adoption.",
+      "state": "never-published"
+    },
+    "dotmac-sites": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED GATE-2 CANDIDATE, NOT A RELEASE. The six-repository greenfield proof and controlled RED are recorded, but Backoffice cutover 1 has not begun, the package is absent from the release allowlist, and Michael has authorized neither publication nor adoption. Keep it unpublished while exact-commit Observer validation, the local snapshot proof and protected-main review remain outstanding. Remote publication additionally requires a typed sites-to-publishing adapter and Integrator evidence; never treat a deployment as the only site copy.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

@@ -200,7 +200,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # tenant editorial plans/items without absorbing publishing or campaign
     # execution. `publishing` is the sixteenth and owns tenant publication
     # releases, target attempts and normalized observations without provider
-    # transport. None of these allocations installs behaviour in the kernel.
+    # transport. `sites` is the seventeenth and owns tenant-local immutable
+    # website composition without absorbing publication or hosting. None of
+    # these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -218,6 +220,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "media_observations",
         "content",
         "publishing",
+        "sites",
     }
 
 

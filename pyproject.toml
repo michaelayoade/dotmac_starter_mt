@@ -92,6 +92,9 @@ dotmac-content = { path = "packages/dotmac-content", develop = true }
 # Tenant-only publication intent, immutable target attempts and reconciled
 # outcomes. Built and proven here; Backoffice is the first candidate adopter.
 dotmac-publishing = { path = "packages/dotmac-publishing", develop = true }
+# Tenant-only website composition and immutable local release snapshots.
+# Greenfield after the fleet audit; Backoffice is the first candidate adopter.
+dotmac-sites = { path = "packages/dotmac-sites", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -173,6 +176,7 @@ module = [
     "dotmac_campaigns.*",
     "dotmac_content.*",
     "dotmac_publishing.*",
+    "dotmac_sites.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -233,6 +237,7 @@ root_packages = [
     "dotmac_campaigns",
     "dotmac_content",
     "dotmac_publishing",
+    "dotmac_sites",
 ]
 
 [[tool.importlinter.contracts]]
@@ -298,6 +303,7 @@ source_modules = [
     "dotmac_campaigns",
     "dotmac_content",
     "dotmac_publishing",
+    "dotmac_sites",
 ]
 forbidden_modules = ["app"]
 
@@ -345,6 +351,7 @@ modules = [
     "dotmac_campaigns",
     "dotmac_content",
     "dotmac_publishing",
+    "dotmac_sites",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -390,6 +397,7 @@ forbidden_modules = [
     "dotmac_durable_timers",
     "dotmac_content",
     "dotmac_publishing",
+    "dotmac_sites",
     "dotmac_auth_oidc",
 ]
 
