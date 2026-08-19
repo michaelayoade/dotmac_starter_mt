@@ -86,6 +86,9 @@ dotmac-campaigns = { path = "packages/dotmac-campaigns", develop = true }
 # Tenant-only editorial content owner extracted product-first from Mkt. Built
 # and proven here; Backoffice remains the first future exact-pin adopter.
 dotmac-content = { path = "packages/dotmac-content", develop = true }
+# Tenant-only publication intent, immutable target attempts and reconciled
+# outcomes. Built and proven here; Backoffice is the first candidate adopter.
+dotmac-publishing = { path = "packages/dotmac-publishing", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -165,6 +168,7 @@ module = [
     "dotmac_integration.*",
     "dotmac_campaigns.*",
     "dotmac_content.*",
+    "dotmac_publishing.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -223,6 +227,7 @@ root_packages = [
     "dotmac_connector_whatsapp",
     "dotmac_campaigns",
     "dotmac_content",
+    "dotmac_publishing",
 ]
 
 [[tool.importlinter.contracts]]
@@ -286,6 +291,7 @@ source_modules = [
     "dotmac_auth_oidc",
     "dotmac_campaigns",
     "dotmac_content",
+    "dotmac_publishing",
 ]
 forbidden_modules = ["app"]
 
@@ -331,6 +337,7 @@ modules = [
     "dotmac_auth_oidc",
     "dotmac_campaigns",
     "dotmac_content",
+    "dotmac_publishing",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -374,6 +381,7 @@ forbidden_modules = [
     "dotmac_people",
     "dotmac_durable_timers",
     "dotmac_content",
+    "dotmac_publishing",
     "dotmac_auth_oidc",
 ]
 

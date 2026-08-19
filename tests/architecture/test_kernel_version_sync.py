@@ -82,6 +82,7 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-campaigns": "0.1.0a72",
     "dotmac-content": "0.1.0a73",
+    "dotmac-publishing": "0.1.0a74",
     "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in

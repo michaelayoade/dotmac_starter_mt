@@ -33,6 +33,8 @@ preserved_tests = [
   "dotmac_mkt:tests/test_web_campaigns.py",
   "dotmac_starter_mt:tests/architecture/test_publishing_module.py",
   "dotmac_starter_mt:tests/unit/test_publishing_lifecycle.py",
+  "dotmac_starter_mt:tests/unit/test_publishing_service.py",
+  "dotmac_starter_mt:tests/test_publishing_isolation.py",
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_backoffice", "dotmac_sub"]

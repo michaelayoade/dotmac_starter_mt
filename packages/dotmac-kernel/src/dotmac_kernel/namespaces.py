@@ -636,6 +636,18 @@ CONTENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("content"),
 )
 
+# `dotmac-publishing` — the FIFTEENTH allocated installable module. It owns
+# tenant publication intent, immutable snapshots, per-target attempt history
+# and normalized outcome reconciliation. `publishing` stays explicit in live
+# catalogs; `pb` leaves the lineage enough revision-id budget. Integrator and
+# connector plugins remain the separate provider-transport owners.
+PUBLISHING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="publishing",
+    prefix="pb",
+    branch_label="publishing",
+    db_schema=module_schema("publishing"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -652,6 +664,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
     CONTENT_MIGRATION_OWNER,
+    PUBLISHING_MIGRATION_OWNER,
 )
 
 
@@ -998,6 +1011,7 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
+    "PUBLISHING_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

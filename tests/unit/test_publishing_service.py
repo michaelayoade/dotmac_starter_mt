@@ -372,7 +372,7 @@ def test_observation_replay_is_idempotent_and_changed_receipt_conflicts(
         outcome=DeliveryOutcome.PUBLISHED,
         remote_ref="remote:one",
     )
-    assert replay.observation.id == first.observation.id
+    assert replay.observation_id == first.observation_id
     assert db.scalar(select(func.count(PublicationObservation.id))) == 1
 
     with pytest.raises(Conflict, match="receipt"):
