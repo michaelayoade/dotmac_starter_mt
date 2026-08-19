@@ -1,7 +1,8 @@
 # `dotmac-publishing` extraction and Backoffice adoption plan
 
-**Status:** Gate 0 source pin and boundary frozen; Gate 1 RED canaries prepared.
-No runtime implementation, release, composition or adoption has started.
+**Status:** Gate 0 source pin and boundary frozen; Gate 1 RED recorded at exact
+commit `a941c6975e5f49520c07608ba2c0fc4e7e6172a3`. No runtime implementation,
+release, composition or adoption has started.
 **Source pin:** Mkt `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d`,
 remote-verified on 2026-08-19.
 **First adopter:** Backoffice. **Second candidate:** Sub, independently.
@@ -58,6 +59,13 @@ module can both decide the same release or outcome.
 
 **Exit:** controlled RED tied to one immutable commit. No runtime code lands
 before this evidence.
+
+**Recorded 2026-08-19:** exit met at
+`a941c6975e5f49520c07608ba2c0fc4e7e6172a3` from a fresh detached writable
+Observer checkout installed from the committed lock with Poetry 2.4.1 and all
+84 tags present. The focused suite produced 32 expected missing-package
+failures and 15 passes; Ruff lint and format checks passed on the three focused
+test files. Gate 2 may now implement the smallest owner.
 
 ## Gate 2 — implement the smallest owner
 

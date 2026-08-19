@@ -8,11 +8,11 @@ This is the product-first contract for `dotmac-publishing`, the second executabl
 slice of the decomposed marketing suite. The Mkt remote was rechecked directly
 on 2026-08-19 and `refs/heads/main` still resolved to the revision above.
 
-Gate 0 freezes the source behavior and its intentional corrections. Gate 1
-checks in the architecture and lifecycle canaries before runtime code exists,
-then records their expected RED result on Observer. Neither gate authorizes a
-namespace allocation, package release, composition, provider connection, data
-migration, writer switch or adoption.
+Gate 0 freezes the source behavior and its intentional corrections. Gate 1 is
+recorded RED on Observer at exact commit
+`a941c6975e5f49520c07608ba2c0fc4e7e6172a3`: runtime code does not exist yet.
+Neither gate authorizes a namespace allocation, package release, composition,
+provider connection, data migration, writer switch or adoption.
 
 ## 1. One owner and the facts it owns
 
@@ -172,3 +172,24 @@ two-directional ratchet is lowered in the same change.
 Sub may later pin the same released contract and run its own lineage. No
 Backoffice or Mkt database, row, ORM, session or filesystem becomes Sub's
 source of truth.
+
+## 7. Gate 1 RED evidence
+
+On 2026-08-19, a fresh detached writable Observer checkout at exact commit
+`a941c6975e5f49520c07608ba2c0fc4e7e6172a3`, with full history and all 84 tag
+refs, installed from the committed lock using Poetry 2.4.1. The focused command
+ran the marketing source audit, publishing architecture contract and publishing
+lifecycle contract with repository addopts cleared only to expose the exact
+summary.
+
+The result was the intended RED: **32 failed and 15 passed**. Every failure was
+either the explicit absent-distribution assertion or the controlled
+`dotmac_publishing` missing-package failure. The 15 passing tests covered the
+suite source/dossier/retirement evidence, the product-first package dossier and
+the provider/sibling-import boundary that is meaningful before code exists.
+No unrelated regression appeared.
+
+At the same exact commit, Ruff lint passed and the pinned formatter reported all
+three focused test files already formatted. This is controlled pre-
+implementation evidence, not a failed candidate and not permission to release
+or adopt. Gate 2 is now the next action.
