@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "dotmac-content"
+version = "0.1.0a1"
+description = "Tenant editorial plans, canonical content, variants, and creative references"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_content", from = "src" }]
+include = [
+  { path = "src/dotmac_content/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_content/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# a73 allocates mod_content/ct/content. The module also consumes the older
+# tenant-scope and database-role prerequisite contracts.
+dotmac-kernel = ">=0.1.0a73"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -624,6 +624,18 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-content` — the FOURTEENTH allocated installable module. It owns the
+# tenant-only editorial plan and content plane extracted from Mkt. `content`
+# remains explicit in live catalogs; `ct` keeps the independent lineage's
+# revision ids compact. Publishing, outbound campaigns, files and provider
+# transport remain separate owners and are not imported by this module.
+CONTENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="content",
+    prefix="ct",
+    branch_label="content",
+    db_schema=module_schema("content"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +651,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    CONTENT_MIGRATION_OWNER,
 )
 
 
@@ -973,6 +986,7 @@ __all__ = [
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
+    "CONTENT_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",

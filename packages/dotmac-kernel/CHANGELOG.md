@@ -6,14 +6,28 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a72 — 2026-08-19
+## 0.1.0a73 — UNRELEASED
 
-Allocates the independent durable-timer module lineage and adds the declaration
-surface its output routing contract requires. This is an allocation and a
-vocabulary guard, not a second timer engine in the kernel.
+Allocates the independent tenant editorial-content lineage. This is physical
+namespace identity only; content behavior remains in the optional module.
 
 ### Added
 
+- `CONTENT_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_content`,
+  revision prefix `ct`, and branch label `content`.
+
+## 0.1.0a72 — 2026-08-19
+
+Carries the campaigns allocation that landed after immutable a71, allocates the
+independent durable-timer lineage, and adds the declaration surface its output
+routing contract requires. These are allocations and vocabulary guards, not
+domain engines in the kernel.
+
+### Added
+
+- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
+  branch label `campaigns`. The module owns provider-neutral campaign
+  progression and consumes the kernel's consent, idempotency and outbox owners.
 - `DURABLE_TIMERS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
   `mod_timers`, revision prefix `dt`, branch label `durable_timers`. The module
   owns timer identity, generation and terminal evidence; it consumes the
@@ -23,16 +37,13 @@ vocabulary guard, not a second timer engine in the kernel.
 
 ## 0.1.0a71 — 2026-08-18
 
-Allocates the independent tenant-only people and campaigns lineages, names and
-proves the Party-person catalogue consumed by employment-directory modules,
-and keeps optional-package imports and large test assemblies independent of
-database configuration and SQLite's ten-attachment ceiling.
+Allocates the independent tenant-only people lineage, names and proves the
+Party-person catalogue consumed by employment-directory modules, and keeps
+optional-package imports and large test assemblies independent of database
+configuration and SQLite's ten-attachment ceiling.
 
 ### Added
 
-- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
-  branch label `campaigns`. The module owns provider-neutral campaign
-  progression and consumes the kernel's consent, idempotency and outbox owners.
 - `party_person_catalog.v1`, covering the required `public.parties` and
   `public.party_persons` columns, keys, relationship, forced tenant RLS,
   tenant-policy marker, and `app_user` read posture without coupling consumers

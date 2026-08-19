@@ -65,12 +65,16 @@ def _normalized() -> str:
 
 def test_source_audit_exists_and_is_indexed() -> None:
     assert INVENTORY.is_file()
-    assert "marketing-suite-sources.md" in (
-        PROJECT_ROOT / "docs" / "inventories" / "README.md"
-    ).read_text()
-    assert "marketing-suite-sources.md" in (
-        PROJECT_ROOT / "docs" / "inventories" / "module-extraction-sources.md"
-    ).read_text()
+    assert (
+        "marketing-suite-sources.md"
+        in (PROJECT_ROOT / "docs" / "inventories" / "README.md").read_text()
+    )
+    assert (
+        "marketing-suite-sources.md"
+        in (
+            PROJECT_ROOT / "docs" / "inventories" / "module-extraction-sources.md"
+        ).read_text()
+    )
 
 
 def test_every_marketing_module_has_one_exact_source_ruling() -> None:

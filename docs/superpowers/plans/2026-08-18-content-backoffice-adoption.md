@@ -1,7 +1,8 @@
 # `dotmac-content` extraction and Backoffice adoption plan
 
-**Status:** audit and RED-canary slice prepared; no package implementation or
-adoption has started.
+**Status:** Gate 1 RED recorded; Gate 2 package candidate prepared and exact-
+commit Observer validation pending. No release, composition or adoption has
+started.
 **Source pin:** Mkt `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d`,
 verified directly against remote `main` on 2026-08-18.
 **First adopter:** Backoffice. **Second candidate:** Sub, independently.

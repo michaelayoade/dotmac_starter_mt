@@ -7,6 +7,7 @@ this contract.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 from importlib import import_module
 from pathlib import Path
@@ -16,6 +17,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = PROJECT_ROOT / "packages" / "dotmac-content"
+MIGRATION = PACKAGE_ROOT / "src/dotmac_content/migrations/versions/ct_0001_content.py"
 
 
 def _content_module(name: str) -> Any:
@@ -31,9 +33,9 @@ def _content_module(name: str) -> Any:
 
 
 def test_the_distribution_exists_only_after_the_red_canary_is_recorded() -> None:
-    assert importlib.util.find_spec("dotmac_content") is not None, (
-        "Gate 1 expected RED: dotmac-content has not been implemented"
-    )
+    assert (
+        importlib.util.find_spec("dotmac_content") is not None
+    ), "Gate 1 expected RED: dotmac-content has not been implemented"
 
 
 def test_manifest_declares_exactly_the_five_tenant_tables() -> None:
@@ -68,6 +70,12 @@ def test_every_model_is_tenant_scoped_and_schema_qualified() -> None:
         tenant_id = model.__table__.columns.get("tenant_id")
         assert tenant_id is not None, f"{model.__name__} has no tenant_id"
         assert not tenant_id.nullable, f"{model.__name__}.tenant_id must be NOT NULL"
+        uniques = {
+            tuple(column.name for column in constraint.columns)
+            for constraint in model.__table__.constraints
+            if constraint.__class__.__name__ == "UniqueConstraint"
+        }
+        assert ("tenant_id", "id") in uniques, model.__name__
 
 
 def test_same_module_relationships_include_tenant_id() -> None:
@@ -149,3 +157,75 @@ def test_package_source_has_no_sibling_module_or_provider_import() -> None:
     assert not violations, "foreign owner/provider imports found:\n" + "\n".join(
         violations
     )
+
+
+def test_public_surface_uses_content_language_not_campaign_language() -> None:
+    public = import_module("dotmac_content")
+    assert not [name for name in public.__all__ if "Campaign" in name]
+
+
+def test_services_never_own_transactions_or_construct_sessions() -> None:
+    service = PACKAGE_ROOT / "src/dotmac_content/service.py"
+    tree = ast.parse(service.read_text(encoding="utf-8"))
+    attribute_calls = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    name_calls = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert not ({"commit", "rollback"} & attribute_calls)
+    assert not ({"Session", "SessionLocal", "sessionmaker"} & name_calls)
+
+
+def test_root_migration_declares_effects_and_creates_the_secure_plane() -> None:
+    manifest = _content_module("manifest")
+    source = MIGRATION.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    ddl = "\n".join(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
+    assigned = {
+        target.id: node.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert ast.literal_eval(assigned["revision"]) == "ct_0001_content"
+    assert ast.literal_eval(assigned["down_revision"]) is None
+    assert ast.literal_eval(assigned["branch_labels"]) == ("content",)
+    assert ast.literal_eval(assigned["REQUIRES"]) == tuple(manifest.module.requires)
+    assert isinstance(assigned["depends_on"], ast.Call)
+    assert getattr(assigned["depends_on"].func, "id", None) == "resolve_depends_on"
+
+    for table in manifest.module.tables:
+        qualified = f"mod_content.{table}"
+        assert f"{qualified} ENABLE ROW LEVEL SECURITY" in ddl
+        assert f"{qualified} FORCE ROW LEVEL SECURITY" in ddl
+        assert f"CREATE POLICY {table}_tenant_isolation" in ddl
+        assert f"ON {qualified}" in ddl
+        assert f"ON {qualified} TO app_user" in ddl
+    assert "TO platform_api" not in ddl
+
+
+def test_lineage_passes_the_composed_migration_gate() -> None:
+    manifest = _content_module("manifest")
+    gate = import_module("dotmac_kernel.migrations.gate")
+    bindings = import_module("app.migration_bindings")
+    report = gate.run_gate(
+        [manifest.module],
+        [
+            PROJECT_ROOT
+            / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions",
+            PROJECT_ROOT / "alembic/versions",
+            MIGRATION.parent,
+        ],
+        bindings=bindings.ASSEMBLY_PREREQUISITE_BINDINGS,
+    )
+    assert report.ok, report.violations

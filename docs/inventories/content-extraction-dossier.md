@@ -1,12 +1,15 @@
 # Editorial content extraction dossier
 
-**As of:** 2026-08-18
+**As of:** 2026-08-19
 **Starter base:** `c6ef6cd7b13105bd95c3faf354ffee9032077625`
 **Audited Mkt source:** `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d`
 
 This is the product-first contract for `dotmac-content`, the first executable
-slice of the decomposed marketing suite. The repository distribution does not
-exist yet. Its canaries are intentionally written before its runtime code.
+slice of the decomposed marketing suite. Gate 1 recorded the deliberately
+absent distribution as RED on Observer at exact commit
+`85dc9bc24b169dab7bbcd38b0cd67b1a3d058881`. A Gate 2 implementation candidate
+now exists on the local marketing-suite branch; it is not release or adoption
+evidence until its exact commit passes the prescribed Observer gates.
 
 The Mkt remote was rechecked directly on 2026-08-18 and `refs/heads/main`
 resolved to the revision above. It is one commit after the audit's original

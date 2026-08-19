@@ -83,6 +83,9 @@ dotmac-integration = { path = "packages/dotmac-integration", develop = true }
 # composed first by Sub and then by Backoffice; the reference assembly does not
 # install its lineage or import it from `app`.
 dotmac-campaigns = { path = "packages/dotmac-campaigns", develop = true }
+# Tenant-only editorial content owner extracted product-first from Mkt. Built
+# and proven here; Backoffice remains the first future exact-pin adopter.
+dotmac-content = { path = "packages/dotmac-content", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -161,6 +164,7 @@ module = [
     "dotmac_imports.*",
     "dotmac_integration.*",
     "dotmac_campaigns.*",
+    "dotmac_content.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -218,6 +222,7 @@ root_packages = [
     "dotmac_auth_oidc",
     "dotmac_connector_whatsapp",
     "dotmac_campaigns",
+    "dotmac_content",
 ]
 
 [[tool.importlinter.contracts]]
@@ -280,6 +285,7 @@ source_modules = [
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
+    "dotmac_content",
 ]
 forbidden_modules = ["app"]
 
@@ -324,6 +330,7 @@ modules = [
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
+    "dotmac_content",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -366,6 +373,7 @@ forbidden_modules = [
     "dotmac_numbering",
     "dotmac_people",
     "dotmac_durable_timers",
+    "dotmac_content",
     "dotmac_auth_oidc",
 ]
 
