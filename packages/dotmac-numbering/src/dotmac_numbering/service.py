@@ -29,13 +29,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Final
+from typing import Any, Final, TypeVar, cast
 from uuid import uuid4
 
 from dotmac_kernel.cache import PlatformScope, Scope, TenantScope
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import Select
 
 from dotmac_numbering.models import (
     NO_PERIOD,
@@ -49,6 +50,16 @@ from dotmac_numbering.models import (
     SeriesCounter,
     SeriesRepair,
 )
+
+SeriesRow = NumberSeries | PlatformNumberSeries
+CounterRow = SeriesCounter | PlatformSeriesCounter
+ModelSet = tuple[
+    type[NumberSeries] | type[PlatformNumberSeries],
+    type[SeriesCounter] | type[PlatformSeriesCounter],
+    type[AllocationReceipt] | type[PlatformAllocationReceipt],
+    type[SeriesRepair] | type[PlatformSeriesRepair],
+]
+_Model = TypeVar("_Model")
 
 MAX_VALUE: Final[int] = 10**15
 MAX_DIGITS: Final[int] = 18
@@ -192,15 +203,24 @@ def configure_series(
     stores the formatted string rather than re-deriving it.
     """
     configuration.validate()
-    series_model, *_ = _models(scope)
     existing = _find_series(db, scope, configuration.series_code, lock=True)
     if existing is not None:
         _assert_safe_transition(db, scope, existing, configuration)
     target = existing
     if target is None:
-        target = series_model(series_code=configuration.series_code)
         if isinstance(scope, TenantScope):
-            target.tenant_id = scope.tenant_id
+            target = NumberSeries(
+                tenant_id=scope.tenant_id,
+                series_code=configuration.series_code,
+            )
+        elif isinstance(scope, PlatformScope):
+            target = PlatformNumberSeries(series_code=configuration.series_code)
+        else:
+            raise _error(
+                "unknown_scope",
+                "An explicit TenantScope or PlatformScope is required.",
+                scope=type(scope).__name__,
+            )
         db.add(target)
     for field in (
         "prefix",
@@ -215,11 +235,14 @@ def configure_series(
     target.include_year = int(configuration.include_year)
     target.include_month = int(configuration.include_month)
     db.flush()
-    return target
+    return cast(SeriesRow, target)
 
 
 def _assert_safe_transition(
-    db: Session, scope: Scope, existing, configuration: SeriesConfiguration
+    db: Session,
+    scope: Scope,
+    existing: SeriesRow,
+    configuration: SeriesConfiguration,
 ) -> None:
     """Refuse a reconfiguration that could reissue an existing number.
 
@@ -321,7 +344,7 @@ def preview(
 # ── Plane plumbing ──────────────────────────────────────────────────────────
 
 
-def _models(scope: Scope):
+def _models(scope: Scope) -> ModelSet:
     if isinstance(scope, TenantScope):
         return NumberSeries, SeriesCounter, AllocationReceipt, SeriesRepair
     if isinstance(scope, PlatformScope):
@@ -338,13 +361,17 @@ def _models(scope: Scope):
     )
 
 
-def _tenant_filter(stmt, scope: Scope, model):
+def _tenant_filter(
+    stmt: Select[tuple[_Model]], scope: Scope, model: Any
+) -> Select[tuple[_Model]]:
     if isinstance(scope, TenantScope):
         return stmt.where(model.tenant_id == scope.tenant_id)
     return stmt
 
 
-def _find_series(db: Session, scope: Scope, series_code: str, *, lock: bool = False):
+def _find_series(
+    db: Session, scope: Scope, series_code: str, *, lock: bool = False
+) -> SeriesRow | None:
     """The series row, optionally locked FOR UPDATE.
 
     LOCK ORDER IS SERIES, THEN PERIOD COUNTER — everywhere, without exception.
@@ -356,10 +383,12 @@ def _find_series(db: Session, scope: Scope, series_code: str, *, lock: bool = Fa
     stmt = _tenant_filter(stmt, scope, series_model)
     if lock:
         stmt = stmt.with_for_update()
-    return db.execute(stmt).scalar_one_or_none()
+    return cast(SeriesRow | None, db.execute(stmt).scalar_one_or_none())
 
 
-def _require_series(db: Session, scope: Scope, series_code: str, *, lock: bool = False):
+def _require_series(
+    db: Session, scope: Scope, series_code: str, *, lock: bool = False
+) -> SeriesRow:
     series = _find_series(db, scope, series_code, lock=lock)
     if series is None:
         raise _error(
@@ -371,16 +400,23 @@ def _require_series(db: Session, scope: Scope, series_code: str, *, lock: bool =
     return series
 
 
-def _find_counter(db: Session, scope: Scope, series_code: str, period_key: str):
+def _find_counter(
+    db: Session, scope: Scope, series_code: str, period_key: str
+) -> CounterRow | None:
     _, counter_model, *_ = _models(scope)
     stmt = select(counter_model).where(
         counter_model.series_code == series_code,
         counter_model.period_key == period_key,
     )
-    return db.execute(_tenant_filter(stmt, scope, counter_model)).scalar_one_or_none()
+    return cast(
+        CounterRow | None,
+        db.execute(_tenant_filter(stmt, scope, counter_model)).scalar_one_or_none(),
+    )
 
 
-def _locked_counter(db: Session, scope: Scope, series, period_key: str):
+def _locked_counter(
+    db: Session, scope: Scope, series: SeriesRow, period_key: str
+) -> CounterRow:
     """The counter for this period, created if absent, then locked.
 
     `INSERT ... ON CONFLICT DO NOTHING` before `SELECT ... FOR UPDATE` is the
@@ -405,7 +441,7 @@ def _locked_counter(db: Session, scope: Scope, series, period_key: str):
     counter = db.execute(
         _tenant_filter(stmt, scope, counter_model).with_for_update()
     ).scalar_one()
-    return counter
+    return cast(CounterRow, counter)
 
 
 # ── Allocation ──────────────────────────────────────────────────────────────
@@ -499,12 +535,27 @@ def allocate(
         )
 
     result = outcome.result
+    formatted_number = result["formatted_number"]
+    value = result["value"]
+    period_key = result["period_key"]
+    result_reference_date = result["reference_date"]
+    if (
+        not isinstance(formatted_number, str)
+        or not isinstance(value, int)
+        or isinstance(value, bool)
+        or not isinstance(period_key, str)
+        or not isinstance(result_reference_date, str)
+    ):
+        raise _error(
+            "invalid_allocation_result",
+            "The idempotency ledger returned an invalid allocation result.",
+        )
     return Allocation(
-        formatted_number=str(result["formatted_number"]),
-        value=int(result["value"]),
+        formatted_number=formatted_number,
+        value=value,
         series_code=series_code,
-        period_key=str(result["period_key"]),
-        reference_date=date.fromisoformat(str(result["reference_date"])),
+        period_key=period_key,
+        reference_date=date.fromisoformat(result_reference_date),
         replayed=outcome.replayed,
     )
 
@@ -551,7 +602,7 @@ def _do_allocate(
         allocated_by=allocated_by,
     )
     if isinstance(scope, TenantScope):
-        receipt.tenant_id = scope.tenant_id
+        cast(AllocationReceipt, receipt).tenant_id = scope.tenant_id
     db.add(receipt)
     db.flush()
 
@@ -630,7 +681,7 @@ def advance_to_at_least(
         repaired_by=repaired_by,
     )
     if isinstance(scope, TenantScope):
-        evidence.tenant_id = scope.tenant_id
+        cast(SeriesRepair, evidence).tenant_id = scope.tenant_id
     db.add(evidence)
     db.flush()
 
