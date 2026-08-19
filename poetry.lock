@@ -604,7 +604,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a73"
+dotmac-kernel = ">=0.1.0a75"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -704,7 +704,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a74"
+version = "0.1.0a76"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -794,7 +794,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a74"
+dotmac-kernel = ">=0.1.0a76"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -3034,4 +3034,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d254b0e0e8f94bd2cabbf56fcd8e2091319b20710bcf5c3c2aee549816b5ed19"
+content-hash = "8ab9622adf25b5f5b508823682a586cce2833754b350bdbb5d78fad505ee55ed"
