@@ -841,28 +841,31 @@ def _install_deferred_snapshot_checks() -> None:
         CREATE OR REPLACE FUNCTION mod_orders.require_consistent_coverage_gate()
         RETURNS trigger AS $$
         DECLARE
-            gate_id uuid;
+            target_gate_id uuid;
             current_gate mod_orders.coverage_gates%ROWTYPE;
             obligations bigint;
             receipts bigint;
         BEGIN
             IF TG_TABLE_NAME = 'coverage_gates' THEN
-                gate_id := NEW.id;
+                target_gate_id := NEW.id;
             ELSE
-                gate_id := NEW.gate_id;
+                target_gate_id := NEW.gate_id;
             END IF;
-            SELECT * INTO current_gate
-              FROM mod_orders.coverage_gates
-             WHERE tenant_id = NEW.tenant_id AND id = gate_id;
+            SELECT gates.* INTO current_gate
+              FROM mod_orders.coverage_gates AS gates
+             WHERE gates.tenant_id = NEW.tenant_id
+               AND gates.id = target_gate_id;
             IF NOT FOUND THEN
                 RETURN NULL;
             END IF;
             SELECT count(*) INTO obligations
-              FROM mod_orders.coverage_obligations
-             WHERE tenant_id = NEW.tenant_id AND gate_id = current_gate.id;
+              FROM mod_orders.coverage_obligations AS obligation_rows
+             WHERE obligation_rows.tenant_id = NEW.tenant_id
+               AND obligation_rows.gate_id = current_gate.id;
             SELECT count(*) INTO receipts
-              FROM mod_orders.coverage_resolution_receipts
-             WHERE tenant_id = NEW.tenant_id AND gate_id = current_gate.id;
+              FROM mod_orders.coverage_resolution_receipts AS receipt_rows
+             WHERE receipt_rows.tenant_id = NEW.tenant_id
+               AND receipt_rows.gate_id = current_gate.id;
             IF current_gate.state = 'binding'
                OR obligations <> current_gate.obligation_count
                OR receipts <> current_gate.resolved_count

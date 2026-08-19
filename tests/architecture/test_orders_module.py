@@ -255,6 +255,39 @@ def test_shared_coverage_trigger_record_shape_canary_detects_planted_case() -> N
     assert _uses_cross_record_shape_case(planted) is True
 
 
+def _has_unqualified_coverage_predicate(source: str) -> bool:
+    return (
+        "WHERE tenant_id = NEW.tenant_id" in source
+        or "AND gate_id = current_gate.id" in source
+    )
+
+
+def _coverage_trigger_source(migration: str) -> str:
+    return migration.split(
+        "CREATE OR REPLACE FUNCTION mod_orders.require_consistent_coverage_gate()",
+        1,
+    )[1].split("$$ LANGUAGE plpgsql", 1)[0]
+
+
+def test_coverage_trigger_qualifies_columns_that_can_shadow_local_variables() -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+    trigger = _coverage_trigger_source(migration)
+    assert "target_gate_id uuid;" in trigger
+    assert "gates.id = target_gate_id" in trigger
+    assert _has_unqualified_coverage_predicate(trigger) is False
+
+
+def test_coverage_predicate_qualification_canary_detects_planted_ambiguity() -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+    trigger = _coverage_trigger_source(migration)
+    planted = trigger.replace(
+        "obligation_rows.gate_id = current_gate.id",
+        "gate_id = current_gate.id",
+        1,
+    )
+    assert _has_unqualified_coverage_predicate(planted) is True
+
+
 def test_lifecycle_and_refusal_audit_actions_are_declared_and_consumed() -> None:
     expected = {
         "orders.submitted",
