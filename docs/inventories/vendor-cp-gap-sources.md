@@ -184,8 +184,9 @@ which is positive evidence that the V6 line was abandoned rather than merely
 pending. Under hard rule 24 this is a **tested reference implementation, not a
 production-used one**. It is the best available source and it is used as one —
 behaviour and parity tests are ported — but this inventory does not claim
-production provenance it does not have, and `EXTRACTION.toml` records
-`source_mode = "reference-first"` rather than `"product-first"` for this half.
+production provenance it does not have, and `EXTRACTION.toml` records `source_mode = "historical-mixed"` — the existing
+vocabulary's term for exactly this case, and deliberately not a new mode
+invented to flatter the provenance.
 
 `credentials.py` is ported **only** for deployment-target identity and
 possession proof. Provider credentials are out of scope by the module's own
