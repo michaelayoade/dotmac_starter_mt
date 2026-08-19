@@ -100,7 +100,7 @@ class PublicationRelease(Base, TimestampMixin):
     deliveries: Mapped[list[PublicationDelivery]] = relationship(
         back_populates="release",
         cascade="all, delete-orphan",
-        order_by="PublicationDelivery.created_at, PublicationDelivery.id",
+        order_by="PublicationDelivery.target_order, PublicationDelivery.id",
     )
 
 
@@ -115,6 +115,12 @@ class PublicationDelivery(Base, TimestampMixin):
             "publication_release_id",
             "target_ref",
             name="uq_publication_deliveries_tenant_release_target",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "publication_release_id",
+            "target_order",
+            name="uq_publication_deliveries_tenant_release_order",
         ),
         ForeignKeyConstraint(
             ["tenant_id", "publication_release_id"],
@@ -135,6 +141,9 @@ class PublicationDelivery(Base, TimestampMixin):
             "tenant_id",
             "state",
         ),
+        CheckConstraint(
+            "target_order >= 0", name="ck_publication_deliveries_target_order"
+        ),
         schema_table_args(SCHEMA),
     )
 
@@ -144,6 +153,9 @@ class PublicationDelivery(Base, TimestampMixin):
     )
     publication_release_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     target_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     variant_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     state: Mapped[DeliveryState] = mapped_column(
         _state_column(DeliveryState, "publication_delivery_state"),

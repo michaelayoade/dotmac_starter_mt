@@ -239,6 +239,7 @@ def test_request_freezes_snapshot_targets_and_timer_inside_the_tenant(
         "binding:one",
         "binding:two",
     ]
+    assert [delivery.target_order for delivery in release.deliveries] == [0, 1]
     assert all(
         delivery.state == DeliveryState.PENDING for delivery in release.deliveries
     )

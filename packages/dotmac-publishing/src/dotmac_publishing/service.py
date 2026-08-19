@@ -169,12 +169,13 @@ def request_publication(
         )
         session.add(release)
         session.flush()
-        for target in command.targets:
+        for target_order, target in enumerate(command.targets):
             session.add(
                 PublicationDelivery(
                     tenant_id=tenant_id,
                     publication_release_id=release.id,
                     target_ref=target.target_ref,
+                    target_order=target_order,
                     variant_key=target.variant_key,
                     state=DeliveryState.PENDING,
                 )

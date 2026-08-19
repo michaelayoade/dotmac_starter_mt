@@ -116,6 +116,7 @@ def upgrade() -> None:
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
         sa.Column("publication_release_id", sa.Uuid(), nullable=False),
         sa.Column("target_ref", sa.String(255), nullable=False),
+        sa.Column("target_order", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("variant_key", sa.String(120), nullable=True),
         sa.Column("state", sa.String(24), nullable=False, server_default="pending"),
         sa.Column("remote_ref", sa.String(500), nullable=True),
@@ -141,6 +142,9 @@ def upgrade() -> None:
             "'failed', 'cancelled')",
             name="ck_publication_deliveries_state",
         ),
+        sa.CheckConstraint(
+            "target_order >= 0", name="ck_publication_deliveries_target_order"
+        ),
         sa.UniqueConstraint(
             "tenant_id", "id", name="uq_publication_deliveries_tenant_id_id"
         ),
@@ -149,6 +153,12 @@ def upgrade() -> None:
             "publication_release_id",
             "target_ref",
             name="uq_publication_deliveries_tenant_release_target",
+        ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "publication_release_id",
+            "target_order",
+            name="uq_publication_deliveries_tenant_release_order",
         ),
         schema=_SCHEMA,
     )
