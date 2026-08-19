@@ -352,6 +352,14 @@ def test_fake_reader_rereads_and_records_supplied_time() -> None:
         is second
     )
     assert reader.calls == (
+        # Failed fake configuration is still a read attempt and remains
+        # observable; the fake must not silently rewrite its call history.
+        ReceivablesReadCallV1(
+            scope=SCOPE,
+            source_owner="billing.receivables",
+            exposure_ref="invoice:inv-1",
+            as_of=AT,
+        ),
         ReceivablesReadCallV1(
             scope=SCOPE,
             source_owner="billing.receivables",

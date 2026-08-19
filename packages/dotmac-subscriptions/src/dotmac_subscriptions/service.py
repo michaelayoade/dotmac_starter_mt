@@ -882,7 +882,7 @@ def record_contract_version(
         supersedes_id = None
         superseded_line_keys: set[UUID] = set()
         if current is not None:
-            if command.starts_at <= current.starts_at:
+            if command.starts_at.astimezone(UTC) <= _stored_utc(current.starts_at):
                 raise SubscriptionConflictError(
                     "contracts.non_monotonic_version",
                     "A new version must start after the current version.",

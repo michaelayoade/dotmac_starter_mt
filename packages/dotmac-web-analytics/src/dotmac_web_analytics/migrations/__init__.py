@@ -1,3 +1,10 @@
-"""Alembic lineage for dotmac-web-analytics."""
+"""Public locator for the installed Web Analytics Alembic lineage."""
 
-__all__: list[str] = []
+from pathlib import Path
+
+
+def versions_dir() -> Path:
+    return Path(__file__).resolve().parent / "versions"
+
+
+__all__ = ["versions_dir"]

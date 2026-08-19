@@ -52,6 +52,7 @@ from dotmac_web_analytics.contracts import (
     WebAnalyticsError,
 )
 from dotmac_web_analytics.manifest import module
+from dotmac_web_analytics.migrations import versions_dir
 from dotmac_web_analytics.projections import (
     detect_projection_drift,
     read_aggregate_metrics,
@@ -147,4 +148,5 @@ __all__ = [
     "register_property",
     "register_stream",
     "repair_projection_drift",
+    "versions_dir",
 ]

@@ -358,13 +358,13 @@ def test_release_metadata_and_runtime_version_agree() -> None:
     package = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text("utf-8"))
     declared = package["tool"]["poetry"]["version"]
     assert dotmac_billing.__version__ == module.version == declared
-    assert package["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a70"
+    assert package["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a75"
     assert package["tool"]["poetry"]["dependencies"]["alembic"] == ">=1.13"
 
     release = json.loads(
         (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     )["modules"]["dotmac-billing"]
-    assert release["kernel_floor"] == "0.1.0a70"
+    assert release["kernel_floor"] == "0.1.0a75"
     assert release["db_schema"] == "mod_billing"
     assert release["import_name"] == "dotmac_billing"
     assert re.fullmatch(r"0\.1\.0a\d+", declared)

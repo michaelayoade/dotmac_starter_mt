@@ -28,7 +28,7 @@ from dotmac_kernel.testing import (
     fake_branding,
     isolated_session,
 )
-from sqlalchemy import Column, Integer, MetaData, Table, inspect, text
+from sqlalchemy import inspect, text
 
 
 def _public_tables():
@@ -72,7 +72,7 @@ def test_isolated_session_rolls_back_between_uses() -> None:
 
 def test_module_schemas_are_explicit_not_inferred_from_imported_metadata() -> None:
     """An imported optional package is not an installed module."""
-    engine = create_test_engine()
+    engine = create_test_engine(tables=())
     try:
         with engine.connect() as connection:
             attached = connection.execute(text("PRAGMA database_list")).all()
@@ -83,7 +83,13 @@ def test_module_schemas_are_explicit_not_inferred_from_imported_metadata() -> No
 
 
 def test_an_explicit_module_schema_is_attached_and_created() -> None:
-    engine = create_test_engine(module_schemas=("mod_tstudio",))
+    selected = tuple(
+        table
+        for table in Base.metadata.tables.values()
+        if table.schema == "mod_tstudio"
+    )
+    assert selected
+    engine = create_test_engine(tables=selected)
     try:
         with engine.connect() as connection:
             attached = connection.execute(text("PRAGMA database_list")).all()
@@ -96,28 +102,35 @@ def test_an_explicit_module_schema_is_attached_and_created() -> None:
         engine.dispose()
 
 
-def test_an_unknown_module_schema_fails_instead_of_being_ignored() -> None:
-    with pytest.raises(ValueError, match="not present in Base.metadata"):
-        create_test_engine(module_schemas=("mod_not_loaded",))
+def test_an_explicit_table_slice_does_not_attach_unselected_schemas() -> None:
+    selected = tuple(
+        table
+        for table in Base.metadata.tables.values()
+        if table.schema == "mod_tstudio"
+    )
+    engine = create_test_engine(tables=selected)
+    try:
+        with engine.connect() as connection:
+            attached = {
+                row[1]
+                for row in connection.execute(text("PRAGMA database_list")).all()
+            }
+        assert attached == {"main", "mod_tstudio"}
+    finally:
+        engine.dispose()
 
 
 def test_too_many_explicit_module_schemas_are_refused_without_translation() -> None:
-    metadata = MetaData()
-    tables = tuple(
-        Table(
-            f"probe_{index}",
-            metadata,
-            Column("id", Integer, primary_key=True),
-            schema=f"mod_probe_{index:02d}",
-        )
-        for index in range(11)
-    )
+    by_schema = {
+        table.schema: table
+        for table in Base.metadata.tables.values()
+        if table.schema is not None
+    }
+    tables = tuple(by_schema[schema] for schema in sorted(by_schema)[:11])
+    assert len(tables) == 11
 
     with pytest.raises(ValueError, match="split this unit composition"):
-        create_test_engine(
-            metadata=metadata,
-            module_schemas=tuple(table.schema for table in tables if table.schema),
-        )
+        create_test_engine(tables=tables)
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────

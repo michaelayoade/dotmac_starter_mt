@@ -79,6 +79,11 @@ def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
         connect_args={"check_same_thread": False},
     )
     schemas = _module_schemas(selected_tables)
+    if len(schemas) > 10:
+        raise ValueError(
+            "SQLite supports at most ten attached module schemas; split this "
+            "unit composition into explicit table slices"
+        )
     if schemas:
 
         @event.listens_for(engine, "connect")

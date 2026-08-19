@@ -217,11 +217,11 @@ def test_wheel_declares_migrations_and_typed_marker() -> None:
     assert (SOURCE / "py.typed").is_file()
 
 
-def test_clean_wheel_installation_is_on_the_governed_module_release_lane() -> None:
+def test_clean_wheel_installation_remains_adoption_gated() -> None:
     allowlist = json.loads((ROOT / ".github/release-modules.json").read_text())
-    assert "dotmac-web-analytics" in allowlist["modules"]
+    assert "dotmac-web-analytics" not in allowlist["modules"]
     workflow = (ROOT / ".github/workflows/release-module.yml").read_text()
-    assert "- dotmac-web-analytics" in workflow
+    assert "- dotmac-web-analytics" not in workflow
     assert "verify-wheel" in workflow
     assert "verify-registry" in workflow
     assert workflow.index("verify-wheel") < workflow.index("Publish to the Forgejo")

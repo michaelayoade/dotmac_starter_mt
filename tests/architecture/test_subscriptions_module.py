@@ -152,7 +152,14 @@ def _scope_shape_violations(source: str) -> set[str]:
                 violations.add("nullable_tenant_id")
         if isinstance(node, ast.Name) and node.id == "scope_kind":
             violations.add("scope_kind")
-        if isinstance(node, ast.Name | ast.arg) and "sentinel_tenant" in node.id:
+        identifier = (
+            node.id
+            if isinstance(node, ast.Name)
+            else node.arg
+            if isinstance(node, ast.arg)
+            else ""
+        )
+        if "sentinel_tenant" in identifier:
             violations.add("sentinel_tenant")
     return violations
 
@@ -186,7 +193,7 @@ def test_manifest_declares_one_dual_plane_owner() -> None:
     assert module.supported_plane_sets == (
         (ModulePlane.TENANT,),
         (ModulePlane.PLATFORM,),
-        (ModulePlane.TENANT, ModulePlane.PLATFORM),
+        (ModulePlane.PLATFORM, ModulePlane.TENANT),
     )
     assert SUBSCRIPTIONS_MIGRATION_OWNER in MIGRATION_OWNER_LEDGER
     assert module.migration_owner() == SUBSCRIPTIONS_MIGRATION_OWNER

@@ -70,6 +70,34 @@
     "so the next reader does not 'repair' it by dispatching a release."
   ],
   "modules": {
+    "dotmac-billing": {
+      "package_dir": "packages/dotmac-billing",
+      "import_name": "dotmac_billing",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a75",
+      "db_schema": "mod_billing",
+      "tag_prefix": "dotmac-billing-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_billing/py.typed",
+          "dotmac_billing/manifest.py",
+          "dotmac_billing/migrations/__init__.py",
+          "dotmac_billing/migrations/versions/bi_0001_billing.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "alembic",
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-release-catalog": {
       "package_dir": "packages/dotmac-release-catalog",
       "import_name": "dotmac_release_catalog",

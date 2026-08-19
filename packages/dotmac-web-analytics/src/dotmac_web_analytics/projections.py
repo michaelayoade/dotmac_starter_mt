@@ -47,6 +47,13 @@ def _hash(document: object) -> str:
     return "sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Restore SQLite's dropped UTC marker; PostgreSQL values stay equivalent."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _property(db: Session, tenant_id: UUID, property_id: UUID) -> AnalyticsProperty:
     prop = db.scalar(
         select(AnalyticsProperty).where(
@@ -221,7 +228,7 @@ def _bucket(value: datetime, timezone_name: str) -> datetime:
         from dotmac_web_analytics.contracts import InvalidContract
 
         raise InvalidContract(f"unknown IANA timezone {timezone_name!r}") from exc
-    local_day = value.astimezone(zone).date()
+    local_day = _as_utc(value).astimezone(zone).date()
     return datetime.combine(local_day, time.min, tzinfo=zone).astimezone(UTC)
 
 
@@ -333,8 +340,8 @@ def _projection_document(
             (
                 row.visitor_digest,
                 row.pseudonym_key_version,
-                row.first_seen_at,
-                row.last_seen_at,
+                _as_utc(row.first_seen_at),
+                _as_utc(row.last_seen_at),
             )
             for row in sorted(visitors, key=lambda item: item.visitor_digest)
         ],
@@ -344,15 +351,15 @@ def _projection_document(
                 row.visitor_digest,
                 row.rule_code,
                 row.rule_version,
-                row.started_at,
-                row.ended_at,
+                _as_utc(row.started_at),
+                _as_utc(row.ended_at),
                 row.event_count,
             )
             for row in sorted(sessions, key=lambda item: item.session_key)
         ],
         [
             (
-                row.bucket_start,
+                _as_utc(row.bucket_start),
                 row.dimension,
                 row.dimension_key,
                 row.event_count,
@@ -563,8 +570,8 @@ def read_sessions(
             row.visitor_digest,
             row.rule_code,
             row.rule_version,
-            row.started_at,
-            row.ended_at,
+            _as_utc(row.started_at),
+            _as_utc(row.ended_at),
             row.event_count,
         )
         for row in rows
@@ -592,8 +599,8 @@ def read_visitors(
             row.property_id,
             row.visitor_digest,
             row.pseudonym_key_version,
-            row.first_seen_at,
-            row.last_seen_at,
+            _as_utc(row.first_seen_at),
+            _as_utc(row.last_seen_at),
         )
         for row in rows
     )
@@ -634,7 +641,7 @@ def read_aggregate_metrics(
     )
     return tuple(
         AggregateMetricRow(
-            row.bucket_start,
+            _as_utc(row.bucket_start),
             ((MetricDimension(row.dimension), row.dimension_key),),
             row.event_count,
             row.visitor_count,

@@ -35,6 +35,7 @@ from dotmac_orders.engine import (
 )
 from dotmac_orders.errors import OrderConflict, OrderError, OrderNotFound
 from dotmac_orders.manifest import module
+from dotmac_orders.migrations import versions_dir
 from dotmac_orders.service import (
     accept_order,
     acknowledge_fulfillment,
@@ -90,4 +91,5 @@ __all__ = [
     "record_coverage_resolution",
     "snapshot_fingerprint",
     "submit_order",
+    "versions_dir",
 ]

@@ -11,10 +11,14 @@ contract = "Publish immutable offer versions and price children beneath a stable
 source_repositories = [
   "dotmac_sub",
   "dotmac_vendor_control_plane",
+  "dotmac_erp",
+  "dotmac_crm",
 ]
 source_revisions = [
   "dotmac_sub:27c76aaeebb7",
   "dotmac_vendor_control_plane:89848017d6b8",
+  "dotmac_erp:0f4b1698ddbf",
+  "dotmac_crm:c64b5aa0f790",
 ]
 source_paths = [
   "dotmac_sub:app/services/billing/cadence.py",
@@ -28,6 +32,11 @@ source_paths = [
   "dotmac_vendor_control_plane:src/vendor_cp/offers/models.py",
   "dotmac_vendor_control_plane:src/vendor_cp/offers/service.py",
   "dotmac_vendor_control_plane:alembic/versions/v002_offer_versions.py",
+  "dotmac_erp:app/models/inventory/price_list.py",
+  "dotmac_erp:app/services/inventory/price_list.py",
+  "dotmac_erp:app/services/finance/automation/recurring.py",
+  "dotmac_crm:app/services/selfcare.py",
+  "dotmac_crm:app/services/crm/sales/service.py",
 ]
 preserved_tests = [
   "dotmac_sub:tests/test_billing_cadence.py",

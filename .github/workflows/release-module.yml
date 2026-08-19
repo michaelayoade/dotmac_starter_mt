@@ -52,12 +52,10 @@ on:
           - dotmac-numbering
           - dotmac-billing
           - dotmac-durable-timers
-          - dotmac-collections
           - dotmac-integration
           - dotmac-approvals
           - dotmac-application-directory
           - dotmac-people
-          - dotmac-durable-timers
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true

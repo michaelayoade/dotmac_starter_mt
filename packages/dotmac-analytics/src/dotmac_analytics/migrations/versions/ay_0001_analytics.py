@@ -351,13 +351,38 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql;
         """
     )
-    for table in _IMMUTABLE_TABLES:
-        op.execute(
-            f"CREATE TRIGGER {table}_append_only "
-            f"BEFORE UPDATE OR DELETE ON mod_analytics.{table} "
-            "FOR EACH ROW EXECUTE FUNCTION mod_analytics.refuse_mutation();"
-        )
-        op.execute(f"GRANT SELECT, INSERT ON mod_analytics.{table} TO app_user;")
+    op.execute(
+        "CREATE TRIGGER metric_catalog_entries_append_only "
+        "BEFORE UPDATE OR DELETE ON mod_analytics.metric_catalog_entries "
+        "FOR EACH ROW EXECUTE FUNCTION mod_analytics.refuse_mutation();"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT ON mod_analytics.metric_catalog_entries TO app_user;"
+    )
+    op.execute(
+        "CREATE TRIGGER metric_ingest_receipts_append_only "
+        "BEFORE UPDATE OR DELETE ON mod_analytics.metric_ingest_receipts "
+        "FOR EACH ROW EXECUTE FUNCTION mod_analytics.refuse_mutation();"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT ON mod_analytics.metric_ingest_receipts TO app_user;"
+    )
+    op.execute(
+        "CREATE TRIGGER metric_observations_append_only "
+        "BEFORE UPDATE OR DELETE ON mod_analytics.metric_observations "
+        "FOR EACH ROW EXECUTE FUNCTION mod_analytics.refuse_mutation();"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT ON mod_analytics.metric_observations TO app_user;"
+    )
+    op.execute(
+        "CREATE TRIGGER metric_projection_rebuilds_append_only "
+        "BEFORE UPDATE OR DELETE ON mod_analytics.metric_projection_rebuilds "
+        "FOR EACH ROW EXECUTE FUNCTION mod_analytics.refuse_mutation();"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT ON mod_analytics.metric_projection_rebuilds TO app_user;"
+    )
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_analytics.metric_points "
         "TO app_user;"

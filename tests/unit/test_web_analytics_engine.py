@@ -166,7 +166,7 @@ def _command(
     occurred_at: datetime = NOW,
     visitor_value: str | None = None,
     attributes: tuple[tuple[str, str | int | bool], ...] = (),
-    page_url: str = "https://site.one.invalid/pricing?utm_source=search",
+    page_url: str | None = None,
     referrer_url: str | None = "https://referrer.invalid/article?ignored=value",
     decision: CollectionDecision = CollectionDecision.ALLOW,
     policy_version: str = "privacy-1",
@@ -208,7 +208,12 @@ def _command(
             source_reference="request-1",
         ),
         attributes=attributes,
-        page=PageEvidence(page_url, referrer_url),
+        page=PageEvidence(
+            page_url
+            if page_url is not None
+            else f"https://{property_code}.invalid/pricing?utm_source=search",
+            referrer_url,
+        ),
         acquisition=AcquisitionEvidence(source="search"),
         device_class=DeviceClass.DESKTOP,
     )
