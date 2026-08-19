@@ -196,7 +196,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
     # than adding another due-work engine. `content` is the fourteenth and owns
     # tenant editorial plans/items without absorbing publishing or campaign
-    # execution. None of these allocations installs behaviour in the kernel.
+    # execution. `publishing` is the fifteenth and owns tenant publication
+    # releases, target attempts and normalized observations without provider
+    # transport. None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -212,6 +214,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "campaigns",
         "durable_timers",
         "content",
+        "publishing",
     }
 
 
