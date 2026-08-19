@@ -73,9 +73,9 @@
       "state": "never-published"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a73",
-      "reason": "OUTSTANDING 2026-08-19: the immutable a72 tag already contains the Campaigns and Durable Timers allocations. Media observations is therefore the fourteenth allocation in a new a73 candidate rather than reusing a published identity for different content. Keep a73 unpublished while its dependent media module remains intentionally unadopted and outside the release allowlist; remove this row only with an explicitly authorized, verified kernel release.",
-      "state": "declared-unpublished"
+      "declared": "0.1.0a74",
+      "reason": "OUTSTANDING 2026-08-19: immutable tag a73 contains the caller-session transaction behavior released from main and does not contain the media-observations namespace allocation. Media observations is therefore the fourteenth allocation in a new a74 candidate rather than a second, conflicting a73 identity. Keep a74 unpublished while its dependent media module remains intentionally unadopted and outside the release allowlist; remove this row only with an explicitly authorized, verified kernel release.",
+      "state": "previous-version-published"
     },
     "dotmac-media-observations": {
       "declared": "0.1.0a1",

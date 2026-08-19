@@ -1877,6 +1877,14 @@ There is exactly ONE transaction authority in this codebase:
   savepoint section below), and never constructs a session of its own.
 - **Expected conflicts use `conflict_savepoint`** — roll back the SAVEPOINT,
   not the transaction (next section).
+- **Caller-session services do not enter the engine owner.** Kernel domain
+  services such as consent, delivery, idempotency and external identity accept
+  the installing assembly's `Session`. Their savepoint mechanic lives in the
+  private, engine-free `dotmac_kernel._transactions`; `dotmac_kernel.db`
+  re-exports `conflict_savepoint` as the supported public spelling. This is an
+  implementation seam, not a second boundary or transaction authority: it
+  constructs no engine/session and never commits or rolls back the caller's
+  outer transaction (ADR-0024 amendment, 2026-08-19).
 - **No route, task, or service constructs an ad hoc session.** The old
   `dotmac_kernel/unit_of_work.py` (`UnitOfWork`, `ConcurrencyConflict`) was a
   second, zero-consumer transaction authority — DELETED under the stronger
@@ -1913,8 +1921,9 @@ under `FORCE ROW LEVEL SECURITY` that fails closed: either an
 result set (500s or blank re-renders, invisible on SQLite since it can't
 enforce RLS at all — this is why the canary requires Postgres).
 
-`dotmac_kernel.db.conflict_savepoint(db)` is the fix, a context manager around
-`Session.begin_nested()` (a `SAVEPOINT` scoped INSIDE the outer
+`dotmac_kernel.db.conflict_savepoint(db)` is the supported public spelling for
+the fix, a context manager around `Session.begin_nested()` (a `SAVEPOINT`
+scoped INSIDE the outer
 transaction): on clean exit it commits the SAVEPOINT (a no-op release, not
 the outer `COMMIT`); on any exception it rolls back ONLY the SAVEPOINT —
 leaving the outer transaction and its `SET LOCAL` fully intact — then
@@ -1948,6 +1957,13 @@ list still populated; edit form re-renders with the field error) rather
 than the pre-fix 500/empty-render. This canary was RED against pre-2b.1
 `main` by construction (the bug is invisible on SQLite, where these tests
 cannot even run).
+
+`tests/architecture/test_kernel_caller_session_independence.py` separately
+guards application composition: it rejects even a deferred
+`dotmac_kernel.db` import from caller-session services and runs consent,
+idempotency and delivery with a valid caller-owned session while the kernel
+`DATABASE_URL` is deliberately unparsable. This proves a service invocation
+cannot accidentally construct a second configured runtime.
 
 ## External-identity login: the decision and the session are one locked step (kernel `0.1.0a64`)
 
