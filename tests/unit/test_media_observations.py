@@ -26,6 +26,7 @@ from dotmac_media_observations import (
     ExactMoney,
     HierarchyObservation,
     InvalidObservation,
+    JsonValue,
     MetricDefinitionDeclaration,
     MetricObservation,
     MetricSemantic,
@@ -936,15 +937,31 @@ def test_derived_ratio_is_explicitly_not_a_provider_observation() -> None:
     assert ratio.claim_status is ClaimStatus.DERIVED_PROJECTION
 
 
-def test_aggregate_properties_refuse_person_or_audience_profiles(db: Session) -> None:
-    _node(db)
-    for properties in (
+@pytest.mark.parametrize(
+    "properties",
+    (
         {"email": "person@example.test"},
         {"audience_members": ["opaque-person"]},
         {"phone_number": "+000000000"},
-    ):
-        with pytest.raises(InvalidObservation, match="aggregate-only"):
-            record_entity(db, replace(_entity("bad"), properties=properties))
+        {"audiences": ["lookalike-1"]},
+        {"profiles": [{"opaque_ref": "profile-1"}]},
+        {"users": ["external-user-1"]},
+        {"metadata": {"contacts": ["external-contact-1"]}},
+        {"lead_id": "local-lead-1"},
+        {"party_ref": "local-party-1"},
+        {"customer_ids": ["local-customer-1"]},
+        {"order_id": "local-order-1"},
+        {"authoritative_revenue": "50000.00"},
+        {"attribution": "official"},
+    ),
+)
+def test_aggregate_properties_refuse_person_identity_or_business_consequences(
+    db: Session,
+    properties: dict[str, JsonValue],
+) -> None:
+    _node(db)
+    with pytest.raises(InvalidObservation, match="aggregate-only"):
+        record_entity(db, replace(_entity("bad"), properties=properties))
 
 
 def test_append_only_model_set_excludes_only_rebuildable_projections() -> None:
