@@ -72,6 +72,11 @@
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
       "state": "never-published"
     },
+    "dotmac-integration": {
+      "declared": "0.1.0a10",
+      "reason": "SEQUENCED FOR THE ACCEPTED ADR-0011 RUNTIME BOUNDARY. SPI 1.3 makes connector secret-binding names and exact egress hosts manifest-owned, preserves every pre-1.3 digest, and gives the Integrator one declaration from which to derive OpenBao and network policy. Publish and registry-verify this module before releasing the first connector that declares SPI >=1.3; remove this row only in the post-release record change after the exact tag exists. This is NOT to be repaired by editing the version; do not let a connector name a10 as its floor while this row remains.",
+      "state": "previous-version-published"
+    },
     "dotmac-kernel": {
       "declared": "0.1.0a74",
       "reason": "OUTSTANDING 2026-08-19: immutable tag a73 contains the caller-session transaction behavior released from main and does not contain the media-observations namespace allocation. Media observations is therefore the fourteenth allocation in a new a74 candidate rather than a second, conflicting a73 identity. Keep a74 unpublished while its dependent media module remains intentionally unadopted and outside the release allowlist; remove this row only with an explicitly authorized, verified kernel release.",

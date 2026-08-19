@@ -9,12 +9,18 @@ document is the bug.
 | | |
 |---|---|
 | Released | `0.1.0a1` through **`0.1.0a9`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2** |
-| Declared | `0.1.0a9`, SPI 1.2 |
+| Declared | `0.1.0a10`, SPI 1.3 |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
 new result. That obligation is discharged by tests, not by this sentence — see
 "SPI 1.0 still works" and "Verification evidence" below.
+
+SPI 1.3 is additive at the executable seam and explicit at the deployment
+seam. A current manifest declares named secret bindings and an exact external
+host allowlist; the empty allowlist means deny-all. Pre-1.3 manifests remain
+readable during adoption and keep their digest. A connector whose declared
+minimum is 1.3 cannot omit either runtime declaration.
 
 The `InboundEvent.disposition` field declared for a7 defaults to `deliver`.
 Existing connectors therefore keep their behaviour; connectors may explicitly
