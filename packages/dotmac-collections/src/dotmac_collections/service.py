@@ -522,22 +522,25 @@ class CollectionPolicyService:
                 "anchor": published.grace.anchor,
             }
         )
-        db.add(
-            CollectionPolicyVersion(
-                id=published.policy_version_id,
-                tenant_id=scope.tenant_id,
-                policy_id=policy.id,
-                version=published.version,
-                reason_code=published.reason_code,
-                collection_timing=published.collection_timing,
-                grace=grace,
-                effective_from=published.effective_from,
-                actor_ref=published.actor_ref,
-                publication_reason=published.reason,
-                published_at=published.published_at,
-                version_fingerprint=published.version_fingerprint,
-            )
+        version_row = CollectionPolicyVersion(
+            id=published.policy_version_id,
+            tenant_id=scope.tenant_id,
+            policy_id=policy.id,
+            version=published.version,
+            reason_code=published.reason_code,
+            collection_timing=published.collection_timing,
+            grace=grace,
+            effective_from=published.effective_from,
+            actor_ref=published.actor_ref,
+            publication_reason=published.reason,
+            published_at=published.published_at,
+            version_fingerprint=published.version_fingerprint,
         )
+        db.add(version_row)
+        # The mapped facts intentionally expose no ORM relationships. Flush the
+        # parent before its composite-FK steps so PostgreSQL, not unit-of-work
+        # guesswork, remains the ordering authority.
+        db.flush()
         for step in published.steps:
             db.add(
                 CollectionPolicyStep(
@@ -1265,20 +1268,20 @@ class PaymentArrangementService:
                 )
             return ArrangementWriteResult(existing.id, existing.lifecycle, True)
         currency = draft.installments[0].amount.currency
-        db.add(
-            PaymentArrangement(
-                id=draft.arrangement_id,
-                tenant_id=draft.scope.tenant_id,
-                arrangement_ref=str(draft.arrangement_id),
-                subject_ref=draft.subject_ref,
-                currency=currency.code,
-                minor_units=currency.minor_units,
-                arrangement_fingerprint=fingerprint,
-                lifecycle="proposed",
-                proposed_at=draft.proposed_at,
-                accepted_at=None,
-            )
+        arrangement_row = PaymentArrangement(
+            id=draft.arrangement_id,
+            tenant_id=draft.scope.tenant_id,
+            arrangement_ref=str(draft.arrangement_id),
+            subject_ref=draft.subject_ref,
+            currency=currency.code,
+            minor_units=currency.minor_units,
+            arrangement_fingerprint=fingerprint,
+            lifecycle="proposed",
+            proposed_at=draft.proposed_at,
+            accepted_at=None,
         )
+        db.add(arrangement_row)
+        db.flush()
         for exposure in draft.exposures:
             db.add(
                 PaymentArrangementExposure(
