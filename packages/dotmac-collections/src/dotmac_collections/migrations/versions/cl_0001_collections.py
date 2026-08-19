@@ -21,6 +21,7 @@ MODULE_CODE = "collections"
 COMMON_REQUIRES = ("module_database_roles.v1", "outbox_relay.v1")
 TENANT_REQUIRES = ("tenant_scope_catalog.v1",)
 PLATFORM_REQUIRES = ()
+REQUIRES = COMMON_REQUIRES + TENANT_REQUIRES
 TENANT_TABLES = (
     "collection_policies",
     "collection_policy_versions",
@@ -41,12 +42,7 @@ TENANT_TABLES = (
     "collection_reconciliations",
 )
 
-depends_on = resolve_depends_on(
-    COMMON_REQUIRES,
-    module=MODULE_CODE,
-    tenant=TENANT_REQUIRES,
-    platform=PLATFORM_REQUIRES,
-)
+depends_on = resolve_depends_on(REQUIRES)
 
 _SCHEMA = "mod_coll"
 _MONEY = sa.Numeric(20, 6)
@@ -849,8 +845,7 @@ def _install_immutability() -> None:
 
 
 def upgrade() -> None:
-    require_prerequisites(op.get_bind(), COMMON_REQUIRES)
-    require_prerequisites(op.get_bind(), TENANT_REQUIRES)
+    require_prerequisites(op.get_bind(), REQUIRES)
     op.execute("CREATE SCHEMA mod_coll;")
     op.execute("GRANT USAGE ON SCHEMA mod_coll TO app_admin;")
     _upgrade_tenant_plane()
