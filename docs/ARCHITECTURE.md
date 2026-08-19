@@ -444,6 +444,63 @@ packages/dotmac-people/          optional tenant employment directory
                  BUILT AND TESTED HERE, NOT COMPOSED by this reference
                  assembly. No ERP identity, payroll, attendance, finance,
                  integration, notification or persisted vacancy cache ports.
+packages/dotmac-inventory/       optional tenant stock owner
+  pyproject.toml                 distribution dotmac-inventory; audit-complete,
+  EXTRACTION.toml                with ERP as qualifying source and first cutover
+  src/dotmac_inventory/          typed commands, SKU/warehouse identity,
+                 immutable movements, rebuildable quantity/value projections,
+                 reservation lifecycle, lot/serial traceability, valuation,
+                 manifest and independent `iv` lineage in `mod_inventory`.
+                 BUILT AND TESTED HERE, NOT COMPOSED. Network equipment is
+                 Inventory state only while stocked; network modules own no
+                 quantity, reservation, movement or cost.
+packages/dotmac-assets/          optional tenant durable-unit owner
+  pyproject.toml                 distribution dotmac-assets; audit-complete,
+  EXTRACTION.toml                with ERP as qualifying source and first cutover
+  src/dotmac_assets/             typed physical lifecycle, custody, maintenance,
+                 disposal and append-only evidence; manifest and independent
+                 `as` lineage in `mod_assets`. BUILT AND TESTED HERE, NOT
+                 COMPOSED. Network modules correlate opaquely and own only
+                 network-specific identity and state.
+packages/dotmac-ipam/            optional tenant address-space owner
+  src/dotmac_ipam/               immutable allocation contracts, address
+                 spaces/pools/reservations/assignments/utilization evidence,
+                 conflict-safe services and independent `ip` lineage in
+                 `mod_ipam`. BUILT HERE, NOT COMPOSED OR ADOPTED.
+packages/dotmac-network-inventory/ optional tenant managed-network identity owner
+  src/dotmac_network_inventory/  sites, nodes, interfaces, ports, VLANs,
+                 configuration evidence and independent `ni` lineage in
+                 `mod_netinv`. Asset/stock correlation is opaque only.
+packages/dotmac-network-observability/ optional tenant network fact owner
+  src/dotmac_network_observability/ collector-neutral observations,
+                 measurements, availability facts, rebuildable health, alert
+                 evidence and independent `no` lineage in `mod_netobs`.
+packages/dotmac-network-topology/ optional tenant topology owner
+  src/dotmac_network_topology/   declared/observed links, minimum-cost paths,
+                 rebuildable reachability/coverage and independent `nt`
+                 lineage in `mod_nettop`.
+packages/dotmac-network-assurance/ optional tenant assurance owner
+  src/dotmac_network_assurance/  network incidents, impact, maintenance,
+                 notification/SLA evidence and independent `na` lineage in
+                 `mod_netassure`; tickets and work orders remain outside.
+packages/dotmac-network-control/ optional tenant command-lifecycle owner
+  src/dotmac_network_control/    provider-neutral request, approval, dispatch,
+                 execution/reconciliation evidence and independent `nc`
+                 lineage in `mod_netctrl`; Integrator performs provider I/O.
+packages/dotmac-fiber-plant/     optional tenant outside-plant owner
+  src/dotmac_fiber_plant/        structures, cables, strands, splices,
+                 terminations, field/change evidence, continuity and
+                 independent `fp` lineage in `mod_fiber`.
+packages/dotmac-network-access/  optional tenant access-state owner
+  src/dotmac_network_access/     provider-neutral desired access, auth/accounting
+                 facts, session/reconciliation evidence and independent `nac`
+                 lineage in `mod_netaccess`.
+packages/dotmac-pon-access/      optional tenant OLT/ONT/PON owner
+  src/dotmac_pon_access/         OLT/port/ONT lifecycle, desired service state,
+                 observations, backups, drift evidence and independent `pn`
+                 lineage in `mod_pon`; vendor I/O stays in Integrator plugins.
+                                 ALL NINE ARE BUILT AS ONE CANDIDATE SUITE,
+                                 NOT COMPOSED, PUBLISHED, OR ADOPTED (ADR-0038).
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1284,6 +1341,21 @@ made concrete — every model has exactly one declared owner.
 | `PlatformStoredFile` | `mod_files.platform_stored_files` | `dotmac-files` optional module | Platform plane over the same persistence-free physical engine: no tenant column or RLS, platform grants, and `app_user` revoked. Vendor CP is candidate cutover 3 through a licensing-owned exact-bundle relation; no product tenant is created and no consumer is claimed yet (ADR-0023). |
 | `ImportRun` | `mod_imports.import_runs` | `dotmac-imports` optional module | Tenant plane: product-first port of Sub's run lifecycle and one-shot dry-run→apply promotion, joined to ERP's decoding/alias/preview mechanism; forced RLS and a tenant-composite identity neither source had (ADR-0025; [`imports-sources.md`](inventories/imports-sources.md)). The input is an opaque `dotmac-files` id plus its SHA-256, not an inline payload. Validation and apply independently hash the raw bytes, and each locked call advances one resumable durable checkpoint. ERP, then Sub, then CRM are the candidate cutovers; ERP E8 still gates source-product retirement. |
 | `ImportRunRow` | `mod_imports.import_run_rows` | `dotmac-imports` optional module | One minimised outcome per input line — `ok | error | skipped`, a canonical row fingerprint, bounded typed safe error detail, and the domain applier's opaque result. Mapped row values and raw exception text are not retained. Carries NO foreign key into a domain table: Sub's shared row table welded `payment_id` into the ledger, and the reference runs the other way here (ADR-0025 § 3). |
+| `Item` / `Warehouse` | `mod_inventory.items`, `warehouses` | `dotmac-inventory` optional module | Tenant-local SKU and stock-facility identity. Product source, supplier, procurement, GL, physical asset and network meaning stay outside (ADR-0036; [`inventory-sources.md`](inventories/inventory-sources.md)). |
+| `StockMovement` / `MovementSerial` | `mod_inventory.stock_movements`, `movement_serials` | `dotmac-inventory` optional module | Immutable signed movement evidence and its serialized-unit trail. Paired transfers conserve quantity/value; no network module may write stock state. |
+| `StockBalance` / `Lot` / `LotBalance` / `Serial` | `mod_inventory.stock_balances`, `lots`, `lot_balances`, `serials` | `dotmac-inventory` optional module | Locked, rebuildable on-hand/reserved/value and traceability projections. Issuing a serialized unit is an explicit typed handoff, not an implicit asset or network lifecycle transition. |
+| `StockReservation` / `ValuationSnapshot` | `mod_inventory.stock_reservations`, `valuation_snapshots` | `dotmac-inventory` optional module | Reservation lifecycle and immutable valuation/NRV evidence. Product work and Finance consume results and retain their own decisions. |
+| `Asset` / `AssetAssignment` | `mod_assets.assets`, `asset_assignments` | `dotmac-assets` optional module | Stable tenant-local durable-unit identity, physical state/condition/location and complete opaque-custodian history. Network Inventory may correlate an asset but cannot duplicate its physical serial, custody or lifecycle (ADR-0037; [`assets-sources.md`](inventories/assets-sources.md)). |
+| `AssetMaintenance` / `AssetDisposal` / `AssetLifecycleEvent` | `mod_assets.asset_maintenance`, `asset_disposals`, `asset_lifecycle_events` | `dotmac-assets` optional module | Guarded physical maintenance/disposal and append-only ordered evidence. Finance, stock, positioning, product work and network configuration remain separate owners. |
+| `AddressSpace` / `Pool` / `Address` / `Assignment` / `UtilizationSnapshot` / `IpamEvent` | `mod_ipam.*` | `dotmac-ipam` optional module | Address-space, pool, reservation and assignment decisions plus immutable utilization/lifecycle evidence. Subscriber/service identity is an opaque subject reference (ADR-0038). |
+| `Site` / `Node` / `Interface` / `Port` / `Vlan` / `VlanAttachment` / `ConfigurationSnapshot` / `NetworkInventoryEvent` | `mod_netinv.*` | `dotmac-network-inventory` optional module | Managed-network identity, admission/archive, interface/port/VLAN state and configuration evidence. Stock and durable-asset state remain with Inventory and Assets; `asset_ref` is opaque. |
+| `Observation` / `Measurement` / `AvailabilityFact` / `HealthProjection` / `Alert` / `AlertEvidence` | `mod_netobs.*` | `dotmac-network-observability` optional module | Deduplicated collector-neutral facts, rebuildable health and alert evidence. Collectors observe; this module owns the local network-health projection, never provider I/O. |
+| `Link` / `PathProjection` / `ReachabilityProjection` / `CoverageGapRow` / `TopologyEvent` | `mod_nettop.*` | `dotmac-network-topology` optional module | Declared/observed topology and minimum-cost rebuildable forwarding/reachability/coverage projections. Endpoints are opaque owner references. |
+| `Incident` / `IncidentEvent` / `Impact` / `MaintenanceWindow` / `NotificationEvidence` / `SlaEvidence` | `mod_netassure.*` | `dotmac-network-assurance` optional module | Network incident, impact, maintenance and SLA evidence. Ticket, work-order, customer-notification policy and escalation execution remain product owners. |
+| `Command` / `CommandEvent` / `Dispatch` / `ExecutionEvidenceRow` / `ReconciliationRun` | `mod_netctrl.*` | `dotmac-network-control` optional module | Provider-neutral command decision/lifecycle and immutable execution evidence. Integrator plugins perform I/O and can only return typed observations. |
+| `Structure` / `Cable` / `Strand` / `Splice` / `Termination` / `FieldObservation` / `Change` / `FiberEvent` | `mod_fiber.*` | `dotmac-fiber-plant` optional module | Outside-plant physical identity, continuity and accepted as-built evidence. CRM authority must converge into Sub before coordinated adoption. |
+| `NasAttachment` / `AccessProjectionRow` / `AuthenticationObservation` / `AccountingObservation` / `AccessSession` / `AccessReconciliation` / `AccessEvent` | `mod_netaccess.*` | `dotmac-network-access` optional module | Provider-neutral desired access, immutable AAA observations, local session state and repairable drift projection. Subscriber entitlement remains a typed product decision. |
+| `Olt` / `PonPort` / `Ont` / `DesiredService` / `PonObservation` / `PonReconciliation` / `BackupEvidenceRow` / `PonEvent` | `mod_pon.*` | `dotmac-pon-access` optional module | OLT/ONT/PON admission, assignment, commissioning, desired service, observation, backup and drift evidence. Fiber/IPAM/inventory correlations are opaque; vendor clients stay in Integrator. |
 | `Campaign` / `CampaignRevision` / `CampaignStep` | `mod_campaigns.campaigns`, `campaign_revisions`, `campaign_steps` | `dotmac-campaigns` optional module | Tenant-only provider-neutral campaign identity and its immutable active execution plan. Product audience, financial and sender business rules are typed inputs; Template Studio and Durable Timers remain assembly-bound owners (ADR-0032; [`campaigns-sources.md`](inventories/campaigns-sources.md)). |
 | `CampaignAudience` / `CampaignRecipient` / `CampaignConsentReceipt` | `mod_campaigns.campaign_audiences`, `campaign_recipients`, `campaign_consent_receipts` | `dotmac-campaigns` optional module | Immutable source-versioned audience and delivery snapshots plus observations of the kernel consent owner's decision at audience, delayed-step and final-delivery gates. They do not become Party/customer or consent-policy records. PII carries an explicit deadline and can only move to the database-enforced scrubbed form after sending begins. |
 | `CampaignRecipientStep` / `CampaignDeliveryIntent` | `mod_campaigns.campaign_recipient_steps`, `campaign_delivery_intents` | `dotmac-campaigns` optional module | One unique recipient/step progression fact and one provider-neutral intent. The package emits deterministic timer identities through a port and writes the kernel outbox atomically; it owns no scheduler, relay, provider credentials, I/O or retry. |
@@ -1336,6 +1408,17 @@ write:
 | Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |
 | Stored-file metadata and physical state | `dotmac_files.service.stage_file` / `request_deletion`, then the explicit target→external-action→record-result phases (`deletion_target` → `delete_object` → `finalize_purge`; `reconciliation_target` → `observe_object` → `record_presence`). DB phases filter explicit `TenantScope` and flush without commit/rollback; provider phases accept no `Session`, so no network call or download stream holds a DB transaction. The owner covers only provider/byte state. Domain attachment relations, read authorization, retention permission, document meaning, and import outcomes remain with the domain that references the opaque file UUID (ADR-0022). |
 | Import run and row outcomes | `dotmac_imports.service` — `create_dry_run`, `validate_next_chunk` (which takes no applier and therefore cannot mutate a domain), `promote` (digest-verified, uniquely constrained so a validated run applies once), `apply_next_chunk`, `mark_failed`. A chunk call locks the run, hashes and decodes the recorded bytes, resumes after the committed checkpoint, and returns without committing; `dotmac_kernel.db` remains the one transaction authority. Completed re-delivery is a no-op. Expected domain refusals are typed `RowRejected` outcomes; unexpected exceptions roll back the attempted chunk and escape. The importing domain remains the sole writer of its own rows through the `RowValidator`/`RowApplier` ports, and owns any reversal of what an import created (ADR-0025). |
+| Inventory items, warehouses, movements, balances, reservations, lots/serials and valuation evidence | `dotmac_inventory.service` is the only writer. Its commands lock affected projections, append immutable evidence, rebuild drift from movements/reservations, and flush without commit/rollback. A product performs the explicit issue handoff; Assets and every network module are forbidden from maintaining stock or value in parallel (ADR-0036/0038). |
+| Durable assets, assignments, maintenance, disposal and lifecycle evidence | `dotmac_assets.service` is the only writer. Expected-state aggregate commands lock source state, preserve the custody chain, append immutable evidence and flush without transaction authority. Network Inventory keeps only an opaque asset correlation and network-specific state (ADR-0037/0038). |
+| Address spaces, pools, reservations, assignments and utilization | `dotmac_ipam.service` is the only writer; reservation ownership and expiry are checked before assignment, pool creation is serialized at the address space, and repair never repoints identity. |
+| Managed sites, nodes, interfaces, ports, VLANs and configuration evidence | `dotmac_network_inventory.service` is the only writer. Asset/stock references are opaque and nullable identity cases use database partial uniqueness. |
+| Network observations, measurements, availability, health and alert evidence | `dotmac_network_observability.service` is the only local writer. Facts are deduplicated; `rebuild_health` alone derives the repairable health projection. |
+| Network links, paths, reachability and coverage gaps | `dotmac_network_topology.service` is the only writer. `resolve_forwarding` creates current paths and `rebuild_topology` recomputes minimum-cost path, reachability and gap projections from selected link facts. |
+| Network incidents, impact, maintenance and SLA evidence | `dotmac_network_assurance.service` is the only writer. It recommends escalation but does not create or mutate tickets/work orders. |
+| Provider-neutral network commands, dispatch and execution evidence | `dotmac_network_control.service` is the only lifecycle writer. Integrator executes the typed dispatch; the module records evidence and rejects evidence not linked to that dispatch. |
+| Fiber structures, cables, strands, splices, terminations and accepted changes | `dotmac_fiber_plant.service` is the only writer. It validates endpoint continuity and preserves field/change evidence; no network sibling imports it. |
+| Desired access, AAA facts, sessions and access drift | `dotmac_network_access.service` is the only writer. Product eligibility arrives as a typed desired projection; collectors contribute immutable facts only. |
+| OLTs, PON ports, ONTs, desired services, backups and PON drift | `dotmac_pon_access.service` is the only writer. Integrator plugins contribute provider observations and execution evidence, never domain writes. |
 | Outbound campaign identity and recipient progression | `dotmac_campaigns.service` — `create_campaign`/`revise_campaign`, `ingest_audience`, `schedule_campaign`, `accept_due_work`, `record_observation`, pause/resume/cancel/complete, `authorize_delivery`, `request_unsubscribe`, counter rebuild and publication/privacy repair. Every path receives and flushes the caller session. Kernel consent decides eligibility, kernel idempotency owns replay, kernel outbox owns publication, Durable Timers owns due-work mechanics, and product adapters supply audience/render/sender/Sales facts; none is a parallel campaigns writer (ADR-0032). |
 | Durable timer generations, cancellation and acceptance/rejection evidence | `dotmac_durable_timers.service` is the sole lifecycle writer on both declared planes: `schedule_timer`, `cancel_timer`, `accept_trigger`, `current_timer`, and `purge_history`. Identity-level PostgreSQL advisory locks serialize even the first schedule; cancellation names the observed generation and refuses a newer current generation; trigger acceptance re-derives current state and records stale evidence with observed/current generations and the opaque source version. The package exports typed ports, never ORM models. A schedule resolves the consuming module's manifest-declared outbox event type, calls the kernel outbox writer in the same transaction and sets `available_at=due_at`; `dotmac_kernel.messaging.relay` remains the sole owner of claim, lease, retry and dead-letter behavior. Business deadline policy and the effect after an accepted trigger remain with the adopting product. This reference assembly builds and proves the optional package but does not compose its `dt` lineage. |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |

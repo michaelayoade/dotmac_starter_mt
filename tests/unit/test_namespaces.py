@@ -194,8 +194,10 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
     # audit found no real named platform consumer.
     # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
-    # than adding another due-work engine. None of these allocations installs
-    # behaviour in the kernel.
+    # than adding another due-work engine. Inventory and Assets are the
+    # fourteenth and fifteenth tenant-only owners. ADR-0038 adds the nine
+    # independently released tenant owners in network-suite-v1. None of these
+    # allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -210,6 +212,17 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "people",
         "campaigns",
         "durable_timers",
+        "inventory",
+        "assets",
+        "ipam",
+        "network_inventory",
+        "network_observability",
+        "network_topology",
+        "network_assurance",
+        "network_control",
+        "fiber_plant",
+        "network_access",
+        "pon_access",
     }
 
 

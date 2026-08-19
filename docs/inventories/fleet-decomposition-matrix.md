@@ -181,11 +181,11 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | sales-agreements | 7 | 13 | 24 | 2 | 8 | 2 | consolidate CRM → Sub, then module ← Sub; vendor rows are a distinct module ← vendor CP (A2(a), ruled 2026-08-12) |
 | commercial-offers | 0 | 0 | 2 | 1 | 1 | 0 | module source **unassigned** (Sub or vendor CP) — A2 |
 | billing-revenue | 12 | 3 | 74 | 0 | 2 | 0 | module ← Sub + contract with ERP |
-| outside-plant | 0 | 33 | 94 | 0 | 30 | 0 | consolidate → Sub, then module ← Sub |
+| outside-plant | 0 | 33 | 94 | 0 | 30 | 0 | consolidate → Sub, then `dotmac-fiber-plant`/`dotmac-pon-access` ← Sub (ADR-0038) |
 | field-workforce | 10 | 26 | 38 | 0 | 15 | 0 | consolidate → Sub, then module ← Sub |
 | geospatial-qualification | 2 | 6 | 11 | 0 | 5 | 0 | consolidate → Sub, then module ← Sub |
 | subscriber-service | 2 | 9 | 74 | 0 | 3 | 0 | consolidate → Sub, then module ← Sub |
-| network-operations | 3 | 2 | 72 | 0 | 1 | 0 | module ← Sub |
+| network-operations | 3 | 2 | 72 | 0 | 1 | 0 | module ← Sub: nine bounded packages in the ADR-0038 disposition ledger |
 | finance-ledger | 82 | 0 | 7 | 0 | 1 | 0 | module ← ERP + contract with Sub |
 | people-payroll | 101 | 0 | 0 | 0 | 0 | 0 | module ← ERP |
 | inventory-procurement | 39 | 3 | 4 | 0 | 0 | 0 | module ← ERP; CRM/Sub copies consolidate → ERP |
@@ -403,7 +403,11 @@ second consumer that proves reuse arrives after the module exists rather than
 before it is allowed to.
 
 The same reading applies to Sub's network-operations (72) and to
-analytics/content rows: single-owner today, module-bound tomorrow.
+analytics/content rows: single-owner today, module-bound tomorrow. ADR-0038 and
+[`network-module-sources.md`](network-module-sources.md) refine the broad
+network-operations/outside-plant measurement buckets into nine bounded owners.
+The original counts remain the frozen duplication measurement; they are not a
+claim that one network suite owns all 166 rows.
 
 Two counter-flows consolidate toward ERP: CRM's 5 expense/material-request
 tables plus its 3 `inventory_*` tables, and Sub's 4
@@ -430,7 +434,7 @@ constraint that adoption — not scope — is the scarce resource.
 | **1** | CRM → Sub authority consolidation, driven by Sub's existing `crm_web_retirement` ledger: outside-plant, engagement-inbox, field-workforce, sales-agreements, geospatial, subscriber projections. **Entry gate:** declare an owner in Sub's registry for the 28 duplicates that have none — see [`fleet-fact-level-decomposition.md`](fleet-fact-level-decomposition.md). | 72 of the 133 CRM↔Sub duplicated names, and it needs no new package to start. The authority questions are already adjudicated; this is capability closure and reconciliation against a named owner. Intermediate — these domains follow into modules in wave 4. |
 | **2** | `dotmac-ticketing` cutover — name the adopter, adopt in Sub, then land CRM's ticket retirement into the module. | The package and its source audit already exist; the only open gate is an adopter. The **first proof that a non-kernel module lineage runs in production**, which every later module wave depends on. |
 | **3** | Consent → delivery/outbox → channel policy → campaigns, in that order. | Consent is a kernel owner and a legal boundary; shipping delivery first ships a suppression bypass. |
-| **4** | Sub-sourced modules: network-operations, subscriber-service, outside-plant, field-workforce, engagement-inbox, sales-agreements, billing. | The domains consolidated in wave 1, now extracted product-first from Sub and consumed back by Sub as an assembly. Depends on wave 2's lineage proof. |
+| **4** | Sub-sourced modules. Network work follows ADR-0038's suite-first programme: seal Sub's IP writer, build all nine independent packages and their composed contracts on one Starter integration branch, then adopt the complete suite in one coordinated Sub cutover. Subscriber-service, field-workforce, engagement-inbox, sales-agreements and billing remain separate slices. | The domains consolidated in wave 1 are extracted product-first from Sub and consumed back by Sub as an assembly. Depends on wave 2's lineage proof; `delivery_after` orders implementation inside the integration branch, never a sibling module dependency or incremental adoption. |
 | **5** | ERP-sourced modules: finance-ledger, people-payroll, inventory-procurement, assets-fleet, expenses, content-help; separately audit forms-data-capture and workflow-automation. | Zero duplication, so nobody is paying for a second implementation today — that sequences it late, and does not exempt it. ERP's kernel/UI adoption must land first. A1 proved the two workflow-named candidates cannot be bundled. |
 | **6** | Source adjudication for projects-tasks (ERP vs Sub) and analytics-reporting, then extraction. | Target layer settled, qualifying source unsettled. Needs the audit `dotmac-ticketing` got. |
 

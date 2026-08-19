@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-inventory"
+version = "0.1.0a1"
+description = "Dotmac Inventory — tenant-local stock ledger, reservations, traceability, and valuation"
+authors = ["Dotmac"]
+readme = "README.md"
+packages = [{ include = "dotmac_inventory", from = "src" }]
+include = [
+  { path = "src/dotmac_inventory/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_inventory/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a73"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

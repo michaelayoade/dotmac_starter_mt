@@ -88,6 +88,17 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # Durable timers consumes a67's relay contract, but its own namespace is
     # allocated later, so the allocation remains the effective floor.
     "dotmac-durable-timers": "0.1.0a72",
+    "dotmac-inventory": "0.1.0a73",
+    "dotmac-assets": "0.1.0a73",
+    "dotmac-ipam": "0.1.0a73",
+    "dotmac-network-inventory": "0.1.0a73",
+    "dotmac-network-observability": "0.1.0a73",
+    "dotmac-network-topology": "0.1.0a73",
+    "dotmac-network-assurance": "0.1.0a73",
+    "dotmac-network-control": "0.1.0a73",
+    "dotmac-fiber-plant": "0.1.0a73",
+    "dotmac-network-access": "0.1.0a73",
+    "dotmac-pon-access": "0.1.0a73",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

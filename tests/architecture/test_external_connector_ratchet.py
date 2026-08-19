@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 
 import pytest
@@ -33,7 +34,9 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = PROJECT_ROOT / "scripts" / "external_connector_sweep.py"
 BASELINE = PROJECT_ROOT / "docs" / "inventories" / "external-connector-baseline.json"
 INVENTORY = PROJECT_ROOT / "docs" / "inventories" / "external-connector-sources.md"
-FLEET_ROOT = PROJECT_ROOT.parent
+FLEET_ROOT = pathlib.Path(
+    os.environ.get("DOTMAC_FLEET_ROOT", PROJECT_ROOT.parent)
+).resolve()
 
 
 def _sweep():

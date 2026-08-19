@@ -6,6 +6,29 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a73 — UNRELEASED
+
+Allocates the reusable tenant-only Inventory and Assets foundations plus the
+nine independently versioned tenant lineages in the network-suite integration.
+The allocations add no shared runtime behaviour and do not compose sibling
+modules or claim that Sub has adopted the suite.
+
+### Added
+
+- `INVENTORY_MIGRATION_OWNER`: schema `mod_inventory`, revision prefix
+  `iv`, branch label `inventory`.
+- `ASSETS_MIGRATION_OWNER`: schema `mod_assets`, revision prefix `as`,
+  branch label `assets`.
+- Network suite owners: `IPAM_MIGRATION_OWNER` (`mod_ipam`/`ip`),
+  `NETWORK_INVENTORY_MIGRATION_OWNER` (`mod_netinv`/`ni`),
+  `NETWORK_OBSERVABILITY_MIGRATION_OWNER` (`mod_netobs`/`no`),
+  `NETWORK_TOPOLOGY_MIGRATION_OWNER` (`mod_nettop`/`nt`),
+  `NETWORK_ASSURANCE_MIGRATION_OWNER` (`mod_netassure`/`na`),
+  `NETWORK_CONTROL_MIGRATION_OWNER` (`mod_netctrl`/`nc`),
+  `FIBER_PLANT_MIGRATION_OWNER` (`mod_fiber`/`fp`),
+  `NETWORK_ACCESS_MIGRATION_OWNER` (`mod_netaccess`/`nac`), and
+  `PON_ACCESS_MIGRATION_OWNER` (`mod_pon`/`pn`).
+
 ## 0.1.0a72 — 2026-08-19
 
 Allocates the independent durable-timer module lineage and adds the declaration

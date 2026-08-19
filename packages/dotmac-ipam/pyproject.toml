@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-ipam"
+version = "0.1.0a1"
+description = "Tenant IP address-space, allocation, assignment, utilization and repair owner"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_ipam", from = "src" }]
+include = [
+  { path = "src/dotmac_ipam/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_ipam/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a73"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -289,7 +289,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a54`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a73`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -305,7 +305,20 @@ retired prefix is never reused.
 | `integration` | `mod_intg` | `ig` | `integration` |
 | `approvals` | `mod_approvals` | `ap` | `approvals` |
 | `numbering` | `mod_numbering` | `nu` | `numbering` |
+| `people` | `mod_people` | `pe` | `people` |
 | `campaigns` | `mod_campaigns` | `ca` | `campaigns` |
+| `durable_timers` | `mod_timers` | `dt` | `durable_timers` |
+| `inventory` | `mod_inventory` | `iv` | `inventory` |
+| `assets` | `mod_assets` | `as` | `assets` |
+| `ipam` | `mod_ipam` | `ip` | `ipam` |
+| `network_inventory` | `mod_netinv` | `ni` | `network_inventory` |
+| `network_observability` | `mod_netobs` | `no` | `network_observability` |
+| `network_topology` | `mod_nettop` | `nt` | `network_topology` |
+| `network_assurance` | `mod_netassure` | `na` | `network_assurance` |
+| `network_control` | `mod_netctrl` | `nc` | `network_control` |
+| `fiber_plant` | `mod_fiber` | `fp` | `fiber_plant` |
+| `network_access` | `mod_netaccess` | `nac` | `network_access` |
+| `pon_access` | `mod_pon` | `pn` | `pon_access` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an

@@ -624,6 +624,92 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-inventory` owns tenant-local stock quantities, immutable movements,
+# reservations, lot/serial traceability and valuation. Network equipment
+# remains Inventory state only while stocked; deployment is an explicit
+# product-orchestrated handoff rather than a second stock writer.
+INVENTORY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="inventory",
+    prefix="iv",
+    branch_label="inventory",
+    db_schema=module_schema("inventory"),
+)
+
+# `dotmac-assets` owns each tenant's durable physical units, custody,
+# maintenance and disposal. Network modules may correlate an asset opaquely,
+# but do not duplicate its physical lifecycle.
+ASSETS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="assets",
+    prefix="as",
+    branch_label="assets",
+    db_schema=module_schema("assets"),
+)
+
+# Network-suite-v1 allocations. These nine tenant-only owners are released and
+# composed independently even though their first Sub adoption is one cohort.
+IPAM_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="ipam",
+    prefix="ip",
+    branch_label="ipam",
+    db_schema=module_schema("ipam"),
+)
+
+NETWORK_INVENTORY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_inventory",
+    prefix="ni",
+    branch_label="network_inventory",
+    db_schema=module_schema("netinv"),
+)
+
+NETWORK_OBSERVABILITY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_observability",
+    prefix="no",
+    branch_label="network_observability",
+    db_schema=module_schema("netobs"),
+)
+
+NETWORK_TOPOLOGY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_topology",
+    prefix="nt",
+    branch_label="network_topology",
+    db_schema=module_schema("nettop"),
+)
+
+NETWORK_ASSURANCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_assurance",
+    prefix="na",
+    branch_label="network_assurance",
+    db_schema=module_schema("netassure"),
+)
+
+NETWORK_CONTROL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_control",
+    prefix="nc",
+    branch_label="network_control",
+    db_schema=module_schema("netctrl"),
+)
+
+FIBER_PLANT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="fiber_plant",
+    prefix="fp",
+    branch_label="fiber_plant",
+    db_schema=module_schema("fiber"),
+)
+
+NETWORK_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_access",
+    prefix="nac",
+    branch_label="network_access",
+    db_schema=module_schema("netaccess"),
+)
+
+PON_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="pon_access",
+    prefix="pn",
+    branch_label="pon_access",
+    db_schema=module_schema("pon"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +725,17 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    INVENTORY_MIGRATION_OWNER,
+    ASSETS_MIGRATION_OWNER,
+    IPAM_MIGRATION_OWNER,
+    NETWORK_INVENTORY_MIGRATION_OWNER,
+    NETWORK_OBSERVABILITY_MIGRATION_OWNER,
+    NETWORK_TOPOLOGY_MIGRATION_OWNER,
+    NETWORK_ASSURANCE_MIGRATION_OWNER,
+    NETWORK_CONTROL_MIGRATION_OWNER,
+    FIBER_PLANT_MIGRATION_OWNER,
+    NETWORK_ACCESS_MIGRATION_OWNER,
+    PON_ACCESS_MIGRATION_OWNER,
 )
 
 
@@ -971,19 +1068,30 @@ class NamespaceRegistry:
 __all__ = [
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
+    "ASSETS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
+    "FIBER_PLANT_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
     "INTEGRATION_MIGRATION_OWNER",
+    "INVENTORY_MIGRATION_OWNER",
+    "IPAM_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
+    "NETWORK_ACCESS_MIGRATION_OWNER",
+    "NETWORK_ASSURANCE_MIGRATION_OWNER",
+    "NETWORK_CONTROL_MIGRATION_OWNER",
+    "NETWORK_INVENTORY_MIGRATION_OWNER",
+    "NETWORK_OBSERVABILITY_MIGRATION_OWNER",
+    "NETWORK_TOPOLOGY_MIGRATION_OWNER",
     "PEOPLE_MIGRATION_OWNER",
+    "PON_ACCESS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

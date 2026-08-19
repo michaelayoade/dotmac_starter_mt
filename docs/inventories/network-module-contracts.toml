@@ -1,0 +1,105 @@
+schema_version = 1
+contract_date = "2026-08-19"
+adoption_cohort = "network-suite-v1"
+decision = "docs/adr/0038-network-capabilities-decompose-sub-first.md"
+dispositions = "docs/inventories/network-module-dispositions.toml"
+rule = "Each package publishes immutable commands, queries, snapshots, and events. Public services return snapshots/results, never ORM instances. Cross-owner identity is opaque and no module imports a sibling."
+
+[[modules]]
+name = "dotmac-ipam"
+package = "dotmac-ipam"
+contract_module = "dotmac_ipam.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["CreateAddressSpace", "CreatePool", "ReserveAddress", "AssignAddress", "ReleaseAssignment", "RecordUtilization", "RepairAssignment"]
+queries = ["AddressLookup", "AssignmentLookup", "UtilizationQuery"]
+snapshots = ["AddressSpaceSnapshot", "PoolSnapshot", "AddressSnapshot", "AssignmentSnapshot", "UtilizationSnapshot", "RepairReport"]
+events = ["AddressReserved", "AddressAssigned", "AssignmentReleased", "AssignmentRepaired"]
+
+[[modules]]
+name = "dotmac-network-inventory"
+package = "dotmac-network-inventory"
+contract_module = "dotmac_network_inventory.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["RegisterSite", "AdmitNode", "RegisterInterface", "RegisterPort", "DefineVlan", "AttachVlan", "RecordConfigurationSnapshot", "ArchiveNode"]
+queries = ["SiteLookup", "NodeLookup", "InterfaceLookup", "VlanLookup"]
+snapshots = ["SiteSnapshot", "NodeSnapshot", "InterfaceSnapshot", "PortSnapshot", "VlanSnapshot", "AdmissionResult", "ConfigurationSnapshot"]
+events = ["NodeAdmitted", "NodeArchived", "InterfaceChanged", "VlanAttachmentChanged"]
+
+[[modules]]
+name = "dotmac-network-observability"
+package = "dotmac-network-observability"
+contract_module = "dotmac_network_observability.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["RecordObservation", "RecordMeasurement", "RecordAvailability", "OpenAlertEvidence", "ResolveAlertEvidence", "RebuildHealth"]
+queries = ["ObservationQuery", "HealthQuery", "AlertQuery"]
+snapshots = ["ObservationReceipt", "MeasurementSnapshot", "HealthSnapshot", "AlertSnapshot"]
+events = ["ObservationRecorded", "HealthChanged", "AlertEvidenceOpened", "AlertEvidenceResolved"]
+
+[[modules]]
+name = "dotmac-network-topology"
+package = "dotmac-network-topology"
+contract_module = "dotmac_network_topology.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["DeclareLink", "WithdrawLink", "RecordObservedLink", "ResolveForwarding", "RebuildTopology"]
+queries = ["LinkLookup", "PathQuery", "ReachabilityQuery", "CoverageQuery"]
+snapshots = ["LinkSnapshot", "PathSnapshot", "ReachabilitySnapshot", "CoverageGap", "TopologyRebuildReport"]
+events = ["LinkDeclared", "LinkWithdrawn", "ObservedLinkRecorded", "PathChanged"]
+
+[[modules]]
+name = "dotmac-network-assurance"
+package = "dotmac-network-assurance"
+contract_module = "dotmac_network_assurance.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["OpenIncident", "ClassifyImpact", "UpdateIncident", "ResolveIncident", "ScheduleMaintenance", "RecordNotificationEvidence", "RecordSlaEvidence"]
+queries = ["IncidentLookup", "ImpactQuery", "MaintenanceQuery", "SlaEvidenceQuery"]
+snapshots = ["IncidentSnapshot", "ImpactSnapshot", "MaintenanceSnapshot", "SlaEvidenceSnapshot", "EscalationRecommendation"]
+events = ["IncidentOpened", "IncidentChanged", "IncidentResolved", "ImpactClassified"]
+
+[[modules]]
+name = "dotmac-network-control"
+package = "dotmac-network-control"
+contract_module = "dotmac_network_control.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["RequestCommand", "ApproveCommand", "RejectCommand", "MarkDispatched", "RecordExecutionObservation", "ReconcileCommand", "RecoverCommand"]
+queries = ["CommandLookup", "DispatchQuery", "ExecutionEvidenceQuery"]
+snapshots = ["CommandSnapshot", "DispatchEnvelope", "ExecutionEvidence", "ReconciliationReport", "RecoveryResult"]
+events = ["CommandRequested", "CommandReady", "CommandCompleted", "CommandFailed"]
+
+[[modules]]
+name = "dotmac-fiber-plant"
+package = "dotmac-fiber-plant"
+contract_module = "dotmac_fiber_plant.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["RegisterStructure", "RegisterCable", "RegisterStrand", "RecordSplice", "RecordTermination", "RecordFieldObservation", "ProposeChange", "ApproveChange", "AcceptChange"]
+queries = ["StructureLookup", "CableLookup", "ContinuityQuery", "ChangeLookup"]
+snapshots = ["StructureSnapshot", "CableSnapshot", "StrandSnapshot", "ContinuityPath", "FieldObservationSnapshot", "ChangeSnapshot"]
+events = ["StructureRegistered", "SpliceRecorded", "FiberChangeAccepted", "ContinuityChanged"]
+
+[[modules]]
+name = "dotmac-network-access"
+package = "dotmac-network-access"
+contract_module = "dotmac_network_access.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["RegisterNasAttachment", "ProjectAccessPolicy", "RecordAuthentication", "RecordAccounting", "ReconcileAccess", "CloseSession"]
+queries = ["AccessStateQuery", "SessionQuery", "AuthenticationQuery", "AccountingQuery"]
+snapshots = ["AccessProjection", "AuthenticationReceipt", "AccountingReceipt", "SessionSnapshot", "AccessDriftReport"]
+events = ["AccessProjectionChanged", "AuthenticationObserved", "SessionStarted", "SessionClosed"]
+
+[[modules]]
+name = "dotmac-pon-access"
+package = "dotmac-pon-access"
+contract_module = "dotmac_pon_access.contracts"
+returns_orm_instances = false
+uses_opaque_cross_owner_refs = true
+commands = ["RegisterOlt", "RegisterPonPort", "AdmitOnt", "AssignOnt", "CommissionOnt", "SetDesiredService", "RecordPonObservation", "ReconcilePon", "RecordBackupEvidence"]
+queries = ["OltLookup", "PonPortLookup", "OntLookup", "DesiredServiceQuery"]
+snapshots = ["OltSnapshot", "PonPortSnapshot", "OntSnapshot", "CommissioningResult", "DesiredServiceSnapshot", "PonDriftReport", "BackupEvidence"]
+events = ["OntAdmitted", "OntAssigned", "OntCommissioned", "PonDriftDetected"]

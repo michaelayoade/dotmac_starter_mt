@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-assets": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED audit-complete state under ADR-0037 and ADR-0038. ERP remains the qualifying durable-asset source and first cutover; landing the candidate on the network-suite integration branch does not make Starter or Sub an adopter. Keep it unallowlisted and unpublished until its Observer proof, ERP Organization-to-Tenant mapping, composed lineage, full-state/lifecycle-digest shadow and one-writer retirement slice are ready. Network modules correlate assets opaquely and may not create a second physical-lifecycle owner. Add the module to a release lane only just in time for the approved product cutover.",
+      "state": "never-published"
+    },
     "dotmac-campaigns": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
@@ -71,6 +76,61 @@
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
       "state": "never-published"
+    },
+    "dotmac-inventory": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED audit-complete state under ADR-0036 and ADR-0038. ERP remains the qualifying stock-ledger source and first cutover; landing the candidate on the network-suite integration branch does not make Starter or Sub an adopter. Keep it unallowlisted and unpublished until its Observer proof, ERP Organization-to-Tenant mapping, composed lineage and quantity/value/reservation/traceability shadow are ready. Network modules consume an explicit typed stock-issue handoff and may not write quantities, movements or valuation. Add the module to a release lane only just in time for the approved product cutover.",
+      "state": "never-published"
+    },
+    "dotmac-fiber-plant": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. Keep unallowlisted and unpublished until the complete nine-module Observer proof and coordinated Sub cutover are approved; CRM outside-plant authority must first converge into Sub.",
+      "state": "never-published"
+    },
+    "dotmac-ipam": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. Keep unallowlisted and unpublished until all nine modules pass Observer validation and Sub completes one coordinated authority cutover; the existing Sub IP writer must be retired at that gate.",
+      "state": "never-published"
+    },
+    "dotmac-network-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. Provider-neutral access projection and AAA evidence are built with the suite but have no adopter; publish only with the approved coordinated Sub cutover.",
+      "state": "never-published"
+    },
+    "dotmac-network-assurance": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. Network incident/impact/SLA ownership is built without ticket or work-order ownership; keep unpublished until complete-suite proof and coordinated Sub adoption.",
+      "state": "never-published"
+    },
+    "dotmac-network-control": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. The provider-neutral command lifecycle is not a provider client and has no adopter; keep unpublished until suite proof, Integrator seam proof and coordinated Sub cutover.",
+      "state": "never-published"
+    },
+    "dotmac-network-inventory": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. Managed-network identity reuses opaque Inventory/Assets handoffs and is neither composed nor adopted; publish only with the complete coordinated Sub cutover.",
+      "state": "never-published"
+    },
+    "dotmac-network-observability": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. Collector-neutral facts and health projections are built with no adopter; keep unpublished until complete-suite Observer proof and coordinated Sub adoption.",
+      "state": "never-published"
+    },
+    "dotmac-network-topology": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. Topology and rebuildable reachability are built with no adopter; keep unpublished until complete-suite Observer proof and coordinated Sub adoption.",
+      "state": "never-published"
+    },
+    "dotmac-pon-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED network-suite-v1 candidate under ADR-0038. OLT/ONT/PON lifecycle remains provider-neutral and unadopted; keep unpublished until complete-suite Observer proof, Integrator seam proof and coordinated Sub cutover.",
+      "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a73",
+      "reason": "OUTSTANDING integration prerequisite for ADR-0036, ADR-0037 and ADR-0038. Kernel a73 allocates the immutable Inventory, Assets and nine network-suite schemas, revision prefixes and branch labels on top of released a72. The declared version intentionally remains ahead of the verified tag until the complete integration branch passes validation and Michael authorizes publication. Remove this row only when the exact a73 artifact is built, installed, verified and tagged; do not repoint a module to released a72, which lacks these allocations.",
+      "state": "declared-unpublished"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
