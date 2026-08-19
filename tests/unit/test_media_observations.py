@@ -165,6 +165,31 @@ def _entity(
     )
 
 
+def _conformance_case() -> NormalizedObservationCase:
+    return NormalizedObservationCase(
+        node_declarations=(
+            NodeTypeDeclaration(
+                tenant_id=TENANT,
+                code="campaign",
+                version=1,
+                label="Campaign",
+                traits={"aggregate": True},
+                declared_by="conformance-fake",
+                declared_at=T0,
+            ),
+        ),
+        metric_declarations=(),
+        observations=(_entity("conformance-entity"),),
+    )
+
+
+class _FakeNormalizedProducer:
+    normalized_observation_spi_version = 1
+
+    def normalized_case(self) -> NormalizedObservationCase:
+        return _conformance_case()
+
+
 def test_three_level_hierarchy_and_current_state_preserve_mkt_parity(
     db: Session,
 ) -> None:
@@ -993,27 +1018,48 @@ def test_append_only_model_set_excludes_only_rebuildable_projections() -> None:
 def test_provider_free_normalization_conformance_replays_a_stable_fixture(
     db: Session,
 ) -> None:
-    class FakeProducer:
-        def normalized_case(self) -> NormalizedObservationCase:
-            return NormalizedObservationCase(
-                node_declarations=(
-                    NodeTypeDeclaration(
-                        tenant_id=TENANT,
-                        code="campaign",
-                        version=1,
-                        label="Campaign",
-                        traits={"aggregate": True},
-                        declared_by="conformance-fake",
-                        declared_at=T0,
-                    ),
-                ),
-                metric_declarations=(),
-                observations=(_entity("conformance-entity"),),
-            )
+    report = run_normalized_conformance(db, _FakeNormalizedProducer())
 
-    report = run_normalized_conformance(db, FakeProducer())
-
+    assert report.spi_version == 1
     assert report.observation_count == 1
     assert report.replay_count == 1
     assert report.installation_ref == "installation-alpha"
     assert report.source_system == "external-media"
+    assert len(report.observation_ids) == 1
+    assert len(report.content_fingerprints) == 1
+    assert len(report.facts) == 1
+    fact = report.facts[0]
+    assert fact.observation_id == report.observation_ids[0]
+    assert fact.content_fingerprint == report.content_fingerprints[0]
+    assert fact.source_observation_id == "conformance-entity"
+    assert fact.normalization_version == 1
+    assert tuple(
+        (receipt.transport_receipt_ref, receipt.received_at)
+        for receipt in fact.transport_receipts
+    ) == (("receipt-conformance-entity", T0 + timedelta(minutes=2)),)
+
+
+@pytest.mark.parametrize(
+    ("declared_version", "expected_error"),
+    (
+        (None, UnsupportedObservation),
+        (2, UnsupportedObservation),
+        ("1", InvalidObservation),
+        (True, InvalidObservation),
+    ),
+)
+def test_normalized_conformance_refuses_missing_malformed_or_incompatible_spi(
+    db: Session,
+    declared_version: object,
+    expected_error: type[InvalidObservation | UnsupportedObservation],
+) -> None:
+    class Producer:
+        def normalized_case(self) -> NormalizedObservationCase:
+            return _conformance_case()
+
+    producer = Producer()
+    if declared_version is not None:
+        producer.normalized_observation_spi_version = declared_version  # type: ignore[attr-defined]
+
+    with pytest.raises(expected_error, match="SPI version"):
+        run_normalized_conformance(db, producer)  # type: ignore[arg-type]
