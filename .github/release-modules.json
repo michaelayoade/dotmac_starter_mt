@@ -303,7 +303,11 @@
         "enforcement point \u2014 a wheel that shipped the models but dropped the refusal",
         "would accept secret VALUES into an immutable config revision and never",
         "complain. It was named `secrets.py` until the release wheel-content policy",
-        "correctly refused it; renamed rather than exempted."
+        "correctly refused it; renamed rather than exempted.",
+        "`runtime_policy.py` is the SPI 1.3 projection point. If a wheel dropped",
+        "it, a connector could declare boundaries while the sole runtime had no",
+        "provider-neutral way to derive the exact egress union or refuse an old",
+        "manifest whose boundary is still omitted."
       ],
       "package_dir": "packages/dotmac-integration",
       "import_name": "dotmac_integration",
@@ -318,6 +322,7 @@
           "dotmac_integration/spi.py",
           "dotmac_integration/ingress.py",
           "dotmac_integration/discovery.py",
+          "dotmac_integration/runtime_policy.py",
           "dotmac_integration/secret_refs.py",
           "dotmac_integration/shadow.py",
           "dotmac_integration/migrations/__init__.py",

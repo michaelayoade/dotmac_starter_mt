@@ -96,9 +96,9 @@
     "     rule for kernels: 'A floor naming an unpublished version cannot be",
     "     resolved by an installer, so it is not a floor at all.' Here it is",
     "     enforced rather than only written down: `resolve` refuses an",
-    "     `integration_floor` with no release tag. This bites TODAY —",
-    "     `dotmac-integration` declares 0.1.0a2 and has published 0.1.0a1, so a",
-    "     connector may currently floor at a1 or wait, and may not floor at a2.",
+    "     `integration_floor` with no release tag. This bites on every SPI bump:",
+    "     the current connector may floor at registry-verified integration a10,",
+    "     while a merely declared future release remains inadmissible.",
     "  5. NO SECRET SHAPE, no persistence, and no private retry/checkpoint",
     "     engine. A connector holds a reference to credential material (ADR-0024",
     "     section 7); it never holds the value, it declares no tables, and it does",
@@ -130,7 +130,7 @@
     "",
     "The Meta/WhatsApp ingress connector is listed with its implementation,",
     "prebuilt conformance corpus, installed-wheel SPI proof and published",
-    "dotmac-integration 0.1.0a5 floor. This is the rule ADR-0026 section 8 set",
+    "dotmac-integration 0.1.0a10 floor. This is the rule ADR-0026 section 8 set",
     "for release eligibility: the entry lands WITH the proof, never ahead of it.",
     "",
     "THIS OBJECT IS THE LOCK. `.github/workflows/release-connector.yml` exists",
@@ -165,7 +165,7 @@
     "dotmac-connector-whatsapp": {
       "$comment": [
         "Ingress-only Meta WhatsApp Cloud API translation and authentication.",
-        "It implements messaging.receive.v1 through SPI 1.2, owns no rows and",
+        "It implements messaging.receive.v1 through SPI 1.3, owns no rows and",
         "imports no product. Sub is the first shadow/cutover target; publication",
         "alone does not make it a contract consumer.",
         "",
@@ -177,8 +177,8 @@
       "import_name": "dotmac_connector_whatsapp",
       "plugin_attr": "PLUGIN",
       "connector_key": "meta_whatsapp",
-      "spi_range": ">=1.2,<2.0",
-      "integration_floor": "0.1.0a5",
+      "spi_range": ">=1.3,<2.0",
+      "integration_floor": "0.1.0a10",
       "tag_prefix": "dotmac-connector-whatsapp-v",
       "wheel_contents": {
         "required": [

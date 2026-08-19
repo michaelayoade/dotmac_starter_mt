@@ -2,6 +2,7 @@
 
 - **As of:** 2026-08-18
 - **Starter:** `c6ef6cd7b13105bd95c3faf354ffee9032077625`
+- **Starter release-gate recheck:** `cfa9df8ac8d4f6c2b4faa92d6724be7ae767bbe7`
 - **Sub:** `510b80ca7fab4f54a57f261872f94b5e972c8eb6`
 - **Sub adoption head recheck:** `0d27ab91181fbc2717731bef28e21578f3442cc4`
 - **CRM:** `60daaa2dd305696636632f48505ab784110a55d2`
@@ -218,7 +219,14 @@ greenfield source or adding ERP as an adopter for this slice.
 | `dotmac_kernel.messaging.outbox` | Sole publication owner. A delivery-intent fact and its outbox row are written in one caller transaction. Reconciliation can restore a missing publication with the same dispatch identity. |
 | `dotmac_kernel.delivery` | Sole raw/provider receipt and bounce/complaint suppression owner. Campaigns consumes normalized delivery observations and never parses provider status. |
 | `dotmac-template-studio` | Exact published template revisions are immutable. A renderer adapter returns rendered content plus revision/fingerprint for a bounded delivery snapshot. No module import. |
-| `dotmac-durable-timers` candidate branch | Owns timer generation, supersession/cancellation, current-trigger acceptance, history retention and delayed outbox relay. Campaigns has no scan loop or due-work ledger and no sibling import. |
+| `dotmac-durable-timers 0.1.0a1` | Registry-verified release owning timer generation, supersession/cancellation, current-trigger acceptance, history retention and delayed outbox relay. Campaigns has no scan loop or due-work ledger and no sibling import. |
+
+Kernel `0.1.0a73` is also registry-verified. Starter PR #268 merged at
+`cfa9df8ac8d4f6c2b4faa92d6724be7ae767bbe7`; release workflow run
+`32220542857` installed the published artifact from the private registry before
+creating annotated tag `dotmac-kernel-v0.1.0a73` on that commit. This closes the
+caller-session runtime and campaigns dependency-floor gates. It does not decide
+Sub's separate S7 table-owner/lineage collisions.
 
 ## Sub adoption prerequisite discovered by the current-head recheck
 
@@ -243,8 +251,9 @@ parallel writers. The module therefore remains buildable and independently
 validated, but stays unallowlisted and unreleased until Sub completes the
 existing S7 disposition/cutover work, composes the exact released kernel
 lineage and proves the superseded local writers are retired. This gate precedes
-the Durable Timers and campaigns authority cutovers; it does not demote Sub as
-the qualifying source or permit Backoffice to go first.
+Sub's adoption of the already-released Durable Timers package and the campaigns
+authority cutover; it does not demote Sub as the qualifying source or permit
+Backoffice to go first.
 
 ## Contract and invariant map
 
@@ -311,9 +320,10 @@ references; there is no shared database, import or campaign-id adoption.
 
 The extraction is authorized as a tenant-only optional module with Sub as the
 mandatory code/test base. The module and its canaries are implemented and
-validated, but publication is blocked by authoritative adoption dependencies:
-complete Sub's kernel S7 consent/idempotency/outbox cutovers and lineage
-composition first, then publish/adopt Durable Timers before due-work, seal the
-Sub campaigns cutover, and only then prove independent reuse in Backoffice.
-Until those owners and Sub's local campaign writer are retired the package may
-be built and tested but must not claim `adopted` or become a second authority.
+validated; kernel a73 and Durable Timers a1 are released. Campaigns publication
+remains blocked by authoritative adoption dependencies: complete Sub's kernel
+S7 consent/idempotency/outbox cutovers and lineage composition first, compose
+the released timer package before due-work, seal the Sub campaigns cutover, and
+only then prove independent reuse in Backoffice. Until those owners and Sub's
+local campaign writer are retired the package may be built and tested but must
+not claim `adopted` or become a second authority.

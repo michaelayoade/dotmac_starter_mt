@@ -639,10 +639,10 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
     assert set(_policy()["connectors"]) == {"dotmac-connector-whatsapp"}
     gate = _gate()
     resolved = gate.resolve(
-        "dotmac-connector-whatsapp", tags={"dotmac-integration-v0.1.0a5"}
+        "dotmac-connector-whatsapp", tags={"dotmac-integration-v0.1.0a10"}
     )
     assert resolved["connector_key"] == "meta_whatsapp"
-    assert resolved["spi_range"] == ">=1.2,<2.0"
+    assert resolved["spi_range"] == ">=1.3,<2.0"
     for attempt in (
         "dotmac-connector-stripe",  # a plausible future name
         "dotmac-auth-oidc",  # a real package, right classification
@@ -650,7 +650,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
         "",
     ):
         with pytest.raises(SystemExit) as refusal:
-            gate.resolve(attempt, tags={"dotmac-integration-v0.1.0a5"})
+            gate.resolve(attempt, tags={"dotmac-integration-v0.1.0a10"})
         assert "not an allowlisted connector plugin" in str(refusal.value), attempt
 
 
@@ -661,14 +661,14 @@ def test_the_real_entry_resolves_through_the_release_command(
 
     gate = _gate()
     monkeypatch.setattr(
-        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a5"]
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a10"]
     )
     gate.cmd_resolve(
-        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a1")
+        argparse.Namespace(distribution="dotmac-connector-whatsapp", version="0.1.0a2")
     )
     output = capsys.readouterr().out
     assert "connector_key=meta_whatsapp" in output
-    assert "tag=dotmac-connector-whatsapp-v0.1.0a1" in output
+    assert "tag=dotmac-connector-whatsapp-v0.1.0a2" in output
 
 
 def test_the_workflow_choice_matches_the_allowlist_exactly() -> None:

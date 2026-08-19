@@ -64,7 +64,7 @@
   "unpublished": {
     "dotmac-campaigns": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete, but current Sub authority evidence blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers, then Durable Timers, then Sub as the first campaigns authority. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
     },
     "dotmac-content": {

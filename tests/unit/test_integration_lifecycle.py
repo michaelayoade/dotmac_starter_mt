@@ -24,6 +24,7 @@ from dotmac_integration import (
     ConnectorInstallation,
     ConnectorManifest,
     DeliveryAttempt,
+    EgressDeclaration,
     ExecutionPolicy,
     LifecycleError,
     LostClaim,
@@ -97,6 +98,8 @@ def _schema_registry():
                 },
             ),
         ),
+        secret_bindings=(),
+        egress=EgressDeclaration(),
     )
     return fake_registry(plugins=[fake_plugin(manifest_=manifest)])
 
