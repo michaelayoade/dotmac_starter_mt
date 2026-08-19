@@ -21,17 +21,16 @@ from dotmac_network_assurance.service import (
 )
 
 __version__ = "0.1.0a1"
-from dotmac_network_assurance.models import (
-    ALL_MODELS,
-    SCHEMA,
-)
-
 from dotmac_network_assurance.contracts import (
     ImpactSeverity,
     IncidentState,
     OpenIncident,
     ResolveIncident,
     UpdateIncident,
+)
+from dotmac_network_assurance.models import (
+    ALL_MODELS,
+    SCHEMA,
 )
 
 __all__ = [

@@ -21,11 +21,6 @@ from dotmac_network_inventory.service import (
 )
 
 __version__ = "0.1.0a1"
-from dotmac_network_inventory.models import (
-    ALL_MODELS,
-    SCHEMA,
-)
-
 from dotmac_network_inventory.contracts import (
     AdmitNode,
     ArchiveNode,
@@ -33,6 +28,10 @@ from dotmac_network_inventory.contracts import (
     NodeState,
     RegisterInterface,
     RegisterSite,
+)
+from dotmac_network_inventory.models import (
+    ALL_MODELS,
+    SCHEMA,
 )
 
 __all__ = [

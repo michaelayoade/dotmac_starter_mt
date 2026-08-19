@@ -26,6 +26,10 @@ from dotmac_network_access.contracts import (
 )
 from dotmac_network_access.manifest import module
 from dotmac_network_access.migrations import versions_dir
+from dotmac_network_access.models import (
+    ALL_MODELS,
+    SCHEMA,
+)
 from dotmac_network_access.service import (
     AccessConflict,
     AccessError,
@@ -40,11 +44,6 @@ from dotmac_network_access.service import (
     record_accounting,
     record_authentication,
     register_nas_attachment,
-)
-
-from dotmac_network_access.models import (
-    ALL_MODELS,
-    SCHEMA,
 )
 
 __all__ = [

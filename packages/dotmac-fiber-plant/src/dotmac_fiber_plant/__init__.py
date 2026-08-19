@@ -22,11 +22,6 @@ from dotmac_fiber_plant.service import (
 )
 
 __version__ = "0.1.0a1"
-from dotmac_fiber_plant.models import (
-    ALL_MODELS,
-    SCHEMA,
-)
-
 from dotmac_fiber_plant.contracts import (
     ContinuityQuery,
     RecordSplice,
@@ -35,6 +30,10 @@ from dotmac_fiber_plant.contracts import (
     RegisterStrand,
     RegisterStructure,
     StructureKind,
+)
+from dotmac_fiber_plant.models import (
+    ALL_MODELS,
+    SCHEMA,
 )
 
 __all__ = [

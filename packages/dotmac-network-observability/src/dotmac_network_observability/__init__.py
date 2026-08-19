@@ -18,11 +18,6 @@ from dotmac_network_observability.service import (
 )
 
 __version__ = "0.1.0a1"
-from dotmac_network_observability.models import (
-    ALL_MODELS,
-    SCHEMA,
-)
-
 from dotmac_network_observability.contracts import (
     AlertState,
     AvailabilityState,
@@ -32,6 +27,10 @@ from dotmac_network_observability.contracts import (
     RecordAvailability,
     RecordObservation,
     ResolveAlertEvidence,
+)
+from dotmac_network_observability.models import (
+    ALL_MODELS,
+    SCHEMA,
 )
 
 __all__ = [

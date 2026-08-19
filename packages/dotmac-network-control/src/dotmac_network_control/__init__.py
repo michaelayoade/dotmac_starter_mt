@@ -19,17 +19,16 @@ from dotmac_network_control.service import (
 )
 
 __version__ = "0.1.0a1"
-from dotmac_network_control.models import (
-    ALL_MODELS,
-    SCHEMA,
-)
-
 from dotmac_network_control.contracts import (
     CommandState,
     ExecutionOutcome,
     MarkDispatched,
     RecordExecutionObservation,
     RequestCommand,
+)
+from dotmac_network_control.models import (
+    ALL_MODELS,
+    SCHEMA,
 )
 
 __all__ = [

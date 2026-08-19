@@ -31,6 +31,10 @@ from dotmac_pon_access.contracts import (
 )
 from dotmac_pon_access.manifest import module
 from dotmac_pon_access.migrations import versions_dir
+from dotmac_pon_access.models import (
+    ALL_MODELS,
+    SCHEMA,
+)
 from dotmac_pon_access.service import (
     PonAccessConflict,
     PonAccessError,
@@ -48,11 +52,6 @@ from dotmac_pon_access.service import (
     register_olt,
     register_pon_port,
     set_desired_service,
-)
-
-from dotmac_pon_access.models import (
-    ALL_MODELS,
-    SCHEMA,
 )
 
 __all__ = [
