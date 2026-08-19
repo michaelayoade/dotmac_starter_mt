@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from dotmac_kernel.db import conflict_savepoint
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -188,6 +187,8 @@ def register_olt(db: Session, *, tenant_id: UUID, command: RegisterOlt) -> OltSn
         created_at=now,
     )
     try:
+        from dotmac_kernel.db import conflict_savepoint
+
         with conflict_savepoint(db):
             db.add(row)
             db.flush()
@@ -233,6 +234,8 @@ def register_pon_port(
         created_at=datetime.now(UTC),
     )
     try:
+        from dotmac_kernel.db import conflict_savepoint
+
         with conflict_savepoint(db):
             db.add(row)
             db.flush()
@@ -276,6 +279,8 @@ def admit_ont(db: Session, *, tenant_id: UUID, command: AdmitOnt) -> OntSnapshot
         admitted_at=command.observed_at,
     )
     try:
+        from dotmac_kernel.db import conflict_savepoint
+
         with conflict_savepoint(db):
             db.add(row)
             db.flush()
@@ -468,6 +473,8 @@ def record_pon_observation(
         fingerprint=fingerprint,
     )
     try:
+        from dotmac_kernel.db import conflict_savepoint
+
         with conflict_savepoint(db):
             db.add(row)
             db.flush()
@@ -564,6 +571,8 @@ def record_backup_evidence(
         source_ref=_clean(command.source_ref, "source reference"),
     )
     try:
+        from dotmac_kernel.db import conflict_savepoint
+
         with conflict_savepoint(db):
             db.add(row)
             db.flush()

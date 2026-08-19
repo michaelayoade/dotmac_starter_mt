@@ -53,6 +53,19 @@ class AccessConflict(AccessError):
     pass
 
 
+
+def _stored_utc(value: datetime) -> datetime:
+    """Normalize SQLite's timezone-naive round-trip without weakening ingress.
+
+    Ingress values are tz-aware; PostgreSQL returns them that way and SQLite
+    does not. Comparing the two directly raises, so the STORED side is
+    normalized at the point of comparison rather than the incoming side, which
+    would quietly accept a naive value from a caller.
+    """
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
 def _clean(value: str, label: str) -> str:
     result = value.strip()
     if not result:
@@ -342,7 +355,9 @@ def record_accounting(
                         raise AccessConflict(
                             "session reference reused for another subject or NAS"
                         )
-                    session.last_seen_at = max(session.last_seen_at, row.observed_at)
+                    session.last_seen_at = max(
+                        _stored_utc(session.last_seen_at), row.observed_at
+                    )
                     session.input_octets = max(session.input_octets, row.input_octets)
                     session.output_octets = max(
                         session.output_octets, row.output_octets
@@ -361,7 +376,7 @@ def record_accounting(
                         event_type="session_started",
                         evidence_ref=row.source_ref,
                         payload={"session_ref": session.session_ref},
-                        occurred_at=session.started_at,
+                        occurred_at=_stored_utc(session.started_at),
                     )
                 if row.event_kind in {"stop", "closed"}:
                     _event(
@@ -475,7 +490,7 @@ def close_session(
     row.closed_at = command.closed_at
     row.closed_reason_code = _clean(command.reason_code, "close reason")
     row.close_source_ref = _clean(command.source_ref, "source reference")
-    row.last_seen_at = max(row.last_seen_at, command.closed_at)
+    row.last_seen_at = max(_stored_utc(row.last_seen_at), command.closed_at)
     _event(
         db,
         tenant_id=tenant_id,

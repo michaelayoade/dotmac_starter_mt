@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from dotmac_kernel.db import conflict_savepoint
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -58,6 +57,25 @@ def _clean(value: str, label: str) -> str:
     return cleaned
 
 
+def _stored_utc(value: datetime) -> datetime:
+    """Normalize SQLite's timezone-naive round-trip without weakening ingress.
+
+    Ingress values are tz-aware; PostgreSQL returns them that way and SQLite
+    does not. A snapshot built from a freshly written row therefore differed
+    from the same snapshot rebuilt on the idempotent replay path, which made a
+    correct replay look like a divergence. Normalizing here — the one place
+    snapshots are projected from rows — keeps every read tz-aware without
+    accepting a naive value at ingress.
+    """
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _stored_utc_or_none(value: datetime | None) -> datetime | None:
+    return None if value is None else _stored_utc(value)
+
+
 def _alert_snapshot(row: Alert) -> AlertSnapshot:
     return AlertSnapshot(
         id=row.id,
@@ -66,8 +84,8 @@ def _alert_snapshot(row: Alert) -> AlertSnapshot:
         rule_ref=row.rule_ref,
         severity=row.severity,
         state=AlertState(row.state),
-        opened_at=row.opened_at,
-        resolved_at=row.resolved_at,
+        opened_at=_stored_utc(row.opened_at),
+        resolved_at=_stored_utc_or_none(row.resolved_at),
         latest_evidence_ref=row.latest_evidence_ref,
     )
 
@@ -313,6 +331,8 @@ def open_alert_evidence(
             latest_evidence_ref=evidence_ref,
         )
         try:
+            from dotmac_kernel.db import conflict_savepoint
+
             with conflict_savepoint(db):
                 db.add(row)
                 db.flush()
@@ -341,6 +361,8 @@ def open_alert_evidence(
         if duplicate is not None:
             return _alert_snapshot(row)
         try:
+            from dotmac_kernel.db import conflict_savepoint
+
             with conflict_savepoint(db):
                 row.latest_evidence_ref = evidence_ref
                 db.add(
@@ -377,6 +399,8 @@ def resolve_alert_evidence(
     if current is not command.expected or current is not AlertState.OPEN:
         raise NetworkObservationConflict("alert state changed")
     try:
+        from dotmac_kernel.db import conflict_savepoint
+
         with conflict_savepoint(db):
             row.state = AlertState.RESOLVED.value
             row.resolved_at = command.observed_at

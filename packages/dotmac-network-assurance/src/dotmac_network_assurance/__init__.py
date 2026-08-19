@@ -21,15 +21,32 @@ from dotmac_network_assurance.service import (
 )
 
 __version__ = "0.1.0a1"
+from dotmac_network_assurance.models import (
+    ALL_MODELS,
+    SCHEMA,
+)
+
+from dotmac_network_assurance.contracts import (
+    ImpactSeverity,
+    IncidentState,
+    OpenIncident,
+    ResolveIncident,
+    UpdateIncident,
+)
+
 __all__ = [
     "__version__",
+    "ALL_MODELS",
     "AssuranceConflict",
     "AssuranceError",
     "AssuranceNotFound",
     "classify_impact",
+    "ImpactSeverity",
+    "IncidentState",
     "lookup_incidents",
     "module",
     "open_incident",
+    "OpenIncident",
     "query_impacts",
     "query_maintenance",
     "query_sla_evidence",
@@ -37,7 +54,10 @@ __all__ = [
     "record_notification_evidence",
     "record_sla_evidence",
     "resolve_incident",
+    "ResolveIncident",
     "schedule_maintenance",
+    "SCHEMA",
     "update_incident",
+    "UpdateIncident",
     "versions_dir",
 ]

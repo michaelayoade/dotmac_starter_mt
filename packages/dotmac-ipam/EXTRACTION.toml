@@ -5,7 +5,7 @@ status = "audit-complete"
 source_mode = "product-first"
 owner = "Tenant address-space, pool, address, reservation, assignment, utilization and repair lifecycle"
 contract = "Create address spaces and pools; reserve, assign and release addresses against opaque product subjects; prevent collisions; record utilization observations; repair projections; return immutable snapshots and ordered evidence. NOT subscriber/service/NAS/OLT/VLAN authority, RADIUS/route projection, provider I/O or credentials."
-source_repositories = ["dotmac_sub", "dotmac_starter_mt"]
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_sub:app/models/network.py",
   "dotmac_sub:app/services/ip_assignment_lifecycle.py",

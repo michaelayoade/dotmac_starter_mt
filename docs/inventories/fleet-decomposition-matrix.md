@@ -183,7 +183,7 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | billing-revenue | 12 | 3 | 74 | 0 | 2 | 0 | module ← Sub + contract with ERP |
 | outside-plant | 0 | 33 | 94 | 0 | 30 | 0 | consolidate → Sub, then `dotmac-fiber-plant`/`dotmac-pon-access` ← Sub (ADR-0043) |
 | positioning | 0 | 3 | 2 | 0 | 2 | 0 | `dotmac-positioning`; Sub cutover 1, ERP cutover 2 |
-| field-workforce | 10 | 26 | 38 | 0 | 15 | 0 | consolidate → Sub, then module ← Sub |
+| field-workforce | 10 | 24 | 36 | 0 | 13 | 0 | consolidate → Sub, then module ← Sub |
 | geospatial-qualification | 2 | 6 | 11 | 0 | 5 | 0 | consolidate → Sub, then module ← Sub |
 | subscriber-service | 2 | 9 | 74 | 0 | 3 | 0 | consolidate → Sub, then module ← Sub |
 | network-operations | 3 | 2 | 72 | 0 | 1 | 0 | module ← Sub: nine bounded packages in the ADR-0043 disposition ledger |

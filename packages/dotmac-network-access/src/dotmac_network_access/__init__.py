@@ -25,6 +25,7 @@ from dotmac_network_access.contracts import (
     SessionState,
 )
 from dotmac_network_access.manifest import module
+from dotmac_network_access.migrations import versions_dir
 from dotmac_network_access.service import (
     AccessConflict,
     AccessError,
@@ -41,6 +42,11 @@ from dotmac_network_access.service import (
     register_nas_attachment,
 )
 
+from dotmac_network_access.models import (
+    ALL_MODELS,
+    SCHEMA,
+)
+
 __all__ = [
     "AccessConflict",
     "AccessDriftReport",
@@ -52,30 +58,33 @@ __all__ = [
     "AccessStateQuery",
     "AccountingQuery",
     "AccountingReceipt",
+    "ALL_MODELS",
     "AuthenticationObserved",
     "AuthenticationOutcome",
     "AuthenticationQuery",
     "AuthenticationReceipt",
-    "CloseSession",
-    "ProjectAccessPolicy",
-    "ReconcileAccess",
-    "RecordAccounting",
-    "RecordAuthentication",
-    "RegisterNasAttachment",
-    "SessionClosed",
-    "SessionQuery",
-    "SessionSnapshot",
-    "SessionStarted",
-    "SessionState",
     "close_session",
+    "CloseSession",
     "module",
     "project_access_policy",
+    "ProjectAccessPolicy",
     "query_access_state",
     "query_accounting",
     "query_authentication",
     "query_sessions",
     "reconcile_access",
+    "ReconcileAccess",
     "record_accounting",
     "record_authentication",
+    "RecordAccounting",
+    "RecordAuthentication",
     "register_nas_attachment",
+    "RegisterNasAttachment",
+    "SCHEMA",
+    "SessionClosed",
+    "SessionQuery",
+    "SessionSnapshot",
+    "SessionStarted",
+    "SessionState",
+    "versions_dir",
 ]

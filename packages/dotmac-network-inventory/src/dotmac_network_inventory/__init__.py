@@ -21,13 +21,27 @@ from dotmac_network_inventory.service import (
 )
 
 __version__ = "0.1.0a1"
+from dotmac_network_inventory.models import (
+    ALL_MODELS,
+    SCHEMA,
+)
+
+from dotmac_network_inventory.contracts import (
+    AdmitNode,
+    ArchiveNode,
+    NodeKind,
+    NodeState,
+    RegisterInterface,
+    RegisterSite,
+)
+
 __all__ = [
     "__version__",
-    "NetworkInventoryConflict",
-    "NetworkInventoryError",
-    "NetworkInventoryNotFound",
     "admit_node",
+    "AdmitNode",
+    "ALL_MODELS",
     "archive_node",
+    "ArchiveNode",
     "attach_vlan",
     "define_vlan",
     "lookup_interfaces",
@@ -35,9 +49,17 @@ __all__ = [
     "lookup_sites",
     "lookup_vlans",
     "module",
+    "NetworkInventoryConflict",
+    "NetworkInventoryError",
+    "NetworkInventoryNotFound",
+    "NodeKind",
+    "NodeState",
     "record_configuration_snapshot",
     "register_interface",
     "register_port",
     "register_site",
+    "RegisterInterface",
+    "RegisterSite",
+    "SCHEMA",
     "versions_dir",
 ]
