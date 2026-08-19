@@ -7,9 +7,9 @@
 This is the product-first contract for `dotmac-content`, the first executable
 slice of the decomposed marketing suite. Gate 1 recorded the deliberately
 absent distribution as RED on Observer at exact commit
-`85dc9bc24b169dab7bbcd38b0cd67b1a3d058881`. A Gate 2 implementation candidate
-now exists on the local marketing-suite branch; it is not release or adoption
-evidence until its exact commit passes the prescribed Observer gates.
+`85dc9bc24b169dab7bbcd38b0cd67b1a3d058881`. Gate 2 is green at exact local
+commit `6665569b41c0afa112784100ef4912fed9ffb9ce`; the package remains an
+unpublished, unallowlisted and unadopted candidate.
 
 The Mkt remote was rechecked directly on 2026-08-18 and `refs/heads/main`
 resolved to the revision above. It is one commit after the audit's original
@@ -144,3 +144,27 @@ lowered in the same change.
 Sub adoption comes later and independently. It pins the same published
 contract, runs its own lineage and owns its own rows; no shared database,
 filesystem, ORM model or service call crosses applications.
+
+## 6. Gate 2 implementation evidence
+
+On 2026-08-19 a fresh detached writable Observer checkout at exact commit
+`6665569b41c0afa112784100ef4912fed9ffb9ce`, with full history and all 84 tag
+refs, installed from the committed lock using Poetry 2.4.1 and passed:
+
+- 100 focused content, product-first, source-coordinate and publication-ledger
+  tests;
+- `make check`: lock/toolchain, Ruff, nine import contracts, mypy across 314
+  source files, Bandit, the composed migration gate, UI, module-catalog and
+  format checks;
+- the complete unit/architecture suite; and
+- the complete disposable-PostgreSQL integration suite.
+
+The focused PostgreSQL content canary then passed all four cases: exact live
+catalog plus forced RLS, tenant-only reads across all five tables, cross-tenant
+write refusal, and unscoped-role fail-closed behavior. The disposable database
+container and network were removed; the test Compose file declares no volume.
+
+This proves the candidate's local contract, not publication or adoption.
+`dotmac-content 0.1.0a1` and kernel a73 remain unpublished; the module is absent
+from the release allowlist and every Backoffice/Mkt writer-retirement row is
+still `not-started`.

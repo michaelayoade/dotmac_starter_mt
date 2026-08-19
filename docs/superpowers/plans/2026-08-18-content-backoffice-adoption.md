@@ -1,8 +1,8 @@
 # `dotmac-content` extraction and Backoffice adoption plan
 
-**Status:** Gate 1 RED recorded; Gate 2 package candidate prepared and exact-
-commit Observer validation pending. No release, composition or adoption has
-started.
+**Status:** Gate 1 RED recorded and Gate 2 green at exact local commit
+`6665569b41c0afa112784100ef4912fed9ffb9ce`. No release, composition or adoption
+has started.
 **Source pin:** Mkt `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d`,
 verified directly against remote `main` on 2026-08-18.
 **First adopter:** Backoffice. **Second candidate:** Sub, independently.
@@ -76,6 +76,13 @@ before this evidence.
 
 **Exit:** Gate 1 canaries plus focused unit, architecture and disposable-
 Postgres integration tests green on Observer.
+
+**Recorded 2026-08-19:** exit met at
+`6665569b41c0afa112784100ef4912fed9ffb9ce`. The exact checkout passed the
+focused contract suite, `make check`, the complete unit/architecture suite,
+the complete disposable-PostgreSQL integration suite and the four-case focused
+content RLS canary. The test database stack was removed. This does not satisfy
+Gate 3 release or Gate 4 adoption.
 
 ## Gate 3 — make it releasable
 
