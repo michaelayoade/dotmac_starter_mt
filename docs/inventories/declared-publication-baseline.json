@@ -62,11 +62,6 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-connector-whatsapp": {
-      "declared": "0.1.0a2",
-      "reason": "INTENDED UNTIL THE SPI 1.3 CONNECTOR RELEASE COMPLETES. The published a1 contract cannot produce the manifest-derived secret and egress policy required by dotmac_integrator. This branch declares a2 only after dotmac-integration 0.1.0a10 was registry-verified; its connector release must rebuild, inspect, install and conform the exact merged wheel before the tag proves publication. Remove this row in the immediate post-release record change, not before the registry verification succeeds.",
-      "state": "declared-unpublished"
-    },
     "dotmac-campaigns": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
