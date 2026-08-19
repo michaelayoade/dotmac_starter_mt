@@ -612,6 +612,24 @@ type = "directory"
 url = "packages/dotmac-connector-whatsapp"
 
 [[package]]
+name = "dotmac-deployment-control"
+version = "0.1.0a1"
+description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0033 § 3)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a76"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-deployment-control"
+
+[[package]]
 name = "dotmac-durable-timers"
 version = "0.1.0a1"
 description = "DotMac dual-plane durable timer identity and generation lifecycle"
@@ -704,7 +722,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a75"
+version = "0.1.0a76"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -3016,4 +3034,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "563d1bc2ddbb07bcfee9b303dc81357d0439b9d1749c8c2c6fde8d0aa7e0bdac"
+content-hash = "8db9cbe795961e13b4a1fc280a9a53718cd379fac70a0dadcc83df4ac5cd6041"
