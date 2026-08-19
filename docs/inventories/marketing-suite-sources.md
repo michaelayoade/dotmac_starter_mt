@@ -1,11 +1,11 @@
 # Decomposed marketing suite source inventory
 
-**Status:** Source audit complete; campaigns is merged and media observations is parked, with neither package released or adopted
-**As of:** 2026-08-18
+**Status:** Source audit complete; campaigns is merged, while content, publishing and media observations are implemented and parked; none is adopted
+**As of:** 2026-08-19
 **Decision owner:** Michael
 **Default first adopter:** Backoffice; campaigns is the Sub-first ADR-0032 exception
 **Later adopter:** Sub, as an independent application
-**Current Starter main:** `f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685`
+**Current Starter main:** `68939275fdb302b1f50ed92a8920ccea745e5d37`
 
 This is the ADR-0006 product-first evidence for a Starter-owned, product-neutral
 marketing suite. It deliberately selects seven small owners rather than
@@ -38,8 +38,7 @@ changing the content boundary.
 `dotmac-campaigns` is implemented and merged by PR #261 at Starter main
 `300ebd7523e85dff7e94efcdf81d8c1f34b80de5`. All sixteen required GitHub
 checks passed, including unit, PostgreSQL integration, Docker, consumer boot,
-kernel floors and engineering standards. Kernel `0.1.0a71` is published and its
-release tag is registry-backed, but it predates the campaigns merge.
+kernel floors and engineering standards.
 
 That milestone is **not adoption**. Campaigns `0.1.0a1` remains unallowlisted,
 unpublished and at dossier status `audit-complete` with no contract consumer.
@@ -47,42 +46,35 @@ ADR-0032 makes Sub cutover 1 for campaigns because Sub is its qualifying source;
 Backoffice is cutover 2 and the independent reuse proof. Backoffice remains the
 default first adopter for the other suite modules.
 
-The tagged kernel `0.1.0a71` does not contain
-`CAMPAIGNS_MIGRATION_OWNER`, although merged source and the campaigns package
-comment claim that a71 allocated `mod_campaigns`/`ca`/`campaigns`. Campaigns
-must not be released against a71. Durable Timers PR #263 is now merged at
-Starter main `f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685`; main declares kernel
-`0.1.0a72` and contains both the campaigns and durable-timers allocations.
-Kernel a72 and Durable Timers `0.1.0a1` are now tagged and registry-verified
-from that exact main commit. The campaigns declared floor and lock still need
-correction from a71 to a72, followed by fresh clean-wheel and consumer-floor
-evidence.
-
-The parked media-observations branch diverged before campaigns and Durable
-Timers merged and separately adds its allocation to an alternate a72 source
-line. Published a72 is immutable and does not contain the media-observations
-allocation. Reconciliation onto main must preserve the existing campaigns and
-durable-timers owners, allocate media observations in a new kernel alpha, and
-repin that package before it can be released. Campaigns release remains gated
-on Sub's kernel S7 consent/idempotency/outbox ownership cutovers, real kernel
-lineage composition, and Durable Timers adoption in Sub; the timer publication
-gate itself is now closed.
+Kernel a72 and Durable Timers `0.1.0a1` are tagged and registry-verified; a72 is
+the first immutable release containing the campaigns namespace allocation.
+Kernel a73 is also published and registry-verified from current Starter main
+`68939275fdb302b1f50ed92a8920ccea745e5d37`. It adds the caller-session
+transaction mechanics required by Sub, so the campaigns package and lock now
+correctly use a73 as the effective floor while retaining a72 as allocation
+evidence. Campaigns release remains gated on Sub's kernel S7
+consent/idempotency/outbox ownership cutovers, real kernel lineage composition,
+and Durable Timers adoption in Sub; the timer and kernel publication gates are
+closed.
 
 `dotmac-media-observations` is complete on the pushed
 `agent/dotmac-media-observations` branch. Commit
 `c548ef02aca10b421d1ebf4158b9c4fdf72e6025` is the validated candidate
-milestone; the branch has since advanced by one evidence-only commit to
-remote head `abf1b9ad4c3889aa6c40ed2e01419e440452f565`. The clean local
-worktree is one unpushed test-hardening commit further at
+milestone; the branch then advanced through evidence-only commit
+`abf1b9ad4c3889aa6c40ed2e01419e440452f565` and test-hardening commit
 `56517abc7f05cb6e20f9b0e5fdb6a492dbf0fdd2`; that commit is not validation
-or release evidence. The candidate package is `0.1.0a1` and still declares
-`dotmac-kernel >=0.1.0a72`, which must move because published a72 lacks its
-allocation. Observer validation is green for the full checks,
-unit/architecture suite and disposable PostgreSQL integration on the earlier
-code revision; c548's documentation revision also passed checks plus focused
-architecture and clean-wheel tests. The candidate is deliberately **parked**:
-it has not been allowlisted, tagged, published, composed or adopted, and no
-authority has moved.
+or release evidence. The pushed branch is reconciled through
+`2ade09d16c3e2d246ad361129c4700de6eff819b`. The candidate package is
+`0.1.0a1` and now declares `dotmac-kernel >=0.1.0a74`: immutable published a73
+lacks its allocation, so the first free identity is the unreleased local a74
+candidate. The old rebase, namespace and floor-repin gates are closed. Observer
+validation was green for the full checks, unit/architecture suite and
+disposable PostgreSQL integration on the earlier code revision; c548's
+documentation revision also passed checks plus focused architecture and
+clean-wheel tests. The candidate is deliberately **parked**: it has not been
+allowlisted, tagged, published, composed or adopted, and no authority has
+moved. The combined marketing branch requires fresh validation after the
+content a75 and publishing a76 allocations are composed beside it.
 
 ### Mkt source-coordinate status across sibling branches
 
@@ -95,12 +87,12 @@ does not change the campaigns source ruling because Sub—not Mkt—is the
 qualifying implementation and Mkt supplies requirements only.
 
 Media-observations commit `abf1b9ad4c3889aa6c40ed2e01419e440452f565`
-now records current Mkt `main`, its configured `master` predecessor and the
+records current Mkt `main`, its configured `master` predecessor and the
 one-commit delivery/content-affinity delta. It explicitly rejects the local
 Post deletion and content/publication associations while preserving the
 missing-object observation. The stale media evidence-coordinate gate is
-therefore closed; rebase, namespace reconciliation, release and adoption remain
-separate gates.
+therefore closed. Rebase, namespace reconciliation and the package floor
+correction are also complete; release and adoption remain separate gates.
 
 ## Source ruling
 
