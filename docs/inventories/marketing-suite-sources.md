@@ -110,7 +110,7 @@ correction are also complete; release and adoption remain separate gates.
 | Starter module | Source mode | Qualifying source | Evidence and initial boundary |
 | --- | --- | --- | --- |
 | `dotmac-content` | `product-first` | `dotmac_mkt` | Preserve campaign-calendar planning, canonical post copy, asset references and approval-ready content state from `Campaign`, `Post`, `Asset` and their services. Stored bytes remain with `dotmac-files`; generic work management is outside this owner. Its a75 allocation and combined train are Observer-green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`; content a1 remains unpublished, unallowlisted, uncomposed and unadopted. |
-| `dotmac-sites` | `greenfield-after-inventory` | `none` | No qualifying site-builder implementation was found in Starter, `dotmac_mkt`, ERP, CRM, Sub or Backoffice. The first slice therefore needs checked-in greenfield proof and a Backoffice canary before code. It owns immutable page/site revisions and release intent, not hosting transport. |
+| `dotmac-sites` | `greenfield-after-inventory` | `none` | No qualifying site-builder implementation was found in Starter, `dotmac_mkt`, ERP, CRM, Sub or Backoffice. The checked-in greenfield proof and Gate 1 canaries now freeze its ownership of immutable page/site revisions and release readiness, not publication intent or hosting transport. |
 | `dotmac-publishing` | `product-first` | `dotmac_mkt` | Gate 2 was Observer-green at `5a1892c3aac30b607cc28baa52217870e97bc63c`. The candidate owns immutable releases, ordered opaque-target deliveries, monotonic attempts, normalized observations and explicit partial/all-failed reconciliation. It preserves qualifying `PostDelivery` scheduling meaning while replacing direct provider adapters with kernel outbox intents and an assembly-supplied typed timer port. Its a76 allocation after immutable a73, media a74 and content a75 is combined-train green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`. Publishing a1 remains local, unpublished, unallowlisted, uncomposed and unadopted. |
 | `dotmac-media-observations` | `product-first` | `dotmac_mkt` | The complete parked candidate is reconciled through branch head `2ade09d16c3e2d246ad361129c4700de6eff819b`; immutable published kernel a73 lacks the media allocation, so the module keeps the next free kernel floor, a74. Its combined train is Observer-green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`; the package remains unreleased, unallowlisted, uncomposed and unadopted. Preserve normalized remote post/ad hierarchy and idempotent metric upserts from `AdSyncService`, `ChannelMetric`, `AdCampaign`, `AdGroup`, `Ad` and `AdMetric`. These are observations; they never assign another module's authoritative lifecycle. |
 | `dotmac-web-analytics` | `product-first` | `dotmac_mkt` | Preserve the provider-neutral daily web metric vocabulary and aggregation behavior for sessions, pageviews, users and bounce rate. GA4 HTTP/OAuth code is rejected; Integrator records typed observations that this local owner projects and reconciles. |
@@ -157,11 +157,12 @@ product-specific switch. They emit provider-neutral commands only after local
 state commits and consume typed, deduplicated observations.
 
 Website releases use the same boundary. `dotmac-sites` always stores a **local
-immutable website snapshot** before requesting remote publication. A
-`SiteRelease` command leaves through the typed outbox; Integrator selects and
-runs the bound hosting connector. A remote URL, deployment identifier or
-successful webhook is evidence of transport, never the only copy of the site.
-The reconciler can re-drive a release from the local snapshot and repair drift.
+immutable website snapshot** and exports a typed `SiteReleaseV1` before remote
+publication can be requested. A thin assembly adapter passes that value to
+`dotmac-publishing`, which owns intent, outcome and the typed outbox; Integrator
+selects and runs the bound hosting connector. A remote URL, deployment
+identifier or successful webhook is evidence of transport, never the only copy
+of the site. Reconciliation can re-drive delivery from the local snapshot.
 
 ## Preserved source evidence
 
