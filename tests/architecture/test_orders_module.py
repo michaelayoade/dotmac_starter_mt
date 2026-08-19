@@ -226,7 +226,7 @@ def test_snapshot_trigger_qualification_canary_detects_a_planted_ambiguity() -> 
 
 def _uses_cross_record_shape_case(source: str) -> bool:
     return (
-        "gate_id := CASE" in source
+        "target_gate_id := CASE" in source
         and "THEN NEW.id" in source
         and "ELSE NEW.gate_id" in source
     )
@@ -242,11 +242,11 @@ def test_shared_coverage_trigger_record_shape_canary_detects_planted_case() -> N
     migration = MIGRATION.read_text(encoding="utf-8")
     planted = migration.replace(
         """IF TG_TABLE_NAME = 'coverage_gates' THEN
-                gate_id := NEW.id;
+                target_gate_id := NEW.id;
             ELSE
-                gate_id := NEW.gate_id;
+                target_gate_id := NEW.gate_id;
             END IF;""",
-        """gate_id := CASE
+        """target_gate_id := CASE
                 WHEN TG_TABLE_NAME = 'coverage_gates' THEN NEW.id
                 ELSE NEW.gate_id
             END;""",
