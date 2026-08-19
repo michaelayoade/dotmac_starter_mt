@@ -30,6 +30,8 @@ KERNEL_SRC ?= packages/dotmac-kernel/src/dotmac_kernel
 UI_SRC ?= packages/dotmac-ui/src/dotmac_ui
 MODULE_SRC ?= packages/dotmac-template-studio/src/dotmac_template_studio
 TICKETING_SRC ?= packages/dotmac-ticketing/src/dotmac_ticketing
+RELEASE_CATALOG_SRC ?= packages/dotmac-release-catalog/src/dotmac_release_catalog
+ENTITLEMENT_ALLOCATION_SRC ?= packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation
 APPDIR_SRC ?= packages/dotmac-application-directory/src/dotmac_application_directory
 FILES_SRC ?= packages/dotmac-files/src/dotmac_files
 IMPORTS_SRC ?= packages/dotmac-imports/src/dotmac_imports
@@ -43,10 +45,11 @@ CONNECTOR_WHATSAPP_SRC ?= packages/dotmac-connector-whatsapp/src/dotmac_connecto
 CAMPAIGNS_SRC ?= packages/dotmac-campaigns/src/dotmac_campaigns
 CONTENT_SRC ?= packages/dotmac-content/src/dotmac_content
 PUBLISHING_SRC ?= packages/dotmac-publishing/src/dotmac_publishing
+SITES_SRC ?= packages/dotmac-sites/src/dotmac_sites
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
