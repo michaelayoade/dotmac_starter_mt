@@ -27,7 +27,7 @@ connector control plane.
 
 ## Candidate validation evidence
 
-Implementation commit `8aed76cdbb677d5f286b701546b8d84130bbc5c6`
+Hardened implementation commit `b30fc32a56bbd0b90fa834b9290c13ba113f03f0`
 passed, from a fresh detached Observer worktree:
 
 - `make check` with Poetry 2.4.1 from the committed hash-locked bootstrap;
@@ -36,13 +36,29 @@ passed, from a fresh detached Observer worktree:
 - the full disposable PostgreSQL suite, including tenant isolation, forced RLS,
   append-only grants/triggers, duplicate ingest, replay conflict, restatement,
   hierarchy and projection-repair canaries; and
+- the pinned Governance verifier at accepted revision
+  `a19259b10568d29dc0a9617347498fea7f1e7a97`; and
 - database container, network and volume teardown.
 
-[GitHub CI run 32148037659](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32148037659)
-passed on the same implementation commit: all quality jobs, unit coverage,
-PostgreSQL integration and teardown, Python 3.11/3.12 floors, consumer boot and
-Docker smoke. No release job or product adoption ran. Engineering Standards is
-PR-only and remains pending because Michael did not authorize a PR.
+[GitHub CI run 32230562002](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32230562002)
+passed all 15 jobs on the same implementation commit: all quality jobs, unit
+coverage, PostgreSQL integration and teardown, Python 3.11/3.12 floors,
+consumer boot and Docker smoke. No release job, product adoption or real
+connector certification ran. The PR-only hosted Engineering Standards job did
+not run because Michael did not authorize a PR; its exact pinned engine passed
+on Observer as recorded above.
+
+## Requirement-to-evidence matrix
+
+| Contract or invariant | Executable evidence |
+|---|---|
+| Product-first source, ownership, tenant-only scope and paused adoption | This dossier, ADR-0033 and `EXTRACTION.toml`; `test_dossier_keeps_adoption_paused_and_attribution_outside`; manifest/allocation assertions in `tests/architecture/test_media_observations_module.py`. |
+| `tenant_id NOT NULL`, tenant-composite identity, internal tenant FKs, forced RLS and append-only online storage | Static migration/model assertions plus `test_every_table_exists_with_forced_rls`, `test_online_role_sees_only_its_tenant` and `test_append_only_grants_and_trigger_refuse_mutation_for_admin` in `tests/test_media_observations_isolation.py`. |
+| Replay idempotency, changed-fingerprint conflict, transport receipts, concurrent duplicate ingest, restatements and deterministic out-of-order projections | Replay/conflict/restatement/out-of-order unit canaries in `tests/unit/test_media_observations.py`; real PostgreSQL arbitration in `test_concurrent_duplicate_ingest_returns_one_fact_and_two_receipts`. |
+| Aware source/receipt times, half-open periods, exact integral counts, exact money/currency/minor units and explicit ratio provenance | Timestamp/period/value unit canaries in `tests/unit/test_media_observations.py`; PostgreSQL exact-money, non-overlap and integral-column canaries in `tests/test_media_observations_isolation.py`. |
+| Missing parents, cycles, provider archive/deletion, hierarchy/metric drift and projection rebuild/repair | Hierarchy parity, orphan/cycle, deletion-state and rebuild-repair canaries in `tests/unit/test_media_observations.py`. |
+| Complete read provenance, typed invalid/unsupported/conflict reporting and normalized analytics facts | Period-read, analytics-payload and typed-rejection canaries in `tests/unit/test_media_observations.py`. |
+| Provider neutrality, aggregate-only/attribution refusal, import independence, clean wheel, sensitivity and provider-free connector conformance | Provider/transport and attribution detectors (including planted violations), raw-payload/person-profile guard, public-surface and clean-wheel tests in `tests/architecture/test_media_observations_module.py`; versioned declaration/kind/replay evidence and malformed-producer refusal in the normalized conformance unit canaries. |
 
 ## Exact audit pins
 

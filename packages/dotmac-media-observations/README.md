@@ -55,9 +55,11 @@ No product has adopted the package. Michael paused Backoffice and Sub adoption
 on 2026-08-18; `EXTRACTION.toml` therefore has no contract consumer and no
 product composition, publication or writer retirement is part of this change.
 
-The uncomposed candidate passed exact-revision Observer static, unit,
-architecture, clean-wheel and PostgreSQL gates and all jobs in
-[CI run 32148037659](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32148037659).
+The uncomposed candidate at
+`b30fc32a56bbd0b90fa834b9290c13ba113f03f0` passed exact-revision Observer
+static, unit, architecture, clean-wheel, PostgreSQL and pinned Governance gates,
+plus all 15 jobs in
+[CI run 32230562002](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32230562002).
 That evidence proves candidate quality, not first-adopter or release readiness:
-the PR-only Engineering Standards gate, Backoffice shadow/cutover proof and any
-Mkt writer retirement remain deliberately unperformed.
+the hosted PR-only Engineering Standards job, Backoffice shadow/cutover proof
+and any Mkt writer retirement remain deliberately unperformed.
