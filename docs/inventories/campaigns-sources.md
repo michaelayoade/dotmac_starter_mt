@@ -1,6 +1,6 @@
 # Campaigns source audit
 
-- **As of:** 2026-08-18
+- **As of:** 2026-08-19
 - **Starter:** `c6ef6cd7b13105bd95c3faf354ffee9032077625`
 - **Sub:** `510b80ca7fab4f54a57f261872f94b5e972c8eb6`
 - **Sub adoption head recheck:** `0d27ab91181fbc2717731bef28e21578f3442cc4`
@@ -22,6 +22,10 @@
   evidence. dotmac_mkt supplies media requirements only. ERP and Backoffice
   have no campaign owner; Backoffice is the independent reuse proof, not a
   source.
+- **Release dependency update:** `dotmac-durable-timers-v0.1.0a1` is released
+  and registry-verified from Starter commit
+  `f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685`. This closes the timer-publication
+  prerequisite only; Sub has not composed it and no Campaigns authority moved.
 
 This inventory is characterization evidence, not authority. ADR-0032 owns the
 campaign boundary and cutover sequence. `packages/dotmac-campaigns/EXTRACTION.toml`
@@ -243,8 +247,9 @@ parallel writers. The module therefore remains buildable and independently
 validated, but stays unallowlisted and unreleased until Sub completes the
 existing S7 disposition/cutover work, composes the exact released kernel
 lineage and proves the superseded local writers are retired. This gate precedes
-the Durable Timers and campaigns authority cutovers; it does not demote Sub as
-the qualifying source or permit Backoffice to go first.
+the Durable Timers adoption and campaigns authority cutovers; the timer's own
+publication gate is complete. It does not demote Sub as the qualifying source
+or permit Backoffice to go first.
 
 ## Contract and invariant map
 
@@ -313,7 +318,8 @@ The extraction is authorized as a tenant-only optional module with Sub as the
 mandatory code/test base. The module and its canaries are implemented and
 validated, but publication is blocked by authoritative adoption dependencies:
 complete Sub's kernel S7 consent/idempotency/outbox cutovers and lineage
-composition first, then publish/adopt Durable Timers before due-work, seal the
-Sub campaigns cutover, and only then prove independent reuse in Backoffice.
+composition first, adopt the already released Durable Timers package before
+due-work, seal the Sub campaigns cutover, and only then prove independent reuse
+in Backoffice.
 Until those owners and Sub's local campaign writer are retired the package may
 be built and tested but must not claim `adopted` or become a second authority.

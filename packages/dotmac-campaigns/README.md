@@ -27,3 +27,16 @@ conformance checks live in `dotmac_campaigns.fakes`.
 All mutators receive a caller-owned SQLAlchemy `Session`, mutate/flush and never
 commit or roll back. The package is tenant-only in V1 and the independent `ca`
 lineage creates every table in `mod_campaigns` with forced RLS.
+
+## Release and adoption status
+
+The implementation is part of Starter's integrated validation matrix but
+remains deliberately unallowlisted and unreleased. The separate Durable Timers
+release prerequisite is now satisfied by
+`dotmac-durable-timers-v0.1.0a1`; Campaigns still imports only its typed port and
+does not gain a scheduler, claim loop or retry engine.
+
+Publication remains gated on Sub completing its kernel consent, idempotency and
+outbox collision dispositions, composing the released timer, and rehearsing the
+backfill, shadow comparison, sealed authority switch and local-writer
+retirement. No Campaigns production authority changes in this Starter change.
