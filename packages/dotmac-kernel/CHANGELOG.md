@@ -6,6 +6,22 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a74 — UNRELEASED
+
+Makes the composed migration gate understand the safe static SQL construction
+used by released installable modules, without permitting dynamic or
+environment-dependent DDL.
+
+### Changed
+
+- The migration gate now resolves module-level string constants, static
+  concatenation, f-strings with only literal parts, and `sa.text(...)` /
+  `sqlalchemy.text(...)` wrappers before inspecting `op.execute(...)` DDL.
+- Dynamic names, function calls, subscripts, attributes outside the approved
+  SQLAlchemy text wrappers, and all other runtime expressions still fail
+  closed. Sensitivity tests prove both the accepted released-module forms and
+  the rejected dynamic boundary.
+
 ## 0.1.0a73 — 2026-08-19
 
 Makes caller-session kernel services safe for independently assembled products.
