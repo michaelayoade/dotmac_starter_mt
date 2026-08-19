@@ -230,3 +230,16 @@ unpublished; publishing is absent from the release allowlist and from this
 reference assembly; Backoffice has not pinned, migrated, shadowed or retired a
 writer; and every `PUB-R*` row remains `not-started`. Release and adoption need
 separate authorization and their own proof.
+
+## 9. Combined-train reconciliation evidence
+
+Immutable published kernel a73, media observations a74 and content a75 move
+publishing's permanent allocation from its original local a74 candidate to
+a76. A fresh detached writable Observer checkout at exact commit
+`9c0068d3c675c955c46bd3391f9d46f6685cbfcb`, with all 85 tags and the committed
+Poetry 2.4.1 lock, passed `make check`, all 3,944 collected unit/architecture
+cases and all 504 collected disposable-PostgreSQL integration cases without
+failure. The combined media/content/publishing live-catalog and forced-RLS
+suite passed all 15 cases before the isolated database and network were
+removed. Publishing a1 and kernel a76 remain unpublished and unallowlisted;
+Backoffice has not adopted the module.

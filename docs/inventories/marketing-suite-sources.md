@@ -73,8 +73,19 @@ disposable PostgreSQL integration on the earlier code revision; c548's
 documentation revision also passed checks plus focused architecture and
 clean-wheel tests. The candidate is deliberately **parked**: it has not been
 allowlisted, tagged, published, composed or adopted, and no authority has
-moved. The combined marketing branch requires fresh validation after the
-content a75 and publishing a76 allocations are composed beside it.
+moved. The combined marketing branch validation recorded below covers content
+a75 and publishing a76 beside it.
+
+### Combined reconciliation evidence
+
+On 2026-08-19 a fresh detached writable Observer checkout at exact commit
+`9c0068d3c675c955c46bd3391f9d46f6685cbfcb`, with all 85 tags and the committed
+Poetry 2.4.1 lock, passed `make check`, all 3,944 collected unit/architecture
+cases and all 504 collected disposable-PostgreSQL integration cases without
+failure. The combined media/content/publishing live-catalog and forced-RLS
+suite passed all 15 cases. Its isolated database container and network were
+removed. This closes reconciliation only: kernel a74/a75/a76 and all three
+module packages remain unpublished, unallowlisted, uncomposed and unadopted.
 
 ### Mkt source-coordinate status across sibling branches
 
@@ -98,10 +109,10 @@ correction are also complete; release and adoption remain separate gates.
 
 | Starter module | Source mode | Qualifying source | Evidence and initial boundary |
 | --- | --- | --- | --- |
-| `dotmac-content` | `product-first` | `dotmac_mkt` | Preserve campaign-calendar planning, canonical post copy, asset references and approval-ready content state from `Campaign`, `Post`, `Asset` and their services. Stored bytes remain with `dotmac-files`; generic work management is outside this owner. |
+| `dotmac-content` | `product-first` | `dotmac_mkt` | Preserve campaign-calendar planning, canonical post copy, asset references and approval-ready content state from `Campaign`, `Post`, `Asset` and their services. Stored bytes remain with `dotmac-files`; generic work management is outside this owner. Its a75 allocation and combined train are Observer-green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`; content a1 remains unpublished, unallowlisted, uncomposed and unadopted. |
 | `dotmac-sites` | `greenfield-after-inventory` | `none` | No qualifying site-builder implementation was found in Starter, `dotmac_mkt`, ERP, CRM, Sub or Backoffice. The first slice therefore needs checked-in greenfield proof and a Backoffice canary before code. It owns immutable page/site revisions and release intent, not hosting transport. |
-| `dotmac-publishing` | `product-first` | `dotmac_mkt` | Gate 2 was Observer-green at `5a1892c3aac30b607cc28baa52217870e97bc63c`. The candidate owns immutable releases, ordered opaque-target deliveries, monotonic attempts, normalized observations and explicit partial/all-failed reconciliation. It preserves qualifying `PostDelivery` scheduling meaning while replacing direct provider adapters with kernel outbox intents and an assembly-supplied typed timer port. Reconciliation moves its allocation to kernel a76 after immutable a73, media a74 and content a75; the combined revision requires fresh Observer proof. Publishing a1 remains local, unpublished, unallowlisted, uncomposed and unadopted. |
-| `dotmac-media-observations` | `product-first` | `dotmac_mkt` | The complete parked candidate is reconciled through branch head `2ade09d16c3e2d246ad361129c4700de6eff819b`; immutable published kernel a73 lacks the media allocation, so the module keeps the next free kernel floor, a74. The package is not released, allowlisted, composed or adopted. Preserve normalized remote post/ad hierarchy and idempotent metric upserts from `AdSyncService`, `ChannelMetric`, `AdCampaign`, `AdGroup`, `Ad` and `AdMetric`. These are observations; they never assign another module's authoritative lifecycle. |
+| `dotmac-publishing` | `product-first` | `dotmac_mkt` | Gate 2 was Observer-green at `5a1892c3aac30b607cc28baa52217870e97bc63c`. The candidate owns immutable releases, ordered opaque-target deliveries, monotonic attempts, normalized observations and explicit partial/all-failed reconciliation. It preserves qualifying `PostDelivery` scheduling meaning while replacing direct provider adapters with kernel outbox intents and an assembly-supplied typed timer port. Its a76 allocation after immutable a73, media a74 and content a75 is combined-train green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`. Publishing a1 remains local, unpublished, unallowlisted, uncomposed and unadopted. |
+| `dotmac-media-observations` | `product-first` | `dotmac_mkt` | The complete parked candidate is reconciled through branch head `2ade09d16c3e2d246ad361129c4700de6eff819b`; immutable published kernel a73 lacks the media allocation, so the module keeps the next free kernel floor, a74. Its combined train is Observer-green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`; the package remains unreleased, unallowlisted, uncomposed and unadopted. Preserve normalized remote post/ad hierarchy and idempotent metric upserts from `AdSyncService`, `ChannelMetric`, `AdCampaign`, `AdGroup`, `Ad` and `AdMetric`. These are observations; they never assign another module's authoritative lifecycle. |
 | `dotmac-web-analytics` | `product-first` | `dotmac_mkt` | Preserve the provider-neutral daily web metric vocabulary and aggregation behavior for sessions, pageviews, users and bounce rate. GA4 HTTP/OAuth code is rejected; Integrator records typed observations that this local owner projects and reconciles. |
 | `dotmac-forms` | `product-first` | `dotmac_erp` | Preserve organization-scoped definitions, immutable versions, sections, typed fields/options, validation, submissions and answer snapshots from ERP's `forms` models and `FormEngineService`. Replace Organization and domain entity coupling with Tenant scope and opaque subject references. |
 | `dotmac-campaigns` | `product-first` | `dotmac_sub` | Implemented on Starter main, but deliberately unreleased and unadopted. Registry-verified a72 contains its namespace allocation and Durable Timers a1; published a73 supplies the caller-session mechanics required by Sub and is therefore the effective package floor. Satisfy Sub's owner, lineage and timer-adoption gates before publication. Preserve audience building, sequences, send windows, canonical senders, attempt/outcome state, unsubscribe and pre-send suppression rechecks. Sub is the mandatory campaign source and cutover 1; Backoffice is cutover 2. CRM and `dotmac_mkt` are parity/retirement inputs, not competing owners. |

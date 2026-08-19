@@ -168,3 +168,15 @@ This proves the candidate's local contract, not publication or adoption.
 `dotmac-content 0.1.0a1` and kernel a75 remain unpublished; the module is absent
 from the release allowlist and every Backoffice/Mkt writer-retirement row is
 still `not-started`.
+
+## 7. Combined-train reconciliation evidence
+
+The immutable a73 caller-session release and the media-observations a74
+allocation moved content's permanent allocation from its original local a73
+candidate to a75. A fresh detached writable Observer checkout at exact commit
+`9c0068d3c675c955c46bd3391f9d46f6685cbfcb`, with all 85 tags and the committed
+Poetry 2.4.1 lock, passed `make check`, all 3,944 collected unit/architecture
+cases and all 504 collected disposable-PostgreSQL integration cases without
+failure. The combined media/content/publishing live-catalog and forced-RLS
+suite passed all 15 cases before the isolated database and network were
+removed. This proves reconciliation only; release and adoption remain closed.
