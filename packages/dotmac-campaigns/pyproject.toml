@@ -12,10 +12,10 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-# a71 allocates mod_campaigns/ca/campaigns and already publishes every kernel
-# facility this module consumes: consent, idempotency, outbox, tenant scopes,
-# module manifests and migration prerequisite verification.
-dotmac-kernel = ">=0.1.0a71"
+# a72 first publishes the mod_campaigns/ca/campaigns allocation. a73 makes the
+# consent, idempotency and delivery services safe to use with an adopter-owned
+# Session without constructing the eager kernel database runtime.
+dotmac-kernel = ">=0.1.0a73"
 sqlalchemy = "^2.0"
 
 [build-system]
