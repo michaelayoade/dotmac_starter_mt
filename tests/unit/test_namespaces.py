@@ -203,7 +203,11 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # offline through `dotmac_kernel.licensing`. `deployment_control`
     # (ADR-0033 § 3) is the sixteenth, platform-only for a reason close to
     # tautological: a module that decides what a FLEET should run cannot live
-    # inside one of the deployments it decides about.
+    # inside one of the deployments it decides about. `brand_profiles`
+    # (ADR-0033 § 2) is the seventeenth and genuinely dual-plane: Sub brands
+    # its own portals and the vendor brands deployments it ships, and the
+    # second needs a HOST binding because a profile must be selectable before
+    # any tenant is resolved.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -222,6 +226,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "commercial_agreements",
         "licensing",
         "deployment_control",
+        "brand_profiles",
     }
 
 
