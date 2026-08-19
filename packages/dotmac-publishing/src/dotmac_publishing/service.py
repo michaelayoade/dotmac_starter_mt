@@ -110,18 +110,31 @@ def _attempt(db: Session, tenant_id: UUID, attempt_id: UUID) -> PublicationAttem
 
 def _snapshot(release: PublicationRelease) -> PublicationSnapshotV1:
     payload = release.snapshot_payload
+    schema_version = payload.get("schema_version")
+    source_ref = payload.get("source_ref")
+    title = payload.get("title")
+    body = payload.get("body")
+    variant_key = payload.get("variant_key")
     creative_refs = payload.get("creative_refs")
-    if not isinstance(creative_refs, list) or not all(
-        isinstance(value, str) for value in creative_refs
+    if (
+        not isinstance(schema_version, int)
+        or not isinstance(source_ref, str)
+        or not isinstance(title, str)
+        or not isinstance(body, str)
+        or (variant_key is not None and not isinstance(variant_key, str))
+        or not isinstance(creative_refs, list)
+        or not all(isinstance(value, str) for value in creative_refs)
     ):
-        raise Conflict(f"publication release {release.id} has an invalid snapshot")
+        raise Conflict(
+            f"publication release {release.id} has an invalid persisted snapshot"
+        )
     return PublicationSnapshotV1(
-        source_ref=str(payload["source_ref"]),
-        title=str(payload["title"]),
-        body=str(payload["body"]),
-        variant_key=cast(str | None, payload.get("variant_key")),
-        creative_refs=tuple(creative_refs),
-        schema_version=int(payload["schema_version"]),
+        source_ref=source_ref,
+        title=title,
+        body=body,
+        variant_key=cast(str | None, variant_key),
+        creative_refs=tuple(cast(list[str], creative_refs)),
+        schema_version=schema_version,
     )
 
 

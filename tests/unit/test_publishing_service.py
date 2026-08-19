@@ -309,6 +309,22 @@ def test_stale_timer_cannot_duplicate_dispatch(db: Session) -> None:
     assert db.scalar(select(func.count(OutboxEvent.id))) == 0
 
 
+def test_dispatch_refuses_a_corrupt_persisted_snapshot(db: Session) -> None:
+    timers = FakeTimers()
+    release = _request(db, timers, command=_command(targets=("binding:one",)))
+    release.snapshot_payload = {
+        **release.snapshot_payload,
+        "schema_version": "not-an-integer",
+    }
+    db.flush()
+
+    with pytest.raises(Conflict, match="invalid persisted snapshot"):
+        _dispatch(db, timers, release.id)
+
+    assert _attempts(db, release.id) == ()
+    assert db.scalar(select(func.count(OutboxEvent.id))) == 0
+
+
 def test_partial_and_all_failed_outcomes_are_retained_and_derived(db: Session) -> None:
     timers = FakeTimers()
     partial = _request(db, timers)
