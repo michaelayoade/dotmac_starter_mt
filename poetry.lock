@@ -569,7 +569,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a71"
+dotmac-kernel = ">=0.1.0a73"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -686,7 +686,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a72"
+version = "0.1.0a73"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"

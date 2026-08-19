@@ -207,7 +207,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a72"
+__version__ = "0.1.0a73"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -300,11 +300,14 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
 
 # ── Deliberately-internal modules ───────────────────────────────────────────
 # Present in the package but NOT part of the public surface — a consumer must
-# not import from these. `display` is consumed only within the kernel (by
-# `templating` / `web_deps`); the `settings_resolver` write helpers are the
-# `settings_admin` narrow surface, not general API (see that module).
+# not import from these. `_transactions` is the engine-free savepoint mechanic
+# for caller-session kernel services; its public spelling remains
+# `dotmac_kernel.db.conflict_savepoint`. `display` is consumed only within the
+# kernel (by `templating` / `web_deps`); the `settings_resolver` write helpers
+# are the `settings_admin` narrow surface, not general API (see that module).
 INTERNAL_MODULES: frozenset[str] = frozenset(
     {
+        "dotmac_kernel._transactions",
         "dotmac_kernel.display",
     }
 )

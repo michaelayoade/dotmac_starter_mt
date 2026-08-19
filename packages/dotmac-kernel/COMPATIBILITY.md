@@ -90,7 +90,9 @@ and may change or disappear without a deprecation cycle**.
    eager DB session owner and engine live here (not at the top level). Route
    guards in `dotmac_kernel.deps` are safe to import before database
    configuration: `get_db` and `get_platform_db` defer entry into the owner
-   until FastAPI resolves the dependency for a request.
+   until FastAPI resolves the dependency for a request. Kernel services that
+   receive a caller-owned `Session` remain import- and invocation-safe: they do
+   not enter that eager owner merely to open a SAVEPOINT.
 
 ### Supported modules and their public names
 
@@ -992,6 +994,10 @@ moving a caller from the first to the second is one identifier.
 
 ## Internal modules and names (do not import)
 
+- `dotmac_kernel._transactions` — private, engine-free savepoint mechanics for
+  kernel-owned services. Consumers use the supported
+  `dotmac_kernel.db.conflict_savepoint` spelling; the private location does not
+  create another session or transaction authority.
 - `dotmac_kernel.display` — consumed only within the kernel (by `templating` /
   `web_deps`). Display formatting reaches templates through the registered Jinja
   filters, not a consumer import.
