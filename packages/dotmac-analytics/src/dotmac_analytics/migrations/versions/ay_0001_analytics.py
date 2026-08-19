@@ -372,9 +372,7 @@ def upgrade() -> None:
         "BEFORE UPDATE OR DELETE ON mod_analytics.metric_observations "
         "FOR EACH ROW EXECUTE FUNCTION mod_analytics.refuse_mutation();"
     )
-    op.execute(
-        "GRANT SELECT, INSERT ON mod_analytics.metric_observations TO app_user;"
-    )
+    op.execute("GRANT SELECT, INSERT ON mod_analytics.metric_observations TO app_user;")
     op.execute(
         "CREATE TRIGGER metric_projection_rebuilds_append_only "
         "BEFORE UPDATE OR DELETE ON mod_analytics.metric_projection_rebuilds "

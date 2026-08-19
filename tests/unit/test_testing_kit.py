@@ -112,8 +112,7 @@ def test_an_explicit_table_slice_does_not_attach_unselected_schemas() -> None:
     try:
         with engine.connect() as connection:
             attached = {
-                row[1]
-                for row in connection.execute(text("PRAGMA database_list")).all()
+                row[1] for row in connection.execute(text("PRAGMA database_list")).all()
             }
         assert attached == {"main", "mod_tstudio"}
     finally:

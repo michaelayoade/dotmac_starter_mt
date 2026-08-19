@@ -97,8 +97,7 @@ def test_source_receipts_and_observations_are_append_only_structurally() -> None
     assert "refuse_mutation" in migration
     for model in models.APPEND_ONLY_MODELS:
         assert (
-            f"GRANT SELECT, INSERT ON mod_analytics.{model.__tablename__}"
-            in migration
+            f"GRANT SELECT, INSERT ON mod_analytics.{model.__tablename__}" in migration
         )
 
 
@@ -173,7 +172,8 @@ def test_the_revision_is_a_lineage_root_with_declared_prerequisites() -> None:
     assignments = {
         node.targets[0].id: ast.literal_eval(node.value)
         for node in tree.body
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id in {"revision", "down_revision", "REQUIRES"}
     }
     assert revision_id_pattern("ay").match(assignments["revision"])

@@ -145,9 +145,7 @@ def test_the_root_revision_declares_and_verifies_its_prerequisites() -> None:
 
 def test_the_reference_assembly_does_not_claim_candidate_adoption() -> None:
     alembic = (REPO_ROOT / "alembic.ini").read_text(encoding="utf-8")
-    allowlist = (REPO_ROOT / ".github/release-modules.json").read_text(
-        encoding="utf-8"
-    )
+    allowlist = (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
     assert "dotmac-surveys" not in alembic
     assert "dotmac-surveys" not in allowlist
 
