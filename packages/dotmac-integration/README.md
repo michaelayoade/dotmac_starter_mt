@@ -12,8 +12,8 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a9`; declared: `0.1.0a10`.** Releases
-a2–a4 implement SPI 1.1; a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
+**Released: `0.1.0a1` through `0.1.0a10`.** Releases a2–a4 implement SPI 1.1;
+a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
 which is the authority on what has and has not shipped. a8 adds indexed,
 revisioned shadow-comparison evidence; a9 adds finite replay-evidence retention
