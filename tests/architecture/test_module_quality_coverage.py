@@ -35,14 +35,13 @@ def _target_recipe(makefile: str, target: str) -> str:
 
 
 def _uncovered_sources(makefile: str, source_roots: set[str]) -> dict[str, set[str]]:
-    variables = {
-        name: value
-        for name, value in re.findall(
+    variables = dict(
+        re.findall(
             r"^([A-Z][A-Z0-9_]*_SRC) \?= (packages/[^\s]+)$",
             makefile,
             re.MULTILINE,
         )
-    }
+    )
     result: dict[str, set[str]] = {}
     for target in ("type-check", "security"):
         recipe = _target_recipe(makefile, target)
