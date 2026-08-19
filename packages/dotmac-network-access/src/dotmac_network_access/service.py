@@ -53,7 +53,6 @@ class AccessConflict(AccessError):
     pass
 
 
-
 def _stored_utc(value: datetime) -> datetime:
     """Normalize SQLite's timezone-naive round-trip without weakening ingress.
 
@@ -65,6 +64,7 @@ def _stored_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
 
 def _clean(value: str, label: str) -> str:
     result = value.strip()
