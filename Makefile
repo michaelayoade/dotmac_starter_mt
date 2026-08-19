@@ -36,6 +36,7 @@ APPDIR_SRC ?= packages/dotmac-application-directory/src/dotmac_application_direc
 FILES_SRC ?= packages/dotmac-files/src/dotmac_files
 IMPORTS_SRC ?= packages/dotmac-imports/src/dotmac_imports
 APPROVALS_SRC ?= packages/dotmac-approvals/src/dotmac_approvals
+NUMBERING_SRC ?= packages/dotmac-numbering/src/dotmac_numbering
 PEOPLE_SRC ?= packages/dotmac-people/src/dotmac_people
 DURABLE_TIMERS_SRC ?= packages/dotmac-durable-timers/src/dotmac_durable_timers
 INTEGRATION_SRC ?= packages/dotmac-integration/src/dotmac_integration
