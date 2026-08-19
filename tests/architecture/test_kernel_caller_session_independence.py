@@ -60,8 +60,7 @@ def test_caller_session_services_never_enter_the_kernel_engine_owner() -> None:
     assert not violations, (
         "services that receive an assembly-owned Session imported "
         "dotmac_kernel.db and therefore constructed a second engine/session "
-        "authority: "
-        + ", ".join(violations)
+        "authority: " + ", ".join(violations)
     )
 
 
