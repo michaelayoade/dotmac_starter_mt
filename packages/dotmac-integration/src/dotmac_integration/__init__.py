@@ -300,6 +300,12 @@ from dotmac_integration.retry import (
     next_state,
     retry_delay_seconds,
 )
+from dotmac_integration.runtime_policy import (
+    ConnectorRuntimePolicy,
+    RuntimeBoundaryMissing,
+    RuntimePolicy,
+    derive_runtime_policy,
+)
 from dotmac_integration.secret_refs import (
     SECRET_REFERENCE_SCHEMES,
     SecretValueError,
@@ -338,6 +344,7 @@ from dotmac_integration.spi import (
     DeliveryPlugin,
     Diagnostic,
     DispatchRequest,
+    EgressDeclaration,
     InboundDisposition,
     InboundEvent,
     IngressHandler,
@@ -350,6 +357,7 @@ from dotmac_integration.spi import (
     ModeNotDeclaredError,
     PollHandler,
     PollPlugin,
+    SecretBindingDeclaration,
     SpiIncompatibleError,
     SpiRange,
     SpiVersion,
@@ -359,7 +367,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a9"
+__version__ = "0.1.0a10"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -587,9 +595,14 @@ __all__ = [
     "ConnectorInstallation",
     "ConnectorManifest",
     "ConnectorRegistry",
+    "ConnectorRuntimePolicy",
     "DuplicateConnectorError",
+    "EgressDeclaration",
     "InvalidManifestError",
     "NoEnabledBindingError",
+    "RuntimeBoundaryMissing",
+    "RuntimePolicy",
+    "SecretBindingDeclaration",
     "SecretValueError",
     "SelectionError",
     "SpiIncompatibleError",
@@ -598,6 +611,7 @@ __all__ = [
     "__version__",
     "check_activation",
     "discover",
+    "derive_runtime_policy",
     "module",
     "require_activatable",
     "resolve_binding",
