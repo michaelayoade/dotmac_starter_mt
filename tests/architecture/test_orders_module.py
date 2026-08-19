@@ -224,6 +224,37 @@ def test_snapshot_trigger_qualification_canary_detects_a_planted_ambiguity() -> 
     assert _unqualified_snapshot_aggregates(planted) == ("line_total",)
 
 
+def _uses_cross_record_shape_case(source: str) -> bool:
+    return (
+        "gate_id := CASE" in source
+        and "THEN NEW.id" in source
+        and "ELSE NEW.gate_id" in source
+    )
+
+
+def test_shared_coverage_trigger_selects_record_shape_before_field_access() -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+    assert "IF TG_TABLE_NAME = 'coverage_gates' THEN" in migration
+    assert _uses_cross_record_shape_case(migration) is False
+
+
+def test_shared_coverage_trigger_record_shape_canary_detects_planted_case() -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+    planted = migration.replace(
+        """IF TG_TABLE_NAME = 'coverage_gates' THEN
+                gate_id := NEW.id;
+            ELSE
+                gate_id := NEW.gate_id;
+            END IF;""",
+        """gate_id := CASE
+                WHEN TG_TABLE_NAME = 'coverage_gates' THEN NEW.id
+                ELSE NEW.gate_id
+            END;""",
+        1,
+    )
+    assert _uses_cross_record_shape_case(planted) is True
+
+
 def test_lifecycle_and_refusal_audit_actions_are_declared_and_consumed() -> None:
     expected = {
         "orders.submitted",

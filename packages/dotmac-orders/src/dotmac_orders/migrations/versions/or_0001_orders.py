@@ -846,10 +846,11 @@ def _install_deferred_snapshot_checks() -> None:
             obligations bigint;
             receipts bigint;
         BEGIN
-            gate_id := CASE
-                WHEN TG_TABLE_NAME = 'coverage_gates' THEN NEW.id
-                ELSE NEW.gate_id
-            END;
+            IF TG_TABLE_NAME = 'coverage_gates' THEN
+                gate_id := NEW.id;
+            ELSE
+                gate_id := NEW.gate_id;
+            END IF;
             SELECT * INTO current_gate
               FROM mod_orders.coverage_gates
              WHERE tenant_id = NEW.tenant_id AND id = gate_id;
