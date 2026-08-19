@@ -157,7 +157,8 @@ def _seed_plane(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:
                 text(
                     "INSERT INTO mod_sites.site_revisions "
                     "(id, tenant_id, site_id, revision_number, state, "
-                    "snapshot_payload, snapshot_digest, created_by_ref, ready_at) VALUES "
+                    "snapshot_payload, snapshot_digest, created_by_ref, "
+                    "ready_at) VALUES "
                     "(:id, :tenant, :site, 1, 'ready', CAST(:payload AS jsonb), "
                     ":digest, :actor, :ready_at)"
                 ),
