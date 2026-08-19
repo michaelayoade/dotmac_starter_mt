@@ -480,9 +480,9 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
-    # a10 is a Python-only SPI 1.3 release: manifest-owned secret-binding names
-    # and exact egress hosts. It adds no migration, so the a9 file set and
-    # digests remain the immutable database history shipped in this tag.
+    # a10 adds SPI 1.3 runtime declarations and changes no migration bytes.
+    # The release workflow installed the exact wheel from the private index,
+    # registered its manifest and only then created this tag.
     "dotmac-integration-v0.1.0a10": (
         "dotmac-integration",
         "7a59864",
@@ -670,7 +670,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: Approvals a5, Integration a9, Allocation a6 and Files a3 are published, so their
+#: Approvals a5, Integration a10, Allocation a6 and Files a3 are published, so their
 #: editable sets are empty; the next migration must enter this map before it
 #: can ship. The release lane does not wait for an open branch, which is why
 #: "released" is read from tags rather than from an intended version number.

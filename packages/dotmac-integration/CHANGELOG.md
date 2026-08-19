@@ -4,8 +4,8 @@
 
 **Ten versions have been released. Pin `0.1.0a10`.** Tags
 `dotmac-integration-v0.1.0a1` … `-v0.1.0a10`, from `1b1d62b`, `aaa3b54`,
-`b14f66e`, `306a40e`, `7828697`, `7e05430`, `c669b24`, `4b1e867`,
-`92ae7a6` and `7a59864`.
+`b14f66e`, `306a40e`, `7828697`, `7e05430`, `c669b24`, `4b1e867` and
+`92ae7a6`, then `7a59864`.
 
 `0.1.0a10` is the latest published version. It raises the additive SPI to 1.3
 and makes named secret bindings plus exact provider egress hosts part of the
