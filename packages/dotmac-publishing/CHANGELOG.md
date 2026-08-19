@@ -7,7 +7,8 @@ per-target delivery and partial-success behavior.
 
 ### Added
 
-- immutable digest-addressed publication snapshots and distinct opaque targets;
+- immutable digest-addressed publication snapshots and explicitly ordered,
+  distinct opaque targets;
 - retry-safe per-target attempt history with transactional outbox commands;
 - deduplicated normalized delivery observations and one aggregate reconciler;
 - typed timer scheduling/acceptance/cancellation seam with stale-generation

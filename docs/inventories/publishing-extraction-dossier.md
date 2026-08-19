@@ -193,3 +193,40 @@ At the same exact commit, Ruff lint passed and the pinned formatter reported all
 three focused test files already formatted. This is controlled pre-
 implementation evidence, not a failed candidate and not permission to release
 or adopt. Gate 2 is now the next action.
+
+## 8. Gate 2 implementation evidence
+
+The executable Gate 2 candidate is frozen at exact local commit
+`5a1892c3aac30b607cc28baa52217870e97bc63c`. A fresh detached writable
+Observer checkout with all 84 tags installed the committed lock using Poetry
+2.4.1. That revision contains `dotmac-publishing 0.1.0a1`, the independent
+`pb_0001_publishing` lineage, and kernel a74's permanent
+`publishing`/`pb`/`mod_publishing` allocation.
+
+Validation was green at that exact code revision:
+
+- 141 focused source-audit, architecture, lifecycle, service, namespace,
+  kernel-floor, publication-ledger and generated-catalog tests passed;
+- `make check` passed the exact Poetry lock, Ruff, all nine import contracts,
+  mypy over 323 source files, Bandit, the composed migration gate, UI assets,
+  generated module catalogue and formatting;
+- the complete unit/architecture lane completed without failure across 3,855
+  collected cases, retaining only repository-defined skips;
+- the complete disposable-PostgreSQL integration lane completed without
+  failure across 497 collected cases; and
+- the publishing-only kernel-plus-module migration suite passed all four live
+  PostgreSQL canaries: catalog agreement, forced RLS on all four tables,
+  two-tenant read isolation, cross-tenant write refusal and unscoped fail-closed
+  behavior. Its per-case databases and the outer Compose project/network were
+  removed after the run.
+
+The full sweeps materially tightened the candidate before this milestone:
+persisted snapshots now fail closed on malformed stored fields, the namespace
+ratchet explicitly enumerates the fifteenth owner, and target order is a stored,
+uniquely constrained release fact rather than timestamp/UUID accident.
+
+This closes implementation Gate 2 only. Publishing a1 and kernel a74 remain
+unpublished; publishing is absent from the release allowlist and from this
+reference assembly; Backoffice has not pinned, migrated, shadowed or retired a
+writer; and every `PUB-R*` row remains `not-started`. Release and adoption need
+separate authorization and their own proof.

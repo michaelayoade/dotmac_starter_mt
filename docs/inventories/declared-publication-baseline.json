@@ -74,7 +74,7 @@
     },
     "dotmac-publishing": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED GATE-2 CANDIDATE, NOT A RELEASE. The package implements the audited tenant publication owner, but Backoffice cutover 1 has not begun, every Mkt writer-retirement row remains not-started, the package is absent from the release allowlist, and Michael has authorized neither publication nor adoption. Keep it unpublished while exact-commit Observer validation and protected-main review are outstanding. Remove this row only in an authorized release change that verifies the exact kernel/publishing artifacts and preserves Backoffice as the first candidate adopter; never edit the declared version down.",
+      "reason": "INTENDED GATE-2 CANDIDATE, NOT A RELEASE. The audited tenant publication owner is exact-commit Observer-green at 5a1892c, but Backoffice cutover 1 has not begun, every Mkt writer-retirement row remains not-started, the package is absent from the release allowlist, and Michael has authorized neither publication nor adoption. Keep it unpublished while protected-main and explicit release-readiness gates remain outstanding. Remove this row only in an authorized release change that verifies the exact kernel/publishing artifacts and preserves Backoffice as the first candidate adopter; never edit the declared version down.",
       "state": "never-published"
     },
     "dotmac-imports": {
