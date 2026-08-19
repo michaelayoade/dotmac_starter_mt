@@ -1,6 +1,6 @@
 # Durable timers — source revalidation
 
-**As of:** 2026-08-18
+**As of:** 2026-08-19
 **Subject:** `dotmac-durable-timers`, ADR-0030 §5 build-order step 6.
 **Authorizing decision:** ADR-0030 §6 — "Where a dossier is incomplete, the
 exception permits completing the audit; it does not turn missing evidence into
@@ -31,7 +31,17 @@ recovery, cancel/accept ordering, stale-generation rejection, poison isolation,
 tenant RLS/composite identity, platform revocation/reachability, and dual-plane
 parity/append-only history. This closes the implementation-proof gate; it is not
 adoption evidence. Sub remains the required first adopter, one timer family at
-a time, after kernel a72 and module a1 are published and pinned exactly.
+a time, after kernel a72 and module a1 are pinned exactly.
+
+Both release gates are now closed. Protected workflows `32212290704` and
+`32212698520` built, inspected, published and registry-verified
+`dotmac-kernel==0.1.0a72` followed by
+`dotmac-durable-timers==0.1.0a1`; annotated tags
+`dotmac-kernel-v0.1.0a72` and `dotmac-durable-timers-v0.1.0a1` both peel to
+protected-main merge commit
+`f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685`. Publication is prerequisite
+evidence, not a cutover: `contract_consumers` remains empty until Sub's first
+timer family changes authority and its local path begins retirement.
 
 ## Revalidation 2026-08-17 — decision and released prerequisite
 

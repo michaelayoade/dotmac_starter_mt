@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a72 — UNRELEASED
+## 0.1.0a72 — 2026-08-19
 
 Allocates the independent durable-timer module lineage and adds the declaration
 surface its output routing contract requires. This is an allocation and a
