@@ -48,32 +48,50 @@ def test_publication_and_delivery_vocabularies_are_exact() -> None:
 
 def test_pending_targets_derive_scheduled_and_inflight_targets_dispatching() -> None:
     lifecycle = _module("lifecycle")
-    assert lifecycle.derive_publication_state(
-        (lifecycle.DeliveryState.PENDING, lifecycle.DeliveryState.PENDING)
-    ) is lifecycle.PublicationState.SCHEDULED
-    assert lifecycle.derive_publication_state(
-        (lifecycle.DeliveryState.PUBLISHED, lifecycle.DeliveryState.ACCEPTED)
-    ) is lifecycle.PublicationState.DISPATCHING
+    assert (
+        lifecycle.derive_publication_state(
+            (lifecycle.DeliveryState.PENDING, lifecycle.DeliveryState.PENDING)
+        )
+        is lifecycle.PublicationState.SCHEDULED
+    )
+    assert (
+        lifecycle.derive_publication_state(
+            (lifecycle.DeliveryState.PUBLISHED, lifecycle.DeliveryState.ACCEPTED)
+        )
+        is lifecycle.PublicationState.DISPATCHING
+    )
 
 
 def test_all_success_partial_success_and_all_failure_are_distinct() -> None:
     lifecycle = _module("lifecycle")
-    assert lifecycle.derive_publication_state(
-        (lifecycle.DeliveryState.PUBLISHED, lifecycle.DeliveryState.PUBLISHED)
-    ) is lifecycle.PublicationState.PUBLISHED
-    assert lifecycle.derive_publication_state(
-        (lifecycle.DeliveryState.PUBLISHED, lifecycle.DeliveryState.FAILED)
-    ) is lifecycle.PublicationState.PARTIAL
-    assert lifecycle.derive_publication_state(
-        (lifecycle.DeliveryState.FAILED, lifecycle.DeliveryState.FAILED)
-    ) is lifecycle.PublicationState.FAILED
+    assert (
+        lifecycle.derive_publication_state(
+            (lifecycle.DeliveryState.PUBLISHED, lifecycle.DeliveryState.PUBLISHED)
+        )
+        is lifecycle.PublicationState.PUBLISHED
+    )
+    assert (
+        lifecycle.derive_publication_state(
+            (lifecycle.DeliveryState.PUBLISHED, lifecycle.DeliveryState.FAILED)
+        )
+        is lifecycle.PublicationState.PARTIAL
+    )
+    assert (
+        lifecycle.derive_publication_state(
+            (lifecycle.DeliveryState.FAILED, lifecycle.DeliveryState.FAILED)
+        )
+        is lifecycle.PublicationState.FAILED
+    )
 
 
 def test_all_cancelled_is_not_misreported_as_failed() -> None:
     lifecycle = _module("lifecycle")
-    assert lifecycle.derive_publication_state(
-        (lifecycle.DeliveryState.CANCELLED, lifecycle.DeliveryState.CANCELLED)
-    ) is lifecycle.PublicationState.CANCELLED
+    assert (
+        lifecycle.derive_publication_state(
+            (lifecycle.DeliveryState.CANCELLED, lifecycle.DeliveryState.CANCELLED)
+        )
+        is lifecycle.PublicationState.CANCELLED
+    )
 
 
 def test_a_publication_requires_at_least_one_target_state() -> None:
@@ -196,7 +214,5 @@ def test_contract_surface_contains_no_provider_vocabulary() -> None:
     contracts = _module("contracts")
     forbidden = ("Provider", "Channel", "Credential", "Adapter")
     assert not [
-        name
-        for name in contracts.__all__
-        if any(token in name for token in forbidden)
+        name for name in contracts.__all__ if any(token in name for token in forbidden)
     ]

@@ -20,8 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = PROJECT_ROOT / "packages" / "dotmac-publishing"
 DOSSIER = PACKAGE_ROOT / "EXTRACTION.toml"
 MIGRATION = (
-    PACKAGE_ROOT
-    / "src/dotmac_publishing/migrations/versions/pb_0001_publishing.py"
+    PACKAGE_ROOT / "src/dotmac_publishing/migrations/versions/pb_0001_publishing.py"
 )
 
 
@@ -38,9 +37,9 @@ def _publishing_module(name: str) -> Any:
 
 
 def test_the_distribution_exists_only_after_the_red_canary_is_recorded() -> None:
-    assert importlib.util.find_spec("dotmac_publishing") is not None, (
-        "Gate 1 expected RED: dotmac-publishing has not been implemented"
-    )
+    assert (
+        importlib.util.find_spec("dotmac_publishing") is not None
+    ), "Gate 1 expected RED: dotmac-publishing has not been implemented"
 
 
 def test_product_first_dossier_pins_the_qualifying_mkt_source() -> None:

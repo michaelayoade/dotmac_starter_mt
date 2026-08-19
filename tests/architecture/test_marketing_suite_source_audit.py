@@ -21,9 +21,7 @@ CONTENT_DOSSIER = PROJECT_ROOT / "packages" / "dotmac-content" / "EXTRACTION.tom
 CONTENT_RETIREMENT = (
     PROJECT_ROOT / "docs" / "inventories" / "content-writer-retirement.toml"
 )
-PUBLISHING_DOSSIER = (
-    PROJECT_ROOT / "packages" / "dotmac-publishing" / "EXTRACTION.toml"
-)
+PUBLISHING_DOSSIER = PROJECT_ROOT / "packages" / "dotmac-publishing" / "EXTRACTION.toml"
 PUBLISHING_RETIREMENT = (
     PROJECT_ROOT / "docs" / "inventories" / "publishing-writer-retirement.toml"
 )
