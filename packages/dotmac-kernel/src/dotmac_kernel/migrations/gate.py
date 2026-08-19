@@ -237,15 +237,120 @@ def _static_value(
             and all(isinstance(arg, str) for arg in args)
         ):
             return qualified(str(args[0]), str(args[1]))
-        # SQLAlchemy's `text("...")` wrapper does not make static SQL dynamic.
-        if name == "text" and len(args) == 1 and isinstance(args[0], str):
-            return args[0]
     return _UNRESOLVED
 
 
 def _literal(node: ast.AST, expressions: Mapping[str, ast.AST] | None = None) -> object:
     value = _static_value(node, expressions)
     return None if value is _UNRESOLVED else value
+
+
+def _sql_templates(
+    node: ast.AST,
+    expressions: Mapping[str, ast.AST],
+    functions: Mapping[str, ast.FunctionDef],
+    resolving: frozenset[str] = frozenset(),
+) -> tuple[str, ...]:
+    """Conservative SQL text shapes for an otherwise unresolved expression.
+
+    Migrations legitimately remove repetitive DDL with a bounded table loop or
+    a local pure string builder.  The full value can be unresolved because a
+    loop variable is not a module constant, while the security property this
+    gate needs remains statically visible: every possible template hard-codes
+    the owning schema.
+
+    Unknown formatted values become a marker, never an assumed value.  Calls
+    are followed only into LOCAL functions and every reachable return is kept;
+    one unqualified return therefore still fails.  A runtime/external builder
+    yields no template and remains ``<uninspectable dynamic SQL>``.
+    """
+    resolved = _static_value(node, expressions)
+    if isinstance(resolved, str):
+        return (resolved,)
+
+    if isinstance(node, ast.JoinedStr):
+        parts: list[str] = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+                continue
+            if isinstance(value, ast.FormattedValue):
+                formatted = _static_value(value.value, expressions)
+                parts.append(
+                    str(formatted) if formatted is not _UNRESOLVED else "<dynamic>"
+                )
+                continue
+            return ()
+        return ("".join(parts),)
+
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _sql_templates(node.left, expressions, functions, resolving)
+        right = _sql_templates(node.right, expressions, functions, resolving)
+        return tuple(a + b for a in left for b in right)
+
+    if isinstance(node, ast.IfExp):
+        return tuple(
+            dict.fromkeys(
+                (
+                    *_sql_templates(node.body, expressions, functions, resolving),
+                    *_sql_templates(node.orelse, expressions, functions, resolving),
+                )
+            )
+        )
+
+    if isinstance(node, ast.Name):
+        expression = expressions.get(node.id)
+        if expression is None:
+            return ()
+        return _sql_templates(expression, expressions, functions, resolving)
+
+    if not isinstance(node, ast.Call):
+        return ()
+    func = node.func
+    name = (
+        func.id
+        if isinstance(func, ast.Name)
+        else func.attr
+        if isinstance(func, ast.Attribute)
+        else None
+    )
+    # Only a bare name can identify the local builder collected above.  An
+    # attribute call such as ``external.policy_sql()`` is runtime code even if
+    # this migration happens to define a same-named local helper.
+    if (
+        not isinstance(func, ast.Name)
+        or name is None
+        or name in resolving
+        or name not in functions
+    ):
+        return ()
+
+    class Returns(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.values: list[ast.AST] = []
+
+        def visit_Return(self, return_node: ast.Return) -> None:
+            if return_node.value is not None:
+                self.values.append(return_node.value)
+
+        # A nested function's return is not a result of the builder being read.
+        def visit_FunctionDef(self, function_node: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, function_node: ast.AsyncFunctionDef) -> None:
+            return
+
+    function = functions[name]
+    visitor = Returns()
+    for statement in function.body:
+        visitor.visit(statement)
+    next_resolving = resolving | frozenset({name})
+    templates: list[str] = []
+    for return_value in visitor.values:
+        templates.extend(
+            _sql_templates(return_value, expressions, functions, next_resolving)
+        )
+    return tuple(dict.fromkeys(templates))
 
 
 def _as_tuple(value: object) -> tuple[str, ...]:
@@ -354,7 +459,8 @@ def _scan_ddl(
                     if isinstance(literal, str):
                         raw_sql.append(literal)
                     else:
-                        raw_sql.append("<uninspectable dynamic SQL>")
+                        templates = _sql_templates(node.args[0], expressions, functions)
+                        raw_sql.extend(templates or ("<uninspectable dynamic SQL>",))
                 continue
             if name not in SCHEMA_QUALIFIED_OPS:
                 continue
