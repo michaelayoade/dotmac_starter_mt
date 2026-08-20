@@ -982,6 +982,24 @@ type = "directory"
 url = "packages/dotmac-usage"
 
 [[package]]
+name = "dotmac-usage-rating"
+version = "0.1.0a1"
+description = "Effective usage-rating rules and pre-tax obligations"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-usage-rating"
+
+[[package]]
 name = "email-validator"
 version = "2.3.0"
 description = "A robust email address syntax and deliverability validation library."
@@ -3143,4 +3161,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "498d6b2129973d465afff96b4bc240a7bd557388181f70efa17137039ce6f421"
+content-hash = "06299b08fb8a5e30cadba65757c49c3c3ad89aa17f29a1650a9d6bd06211b109"

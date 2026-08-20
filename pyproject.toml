@@ -96,6 +96,7 @@ dotmac-service-catalog = { path = "packages/dotmac-service-catalog", develop = t
 dotmac-qualification = { path = "packages/dotmac-qualification", develop = true }
 dotmac-services = { path = "packages/dotmac-services", develop = true }
 dotmac-usage = { path = "packages/dotmac-usage", develop = true }
+dotmac-usage-rating = { path = "packages/dotmac-usage-rating", develop = true }
 # Optional dual-plane timer identity and generation owner. Delivery stays in
 # the kernel outbox relay; each real adopter composes its own selected planes.
 dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = true }
@@ -190,6 +191,7 @@ module = [
     "dotmac_qualification.*",
     "dotmac_services.*",
     "dotmac_usage.*",
+    "dotmac_usage_rating.*",
     "dotmac_durable_timers.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
@@ -255,6 +257,7 @@ root_packages = [
     "dotmac_qualification",
     "dotmac_services",
     "dotmac_usage",
+    "dotmac_usage_rating",
     "dotmac_durable_timers",
     "dotmac_integration",
     "dotmac_auth_oidc",
@@ -328,6 +331,7 @@ source_modules = [
     "dotmac_qualification",
     "dotmac_services",
     "dotmac_usage",
+    "dotmac_usage_rating",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -396,6 +400,7 @@ modules = [
     "dotmac_qualification",
     "dotmac_services",
     "dotmac_usage",
+    "dotmac_usage_rating",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -449,6 +454,7 @@ forbidden_modules = [
     "dotmac_qualification",
     "dotmac_services",
     "dotmac_usage",
+    "dotmac_usage_rating",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
 ]
