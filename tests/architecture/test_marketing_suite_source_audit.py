@@ -158,7 +158,8 @@ def test_release_authorized_media_observations_is_not_misreported_as_adopted() -
         "media a78, content a79, publishing a80 and sites a81",
         "all four packages floor at the first installable cohort kernel, a81",
         "authorized release on 2026-08-20",
-        "now allowlisted while the restacked exact-commit observer proof remains pending",
+        "now allowlisted while the restacked exact-commit "
+        "observer proof remains pending",
         "release does not resume adoption or move authority",
         "tagged, published, composed or adopted",
         "release and adoption remain separate gates",
