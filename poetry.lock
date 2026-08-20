@@ -831,7 +831,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a83"
+version = "0.1.0a84"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1055,6 +1055,24 @@ type = "directory"
 url = "packages/dotmac-pon-access"
 
 [[package]]
+name = "dotmac-positioning"
+version = "0.1.0a1"
+description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-positioning"
+
+[[package]]
 name = "dotmac-publishing"
 version = "0.1.0a1"
 description = "Tenant publication requests, target attempts, and reconciled outcomes"
@@ -1083,7 +1101,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a83"
+dotmac-kernel = ">=0.1.0a84"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -1119,7 +1137,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a83"
+dotmac-kernel = ">=0.1.0a84"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -3359,4 +3377,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "49fc36a365ff3588643853be78bc14f651d5ad966a39dd670c2b8dff113eeeaf"
+content-hash = "7d59bdefdb8347e782cfbf95b49952ec74bd1bf6b01797bdde4b714503e55ede"

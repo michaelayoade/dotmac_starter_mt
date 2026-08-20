@@ -107,6 +107,10 @@ dotmac-network-control = { path = "packages/dotmac-network-control", develop = t
 dotmac-fiber-plant = { path = "packages/dotmac-fiber-plant", develop = true }
 dotmac-network-access = { path = "packages/dotmac-network-access", develop = true }
 dotmac-pon-access = { path = "packages/dotmac-pon-access", develop = true }
+# Tenant-only provider-neutral position observations (ADR-0039). Built and
+# proven here; Assets keeps a durable unit's authoritative location and product
+# owners keep every consequence, so the reference assembly installs nothing.
+dotmac-positioning = { path = "packages/dotmac-positioning", develop = true }
 # Optional dual-plane timer identity and generation owner. Delivery stays in
 # the kernel outbox relay; each real adopter composes its own selected planes.
 dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = true }
@@ -225,6 +229,7 @@ module = [
     "dotmac_fiber_plant.*",
     "dotmac_network_access.*",
     "dotmac_pon_access.*",
+    "dotmac_positioning.*",
     "dotmac_durable_timers.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
@@ -302,6 +307,7 @@ root_packages = [
     "dotmac_fiber_plant",
     "dotmac_network_access",
     "dotmac_pon_access",
+    "dotmac_positioning",
     "dotmac_durable_timers",
     "dotmac_integration",
     "dotmac_media_observations",
@@ -388,6 +394,7 @@ source_modules = [
     "dotmac_fiber_plant",
     "dotmac_network_access",
     "dotmac_pon_access",
+    "dotmac_positioning",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -468,6 +475,7 @@ modules = [
     "dotmac_fiber_plant",
     "dotmac_network_access",
     "dotmac_pon_access",
+    "dotmac_positioning",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -533,6 +541,7 @@ forbidden_modules = [
     "dotmac_fiber_plant",
     "dotmac_network_access",
     "dotmac_pon_access",
+    "dotmac_positioning",
     "dotmac_durable_timers",
     "dotmac_content",
     "dotmac_publishing",

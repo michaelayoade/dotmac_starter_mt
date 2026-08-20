@@ -89,7 +89,7 @@ def test_retained_capabilities_have_audit_complete_dossiers() -> None:
         assert dossier["inventory_evidence"] == [
             "docs/inventories/sub-vnext-parity-sources.md",
             "docs/inventories/sub-vnext-parity-dispositions.toml",
-            "docs/adr/0039-sub-vnext-parity-capabilities-have-"
+            "docs/adr/0040-sub-vnext-parity-capabilities-have-"
             "narrow-independent-owners.md",
         ]
 

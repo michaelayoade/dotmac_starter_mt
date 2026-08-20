@@ -83,8 +83,8 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # release, a74-a77 to the vendor cohort, and media observations, content,
 # publishing and sites therefore follow in a78, a79, a80 and a81.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
-    "dotmac-referrals": "0.1.0a83",
-    "dotmac-reseller-management": "0.1.0a83",
+    "dotmac-referrals": "0.1.0a84",
+    "dotmac-reseller-management": "0.1.0a84",
     "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
@@ -121,6 +121,10 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-fiber-plant": "0.1.0a82",
     "dotmac-network-access": "0.1.0a82",
     "dotmac-pon-access": "0.1.0a82",
+    # Positioning is the ordinary case once more: a83 allocates `pos`/`po` and
+    # every capability it consumes — `requires` (a56), the two prerequisite
+    # names — predates that allocation, so the ledger row alone sets the floor.
+    "dotmac-positioning": "0.1.0a83",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

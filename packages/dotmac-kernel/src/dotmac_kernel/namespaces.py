@@ -857,10 +857,23 @@ PON_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("pon"),
 )
 
+# `dotmac-positioning` — the thirty-third allocated installable module. It owns
+# provider-neutral position observations and nothing that follows from them
+# (ADR-0039). `positioning` stays explicit in live catalogs; `po` keeps the
+# lineage's revision ids compact. Assets owns a durable unit's authoritative
+# location, product owners decide geofence/SLA/dispatch consequences, and
+# Integrator owns provider transport — none of those move here.
+POSITIONING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="positioning",
+    prefix="po",
+    branch_label="positioning",
+    db_schema=module_schema("pos"),
+)
+
 # `dotmac-referrals` — Sub's programme/code/attribution/conversion owner,
 # extracted without Party, Customer, Lead, Billing or transport persistence.
 # Tenant-only because an ISP tenant owns its referral programme and evidence;
-# no named platform-plane consumer exists (ADR-0039).
+# no named platform-plane consumer exists (ADR-0040).
 REFERRALS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="referrals",
     prefix="rf",
@@ -871,7 +884,7 @@ REFERRALS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 # `dotmac-reseller-management` — Sub's tenant reseller identity, hierarchy,
 # delegated-authority and lifecycle owner. Party, Customer, Commercial
 # Agreements, Entitlement Allocation, commissions and payouts remain outside
-# this namespace (ADR-0039).
+# this namespace (ADR-0040).
 RESELLER_MANAGEMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="reseller_management",
     prefix="rm",
@@ -913,6 +926,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     FIBER_PLANT_MIGRATION_OWNER,
     NETWORK_ACCESS_MIGRATION_OWNER,
     PON_ACCESS_MIGRATION_OWNER,
+    POSITIONING_MIGRATION_OWNER,
     REFERRALS_MIGRATION_OWNER,
     RESELLER_MANAGEMENT_MIGRATION_OWNER,
 )

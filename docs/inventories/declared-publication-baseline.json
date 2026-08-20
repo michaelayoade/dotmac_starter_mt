@@ -63,8 +63,8 @@
   ],
   "unpublished": {
     "dotmac-kernel": {
-      "declared": "0.1.0a83",
-      "reason": "INTENDED UNTIL THE REFERRALS AND RESELLER MANAGEMENT MODULE RELEASE. Published a77 and a81 own the vendor and marketing allocations and cannot be repointed; a82 owns the eleven network-cohort rows. Kernel 0.1.0a83 adds exactly two independent MIGRATION_OWNER_LEDGER rows and no runtime behaviour: mod_referrals / rf and mod_reseller / rm, whose matching manifests, migrations and tests land in this parity slice. Remove this row when a separately authorized release change tags kernel 0.1.0a83 and both module artifacts after exact-commit validation; do NOT edit the declared version down.",
+      "declared": "0.1.0a84",
+      "reason": "INTENDED UNTIL THE REFERRALS AND RESELLER MANAGEMENT MODULE RELEASE. Published a77 and a81 own the vendor and marketing allocations and cannot be repointed; a82 owns the eleven network-cohort rows and a83 owns Positioning. Kernel 0.1.0a84 adds exactly two independent MIGRATION_OWNER_LEDGER rows and no runtime behaviour: mod_referrals / rf and mod_reseller / rm, whose matching manifests, migrations and tests land in this parity slice. Remove this row when a separately authorized release change tags kernel 0.1.0a84 and both module artifacts after exact-commit validation; do NOT edit the declared version down.",
       "state": "previous-version-published"
     },
     "dotmac-campaigns": {
@@ -79,12 +79,12 @@
     },
     "dotmac-referrals": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0039 and EXTRACTION.toml record Sub as the first candidate consumer, but the dossier remains audit-complete with no contract consumer or adoption evidence: no product yet pins this lineage and Sub's local writer remains authoritative. The release allowlist makes the module publishable; it does not claim adoption or silently dispatch a release. Remove this row in a separately authorized release change after exact-commit Observer validation and immediately before Sub installs the exact pin, backfills, shadows, seals and retires its local writer. Do NOT publish or edit the declared version down merely to make this ledger disappear.",
+      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer, but the dossier remains audit-complete with no contract consumer or adoption evidence: no product yet pins this lineage and Sub's local writer remains authoritative. The release allowlist makes the module publishable; it does not claim adoption or silently dispatch a release. Remove this row in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills, shadows, seals and retires its local writer. Do NOT publish or edit the declared version down merely to make this ledger disappear.",
       "state": "never-published"
     },
     "dotmac-reseller-management": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0039 and EXTRACTION.toml record Sub as the first candidate consumer and qualifying source, but no product pins this lineage and Sub's local reseller lifecycle remains authoritative. The release allowlist makes the module publishable; it does not claim adoption. Remove this row only in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills reseller identity, hierarchy, bindings and authority revisions, graph-compares at a sealed watermark and retires its local writers. Commissions and payouts remain outside this cutover.",
+      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer and qualifying source, but no product pins this lineage and Sub's local reseller lifecycle remains authoritative. The release allowlist makes the module publishable; it does not claim adoption. Remove this row only in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills reseller identity, hierarchy, bindings and authority revisions, graph-compares at a sealed watermark and retires its local writers. Commissions and payouts remain outside this cutover.",
       "state": "never-published"
     },
     "dotmac-template-studio": {
@@ -145,6 +145,11 @@
     "dotmac-pon-access": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns PON terminals, service ports and optical evidence (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-positioning": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL A NAMED FIRST ADOPTER. This package owns provider-neutral position observations and nothing that follows from them (ADR-0039); it is built and gate-proven here and floors on the kernel a83 allocation that mints its lineage. It is deliberately NOT release-allowlisted: no product composes it, Assets keeps a durable unit's authoritative location, and the adopting product keeps every geofence, SLA, dispatch and billing consequence \u2014 publishing before a real adopter exists is the speculative extraction ADR-0006 section 5 refuses. Remove this row only in the release change that adds the allowlist entry and records that adopter with exact pins; never by editing the declared version down.",
       "state": "never-published"
     }
   }

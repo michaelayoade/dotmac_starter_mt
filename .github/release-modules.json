@@ -537,12 +537,12 @@
       "$comment": [
         "Tenant referral programme, invitation, attribution and conversion owner.",
         "Product-first from Sub; Party, Customer, Lead and Billing remain opaque",
-        "collaborators. Kernel a83 allocates mod_referrals / rf / referrals."
+        "collaborators. Kernel a84 allocates mod_referrals / rf / referrals."
       ],
       "package_dir": "packages/dotmac-referrals",
       "import_name": "dotmac_referrals",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a83",
+      "kernel_floor": "0.1.0a84",
       "db_schema": "mod_referrals",
       "tag_prefix": "dotmac-referrals-v",
       "wheel_contents": {
@@ -573,12 +573,12 @@
         "Tenant reseller identity, hierarchy, authority and lifecycle owner.",
         "Product-first from Sub; Party, Customer, Commercial Agreements,",
         "Entitlement Allocation, commissions and payouts remain collaborators.",
-        "Kernel a83 allocates mod_reseller / rm / reseller_management."
+        "Kernel a84 allocates mod_reseller / rm / reseller_management."
       ],
       "package_dir": "packages/dotmac-reseller-management",
       "import_name": "dotmac_reseller_management",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a83",
+      "kernel_floor": "0.1.0a84",
       "db_schema": "mod_reseller",
       "tag_prefix": "dotmac-reseller-management-v",
       "wheel_contents": {

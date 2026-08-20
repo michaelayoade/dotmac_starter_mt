@@ -97,6 +97,17 @@ FAMILIES: tuple[tuple[str, str], ...] = (
         r"event_outbox|event_handler_|durable_timer|idempotency|"
         r"batch_operations|recurring_|.*_dead_letter$)",
     ),
+    # ADR-0039: positioning owns only location OBSERVATIONS and rebuildable
+    # projections. Anchored exact and placed BEFORE the broader field/inbox
+    # families, because every one of these names also matches `field_` or
+    # `crm_agent_location`. Map assets, GIS geometry, vehicles and every
+    # business consequence stay with their product-domain owners — carrying a
+    # coordinate is not the same as being position evidence.
+    (
+        "positioning",
+        r"^(field_tech_location_pings|field_tech_presence|"
+        r"crm_agent_location_pings)$",
+    ),
     (
         "engagement-inbox",
         r"^(inbox_|team_inbox_|crm_conversation|crm_messages|"
