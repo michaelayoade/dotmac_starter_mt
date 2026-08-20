@@ -86,6 +86,7 @@ on:
         required: true
         type: choice
         options:
+          - dotmac-connector-meta-social
           - dotmac-connector-whatsapp
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"

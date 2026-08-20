@@ -162,6 +162,42 @@
     "package_dir_prefix": "packages/dotmac-connector-"
   },
   "connectors": {
+    "dotmac-connector-meta-social": {
+      "$comment": [
+        "Ingress-only Meta Social translation and authentication for Facebook",
+        "Messenger, Instagram DMs, Facebook comments and Instagram comments.",
+        "It implements messaging.receive.v1 through SPI 1.3, owns no rows and",
+        "imports no product. Sub is the first shadow/cutover target; publication",
+        "alone does not make it a contract consumer.",
+        "",
+        "This first release declares deny-all egress. Outbound Graph delivery",
+        "is a later messaging.send.v1 capability slice with its own contract."
+      ],
+      "package_dir": "packages/dotmac-connector-meta-social",
+      "import_name": "dotmac_connector_meta_social",
+      "plugin_attr": "PLUGIN",
+      "connector_key": "meta_social",
+      "spi_range": ">=1.3,<2.0",
+      "integration_floor": "0.1.0a10",
+      "tag_prefix": "dotmac-connector-meta-social-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_connector_meta_social/__init__.py",
+          "dotmac_connector_meta_social/plugin.py",
+          "dotmac_connector_meta_social/py.typed"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-integration",
+          "python"
+        ]
+      }
+    },
     "dotmac-connector-whatsapp": {
       "$comment": [
         "Ingress-only Meta WhatsApp Cloud API translation and authentication.",
