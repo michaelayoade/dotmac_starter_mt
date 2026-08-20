@@ -649,6 +649,29 @@ COMMERCIAL_AGREEMENTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("agreements"),
 )
 
+# `dotmac-licensing` — the ISSUER half of WS8 (ADR-0033 § 2). `licensing` is plain
+# in a catalog dump for the same reason `files`, `imports` and `approvals` are; the
+# distinct `li` prefix keeps its independently released lineage inside the
+# revision-id budget.
+#
+# PLATFORM PLANE ONLY, and here the plane is a security boundary rather than
+# merely an absent consumer. A tenant data plane installing licence ISSUANCE
+# would put the thing that decides what a deployment may do inside the deployment
+# it decides about. The receiving half is already elsewhere and already correct:
+# `dotmac_kernel.licensing` verifies a signed envelope fully OFFLINE, so a data
+# plane learns what it may do from a document it can check without asking anyone.
+# Reading the issuer's tables instead would replace an offline cryptographic check
+# with a network dependency and a trust relationship.
+#
+# The allocation adds no kernel behaviour — nothing consumes it but the module it
+# names — which is what makes it compatible with ADR-0017's moratorium.
+LICENSING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="licensing",
+    prefix="li",
+    branch_label="licensing",
+    db_schema=module_schema("licensing"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -665,6 +688,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
     COMMERCIAL_AGREEMENTS_MIGRATION_OWNER,
+    LICENSING_MIGRATION_OWNER,
 )
 
 

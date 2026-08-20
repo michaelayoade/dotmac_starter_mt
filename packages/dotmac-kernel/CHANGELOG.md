@@ -6,6 +6,20 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a75 — 2026-08-19
+
+Allocates the independent licensing module lineage. No kernel behaviour changes:
+one ledger row and nothing else.
+
+### Added
+
+- `LICENSING_MIGRATION_OWNER` — `mod_licensing`, prefix `li`, branch label
+  `licensing`. Platform plane only, and for this module the plane is a security
+  boundary rather than an absent consumer: issuance must not live inside the
+  deployment it authorises, and the receiving half already verifies offline
+  through `dotmac_kernel.licensing`. `dotmac-licensing` 0.1.0a1 declares the
+  matching manifest in the same change (ADR-0026 § 8).
+
 ## 0.1.0a74 — 2026-08-19
 
 Allocates the independent commercial-agreement module lineage. No kernel
