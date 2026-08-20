@@ -739,6 +739,24 @@ type = "directory"
 url = "packages/dotmac-imports"
 
 [[package]]
+name = "dotmac-inbox-operations"
+version = "0.1.0a1"
+description = "Staffed inbox queues, routing, presence, and assignments"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-inbox-operations"
+
+[[package]]
 name = "dotmac-integration"
 version = "0.1.0a10"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
@@ -3179,4 +3197,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "213df5af40422561f0d0082a51a1600958bec98242e14b921d7803ff3c9eb8c6"
+content-hash = "9723779092088c253d70d2dd640cb11bdb55cffdd75ea609e6d9776e76926ed3"

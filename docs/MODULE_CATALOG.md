@@ -57,6 +57,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`adopted`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a6` | `>=0.1.0a68` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | `tenant`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a61` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-inbox-operations`](../packages/dotmac-inbox-operations/README.md) | optional module | [`audit-complete`](../packages/dotmac-inbox-operations/EXTRACTION.toml) | [tenant · `mod_inbox_ops`](../packages/dotmac-inbox-operations/src/dotmac_inbox_operations/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a10` | `>=0.1.0a68` | `dotmac_integrator` | — |
 | [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a78` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-licensing`](../packages/dotmac-licensing/README.md) | optional module | [`audit-complete`](../packages/dotmac-licensing/EXTRACTION.toml) | [platform · `mod_licensing`](../packages/dotmac-licensing/src/dotmac_licensing/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
@@ -182,6 +183,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-imports/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_crm`, `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-inbox-operations`](../packages/dotmac-inbox-operations/README.md)
+
+- **Owner:** Staffed inbox queues, routing, agent presence and conversation assignment
+- **Contract:** Own inbox queues, provider-neutral routing rules, inbox-specific agent presence/capacity, opaque conversation assignments and workflow evidence. NOT conversations/messages/read cursors, tickets/work orders, transport/connectors, notifications, AI, workforce shifts or field availability.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-inbox-operations/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_crm`, `dotmac_sub`.
 
 ### [`dotmac-integration`](../packages/dotmac-integration/README.md)
 

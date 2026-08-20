@@ -484,6 +484,10 @@ packages/dotmac-service-access-policy/ optional desired-access decision owner
   src/dotmac_service_access_policy/ per-service policy inputs and desired state;
                  `sa` lineage in `mod_svc_access`, tenant-only forced RLS,
                  uncomposed. Network Access remains the only enforcer.
+packages/dotmac-inbox-operations/ optional staffed-inbox operation owner
+  src/dotmac_inbox_operations/   queues, routing, inbox presence, opaque
+                 assignments and workflow events; `io` lineage in
+                 `mod_inbox_ops`, tenant-only forced RLS, uncomposed.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1345,6 +1349,7 @@ made concrete — every model has exactly one declared owner.
 | `UsageObservation` / `UsageCorrection` / `UsageAggregate` | `mod_usage.usage_observations`, `mod_usage.usage_corrections`, `mod_usage.usage_aggregates` | `dotmac-usage` optional module | Normalized immutable meter facts, append-only corrections and rebuildable projections. Raw AAA remains an upstream collector concern; tariff selection, monetary rating, invoices and ledgers remain outside. |
 | `RatingRule` / `RatedUsageObligation` | `mod_usage_rate.rating_rules`, `mod_usage_rate.rated_usage_obligations` | `dotmac-usage-rating` optional module | Effective meter pricing and immutable pre-tax rated obligations from opaque usage references. Invoice lifecycle, tax, payments, revenue recognition and GL posting remain outside. |
 | `ServiceAccessInput` / `DesiredAccessDecision` | `mod_svc_access.service_access_inputs`, `mod_svc_access.desired_access_decisions` | `dotmac-service-access-policy` optional module | Per-service FUP/prepaid/collections/admin observations and one desired ALLOW/RESTRICT/DENY projection. It owns no subscriber/account status and performs no AAA or device mutation; Network Access reconciles enforcement. |
+| `InboxQueue` / `InboxRoutingRule` / `InboxAgentPresence` / `ConversationAssignment` / `InboxWorkflowEvent` | `mod_inbox_ops.*` declared tables | `dotmac-inbox-operations` optional module | Staffed inbox operation state adjudicated from Sub and CRM. Conversation/message content remains with Inbox, providers remain transports, and shifts/field availability remain with Workforce. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
