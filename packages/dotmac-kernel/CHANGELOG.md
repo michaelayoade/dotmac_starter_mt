@@ -6,6 +6,21 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a85 — UNRELEASED
+
+Allocates the ERP/Backoffice/general tenant-module cohort. This is physical
+namespace identity only; every business decision remains in its independently
+released module and no product composition or authority cutover is implied.
+
+### Added
+
+- Permanent migration owners for Accounting (`ac`), Analytics (`ay`), Banking
+  (`bk`), Documents (`do`), Expenses (`ex`), Finance (`fn`), Inbox (`ib`),
+  Party context (`pt`), Payables (`pa`), Payroll (`py`), Procurement (`pc`),
+  Projects (`pj`), Records (`re`), Surveys (`sv`), Tax (`tx`) and Work Orders
+  (`wo`). Documents does not reuse deployment-control's `dc`; Party does not
+  reuse Payables' `pa`.
+
 ## 0.1.0a84 — UNRELEASED
 
 Allocates the independent tenant Referral and Reseller Management lineages. No

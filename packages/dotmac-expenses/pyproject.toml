@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-expenses"
+version = "0.1.0a1"
+description = "Tenant expense requests, claims, receipt evidence, policy evaluation and reimbursement eligibility"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_expenses", from = "src" }]
+include = [
+  { path = "src/dotmac_expenses/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_expenses/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

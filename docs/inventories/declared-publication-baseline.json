@@ -62,39 +62,14 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
-    "dotmac-kernel": {
-      "declared": "0.1.0a84",
-      "reason": "INTENDED UNTIL THE REFERRALS AND RESELLER MANAGEMENT MODULE RELEASE. Published a77 and a81 own the vendor and marketing allocations and cannot be repointed; a82 owns the eleven network-cohort rows and a83 owns Positioning. Kernel 0.1.0a84 adds exactly two independent MIGRATION_OWNER_LEDGER rows and no runtime behaviour: mod_referrals / rf and mod_reseller / rm, whose matching manifests, migrations and tests land in this parity slice. Remove this row when a separately authorized release change tags kernel 0.1.0a84 and both module artifacts after exact-commit validation; do NOT edit the declared version down.",
-      "state": "previous-version-published"
-    },
-    "dotmac-campaigns": {
+    "dotmac-accounting": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
+      "reason": "INTENDED PUBLISH-PREP STATE. Accounting is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in exact-pin composition, backfill, shadow comparison and sealed legacy-writer retirement slice; package creation alone moves no ledger authority.",
       "state": "never-published"
     },
-    "dotmac-imports": {
-      "declared": "0.1.0a2",
-      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
-      "state": "never-published"
-    },
-    "dotmac-referrals": {
+    "dotmac-analytics": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer, but the dossier remains audit-complete with no contract consumer or adoption evidence: no product yet pins this lineage and Sub's local writer remains authoritative. The release allowlist makes the module publishable; it does not claim adoption or silently dispatch a release. Remove this row in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills, shadows, seals and retires its local writer. Do NOT publish or edit the declared version down merely to make this ledger disappear.",
-      "state": "never-published"
-    },
-    "dotmac-reseller-management": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer and qualifying source, but no product pins this lineage and Sub's local reseller lifecycle remains authoritative. The release allowlist makes the module publishable; it does not claim adoption. Remove this row only in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills reseller identity, hierarchy, bindings and authority revisions, graph-compares at a sealed watermark and retires its local writers. Commissions and payouts remain outside this cutover.",
-      "state": "never-published"
-    },
-    "dotmac-template-studio": {
-      "declared": "0.2.0a3",
-      "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
-      "state": "never-published"
-    },
-    "dotmac-inventory": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns the tenant stock ledger, immutable movements, reservations, lot/serial traceability and valuation (ADR-0036), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "reason": "INTENDED PUBLISH-PREP STATE. Analytics is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in declaration, typed aggregate adapter, projection-shadow, digest-rebuild and reader-retirement slice; Backoffice can only follow as an independent consumer.",
       "state": "never-published"
     },
     "dotmac-assets": {
@@ -102,9 +77,74 @@
       "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns durable-unit identity, custody, maintenance and disposal (ADR-0037), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
       "state": "never-published"
     },
+    "dotmac-banking": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Banking is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof, an installable Accounting owner, and ERP's checked-in account, observation, matching and reconciliation backfill-shadow-cutover seam; Backoffice is explicitly later.",
+      "state": "never-published"
+    },
+    "dotmac-campaigns": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-documents": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Documents is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in E8 tenant/session/lineage prerequisite plus opaque Files, Approvals and Timers adapters, handbook-version backfill, shadow comparison and writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-expenses": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Expenses is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in exact-pin adapters, backfill, shadow and sealed writer-retirement slice. Backoffice stays uncomposed until ERP proves cutover one.",
+      "state": "never-published"
+    },
+    "dotmac-fiber-plant": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns outside-plant structures, strands, splices and continuity (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-finance": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Finance is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in fixed-asset backfill, corrected parity fixtures, opaque physical-asset and Accounting consequence adapters, shadow reconciliation and authority-switch rehearsal.",
+      "state": "never-published"
+    },
+    "dotmac-imports": {
+      "declared": "0.1.0a2",
+      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
+      "state": "never-published"
+    },
+    "dotmac-inbox": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Inbox is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin lineage, typed Integrator receive adapter, conversation backfill, shadow comparison, product-link projection and sole-writer cutover.",
+      "state": "never-published"
+    },
+    "dotmac-inventory": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns the tenant stock ledger, immutable movements, reservations, lot/serial traceability and valuation (ADR-0036), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
     "dotmac-ipam": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns address-space allocation and assignment (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a85",
+      "reason": "INTENDED ERP/BACKOFFICE/GENERAL PUBLISH-PREP COHORT. Published a83 cannot be repointed and a84 allocates Referrals and Reseller Management, so a85 allocates these sixteen new independent lineages after collision resolution and is their shared installable floor. It is not release-authorized: keep a85 unpublished until the cohort passes its accepted validation gate and the first authorized adopter slice is ready.",
+      "state": "declared-unpublished"
+    },
+    "dotmac-network-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns subscriber access sessions and authorization facts (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-network-assurance": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns derived service-impact assessment (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-network-control": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns requested and executed control actions (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
       "state": "never-published"
     },
     "dotmac-network-inventory": {
@@ -122,24 +162,19 @@
       "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns declared link and path structure (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
       "state": "never-published"
     },
-    "dotmac-network-assurance": {
+    "dotmac-party": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns derived service-impact assessment (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "reason": "INTENDED PUBLISH-PREP STATE. Party is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin composition, party_person_catalog binding, declaration registries, backfill, reader migration, shadow comparison and transferred-writer retirement.",
       "state": "never-published"
     },
-    "dotmac-network-control": {
+    "dotmac-payables": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns requested and executed control actions (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "reason": "INTENDED PUBLISH-PREP STATE. Payables is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof, ERP's completed Accounting adoption, and a checked-in exact-pin AP backfill, shadow, settlement-observation and accounting-receipt reconciliation seam with legacy-writer retirement.",
       "state": "never-published"
     },
-    "dotmac-fiber-plant": {
+    "dotmac-payroll": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns outside-plant structures, strands, splices and continuity (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
-      "state": "never-published"
-    },
-    "dotmac-network-access": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns subscriber access sessions and authorization facts (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "reason": "INTENDED PUBLISH-PREP STATE. Payroll is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof, stable People and Accounting reference seams, and ERP's checked-in exact-pin calculation/liability backfill, source parity, shadow comparison and writer-retirement slice.",
       "state": "never-published"
     },
     "dotmac-pon-access": {
@@ -150,6 +185,51 @@
     "dotmac-positioning": {
       "declared": "0.1.0a1",
       "reason": "ALLOWLISTED FOR RELEASE, NOT YET RELEASED, AND NOT ADOPTED. Michael named Dotmac Sub the first adopter on 2026-08-20, so the ADR-0006 section 5 objection this row previously recorded \u2014 a package built for nobody \u2014 no longer holds, and the release lane is open. Kernel a83 is published and registry-verified, so the >=0.1.0a83 floor names an installable artifact. What remains is this module's own release, and it is deliberately not dispatched yet: two source-shape decisions are open first. The module makes position_observations.accuracy_m NOT NULL where Sub's column is nullable, and it replaces Sub's location_sharing_enabled boolean with a purpose/expiry/revocation grant, which is a privacy policy decision about tracking staff rather than a schema detail. Remove this row in the post-release record once the exact protected-main artifact is registry-verified and tagged; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-procurement": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Procurement is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in organization-to-tenant mapping, supplier/item/budget/approval/receipt adapters, full lifecycle backfill, typed shadow digests and sealed writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-projects": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Projects is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin lineage, neutral project/task/dependency backfill, product-owned subject and consequence adapters, shadow comparison and authoritative writer cutover.",
+      "state": "never-published"
+    },
+    "dotmac-records": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Records is audit-complete greenfield code but release-unallowlisted. Publication waits for exact-commit Observer proof, ERP's exhaustive retention/deletion/hold writer inventory, and checked-in opaque Files, Approvals and Timers seams with destructive execution disabled through shadow.",
+      "state": "never-published"
+    },
+    "dotmac-referrals": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer, but the dossier remains audit-complete with no contract consumer or adoption evidence: no product yet pins this lineage and Sub's local writer remains authoritative. The release allowlist makes the module publishable; it does not claim adoption or silently dispatch a release. Remove this row in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills, shadows, seals and retires its local writer. Do NOT publish or edit the declared version down merely to make this ledger disappear.",
+      "state": "never-published"
+    },
+    "dotmac-reseller-management": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer and qualifying source, but no product pins this lineage and Sub's local reseller lifecycle remains authoritative. The release allowlist makes the module publishable; it does not claim adoption. Remove this row only in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills reseller identity, hierarchy, bindings and authority revisions, graph-compares at a sealed watermark and retires its local writers. Commissions and payouts remain outside this cutover.",
+      "state": "never-published"
+    },
+    "dotmac-surveys": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Surveys is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin lineage, definition/invitation/response backfill, product-owned ticket and work-order eligibility adapters, aggregate shadow and old-writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-tax": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Tax is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof, an installable Accounting owner, and ERP's checked-in governed policy-data extraction, determination/report/return backfill, source-parity shadow and sealed writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-template-studio": {
+      "declared": "0.2.0a3",
+      "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "state": "never-published"
+    },
+    "dotmac-work-orders": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED PUBLISH-PREP STATE. Work Orders is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin internal-crew lineage, product-subject and assignee adapters, full execution backfill, shadow comparison and sole-writer cutover.",
       "state": "never-published"
     }
   }

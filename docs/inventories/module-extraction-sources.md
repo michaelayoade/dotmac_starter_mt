@@ -59,6 +59,33 @@ shared package, or maintaining two implementations.
 |---|---|---|---|
 | `dotmac-people` | **Audit complete; a1 released and uncomposed** | ERP is the only qualifying source for the narrow employment-directory contract. Kernel Party remains the identity owner; ERP Person, credentials, payroll, attendance, finance and integration fields do not port. The six-table `mod_people` plane, Party prerequisite, forced-RLS canaries, temporal primary-overlap enforcement and ERP parity behavior now live in `packages/dotmac-people`; no authority has moved. Full evidence in [`people-directory-sources.md`](people-directory-sources.md). | Compose exact kernel a71 and dotmac-people a1 in clean Backoffice and implement the narrow ERP projection/backfill/shadow contract. ERP's 131 FK declarations require a rebuildable compatibility projection after the sealed writer cutover; its projection ratchet remains separate from the lifecycle-writer ratchet. Backoffice composition alone moves no authority. |
 
+## ERP / Backoffice / general publication-prep cohort
+
+These packages are audit-complete implementations, not authorized releases.
+They share unpublished kernel floor a84, have zero contract consumers and are
+absent from the closed release allowlist. Exact source pins live in each
+`EXTRACTION.toml`; the joined dependency and Observer gate is
+[`erp-backoffice-general-publication-readiness.md`](erp-backoffice-general-publication-readiness.md).
+
+| Distribution | Source ruling | Cutover-1 gate |
+|---|---|---|
+| `dotmac-accounting` | product-first from ERP | ERP exact-pin composition, full ledger shadow and legacy-writer retirement |
+| `dotmac-analytics` | product-first from ERP | ERP declarations/adapters, projection digest shadow and reader retirement |
+| `dotmac-banking` | product-first from ERP | Accounting first; ERP matching/reconciliation shadow and writer retirement |
+| `dotmac-documents` | ERP base plus Sub immutable-content delta | ERP E8 plus Files/Approvals/Timers seams and handbook writer retirement |
+| `dotmac-expenses` | product-first from ERP | ERP first; Backoffice only after the ERP writer switch |
+| `dotmac-finance` | product-first from ERP fixed assets | Physical-asset and Accounting seams plus ERP book/consequence reconciliation |
+| `dotmac-inbox` | product-first from Sub Team Inbox | Sub Integrator/product-link adapters and conversation writer switch |
+| `dotmac-party` | product-first from Sub | Kernel Party binding, declaration registries and Sub reader/writer cutovers |
+| `dotmac-payables` | product-first from ERP AP | Accounting first; ERP liability/settlement/accounting-receipt reconciliation |
+| `dotmac-payroll` | product-first from ERP | stable People/Accounting seams and ERP calculation/liability writer retirement |
+| `dotmac-procurement` | product-first from ERP | Organization-to-Tenant plus supplier/item/budget/approval/receipt adapters |
+| `dotmac-projects` | product-first from Sub | product subject/consequence links and Sub project/task writer switch |
+| `dotmac-records` | greenfield after exact fleet inventory | ERP writer inventory plus Files/Approvals/Timers seams; destructive shadow disabled |
+| `dotmac-surveys` | product-first from Sub | ticket/work-order eligibility adapters and Sub response/aggregate shadow |
+| `dotmac-tax` | product-first from ERP | Accounting first; governed policy data and ERP determination/report/return shadow |
+| `dotmac-work-orders` | product-first from Sub | internal-crew path only; product subject/assignee adapters and writer switch |
+
 ## Decomposed marketing suite candidates
 
 Michael activated this suite as a goal on 2026-08-18. Campaigns is implemented

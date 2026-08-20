@@ -229,6 +229,11 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `reseller_management` is the thirty-fifth and tenant-only: Sub's reseller
     # hierarchy and delegated-authority lifecycle move here while Party,
     # Customer, commissions and payouts keep their own owners.
+    # The consolidated ERP/Backoffice/general cohort is the thirty-sixth
+    # through fifty-first allocations:
+    # sixteen independently releasable tenant owners sharing one allocation
+    # release, with Documents and Party deliberately avoiding the already-owned
+    # `dc` and `pa` prefixes.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -266,6 +271,22 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "positioning",
         "referrals",
         "reseller_management",
+        "accounting",
+        "analytics",
+        "banking",
+        "documents",
+        "expenses",
+        "finance",
+        "inbox",
+        "party",
+        "payables",
+        "payroll",
+        "procurement",
+        "projects",
+        "records",
+        "surveys",
+        "tax",
+        "work_orders",
     }
 
 

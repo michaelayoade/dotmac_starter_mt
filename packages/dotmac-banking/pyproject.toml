@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-banking"
+version = "0.1.0a1"
+description = "Composable bank-account, statement, matching, reconciliation and cash-observation owner"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_banking", from = "src" }]
+include = [
+  { path = "src/dotmac_banking/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_banking/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
