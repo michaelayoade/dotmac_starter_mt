@@ -6,6 +6,57 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a81 — UNRELEASED
+
+Allocates the independent tenant website-composition lineage. This is physical
+namespace identity only; site behavior remains in the optional module.
+
+### Added
+
+- `SITES_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_sites`,
+  revision prefix `si`, and branch label `sites`.
+
+## 0.1.0a80 — UNRELEASED
+
+Allocates the independent tenant publication-lifecycle lineage. This is
+physical namespace identity only; publication behavior remains in the optional
+module.
+
+### Added
+
+- `PUBLISHING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_publishing`, revision prefix `pb`, and branch label `publishing`.
+
+## 0.1.0a79 — UNRELEASED
+
+Allocates the independent tenant editorial-content lineage. This is physical
+namespace identity only; content behavior remains in the optional module.
+
+### Added
+
+- `CONTENT_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_content`,
+  revision prefix `ct`, and branch label `content`.
+
+## 0.1.0a78 — UNRELEASED
+
+Allocates the immutable tenant-plane database identity for the independently
+installable `dotmac-media-observations` module.
+
+### Added
+
+- `MEDIA_OBSERVATIONS_MIGRATION_OWNER`, owning schema `mod_mediaobs`, migration
+  prefix `mo`, and Alembic branch `media_observations`. The allocation adds no
+  media behavior to the kernel; it only lets the package register its own
+  namespace and lineage without collision.
+
+### Changed
+
+- The supported SQLite unit-test harness now keeps up to ten module namespaces
+  as attached databases and maps only collision-free overflow to SQLite's
+  qualified `main` namespace. This preserves the fast service-logic lane after
+  the module registry crosses SQLite's hard attachment limit; namespace and
+  isolation proofs remain PostgreSQL gates.
+
 ## 0.1.0a77 — 2026-08-19
 
 Allocates the independent brand-profile module lineage. No kernel behaviour

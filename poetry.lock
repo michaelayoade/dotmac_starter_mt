@@ -631,6 +631,24 @@ type = "directory"
 url = "packages/dotmac-connector-whatsapp"
 
 [[package]]
+name = "dotmac-content"
+version = "0.1.0a1"
+description = "Tenant editorial plans, canonical content, variants, and creative references"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a81"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-content"
+
+[[package]]
 name = "dotmac-deployment-control"
 version = "0.1.0a1"
 description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0033 § 3)"
@@ -741,7 +759,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a77"
+version = "0.1.0a81"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -785,6 +803,24 @@ type = "directory"
 url = "packages/dotmac-licensing"
 
 [[package]]
+name = "dotmac-media-observations"
+version = "0.1.0a1"
+description = "Provider-neutral immutable external media observations and rebuildable projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a81"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-media-observations"
+
+[[package]]
 name = "dotmac-numbering"
 version = "0.1.0a2"
 description = "DotMac dual-plane document-series allocation with immutable receipts"
@@ -821,6 +857,24 @@ type = "directory"
 url = "packages/dotmac-people"
 
 [[package]]
+name = "dotmac-publishing"
+version = "0.1.0a1"
+description = "Tenant publication requests, target attempts, and reconciled outcomes"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a81"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-publishing"
+
+[[package]]
 name = "dotmac-release-catalog"
 version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
@@ -837,6 +891,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-release-catalog"
+
+[[package]]
+name = "dotmac-sites"
+version = "0.1.0a1"
+description = "Tenant sites, immutable page revisions, and local release snapshots"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a81"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-sites"
 
 [[package]]
 name = "dotmac-template-studio"
@@ -3053,4 +3125,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "9b1c0d362e28314bd140076528067a64c060ca275f3cbd2e8feafabd0d835e53"
+content-hash = "281aacebcbc3ea031c0d4d0296851b998c74d46df3a129acf4ea2b16e227f162"

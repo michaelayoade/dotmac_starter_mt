@@ -30,20 +30,31 @@ KERNEL_SRC ?= packages/dotmac-kernel/src/dotmac_kernel
 UI_SRC ?= packages/dotmac-ui/src/dotmac_ui
 MODULE_SRC ?= packages/dotmac-template-studio/src/dotmac_template_studio
 TICKETING_SRC ?= packages/dotmac-ticketing/src/dotmac_ticketing
+RELEASE_CATALOG_SRC ?= packages/dotmac-release-catalog/src/dotmac_release_catalog
+ENTITLEMENT_ALLOCATION_SRC ?= packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation
 APPDIR_SRC ?= packages/dotmac-application-directory/src/dotmac_application_directory
 FILES_SRC ?= packages/dotmac-files/src/dotmac_files
 IMPORTS_SRC ?= packages/dotmac-imports/src/dotmac_imports
 APPROVALS_SRC ?= packages/dotmac-approvals/src/dotmac_approvals
+NUMBERING_SRC ?= packages/dotmac-numbering/src/dotmac_numbering
 PEOPLE_SRC ?= packages/dotmac-people/src/dotmac_people
 DURABLE_TIMERS_SRC ?= packages/dotmac-durable-timers/src/dotmac_durable_timers
+COMMERCIAL_AGREEMENTS_SRC ?= packages/dotmac-commercial-agreements/src/dotmac_commercial_agreements
+LICENSING_SRC ?= packages/dotmac-licensing/src/dotmac_licensing
+DEPLOYMENT_CONTROL_SRC ?= packages/dotmac-deployment-control/src/dotmac_deployment_control
+BRAND_PROFILES_SRC ?= packages/dotmac-brand-profiles/src/dotmac_brand_profiles
 INTEGRATION_SRC ?= packages/dotmac-integration/src/dotmac_integration
+MEDIA_OBSERVATIONS_SRC ?= packages/dotmac-media-observations/src/dotmac_media_observations
 OIDC_SRC ?= packages/dotmac-auth-oidc/src/dotmac_auth_oidc
 CONNECTOR_WHATSAPP_SRC ?= packages/dotmac-connector-whatsapp/src/dotmac_connector_whatsapp
 CAMPAIGNS_SRC ?= packages/dotmac-campaigns/src/dotmac_campaigns
+CONTENT_SRC ?= packages/dotmac-content/src/dotmac_content
+PUBLISHING_SRC ?= packages/dotmac-publishing/src/dotmac_publishing
+SITES_SRC ?= packages/dotmac-sites/src/dotmac_sites
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py

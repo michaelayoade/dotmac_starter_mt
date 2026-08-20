@@ -143,7 +143,9 @@ from dotmac_kernel.namespaces import (
     DURABLE_TIMERS_MIGRATION_OWNER,
     HOST_SCHEMA,
     MAX_REVISION_ID_LENGTH,
+    MEDIA_OBSERVATIONS_MIGRATION_OWNER,
     MIGRATION_OWNER_LEDGER,
+    PEOPLE_MIGRATION_OWNER,
     DuplicateBranchLabelError,
     DuplicateMigrationPrefixError,
     DuplicateSchemaError,
@@ -207,7 +209,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a77"
+__version__ = "0.1.0a81"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -378,9 +380,11 @@ __all__ = [
     "HOST_SCHEMA",
     "DURABLE_TIMERS_MIGRATION_OWNER",
     "MAX_REVISION_ID_LENGTH",
+    "MEDIA_OBSERVATIONS_MIGRATION_OWNER",
     "MIGRATION_OWNER_LEDGER",
     "MigrationOwner",
     "NamespaceRegistry",
+    "PEOPLE_MIGRATION_OWNER",
     "module_schema",
     "qualified",
     "schema_table_args",

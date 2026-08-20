@@ -801,6 +801,160 @@
           "python"
         ]
       }
+    },
+    "dotmac-media-observations": {
+      "$comment": [
+        "The product-first marketing module cohort. All four floor on kernel",
+        "0.1.0a81: their allocation rows land in a78 (`mo`), a79 (`ct`), a80",
+        "(`pb`) and a81 (`si`), while one kernel release publishes only the",
+        "tip. a81 is therefore the first installable kernel carrying any of",
+        "the four allocations. tests/architecture/test_kernel_version_sync.py",
+        "proves the skipped allocations against immutable tags.",
+        "",
+        "Every source module and migration is required wheel content because",
+        "Starter does not compose these lineages. A partial wheel would first",
+        "fail in an adopter, so release inspection must prove the complete",
+        "published surface here. Allowlisting makes the cohort publishable; it",
+        "does not claim adoption or move authority from Backoffice/Sub."
+      ],
+      "package_dir": "packages/dotmac-media-observations",
+      "import_name": "dotmac_media_observations",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a81",
+      "db_schema": "mod_mediaobs",
+      "tag_prefix": "dotmac-media-observations-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_media_observations/py.typed",
+          "dotmac_media_observations/manifest.py",
+          "dotmac_media_observations/conformance.py",
+          "dotmac_media_observations/contracts.py",
+          "dotmac_media_observations/models.py",
+          "dotmac_media_observations/service.py",
+          "dotmac_media_observations/migrations/__init__.py",
+          "dotmac_media_observations/migrations/versions/mo_0001_media_observations.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-content": {
+      "$comment": [
+        "Tenant editorial plans and immutable ContentSnapshotV1 values.",
+        "See dotmac-media-observations for the cohort floor and wheel-content",
+        "reasoning. Files, campaigns and publishing remain separate owners."
+      ],
+      "package_dir": "packages/dotmac-content",
+      "import_name": "dotmac_content",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a81",
+      "db_schema": "mod_content",
+      "tag_prefix": "dotmac-content-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_content/py.typed",
+          "dotmac_content/manifest.py",
+          "dotmac_content/contracts.py",
+          "dotmac_content/lifecycle.py",
+          "dotmac_content/models.py",
+          "dotmac_content/service.py",
+          "dotmac_content/migrations/__init__.py",
+          "dotmac_content/migrations/versions/ct_0001_content.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-publishing": {
+      "$comment": [
+        "Immutable publication intent, attempts and normalized outcomes.",
+        "See dotmac-media-observations for the cohort floor and wheel-content",
+        "reasoning. Integrator and connector plugins still own transport."
+      ],
+      "package_dir": "packages/dotmac-publishing",
+      "import_name": "dotmac_publishing",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a81",
+      "db_schema": "mod_publishing",
+      "tag_prefix": "dotmac-publishing-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_publishing/py.typed",
+          "dotmac_publishing/manifest.py",
+          "dotmac_publishing/contracts.py",
+          "dotmac_publishing/lifecycle.py",
+          "dotmac_publishing/models.py",
+          "dotmac_publishing/service.py",
+          "dotmac_publishing/migrations/__init__.py",
+          "dotmac_publishing/migrations/versions/pb_0001_publishing.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-sites": {
+      "$comment": [
+        "Immutable tenant-local page and site releases without hosting I/O.",
+        "See dotmac-media-observations for the cohort floor and wheel-content",
+        "reasoning. Publishing owns remote release intent; Integrator owns",
+        "hosting transport and evidence."
+      ],
+      "package_dir": "packages/dotmac-sites",
+      "import_name": "dotmac_sites",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a81",
+      "db_schema": "mod_sites",
+      "tag_prefix": "dotmac-sites-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_sites/py.typed",
+          "dotmac_sites/manifest.py",
+          "dotmac_sites/contracts.py",
+          "dotmac_sites/lifecycle.py",
+          "dotmac_sites/models.py",
+          "dotmac_sites/service.py",
+          "dotmac_sites/migrations/__init__.py",
+          "dotmac_sites/migrations/versions/si_0001_sites.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

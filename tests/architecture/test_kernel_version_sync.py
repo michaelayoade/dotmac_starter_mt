@@ -78,7 +78,10 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 #
 # People consumes no kernel feature newer than its allocation release. If it
 # adopts a newer capability, move its row to CAPABILITY_RAISED_FLOORS while
-# retaining the allocation release as evidence there.
+# retaining the allocation release as evidence there. Durable timers was
+# allocated in a72. Immutable a73 belongs to the caller-session transaction
+# release, a74-a77 to the vendor cohort, and media observations, content,
+# publishing and sites therefore follow in a78, a79, a80 and a81.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
@@ -95,6 +98,9 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # UNPUBLISHED_ALLOCATION_FLOORS below for why an allocation can fail to be
     # a floor.
     "dotmac-brand-profiles": "0.1.0a77",
+    # Sites is the marketing cohort tip: a81 both allocates its lineage and is
+    # the first installable kernel carrying all four marketing allocations.
+    "dotmac-sites": "0.1.0a81",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -227,11 +233,17 @@ CAPABILITY_RAISED_FLOORS = {
 #
 # The ADR-0033 cohort was built as four stacked pull requests, each bumping the
 # kernel to carry its own ledger row: a74 (`cg`), a75 (`li`), a76 (`dc`), a77
-# (`bp`). Only the tip is releasable — a kernel release publishes ONE version,
+# (`bp`). Only the tip was releasable — a kernel release publishes ONE version,
 # and a74..a76 exist as changelog history rather than as artifacts, exactly as
 # a53..a55 do. a77 is therefore the first installable kernel carrying any of
 # these four allocations, which makes it the floor of all four rather than of
 # the last one.
+#
+# The marketing cohort follows the same rule: a78 (`mo`), a79 (`ct`), a80
+# (`pb`) and a81 (`si`). a78..a80 are allocation history, while a81 is the first
+# kernel artifact that can load any member. Sites sits in the ordinary map
+# because its allocation equals that floor; the first three sit here because
+# their source allocations are necessarily unpublished.
 #
 # Each value is (floor, allocation). Unlike the map above, the gap is not a
 # consumer break: no released version of these modules ever floored at a74..a76,
@@ -240,6 +252,9 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
     "dotmac-commercial-agreements": ("0.1.0a77", "0.1.0a74"),
     "dotmac-licensing": ("0.1.0a77", "0.1.0a75"),
     "dotmac-deployment-control": ("0.1.0a77", "0.1.0a76"),
+    "dotmac-media-observations": ("0.1.0a81", "0.1.0a78"),
+    "dotmac-content": ("0.1.0a81", "0.1.0a79"),
+    "dotmac-publishing": ("0.1.0a81", "0.1.0a80"),
 }
 
 

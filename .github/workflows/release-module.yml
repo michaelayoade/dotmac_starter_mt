@@ -59,6 +59,10 @@ on:
           - dotmac-licensing
           - dotmac-deployment-control
           - dotmac-brand-profiles
+          - dotmac-media-observations
+          - dotmac-content
+          - dotmac-publishing
+          - dotmac-sites
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true

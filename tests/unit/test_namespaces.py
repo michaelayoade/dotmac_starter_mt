@@ -207,7 +207,10 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # (ADR-0033 § 2) is the seventeenth and genuinely dual-plane: Sub brands
     # its own portals and the vendor brands deployments it ships, and the
     # second needs a HOST binding because a profile must be selectable before
-    # any tenant is resolved.
+    # any tenant is resolved. `media_observations`, `content`, `publishing` and
+    # `sites` are the eighteenth through twenty-first allocations. They remain
+    # tenant-only and keep observations, editorial state, release intent and
+    # local website composition as four independent owners.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -227,6 +230,10 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "licensing",
         "deployment_control",
         "brand_profiles",
+        "media_observations",
+        "content",
+        "publishing",
+        "sites",
     }
 
 

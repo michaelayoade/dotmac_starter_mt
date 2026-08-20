@@ -96,10 +96,22 @@ dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = tru
 # its runtime is the separate `dotmac_integrator` assembly, so the reference
 # assembly deliberately does not compose the `ig` lineage.
 dotmac-integration = { path = "packages/dotmac-integration", develop = true }
+# Immutable, provider-neutral external media facts. Built and proven here but
+# deliberately not composed by Starter or any product while adoption is paused.
+dotmac-media-observations = { path = "packages/dotmac-media-observations", develop = true }
 # Tenant-only outbound campaign progression (ADR-0032). Built and proven here,
 # composed first by Sub and then by Backoffice; the reference assembly does not
 # install its lineage or import it from `app`.
 dotmac-campaigns = { path = "packages/dotmac-campaigns", develop = true }
+# Tenant-only editorial content owner extracted product-first from Mkt. Built
+# and proven here; Backoffice remains the first future exact-pin adopter.
+dotmac-content = { path = "packages/dotmac-content", develop = true }
+# Tenant-only publication intent, immutable target attempts and reconciled
+# outcomes. Built and proven here; Backoffice is the first candidate adopter.
+dotmac-publishing = { path = "packages/dotmac-publishing", develop = true }
+# Tenant-only website composition and immutable local release snapshots.
+# Greenfield after the fleet audit; Backoffice is the first candidate adopter.
+dotmac-sites = { path = "packages/dotmac-sites", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -181,7 +193,11 @@ module = [
     "dotmac_durable_timers.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
+    "dotmac_media_observations.*",
     "dotmac_campaigns.*",
+    "dotmac_content.*",
+    "dotmac_publishing.*",
+    "dotmac_sites.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -240,9 +256,13 @@ root_packages = [
     "dotmac_people",
     "dotmac_durable_timers",
     "dotmac_integration",
+    "dotmac_media_observations",
     "dotmac_auth_oidc",
     "dotmac_connector_whatsapp",
     "dotmac_campaigns",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
 ]
 
 [[tool.importlinter.contracts]]
@@ -303,12 +323,16 @@ source_modules = [
     "dotmac_files",
     "dotmac_imports",
     "dotmac_integration",
+    "dotmac_media_observations",
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
 ]
 forbidden_modules = ["app"]
 
@@ -366,12 +390,16 @@ modules = [
     "dotmac_files",
     "dotmac_imports",
     "dotmac_integration",
+    "dotmac_media_observations",
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -416,8 +444,12 @@ forbidden_modules = [
     "dotmac_imports",
     "dotmac_approvals",
     "dotmac_numbering",
+    "dotmac_media_observations",
     "dotmac_people",
     "dotmac_durable_timers",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
     "dotmac_auth_oidc",
 ]
 

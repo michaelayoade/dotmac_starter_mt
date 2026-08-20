@@ -26,7 +26,7 @@ are different decisions that look like one — and the split is the point.
 | 4 | Is this agreement ACTIVE — was the contracted activation rule satisfied? | `dotmac-commercial-agreements` | **built**, PR #275 |
 | 5 | What does an activated agreement version entitle, exactly? | `dotmac-entitlement-allocation` | **adopted** in Vendor production |
 | 6 | What signed, versioned, revocable authority does that entitlement become? | `dotmac-licensing` | **built**, PR #276 |
-| 7 | Which brand does this deployment present? | `dotmac-brand-profiles` | **built**, PR #278 |
+| 7 | Which brand does this deployment present? | `dotmac-brand-profiles` | **released**, run `32339834679`; adoption pending |
 | 8 | What SHOULD this deployment be running, and is that plan approved? | `dotmac-deployment-control` | **built**, PR #277 |
 | 9 | How do the bytes get there, and what happened on the wire? | `dotmac-integration` / the Integrator assembly | **adopted** (ADR-0024) |
 | 10 | What IS the deployment running, and does it match what we sent? | `dotmac-deployment-control` | **built**, PR #277 |

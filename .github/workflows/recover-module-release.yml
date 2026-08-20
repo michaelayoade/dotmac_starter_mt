@@ -47,6 +47,10 @@ on:
           - dotmac-licensing
           - dotmac-deployment-control
           - dotmac-brand-profiles
+          - dotmac-media-observations
+          - dotmac-content
+          - dotmac-publishing
+          - dotmac-sites
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

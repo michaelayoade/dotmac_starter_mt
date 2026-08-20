@@ -6,6 +6,8 @@ surface is still settling — a `0.MINOR` bump may carry breaking changes.
 ## 0.1.0a1 — 2026-08-19
 
 First release. Product-first extraction of Sub's `BrandProfile` (ADR-0033 § 2).
+Published, installed back from the Forgejo registry, registered alone and tagged
+from exact main SHA `ed69f9d` by release run `32339834679`.
 
 ### Added
 

@@ -719,6 +719,53 @@ BRAND_PROFILES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("brand"),
 )
 
+# `dotmac-media-observations` — the eighteenth allocated installable module.
+# External media hierarchy, configuration and provider-reported aggregate
+# performance are tenant data-plane observations; the source audit found no
+# platform-plane adopter. `mediaobs` remains legible in catalog output and the
+# short `mo` revision prefix preserves the readable-slug budget.
+MEDIA_OBSERVATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="media_observations",
+    prefix="mo",
+    branch_label="media_observations",
+    db_schema=module_schema("mediaobs"),
+)
+
+# `dotmac-content` — the nineteenth allocated installable module. It owns the
+# tenant-only editorial plan and content plane extracted from Mkt. `content`
+# remains explicit in live catalogs; `ct` keeps the independent lineage's
+# revision ids compact. Publishing, outbound campaigns, files and provider
+# transport remain separate owners and are not imported by this module.
+CONTENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="content",
+    prefix="ct",
+    branch_label="content",
+    db_schema=module_schema("content"),
+)
+
+# `dotmac-publishing` — the twentieth allocated installable module. It owns
+# tenant publication intent, immutable snapshots, per-target attempt history
+# and normalized outcome reconciliation. `publishing` stays explicit in live
+# catalogs; `pb` leaves the lineage enough revision-id budget. Integrator and
+# connector plugins remain the separate provider-transport owners.
+PUBLISHING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="publishing",
+    prefix="pb",
+    branch_label="publishing",
+    db_schema=module_schema("publishing"),
+)
+
+# `dotmac-sites` — the twenty-first allocated installable module. It owns the
+# tenant site/page composition plane and immutable local website revisions.
+# `sites` remains explicit in live catalogs; `si` keeps the lineage compact.
+# Publishing owns delivery intent/outcomes and Integrator owns hosting I/O.
+SITES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="sites",
+    prefix="si",
+    branch_label="sites",
+    db_schema=module_schema("sites"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -738,6 +785,10 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     LICENSING_MIGRATION_OWNER,
     DEPLOYMENT_CONTROL_MIGRATION_OWNER,
     BRAND_PROFILES_MIGRATION_OWNER,
+    MEDIA_OBSERVATIONS_MIGRATION_OWNER,
+    CONTENT_MIGRATION_OWNER,
+    PUBLISHING_MIGRATION_OWNER,
+    SITES_MIGRATION_OWNER,
 )
 
 
