@@ -6,6 +6,25 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a78 — 2026-08-20
+
+Allocates the ten independent tenant-plane lineages required by ADR-0034's ISP
+essential-domain cohort. This release adds permanent physical identities only;
+it does not compose a module, move authority, or claim a product cutover.
+
+### Added
+
+- `CUSTOMERS_MIGRATION_OWNER`: `mod_customers`, prefix `cu`.
+- `SERVICE_CATALOG_MIGRATION_OWNER`: `mod_svc_cat`, prefix `sc`.
+- `QUALIFICATION_MIGRATION_OWNER`: `mod_qual`, prefix `qu`.
+- `SERVICES_MIGRATION_OWNER`: `mod_services`, prefix `sv`.
+- `USAGE_MIGRATION_OWNER`: `mod_usage`, prefix `us`.
+- `USAGE_RATING_MIGRATION_OWNER`: `mod_usage_rate`, prefix `ur`.
+- `SERVICE_ACCESS_POLICY_MIGRATION_OWNER`: `mod_svc_access`, prefix `sa`.
+- `INBOX_OPERATIONS_MIGRATION_OWNER`: `mod_inbox_ops`, prefix `io`.
+- `WORKFORCE_MIGRATION_OWNER`: `mod_workforce`, prefix `wf`.
+- `FX_POLICY_MIGRATION_OWNER`: `mod_fx_policy`, prefix `fx`.
+
 ## 0.1.0a77 — 2026-08-19
 
 Allocates the independent brand-profile module lineage. No kernel behaviour

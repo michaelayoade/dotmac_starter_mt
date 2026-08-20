@@ -208,6 +208,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # its own portals and the vendor brands deployments it ships, and the
     # second needs a HOST binding because a profile must be selectable before
     # any tenant is resolved.
+    # ADR-0034 adds the ten ISP essential owners as one allocation cohort.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -227,6 +228,51 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "licensing",
         "deployment_control",
         "brand_profiles",
+        "customers",
+        "service_catalog",
+        "qualification",
+        "services",
+        "usage",
+        "usage_rating",
+        "service_access_policy",
+        "inbox_operations",
+        "workforce",
+        "fx_policy",
+    }
+
+    allocations = {
+        owner.owner: (owner.db_schema, owner.prefix, owner.branch_label)
+        for owner in modules
+    }
+    assert {
+        name: allocations[name]
+        for name in (
+            "customers",
+            "service_catalog",
+            "qualification",
+            "services",
+            "usage",
+            "usage_rating",
+            "service_access_policy",
+            "inbox_operations",
+            "workforce",
+            "fx_policy",
+        )
+    } == {
+        "customers": ("mod_customers", "cu", "customers"),
+        "service_catalog": ("mod_svc_cat", "sc", "service_catalog"),
+        "qualification": ("mod_qual", "qu", "qualification"),
+        "services": ("mod_services", "sv", "services"),
+        "usage": ("mod_usage", "us", "usage"),
+        "usage_rating": ("mod_usage_rate", "ur", "usage_rating"),
+        "service_access_policy": (
+            "mod_svc_access",
+            "sa",
+            "service_access_policy",
+        ),
+        "inbox_operations": ("mod_inbox_ops", "io", "inbox_operations"),
+        "workforce": ("mod_workforce", "wf", "workforce"),
+        "fx_policy": ("mod_fx_policy", "fx", "fx_policy"),
     }
 
 

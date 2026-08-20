@@ -719,6 +719,79 @@ BRAND_PROFILES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("brand"),
 )
 
+# ADR-0034 allocates the ten missing ISP domain owners as one reviewed cohort
+# before their independent package commits. This is physical identity only: it
+# composes no lineage and moves no domain authority.
+CUSTOMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="customers",
+    prefix="cu",
+    branch_label="customers",
+    db_schema=module_schema("customers"),
+)
+
+SERVICE_CATALOG_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="service_catalog",
+    prefix="sc",
+    branch_label="service_catalog",
+    db_schema=module_schema("svc_cat"),
+)
+
+QUALIFICATION_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="qualification",
+    prefix="qu",
+    branch_label="qualification",
+    db_schema=module_schema("qual"),
+)
+
+SERVICES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="services",
+    prefix="sv",
+    branch_label="services",
+    db_schema=module_schema("services"),
+)
+
+USAGE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="usage",
+    prefix="us",
+    branch_label="usage",
+    db_schema=module_schema("usage"),
+)
+
+USAGE_RATING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="usage_rating",
+    prefix="ur",
+    branch_label="usage_rating",
+    db_schema=module_schema("usage_rate"),
+)
+
+SERVICE_ACCESS_POLICY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="service_access_policy",
+    prefix="sa",
+    branch_label="service_access_policy",
+    db_schema=module_schema("svc_access"),
+)
+
+INBOX_OPERATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="inbox_operations",
+    prefix="io",
+    branch_label="inbox_operations",
+    db_schema=module_schema("inbox_ops"),
+)
+
+WORKFORCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="workforce",
+    prefix="wf",
+    branch_label="workforce",
+    db_schema=module_schema("workforce"),
+)
+
+FX_POLICY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="fx_policy",
+    prefix="fx",
+    branch_label="fx_policy",
+    db_schema=module_schema("fx_policy"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -738,6 +811,16 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     LICENSING_MIGRATION_OWNER,
     DEPLOYMENT_CONTROL_MIGRATION_OWNER,
     BRAND_PROFILES_MIGRATION_OWNER,
+    CUSTOMERS_MIGRATION_OWNER,
+    SERVICE_CATALOG_MIGRATION_OWNER,
+    QUALIFICATION_MIGRATION_OWNER,
+    SERVICES_MIGRATION_OWNER,
+    USAGE_MIGRATION_OWNER,
+    USAGE_RATING_MIGRATION_OWNER,
+    SERVICE_ACCESS_POLICY_MIGRATION_OWNER,
+    INBOX_OPERATIONS_MIGRATION_OWNER,
+    WORKFORCE_MIGRATION_OWNER,
+    FX_POLICY_MIGRATION_OWNER,
 )
 
 
@@ -1072,10 +1155,13 @@ __all__ = [
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
+    "CUSTOMERS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
+    "FX_POLICY_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
+    "INBOX_OPERATIONS_MIGRATION_OWNER",
     "INTEGRATION_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
@@ -1083,6 +1169,10 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
+    "QUALIFICATION_MIGRATION_OWNER",
+    "SERVICE_ACCESS_POLICY_MIGRATION_OWNER",
+    "SERVICE_CATALOG_MIGRATION_OWNER",
+    "SERVICES_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
@@ -1094,6 +1184,9 @@ __all__ = [
     "DuplicateSchemaError",
     "DuplicateTableOwnerError",
     "DURABLE_TIMERS_MIGRATION_OWNER",
+    "USAGE_MIGRATION_OWNER",
+    "USAGE_RATING_MIGRATION_OWNER",
+    "WORKFORCE_MIGRATION_OWNER",
     "HostSchemaClaimError",
     "InvalidMigrationPrefixError",
     "InvalidRevisionIdError",

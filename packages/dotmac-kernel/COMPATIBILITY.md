@@ -291,7 +291,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a54`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a78`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -308,6 +308,22 @@ retired prefix is never reused.
 | `approvals` | `mod_approvals` | `ap` | `approvals` |
 | `numbering` | `mod_numbering` | `nu` | `numbering` |
 | `campaigns` | `mod_campaigns` | `ca` | `campaigns` |
+| `durable_timers` | `mod_timers` | `dt` | `durable_timers` |
+| `commercial_agreements` | `mod_agreements` | `cg` | `commercial_agreements` |
+| `licensing` | `mod_licensing` | `li` | `licensing` |
+| `deployment_control` | `mod_deploy` | `dc` | `deployment_control` |
+| `brand_profiles` | `mod_brand` | `bp` | `brand_profiles` |
+| `people` | `mod_people` | `pe` | `people` |
+| `customers` | `mod_customers` | `cu` | `customers` |
+| `service_catalog` | `mod_svc_cat` | `sc` | `service_catalog` |
+| `qualification` | `mod_qual` | `qu` | `qualification` |
+| `services` | `mod_services` | `sv` | `services` |
+| `usage` | `mod_usage` | `us` | `usage` |
+| `usage_rating` | `mod_usage_rate` | `ur` | `usage_rating` |
+| `service_access_policy` | `mod_svc_access` | `sa` | `service_access_policy` |
+| `inbox_operations` | `mod_inbox_ops` | `io` | `inbox_operations` |
+| `workforce` | `mod_workforce` | `wf` | `workforce` |
+| `fx_policy` | `mod_fx_policy` | `fx` | `fx_policy` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
