@@ -703,6 +703,23 @@ type = "directory"
 url = "packages/dotmac-connector-meta-social"
 
 [[package]]
+name = "dotmac-connector-paystack"
+version = "0.1.0a1"
+description = "Ingress-only Paystack settlement connector for Dotmac Integrator"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a10"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-paystack"
+
+[[package]]
 name = "dotmac-connector-whatsapp"
 version = "0.1.0a2"
 description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
@@ -3684,4 +3701,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d7654d7d18fa37e6374e7f2770f93a99b2aaa544cdf36c6d8f66d23f20a3c162"
+content-hash = "199d3e91f4958f5aa8448fbfd238cb347dd2f464cc57f34ff84050781179624b"

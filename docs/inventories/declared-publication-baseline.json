@@ -87,6 +87,11 @@
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-connector-paystack": {
+      "declared": "0.1.0a1",
+      "reason": "OUTSTANDING CONNECTOR RELEASE AFTER MERGE. Michael explicitly authorized the product-first Paystack ingress adapter on 2026-08-20. The package is release-allowlisted at SPI >=1.3,<2.0 with an installable dotmac-integration 0.1.0a10 floor, but this source revision has not yet passed the protected registry workflow and therefore has no verified tag. Publication is supply-chain evidence only: it does not compose the connector into dotmac_integrator, move Paystack callback authority, or retire Sub and ERP transport. Remove this row in the post-release record after the exact wheel is installed from the private index, conformance-checked and tagged; never by editing the declared version down.",
+      "state": "never-published"
+    },
     "dotmac-documents": {
       "declared": "0.1.0a1",
       "reason": "INTENDED PUBLISH-PREP STATE. Documents is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in E8 tenant/session/lineage prerequisite plus opaque Files, Approvals and Timers adapters, handbook-version backfill, shadow comparison and writer retirement.",
