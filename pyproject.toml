@@ -167,6 +167,7 @@ cryptography = "^45"
 # Build/test input only. The Starter assembly never hosts provider plugins;
 # dotmac_integrator pins the independently released connector at runtime.
 dotmac-connector-whatsapp = { path = "packages/dotmac-connector-whatsapp", develop = true }
+dotmac-connector-meta-social = { path = "packages/dotmac-connector-meta-social", develop = true }
 
 [tool.ruff]
 line-length = 88
@@ -313,6 +314,7 @@ root_packages = [
     "dotmac_media_observations",
     "dotmac_auth_oidc",
     "dotmac_connector_whatsapp",
+    "dotmac_connector_meta_social",
     "dotmac_campaigns",
     "dotmac_content",
     "dotmac_publishing",

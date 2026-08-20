@@ -51,6 +51,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-brand-profiles`](../packages/dotmac-brand-profiles/README.md) | optional module | [`audit-complete`](../packages/dotmac-brand-profiles/EXTRACTION.toml) | [tenant+platform · `mod_brand`](../packages/dotmac-brand-profiles/src/dotmac_brand_profiles/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md) | optional module | [`audit-complete`](../packages/dotmac-campaigns/EXTRACTION.toml) | [tenant · `mod_campaigns`](../packages/dotmac-campaigns/src/dotmac_campaigns/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac_backoffice`, `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-commercial-agreements`](../packages/dotmac-commercial-agreements/README.md) | optional module | [`audit-complete`](../packages/dotmac-commercial-agreements/EXTRACTION.toml) | [platform · `mod_agreements`](../packages/dotmac-commercial-agreements/src/dotmac_commercial_agreements/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
+| [`dotmac-connector-meta-social`](../packages/dotmac-connector-meta-social/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-meta-social/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator`, `dotmac_sub` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_integrator` |
 | [`dotmac-content`](../packages/dotmac-content/README.md) | optional module | [`audit-complete`](../packages/dotmac-content/EXTRACTION.toml) | [tenant · `mod_content`](../packages/dotmac-content/src/dotmac_content/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac_backoffice`, `dotmac_sub` |
 | [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md) | optional module | [`audit-complete`](../packages/dotmac-deployment-control/EXTRACTION.toml) | [platform · `mod_deploy`](../packages/dotmac-deployment-control/src/dotmac_deployment_control/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
@@ -145,6 +146,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-commercial-agreements/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_vendor_control_plane`.
+
+### [`dotmac-connector-meta-social`](../packages/dotmac-connector-meta-social/README.md)
+
+- **Owner:** Meta Social ingress authentication and wire translation: Facebook and Instagram subscription challenge, exact-byte signature verification, provider event identity, message/comment normalization, and acknowledgement bytes.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key meta_social and capability messaging.receive.v1 in INGRESS mode only. The connector receives immutable request bytes and already-materialized declared secret material. It emits one provider-neutral fact per Meta message/comment or record-only transport evidence. It owns no rows, sessions, retries, checkpoints, product identity, conversation state, tickets, subscriber state, HTTP status, profile lookup, or outbound Graph I/O.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-meta-social/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_sub`.
 
 ### [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md)
 

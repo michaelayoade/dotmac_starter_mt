@@ -632,6 +632,23 @@ type = "directory"
 url = "packages/dotmac-commercial-agreements"
 
 [[package]]
+name = "dotmac-connector-meta-social"
+version = "0.1.0a1"
+description = "Ingress-only Facebook and Instagram connector for Dotmac Integrator"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a10"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-meta-social"
+
+[[package]]
 name = "dotmac-connector-whatsapp"
 version = "0.1.0a2"
 description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
