@@ -1,6 +1,9 @@
 # Changelog — dotmac-media-observations
 
-## 0.1.0a1 — UNRELEASED
+## 0.1.0a1 — 2026-08-20
+
+Published, registry-verified and tagged from exact protected-main revision
+`8f99413` by release run `32346834449` against `dotmac-kernel 0.1.0a81`.
 
 ### Added
 

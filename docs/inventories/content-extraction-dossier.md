@@ -8,9 +8,9 @@ This is the product-first contract for `dotmac-content`, the first executable
 slice of the decomposed marketing suite. Gate 1 recorded the deliberately
 absent distribution as RED on Observer at exact commit
 `85dc9bc24b169dab7bbcd38b0cd67b1a3d058881`. Gate 2 is green at exact local
-commit `6665569b41c0afa112784100ef4912fed9ffb9ce`; the package is now
-release-allowlisted but remains unpublished, uncomposed and unadopted pending
-restack validation.
+commit `6665569b41c0afa112784100ef4912fed9ffb9ce`; the package is now published
+and registry-verified at `0.1.0a1` against kernel `0.1.0a81`, but remains
+uncomposed and unadopted.
 
 The Mkt remote was rechecked directly on 2026-08-18 and `refs/heads/main`
 resolved to the revision above. It is one commit after the audit's original
@@ -182,13 +182,16 @@ failure. The combined media/content/publishing live-catalog and forced-RLS
 suite passed all 15 cases before the isolated database and network were
 removed. This proves reconciliation only; release and adoption remain closed.
 
-## 8. Published-a77 restack and release authorization
+## 8. Published-a77 restack and release
 
 Published kernel a77 now owns the vendor cohort, so the content allocation is
 a79 after media observations a78 and before publishing a80 and Sites a81. The
 cohort publishes one kernel tip; `dotmac-content 0.1.0a1` therefore floors at
 the first installable release carrying all four rows, a81. Michael authorized
-release on 2026-08-20, and the package is allowlisted, but publication remains
-blocked until the restacked exact commit repeats the full Observer proof.
-Backoffice composition, shadowing, writer retirement and adoption remain
-separate gates.
+GitHub CI to validate the restack. PR #284 passed all sixteen required checks
+and merged as exact protected-main revision `8f99413`. Release runs
+`32346291258` and `32348113583` published, registry-verified and tagged kernel
+a81 and Content a1 from that revision, with media observations included in the
+registry composition check. Backoffice composition, shadowing, writer
+retirement and adoption remain separate gates; every retirement row remains
+`not-started`.

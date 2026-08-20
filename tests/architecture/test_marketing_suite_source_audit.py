@@ -145,7 +145,7 @@ def test_merged_campaigns_is_not_misreported_as_released_or_adopted() -> None:
     assert [phrase for phrase in required if phrase not in normalized] == []
 
 
-def test_release_authorized_media_observations_is_not_misreported_as_adopted() -> None:
+def test_released_media_observations_is_not_misreported_as_adopted() -> None:
     normalized = _normalized()
     required = (
         "c548ef02aca10b421d1ebf4158b9c4fdf72e6025",
@@ -157,11 +157,17 @@ def test_release_authorized_media_observations_is_not_misreported_as_adopted() -
         "published kernel a77 now owns the vendor cohort",
         "media a78, content a79, publishing a80 and sites a81",
         "all four packages floor at the first installable cohort kernel, a81",
-        "authorized release on 2026-08-20",
-        "now allowlisted while the restacked exact-commit "
-        "observer proof remains pending",
-        "release does not resume adoption or move authority",
-        "tagged, published, composed or adopted",
+        "pr #284 passed all sixteen required checks",
+        "8f99413826e5adf3d35379ebc6deb79bcb5c8242",
+        "protected release train published and registry-verified kernel a81 plus "
+        "all four a1 modules",
+        "release did not resume adoption or move authority",
+        "all five tags point and peel to the exact main revision",
+        "artifact and manifest compatibility evidence; it is not product "
+        "composition, writer cutover or adoption",
+        "backoffice and sub remain candidate consumers",
+        "all writer-retirement rows remain `not-started`",
+        "adoption pause remains active",
         "release and adoption remain separate gates",
     )
     assert [phrase for phrase in required if phrase not in normalized] == []
