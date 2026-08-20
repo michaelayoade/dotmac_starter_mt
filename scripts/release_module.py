@@ -53,6 +53,7 @@ from typing import Final
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = REPO_ROOT / ".github" / "release-modules.json"
+PACKAGES_ROOT = REPO_ROOT / "packages"
 
 
 class ReleaseRefused(SystemExit):
@@ -91,6 +92,43 @@ def _declared(entry: dict) -> dict:
         (entry["package_path"] / "pyproject.toml").read_text(encoding="utf-8")
     )["tool"]["poetry"]
     return manifest
+
+
+def local_first_party_dependencies(entry: dict) -> list[Path]:
+    """Return reviewed first-party dependencies that need local smoke wheels.
+
+    ``wheel_contents.allowed_requires`` is the authority: merely existing under
+    ``packages/`` never opts a distribution into a release. The intersection is
+    useful because the pre-publish smoke has no registry credential and must be
+    able to install every permitted first-party dependency from this exact
+    checkout. Third-party dependencies keep resolving from the public index.
+
+    The kernel is excluded because it has a stronger, dedicated artifact path
+    tied to ``kernel_floor``. The target itself is already supplied by ``--dist``.
+    """
+    permitted = {
+        name.casefold() for name in entry["wheel_contents"]["allowed_requires"]
+    }
+    excluded = {entry["distribution"].casefold(), "dotmac-kernel"}
+    found: dict[str, Path] = {}
+
+    for pyproject in sorted(PACKAGES_ROOT.glob("*/pyproject.toml")):
+        manifest = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        poetry = manifest.get("tool", {}).get("poetry", {})
+        name = poetry.get("name")
+        if not isinstance(name, str):
+            continue
+        normalized = name.casefold()
+        if normalized not in permitted or normalized in excluded:
+            continue
+        if normalized in found:
+            raise ReleaseRefused(
+                f"{entry['distribution']}: first-party dependency {name!r} is "
+                f"declared by both {found[normalized]} and {pyproject.parent}"
+            )
+        found[normalized] = pyproject.parent
+
+    return [found[name] for name in sorted(found)]
 
 
 def cmd_resolve(args: argparse.Namespace) -> None:
@@ -166,9 +204,11 @@ def cmd_inspect(args: argparse.Namespace) -> None:
             if name.startswith(prefix):
                 problems.append(f"forbidden content: {name}")
 
-    # Dependency closure: a module depends on the kernel and nothing else in the
-    # fleet. A sibling module or the assembly appearing here would make the
-    # module un-releasable independently (ADR-0006 § 2).
+    # Dependency closure is reviewed per module. Most modules depend on the
+    # kernel and third-party persistence libraries only; ADR-0006 also permits
+    # the module -> dotmac-ui direction used by brand profiles. A sibling module
+    # or the assembly appearing here would still make the module unreleasable
+    # independently (ADR-0006 § 2).
     requires = [
         line.split(":", 1)[1].strip()
         for line in meta_text.splitlines()
@@ -265,6 +305,33 @@ def _verify_installed(python: Path, targets: list[tuple[str, str, str]]) -> None
     subprocess.run([str(python), "-c", _REGISTER.format(names=targets)], check=True)
 
 
+def cmd_build_local_dependencies(args: argparse.Namespace) -> None:
+    """Build every policy-permitted first-party dependency for wheel smoke.
+
+    This is intentionally separate from the target and kernel builds: those two
+    have release-specific inspection and floor rules. These artifacts are only
+    resolver inputs for the pre-publish clean install; ``verify-registry`` later
+    proves the release against independently published dependency artifacts.
+    """
+    entry = resolve(args.distribution)
+    output = Path(args.output).resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    dependencies = local_first_party_dependencies(entry)
+
+    for dependency in dependencies:
+        subprocess.run(
+            ["poetry", "build", "--output", str(output)],
+            cwd=dependency,
+            check=True,
+        )
+
+    if dependencies:
+        names = ", ".join(path.name for path in dependencies)
+        print(f"{entry['distribution']}: built local smoke dependencies: {names}")
+    else:
+        print(f"{entry['distribution']}: no extra first-party smoke dependencies")
+
+
 def cmd_verify_wheel(args: argparse.Namespace) -> None:
     """Pre-publish smoke: the built bytes, installed clean, registering.
 
@@ -272,7 +339,9 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
     that allocated its schema, and that kernel may not be published yet — this
     smoke runs BEFORE any publication, including the kernel's own. So the caller
     supplies a locally built kernel wheel through `--kernel-dist`, and the
-    module resolves against it via `--find-links`.
+    module resolves against it via `--find-links`. Any additional first-party
+    distributions permitted by the module's reviewed wheel policy are built by
+    ``build-local-dependencies`` and supplied through ``--dependency-dist``.
 
     That is a weaker claim than the registry verification deliberately: it
     proves these bytes install and register against the kernel THIS CHECKOUT
@@ -285,6 +354,8 @@ def cmd_verify_wheel(args: argparse.Namespace) -> None:
     links = ["--find-links", args.dist]
     if args.kernel_dist:
         links += ["--find-links", args.kernel_dist]
+    for dependency_dist in args.dependency_dist:
+        links += ["--find-links", dependency_dist]
 
     with tempfile.TemporaryDirectory() as tmp:
         python, pip = _venv(Path(tmp) / "venv")
@@ -459,6 +530,14 @@ def main() -> int:
     p.add_argument("--dist", required=True)
     p.set_defaults(func=cmd_inspect)
 
+    p = sub.add_parser(
+        "build-local-dependencies",
+        help="build reviewed first-party dependency wheels for the local smoke",
+    )
+    p.add_argument("distribution")
+    p.add_argument("--output", required=True)
+    p.set_defaults(func=cmd_build_local_dependencies)
+
     p = sub.add_parser("verify-wheel", help="install the built wheel and register")
     p.add_argument("distribution")
     p.add_argument("--dist", required=True)
@@ -466,6 +545,12 @@ def main() -> int:
         "--kernel-dist",
         default="",
         help="directory holding a locally built dotmac-kernel wheel",
+    )
+    p.add_argument(
+        "--dependency-dist",
+        action="append",
+        default=[],
+        help="directory holding locally built, policy-permitted dependency wheels",
     )
     p.set_defaults(func=cmd_verify_wheel)
 

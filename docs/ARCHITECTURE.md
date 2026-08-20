@@ -289,6 +289,12 @@ workflow — with `.github/release-adapters.json` owning the same question for
 `manifest_attr` or `kernel_floor` for the module lane to assert and so are
 gated, built and verified by `release-adapter.yml` instead (ADR-0006's
 2026-08-14 amendment; the adapter lane lists nothing today).
+The module lane's pre-publish smoke builds the target and kernel wheels plus
+every repository-local distribution named by that module's reviewed
+`wheel_contents.allowed_requires`; this is how the permitted
+`module -> dotmac-ui` direction stays installable without giving the build job a
+registry credential. The post-publish smoke separately installs from the
+registry, so local dependency artifacts cannot substitute for publication.
 `scripts/module_catalog.py` joins those inputs deterministically, and
 `tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
 refuse drift or an undiscoverable new distribution. An application still owns
