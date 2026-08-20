@@ -59,9 +59,7 @@ def _uncovered_sources(makefile: str, source_roots: set[str]) -> dict[str, set[s
         for variable, pattern in source_families.items():
             if f"$({variable})" in recipe:
                 covered.update(
-                    path
-                    for path in source_roots
-                    if fnmatch.fnmatchcase(path, pattern)
+                    path for path in source_roots if fnmatch.fnmatchcase(path, pattern)
                 )
         result[target] = source_roots - covered
     return result
