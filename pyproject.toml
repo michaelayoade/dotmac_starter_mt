@@ -45,6 +45,11 @@ dotmac-ticketing = { path = "packages/dotmac-ticketing", develop = true }
 dotmac-release-catalog = { path = "packages/dotmac-release-catalog", develop = true }
 # The fourth installable module (ADR-0006 M4), and the second vendor-side one.
 dotmac-entitlement-allocation = { path = "packages/dotmac-entitlement-allocation", develop = true }
+# The durable vendor<->operator commercial agreement (ADR-0033 § 1). Like the
+# two above it is vendor-side: `app/assembly.py` does not compose it, and the
+# "assembly must not install vendor-only modules" contract below is what keeps
+# that true rather than merely current.
+dotmac-commercial-agreements = { path = "packages/dotmac-commercial-agreements", develop = true }
 # The third installable module (ADR-0021), and the first whose consumer is a
 # DIFFERENT assembly: the Tenant Workspace. This repository builds, tests and
 # releases it, but `app/assembly.py` deliberately does NOT compose it and
@@ -153,6 +158,7 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = [
     "dotmac_entitlement_allocation.*",
+    "dotmac_commercial_agreements.*",
     "dotmac_files.*",
     "dotmac_approvals.*",
     "dotmac_numbering.*",
@@ -207,6 +213,7 @@ root_packages = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",
@@ -270,6 +277,7 @@ source_modules = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",
@@ -297,14 +305,20 @@ forbidden_modules = ["app"]
 # workflow does not leak into every data plane. Putting the tables in an
 # optional module satisfies C1 only while a product assembly cannot install it.
 #
-# `dotmac-fleet`, `dotmac-fleet-health`, `dotmac-support-access` and
-# `dotmac-licence-issuance` join this list as they land; licence-issuance most
-# of all, since it holds a signing key that must never reach a data plane.
+# `dotmac-commercial-agreements` has joined this list. `dotmac-licensing` and
+# `dotmac-deployment-control` join it as they land — licensing most of all,
+# since it names the signing material that must never be reachable from a data
+# plane. `dotmac-support-access` will NOT join it: ADR-0033 § 4 records that the
+# decision already has three owners and the module is not built.
 [[tool.importlinter.contracts]]
 name = "The assembly must not install vendor-only modules"
 type = "forbidden"
 source_modules = ["app"]
-forbidden_modules = ["dotmac_release_catalog", "dotmac_entitlement_allocation"]
+forbidden_modules = [
+    "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
+]
 
 [[tool.importlinter.contracts]]
 name = "Modules are independent of each other"
@@ -314,6 +328,7 @@ modules = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",
@@ -359,6 +374,7 @@ forbidden_modules = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",

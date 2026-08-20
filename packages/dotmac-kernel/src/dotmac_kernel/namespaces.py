@@ -624,6 +624,31 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
+# `dotmac-commercial-agreements` — the durable commercial agreement between the
+# platform operator and a counterparty (ADR-0033 § 1). `agreements` is plain in a
+# catalog dump for the same reason `files`, `imports` and `approvals` are — a
+# reader of `mod_agreements.agreements` needs no glossary — and the distinct `cg`
+# prefix keeps its independently released lineage inside the revision-id budget.
+# `ca` is the campaign lineage's and `a` alone is the host assembly's.
+#
+# PLATFORM PLANE ONLY, and declared rather than discovered. ADR-0033 § 7 derives
+# every plane in this programme from a consumer that exists TODAY: the vendor
+# control plane owns vendor↔operator agreements, and no tenant data plane holds
+# one. Sub sells ISP service to subscribers, which is a different subject with a
+# different owner (`dotmac-subscriptions`, ruling A2(a)). A tenant plane declared
+# "for later" is a plane whose isolation nobody tests, so `tables` stays empty.
+#
+# The row lands in the same change as the module's manifest, migration and
+# dossier, exactly as the allocation rule above requires — and for the reason
+# ADR-0026 § 8 records: a reservation ahead of the code is renumbered at every
+# rebase while the alpha train is contended.
+COMMERCIAL_AGREEMENTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="commercial_agreements",
+    prefix="cg",
+    branch_label="commercial_agreements",
+    db_schema=module_schema("agreements"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -639,6 +664,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    COMMERCIAL_AGREEMENTS_MIGRATION_OWNER,
 )
 
 

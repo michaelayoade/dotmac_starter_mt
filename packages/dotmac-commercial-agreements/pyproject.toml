@@ -1,0 +1,37 @@
+[tool.poetry]
+name = "dotmac-commercial-agreements"
+version = "0.1.0a1"
+description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0033 § 1)"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_commercial_agreements", from = "src" }]
+include = [
+    { path = "src/dotmac_commercial_agreements/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_commercial_agreements/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# The one runtime dependency (ADR-0006 § 2). Notably NOT `dotmac-approvals`,
+# `dotmac-entitlement-allocation` or `dotmac-release-catalog`: each of those
+# couplings is cut at a port in `ports.py`, which is what makes this module
+# independently releasable and what the `Modules are independent of each other`
+# import-linter contract enforces.
+#
+# The floor is the highest capability actually consumed, and it is the
+# ALLOCATION that sets it here: a74 carries this module's `mod_agreements`
+# ledger row, and no earlier kernel can register the module at all —
+# `NamespaceRegistry.from_manifests` raises `UnallocatedNamespaceError`.
+#
+# The two request-time prerequisites this module declares are both older than
+# that: `idempotency_ledger.v1` published in a66 and `platform_audit_log.v1` in
+# a68. A floor below a74 would therefore fail on the allocation rather than on
+# a capability, which is a worse error message for the same defect — the
+# manifest raises while it is being CONSTRUCTED, before any composition check
+# a reader could interpret.
+dotmac-kernel = ">=0.1.0a74"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

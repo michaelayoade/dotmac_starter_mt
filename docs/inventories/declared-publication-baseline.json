@@ -62,6 +62,16 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-commercial-agreements": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE VENDOR CP COMPOSITION. ADR-0033 s1 built this owner product-first from the vendor control plane; EXTRACTION.toml is audit-complete with empty adoption_evidence and empty contract_consumers, and no product pins it. Publishing now would put an installable version in front of consumers with no adopter, no cutover and no migration of the existing vendor_cp.contracts rows \u2014 and the dossier records data-bearing obligations (preserve every content_hash, map pending_approval to proposed, synthesise history from the audit log) that a release would imply were already met. Remove this row in the release change that records dotmac_vendor_control_plane as the first contract consumer.",
+      "state": "never-published"
+    },
+    "dotmac-kernel": {
+      "declared": "0.1.0a74",
+      "reason": "INTENDED UNTIL THE ADR-0033 VENDOR MODULE COHORT RELEASES. This kernel version adds one MIGRATION_OWNER_LEDGER row and no behaviour \u2014 the allocation for a module in the same change. A kernel whose only content is an allocation has no consumer until that module exists, so it is published together with the module it allocates for, not ahead of it. The module floors already pin this exact version, so releasing the kernel alone would satisfy nothing. Remove this row in the release change that tags the kernel and its module together; do NOT edit the declared version down, which would discard the allocation the number describes.",
+      "state": "declared-unpublished"
+    },
     "dotmac-campaigns": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",

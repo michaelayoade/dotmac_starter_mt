@@ -577,6 +577,24 @@ type = "directory"
 url = "packages/dotmac-campaigns"
 
 [[package]]
+name = "dotmac-commercial-agreements"
+version = "0.1.0a1"
+description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0033 § 1)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a74"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-commercial-agreements"
+
+[[package]]
 name = "dotmac-connector-whatsapp"
 version = "0.1.0a2"
 description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
@@ -686,7 +704,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a73"
+version = "0.1.0a74"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -2980,4 +2998,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "ed99a2e87bb4b5046cb3d62c0f98fd4c7b4326fd52f5a0321088fcef6a7a3e02"
+content-hash = "762215214bcd9cb10c8b0efd7166be3494193ce7a1fb815e160c0c1187f56fb0"

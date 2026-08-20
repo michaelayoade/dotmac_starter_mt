@@ -6,6 +6,22 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a74 — 2026-08-19
+
+Allocates the independent commercial-agreement module lineage. No kernel
+behaviour changes: this release adds one ledger row and nothing else, which is
+what ADR-0017's moratorium permits — an allocation is physical identity, not a
+facility, and nothing consumes it but the module it names.
+
+### Added
+
+- `COMMERCIAL_AGREEMENTS_MIGRATION_OWNER` — `mod_agreements`, prefix `cg`,
+  branch label `commercial_agreements`. Platform plane only; ADR-0033 § 7
+  derives it from the vendor control plane as the one consumer that exists
+  today. `dotmac-commercial-agreements` 0.1.0a1 declares the matching manifest
+  in the same change, so the row is never a reservation without code behind it
+  (ADR-0026 § 8).
+
 ## 0.1.0a73 — 2026-08-19
 
 Makes caller-session kernel services safe for independently assembled products.
