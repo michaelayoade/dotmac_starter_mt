@@ -137,6 +137,11 @@
       "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns address-space allocation and assignment (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
       "state": "never-published"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a86",
+      "reason": "AUTHORIZED WEB ANALYTICS ALLOCATION RELEASE. Kernel a85 is registry-verified and tagged from exact protected-main revision b0310103 by release run 32462383827; a86 adds only `web_analytics` (schema mod_webanalytics, prefix wa) under ADR-0055 and does not repoint any published allocation. Publication makes that physical namespace identity installable and does NOT publish, compose or adopt the Web Analytics module or move any business authority. Release only from exact protected main after required CI is green and registry verification passes; remove this row in the post-release record after dotmac-kernel-v0.1.0a86 is tagged, never by editing the declared version down.",
+      "state": "previous-version-published"
+    },
     "dotmac-network-access": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns subscriber access sessions and authorization facts (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
@@ -225,6 +230,11 @@
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "state": "never-published"
+    },
+    "dotmac-web-analytics": {
+      "declared": "0.1.0a1",
+      "reason": "AUTHORIZED WEB ANALYTICS RELEASE CANDIDATE. The greenfield-after-inventory module owns privacy-minimised first-party observations and deterministic projections under ADR-0055, is release-allowlisted in this change, and floors on the a86 kernel allocation that mints its lineage. Backoffice and Sub remain candidate adopters; publication does not compose the module or move property, consent, attribution, customer or commercial authority. Remove this row only after the exact protected-main module artifact is registry-verified and tagged; adoption evidence remains separate.",
       "state": "never-published"
     },
     "dotmac-work-orders": {

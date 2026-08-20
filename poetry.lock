@@ -1008,7 +1008,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a85"
+version = "0.1.0a86"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1535,6 +1535,24 @@ develop = true
 [package.source]
 type = "directory"
 url = "packages/dotmac-ui"
+
+[[package]]
+name = "dotmac-web-analytics"
+version = "0.1.0a1"
+description = "Privacy-first first-party website observations and deterministic analytical projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a86"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-web-analytics"
 
 [[package]]
 name = "dotmac-work-orders"
@@ -3718,4 +3736,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "17ff11614548d11594cbcd4e9cb40d4d7c3a342ef01fac434721c4d46e328fa3"
+content-hash = "d9584c91666a4c03f9801803f7b2db3ed18e7279afdb54df27ee68230a8e27fb"

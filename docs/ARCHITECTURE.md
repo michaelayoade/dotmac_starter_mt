@@ -71,6 +71,18 @@ package is published and registry-verified at `0.1.0a1` against kernel
 `0.1.0a81`, but no product composes it; Michael's 2026-08-18 adoption pause
 remains active because release is not adoption.
 
+First-party website measurement follows the same application boundary without
+becoming a connector concern (ADR-0055):
+
+| Contract surface | Owner | Non-owner boundary |
+|---|---|---|
+| Property/stream identity, accepted first-party events, property-scoped visitor/session evidence, filter evidence, deterministic aggregates/funnels, retention rebuild and drift repair | each application's installed `dotmac-web-analytics` tenant plane | Contains no website hostname, content, form value, customer identity, provider API, official attribution or dashboard policy |
+| Origin verification and rate limiting for a collection request | the adopting application's thin local or remote collection adapter | Both local and Integrator-delivered commands enter the same versioned analytics service; remote transport is not a bypass |
+| Remote delivery and replay evidence | `dotmac-integration` inside `dotmac_integrator` plus a website connector plugin | Transports a typed observation and records delivery; never classifies, sessionises or attributes it |
+| Website routes/content and form submission | `dotmac-sites` and the adopting product's Forms owner | May emit a declared anonymous event after its own decision; analytics receives no form or customer fields |
+| Provider analytics aggregates | `dotmac-media-observations` through Integrator connectors | Cannot write or masquerade as first-party events |
+| Consent eligibility and official acquisition/commercial consequences | product consent owner; future attribution owner; Sales/Orders/Billing | Analytics records the effective policy evidence and anonymous sequence only |
+
 For ticketing this means separate local installations: Sub owns operational
 customer/service tickets, ERP owns only its internal back-office tickets, and
 the vendor control plane owns vendor-support tickets. A remotely owned ticket
@@ -622,7 +634,7 @@ being observable without the product having to remember.
 ### ERP / Backoffice / general publication-prep ownership map
 
 The following tenant-only packages are as-built in this repository at
-`0.1.0a1`, allocated by unpublished kernel `0.1.0a85`, and deliberately not
+`0.1.0a1`, allocated by published kernel `0.1.0a85`, and deliberately not
 composed or release-allowlisted. Each row names the package's decision owner;
 products retain their current authority until the dossier's sealed cutover and
 writer-retirement gate completes. The cohort validation and adopter dependency
@@ -1592,6 +1604,7 @@ write:
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
 | Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |
 | Stored-file metadata and physical state | `dotmac_files.service.stage_file` / `request_deletion`, then the explicit target→external-action→record-result phases (`deletion_target` → `delete_object` → `finalize_purge`; `reconciliation_target` → `observe_object` → `record_presence`). DB phases filter explicit `TenantScope` and flush without commit/rollback; provider phases accept no `Session`, so no network call or download stream holds a DB transaction. The owner covers only provider/byte state. Domain attachment relations, read authorization, retention permission, document meaning, and import outcomes remain with the domain that references the opaque file UUID (ADR-0022). |
+| First-party website observations and analytical projections | `dotmac_web_analytics.service.record_event` is the sole raw-observation writer; `record_classification` appends filter evidence; `dotmac_web_analytics.projections.rebuild_projections` is the sole writer of visitor/session/route/source/device/event/funnel projections; `dotmac_web_analytics.retention` deletes through the offline retention/privacy path and rebuilds before the transaction can complete. Property/origin/event/privacy/session/retention policy comes from each adopter. Websites, forms, campaigns, provider observations, customer identity, attribution and revenue remain with their named owners (ADR-0055). |
 | Import run and row outcomes | `dotmac_imports.service` — `create_dry_run`, `validate_next_chunk` (which takes no applier and therefore cannot mutate a domain), `promote` (digest-verified, uniquely constrained so a validated run applies once), `apply_next_chunk`, `mark_failed`. A chunk call locks the run, hashes and decodes the recorded bytes, resumes after the committed checkpoint, and returns without committing; `dotmac_kernel.db` remains the one transaction authority. Completed re-delivery is a no-op. Expected domain refusals are typed `RowRejected` outcomes; unexpected exceptions roll back the attempted chunk and escape. The importing domain remains the sole writer of its own rows through the `RowValidator`/`RowApplier` ports, and owns any reversal of what an import created (ADR-0025). |
 | Editorial plans, content items, variants and creative relations | `dotmac_content.service` — plan/item create, get, list, count and guarded update; variant creation; plan/item creative attachment; immutable snapshot construction. Every write requires explicit `TenantScope`, filters the tenant in the service, mutates and flushes the caller's session, and never commits or rolls back. Backoffice authorizes actors, `dotmac-files` owns bytes, publishing owns releases, `dotmac-campaigns` owns outbound progression, and Integrator owns provider transport; none is a parallel content writer. |
 | Publication releases, deliveries, attempts and normalized observations | `dotmac_publishing.service` — idempotent immutable request creation and typed timer scheduling; stale-safe due dispatch; one outbox intent per target attempt; receipt-deduplicated observation recording; explicit partial/all-failed reconciliation; failed-target retry and pre-dispatch cancellation. Every write requires explicit `TenantScope`, filters the tenant in the service, mutates and flushes the caller's session, and never commits or rolls back. An assembly supplies timer storage, Backoffice owns authorization/target policy, content/sites own editable sources, kernel owns idempotency/outbox, and Integrator owns bindings, providers, credentials and transport; none is a parallel publication writer. |

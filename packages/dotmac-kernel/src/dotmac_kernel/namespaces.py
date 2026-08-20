@@ -1010,6 +1010,18 @@ WORK_ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("workorders"),
 )
 
+# `dotmac-web-analytics` — tenant-only first-party website observations and
+# deterministic projections (ADR-0055). The fleet audit found no qualifying
+# privacy-minimising owner, so this allocation names one independent module
+# schema. Property/origin/consent policy and every business consequence remain
+# with the adopting product; Integrator owns remote transport.
+WEB_ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="web_analytics",
+    prefix="wa",
+    branch_label="web_analytics",
+    db_schema=module_schema("webanalytics"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1063,6 +1075,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     SURVEYS_MIGRATION_OWNER,
     TAX_MIGRATION_OWNER,
     WORK_ORDERS_MIGRATION_OWNER,
+    WEB_ANALYTICS_MIGRATION_OWNER,
 )
 
 
@@ -1410,6 +1423,7 @@ __all__ = [
     "PEOPLE_MIGRATION_OWNER",
     "REFERRALS_MIGRATION_OWNER",
     "RESELLER_MANAGEMENT_MIGRATION_OWNER",
+    "WEB_ANALYTICS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

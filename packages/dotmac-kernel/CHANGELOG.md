@@ -6,7 +6,27 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a85 — UNRELEASED
+## 0.1.0a86 — UNRELEASED
+
+Allocates the tenant first-party web-analytics lineage (ADR-0055). Physical
+namespace identity only; collection policy, origin admission and every
+analytical behaviour stay in the optional module, and the reference assembly
+composes none of it.
+
+Its own number is required because a85 is registry-verified and tagged. The
+a86 kernel is the first release candidate carrying the web-analytics row.
+
+### Added
+
+- `WEB_ANALYTICS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_webanalytics`, revision prefix `wa`, and branch label `web_analytics`.
+
+## 0.1.0a85 — 2026-08-21
+
+Published, installed back from the private index, consumer-smoked and tagged
+from exact protected-main revision `b0310103` by release run `32462383827`.
+Publication makes the physical namespace allocations installable; it publishes
+or adopts none of the independently versioned modules.
 
 Allocates the ERP/Backoffice/general tenant-module cohort. This is physical
 namespace identity only; every business decision remains in its independently
@@ -21,7 +41,10 @@ released module and no product composition or authority cutover is implied.
   (`wo`). Documents does not reuse deployment-control's `dc`; Party does not
   reuse Payables' `pa`.
 
-## 0.1.0a84 — UNRELEASED
+## 0.1.0a84 — UNPUBLISHED
+
+This version was not published separately. Its allocations first became
+installable in cumulative kernel `0.1.0a85`.
 
 Allocates the independent tenant Referral and Reseller Management lineages. No
 kernel behavior changes: two ledger rows and nothing else.

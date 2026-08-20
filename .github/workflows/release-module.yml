@@ -66,6 +66,7 @@ on:
           - dotmac-sites
           - dotmac-referrals
           - dotmac-reseller-management
+          - dotmac-web-analytics
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
