@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "dotmac-network-topology"
+version = "0.1.0a1"
+description = "Tenant declared/observed link, path, reachability and topology-projection owner"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_network_topology", from = "src" }]
+include = [{ path = "src/dotmac_network_topology/py.typed", format = ["sdist", "wheel"] }, { path = "src/dotmac_network_topology/migrations/**/*", format = ["sdist", "wheel"] }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a82"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

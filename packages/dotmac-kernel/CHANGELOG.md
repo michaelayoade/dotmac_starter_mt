@@ -6,6 +6,43 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a82 — UNRELEASED
+
+Allocates the eleven independent network-cohort lineages in one release
+(ADR-0036, ADR-0037, ADR-0038). This is physical namespace identity only; every
+behaviour stays in its own optional module, and no module here is composed by
+the reference assembly.
+
+One release rather than eleven because the allocations have no ordering between
+them: each is a fresh schema, prefix and branch label that collides with nothing
+else in the ledger, and eleven stacked bumps would mint ten version numbers no
+installer could ever resolve — the a74..a76 and a78..a80 history this changelog
+already records.
+
+### Added
+
+- `INVENTORY_MIGRATION_OWNER`: schema `mod_inventory`, prefix `iv`, branch label
+  `inventory`.
+- `ASSETS_MIGRATION_OWNER`: schema `mod_assets`, prefix `as`, branch label
+  `assets`.
+- `IPAM_MIGRATION_OWNER`: schema `mod_ipam`, prefix `ip`, branch label `ipam`.
+- `NETWORK_INVENTORY_MIGRATION_OWNER`: schema `mod_netinv`, prefix `ni`, branch
+  label `network_inventory`.
+- `NETWORK_OBSERVABILITY_MIGRATION_OWNER`: schema `mod_netobs`, prefix `no`,
+  branch label `network_observability`.
+- `NETWORK_TOPOLOGY_MIGRATION_OWNER`: schema `mod_nettop`, prefix `nt`, branch
+  label `network_topology`.
+- `NETWORK_ASSURANCE_MIGRATION_OWNER`: schema `mod_netassure`, prefix `na`,
+  branch label `network_assurance`.
+- `NETWORK_CONTROL_MIGRATION_OWNER`: schema `mod_netctrl`, prefix `nc`, branch
+  label `network_control`.
+- `FIBER_PLANT_MIGRATION_OWNER`: schema `mod_fiber`, prefix `fp`, branch label
+  `fiber_plant`.
+- `NETWORK_ACCESS_MIGRATION_OWNER`: schema `mod_netaccess`, prefix `nac`, branch
+  label `network_access`.
+- `PON_ACCESS_MIGRATION_OWNER`: schema `mod_pon`, prefix `pn`, branch label
+  `pon_access`.
+
 ## 0.1.0a81 — UNRELEASED
 
 Allocates the independent tenant website-composition lineage. This is physical

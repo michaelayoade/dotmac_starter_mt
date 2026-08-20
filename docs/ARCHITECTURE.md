@@ -500,6 +500,53 @@ packages/dotmac-sites/           optional tenant website-composition owner
                  COMPOSED by this reference assembly. Files, forms,
                  publication intent/outcomes and Integrator hosting transport
                  remain separate owners.
+packages/dotmac-inventory/       optional tenant stock-ledger owner
+  pyproject.toml                 distribution dotmac-inventory; audit-complete,
+  EXTRACTION.toml                product-first from ERP; ERP is candidate
+                                 cutover 1 (ADR-0036)
+  src/dotmac_inventory/          items, warehouses, immutable movements,
+                 balances, reservations, lot/serial traceability and moving-
+                 average valuation; manifest plus independent `iv` lineage in
+                 schema `mod_inventory`. Tenant plane only and forced RLS.
+                 BUILT AND TESTED HERE, NOT COMPOSED by this reference
+                 assembly. Procurement authorisation, payables, GL posting and
+                 durable-asset lifecycle remain separate owners.
+packages/dotmac-assets/          optional tenant durable-unit owner
+  pyproject.toml                 distribution dotmac-assets; audit-complete,
+  EXTRACTION.toml                product-first from ERP; ERP is candidate
+                                 cutover 1 (ADR-0037)
+  src/dotmac_assets/             durable-unit identity, physical lifecycle,
+                 opaque location, custody/assignment history, maintenance and
+                 disposal with append-only evidence; manifest plus independent
+                 `as` lineage in schema `mod_assets`. Tenant plane only and
+                 forced RLS. BUILT AND TESTED HERE, NOT COMPOSED by this
+                 reference assembly. Capitalization, depreciation, stock,
+                 position observations and product extensions remain separate
+                 owners.
+packages/dotmac-ipam/            network-suite-v1: tenant address-space owner
+packages/dotmac-network-inventory/    network-suite-v1: managed sites, nodes,
+                                 interfaces, ports, VLANs and admission
+packages/dotmac-network-observability/ network-suite-v1: observations,
+                                 measurements, availability and alert evidence
+packages/dotmac-network-topology/     network-suite-v1: declared/observed
+                                 links, paths and reachability projections
+packages/dotmac-network-assurance/    network-suite-v1: incidents, impact,
+                                 maintenance and SLA evidence
+packages/dotmac-network-control/      network-suite-v1: provider-neutral
+                                 commands, dispatch and execution evidence
+packages/dotmac-fiber-plant/     network-suite-v1: outside-plant structures,
+                                 strands, splices, terminations, continuity
+packages/dotmac-network-access/  network-suite-v1: access projections,
+                                 authentication/accounting facts and sessions
+packages/dotmac-pon-access/      network-suite-v1: OLT/ONT commissioning,
+                                 desired state and optical evidence
+                 The nine network-suite-v1 candidates each own one independent
+                 lineage (`ip`, `ni`, `no`, `nt`, `na`, `nc`, `fp`, `nac`,
+                 `pn`) in its own schema, tenant plane only and forced RLS.
+                 They import no sibling module and hold cross-owner references
+                 opaquely. BUILT AND TESTED HERE AS ONE COHORT, NOT COMPOSED
+                 by this reference assembly and not released before Sub's
+                 first-authority cutover (ADR-0038).
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)

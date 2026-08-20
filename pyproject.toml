@@ -89,6 +89,24 @@ dotmac-numbering = { path = "packages/dotmac-numbering", develop = true }
 # Tenant employment-directory owner extracted product-first from ERP. Built and
 # proven here; the clean Backoffice assembly is its first exact-pin consumer.
 dotmac-people = { path = "packages/dotmac-people", develop = true }
+# Tenant-only stock-ledger and traceability owner (ADR-0036). The network
+# suite reuses this owner for equipment while it is stocked; deployment does
+# not turn Network Inventory into a second quantity or valuation writer.
+dotmac-inventory = { path = "packages/dotmac-inventory", develop = true }
+# Tenant-only durable-unit owner (ADR-0037). Network modules bind to an asset
+# opaquely and retain only network-specific identity and behavior.
+dotmac-assets = { path = "packages/dotmac-assets", develop = true }
+# ADR-0038 network-suite-v1 candidates. Built and validated together here, but
+# not composed by the reference assembly and not adopted incrementally in Sub.
+dotmac-ipam = { path = "packages/dotmac-ipam", develop = true }
+dotmac-network-inventory = { path = "packages/dotmac-network-inventory", develop = true }
+dotmac-network-observability = { path = "packages/dotmac-network-observability", develop = true }
+dotmac-network-topology = { path = "packages/dotmac-network-topology", develop = true }
+dotmac-network-assurance = { path = "packages/dotmac-network-assurance", develop = true }
+dotmac-network-control = { path = "packages/dotmac-network-control", develop = true }
+dotmac-fiber-plant = { path = "packages/dotmac-fiber-plant", develop = true }
+dotmac-network-access = { path = "packages/dotmac-network-access", develop = true }
+dotmac-pon-access = { path = "packages/dotmac-pon-access", develop = true }
 # Optional dual-plane timer identity and generation owner. Delivery stays in
 # the kernel outbox relay; each real adopter composes its own selected planes.
 dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = true }
@@ -190,6 +208,17 @@ module = [
     "dotmac_approvals.*",
     "dotmac_numbering.*",
     "dotmac_people.*",
+    "dotmac_inventory.*",
+    "dotmac_assets.*",
+    "dotmac_ipam.*",
+    "dotmac_network_inventory.*",
+    "dotmac_network_observability.*",
+    "dotmac_network_topology.*",
+    "dotmac_network_assurance.*",
+    "dotmac_network_control.*",
+    "dotmac_fiber_plant.*",
+    "dotmac_network_access.*",
+    "dotmac_pon_access.*",
     "dotmac_durable_timers.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
@@ -254,6 +283,17 @@ root_packages = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
     "dotmac_durable_timers",
     "dotmac_integration",
     "dotmac_media_observations",
@@ -327,6 +367,17 @@ source_modules = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -394,6 +445,17 @@ modules = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -446,6 +508,17 @@ forbidden_modules = [
     "dotmac_numbering",
     "dotmac_media_observations",
     "dotmac_people",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
     "dotmac_durable_timers",
     "dotmac_content",
     "dotmac_publishing",

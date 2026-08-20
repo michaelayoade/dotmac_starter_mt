@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-kernel": {
+      "declared": "0.1.0a82",
+      "reason": "AUTHORIZED NETWORK COHORT ALLOCATION, ON TOP OF TWO PUBLISHED ONES. a77 owns the vendor allocations and a81 is now registry-verified and tagged as the marketing cohort's first installable kernel; neither can be repointed. a82 therefore mints the eleven network-cohort rows together \u2014 inventory, assets, ipam, network inventory, network observability, network topology, network assurance, network control, fiber plant, network access and PON access. One kernel workflow publishes only the tip, so a82 is the first installable kernel carrying all three cohorts and every module named here floors there. Keep this row until the exact protected-main a82 artifact is registry-verified and tagged; remove it with the post-release record, never by editing the declared version down.",
+      "state": "previous-version-published"
+    },
     "dotmac-campaigns": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
@@ -75,6 +80,61 @@
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "state": "never-published"
+    },
+    "dotmac-inventory": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns the tenant stock ledger, immutable movements, reservations, lot/serial traceability and valuation (ADR-0036), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-assets": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns durable-unit identity, custody, maintenance and disposal (ADR-0037), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-ipam": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns address-space allocation and assignment (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-network-inventory": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns network-element identity and lifecycle (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-network-observability": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns collected network measurements (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-network-topology": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns declared link and path structure (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-network-assurance": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns derived service-impact assessment (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-network-control": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns requested and executed control actions (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-fiber-plant": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns outside-plant structures, strands, splices and continuity (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-network-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns subscriber access sessions and authorization facts (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-pon-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns PON terminals, service ports and optical evidence (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
       "state": "never-published"
     }
   }
