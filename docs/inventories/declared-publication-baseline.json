@@ -63,8 +63,8 @@
   ],
   "unpublished": {
     "dotmac-kernel": {
-      "declared": "0.1.0a83",
-      "reason": "AUTHORIZED POSITIONING ALLOCATION, ON TOP OF THE NETWORK AND MARKETING ONES. a77 owns the vendor allocations and a81 is registry-verified as the marketing cohort's first installable kernel; a82 mints the eleven network-cohort rows and is on main but not yet tagged. a83 adds the twelfth and last of this sequence, `positioning` (schema mod_pos, prefix po). It takes its own number rather than growing a82, because a82's changelog entry already states what it allocated and a record that describes content it never carried is worse than an extra unpublished number. One kernel workflow publishes only the tip, so a83 is the first installable kernel carrying every allocation above and each module floors at the release that minted its own row. Keep this row until the exact protected-main a83 artifact is registry-verified and tagged; remove it with the post-release record, never by editing the declared version down.",
+      "declared": "0.1.0a84",
+      "reason": "INTENDED UNTIL THE REFERRALS AND RESELLER MANAGEMENT MODULE RELEASE. Published a77 and a81 own the vendor and marketing allocations and cannot be repointed; a82 owns the eleven network-cohort rows and a83 owns Positioning. Kernel 0.1.0a84 adds exactly two independent MIGRATION_OWNER_LEDGER rows and no runtime behaviour: mod_referrals / rf and mod_reseller / rm, whose matching manifests, migrations and tests land in this parity slice. Remove this row when a separately authorized release change tags kernel 0.1.0a84 and both module artifacts after exact-commit validation; do NOT edit the declared version down.",
       "state": "previous-version-published"
     },
     "dotmac-campaigns": {
@@ -75,6 +75,16 @@
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
+      "state": "never-published"
+    },
+    "dotmac-referrals": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer, but the dossier remains audit-complete with no contract consumer or adoption evidence: no product yet pins this lineage and Sub's local writer remains authoritative. The release allowlist makes the module publishable; it does not claim adoption or silently dispatch a release. Remove this row in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills, shadows, seals and retires its local writer. Do NOT publish or edit the declared version down merely to make this ledger disappear.",
+      "state": "never-published"
+    },
+    "dotmac-reseller-management": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer and qualifying source, but no product pins this lineage and Sub's local reseller lifecycle remains authoritative. The release allowlist makes the module publishable; it does not claim adoption. Remove this row only in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills reseller identity, hierarchy, bindings and authority revisions, graph-compares at a sealed watermark and retires its local writers. Commissions and payouts remain outside this cutover.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

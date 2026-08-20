@@ -77,6 +77,23 @@ local owning record; a separate locally owned ticket may be created only by the
 local ticket owner. Synchronization never makes either application a writer of
 the other's lifecycle.
 
+ADR-0040 accepts the next Sub vNext parity cohort without claiming it is
+installed today. The product-first inventory and extraction dossiers are
+complete; implementation, publication and adoption remain separate gates. The
+accepted owners are `dotmac-referrals`, `dotmac-reseller-management`,
+`dotmac-ai-operations`, `dotmac-remote-access`,
+`dotmac-compliance-reporting`, `dotmac-workflow-runtime`,
+`dotmac-support-access`, `dotmac-platform-health`, and the independently
+qualified `dotmac-forms`. Fleet Control adopts the already implemented
+`dotmac-deployment-control`; there is no `dotmac-fleet-control` owner.
+
+The tenant plane is accepted for Referrals, Reseller Management, AI Operations,
+Remote Access, Compliance Reporting, Workflow Runtime and Forms. Support Access
+and Platform Health are platform-plane capabilities with the Vendor control
+plane as their first candidate assembly. These are target ownership decisions,
+not entries in the as-built module registry below; each enters that registry
+only with its manifest, lineage, catalog and live isolation canary.
+
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
 The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
@@ -132,8 +149,8 @@ quota decisions—not payment providers or raw license payloads.
 The application currently has tenant creation and `Tenant.is_active`/
 `suspended_at`/`deleted_at` fields, but no canonical tenant transition service,
 cross-module lifecycle orchestrator, outbox/inbox, onboarding workflow,
-subscription/billing/rating lifecycle, support-access workflow, or coordinated
-offboarding/purge path. The target uses separate tenant, subscription,
+subscription/billing/rating lifecycle, implemented support-access workflow, or
+coordinated offboarding/purge path. The target uses separate tenant, subscription,
 entitlement, provider-job, domain, and license state machines. Versioned policy
 maps commercial events to restriction/suspension; payment failure never directly
 deletes data.
@@ -1448,6 +1465,10 @@ made concrete — every model has exactly one declared owner.
 | `EmploymentType` | `mod_people.employment_types` | `dotmac-people` optional module | Tenant employment-arrangement catalogue with no payroll or product-integration fields. |
 | `Position` | `mod_people.positions` | `dotmac-people` optional module | Canonical reporting hierarchy and vacancy-routing policy. Vacancy is derived from dated assignments; ERP's persisted `is_vacant` cache is deliberately not ported. |
 | `PositionAssignment` | `mod_people.position_assignments` | `dotmac-people` optional module | Historical PRIMARY/ACTING/INTERIM occupancy. Service checks preserve ERP behavior and a PostgreSQL trigger serializes and rejects all overlapping primary intervals, including the finite intervals ERP's open-ended partial indexes missed. |
+| `ReferralProgramme` / `ReferralProgrammeVersion` | `mod_referrals.referral_programmes`, `referral_programme_versions` | `dotmac-referrals` optional module | Tenant referral policy identity and immutable active-policy snapshot, product-first from Sub. Party, Customer, Sales and Billing remain opaque collaborators (ADR-0040). |
+| `ReferralCode` / `Referral` / `ReferralConversion` | `mod_referrals.referral_codes`, `referrals`, `referral_conversions` | `dotmac-referrals` optional module | Finite invitation identity, idempotent source attribution and evidence-bound conversion. The conversion writes a provider-neutral reward request to the kernel outbox; it never creates a lead/customer or applies a credit. |
+| `ResellerAccount` / `ResellerAuthorityRevision` | `mod_reseller.reseller_accounts`, `reseller_authority_revisions` | `dotmac-reseller-management` optional module | Product-first from Sub: tenant reseller identity, cycle-safe hierarchy, active/suspended/retired lifecycle and immutable least-privilege delegated authority. Party roles are opaque references; Commercial Agreements and Entitlement Allocation remain independent owners (ADR-0040). |
+| `ResellerMemberBinding` / `ResellerCustomerAccountBinding` | `mod_reseller.reseller_member_bindings`, `reseller_customer_account_bindings` | `dotmac-reseller-management` optional module | Tenant-scoped bindings to opaque member and customer-account identities. They authorize no login and copy no Party or Customer state; commissions, payouts, invoices and customer lifecycle do not enter this namespace. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -1493,6 +1514,8 @@ write:
 | Editorial plans, content items, variants and creative relations | `dotmac_content.service` — plan/item create, get, list, count and guarded update; variant creation; plan/item creative attachment; immutable snapshot construction. Every write requires explicit `TenantScope`, filters the tenant in the service, mutates and flushes the caller's session, and never commits or rolls back. Backoffice authorizes actors, `dotmac-files` owns bytes, publishing owns releases, `dotmac-campaigns` owns outbound progression, and Integrator owns provider transport; none is a parallel content writer. |
 | Publication releases, deliveries, attempts and normalized observations | `dotmac_publishing.service` — idempotent immutable request creation and typed timer scheduling; stale-safe due dispatch; one outbox intent per target attempt; receipt-deduplicated observation recording; explicit partial/all-failed reconciliation; failed-target retry and pre-dispatch cancellation. Every write requires explicit `TenantScope`, filters the tenant in the service, mutates and flushes the caller's session, and never commits or rolls back. An assembly supplies timer storage, Backoffice owns authorization/target policy, content/sites own editable sources, kernel owns idempotency/outbox, and Integrator owns bindings, providers, credentials and transport; none is a parallel publication writer. |
 | Outbound campaign identity and recipient progression | `dotmac_campaigns.service` — `create_campaign`/`revise_campaign`, `ingest_audience`, `schedule_campaign`, `accept_due_work`, `record_observation`, pause/resume/cancel/complete, `authorize_delivery`, `request_unsubscribe`, counter rebuild and publication/privacy repair. Every path receives and flushes the caller session. Kernel consent decides eligibility, kernel idempotency owns replay, kernel outbox owns publication, Durable Timers owns due-work mechanics, and product adapters supply audience/render/sender/Sales facts; none is a parallel campaigns writer (ADR-0032). |
+| Referral programmes, codes, attribution and conversions | `dotmac_referrals.service` — `create_programme`, `issue_code`, `capture_referral`, and `record_conversion`. Every call receives an explicit tenant scope and caller session; conversion evidence and its reward-request outbox fact flush atomically. Party, Customer, Lead and Billing mutations remain outside the module (ADR-0040). |
+| Reseller account identity, hierarchy, delegated authority, bindings and lifecycle | `dotmac_reseller_management.service` — `create_account`, `set_parent`, `publish_authority`, `bind_member`, `bind_customer_account`, and `transition_account`. The owner receives an explicit tenant scope and caller session, rejects hierarchy cycles and authority broader than the parent revision, and flushes provider-neutral status facts through the kernel outbox. Party, Customer, Commercial Agreements, Entitlement Allocation, authentication, commissions, payouts and invoices remain outside the module (ADR-0040). |
 | Durable timer generations, cancellation and acceptance/rejection evidence | `dotmac_durable_timers.service` is the sole lifecycle writer on both declared planes: `schedule_timer`, `cancel_timer`, `accept_trigger`, `current_timer`, and `purge_history`. Identity-level PostgreSQL advisory locks serialize even the first schedule; cancellation names the observed generation and refuses a newer current generation; trigger acceptance re-derives current state and records stale evidence with observed/current generations and the opaque source version. The package exports typed ports, never ORM models. A schedule resolves the consuming module's manifest-declared outbox event type, calls the kernel outbox writer in the same transaction and sets `available_at=due_at`; `dotmac_kernel.messaging.relay` remains the sole owner of claim, lease, retry and dead-letter behavior. Business deadline policy and the effect after an accepted trigger remain with the adopting product. This reference assembly builds and proves the optional package but does not compose its `dt` lineage. |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
 

@@ -831,7 +831,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a83"
+version = "0.1.0a84"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1091,6 +1091,24 @@ type = "directory"
 url = "packages/dotmac-publishing"
 
 [[package]]
+name = "dotmac-referrals"
+version = "0.1.0a1"
+description = "Tenant referral programmes, attribution, conversion and reward-request evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a84"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-referrals"
+
+[[package]]
 name = "dotmac-release-catalog"
 version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
@@ -1107,6 +1125,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-release-catalog"
+
+[[package]]
+name = "dotmac-reseller-management"
+version = "0.1.0a1"
+description = "Tenant reseller identity, hierarchy, delegated authority and lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a84"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-reseller-management"
 
 [[package]]
 name = "dotmac-sites"
@@ -3341,4 +3377,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "ce5d5453a47bc6ab2e9a744c3caae045fdc292adad7933894a8cbee747d5861e"
+content-hash = "7d59bdefdb8347e782cfbf95b49952ec74bd1bf6b01797bdde4b714503e55ede"

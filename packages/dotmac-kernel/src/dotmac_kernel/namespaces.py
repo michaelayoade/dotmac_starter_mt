@@ -870,6 +870,28 @@ POSITIONING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("pos"),
 )
 
+# `dotmac-referrals` — Sub's programme/code/attribution/conversion owner,
+# extracted without Party, Customer, Lead, Billing or transport persistence.
+# Tenant-only because an ISP tenant owns its referral programme and evidence;
+# no named platform-plane consumer exists (ADR-0040).
+REFERRALS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="referrals",
+    prefix="rf",
+    branch_label="referrals",
+    db_schema=module_schema("referrals"),
+)
+
+# `dotmac-reseller-management` — Sub's tenant reseller identity, hierarchy,
+# delegated-authority and lifecycle owner. Party, Customer, Commercial
+# Agreements, Entitlement Allocation, commissions and payouts remain outside
+# this namespace (ADR-0040).
+RESELLER_MANAGEMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="reseller_management",
+    prefix="rm",
+    branch_label="reseller_management",
+    db_schema=module_schema("reseller"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -905,6 +927,8 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     NETWORK_ACCESS_MIGRATION_OWNER,
     PON_ACCESS_MIGRATION_OWNER,
     POSITIONING_MIGRATION_OWNER,
+    REFERRALS_MIGRATION_OWNER,
+    RESELLER_MANAGEMENT_MIGRATION_OWNER,
 )
 
 
@@ -1250,6 +1274,8 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
+    "REFERRALS_MIGRATION_OWNER",
+    "RESELLER_MANAGEMENT_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

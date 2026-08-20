@@ -6,6 +6,21 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a84 — UNRELEASED
+
+Allocates the independent tenant Referral and Reseller Management lineages. No
+kernel behavior changes: two ledger rows and nothing else.
+
+### Added
+
+- `REFERRALS_MIGRATION_OWNER` — `mod_referrals`, revision prefix `rf`, branch
+  label `referrals`. `dotmac-referrals` 0.1.0a1 declares the matching manifest,
+  tenant tables and root lineage in the same change (ADR-0040).
+- `RESELLER_MANAGEMENT_MIGRATION_OWNER` — `mod_reseller`, revision prefix `rm`,
+  branch label `reseller_management`. `dotmac-reseller-management` 0.1.0a1
+  declares the matching manifest, tenant tables and root lineage in the same
+  change (ADR-0040).
+
 ## 0.1.0a83 — UNRELEASED
 
 Allocates the tenant positioning lineage (ADR-0039). Physical namespace

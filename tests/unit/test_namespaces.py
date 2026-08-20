@@ -223,6 +223,12 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # and nothing that follows from them (ADR-0039). It is NOT part of the
     # network cohort above — Assets keeps a durable unit's authoritative
     # location, so the two are separate owners rather than one.
+    # `referrals` is the thirty-fourth and tenant-only: a tenant programme owns
+    # attribution and conversion evidence while rewards leave through the
+    # outbox for the product that owns fulfilment.
+    # `reseller_management` is the thirty-fifth and tenant-only: Sub's reseller
+    # hierarchy and delegated-authority lifecycle move here while Party,
+    # Customer, commissions and payouts keep their own owners.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -258,6 +264,8 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "network_access",
         "pon_access",
         "positioning",
+        "referrals",
+        "reseller_management",
     }
 
 
