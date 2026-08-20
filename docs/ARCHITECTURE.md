@@ -547,6 +547,17 @@ packages/dotmac-pon-access/      network-suite-v1: OLT/ONT commissioning,
                  opaquely. BUILT AND TESTED HERE AS ONE COHORT, NOT COMPOSED
                  by this reference assembly and not released before Sub's
                  first-authority cutover (ADR-0038).
+packages/dotmac-positioning/     optional tenant position-evidence owner
+  pyproject.toml                 distribution dotmac-positioning;
+  EXTRACTION.toml                audit-complete, no adopter yet (ADR-0039)
+  src/dotmac_positioning/        provider-neutral position observations,
+                 tracked-unit identity and derived motion/stop facts; manifest
+                 plus independent `po` lineage in schema `mod_pos`. Tenant
+                 plane only and forced RLS. BUILT AND TESTED HERE, NOT COMPOSED
+                 by this reference assembly. Deliberately NOT part of the
+                 network suite: Assets owns a durable unit's AUTHORITATIVE
+                 location, positioning only observes, and the adopting product
+                 keeps every geofence, SLA, dispatch and billing consequence.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
