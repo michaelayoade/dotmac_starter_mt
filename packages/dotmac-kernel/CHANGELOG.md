@@ -21,7 +21,10 @@ kernel behavior changes: two ledger rows and nothing else.
   declares the matching manifest, tenant tables and root lineage in the same
   change (ADR-0040).
 
-## 0.1.0a83 — UNRELEASED
+## 0.1.0a83 — 2026-08-20
+
+Published, registry-verified and tagged from exact protected-main revision
+`4cfdcd7` by release run `32357917582`.
 
 Allocates the tenant positioning lineage (ADR-0039). Physical namespace
 identity only; every positioning behaviour stays in the optional module, and
@@ -36,7 +39,7 @@ describe content it never carried — even though neither version is tagged yet.
 - `POSITIONING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_pos`,
   revision prefix `po`, and branch label `positioning`.
 
-## 0.1.0a82 — UNRELEASED
+## 0.1.0a82 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a83
 
 Allocates the eleven independent network-cohort lineages in one release
 (ADR-0036, ADR-0037, ADR-0038). This is physical namespace identity only; every
