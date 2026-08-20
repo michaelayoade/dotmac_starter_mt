@@ -133,6 +133,9 @@ dotmac-sites = { path = "packages/dotmac-sites", develop = true }
 # Tenant-only referral programme/attribution owner extracted from Sub. This
 # reference assembly builds and proves the package but does not compose `rf`.
 dotmac-referrals = { path = "packages/dotmac-referrals", develop = true }
+# Tenant-only reseller identity, hierarchy and delegated-authority owner
+# extracted from Sub. The reference assembly proves but does not compose `rm`.
+dotmac-reseller-management = { path = "packages/dotmac-reseller-management", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -231,6 +234,7 @@ module = [
     "dotmac_publishing.*",
     "dotmac_sites.*",
     "dotmac_referrals.*",
+    "dotmac_reseller_management.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -308,6 +312,7 @@ root_packages = [
     "dotmac_publishing",
     "dotmac_sites",
     "dotmac_referrals",
+    "dotmac_reseller_management",
 ]
 
 [[tool.importlinter.contracts]]
@@ -390,6 +395,7 @@ source_modules = [
     "dotmac_publishing",
     "dotmac_sites",
     "dotmac_referrals",
+    "dotmac_reseller_management",
 ]
 forbidden_modules = ["app"]
 
@@ -469,6 +475,7 @@ modules = [
     "dotmac_publishing",
     "dotmac_sites",
     "dotmac_referrals",
+    "dotmac_reseller_management",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and

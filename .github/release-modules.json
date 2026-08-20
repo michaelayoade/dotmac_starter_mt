@@ -568,6 +568,42 @@
         ]
       }
     },
+    "dotmac-reseller-management": {
+      "$comment": [
+        "Tenant reseller identity, hierarchy, authority and lifecycle owner.",
+        "Product-first from Sub; Party, Customer, Commercial Agreements,",
+        "Entitlement Allocation, commissions and payouts remain collaborators.",
+        "Kernel a83 allocates mod_reseller / rm / reseller_management."
+      ],
+      "package_dir": "packages/dotmac-reseller-management",
+      "import_name": "dotmac_reseller_management",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_reseller",
+      "tag_prefix": "dotmac-reseller-management-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_reseller_management/py.typed",
+          "dotmac_reseller_management/manifest.py",
+          "dotmac_reseller_management/contracts.py",
+          "dotmac_reseller_management/models.py",
+          "dotmac_reseller_management/service.py",
+          "dotmac_reseller_management/migrations/__init__.py",
+          "dotmac_reseller_management/migrations/versions/rm_0001_reseller_management.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-durable-timers": {
       "$comment": [
         "Generation-safe due work on separately selectable tenant and platform",

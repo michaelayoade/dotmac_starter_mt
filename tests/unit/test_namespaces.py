@@ -222,6 +222,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `referrals` is the thirty-third and tenant-only: a tenant programme owns
     # attribution and conversion evidence while rewards leave through the
     # outbox for the product that owns fulfilment.
+    # `reseller_management` is the thirty-fourth and tenant-only: Sub's reseller
+    # hierarchy and delegated-authority lifecycle move here while Party,
+    # Customer, commissions and payouts keep their own owners.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -257,6 +260,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "network_access",
         "pon_access",
         "referrals",
+        "reseller_management",
     }
 
 

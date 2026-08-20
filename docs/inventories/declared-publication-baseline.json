@@ -64,7 +64,7 @@
   "unpublished": {
     "dotmac-kernel": {
       "declared": "0.1.0a83",
-      "reason": "INTENDED UNTIL THE REFERRALS MODULE RELEASE. Published a77 and a81 own the vendor and marketing allocations and cannot be repointed; a82 owns the eleven network-cohort rows. Kernel 0.1.0a83 adds exactly one MIGRATION_OWNER_LEDGER row and no runtime behaviour: the mod_referrals / rf allocation whose matching manifest, migration and tests land in the same focused change. Remove this row when a separately authorized release change tags kernel 0.1.0a83 and dotmac-referrals 0.1.0a1 after exact-commit Observer validation; do NOT edit the declared version down.",
+      "reason": "INTENDED UNTIL THE REFERRALS AND RESELLER MANAGEMENT MODULE RELEASE. Published a77 and a81 own the vendor and marketing allocations and cannot be repointed; a82 owns the eleven network-cohort rows. Kernel 0.1.0a83 adds exactly two independent MIGRATION_OWNER_LEDGER rows and no runtime behaviour: mod_referrals / rf and mod_reseller / rm, whose matching manifests, migrations and tests land in this parity slice. Remove this row when a separately authorized release change tags kernel 0.1.0a83 and both module artifacts after exact-commit validation; do NOT edit the declared version down.",
       "state": "previous-version-published"
     },
     "dotmac-campaigns": {
@@ -80,6 +80,11 @@
     "dotmac-referrals": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0039 and EXTRACTION.toml record Sub as the first candidate consumer, but the dossier remains audit-complete with no contract consumer or adoption evidence: no product yet pins this lineage and Sub's local writer remains authoritative. The release allowlist makes the module publishable; it does not claim adoption or silently dispatch a release. Remove this row in a separately authorized release change after exact-commit Observer validation and immediately before Sub installs the exact pin, backfills, shadows, seals and retires its local writer. Do NOT publish or edit the declared version down merely to make this ledger disappear.",
+      "state": "never-published"
+    },
+    "dotmac-reseller-management": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0039 and EXTRACTION.toml record Sub as the first candidate consumer and qualifying source, but no product pins this lineage and Sub's local reseller lifecycle remains authoritative. The release allowlist makes the module publishable; it does not claim adoption. Remove this row only in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills reseller identity, hierarchy, bindings and authority revisions, graph-compares at a sealed watermark and retires its local writers. Commissions and payouts remain outside this cutover.",
       "state": "never-published"
     },
     "dotmac-template-studio": {

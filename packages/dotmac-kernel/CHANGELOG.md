@@ -8,14 +8,18 @@ here.
 
 ## 0.1.0a83 — UNRELEASED
 
-Allocates the independent tenant Referral lineage. No kernel behavior changes:
-one ledger row and nothing else.
+Allocates the independent tenant Referral and Reseller Management lineages. No
+kernel behavior changes: two ledger rows and nothing else.
 
 ### Added
 
 - `REFERRALS_MIGRATION_OWNER` — `mod_referrals`, revision prefix `rf`, branch
   label `referrals`. `dotmac-referrals` 0.1.0a1 declares the matching manifest,
   tenant tables and root lineage in the same change (ADR-0039).
+- `RESELLER_MANAGEMENT_MIGRATION_OWNER` — `mod_reseller`, revision prefix `rm`,
+  branch label `reseller_management`. `dotmac-reseller-management` 0.1.0a1
+  declares the matching manifest, tenant tables and root lineage in the same
+  change (ADR-0039).
 
 ## 0.1.0a82 — UNRELEASED
 
