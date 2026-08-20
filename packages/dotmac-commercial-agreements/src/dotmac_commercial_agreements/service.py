@@ -264,7 +264,7 @@ def accepted_snapshot(row: Agreement) -> dict[str, Any]:
                 for line in row.lines
             ),
             key=lambda d: (
-                int(d["line_no"]),  # type: ignore[arg-type]
+                int(d["line_no"]),
                 str(d["product_code"]),
                 str(d["capability_code"]),
             ),
