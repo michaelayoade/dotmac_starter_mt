@@ -875,6 +875,24 @@ type = "directory"
 url = "packages/dotmac-release-catalog"
 
 [[package]]
+name = "dotmac-service-access-policy"
+version = "0.1.0a1"
+description = "Per-service desired network-access policy decisions"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-service-access-policy"
+
+[[package]]
 name = "dotmac-service-catalog"
 version = "0.1.0a1"
 description = "Technical service specifications, plan families, characteristics, and eligibility inputs"
@@ -3161,4 +3179,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "06299b08fb8a5e30cadba65757c49c3c3ad89aa17f29a1650a9d6bd06211b109"
+content-hash = "213df5af40422561f0d0082a51a1600958bec98242e14b921d7803ff3c9eb8c6"

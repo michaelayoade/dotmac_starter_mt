@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-service-access-policy"
+version = "0.1.0a1"
+description = "Per-service desired network-access policy decisions"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_service_access_policy", from = "src" }]
+include = [
+  { path = "src/dotmac_service_access_policy/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_service_access_policy/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

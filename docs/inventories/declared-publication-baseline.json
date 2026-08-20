@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-service-access-policy": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The Sub-first per-service desired-access owner is audit-complete and uncomposed; Network Access remains the enforcer. Publishing is forbidden in this programme. Remove only with authorized input backfill, zero-drift desired-state shadow and retirement of parallel policy resolvers/direct device writers.",
+      "state": "never-published"
+    },
     "dotmac-usage-rating": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The Sub-first pre-tax usage-rating owner is audit-complete and uncomposed; invoices, tax, payments and accounting remain separate. Publishing is forbidden in this programme. Remove only with authorized rule/obligation backfill, zero-drift amount shadow and sole-writer cutover.",

@@ -480,6 +480,10 @@ packages/dotmac-usage-rating/    optional pre-tax usage-rating owner
   src/dotmac_usage_rating/       effective rules and immutable obligations;
                  `ur` lineage in `mod_usage_rate`, tenant-only forced RLS,
                  uncomposed. Invoices, tax, payments and accounting stay out.
+packages/dotmac-service-access-policy/ optional desired-access decision owner
+  src/dotmac_service_access_policy/ per-service policy inputs and desired state;
+                 `sa` lineage in `mod_svc_access`, tenant-only forced RLS,
+                 uncomposed. Network Access remains the only enforcer.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1340,6 +1344,7 @@ made concrete — every model has exactly one declared owner.
 | `ServiceInstance` / `ServiceLifecycleEvent` | `mod_services.service_instances`, `mod_services.service_lifecycle_events` | `dotmac-services` optional module | One tenant service identity, current lifecycle state and immutable transition history. Customer/catalogue/qualification identifiers are opaque; fulfillment, access enforcement, subscriptions, rating and billing remain outside. |
 | `UsageObservation` / `UsageCorrection` / `UsageAggregate` | `mod_usage.usage_observations`, `mod_usage.usage_corrections`, `mod_usage.usage_aggregates` | `dotmac-usage` optional module | Normalized immutable meter facts, append-only corrections and rebuildable projections. Raw AAA remains an upstream collector concern; tariff selection, monetary rating, invoices and ledgers remain outside. |
 | `RatingRule` / `RatedUsageObligation` | `mod_usage_rate.rating_rules`, `mod_usage_rate.rated_usage_obligations` | `dotmac-usage-rating` optional module | Effective meter pricing and immutable pre-tax rated obligations from opaque usage references. Invoice lifecycle, tax, payments, revenue recognition and GL posting remain outside. |
+| `ServiceAccessInput` / `DesiredAccessDecision` | `mod_svc_access.service_access_inputs`, `mod_svc_access.desired_access_decisions` | `dotmac-service-access-policy` optional module | Per-service FUP/prepaid/collections/admin observations and one desired ALLOW/RESTRICT/DENY projection. It owns no subscriber/account status and performs no AAA or device mutation; Network Access reconciles enforcement. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

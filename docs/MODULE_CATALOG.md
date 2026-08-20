@@ -64,6 +64,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-people`](../packages/dotmac-people/README.md) | optional module | [`audit-complete`](../packages/dotmac-people/EXTRACTION.toml) | [tenant · `mod_people`](../packages/dotmac-people/src/dotmac_people/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac_backoffice` |
 | [`dotmac-qualification`](../packages/dotmac-qualification/README.md) | optional module | [`audit-complete`](../packages/dotmac-qualification/EXTRACTION.toml) | [tenant · `mod_qual`](../packages/dotmac-qualification/src/dotmac_qualification/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
+| [`dotmac-service-access-policy`](../packages/dotmac-service-access-policy/README.md) | optional module | [`audit-complete`](../packages/dotmac-service-access-policy/EXTRACTION.toml) | [tenant · `mod_svc_access`](../packages/dotmac-service-access-policy/src/dotmac_service_access_policy/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-service-catalog`](../packages/dotmac-service-catalog/README.md) | optional module | [`audit-complete`](../packages/dotmac-service-catalog/EXTRACTION.toml) | [tenant · `mod_svc_cat`](../packages/dotmac-service-catalog/src/dotmac_service_catalog/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-services`](../packages/dotmac-services/README.md) | optional module | [`audit-complete`](../packages/dotmac-services/EXTRACTION.toml) | [tenant · `mod_services`](../packages/dotmac-services/src/dotmac_services/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
@@ -237,6 +238,14 @@ and the next gate.
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-release-catalog/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** `dotmac_vendor_control_plane`.
 - **Candidate consumers:** —.
+
+### [`dotmac-service-access-policy`](../packages/dotmac-service-access-policy/README.md)
+
+- **Owner:** Per-service desired access decisions from operational policy inputs
+- **Contract:** Own current per-service FUP, prepaid, collections and administrative policy observations plus the derived desired ALLOW/RESTRICT/DENY state. Consequences are scoped to the affected service. NOT customer/subscriber status, balance/collections ownership, AAA facts, network-device state or enforcement.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-service-access-policy/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
 
 ### [`dotmac-service-catalog`](../packages/dotmac-service-catalog/README.md)
 
