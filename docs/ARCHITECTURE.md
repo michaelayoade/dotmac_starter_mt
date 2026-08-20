@@ -444,6 +444,16 @@ packages/dotmac-people/          optional tenant employment directory
                  BUILT AND TESTED HERE, NOT COMPOSED by this reference
                  assembly. No ERP identity, payroll, attendance, finance,
                  integration, notification or persisted vacancy cache ports.
+packages/dotmac-customers/       optional tenant customer-account owner
+  pyproject.toml                 distribution dotmac-customers; audit-complete,
+  EXTRACTION.toml                with Sub as the qualifying source and first
+                                 candidate consumer
+  src/dotmac_customers/          account identity/lifecycle, narrow profiles,
+                 and typed opaque Party references; manifest plus independent
+                 `cu` lineage in `mod_customers`. Tenant plane only, forced
+                 RLS, built and tested here but not composed. Authentication,
+                 reachability, addresses, qualification, commercial terms,
+                 services, billing and network state remain outside.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1295,6 +1305,9 @@ made concrete — every model has exactly one declared owner.
 | `EmploymentType` | `mod_people.employment_types` | `dotmac-people` optional module | Tenant employment-arrangement catalogue with no payroll or product-integration fields. |
 | `Position` | `mod_people.positions` | `dotmac-people` optional module | Canonical reporting hierarchy and vacancy-routing policy. Vacancy is derived from dated assignments; ERP's persisted `is_vacant` cache is deliberately not ported. |
 | `PositionAssignment` | `mod_people.position_assignments` | `dotmac-people` optional module | Historical PRIMARY/ACTING/INTERIM occupancy. Service checks preserve ERP behavior and a PostgreSQL trigger serializes and rejects all overlapping primary intervals, including the finite intervals ERP's open-ended partial indexes missed. |
+| `CustomerAccount` | `mod_customers.customer_accounts` | `dotmac-customers` optional module | Stable tenant customer account number, display label, and account lifecycle extracted Sub-first. It is not a login, subscription, billing account, or network-access record. |
+| `CustomerProfile` | `mod_customers.customer_profiles` | `dotmac-customers` optional module | One narrow segment/notes profile per customer account. Contact reachability, addresses, location evidence and arbitrary identity fields remain with their owning systems. |
+| `CustomerPartyReference` | `mod_customers.customer_party_references` | `dotmac-customers` optional module | Typed opaque association to a Party identity owned elsewhere. The module never copies person/organization identity or dereferences a foreign application's database. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

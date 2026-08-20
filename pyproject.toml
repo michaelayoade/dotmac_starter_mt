@@ -89,6 +89,9 @@ dotmac-numbering = { path = "packages/dotmac-numbering", develop = true }
 # Tenant employment-directory owner extracted product-first from ERP. Built and
 # proven here; the clean Backoffice assembly is its first exact-pin consumer.
 dotmac-people = { path = "packages/dotmac-people", develop = true }
+# Tenant customer-account owner extracted from Sub; built and proven here but
+# deliberately uncomposed until Sub's explicit shadow/cutover programme.
+dotmac-customers = { path = "packages/dotmac-customers", develop = true }
 # Optional dual-plane timer identity and generation owner. Delivery stays in
 # the kernel outbox relay; each real adopter composes its own selected planes.
 dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = true }
@@ -178,6 +181,7 @@ module = [
     "dotmac_approvals.*",
     "dotmac_numbering.*",
     "dotmac_people.*",
+    "dotmac_customers.*",
     "dotmac_durable_timers.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
@@ -238,6 +242,7 @@ root_packages = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_customers",
     "dotmac_durable_timers",
     "dotmac_integration",
     "dotmac_auth_oidc",
@@ -306,6 +311,7 @@ source_modules = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_customers",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -369,6 +375,7 @@ modules = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_customers",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -417,6 +424,7 @@ forbidden_modules = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_customers",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
 ]

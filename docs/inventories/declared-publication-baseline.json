@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-customers": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary, extraction dossier and exact-commit Observer proof land before any product composition or authority cutover. This programme explicitly forbids publishing. Remove this row only in a separately authorized release change paired with Sub's backfill, shadow, zero-drift and writer-retirement evidence; do not infer adoption from the package existing.",
+      "state": "never-published"
+    },
     "dotmac-kernel": {
       "declared": "0.1.0a78",
       "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. Kernel a78 allocates ten permanent namespace and lineage identities before their ten focused package commits; it adds no runtime facility, composes no module and moves no product authority. The packages remain audit-complete, unallowlisted and uncomposed until separately Observer-green, and this programme explicitly forbids publishing or pushing. Remove this row only in a later authorized release change after the complete cohort and its exact kernel pin are ready for a named product adoption; do not edit the declared version down and do not infer cutover from the tag.",

@@ -51,6 +51,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md) | optional module | [`audit-complete`](../packages/dotmac-campaigns/EXTRACTION.toml) | [tenant · `mod_campaigns`](../packages/dotmac-campaigns/src/dotmac_campaigns/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac_backoffice`, `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-commercial-agreements`](../packages/dotmac-commercial-agreements/README.md) | optional module | [`audit-complete`](../packages/dotmac-commercial-agreements/EXTRACTION.toml) | [platform · `mod_agreements`](../packages/dotmac-commercial-agreements/src/dotmac_commercial_agreements/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_integrator` |
+| [`dotmac-customers`](../packages/dotmac-customers/README.md) | optional module | [`audit-complete`](../packages/dotmac-customers/EXTRACTION.toml) | [tenant · `mod_customers`](../packages/dotmac-customers/src/dotmac_customers/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md) | optional module | [`audit-complete`](../packages/dotmac-deployment-control/EXTRACTION.toml) | [platform · `mod_deploy`](../packages/dotmac-deployment-control/src/dotmac_deployment_control/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-durable-timers`](../packages/dotmac-durable-timers/README.md) | optional module | [`audit-complete`](../packages/dotmac-durable-timers/EXTRACTION.toml) | [tenant+platform · `mod_timers`](../packages/dotmac-durable-timers/src/dotmac_durable_timers/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a72` | — | `dotmac_crm`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`adopted`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a6` | `>=0.1.0a68` | `dotmac_vendor_control_plane` | — |
@@ -127,6 +128,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_integrator`.
+
+### [`dotmac-customers`](../packages/dotmac-customers/README.md)
+
+- **Owner:** Tenant customer account identity, narrow profile, lifecycle, and typed Party references
+- **Contract:** Own customer account numbers, account lifecycle, display/profile attributes, and typed opaque references to Party identities. NOT person/organization identity, authentication, contact reachability, addresses, qualification, offers, prices, subscriptions, service lifecycle, billing, collections, usage, or network state.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-customers/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
 
 ### [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md)
 

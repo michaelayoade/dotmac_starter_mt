@@ -631,6 +631,24 @@ type = "directory"
 url = "packages/dotmac-connector-whatsapp"
 
 [[package]]
+name = "dotmac-customers"
+version = "0.1.0a1"
+description = "Tenant customer accounts, profiles, and party references"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-customers"
+
+[[package]]
 name = "dotmac-deployment-control"
 version = "0.1.0a1"
 description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0033 § 3)"
@@ -3053,4 +3071,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "9b1c0d362e28314bd140076528067a64c060ca275f3cbd2e8feafabd0d835e53"
+content-hash = "5dbadfa9cce99ef4db9ec3b7b9c1c1328d23e568cf72d50c53f2c6bebf48d3fe"
