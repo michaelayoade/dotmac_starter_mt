@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.1.0a1 — UNRELEASED
+## 0.1.0a1 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `75a26ab` by release run
+`32460582571`. Publication is supply-chain evidence only; it composes no
+product and moves no authority.
 
 - Extract the product-neutral position-observation and current-projection
   contract from the corrected Dotmac Sub reference implementation.
