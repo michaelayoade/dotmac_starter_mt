@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-services": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The Sub-first service-instance lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift lifecycle shadow and sole-writer cutover.",
+      "state": "never-published"
+    },
     "dotmac-qualification": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and sole-writer cutover.",

@@ -893,6 +893,24 @@ type = "directory"
 url = "packages/dotmac-service-catalog"
 
 [[package]]
+name = "dotmac-services"
+version = "0.1.0a1"
+description = "Authoritative tenant service-instance lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-services"
+
+[[package]]
 name = "dotmac-template-studio"
 version = "0.2.0a3"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
@@ -3107,4 +3125,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "a7108cd70d0a7fe6de050cd0eea0f09f687455bef2f921fb851567218fdf8226"
+content-hash = "52e93028c9aac2c4eede7159dea151163dfac73356b88fd1cba74377e1a642bf"

@@ -65,6 +65,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-qualification`](../packages/dotmac-qualification/README.md) | optional module | [`audit-complete`](../packages/dotmac-qualification/EXTRACTION.toml) | [tenant · `mod_qual`](../packages/dotmac-qualification/src/dotmac_qualification/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-service-catalog`](../packages/dotmac-service-catalog/README.md) | optional module | [`audit-complete`](../packages/dotmac-service-catalog/EXTRACTION.toml) | [tenant · `mod_svc_cat`](../packages/dotmac-service-catalog/src/dotmac_service_catalog/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
+| [`dotmac-services`](../packages/dotmac-services/README.md) | optional module | [`audit-complete`](../packages/dotmac-services/EXTRACTION.toml) | [tenant · `mod_services`](../packages/dotmac-services/src/dotmac_services/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`audit-complete`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
@@ -240,6 +241,14 @@ and the next gate.
 - **Owner:** Technical service specifications, plan families, characteristics, and eligibility-input declarations
 - **Contract:** Own provider-neutral technical service specifications, plan-family classification, characteristic definitions, and the input vocabulary a qualification decision may consume. NOT offers, prices, discounts, contracts, subscriptions, billing cycles, tax, fixed recurrence, provisioning, or qualification decisions.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-service-catalog/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-services`](../packages/dotmac-services/README.md)
+
+- **Owner:** Tenant service-instance identity and lifecycle transitions
+- **Contract:** Own service instances, their current lifecycle status and immutable transition history. Customer, specification and qualification identities are opaque references. NOT customer identity, catalogue, qualification, fulfillment, network/access enforcement, subscription contracts, usage, rating, invoicing or accounting.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-services/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_sub`.
 
