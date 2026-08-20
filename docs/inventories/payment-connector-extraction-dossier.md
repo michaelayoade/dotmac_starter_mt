@@ -12,6 +12,38 @@ ADR-0009, ADR-0018, ADR-0017
 **Evidence base:** `docs/inventories/payment-connector-sources.md`
 **Contract spec:** `docs/superpowers/specs/2026-08-14-payment-connector-and-settlement-contracts.md`
 
+## Execution amendment — 2026-08-20
+
+The historical audit below is retained as measured. Its three construction
+gates have since changed state:
+
+1. `dotmac-integration` 0.1.0a10 publishes SPI 1.3, including immutable raw
+   ingress bytes, headers, exact-byte connector verification, normalization,
+   acknowledgement ownership, declared secret bindings and deny-all-capable
+   egress declarations. The SPI gap is resolved.
+2. `dotmac_integrator` at
+   `d886e3c9956192fe1d5f085d352a516812c253c8` owns the assembly secret resolver
+   and loads declared material for the connector call without adding a
+   provider branch. The missing-owner claim in G2 is resolved.
+3. Michael's dated amendment to ADR-0017 authorizes Paystack and Flutterwave
+   connector construction. The authority is scoped to separate
+   provider-specific adapters and does not claim adoption or cutover.
+
+The first executable package is therefore
+`packages/dotmac-connector-paystack/`, whose own `EXTRACTION.toml` supersedes
+the illustrative TOML in § 3. It is deliberately INGRESS-only and deny-all on
+egress. Publication is supply-chain evidence; Sub remains authoritative until
+the recorded shadow and callback cutover retires its direct transport.
+
+Two contract ambiguities are also closed by the as-built assembly boundary.
+The Integrator delivery envelope supplies destination, scope, contract,
+receipt and idempotency context; the connector neither accepts nor derives a
+tenant or source-system identity from provider metadata. Paystack's documented
+×100 amount representation for every supported currency, including XOF, is a
+provider wire rule. Using that rule in the Paystack adapter is not the product
+currency default rejected below: currency remains mandatory on every emitted
+money value, and no connector chooses a missing currency.
+
 Every path in the TOML blocks below was confirmed to exist by `ls` / `wc -l`
 during this audit.
 

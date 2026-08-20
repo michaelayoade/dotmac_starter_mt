@@ -638,6 +638,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
     """The real entry resolves while every neighbouring lane remains refused."""
     assert set(_policy()["connectors"]) == {
         "dotmac-connector-meta-social",
+        "dotmac-connector-paystack",
         "dotmac-connector-whatsapp",
     }
     gate = _gate()
@@ -649,6 +650,7 @@ def test_the_allowlist_opens_for_only_the_proven_connector() -> None:
     }
     assert resolved_keys == {
         "dotmac-connector-meta-social": "meta_social",
+        "dotmac-connector-paystack": "paystack",
         "dotmac-connector-whatsapp": "meta_whatsapp",
     }
     for attempt in (
@@ -696,6 +698,23 @@ def test_the_meta_social_entry_resolves_through_the_release_command(
     output = capsys.readouterr().out
     assert "connector_key=meta_social" in output
     assert "tag=dotmac-connector-meta-social-v0.1.0a1" in output
+
+
+def test_the_paystack_entry_resolves_through_the_release_command(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    gate = _gate()
+    monkeypatch.setattr(
+        gate, "git_tags", lambda *_args, **_kwargs: ["dotmac-integration-v0.1.0a10"]
+    )
+    gate.cmd_resolve(
+        argparse.Namespace(distribution="dotmac-connector-paystack", version="0.1.0a1")
+    )
+    output = capsys.readouterr().out
+    assert "connector_key=paystack" in output
+    assert "tag=dotmac-connector-paystack-v0.1.0a1" in output
 
 
 def test_the_workflow_choice_matches_the_allowlist_exactly() -> None:
