@@ -211,6 +211,14 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `sites` are the eighteenth through twenty-first allocations. They remain
     # tenant-only and keep observations, editorial state, release intent and
     # local website composition as four independent owners.
+    # `inventory` and `assets` are the twenty-second and twenty-third: the
+    # tenant stock ledger (ADR-0036) and the tenant durable-unit lifecycle
+    # (ADR-0037), deliberately separate because a part in stock and a
+    # commissioned unit have different lifecycles and different writers.
+    # The nine network-suite-v1 allocations (ADR-0038) are the twenty-fourth
+    # through thirty-second. They are minted together because their first
+    # adoption is one Sub-first cohort, but each owns an independent lineage —
+    # a suite is a release cohort, not a shared namespace.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -234,6 +242,17 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "content",
         "publishing",
         "sites",
+        "inventory",
+        "assets",
+        "ipam",
+        "network_inventory",
+        "network_observability",
+        "network_topology",
+        "network_assurance",
+        "network_control",
+        "fiber_plant",
+        "network_access",
+        "pon_access",
     }
 
 
