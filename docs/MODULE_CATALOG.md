@@ -62,6 +62,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-licensing`](../packages/dotmac-licensing/README.md) | optional module | [`audit-complete`](../packages/dotmac-licensing/EXTRACTION.toml) | [platform · `mod_licensing`](../packages/dotmac-licensing/src/dotmac_licensing/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-people`](../packages/dotmac-people/README.md) | optional module | [`audit-complete`](../packages/dotmac-people/EXTRACTION.toml) | [tenant · `mod_people`](../packages/dotmac-people/src/dotmac_people/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac_backoffice` |
+| [`dotmac-qualification`](../packages/dotmac-qualification/README.md) | optional module | [`audit-complete`](../packages/dotmac-qualification/EXTRACTION.toml) | [tenant · `mod_qual`](../packages/dotmac-qualification/src/dotmac_qualification/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-service-catalog`](../packages/dotmac-service-catalog/README.md) | optional module | [`audit-complete`](../packages/dotmac-service-catalog/EXTRACTION.toml) | [tenant · `mod_svc_cat`](../packages/dotmac-service-catalog/src/dotmac_service_catalog/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
@@ -217,6 +218,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-people/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_backoffice`.
+
+### [`dotmac-qualification`](../packages/dotmac-qualification/README.md)
+
+- **Owner:** Time-bounded service eligibility evidence and qualification decisions
+- **Contract:** Own qualification cases, immutable typed evidence with observation/validity windows, and expiring eligibility decisions. Positioning and Network Access contribute observations only. NOT coordinates, topology, network reachability truth, catalogue declarations, customer identity, service lifecycle, fulfillment, or provisioning.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-qualification/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
 
 ### [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md)
 

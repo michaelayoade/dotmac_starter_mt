@@ -839,6 +839,24 @@ type = "directory"
 url = "packages/dotmac-people"
 
 [[package]]
+name = "dotmac-qualification"
+version = "0.1.0a1"
+description = "Time-bounded service qualification evidence and decisions"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-qualification"
+
+[[package]]
 name = "dotmac-release-catalog"
 version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
@@ -3089,4 +3107,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "09b1f4f78683bc98b18afa511ca323d162ce66defbf25382547495b7a3b92a91"
+content-hash = "a7108cd70d0a7fe6de050cd0eea0f09f687455bef2f921fb851567218fdf8226"

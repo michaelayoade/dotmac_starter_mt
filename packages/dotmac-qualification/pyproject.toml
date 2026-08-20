@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "dotmac-qualification"
+version = "0.1.0a1"
+description = "Time-bounded service qualification evidence and decisions"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_qualification", from = "src" }]
+include = [
+  { path = "src/dotmac_qualification/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_qualification/migrations/**/*", format = ["sdist", "wheel"] },
+]
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -462,6 +462,11 @@ packages/dotmac-service-catalog/ optional technical service catalogue
                  lineage in `mod_svc_cat`, tenant-only forced RLS, built and
                  tested here but uncomposed. Offers, prices, contracts,
                  subscriptions and fixed recurrence are excluded.
+packages/dotmac-qualification/   optional qualification-decision owner
+  src/dotmac_qualification/      time-bounded observation evidence and
+                 expiring decisions; `qu` lineage in `mod_qual`, tenant-only
+                 forced RLS, uncomposed. Positioning/network systems supply
+                 facts but never write the authoritative decision.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1318,6 +1323,7 @@ made concrete — every model has exactly one declared owner.
 | `CustomerPartyReference` | `mod_customers.customer_party_references` | `dotmac-customers` optional module | Typed opaque association to a Party identity owned elsewhere. The module never copies person/organization identity or dereferences a foreign application's database. |
 | `ServiceSpecification` / `PlanFamily` | `mod_svc_cat.service_specifications`, `mod_svc_cat.plan_families` | `dotmac-service-catalog` optional module | Provider-neutral technical catalogue identity and grouping extracted Sub-first. No offer, price, contract, subscription, billing cycle or fixed recurrence is stored. |
 | `CharacteristicDefinition` / `EligibilityInputDefinition` | `mod_svc_cat.characteristic_definitions`, `mod_svc_cat.eligibility_input_definitions` | `dotmac-service-catalog` optional module | Typed technical characteristic vocabulary and declared facts a Qualification owner may consume. They do not decide eligibility or provision network state. |
+| `QualificationCase` / `QualificationEvidence` / `QualificationDecision` | `mod_qual.qualification_cases`, `mod_qual.qualification_evidence`, `mod_qual.qualification_decisions` | `dotmac-qualification` optional module | Time-bounded observation evidence and the one expiring service-eligibility decision. Positioning and Network Access contribute facts; they do not assign the outcome or service lifecycle. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

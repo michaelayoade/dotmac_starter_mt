@@ -93,6 +93,7 @@ dotmac-people = { path = "packages/dotmac-people", develop = true }
 # deliberately uncomposed until Sub's explicit shadow/cutover programme.
 dotmac-customers = { path = "packages/dotmac-customers", develop = true }
 dotmac-service-catalog = { path = "packages/dotmac-service-catalog", develop = true }
+dotmac-qualification = { path = "packages/dotmac-qualification", develop = true }
 # Optional dual-plane timer identity and generation owner. Delivery stays in
 # the kernel outbox relay; each real adopter composes its own selected planes.
 dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = true }
@@ -184,6 +185,7 @@ module = [
     "dotmac_people.*",
     "dotmac_customers.*",
     "dotmac_service_catalog.*",
+    "dotmac_qualification.*",
     "dotmac_durable_timers.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
@@ -246,6 +248,7 @@ root_packages = [
     "dotmac_people",
     "dotmac_customers",
     "dotmac_service_catalog",
+    "dotmac_qualification",
     "dotmac_durable_timers",
     "dotmac_integration",
     "dotmac_auth_oidc",
@@ -316,6 +319,7 @@ source_modules = [
     "dotmac_people",
     "dotmac_customers",
     "dotmac_service_catalog",
+    "dotmac_qualification",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -381,6 +385,7 @@ modules = [
     "dotmac_people",
     "dotmac_customers",
     "dotmac_service_catalog",
+    "dotmac_qualification",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
@@ -431,6 +436,7 @@ forbidden_modules = [
     "dotmac_people",
     "dotmac_customers",
     "dotmac_service_catalog",
+    "dotmac_qualification",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
 ]
