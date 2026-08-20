@@ -24,6 +24,8 @@ together — which is the failure this test exists to catch.
 
 from __future__ import annotations
 
+import importlib.util
+import itertools
 import json
 import re
 import tomllib
@@ -85,6 +87,14 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # Durable timers consumes a67's relay contract, but its own namespace is
     # allocated later, so the allocation remains the effective floor.
     "dotmac-durable-timers": "0.1.0a72",
+    # Brand profiles is the ordinary case for a fourth time: `BRAND_PROFILES_
+    # MIGRATION_OWNER` and this module landed in the same a77 change, and every
+    # capability it consumes — `platform_tables` (a53), the prerequisite
+    # contract (a56), `supported_plane_sets` (a61) — predates that allocation.
+    # Its three siblings from the same ADR-0033 cohort do NOT sit here; see
+    # UNPUBLISHED_ALLOCATION_FLOORS below for why an allocation can fail to be
+    # a floor.
+    "dotmac-brand-profiles": "0.1.0a77",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -202,6 +212,36 @@ CAPABILITY_RAISED_FLOORS = {
     "dotmac-entitlement-allocation": ("0.1.0a68", "0.1.0a45"),
 }
 
+# The third rule, and the one the other two maps cannot state: a module whose
+# own allocation IS the highest thing it needs, in a kernel release that was
+# never published.
+#
+# `dotmac-release-catalog`'s entry above already records the operative test —
+# "earliest PUBLISHED", not "earliest" — but it applies it to a CAPABILITY
+# (`platform_tables`, source a53, first installable a56). These three apply it
+# to the allocation itself. Putting them in CAPABILITY_RAISED_FLOORS would
+# assert a capability raised them and none did; putting them in
+# LEDGER_ALLOCATION_RELEASES would assert `floor == allocation` and pin three
+# versions no installer can resolve. So they get a map that says the true
+# reason, which is this file's standing preference over a stretched one.
+#
+# The ADR-0033 cohort was built as four stacked pull requests, each bumping the
+# kernel to carry its own ledger row: a74 (`cg`), a75 (`li`), a76 (`dc`), a77
+# (`bp`). Only the tip is releasable — a kernel release publishes ONE version,
+# and a74..a76 exist as changelog history rather than as artifacts, exactly as
+# a53..a55 do. a77 is therefore the first installable kernel carrying any of
+# these four allocations, which makes it the floor of all four rather than of
+# the last one.
+#
+# Each value is (floor, allocation). Unlike the map above, the gap is not a
+# consumer break: no released version of these modules ever floored at a74..a76,
+# because none of them has been released at all.
+UNPUBLISHED_ALLOCATION_FLOORS = {
+    "dotmac-commercial-agreements": ("0.1.0a77", "0.1.0a74"),
+    "dotmac-licensing": ("0.1.0a77", "0.1.0a75"),
+    "dotmac-deployment-control": ("0.1.0a77", "0.1.0a76"),
+}
+
 
 def _alpha(release: str) -> int:
     """The alpha serial from `0.1.0aNN`.
@@ -259,9 +299,89 @@ def test_a_capability_raised_floor_is_above_its_allocation(
     )
 
 
+def _kernel_tag_serials() -> set[int]:
+    """Every PUBLISHED kernel alpha serial, read from immutable tags.
+
+    Reuses the publication sweep's tag reader rather than a second
+    `git tag` of its own, so "what is published" has one answer in this
+    repository. A refusal is a FAILURE, never a skip: `actions/checkout`
+    fetches no tags by default, and a tag-blind version of this test would
+    report green while comparing an empty set against everything — the exact
+    hole `test_declared_publication.py` documents having had.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "declared_publication_sweep",
+        PACKAGES.parent / "scripts" / "declared_publication_sweep.py",
+    )
+    assert spec is not None and spec.loader is not None
+    sweep = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sweep)
+    tags = sweep.git_tags()
+    serials = {
+        int(match.group(1))
+        for tag in tags
+        if (match := re.fullmatch(r"dotmac-kernel-v0\.1\.0a(\d+)", tag))
+    }
+    assert serials, (
+        "no dotmac-kernel-v0.1.0a* tag is visible, so this test would pass by "
+        "seeing nothing. Fetch tags (`git fetch --tags`) — a tag-blind run is "
+        "a hole, not a pass"
+    )
+    return serials
+
+
+@pytest.mark.parametrize(
+    ("distribution", "floors"), sorted(UNPUBLISHED_ALLOCATION_FLOORS.items())
+)
+def test_an_unpublished_allocation_rounds_up_to_the_first_installable_kernel(
+    distribution: str, floors: tuple[str, str]
+) -> None:
+    """The third rule, proven against tags rather than against prose.
+
+    Two halves, and the second is the one that matters. The first says the
+    module pins the floor. The second says the floor is honestly derived: NO
+    kernel was ever published in `[allocation, floor)`, so rounding up was
+    forced rather than chosen. Without it the map would accept any floor above
+    the allocation, which is how a module quietly acquires a floor higher than
+    it needs and stops installing on kernels that would have run it perfectly.
+    """
+    floor, allocation = floors
+    manifest = tomllib.loads(
+        (PACKAGES / distribution / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == f">={floor}"
+    assert _alpha(floor) > _alpha(allocation), (
+        f"{distribution}'s floor {floor} is not above its allocation "
+        f"{allocation}; if the allocation IS installable this row belongs in "
+        "LEDGER_ALLOCATION_RELEASES"
+    )
+    lower, upper = _alpha(allocation), _alpha(floor)
+    skipped = sorted(s for s in _kernel_tag_serials() if lower <= s < upper)
+    assert not skipped, (
+        f"{distribution} floors at {floor} but kernel 0.1.0a{skipped[0]} is "
+        f"published and already carries the {allocation} allocation — the floor "
+        "must name the FIRST installable kernel, not a later one"
+    )
+
+
 def test_a_module_has_exactly_one_floor_rule() -> None:
-    """The two maps must not overlap, or a module's floor has two answers."""
-    assert not set(LEDGER_ALLOCATION_RELEASES) & set(CAPABILITY_RAISED_FLOORS)
+    """The maps must not overlap, or a module's floor has more than one answer.
+
+    Checked pairwise rather than by summing three lengths against a set: a
+    module listed in all three would leave the totals wrong in a way that is
+    obvious, but one listed in two of three is the realistic mistake and the
+    pairwise form names which two.
+    """
+    maps = {
+        "LEDGER_ALLOCATION_RELEASES": set(LEDGER_ALLOCATION_RELEASES),
+        "CAPABILITY_RAISED_FLOORS": set(CAPABILITY_RAISED_FLOORS),
+        "UNPUBLISHED_ALLOCATION_FLOORS": set(UNPUBLISHED_ALLOCATION_FLOORS),
+    }
+    for left, right in itertools.combinations(sorted(maps), 2):
+        assert not maps[left] & maps[right], (
+            f"{sorted(maps[left] & maps[right])} is in both {left} and {right}; "
+            "a module's floor must have exactly one rule"
+        )
 
 
 def test_every_releasable_module_has_a_floor_rule() -> None:
@@ -285,7 +405,10 @@ def test_every_releasable_module_has_a_floor_rule() -> None:
     )
     assert allowlist, "the allowlist is empty; this gate would prove nothing"
     unruled = sorted(
-        allowlist - set(LEDGER_ALLOCATION_RELEASES) - set(CAPABILITY_RAISED_FLOORS)
+        allowlist
+        - set(LEDGER_ALLOCATION_RELEASES)
+        - set(CAPABILITY_RAISED_FLOORS)
+        - set(UNPUBLISHED_ALLOCATION_FLOORS)
     )
     assert not unruled, (
         f"releasable module(s) {unruled} have no floor rule — a module absent "
@@ -299,6 +422,7 @@ def test_every_releasable_module_has_a_floor_rule() -> None:
     sorted(
         {*LEDGER_ALLOCATION_RELEASES.values()}
         | {floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()}
+        | {floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()}
     ),
 )
 def test_each_allocation_release_is_documented(release: str) -> None:
@@ -320,6 +444,8 @@ def test_no_vendor_module_claims_an_upstream_train_version() -> None:
         *LEDGER_ALLOCATION_RELEASES.values(),
         *(floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()),
         *(allocation for _, allocation in CAPABILITY_RAISED_FLOORS.values()),
+        *(floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()),
+        *(allocation for _, allocation in UNPUBLISHED_ALLOCATION_FLOORS.values()),
     }
     assert floors, "no floors to check; this gate would pass for the wrong reason"
     assert floors & contested == set()
@@ -337,6 +463,11 @@ def test_the_kernel_is_at_least_every_module_floor() -> None:
         # likely to outrun the kernel: they move when a module adopts a NEW
         # kernel feature, not once when its namespace is allocated.
         *(floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()),
+        # These cannot outrun the kernel by construction — an unpublished
+        # allocation rounds UP to a published release, and the kernel is at
+        # least every release it has ever cut — but reading all three maps is
+        # what stops the assertion going quiet if a map is renamed or emptied.
+        *(floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()),
     }
     for release in floors:
         assert _alpha(declared) >= _alpha(

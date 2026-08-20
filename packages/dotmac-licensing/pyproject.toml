@@ -31,7 +31,7 @@ python = ">=3.11,<3.14"
 # `platform_audit_log.v1` in a68), so a lower floor would fail on the allocation
 # rather than on a capability — a worse error message for the same defect, since
 # the manifest raises while it is being CONSTRUCTED.
-dotmac-kernel = ">=0.1.0a75"
+dotmac-kernel = ">=0.1.0a77"
 sqlalchemy = "^2.0"
 
 [build-system]
