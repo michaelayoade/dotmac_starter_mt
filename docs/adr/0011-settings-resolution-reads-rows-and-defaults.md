@@ -93,12 +93,29 @@ that the knob is read — which is not the property anyone cares about.
   bulk paths, asserts a stored row wins, asserts the **spec default** wins over
   the environment, and asserts the environment reaches a value only by seeding.
   Includes a sensitivity proof that the patch fires.
-- `tests/architecture/test_settings_env_is_bootstrap_only.py` — no function in
-  the resolver touches the environment except `seed_settings_from_env`, which is
-  a named, single-entry allowlist. It also asserts the bootstrap *still* reads
-  it: an allowlist that stops describing reality would mean `env_var` had
-  quietly become inert and every spec declaring one was lying. Includes a
-  sensitivity proof against a planted read.
+- `tests/architecture/test_settings_env_is_bootstrap_only.py` — an AST sweep of
+  the whole settings surface (every kernel `setting*.py` plus the assembly's
+  settings feature; `test_the_swept_surface_is_the_real_one` fails if a module
+  appears on the path and not in the sweep). It resolves aliases and attribute
+  chains rather than matching source text, and visits sync definitions, async
+  definitions, class bodies and module scope. Two allowlisted readers, each with
+  its reason: `seed_settings_from_env` (this ADR's bootstrap) and
+  `_keyring_from_env` (ADR-0009 key material, which is not a setting value —
+  `settings_crypto` is swept rather than excluded so the allowance is a named
+  line rather than an unwatched module). It asserts each allowlisted reader
+  *still* reads the environment: an allowlist that stops describing reality
+  would mean `env_var` had quietly become inert, or the env keyring silently
+  dead. Ten sensitivity proofs, one per way the previous substring scan could be
+  fooled — including the false-positive direction, since a detector that flags
+  docstring prose gets its allowlist padded until it means nothing.
+- `packages/dotmac-kernel/src/dotmac_kernel/app_factory.py` —
+  `_required_setting_errors` excuses only connection-level failure
+  (`OperationalError`, `InterfaceError`, pool `TimeoutError`). Every other
+  exception is reported as a startup error, which the lifespan turns into a
+  refusal to start in production. `tests/unit/test_required_setting_startup_check.py`
+  drives both branches and proves the report never renders a bound parameter —
+  a `StatementError` stringifies with the failing SQL and its parameters, and a
+  settings seed's parameters can be a secret's value.
 
 Neither is sufficient alone, for the reason ADR-0009 gives: the runtime proof
 catches any spelling but only on paths a test drives; the static check covers
