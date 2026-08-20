@@ -25,7 +25,7 @@ same: *does a qualifying owner already exist?*
 |---|---|---|---|
 | 1 | `dotmac-commercial-agreements` | **build — product-first extraction** | Vendor `contracts/` is a qualifying implementation; no Starter owner exists |
 | 2 | `dotmac-licensing` | **build — product-first extraction** | Vendor `licensing/` is a qualifying issuer; the kernel owns only the receiver half |
-| 3 | `dotmac-deployment-control` | **build — part extraction, part evidenced greenfield** | Vendor V6 slices are a tested reference for the receipt half; the plan/rollout half has no source in any repository |
+| 3 | `dotmac-deployment-control` | **build — greenfield after inventory, with a tested reference** | Vendor V6 slices are a tested reference for the receipt half; the plan/rollout half has no source in any repository |
 | 4 | Brand / Profile | **build — product-first extraction** | Sub `BrandProfile` is a qualifying implementation; kernel `branding` is a six-key resolver, not a profile owner |
 | 5 | `dotmac-support-access` | **DO NOT BUILD** | ADR-0029 already names three owners for exactly this decision |
 | 6 | `dotmac-notifications` | **DO NOT BUILD** | ADR-0006 § 5c and three taken dossiers already placed all six of its decisions |
@@ -184,9 +184,11 @@ which is positive evidence that the V6 line was abandoned rather than merely
 pending. Under hard rule 24 this is a **tested reference implementation, not a
 production-used one**. It is the best available source and it is used as one —
 behaviour and parity tests are ported — but this inventory does not claim
-production provenance it does not have, and `EXTRACTION.toml` records `source_mode = "historical-mixed"` — the existing
-vocabulary's term for exactly this case, and deliberately not a new mode
-invented to flatter the provenance.
+production provenance it does not have, and `EXTRACTION.toml` records `source_mode = "greenfield-after-inventory"`, not
+`product-first`. Rule 24's test is a qualifying PRODUCTION-USED implementation,
+and a never-deployed branch is not one however good it is — so the reference is
+recorded in `source_paths` as material consulted, and the mode states the truth
+about provenance rather than borrowing the stronger word.
 
 `credentials.py` is ported **only** for deployment-target identity and
 possession proof. Provider credentials are out of scope by the module's own

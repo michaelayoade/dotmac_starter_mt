@@ -200,7 +200,10 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # agreement. `licensing` (ADR-0033 § 2) is the fifteenth, and its plane is a
     # SECURITY boundary rather than an absent consumer — issuance must not live
     # inside the deployment it authorises, and the receiving half already verifies
-    # offline through `dotmac_kernel.licensing`.
+    # offline through `dotmac_kernel.licensing`. `deployment_control`
+    # (ADR-0033 § 3) is the sixteenth, platform-only for a reason close to
+    # tautological: a module that decides what a FLEET should run cannot live
+    # inside one of the deployments it decides about.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -218,6 +221,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "durable_timers",
         "commercial_agreements",
         "licensing",
+        "deployment_control",
     }
 
 

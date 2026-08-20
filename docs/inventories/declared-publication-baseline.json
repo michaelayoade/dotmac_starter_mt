@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-deployment-control": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE VENDOR CP COMPOSITION. ADR-0033 s3 built this owner greenfield-after-inventory; EXTRACTION.toml is audit-complete with empty adoption_evidence and no product pins it. Unlike its siblings there is nothing to cut over FROM \u2014 the Vendor V6 slices were never merged \u2014 so adoption is a greenfield composition, and the dossier still owes two proofs a release would imply were done: the claim/proof CHECK constraints against raw SQL, and a concurrency rehearsal for the stable-verdict rule that a single-process test cannot establish. Remove this row in the release change that records the vendor control plane as the first contract consumer and deletes the two abandoned V6 branches.",
+      "state": "never-published"
+    },
     "dotmac-licensing": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL THE VENDOR CP COMPOSITION. ADR-0033 s2 built the ISSUER half product-first; EXTRACTION.toml is audit-complete with empty adoption_evidence and no product pins it. This one must not be published early for a reason the others do not share: the cutover migrates signed envelopes BYTE-FOR-BYTE (re-serialising changes the digest and invalidates the signature on every deployed licence), migrates signing keys as PUBLIC material only, and carries the revocation lists cumulative superset rule ACROSS the cutover. An installable version implies those obligations are discharged. Remove this row in the release change that records the vendor control plane as the first contract consumer.",
@@ -73,7 +78,7 @@
       "state": "never-published"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a75",
+      "declared": "0.1.0a76",
       "reason": "INTENDED UNTIL THE ADR-0033 VENDOR MODULE COHORT RELEASES. This kernel version adds one MIGRATION_OWNER_LEDGER row and no behaviour \u2014 the allocation for a module in the same change. A kernel whose only content is an allocation has no consumer until that module exists, so it is published together with the module it allocates for, not ahead of it. The module floors already pin this exact version, so releasing the kernel alone would satisfy nothing. Remove this row in the release change that tags the kernel and its module together; do NOT edit the declared version down, which would discard the allocation the number describes.",
       "state": "declared-unpublished"
     },

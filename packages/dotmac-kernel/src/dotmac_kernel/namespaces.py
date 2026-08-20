@@ -672,6 +672,30 @@ LICENSING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("licensing"),
 )
 
+# `dotmac-deployment-control` — desired deployment intent, rollout, acknowledgement
+# and reconciliation (ADR-0033 § 3). `deploy` rather than `deployment_control`
+# because the short code is the permanent physical identity and every qualified
+# name pays for its length; `dc` leaves the revision-id budget for a readable slug.
+#
+# PLATFORM PLANE ONLY, for a reason close to tautological: a module that decides
+# what a FLEET of deployments should run cannot live inside one of those
+# deployments. The deployments are separate applications that learn what to do
+# through the Integrator and report back through a signed envelope the kernel
+# verifies (ADR-0007) — never by reading this schema (ADR-0024).
+#
+# This is the one module in the ADR-0033 programme with a SPLIT provenance: the
+# receipt half ports the never-merged Vendor V6 admission design, and the
+# plan/rollout half is greenfield with the absence evidenced across every branch,
+# stash, dangling object and reflog of the Vendor repository plus seven others.
+# Its dossier records that as `historical-mixed` rather than claiming a mode it
+# cannot support.
+DEPLOYMENT_CONTROL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="deployment_control",
+    prefix="dc",
+    branch_label="deployment_control",
+    db_schema=module_schema("deploy"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -689,6 +713,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     DURABLE_TIMERS_MIGRATION_OWNER,
     COMMERCIAL_AGREEMENTS_MIGRATION_OWNER,
     LICENSING_MIGRATION_OWNER,
+    DEPLOYMENT_CONTROL_MIGRATION_OWNER,
 )
 
 

@@ -86,16 +86,18 @@ Hard rule 24 requires a qualifying production implementation, or checked-in
 evidence that none exists. Deployment control has **one of each**, so the module
 declares two source modes rather than claiming one it cannot support:
 
-- **The receipt / acknowledgement half is `historical-mixed`.** Vendor's V6 slices
+- **The receipt / acknowledgement half has a tested reference, not a source.** Vendor's V6 slices
   (`admission.py`, `admission_models.py`, `credentials.py`,
   `credential_models.py`, ~1,300 LOC with ~1,425 LOC of tests and a 723-line
   design document) are ported with their parity tests. They were **never merged
   and never deployed**, and their migration slots were subsequently reused by
   different work on Vendor `main` — so they are a *tested reference*, not a
   production-used implementation. `EXTRACTION.toml` records
-  `source_mode = "historical-mixed"` — the existing vocabulary's term for
-  exactly this, and deliberately not a new mode invented to flatter the
-  provenance. Only deployment-target
+  `source_mode = "greenfield-after-inventory"`, not `product-first`. Rule 24's
+  test is a qualifying PRODUCTION-USED implementation, and a never-deployed
+  branch is not one however good it is — so the reference is recorded in
+  `source_paths` as material consulted, and the mode states the truth about
+  provenance rather than borrowing the stronger word. Only deployment-target
   identity and possession proof are taken from `credentials.py`; provider
   credentials stay with the Integrator.
 - **The plan / rollout half is greenfield, and the absence is evidenced.** The
