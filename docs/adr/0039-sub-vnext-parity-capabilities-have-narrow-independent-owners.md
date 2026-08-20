@@ -1,4 +1,4 @@
-# ADR-0034: Sub vNext parity capabilities have narrow independent owners
+# ADR-0039: Sub vNext parity capabilities have narrow independent owners
 
 **Status:** Accepted
 **Date:** 2026-08-20

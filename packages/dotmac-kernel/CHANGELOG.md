@@ -6,6 +6,17 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a83 — UNRELEASED
+
+Allocates the independent tenant Referral lineage. No kernel behavior changes:
+one ledger row and nothing else.
+
+### Added
+
+- `REFERRALS_MIGRATION_OWNER` — `mod_referrals`, revision prefix `rf`, branch
+  label `referrals`. `dotmac-referrals` 0.1.0a1 declares the matching manifest,
+  tenant tables and root lineage in the same change (ADR-0039).
+
 ## 0.1.0a82 — UNRELEASED
 
 Allocates the eleven independent network-cohort lineages in one release

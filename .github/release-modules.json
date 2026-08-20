@@ -533,6 +533,41 @@
         ]
       }
     },
+    "dotmac-referrals": {
+      "$comment": [
+        "Tenant referral programme, invitation, attribution and conversion owner.",
+        "Product-first from Sub; Party, Customer, Lead and Billing remain opaque",
+        "collaborators. Kernel a83 allocates mod_referrals / rf / referrals."
+      ],
+      "package_dir": "packages/dotmac-referrals",
+      "import_name": "dotmac_referrals",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_referrals",
+      "tag_prefix": "dotmac-referrals-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_referrals/py.typed",
+          "dotmac_referrals/manifest.py",
+          "dotmac_referrals/contracts.py",
+          "dotmac_referrals/models.py",
+          "dotmac_referrals/service.py",
+          "dotmac_referrals/migrations/__init__.py",
+          "dotmac_referrals/migrations/versions/rf_0001_referrals.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-durable-timers": {
       "$comment": [
         "Generation-safe due work on separately selectable tenant and platform",

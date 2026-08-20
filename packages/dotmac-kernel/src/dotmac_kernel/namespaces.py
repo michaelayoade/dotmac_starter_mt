@@ -857,6 +857,17 @@ PON_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("pon"),
 )
 
+# `dotmac-referrals` — Sub's programme/code/attribution/conversion owner,
+# extracted without Party, Customer, Lead, Billing or transport persistence.
+# Tenant-only because an ISP tenant owns its referral programme and evidence;
+# no named platform-plane consumer exists (ADR-0039).
+REFERRALS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="referrals",
+    prefix="rf",
+    branch_label="referrals",
+    db_schema=module_schema("referrals"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -891,6 +902,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     FIBER_PLANT_MIGRATION_OWNER,
     NETWORK_ACCESS_MIGRATION_OWNER,
     PON_ACCESS_MIGRATION_OWNER,
+    REFERRALS_MIGRATION_OWNER,
 )
 
 
@@ -1236,6 +1248,7 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
+    "REFERRALS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

@@ -1,5 +1,5 @@
 schema_version = 1
-decision = "docs/adr/0034-sub-vnext-parity-capabilities-have-narrow-independent-owners.md"
+decision = "docs/adr/0039-sub-vnext-parity-capabilities-have-narrow-independent-owners.md"
 inventory = "docs/inventories/sub-vnext-parity-sources.md"
 
 [[capability]]

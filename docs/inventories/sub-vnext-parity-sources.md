@@ -1,7 +1,7 @@
 # Sub vNext parity capability source adjudication
 
 **As of:** 2026-08-20
-**Decision:** [ADR-0034](../adr/0034-sub-vnext-parity-capabilities-have-narrow-independent-owners.md)
+**Decision:** [ADR-0039](../adr/0039-sub-vnext-parity-capabilities-have-narrow-independent-owners.md)
 
 This is the mandatory product-first inventory for the Sub vNext parity cohort.
 Only immutable Git references were inspected; dirty working copies contributed

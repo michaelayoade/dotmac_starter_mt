@@ -12,11 +12,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DISPOSITIONS = (
-    REPO_ROOT / "docs/inventories/sub-vnext-parity-dispositions.toml"
-)
+DISPOSITIONS = REPO_ROOT / "docs/inventories/sub-vnext-parity-dispositions.toml"
 
 EXPECTED = {
     "ai_operations": ("dotmac-ai-operations", "retain"),
@@ -92,7 +89,7 @@ def test_retained_capabilities_have_audit_complete_dossiers() -> None:
         assert dossier["inventory_evidence"] == [
             "docs/inventories/sub-vnext-parity-sources.md",
             "docs/inventories/sub-vnext-parity-dispositions.toml",
-            "docs/adr/0034-sub-vnext-parity-capabilities-have-"
+            "docs/adr/0039-sub-vnext-parity-capabilities-have-"
             "narrow-independent-owners.md",
         ]
 
@@ -111,10 +108,5 @@ def test_disposition_checker_detects_a_second_fleet_owner() -> None:
             break
     assert disposition_problems(document) == [
         "closed disposition map changed: "
-        + repr(
-            {
-                row["code"]: (row["distribution"], row["disposition"])
-                for row in rows
-            }
-        )
+        + repr({row["code"]: (row["distribution"], row["disposition"]) for row in rows})
     ]
