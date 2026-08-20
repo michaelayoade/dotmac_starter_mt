@@ -54,6 +54,7 @@ on:
           - dotmac-approvals
           - dotmac-application-directory
           - dotmac-people
+          - dotmac-positioning
           - dotmac-durable-timers
           - dotmac-commercial-agreements
           - dotmac-licensing

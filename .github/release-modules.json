@@ -498,6 +498,51 @@
         ]
       }
     },
+    "dotmac-positioning": {
+      "$comment": [
+        "Tenant position-evidence owner (ADR-0039). Kernel a83 allocates",
+        "mod_pos; a83 is published and registry-verified, so the floor names an",
+        "installable artifact rather than a promise.",
+        "",
+        "Dotmac Sub is the named first adopter and cutover 1: it holds the only",
+        "qualifying source rows (field_tech_location_pings, and the position",
+        "half of field_tech_presence), and the package dossier already names it.",
+        "",
+        "This row opens the RELEASE lane only. It moves no authority. Sub still",
+        "has to compose the plane, create its own technician-to-tracked-unit",
+        "link, shadow the disposition/current/trail/grant digests, switch the",
+        "writers and retire its local position writer before adoption may be",
+        "claimed. A published artifact is not an adopted one."
+      ],
+      "package_dir": "packages/dotmac-positioning",
+      "import_name": "dotmac_positioning",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_pos",
+      "tag_prefix": "dotmac-positioning-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_positioning/py.typed",
+          "dotmac_positioning/manifest.py",
+          "dotmac_positioning/contracts.py",
+          "dotmac_positioning/models.py",
+          "dotmac_positioning/service.py",
+          "dotmac_positioning/migrations/__init__.py",
+          "dotmac_positioning/migrations/versions/po_0001_positioning.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
     "dotmac-people": {
       "$comment": [
         "Tenant employment-directory owner extracted product-first from ERP.",
