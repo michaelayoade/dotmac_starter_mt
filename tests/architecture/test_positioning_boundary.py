@@ -77,7 +77,7 @@ def test_positioning_decision_and_inventory_are_authoritative_and_indexed() -> N
 def test_positioning_is_a_named_module_destination_and_resource_owner() -> None:
     matrix = MATRIX.read_text(encoding="utf-8")
     row = re.search(
-        r"^\|\s*positioning\s*\|(?:\s*\d+\s*\|){6}([^|]*)\|\s*$",
+        r"^\|\s*positioning\s*\|(?:\s*\d+\s*\|){7}([^|]*)\|\s*$",
         matrix,
         re.MULTILINE,
     )
