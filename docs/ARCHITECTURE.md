@@ -472,6 +472,10 @@ packages/dotmac-services/        optional service-instance lifecycle owner
                  history; `sv` lineage in `mod_services`, tenant-only forced
                  RLS, uncomposed. Customer, catalogue and qualification
                  identities remain opaque; enforcement and billing stay out.
+packages/dotmac-usage/           optional normalized usage-fact owner
+  src/dotmac_usage/              immutable observations, append-only corrections
+                 and rebuildable aggregates; `us` lineage in `mod_usage`,
+                 tenant-only forced RLS, uncomposed. Raw AAA and rating stay out.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1330,6 +1334,7 @@ made concrete — every model has exactly one declared owner.
 | `CharacteristicDefinition` / `EligibilityInputDefinition` | `mod_svc_cat.characteristic_definitions`, `mod_svc_cat.eligibility_input_definitions` | `dotmac-service-catalog` optional module | Typed technical characteristic vocabulary and declared facts a Qualification owner may consume. They do not decide eligibility or provision network state. |
 | `QualificationCase` / `QualificationEvidence` / `QualificationDecision` | `mod_qual.qualification_cases`, `mod_qual.qualification_evidence`, `mod_qual.qualification_decisions` | `dotmac-qualification` optional module | Time-bounded observation evidence and the one expiring service-eligibility decision. Positioning and Network Access contribute facts; they do not assign the outcome or service lifecycle. |
 | `ServiceInstance` / `ServiceLifecycleEvent` | `mod_services.service_instances`, `mod_services.service_lifecycle_events` | `dotmac-services` optional module | One tenant service identity, current lifecycle state and immutable transition history. Customer/catalogue/qualification identifiers are opaque; fulfillment, access enforcement, subscriptions, rating and billing remain outside. |
+| `UsageObservation` / `UsageCorrection` / `UsageAggregate` | `mod_usage.usage_observations`, `mod_usage.usage_corrections`, `mod_usage.usage_aggregates` | `dotmac-usage` optional module | Normalized immutable meter facts, append-only corrections and rebuildable projections. Raw AAA remains an upstream collector concern; tariff selection, monetary rating, invoices and ledgers remain outside. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

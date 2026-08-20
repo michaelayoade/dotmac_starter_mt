@@ -964,6 +964,24 @@ type = "directory"
 url = "packages/dotmac-ui"
 
 [[package]]
+name = "dotmac-usage"
+version = "0.1.0a1"
+description = "Normalized usage observations, corrections, and projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-usage"
+
+[[package]]
 name = "email-validator"
 version = "2.3.0"
 description = "A robust email address syntax and deliverability validation library."
@@ -3125,4 +3143,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "52e93028c9aac2c4eede7159dea151163dfac73356b88fd1cba74377e1a642bf"
+content-hash = "498d6b2129973d465afff96b4bc240a7bd557388181f70efa17137039ce6f421"

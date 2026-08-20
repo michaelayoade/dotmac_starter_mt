@@ -69,6 +69,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`audit-complete`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
+| [`dotmac-usage`](../packages/dotmac-usage/README.md) | optional module | [`audit-complete`](../packages/dotmac-usage/EXTRACTION.toml) | [tenant · `mod_usage`](../packages/dotmac-usage/src/dotmac_usage/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 
 ## Contracts and ownership
 
@@ -275,3 +276,11 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-ui/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`.
 - **Candidate consumers:** `dotmac_crm`.
+
+### [`dotmac-usage`](../packages/dotmac-usage/README.md)
+
+- **Owner:** Normalized service-usage facts, corrections and rebuildable aggregates
+- **Contract:** Own normalized meter observations deduplicated by source event, append-only corrections, and rebuildable window aggregates. Service identity is opaque. NOT raw AAA/RADIUS packet/session authority, service lifecycle, tariff selection, monetary rating, invoicing, tax or accounting.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-usage/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
