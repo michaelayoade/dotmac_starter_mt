@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-positioning"
+version = "0.1.0a1"
+description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_positioning", from = "src" }]
+include = [
+    { path = "src/dotmac_positioning/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_positioning/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

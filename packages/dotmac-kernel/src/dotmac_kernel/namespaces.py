@@ -857,6 +857,19 @@ PON_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("pon"),
 )
 
+# `dotmac-positioning` — the thirty-third allocated installable module. It owns
+# provider-neutral position observations and nothing that follows from them
+# (ADR-0039). `positioning` stays explicit in live catalogs; `po` keeps the
+# lineage's revision ids compact. Assets owns a durable unit's authoritative
+# location, product owners decide geofence/SLA/dispatch consequences, and
+# Integrator owns provider transport — none of those move here.
+POSITIONING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="positioning",
+    prefix="po",
+    branch_label="positioning",
+    db_schema=module_schema("pos"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -891,6 +904,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     FIBER_PLANT_MIGRATION_OWNER,
     NETWORK_ACCESS_MIGRATION_OWNER,
     PON_ACCESS_MIGRATION_OWNER,
+    POSITIONING_MIGRATION_OWNER,
 )
 
 

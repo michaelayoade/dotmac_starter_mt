@@ -219,6 +219,10 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # through thirty-second. They are minted together because their first
     # adoption is one Sub-first cohort, but each owns an independent lineage —
     # a suite is a release cohort, not a shared namespace.
+    # `positioning` is the thirty-third: provider-neutral position observations
+    # and nothing that follows from them (ADR-0039). It is NOT part of the
+    # network cohort above — Assets keeps a durable unit's authoritative
+    # location, so the two are separate owners rather than one.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -253,6 +257,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "fiber_plant",
         "network_access",
         "pon_access",
+        "positioning",
     }
 
 

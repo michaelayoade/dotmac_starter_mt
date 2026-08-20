@@ -547,6 +547,17 @@ packages/dotmac-pon-access/      network-suite-v1: OLT/ONT commissioning,
                  opaquely. BUILT AND TESTED HERE AS ONE COHORT, NOT COMPOSED
                  by this reference assembly and not released before Sub's
                  first-authority cutover (ADR-0038).
+packages/dotmac-positioning/     optional tenant position-evidence owner
+  pyproject.toml                 distribution dotmac-positioning;
+  EXTRACTION.toml                audit-complete, no adopter yet (ADR-0039)
+  src/dotmac_positioning/        provider-neutral position observations,
+                 tracked-unit identity and derived motion/stop facts; manifest
+                 plus independent `po` lineage in schema `mod_pos`. Tenant
+                 plane only and forced RLS. BUILT AND TESTED HERE, NOT COMPOSED
+                 by this reference assembly. Deliberately NOT part of the
+                 network suite: Assets owns a durable unit's AUTHORITATIVE
+                 location, positioning only observes, and the adopting product
+                 keeps every geofence, SLA, dispatch and billing consequence.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -569,6 +580,23 @@ app/                             the reference assembly
 templates/       Jinja templates for the admin portal (see "Admin portal" below)
 static/          Tailwind v4 CSS + vendored htmx/Alpine JS for the portal
 ```
+
+### Position evidence stops at the observation (ADR-0039)
+
+`dotmac-positioning` is deliberately NOT part of the network suite, and the
+boundary is the reason it exists as its own owner: an observation is not a
+decision, and a coordinate is not a consequence. Products own consequences.
+
+| Contract surface | Owner | Non-owner boundary |
+|---|---|---|
+| Position observations and projections | `dotmac-positioning` (`mod_pos`, tenant plane only) | Owns no vehicle lifecycle, work-order lifecycle, attendance consequence, provider transport or map presentation |
+| A durable unit's AUTHORITATIVE location | `dotmac-assets` | Reads no observation; positioning never overwrites it — a product asks the asset owner to move it when policy permits |
+| Subject links, applicability, policy and every business consequence — geofence action, SLA, dispatch, billing | the adopting product (Sub is cutover 1, ERP cutover 2) | Imports no positioning persistence; links a local subject to an opaque tracked-unit id |
+| Static plant, GIS and map coordinates | `dotmac-fiber-plant`, `dotmac-network-inventory`, `dotmac-network-topology` | Carrying a coordinate does not make state position evidence; these are fixed infrastructure, not tracked units |
+
+Consent is part of the evidence, not the product: `collection_grants` carries
+purpose, expiry and revocation, so a tracked unit whose grant lapsed stops
+being observable without the product having to remember.
 
 Core never imports `app/features` (import-linter contract). Features never
 import each other (import-linter contract). Cross-feature references are

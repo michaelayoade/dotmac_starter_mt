@@ -63,8 +63,8 @@
   ],
   "unpublished": {
     "dotmac-kernel": {
-      "declared": "0.1.0a82",
-      "reason": "AUTHORIZED NETWORK COHORT ALLOCATION, ON TOP OF TWO PUBLISHED ONES. a77 owns the vendor allocations and a81 is now registry-verified and tagged as the marketing cohort's first installable kernel; neither can be repointed. a82 therefore mints the eleven network-cohort rows together \u2014 inventory, assets, ipam, network inventory, network observability, network topology, network assurance, network control, fiber plant, network access and PON access. One kernel workflow publishes only the tip, so a82 is the first installable kernel carrying all three cohorts and every module named here floors there. Keep this row until the exact protected-main a82 artifact is registry-verified and tagged; remove it with the post-release record, never by editing the declared version down.",
+      "declared": "0.1.0a83",
+      "reason": "AUTHORIZED POSITIONING ALLOCATION, ON TOP OF THE NETWORK AND MARKETING ONES. a77 owns the vendor allocations and a81 is registry-verified as the marketing cohort's first installable kernel; a82 mints the eleven network-cohort rows and is on main but not yet tagged. a83 adds the twelfth and last of this sequence, `positioning` (schema mod_pos, prefix po). It takes its own number rather than growing a82, because a82's changelog entry already states what it allocated and a record that describes content it never carried is worse than an extra unpublished number. One kernel workflow publishes only the tip, so a83 is the first installable kernel carrying every allocation above and each module floors at the release that minted its own row. Keep this row until the exact protected-main a83 artifact is registry-verified and tagged; remove it with the post-release record, never by editing the declared version down.",
       "state": "previous-version-published"
     },
     "dotmac-campaigns": {
@@ -135,6 +135,11 @@
     "dotmac-pon-access": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns PON terminals, service ports and optical evidence (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-positioning": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL A NAMED FIRST ADOPTER. This package owns provider-neutral position observations and nothing that follows from them (ADR-0039); it is built and gate-proven here and floors on the kernel a83 allocation that mints its lineage. It is deliberately NOT release-allowlisted: no product composes it, Assets keeps a durable unit's authoritative location, and the adopting product keeps every geofence, SLA, dispatch and billing consequence \u2014 publishing before a real adopter exists is the speculative extraction ADR-0006 section 5 refuses. Remove this row only in the release change that adds the allowlist entry and records that adopter with exact pins; never by editing the declared version down.",
       "state": "never-published"
     }
   }

@@ -6,6 +6,21 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a83 — UNRELEASED
+
+Allocates the tenant positioning lineage (ADR-0039). Physical namespace
+identity only; every positioning behaviour stays in the optional module, and
+the reference assembly composes none of it.
+
+Its own number rather than a twelfth row in a82: a82 is already on `main` and
+its entry states what it allocated, so growing it would make a published record
+describe content it never carried — even though neither version is tagged yet.
+
+### Added
+
+- `POSITIONING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_pos`,
+  revision prefix `po`, and branch label `positioning`.
+
 ## 0.1.0a82 — UNRELEASED
 
 Allocates the eleven independent network-cohort lineages in one release

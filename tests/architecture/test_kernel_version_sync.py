@@ -119,6 +119,10 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-fiber-plant": "0.1.0a82",
     "dotmac-network-access": "0.1.0a82",
     "dotmac-pon-access": "0.1.0a82",
+    # Positioning is the ordinary case once more: a83 allocates `pos`/`po` and
+    # every capability it consumes — `requires` (a56), the two prerequisite
+    # names — predates that allocation, so the ledger row alone sets the floor.
+    "dotmac-positioning": "0.1.0a83",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

@@ -190,12 +190,13 @@ tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 | notifications-comms | 7 | 14 | 18 | 1 | 0 | 11 | 1 | kernel (consent + outbox) + module ← Sub; Mkt copy retires |
 | content-publishing | 0 | 0 | 0 | 4 | 0 | 0 | 0 | `dotmac-content` + `dotmac-publishing` ← Mkt |
 | marketing-observations | 0 | 0 | 0 | 5 | 0 | 0 | 0 | `dotmac-media-observations` + `dotmac-web-analytics` ← Mkt |
-| engagement-inbox | 0 | 28 | 29 | 0 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
+| engagement-inbox | 0 | 27 | 29 | 0 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
 | sales-agreements | 7 | 13 | 24 | 0 | 2 | 8 | 2 | consolidate CRM → Sub, then module ← Sub; vendor rows are a distinct module ← vendor CP (A2(a), ruled 2026-08-12) |
 | commercial-offers | 0 | 0 | 2 | 0 | 1 | 1 | 0 | module source **unassigned** (Sub or vendor CP) — A2 |
 | billing-revenue | 12 | 3 | 74 | 8 | 0 | 4 | 0 | module ← Sub + contract with ERP; Mkt's inherited copy retires |
 | outside-plant | 0 | 33 | 94 | 0 | 0 | 30 | 0 | consolidate → Sub, then module ← Sub |
-| field-workforce | 10 | 26 | 38 | 0 | 0 | 15 | 0 | consolidate → Sub, then module ← Sub |
+| field-workforce | 10 | 24 | 36 | 0 | 0 | 13 | 0 | consolidate → Sub, then module ← Sub |
+| positioning | 0 | 3 | 2 | 0 | 0 | 2 | 0 | `dotmac-positioning`; Sub cutover 1, ERP cutover 2 |
 | geospatial-qualification | 2 | 6 | 11 | 0 | 0 | 5 | 0 | consolidate → Sub, then module ← Sub |
 | subscriber-service | 2 | 9 | 74 | 3 | 0 | 5 | 0 | consolidate → Sub, then module ← Sub; Mkt's inherited copy retires |
 | network-operations | 3 | 2 | 72 | 0 | 0 | 1 | 0 | module ← Sub |
