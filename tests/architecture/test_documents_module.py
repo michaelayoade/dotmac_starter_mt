@@ -79,8 +79,8 @@ def test_document_identity_does_not_duplicate_file_or_domain_ownership() -> None
         "subscriber_id",
     }
     for model in models.ALL_MODELS:
-        assert not (set(model.__table__.columns) & forbidden)
-    version_columns = set(models.DocumentVersion.__table__.columns)
+        assert not (set(model.__table__.columns.keys()) & forbidden)
+    version_columns = set(models.DocumentVersion.__table__.columns.keys())
     assert {
         "file_id",
         "checksum_sha256",

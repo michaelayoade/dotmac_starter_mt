@@ -719,23 +719,164 @@ def _create_evidence() -> None:
 
 
 def _install_security() -> None:
-    for table in _TABLES:
-        op.execute(f"ALTER TABLE mod_expenses.{table} ENABLE ROW LEVEL SECURITY;")
-        op.execute(f"ALTER TABLE mod_expenses.{table} FORCE ROW LEVEL SECURITY;")
-        op.execute(
-            f"""
-            CREATE POLICY {table}_tenant_isolation
-                ON mod_expenses.{table}
-                USING (tenant_id = current_setting('app.current_tenant', true)::uuid)
-                WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);
-            """
-        )
-        op.execute(
-            f"GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.{table} TO app_user;"
-        )
-        op.execute(
-            f"GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.{table} TO app_admin;"
-        )
+    op.execute("ALTER TABLE mod_expenses.expense_categories ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_expenses.expense_categories FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY expense_categories_tenant_isolation "
+        "ON mod_expenses.expense_categories "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_categories TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_categories TO app_admin;"
+    )
+    op.execute("ALTER TABLE mod_expenses.expense_policies ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_expenses.expense_policies FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY expense_policies_tenant_isolation "
+        "ON mod_expenses.expense_policies "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_policies TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_policies TO app_admin;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_policy_rules ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_policy_rules FORCE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "CREATE POLICY expense_policy_rules_tenant_isolation "
+        "ON mod_expenses.expense_policy_rules "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_policy_rules TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_policy_rules TO app_admin;"
+    )
+    op.execute("ALTER TABLE mod_expenses.expense_requests ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_expenses.expense_requests FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY expense_requests_tenant_isolation "
+        "ON mod_expenses.expense_requests "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_requests TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_requests TO app_admin;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_request_lines ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_request_lines FORCE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "CREATE POLICY expense_request_lines_tenant_isolation "
+        "ON mod_expenses.expense_request_lines "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_request_lines TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_request_lines TO app_admin;"
+    )
+    op.execute("ALTER TABLE mod_expenses.expense_claims ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_expenses.expense_claims FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY expense_claims_tenant_isolation "
+        "ON mod_expenses.expense_claims "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_claims TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_claims TO app_admin;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_claim_lines ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute("ALTER TABLE mod_expenses.expense_claim_lines FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY expense_claim_lines_tenant_isolation "
+        "ON mod_expenses.expense_claim_lines "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_claim_lines TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_claim_lines TO app_admin;"
+    )
+    op.execute("ALTER TABLE mod_expenses.expense_receipts ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_expenses.expense_receipts FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY expense_receipts_tenant_isolation "
+        "ON mod_expenses.expense_receipts "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_receipts TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_receipts TO app_admin;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_policy_evaluations ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_policy_evaluations FORCE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "CREATE POLICY expense_policy_evaluations_tenant_isolation "
+        "ON mod_expenses.expense_policy_evaluations "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_policy_evaluations TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_policy_evaluations TO app_admin;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_lifecycle_events ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_expenses.expense_lifecycle_events FORCE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "CREATE POLICY expense_lifecycle_events_tenant_isolation "
+        "ON mod_expenses.expense_lifecycle_events "
+        "USING (tenant_id = current_setting('app.current_tenant', true)::uuid) "
+        "WITH CHECK (tenant_id = current_setting('app.current_tenant', true)::uuid);"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_lifecycle_events TO app_user;"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_expenses.expense_lifecycle_events TO app_admin;"
+    )
     op.execute(
         "REVOKE UPDATE, DELETE ON mod_expenses.expense_policy_evaluations FROM app_user;"
     )

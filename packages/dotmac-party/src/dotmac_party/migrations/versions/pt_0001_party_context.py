@@ -418,24 +418,68 @@ def upgrade() -> None:
         schema=_SCHEMA,
     )
 
-    for table in (
-        "party_roles",
-        "party_relationships",
-        "party_memberships",
-        "party_contact_points",
-        "party_external_references",
-    ):
-        op.execute(f"ALTER TABLE mod_party.{table} ENABLE ROW LEVEL SECURITY;")
-        op.execute(f"ALTER TABLE mod_party.{table} FORCE ROW LEVEL SECURITY;")
-        op.execute(
-            f"CREATE POLICY {table}_tenant_isolation ON mod_party.{table} "
-            "USING (tenant_id = public.app_current_tenant_id()) "
-            "WITH CHECK (tenant_id = public.app_current_tenant_id());"
-        )
-        op.execute(
-            f"GRANT SELECT, INSERT, UPDATE, DELETE "
-            f"ON mod_party.{table} TO app_user;"
-        )
+    op.execute("ALTER TABLE mod_party.party_roles ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_party.party_roles FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY party_roles_tenant_isolation ON mod_party.party_roles "
+        "USING (tenant_id = public.app_current_tenant_id()) "
+        "WITH CHECK (tenant_id = public.app_current_tenant_id());"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_party.party_roles TO app_user;"
+    )
+    op.execute("ALTER TABLE mod_party.party_relationships ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_party.party_relationships FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY party_relationships_tenant_isolation "
+        "ON mod_party.party_relationships "
+        "USING (tenant_id = public.app_current_tenant_id()) "
+        "WITH CHECK (tenant_id = public.app_current_tenant_id());"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE "
+        "ON mod_party.party_relationships TO app_user;"
+    )
+    op.execute("ALTER TABLE mod_party.party_memberships ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_party.party_memberships FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY party_memberships_tenant_isolation "
+        "ON mod_party.party_memberships "
+        "USING (tenant_id = public.app_current_tenant_id()) "
+        "WITH CHECK (tenant_id = public.app_current_tenant_id());"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE "
+        "ON mod_party.party_memberships TO app_user;"
+    )
+    op.execute("ALTER TABLE mod_party.party_contact_points ENABLE ROW LEVEL SECURITY;")
+    op.execute("ALTER TABLE mod_party.party_contact_points FORCE ROW LEVEL SECURITY;")
+    op.execute(
+        "CREATE POLICY party_contact_points_tenant_isolation "
+        "ON mod_party.party_contact_points "
+        "USING (tenant_id = public.app_current_tenant_id()) "
+        "WITH CHECK (tenant_id = public.app_current_tenant_id());"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE "
+        "ON mod_party.party_contact_points TO app_user;"
+    )
+    op.execute(
+        "ALTER TABLE mod_party.party_external_references ENABLE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "ALTER TABLE mod_party.party_external_references FORCE ROW LEVEL SECURITY;"
+    )
+    op.execute(
+        "CREATE POLICY party_external_references_tenant_isolation "
+        "ON mod_party.party_external_references "
+        "USING (tenant_id = public.app_current_tenant_id()) "
+        "WITH CHECK (tenant_id = public.app_current_tenant_id());"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE "
+        "ON mod_party.party_external_references TO app_user;"
+    )
 
 
 def downgrade() -> None:

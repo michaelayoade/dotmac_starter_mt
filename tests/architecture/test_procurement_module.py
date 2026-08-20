@@ -179,4 +179,4 @@ def test_lineage_gate_refuses_an_assembly_without_prerequisite_bindings() -> Non
         bindings=(),
     )
     assert not report.ok
-    assert any("unbound requirement" in violation for violation in report.violations)
+    assert any("binds no provider" in violation for violation in report.violations)

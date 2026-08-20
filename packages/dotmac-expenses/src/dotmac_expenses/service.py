@@ -317,7 +317,15 @@ def publish_policy(
         return policy
     if policy.status != PolicyStatus.DRAFT:
         raise InvalidLifecycle("only a draft policy revision can be published")
-    if not policy.rules:
+    rule_count = db.scalar(
+        select(func.count())
+        .select_from(ExpensePolicyRule)
+        .where(
+            ExpensePolicyRule.tenant_id == scope.tenant_id,
+            ExpensePolicyRule.policy_id == policy.id,
+        )
+    )
+    if not rule_count:
         raise InvalidLifecycle("a policy needs at least one rule before publication")
     end = policy.effective_to or date.max
     overlap = db.scalar(
@@ -849,7 +857,7 @@ def attach_receipt(
     )
     try:
         with _conflict_scope(db):
-            db.add(row)
+            line.receipts.append(row)
             db.flush()
     except IntegrityError as exc:
         raise Conflict(

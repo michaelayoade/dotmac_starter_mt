@@ -668,7 +668,7 @@ def upgrade() -> None:
         CREATE FUNCTION mod_accounting.protect_fiscal_year_overlap()
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         BEGIN
-          PERFORM pg_advisory_xact_lock(hashtextextended(NEW.tenant_id::text || ':fiscal-years', 0));
+          PERFORM pg_advisory_xact_lock(hashtextextended(NEW.tenant_id::text || '|fiscal-years', 0));
           IF EXISTS (
             SELECT 1 FROM mod_accounting.fiscal_years existing
             WHERE existing.tenant_id=NEW.tenant_id
@@ -693,7 +693,7 @@ def upgrade() -> None:
         CREATE FUNCTION mod_accounting.protect_fiscal_period_overlap()
         RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         BEGIN
-          PERFORM pg_advisory_xact_lock(hashtextextended(NEW.tenant_id::text || ':periods:' || NEW.fiscal_year_id::text, 0));
+          PERFORM pg_advisory_xact_lock(hashtextextended(NEW.tenant_id::text || '|periods|' || NEW.fiscal_year_id::text, 0));
           IF EXISTS (
             SELECT 1 FROM mod_accounting.fiscal_periods existing
             WHERE existing.tenant_id=NEW.tenant_id

@@ -67,7 +67,7 @@ def test_records_module_foreign_keys_carry_tenant_scope() -> None:
 
 
 def test_record_snapshot_uses_opaque_source_and_file_references() -> None:
-    columns = set(models.Record.__table__.columns)
+    columns = set(models.Record.__table__.columns.keys())
     assert {
         "source_owner",
         "source_type",
@@ -90,7 +90,7 @@ def test_record_snapshot_uses_opaque_source_and_file_references() -> None:
         "provider_code",
     }
     for model in models.ALL_MODELS:
-        assert not (set(model.__table__.columns) & forbidden)
+        assert not (set(model.__table__.columns.keys()) & forbidden)
 
 
 def test_migration_creates_rls_and_immutable_evidence_in_one_revision() -> None:

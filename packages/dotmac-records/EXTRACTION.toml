@@ -47,8 +47,8 @@ preserved_tests = [
 contract_consumers = []
 candidate_consumers = ["dotmac_erp", "dotmac_sub"]
 inventory_evidence = [
-  "dotmac_starter_mt:docs/inventories/documents-records-sources.md",
-  "dotmac_starter_mt:docs/adr/0049-documents-own-controlled-versions-records-own-declared-evidence.md",
+  "docs/inventories/documents-records-sources.md",
+  "docs/adr/0049-documents-own-controlled-versions-records-own-declared-evidence.md",
 ]
 composition_boundary = "ADR-0024/0033: each product installs its own tenant-only re lineage. Records imports the kernel but no Documents/Files/Approvals/Timers/product package. Sources arrive as typed opaque snapshots and versioned observations; outputs are timer requests, disposition decisions and exact Files authorizations. No cross-application database, module FK or fallback writer."
 first_cutover = "ERP is the first declaration candidate because its HR and finance attachment surfaces create the clearest compliance demand, but only after a checked-in writer inventory identifies every current retention/deletion/hold path. Sub follows as independent reuse proof. No existing product is credited as a qualifying implementation source."

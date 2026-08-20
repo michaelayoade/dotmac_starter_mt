@@ -37,7 +37,7 @@ from dotmac_analytics.models import (
 )
 from dotmac_kernel.idempotency_models import IdempotencyRecord
 from dotmac_kernel.models import Base, Tenant
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -373,11 +373,15 @@ def test_rebuild_repairs_projection_drift_and_records_evidence(
 
 
 def test_service_never_commits_or_rolls_back(
-    db: Session, declarations: MetricDeclarationRegistry
+    db: Session,
+    declarations: MetricDeclarationRegistry,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[str] = []
-    event.listen(db, "after_commit", lambda session: calls.append("commit"))
-    event.listen(db, "after_rollback", lambda session: calls.append("rollback"))
+    def forbidden_boundary() -> None:
+        raise AssertionError("the service must not own the transaction boundary")
+
+    monkeypatch.setattr(db, "commit", forbidden_boundary)
+    monkeypatch.setattr(db, "rollback", forbidden_boundary)
     record_batch(db, command=_command(), declarations=declarations)
     rebuild_projection(
         db,
@@ -385,4 +389,3 @@ def test_service_never_commits_or_rolls_back(
         rebuilt_by="test",
         rebuilt_at=START + timedelta(days=3),
     )
-    assert calls == []

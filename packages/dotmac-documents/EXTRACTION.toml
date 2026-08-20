@@ -49,8 +49,8 @@ preserved_tests = [
 contract_consumers = []
 candidate_consumers = ["dotmac_erp", "dotmac_sub"]
 inventory_evidence = [
-  "dotmac_starter_mt:docs/inventories/documents-records-sources.md",
-  "dotmac_starter_mt:docs/adr/0049-documents-own-controlled-versions-records-own-declared-evidence.md",
+  "docs/inventories/documents-records-sources.md",
+  "docs/adr/0049-documents-own-controlled-versions-records-own-declared-evidence.md",
 ]
 composition_boundary = "ADR-0024/0033: each product installs its own tenant-only do lineage. Documents imports the kernel but no sibling/product. Assemblies pass opaque Files ids/checksums, approval observations and timer requests across typed seams; Records may consume a Documents version only as an opaque source snapshot, never by FK or ORM import."
 first_cutover = "ERP after its E8 tenant/session/lineage gate: HR handbook is the first coherent slice because it is the qualifying source and already has version/effective-date/acknowledgement demand. Sub follows with controlled legal documents after the exact release is proven in ERP; quote business meaning and rendering stay in Sub."

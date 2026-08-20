@@ -1185,7 +1185,7 @@ def _install_rls_and_grants() -> None:
         "CREATE POLICY receipt_observations_tenant_isolation ON mod_procurement.receipt_observations USING (tenant_id = public.app_current_tenant_id()) WITH CHECK (tenant_id = public.app_current_tenant_id());"
     )
     op.execute(
-        "GRANT SELECT, INSERT ON mod_procurement.receipt_observations TO app_user;"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_procurement.receipt_observations TO app_user;"
     )
     op.execute(
         "ALTER TABLE mod_procurement.procurement_evidence ENABLE ROW LEVEL SECURITY;"
@@ -1197,7 +1197,7 @@ def _install_rls_and_grants() -> None:
         "CREATE POLICY procurement_evidence_tenant_isolation ON mod_procurement.procurement_evidence USING (tenant_id = public.app_current_tenant_id()) WITH CHECK (tenant_id = public.app_current_tenant_id());"
     )
     op.execute(
-        "GRANT SELECT, INSERT ON mod_procurement.procurement_evidence TO app_user;"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON mod_procurement.procurement_evidence TO app_user;"
     )
     op.execute(
         "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA mod_procurement TO app_admin;"
