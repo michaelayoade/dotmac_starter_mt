@@ -140,6 +140,25 @@ dotmac-referrals = { path = "packages/dotmac-referrals", develop = true }
 # Tenant-only reseller identity, hierarchy and delegated-authority owner
 # extracted from Sub. The reference assembly proves but does not compose `rm`.
 dotmac-reseller-management = { path = "packages/dotmac-reseller-management", develop = true }
+# ERP/Backoffice/general publication-prep cohort. These distributions are built
+# and governed here, but remain uncomposed and release-unallowlisted until an
+# exact-pin product adopter and exact-commit Observer proof exist for each one.
+dotmac-accounting = { path = "packages/dotmac-accounting", develop = true }
+dotmac-analytics = { path = "packages/dotmac-analytics", develop = true }
+dotmac-banking = { path = "packages/dotmac-banking", develop = true }
+dotmac-documents = { path = "packages/dotmac-documents", develop = true }
+dotmac-expenses = { path = "packages/dotmac-expenses", develop = true }
+dotmac-finance = { path = "packages/dotmac-finance", develop = true }
+dotmac-inbox = { path = "packages/dotmac-inbox", develop = true }
+dotmac-party = { path = "packages/dotmac-party", develop = true }
+dotmac-payables = { path = "packages/dotmac-payables", develop = true }
+dotmac-payroll = { path = "packages/dotmac-payroll", develop = true }
+dotmac-procurement = { path = "packages/dotmac-procurement", develop = true }
+dotmac-projects = { path = "packages/dotmac-projects", develop = true }
+dotmac-records = { path = "packages/dotmac-records", develop = true }
+dotmac-surveys = { path = "packages/dotmac-surveys", develop = true }
+dotmac-tax = { path = "packages/dotmac-tax", develop = true }
+dotmac-work-orders = { path = "packages/dotmac-work-orders", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -241,6 +260,22 @@ module = [
     "dotmac_sites.*",
     "dotmac_referrals.*",
     "dotmac_reseller_management.*",
+    "dotmac_accounting.*",
+    "dotmac_analytics.*",
+    "dotmac_banking.*",
+    "dotmac_documents.*",
+    "dotmac_expenses.*",
+    "dotmac_finance.*",
+    "dotmac_inbox.*",
+    "dotmac_party.*",
+    "dotmac_payables.*",
+    "dotmac_payroll.*",
+    "dotmac_procurement.*",
+    "dotmac_projects.*",
+    "dotmac_records.*",
+    "dotmac_surveys.*",
+    "dotmac_tax.*",
+    "dotmac_work_orders.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -321,6 +356,22 @@ root_packages = [
     "dotmac_sites",
     "dotmac_referrals",
     "dotmac_reseller_management",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
 ]
 
 [[tool.importlinter.contracts]]
@@ -405,6 +456,22 @@ source_modules = [
     "dotmac_sites",
     "dotmac_referrals",
     "dotmac_reseller_management",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
 ]
 forbidden_modules = ["app"]
 
@@ -486,6 +553,22 @@ modules = [
     "dotmac_sites",
     "dotmac_referrals",
     "dotmac_reseller_management",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -548,6 +631,22 @@ forbidden_modules = [
     "dotmac_content",
     "dotmac_publishing",
     "dotmac_sites",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
     "dotmac_auth_oidc",
 ]
 

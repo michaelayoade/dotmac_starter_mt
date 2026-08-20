@@ -617,6 +617,80 @@ Consent is part of the evidence, not the product: `collection_grants` carries
 purpose, expiry and revocation, so a tracked unit whose grant lapsed stops
 being observable without the product having to remember.
 
+### ERP / Backoffice / general publication-prep ownership map
+
+The following tenant-only packages are as-built in this repository at
+`0.1.0a1`, allocated by unpublished kernel `0.1.0a85`, and deliberately not
+composed or release-allowlisted. Each row names the package's decision owner;
+products retain their current authority until the dossier's sealed cutover and
+writer-retirement gate completes. The cohort validation and adopter dependency
+map is
+[`erp-backoffice-general-publication-readiness.md`](inventories/erp-backoffice-general-publication-readiness.md).
+
+| Package | Sole owned decision/state surface | Qualifying provenance |
+|---|---|---|
+| `dotmac-accounting` | Tenant chart, fiscal periods/dimensions, balanced posting, reversal and immutable ledger evidence | ERP GL behavior and tests |
+| `dotmac-analytics` | Declared aggregate observations and deterministic rebuildable current-point projections | ERP metric storage/computers; fleet projection requirements |
+| `dotmac-banking` | Bank-account masters, statement/cash observations, matching decisions and reconciliation evidence | ERP banking behavior |
+| `dotmac-documents` | Controlled document identity, immutable exact-content versions, lifecycle, collaboration and acknowledgements | ERP handbook base plus Sub immutable quote delta |
+| `dotmac-expenses` | Requests, claims, receipt meaning, policy evaluation, lifecycle and reimbursement eligibility | ERP expenses behavior |
+| `dotmac-finance` | Fixed-asset accounting books, valuations and immutable balanced consequences | ERP fixed-assets behavior |
+| `dotmac-inbox` | Conversation/message identity and lifecycle, ordering/threading and per-operator read cursors | Sub Team Inbox behavior |
+| `dotmac-party` | Party business capacities, capacity relationships, memberships, reachability evidence and external-reference provenance | Sub Party-context behavior; kernel Party retains identity |
+| `dotmac-payables` | Supplier invoices/credits, recognized liabilities and payment-obligation lifecycle | ERP AP behavior |
+| `dotmac-payroll` | Component policy, immutable structures, calculation evidence and employee/external liabilities | ERP payroll behavior |
+| `dotmac-procurement` | Requisitions, sourcing, supplier offers, awards and purchase commitments | ERP procurement behavior |
+| `dotmac-projects` | Project/task identity and lifecycle, hierarchy, dependencies, templates, schedule constraints and assignments | Sub project/task behavior |
+| `dotmac-records` | Record declarations, retention schedules/triggers, legal holds, preservation/custody and disposition authority | Greenfield after the exact fleet inventory |
+| `dotmac-surveys` | Survey definitions/invitations, response evidence, answer validation and rebuildable feedback aggregates | Sub communications-surveys behavior |
+| `dotmac-tax` | Tenant tax policy, determinations, statutory report snapshots, filing obligations and return lifecycle | ERP tax behavior; Sub supplies billing facts only |
+| `dotmac-work-orders` | Physical-work execution lifecycle and evidence | Sub internal-crew WorkOrder behavior |
+
+Every persisted class in this cohort has an explicit owner. Table names below
+are relative to the package's declared `mod_*` schema; every adopter owns its
+local copy and no cross-application or sibling-module foreign key is implied.
+
+| Package | Persisted model classes | Owned tables | Decision source |
+|---|---|---|---|
+| `dotmac-accounting` | `AccountCategory`, `Account`, `FiscalYear`, `FiscalPeriod`, `AccountingDimension`, `AccountingDimensionValue`, `JournalEntry`, `JournalLine`, `JournalLineDimension`, `PostedLedgerLine`, `PostedLedgerDimension`, `PeriodEvent` | `account_categories`, `accounts`, `fiscal_years`, `fiscal_periods`, `accounting_dimensions`, `accounting_dimension_values`, `journal_entries`, `journal_lines`, `journal_line_dimensions`, `posted_ledger_lines`, `posted_ledger_dimensions`, `period_events` | ERP product-first; ADR-0041 |
+| `dotmac-analytics` | `MetricCatalogEntry`, `MetricIngestReceipt`, `MetricObservation`, `MetricPoint`, `MetricProjectionRebuild` | `metric_catalog_entries`, `metric_ingest_receipts`, `metric_observations`, `metric_points`, `metric_projection_rebuilds` | ERP product-first; ADR-0043 |
+| `dotmac-banking` | `BankInstitution`, `BankAccount`, `BankStatement`, `BankStatementLine`, `CashAccountObservation`, `MatchPolicy`, `MatchDecision`, `MatchAllocation`, `Reconciliation` | `bank_institutions`, `bank_accounts`, `bank_statements`, `bank_statement_lines`, `cash_account_observations`, `match_policies`, `match_decisions`, `match_allocations`, `reconciliations` | ERP product-first; ADR-0044 |
+| `dotmac-documents` | `DocumentLibrary`, `DocumentTypeVersion`, `Document`, `DocumentVersion`, `DocumentRendition`, `DocumentClassification`, `DocumentRelation`, `DocumentCheckout`, `DocumentAnnotation`, `DocumentAccessGrant`, `DocumentAcknowledgement`, `DocumentEvent` | `document_libraries`, `document_type_versions`, `documents`, `document_versions`, `document_renditions`, `document_classifications`, `document_relations`, `document_checkouts`, `document_annotations`, `document_access_grants`, `document_acknowledgements`, `document_events` | ERP base plus Sub delta; ADR-0049 |
+| `dotmac-expenses` | `ExpenseCategory`, `ExpensePolicy`, `ExpensePolicyRule`, `ExpenseRequest`, `ExpenseRequestLine`, `ExpenseClaim`, `ExpenseClaimLine`, `ExpenseReceipt`, `ExpensePolicyEvaluation`, `ExpenseLifecycleEvent` | `expense_categories`, `expense_policies`, `expense_policy_rules`, `expense_requests`, `expense_request_lines`, `expense_claims`, `expense_claim_lines`, `expense_receipts`, `expense_policy_evaluations`, `expense_lifecycle_events` | ERP product-first; ADR-0047 |
+| `dotmac-finance` | `AssetBook`, `DepreciationRun`, `DepreciationLine`, `AccountingEvent`, `AccountingConsequence`, `AccountingConsequenceLine` | `asset_books`, `depreciation_runs`, `depreciation_lines`, `accounting_events`, `accounting_consequences`, `accounting_consequence_lines` | ERP product-first; ADR-0048 |
+| `dotmac-inbox` | `Conversation`, `Message`, `ConversationReadState` | `conversations`, `messages`, `conversation_read_states` | Sub product-first; ADR-0052 |
+| `dotmac-party` | `PartyRole`, `PartyRelationship`, `PartyMembership`, `PartyContactPoint`, `PartyExternalReference` | `party_roles`, `party_relationships`, `party_memberships`, `party_contact_points`, `party_external_references` | Sub product-first; kernel Party retains identity; ADR-0019 |
+| `dotmac-payables` | `SupplierInvoice`, `SupplierInvoiceLine`, `CreditNote`, `CreditNoteLine`, `PaymentObligation`, `LiabilityEvent`, `CreditApplication`, `SettlementObservation`, `AccountingReceipt` | `supplier_invoices`, `supplier_invoice_lines`, `credit_notes`, `credit_note_lines`, `payment_obligations`, `liability_events`, `credit_applications`, `settlement_observations`, `accounting_receipts` | ERP product-first; ADR-0042 |
+| `dotmac-payroll` | `PayComponent`, `PayStructure`, `PayStructureRevision`, `PayStructureRule`, `PayRuleBasis`, `EmployeePayAssignment`, `PayrollRun`, `PayrollCalculation`, `PayrollCalculationLine`, `PayrollLiability`, `PayrollLiabilitySettlement` | `pay_components`, `pay_structures`, `pay_structure_revisions`, `pay_structure_rules`, `pay_rule_bases`, `employee_pay_assignments`, `payroll_runs`, `payroll_calculations`, `payroll_calculation_lines`, `payroll_liabilities`, `payroll_liability_settlements` | ERP product-first; ADR-0046 |
+| `dotmac-procurement` | `PurchaseRequisition`, `PurchaseRequisitionLine`, `SourcingEvent`, `SourcingEventLine`, `SourcingInvitation`, `BidSubmission`, `BidLine`, `BidEvaluation`, `PurchaseOrder`, `PurchaseOrderLine`, `ReceiptObservationRecord`, `ProcurementEvidence` | `purchase_requisitions`, `purchase_requisition_lines`, `sourcing_events`, `sourcing_event_lines`, `sourcing_invitations`, `bid_submissions`, `bid_lines`, `bid_evaluations`, `purchase_orders`, `purchase_order_lines`, `receipt_observations`, `procurement_evidence` | ERP product-first; ADR-0050 |
+| `dotmac-projects` | `Project`, `ProjectTemplate`, `ProjectTemplateTask`, `ProjectTemplateTaskDependency`, `ProjectTask`, `ProjectTaskDependency`, `ProjectTaskAssignee` | `projects`, `project_templates`, `project_template_tasks`, `project_template_task_dependencies`, `project_tasks`, `project_task_dependencies`, `project_task_assignees` | Sub product-first; ADR-0051 |
+| `dotmac-records` | `RetentionScheduleVersion`, `RecordSeriesVersion`, `Record`, `RecordTriggerObservation`, `LegalHoldCase`, `LegalHoldTarget`, `DispositionBatch`, `DispositionItem`, `CustodyTransfer`, `PreservationCheck`, `RecordEvent` | `retention_schedule_versions`, `record_series_versions`, `records`, `record_trigger_observations`, `legal_hold_cases`, `legal_hold_targets`, `disposition_batches`, `disposition_items`, `custody_transfers`, `preservation_checks`, `record_events` | Greenfield after exact fleet inventory; ADR-0049 |
+| `dotmac-surveys` | `Survey`, `SurveyInvitation`, `SurveyResponse` | `surveys`, `survey_invitations`, `survey_responses` | Sub product-first; ADR-0053 |
+| `dotmac-tax` | `TaxAuthority`, `TaxJurisdiction`, `TaxCode`, `TaxRule`, `TaxRuleBand`, `TaxDetermination`, `TaxDeterminationLine`, `StatutoryReportDefinition`, `StatutoryReportBox`, `TaxFilingObligation`, `StatutoryReport`, `StatutoryReportValue`, `TaxReturn`, `TaxReturnEvent` | `tax_authorities`, `tax_jurisdictions`, `tax_codes`, `tax_rules`, `tax_rule_bands`, `tax_determinations`, `tax_determination_lines`, `statutory_report_definitions`, `statutory_report_boxes`, `tax_filing_obligations`, `statutory_reports`, `statutory_report_values`, `tax_returns`, `tax_return_events` | ERP product-first; ADR-0045 |
+| `dotmac-work-orders` | `WorkOrder`, `WorkOrderAssignment`, `WorkOrderEvent`, `WorkOrderWorkLog`, `WorkOrderNote`, `WorkOrderEvidence` | `work_orders`, `work_order_assignments`, `work_order_events`, `work_order_worklogs`, `work_order_notes`, `work_order_evidence` | Sub product-first; ADR-0054 |
+
+Canonical writers are equally explicit. These services accept the caller's
+session, mutate and flush; they do not commit or roll back. Product adapters
+authorize and translate typed facts but never maintain a parallel writer.
+
+| State surface | Canonical writer and non-owner boundary |
+|---|---|
+| Accounting chart, periods, dimensions, journals and ledger evidence | `dotmac_accounting.service`; producers submit typed facts, while Approvals, Numbering and each subledger retain their separate decisions. |
+| Analytical declaration snapshots, receipts, observations and winning points | `dotmac_analytics.service.record_batch`; `rebuild_projection` is the sole repair writer for `metric_points`; domain owners retain calculations. |
+| Banking masters, observations, match allocations and reconciliations | `dotmac_banking.service`; Integrator owns provider transport and Accounting owns cash-ledger projection. |
+| Controlled document identity, exact versions and document lifecycle | `dotmac_documents.service`; Files owns bytes, Approvals owns verdicts and Durable Timers owns wake-up identity. |
+| Expense requests, claims, receipts, policy evidence and eligibility | `dotmac_expenses.service`; Party owns identity, Approvals owns quorum, Files owns bytes and Finance owns payable/payment state. |
+| Fixed-asset books, valuation decisions and balanced consequences | `dotmac_finance.service`; the physical Assets owner and the Accounting projection remain separate typed seams. |
+| Conversations, messages and read cursors | `dotmac_inbox.service`; products own subject/workforce links and consequences, while Integrator owns transport evidence. |
+| Party capacities, relationships, memberships, contact evidence and external references | `dotmac_party.service`; kernel Party remains the identity owner and authorization consumes facts without treating them as grants. |
+| Supplier documents, credits, liabilities and obligations | `dotmac_payables.service`; Procurement, suppliers, Approvals, Tax, Accounting and Treasury remain independent owners. |
+| Payroll components, structures, calculations, liabilities and settlement coverage | `dotmac_payroll.service`; People, Tax, Banking and Accounting are ports, not imported models or alternate writers. |
+| Requisitions, sourcing, bids, awards, commitments and receipt projection | `dotmac_procurement.service`; Approvals decides quorum, Inventory owns stock/receipts and Payables consumes approved commitment facts. |
+| Project/task/template/dependency/assignment structure and lifecycle | `dotmac_projects.service`; products own project subjects plus finance, workforce, work-order and customer consequences. |
+| Record declarations, schedules, holds, preservation, custody and disposition | `dotmac_records.service`; source domains retain meaning, Files performs physical deletion, Approvals decides verdicts and Timers schedules review. |
+| Survey definitions, invitations, responses and aggregates | `dotmac_surveys.service`; products own eligibility, delivery and every subject consequence. |
+| Tax policy, determinations, report snapshots, obligations and returns | `dotmac_tax.service`; products own taxable source facts, Integrator owns authority transport and Accounting owns postings. |
+| Physical-work execution rows and evidence | `dotmac_work_orders.service`; products own subjects, workforce eligibility, inventory, topology and downstream consequences. |
 Core never imports `app/features` (import-linter contract). Features never
 import each other (import-linter contract). Cross-feature references are
 FK/UUID columns, never a Python import — e.g. `rbac`'s `PartyRoleGrant` refers

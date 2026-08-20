@@ -64,14 +64,30 @@ PON_ACCESS_SRC ?= packages/dotmac-pon-access/src/dotmac_pon_access
 REFERRALS_SRC ?= packages/dotmac-referrals/src/dotmac_referrals
 RESELLER_MANAGEMENT_SRC ?= packages/dotmac-reseller-management/src/dotmac_reseller_management
 POSITIONING_SRC ?= packages/dotmac-positioning/src/dotmac_positioning
+ACCOUNTING_SRC ?= packages/dotmac-accounting/src/dotmac_accounting
+ANALYTICS_SRC ?= packages/dotmac-analytics/src/dotmac_analytics
+BANKING_SRC ?= packages/dotmac-banking/src/dotmac_banking
+DOCUMENTS_SRC ?= packages/dotmac-documents/src/dotmac_documents
+EXPENSES_SRC ?= packages/dotmac-expenses/src/dotmac_expenses
+FINANCE_SRC ?= packages/dotmac-finance/src/dotmac_finance
+INBOX_SRC ?= packages/dotmac-inbox/src/dotmac_inbox
+PARTY_SRC ?= packages/dotmac-party/src/dotmac_party
+PAYABLES_SRC ?= packages/dotmac-payables/src/dotmac_payables
+PAYROLL_SRC ?= packages/dotmac-payroll/src/dotmac_payroll
+PROCUREMENT_SRC ?= packages/dotmac-procurement/src/dotmac_procurement
+PROJECTS_SRC ?= packages/dotmac-projects/src/dotmac_projects
+RECORDS_SRC ?= packages/dotmac-records/src/dotmac_records
+SURVEYS_SRC ?= packages/dotmac-surveys/src/dotmac_surveys
+TAX_SRC ?= packages/dotmac-tax/src/dotmac_tax
+WORK_ORDERS_SRC ?= packages/dotmac-work-orders/src/dotmac_work_orders
 # Connector plugins are an open package family. A new provider distribution
 # enrolls in both quality gates by existing under the release-lane prefix; no
 # provider name belongs in this Makefile.
 CONNECTOR_SOURCES := $(sort $(filter-out %/__pycache__,$(wildcard packages/dotmac-connector-*/src/*)))
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC) $(INVENTORY_SRC) $(ASSETS_SRC) $(IPAM_SRC) $(NETWORK_INVENTORY_SRC) $(NETWORK_OBSERVABILITY_SRC) $(NETWORK_TOPOLOGY_SRC) $(NETWORK_ASSURANCE_SRC) $(NETWORK_CONTROL_SRC) $(FIBER_PLANT_SRC) $(NETWORK_ACCESS_SRC) $(PON_ACCESS_SRC) $(POSITIONING_SRC) $(REFERRALS_SRC) $(RESELLER_MANAGEMENT_SRC) $(CONNECTOR_SOURCES)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC) $(INVENTORY_SRC) $(ASSETS_SRC) $(IPAM_SRC) $(NETWORK_INVENTORY_SRC) $(NETWORK_OBSERVABILITY_SRC) $(NETWORK_TOPOLOGY_SRC) $(NETWORK_ASSURANCE_SRC) $(NETWORK_CONTROL_SRC) $(FIBER_PLANT_SRC) $(NETWORK_ACCESS_SRC) $(PON_ACCESS_SRC) $(POSITIONING_SRC) $(REFERRALS_SRC) $(RESELLER_MANAGEMENT_SRC) $(ACCOUNTING_SRC) $(ANALYTICS_SRC) $(BANKING_SRC) $(DOCUMENTS_SRC) $(EXPENSES_SRC) $(FINANCE_SRC) $(INBOX_SRC) $(PARTY_SRC) $(PAYABLES_SRC) $(PAYROLL_SRC) $(PROCUREMENT_SRC) $(PROJECTS_SRC) $(RECORDS_SRC) $(SURVEYS_SRC) $(TAX_SRC) $(WORK_ORDERS_SRC) $(CONNECTOR_SOURCES)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC) $(INVENTORY_SRC) $(ASSETS_SRC) $(IPAM_SRC) $(NETWORK_INVENTORY_SRC) $(NETWORK_OBSERVABILITY_SRC) $(NETWORK_TOPOLOGY_SRC) $(NETWORK_ASSURANCE_SRC) $(NETWORK_CONTROL_SRC) $(FIBER_PLANT_SRC) $(NETWORK_ACCESS_SRC) $(PON_ACCESS_SRC) $(POSITIONING_SRC) $(REFERRALS_SRC) $(RESELLER_MANAGEMENT_SRC) $(CONNECTOR_SOURCES)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC) $(INVENTORY_SRC) $(ASSETS_SRC) $(IPAM_SRC) $(NETWORK_INVENTORY_SRC) $(NETWORK_OBSERVABILITY_SRC) $(NETWORK_TOPOLOGY_SRC) $(NETWORK_ASSURANCE_SRC) $(NETWORK_CONTROL_SRC) $(FIBER_PLANT_SRC) $(NETWORK_ACCESS_SRC) $(PON_ACCESS_SRC) $(POSITIONING_SRC) $(REFERRALS_SRC) $(RESELLER_MANAGEMENT_SRC) $(ACCOUNTING_SRC) $(ANALYTICS_SRC) $(BANKING_SRC) $(DOCUMENTS_SRC) $(EXPENSES_SRC) $(FINANCE_SRC) $(INBOX_SRC) $(PARTY_SRC) $(PAYABLES_SRC) $(PAYROLL_SRC) $(PROCUREMENT_SRC) $(PROJECTS_SRC) $(RECORDS_SRC) $(SURVEYS_SRC) $(TAX_SRC) $(WORK_ORDERS_SRC) $(CONNECTOR_SOURCES)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py

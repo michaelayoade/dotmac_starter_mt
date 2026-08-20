@@ -892,6 +892,124 @@ RESELLER_MANAGEMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("reseller"),
 )
 
+# ERP/Backoffice/general publish-preparation cohort. These sixteen tenant-only
+# modules were audited independently, then restacked together so their physical
+# identities are allocated once against the current kernel train. The compact
+# prefixes are permanent. In particular, Documents uses `do` because `dc`
+# already belongs to deployment control, and Party uses `pt` because `pa`
+# belongs to Payables.
+ACCOUNTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="accounting",
+    prefix="ac",
+    branch_label="accounting",
+    db_schema=module_schema("accounting"),
+)
+
+ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="analytics",
+    prefix="ay",
+    branch_label="analytics",
+    db_schema=module_schema("analytics"),
+)
+
+BANKING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="banking",
+    prefix="bk",
+    branch_label="banking",
+    db_schema=module_schema("banking"),
+)
+
+DOCUMENTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="documents",
+    prefix="do",
+    branch_label="documents",
+    db_schema=module_schema("documents"),
+)
+
+EXPENSES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="expenses",
+    prefix="ex",
+    branch_label="expenses",
+    db_schema=module_schema("expenses"),
+)
+
+FINANCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="finance",
+    prefix="fn",
+    branch_label="finance",
+    db_schema=module_schema("finance"),
+)
+
+INBOX_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="inbox",
+    prefix="ib",
+    branch_label="inbox",
+    db_schema=module_schema("inbox"),
+)
+
+PARTY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="party",
+    prefix="pt",
+    branch_label="party",
+    db_schema=module_schema("party"),
+)
+
+PAYABLES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="payables",
+    prefix="pa",
+    branch_label="payables",
+    db_schema=module_schema("payables"),
+)
+
+PAYROLL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="payroll",
+    prefix="py",
+    branch_label="payroll",
+    db_schema=module_schema("payroll"),
+)
+
+PROCUREMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="procurement",
+    prefix="pc",
+    branch_label="procurement",
+    db_schema=module_schema("procurement"),
+)
+
+PROJECTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="projects",
+    prefix="pj",
+    branch_label="projects",
+    db_schema=module_schema("projects"),
+)
+
+RECORDS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="records",
+    prefix="re",
+    branch_label="records",
+    db_schema=module_schema("records"),
+)
+
+SURVEYS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="surveys",
+    prefix="sv",
+    branch_label="surveys",
+    db_schema=module_schema("surveys"),
+)
+
+TAX_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="tax",
+    prefix="tx",
+    branch_label="tax",
+    db_schema=module_schema("tax"),
+)
+
+WORK_ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="work_orders",
+    prefix="wo",
+    branch_label="work_orders",
+    db_schema=module_schema("workorders"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -929,6 +1047,22 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     POSITIONING_MIGRATION_OWNER,
     REFERRALS_MIGRATION_OWNER,
     RESELLER_MANAGEMENT_MIGRATION_OWNER,
+    ACCOUNTING_MIGRATION_OWNER,
+    ANALYTICS_MIGRATION_OWNER,
+    BANKING_MIGRATION_OWNER,
+    DOCUMENTS_MIGRATION_OWNER,
+    EXPENSES_MIGRATION_OWNER,
+    FINANCE_MIGRATION_OWNER,
+    INBOX_MIGRATION_OWNER,
+    PARTY_MIGRATION_OWNER,
+    PAYABLES_MIGRATION_OWNER,
+    PAYROLL_MIGRATION_OWNER,
+    PROCUREMENT_MIGRATION_OWNER,
+    PROJECTS_MIGRATION_OWNER,
+    RECORDS_MIGRATION_OWNER,
+    SURVEYS_MIGRATION_OWNER,
+    TAX_MIGRATION_OWNER,
+    WORK_ORDERS_MIGRATION_OWNER,
 )
 
 
