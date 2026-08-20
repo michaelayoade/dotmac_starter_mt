@@ -64,8 +64,9 @@ plugins retain credentials, wire payloads, endpoints, polling/webhooks,
 checkpoints and retry evidence. Provider conversion claims remain explicitly
 `provider_reported`; Lead origin, customer identity, attribution, authoritative
 revenue and business consequences remain outside the module (ADR-0034). The
-package is built and release-allowlisted here but is not composed; Michael's
-2026-08-18 adoption pause remains active because release is not adoption.
+package is published and registry-verified at `0.1.0a1` against kernel
+`0.1.0a81`, but no product composes it; Michael's 2026-08-18 adoption pause
+remains active because release is not adoption.
 
 For ticketing this means separate local installations: Sub owns operational
 customer/service tickets, ERP owns only its internal back-office tickets, and

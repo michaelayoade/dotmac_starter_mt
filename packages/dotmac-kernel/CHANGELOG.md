@@ -58,7 +58,10 @@ already records.
 - `PON_ACCESS_MIGRATION_OWNER`: schema `mod_pon`, prefix `pn`, branch label
   `pon_access`.
 
-## 0.1.0a81 — UNRELEASED
+## 0.1.0a81 — 2026-08-20
+
+Published, registry-verified and tagged from exact protected-main revision
+`8f99413` by release run `32346291258`.
 
 Allocates the independent tenant website-composition lineage. This is physical
 namespace identity only; site behavior remains in the optional module.
@@ -68,7 +71,7 @@ namespace identity only; site behavior remains in the optional module.
 - `SITES_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_sites`,
   revision prefix `si`, and branch label `sites`.
 
-## 0.1.0a80 — UNRELEASED
+## 0.1.0a80 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a81
 
 Allocates the independent tenant publication-lifecycle lineage. This is
 physical namespace identity only; publication behavior remains in the optional
@@ -79,7 +82,7 @@ module.
 - `PUBLISHING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
   `mod_publishing`, revision prefix `pb`, and branch label `publishing`.
 
-## 0.1.0a79 — UNRELEASED
+## 0.1.0a79 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a81
 
 Allocates the independent tenant editorial-content lineage. This is physical
 namespace identity only; content behavior remains in the optional module.
@@ -89,7 +92,7 @@ namespace identity only; content behavior remains in the optional module.
 - `CONTENT_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_content`,
   revision prefix `ct`, and branch label `content`.
 
-## 0.1.0a78 — UNRELEASED
+## 0.1.0a78 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a81
 
 Allocates the immutable tenant-plane database identity for the independently
 installable `dotmac-media-observations` module.

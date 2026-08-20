@@ -1,11 +1,11 @@
 # Sites extraction dossier
 
-**As of:** 2026-08-19
+**As of:** 2026-08-20
 **Source mode:** greenfield after six-repository inventory
 **Candidate allocation:** kernel a81, `si`, `sites`, `mod_sites`
 **Gate 2 code/evidence revision:**
 `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`
-**Release/adoption:** release authorized 2026-08-20; adoption not authorized
+**Release/adoption:** a1 released 2026-08-20; adoption not authorized
 
 No qualifying site-builder exists at the exact coordinates recorded in
 [`sites-sources.md`](sites-sources.md). This dossier therefore specifies the
@@ -31,8 +31,9 @@ tag-complete Observer checkout using Poetry 2.4.1 passed:
   five dedicated Sites RLS, same-tenant and immutability cases.
 
 The PostgreSQL 16 container used a unique loopback port and Compose project;
-its container and network were removed after the run. This is candidate
-evidence only: no package was published, allowlisted, composed or adopted.
+its container and network were removed after the run. This was candidate
+evidence only at that milestone: no package had yet been published,
+allowlisted, composed or adopted.
 
 The complete-gate run also proved a reusable guard defect. Four typed packages
 were missing from one or both explicitly enumerated mypy/Bandit recipes. The
@@ -113,15 +114,22 @@ fields, that contract must be extended explicitly before remote cutover.
 5. **Complete:** the five-table owner and local release contract passed focused,
    full unit/architecture, full disposable PostgreSQL and live-catalog/RLS
    suites on Observer at exact revision `8bf12dd`.
-6. **In progress:** release and allowlisting are authorized, but publication
-   waits for exact-commit restack proof on Observer. Backoffice composition,
-   adoption and remote deployment remain closed until separately proven.
+6. **Complete for release only:** PR #284 passed all sixteen required checks;
+   exact protected-main revision `8f99413` published and registry-verified
+   kernel a81 plus Sites a1. Backoffice composition, adoption and remote
+   deployment remain closed until separately proven.
 
-## 2026-08-20 restack
+## 2026-08-20 restack and release
 
 Published kernel a77 owns the vendor cohort and cannot be repointed. Sites now
 follows media observations a78, content a79 and publishing a80 at a81. Because
 the kernel workflow publishes one tip, a81 is also every cohort module's first
-installable floor. The earlier `8bf12dd` proof remains valid historical evidence
-for behavior but is not release evidence for the restacked source; the complete
-Observer lanes must pass again before publication.
+installable floor. The earlier `8bf12dd` proof remains valid historical
+behavior evidence. Michael directed GitHub CI to validate the restacked
+release: PR #284 passed all sixteen required checks and merged as exact
+protected-main revision `8f99413`. Release runs `32346291258` and `32350030557`
+published, registry-verified and tagged kernel a81 and Sites a1 from that
+revision. The Sites registry verification installed the complete
+media/content/publishing/Sites composition. That proves artifact and manifest
+compatibility, not product adoption; Gate 3, Backoffice composition and remote
+publication remain closed.

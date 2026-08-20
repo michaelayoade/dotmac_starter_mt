@@ -244,13 +244,16 @@ suite passed all 15 cases before the isolated database and network were
 removed. This remains historical evidence for the pre-restack allocation;
 Backoffice has not adopted the module.
 
-## 10. Published-a77 restack and release authorization
+## 10. Published-a77 restack and release
 
 Published kernel a77 owns the vendor cohort, so publishing's permanent
 allocation moves to a80 after media observations a78 and content a79. Sites a81
 completes the cohort, and one kernel release publishes only that tip; Publishing
 a1 therefore floors at a81. Michael authorized release on 2026-08-20, and the
-package is allowlisted, but publication remains blocked until the restacked
-exact commit repeats the full Observer proof. Backoffice composition, every
-`PUB-R*` writer switch, transport certification and adoption remain separate
-gates.
+package was validated by all sixteen required checks on PR #284 and merged as
+exact protected-main revision `8f99413`. Release runs `32346291258` and
+`32348989950` published, registry-verified and tagged kernel a81 and Publishing
+a1 from that revision; the registry verification composed media observations,
+content and publishing cumulatively. Backoffice composition, every `PUB-R*`
+writer switch, transport certification and adoption remain separate gates and
+remain not started.
