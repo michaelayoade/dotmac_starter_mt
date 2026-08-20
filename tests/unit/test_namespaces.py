@@ -234,6 +234,9 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # sixteen independently releasable tenant owners sharing one allocation
     # release, with Documents and Party deliberately avoiding the already-owned
     # `dc` and `pa` prefixes.
+    # `web_analytics` is the fifty-second: privacy-minimised first-party
+    # observations and deterministic projections (ADR-0055). Property, origin,
+    # consent and consequence policy remains with each adopting product.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -287,6 +290,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "surveys",
         "tax",
         "work_orders",
+        "web_analytics",
     }
 
 

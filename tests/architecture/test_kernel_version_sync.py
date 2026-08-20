@@ -126,6 +126,10 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # every capability it consumes — `requires` (a56), the two prerequisite
     # names — predates that allocation, so the ledger row alone sets the floor.
     "dotmac-positioning": "0.1.0a83",
+    # Web Analytics owns a fresh tenant-only lineage and consumes only the
+    # prerequisite contract that predates its a84 allocation. Its ledger row
+    # is therefore the effective floor.
+    "dotmac-web-analytics": "0.1.0a86",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
