@@ -1,11 +1,11 @@
 # Decomposed marketing suite source inventory
 
-**Status:** Source audit complete; media observations, content, publishing and Sites are release-authorized and restacked for revalidation; none is adopted
+**Status:** Source audit complete; media observations, content, publishing and Sites are released and registry-verified; none is adopted
 **As of:** 2026-08-20
 **Decision owner:** Michael
 **Default first adopter:** Backoffice; campaigns is the Sub-first ADR-0032 exception
 **Later adopter:** Sub, as an independent application
-**Restack base:** `1241640f92968d03c698db5141419d7768bf86a5`
+**Release main:** `8f99413826e5adf3d35379ebc6deb79bcb5c8242`
 
 This is the ADR-0006 product-first evidence for a Starter-owned, product-neutral
 marketing suite. It deliberately selects seven small owners rather than
@@ -57,7 +57,7 @@ consent/idempotency/outbox ownership cutovers, real kernel lineage composition,
 and Durable Timers adoption in Sub; the timer and kernel publication gates are
 closed.
 
-`dotmac-media-observations` is complete on the pushed
+`dotmac-media-observations` originated on the pushed
 `agent/dotmac-media-observations` branch. Commit
 `c548ef02aca10b421d1ebf4158b9c4fdf72e6025` is the validated candidate
 milestone; the branch then advanced through evidence-only commit
@@ -71,11 +71,11 @@ all four packages floor at the first installable cohort kernel, a81. Observer
 validation was green for the full checks, unit/architecture suite and
 disposable PostgreSQL integration on the earlier code revision; c548's
 documentation revision also passed checks plus focused architecture and
-clean-wheel tests. The candidate is deliberately **parked**: it has not been
-tagged, published, composed or adopted, and no authority has moved. Michael
-authorized release on 2026-08-20, so the cohort is now allowlisted while the
-restacked exact-commit Observer proof remains pending. Release does not resume
-adoption or move authority.
+clean-wheel tests. Michael authorized GitHub CI to validate the restacked
+release candidate. PR #284 passed all sixteen required checks, merged as exact
+main revision `8f99413826e5adf3d35379ebc6deb79bcb5c8242`, and the protected release
+train published and registry-verified kernel a81 plus all four a1 modules.
+Release did not resume adoption or move authority.
 
 ### Combined reconciliation evidence
 
@@ -87,7 +87,32 @@ failure. The combined media/content/publishing live-catalog and forced-RLS
 suite passed all 15 cases. Its isolated database container and network were
 removed. This is historical evidence for the pre-restack a74-a76 layout. The
 published vendor a74-a77 cohort invalidated those local allocation numbers;
-the a78-a81 restack must repeat this exact proof before release.
+the release evidence for the a78-a81 restack is recorded below.
+
+### 2026-08-20 release evidence
+
+[PR #284](https://github.com/michaelayoade/dotmac_starter_mt/pull/284) passed
+all sixteen required checks on its final candidate, including unit,
+PostgreSQL integration, migration, Python-floor, consumer-boot, Docker,
+security, type and engineering-standards gates. It squash-merged as protected
+main revision `8f99413826e5adf3d35379ebc6deb79bcb5c8242`. Main remained at that exact
+revision for the complete release train:
+
+| Distribution | Version | Release run | Registry composition verified | Tag |
+| --- | --- | --- | --- | --- |
+| `dotmac-kernel` | `0.1.0a81` | [32346291258](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32346291258) | kernel artifact | `dotmac-kernel-v0.1.0a81` |
+| `dotmac-media-observations` | `0.1.0a1` | [32346834449](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32346834449) | kernel a81 + media observations | `dotmac-media-observations-v0.1.0a1` |
+| `dotmac-content` | `0.1.0a1` | [32348113583](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32348113583) | kernel a81 + media observations + content | `dotmac-content-v0.1.0a1` |
+| `dotmac-publishing` | `0.1.0a1` | [32348989950](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32348989950) | kernel a81 + media observations + content + publishing | `dotmac-publishing-v0.1.0a1` |
+| `dotmac-sites` | `0.1.0a1` | [32350030557](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32350030557) | full kernel/media/content/publishing/Sites composition | `dotmac-sites-v0.1.0a1` |
+
+Every workflow installed the published artifact from the registry, registered
+its manifest, and then wrote its release tag. All five tags point and peel to
+the exact main revision above. This cumulative release-workflow composition is
+artifact and manifest compatibility evidence; it is not product composition,
+writer cutover or adoption. Backoffice and Sub remain candidate consumers, all
+writer-retirement rows remain `not-started`, and the media-observations
+adoption pause remains active.
 
 ### Mkt source-coordinate status across sibling branches
 
@@ -111,18 +136,18 @@ correction are also complete; release and adoption remain separate gates.
 
 | Starter module | Source mode | Qualifying source | Evidence and initial boundary |
 | --- | --- | --- | --- |
-| `dotmac-content` | `product-first` | `dotmac_mkt` | Preserve campaign-calendar planning, canonical post copy, asset references and approval-ready content state from `Campaign`, `Post`, `Asset` and their services. Stored bytes remain with `dotmac-files`; generic work management is outside this owner. Its allocation is a79 and its installable floor is a81. Content a1 is release-allowlisted but remains unpublished, uncomposed and unadopted pending restack proof. |
-| `dotmac-sites` | `greenfield-after-inventory` | `none` | No qualifying site-builder implementation was found in Starter, `dotmac_mkt`, ERP, CRM, Sub or Backoffice. Gate 2 is historically green at `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`, including all five Sites isolation/immutability canaries. The allocation is now a81 and Sites a1 is release-allowlisted but remains unpublished, uncomposed and unadopted pending restack proof. |
-| `dotmac-publishing` | `product-first` | `dotmac_mkt` | The owner keeps immutable releases, ordered opaque-target deliveries, monotonic attempts, normalized observations and explicit partial/all-failed reconciliation; Integrator retains transport. Its allocation is a80 and its installable floor is a81. Publishing a1 is release-allowlisted but remains unpublished, uncomposed and unadopted pending restack proof. |
-| `dotmac-media-observations` | `product-first` | `dotmac_mkt` | Preserve normalized remote post/ad hierarchy and idempotent metric upserts from the qualifying Mkt implementation without provider transport or authoritative business consequences. Its allocation is a78 and its installable floor is a81. Media observations a1 is release-allowlisted but remains unpublished, uncomposed and unadopted pending restack proof. |
+| `dotmac-content` | `product-first` | `dotmac_mkt` | Preserve campaign-calendar planning, canonical post copy, asset references and approval-ready content state from `Campaign`, `Post`, `Asset` and their services. Stored bytes remain with `dotmac-files`; generic work management is outside this owner. Allocation a79 is installable through released kernel a81; Content a1 is registry-verified but remains uncomposed and unadopted. |
+| `dotmac-sites` | `greenfield-after-inventory` | `none` | No qualifying site-builder implementation was found in Starter, `dotmac_mkt`, ERP, CRM, Sub or Backoffice. Gate 2 is historically green at `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`, including all five Sites isolation/immutability canaries. Allocation and floor a81 plus Sites a1 are released and registry-verified; the module remains uncomposed and unadopted. |
+| `dotmac-publishing` | `product-first` | `dotmac_mkt` | The owner keeps immutable releases, ordered opaque-target deliveries, monotonic attempts, normalized observations and explicit partial/all-failed reconciliation; Integrator retains transport. Allocation a80 is installable through released kernel a81; Publishing a1 is registry-verified but remains uncomposed and unadopted. |
+| `dotmac-media-observations` | `product-first` | `dotmac_mkt` | Preserve normalized remote post/ad hierarchy and idempotent metric upserts from the qualifying Mkt implementation without provider transport or authoritative business consequences. Allocation a78 is installable through released kernel a81; Media Observations a1 is registry-verified but remains uncomposed and unadopted under the active adoption pause. |
 | `dotmac-web-analytics` | `product-first` | `dotmac_mkt` | Preserve the provider-neutral daily web metric vocabulary and aggregation behavior for sessions, pageviews, users and bounce rate. GA4 HTTP/OAuth code is rejected; Integrator records typed observations that this local owner projects and reconciles. |
 | `dotmac-forms` | `product-first` | `dotmac_erp` | Preserve organization-scoped definitions, immutable versions, sections, typed fields/options, validation, submissions and answer snapshots from ERP's `forms` models and `FormEngineService`. Replace Organization and domain entity coupling with Tenant scope and opaque subject references. |
 | `dotmac-campaigns` | `product-first` | `dotmac_sub` | Implemented on Starter main, but deliberately unreleased and unadopted. Registry-verified a72 contains its namespace allocation and Durable Timers a1; published a73 supplies the caller-session mechanics required by Sub and is therefore the effective package floor. Satisfy Sub's owner, lineage and timer-adoption gates before publication. Preserve audience building, sequences, send windows, canonical senders, attempt/outcome state, unsubscribe and pre-send suppression rechecks. Sub is the mandatory campaign source and cutover 1; Backoffice is cutover 2. CRM and `dotmac_mkt` are parity/retirement inputs, not competing owners. |
 
-Every eventual package still needs its own `EXTRACTION.toml`, manifest, owner,
-namespace, lineage, tenant-isolation canary, preserved parity tests, first
-cutover and local-copy retirement gate. This inventory selects sources; it does
-not claim that any package or adoption already exists.
+Every package needs its own `EXTRACTION.toml`, manifest, owner, namespace,
+lineage, tenant-isolation canary, preserved parity tests, first cutover and
+local-copy retirement gate. This inventory selects sources and records release
+state; it does not claim that publication completed any product adoption.
 
 ## Why the suite is decomposed
 

@@ -41,8 +41,9 @@ passed, from a fresh detached Observer worktree:
 [GitHub CI run 32148037659](https://github.com/michaelayoade/dotmac_starter_mt/actions/runs/32148037659)
 passed on the same implementation commit: all quality jobs, unit coverage,
 PostgreSQL integration and teardown, Python 3.11/3.12 floors, consumer boot and
-Docker smoke. No release job or product adoption ran. Engineering Standards is
-PR-only and remains pending because Michael did not authorize a PR.
+Docker smoke. At that milestone no release job or product adoption ran, and
+PR-only Engineering Standards evidence had not yet been authorized. The later
+restack, PR and release evidence is recorded below.
 
 ## Exact audit pins
 
@@ -189,6 +190,22 @@ connector file is changed by this extraction. The future sequence remains:
 7. adopt the same exact release independently in Sub.
 
 None of those steps is authorized by the present change.
+
+## 2026-08-20 release evidence
+
+Michael authorized release without resuming adoption and directed GitHub CI to
+validate the restacked cohort.
+[PR #284](https://github.com/michaelayoade/dotmac_starter_mt/pull/284) passed all
+sixteen required checks and merged as exact protected-main revision
+`8f99413826e5adf3d35379ebc6deb79bcb5c8242`. Kernel release run `32346291258`
+and media-observations release run `32346834449` published, registry-verified
+and tagged `dotmac-kernel 0.1.0a81` and `dotmac-media-observations 0.1.0a1`
+from that revision. The release workflow installed both registry artifacts and
+registered the module manifest before tagging.
+
+This is publication evidence only. No product composes the lineage, Mkt writer
+authority is still unverified, and the 2026-08-18 adoption pause plus every
+shadow, cutover, retirement and connector-certification gate remains active.
 
 ## Frozen V1 contract checklist
 
