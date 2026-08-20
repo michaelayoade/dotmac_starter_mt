@@ -43,6 +43,10 @@ on:
           - dotmac-application-directory
           - dotmac-people
           - dotmac-durable-timers
+          - dotmac-commercial-agreements
+          - dotmac-licensing
+          - dotmac-deployment-control
+          - dotmac-brand-profiles
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

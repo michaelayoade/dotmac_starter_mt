@@ -55,6 +55,10 @@ on:
           - dotmac-application-directory
           - dotmac-people
           - dotmac-durable-timers
+          - dotmac-commercial-agreements
+          - dotmac-licensing
+          - dotmac-deployment-control
+          - dotmac-brand-profiles
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true

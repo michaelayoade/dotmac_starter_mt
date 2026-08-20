@@ -573,6 +573,234 @@
           "python"
         ]
       }
+    },
+    "dotmac-commercial-agreements": {
+      "$comment": [
+        "The ADR-0033 vendor module cohort. All four are listed together because",
+        "they are released together: the modules floor on kernel 0.1.0a77 and",
+        "0.1.0a77 exists to carry their four MIGRATION_OWNER_LEDGER rows, so a",
+        "kernel release with no module beside it satisfies nothing and a module",
+        "release without it cannot resolve.",
+        "",
+        "kernel_floor is 0.1.0a77 for all four, and for three of them that is NOT",
+        "their own allocation release. The cohort was built as four stacked pull",
+        "requests, each bumping the kernel to carry its own row - a74 (`cg`), a75",
+        "(`li`), a76 (`dc`), a77 (`bp`) - and a kernel release publishes ONE",
+        "version, so a74..a76 exist as changelog history rather than as artifacts.",
+        "a77 is the first INSTALLABLE kernel carrying any of the four allocations,",
+        "which is what makes it the floor of all four. Same rule the a53..a55 gap",
+        "already forced on `platform_tables`, applied to an allocation instead of",
+        "to a capability; the reasoning is in",
+        "tests/architecture/test_kernel_version_sync.py's",
+        "UNPUBLISHED_ALLOCATION_FLOORS, and a tag-reading test refuses a floor",
+        "that skips a kernel which would have run the module.",
+        "",
+        "EVERY source module and EVERY migration is required wheel content. This",
+        "repository composes none of the four - `app/assembly.py` omits them and",
+        "`alembic.ini` carries no `cg`, `li`, `dc` or `bp` lineage, because the",
+        "starter is a target application and these are the vendor control plane's",
+        "capabilities - so a wheel that shipped the manifest and dropped a module",
+        "would fail first in an ADOPTER's deployment rather than here. That is the",
+        "same argument dotmac-integration, dotmac-approvals and",
+        "dotmac-application-directory record, and it is why the required list is",
+        "the whole package rather than a sample of it.",
+        "",
+        "Listing them is what unblocks the composition. `dotmac_vendor_control_plane`",
+        "cannot pin an unpublished module, so every `first_cutover` in this cohort",
+        "was unreachable by construction while these rows were absent - and",
+        "publication remains gated separately by",
+        "docs/inventories/declared-publication-baseline.json, which still carries a",
+        "row for each of the four. An allowlist row makes a module PUBLISHABLE; it",
+        "does not assert that it has been published or adopted.",
+        "",
+        "The cohort's first module (ADR-0033 s1), extracted product-first from",
+        "the vendor control plane's own running `vendor_cp.contracts`. Its",
+        "`agreement_events` table is append-only through a",
+        "`refuse_history_rewrite` trigger, which is why `cg_0001` is required",
+        "wheel content in a way a pure-DDL migration would not be: a wheel that",
+        "dropped it would install a module whose central invariant is enforced",
+        "nowhere."
+      ],
+      "package_dir": "packages/dotmac-commercial-agreements",
+      "import_name": "dotmac_commercial_agreements",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a77",
+      "db_schema": "mod_agreements",
+      "tag_prefix": "dotmac-commercial-agreements-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_commercial_agreements/py.typed",
+          "dotmac_commercial_agreements/manifest.py",
+          "dotmac_commercial_agreements/facts.py",
+          "dotmac_commercial_agreements/models.py",
+          "dotmac_commercial_agreements/ports.py",
+          "dotmac_commercial_agreements/service.py",
+          "dotmac_commercial_agreements/migrations/__init__.py",
+          "dotmac_commercial_agreements/migrations/versions/cg_0001_agreements.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-licensing": {
+      "$comment": [
+        "The ISSUER half of licensing (ADR-0033 s2), extracted product-first.",
+        "See dotmac-commercial-agreements above for the cohort-wide floor and",
+        "wheel-content reasoning; only what is specific to this module is",
+        "repeated here.",
+        "",
+        "`allowed_requires` carries no crypto library, and that is a boundary",
+        "rather than an omission: this module holds no private key column and",
+        "implements no signer. `LicenceSigner` is a port the ADOPTING assembly",
+        "fills over its own secret seam (ADR-0009 - a secret is held, never",
+        "dereferenced), so a crypto dependency appearing here would mean the",
+        "boundary had moved and the exact-set gate should refuse the release."
+      ],
+      "package_dir": "packages/dotmac-licensing",
+      "import_name": "dotmac_licensing",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a77",
+      "db_schema": "mod_licensing",
+      "tag_prefix": "dotmac-licensing-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_licensing/py.typed",
+          "dotmac_licensing/manifest.py",
+          "dotmac_licensing/facts.py",
+          "dotmac_licensing/models.py",
+          "dotmac_licensing/ports.py",
+          "dotmac_licensing/service.py",
+          "dotmac_licensing/migrations/__init__.py",
+          "dotmac_licensing/migrations/versions/li_0001_licensing.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-deployment-control": {
+      "$comment": [
+        "Deployment intent, delivery and observed applied state (ADR-0033 s3).",
+        "See dotmac-commercial-agreements above for the cohort-wide floor and",
+        "wheel-content reasoning.",
+        "",
+        "Alone in the cohort this one is `greenfield-after-inventory` rather",
+        "than product-first: the Vendor V6 slices it references were never",
+        "merged and never deployed, so they cannot qualify as a production",
+        "source under rule 24 however good they are. Its dossier records the",
+        "distinction, and `test_product_first_extraction.py` enforces it.",
+        "",
+        "`dc_0001` is required wheel content for a reason stronger than the",
+        "cohort's: it declares the two claim/proof CHECK constraints that make",
+        "an unproven identity unwritable. The model declares them too, so a",
+        "wheel dropping the migration would install a module that refuses the",
+        "write through the service and accepts it through raw SQL - which is",
+        "exactly the gap tests/test_deployment_control_platform_isolation.py",
+        "proves closed against a real database."
+      ],
+      "package_dir": "packages/dotmac-deployment-control",
+      "import_name": "dotmac_deployment_control",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a77",
+      "db_schema": "mod_deploy",
+      "tag_prefix": "dotmac-deployment-control-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_deployment_control/py.typed",
+          "dotmac_deployment_control/manifest.py",
+          "dotmac_deployment_control/facts.py",
+          "dotmac_deployment_control/models.py",
+          "dotmac_deployment_control/ports.py",
+          "dotmac_deployment_control/service.py",
+          "dotmac_deployment_control/migrations/__init__.py",
+          "dotmac_deployment_control/migrations/versions/dc_0001_deployment_control.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-brand-profiles": {
+      "$comment": [
+        "Scoped brand values, provenance, precedence and locks (ADR-0033 s2a).",
+        "See dotmac-commercial-agreements above for the cohort-wide",
+        "wheel-content reasoning. Unlike its three siblings this module's",
+        "0.1.0a77 floor IS its own allocation release, so it sits in",
+        "LEDGER_ALLOCATION_RELEASES rather than UNPUBLISHED_ALLOCATION_FLOORS.",
+        "",
+        "`dotmac-ui` in `allowed_requires` is the first time a module in this",
+        "lane declares a first-party dependency other than the kernel, and it",
+        "is the approved presentation boundary rather than an escape: dotmac-ui",
+        "owns the token vocabulary, the projection and contrast validation,",
+        "this module owns the scoped VALUES, and the assembly maps one into the",
+        "other. The dependency direction is the published one",
+        "(assembly -> module -> dotmac-ui -> dotmac-kernel), and dotmac-ui",
+        "0.1.0a7 is released, so the floor resolves. Vendoring a hex parser or",
+        "a contrast check to avoid the dependency would create the second",
+        "owner ADR-0006 U1 exists to prevent.",
+        "",
+        "`brand_values.py` is required wheel content because it is where the",
+        "allowlist lives: BRAND_OVERRIDE_INPUTS names the only two values that",
+        "may cross into `dotmac_ui.BrandOverride`, and every other legacy",
+        "semantic colour is dispositioned in code rather than in prose. A wheel",
+        "that shipped the models and dropped it would install a module whose",
+        "stated boundary is enforced nowhere."
+      ],
+      "package_dir": "packages/dotmac-brand-profiles",
+      "import_name": "dotmac_brand_profiles",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a77",
+      "db_schema": "mod_brand",
+      "tag_prefix": "dotmac-brand-profiles-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_brand_profiles/py.typed",
+          "dotmac_brand_profiles/manifest.py",
+          "dotmac_brand_profiles/brand_values.py",
+          "dotmac_brand_profiles/models.py",
+          "dotmac_brand_profiles/ports.py",
+          "dotmac_brand_profiles/service.py",
+          "dotmac_brand_profiles/migrations/__init__.py",
+          "dotmac_brand_profiles/migrations/versions/bp_0001_brand_profiles.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "dotmac-ui",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

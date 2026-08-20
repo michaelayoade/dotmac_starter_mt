@@ -29,7 +29,7 @@ python = ">=3.11,<3.14"
 # a capability, which is a worse error message for the same defect — the
 # manifest raises while it is being CONSTRUCTED, before any composition check
 # a reader could interpret.
-dotmac-kernel = ">=0.1.0a74"
+dotmac-kernel = ">=0.1.0a77"
 sqlalchemy = "^2.0"
 
 [build-system]

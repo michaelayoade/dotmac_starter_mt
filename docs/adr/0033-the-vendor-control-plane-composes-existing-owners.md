@@ -225,6 +225,50 @@ imports no Integrator model and shares no database with one. This is ADR-0024
 and the `Modules are independent of each other` import-linter contract, and it is
 the same shape ADR-0029 § 3 uses for approvals and access.
 
+### 9. The cohort releases before it is adopted, and the two are not the same act
+_Amended 2026-08-20._
+
+Composition cannot start until the modules are installable. `dotmac_vendor_control_plane`
+pins from the private index, so it cannot compose an artifact that does not exist —
+which makes "publish once the adoption evidence lands" a deadlock, not a safeguard.
+`dotmac-ticketing`, `dotmac-integration` and `dotmac-application-directory` each
+record having broken the same one.
+
+So the four modules and the kernel release **together, as one cohort, immediately
+before the Vendor composition begins**:
+
+- kernel `0.1.0a77` carries all four `MIGRATION_OWNER_LEDGER` rows. It is the
+  cohort's only releasable kernel — a74, a75 and a76 exist as changelog history
+  because each stacked pull request bumped the version, and a kernel release
+  publishes one version. **Every module in the cohort therefore floors at a77**,
+  including the three whose own allocation is lower; a floor naming an unpublished
+  version is not a floor.
+- The release is dispatched **just in time for the cutover**, the pattern
+  `dotmac-imports` records, never as a speculative publish.
+
+What the release does NOT assert:
+
+| Act | What it establishes |
+| --- | --- |
+| An allowlist row in `.github/release-modules.json` | the module MAY be published |
+| A `<distribution>-v<version>` tag | the module CAN be installed and pinned |
+| `EXTRACTION.toml` `adoption_evidence` | a product RUNS it, with proof |
+
+Only the third is adoption. Each module's cutover obligations — commercial
+agreements' `content_hash` preservation and history synthesis, licensing's
+byte-for-byte envelope migration and cumulative revocation superset, deployment
+control's concurrency rehearsal for the stable-verdict rule — are discharged in
+the adopting repository and recorded in `EXTRACTION.toml`, which stays
+`audit-complete` with empty `adoption_evidence` until they are. Withholding a tag
+does not enforce them; it only prevents the change that would.
+
+One correction lands with this amendment. The `dotmac-deployment-control`
+publication-ledger row claimed two proofs were outstanding. Only the concurrency
+rehearsal is. The claim/proof CHECK constraints are proven against **raw SQL** in
+this repository's Postgres integration job
+(`tests/test_deployment_control_platform_isolation.py`
+`::TestTheClaimProofSeparationIsStructural`).
+
 ## Consequences
 
 **Positive.** Two capabilities are not built, so two decisions keep one owner
