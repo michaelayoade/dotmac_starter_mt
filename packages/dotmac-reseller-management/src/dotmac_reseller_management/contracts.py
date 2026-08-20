@@ -106,9 +106,7 @@ class ChangeStatus:
     def __post_init__(self) -> None:
         target = self.target_status.strip().lower()
         if target not in ACCOUNT_STATUSES:
-            raise ContractError(
-                "target_status must be active, suspended, or retired"
-            )
+            raise ContractError("target_status must be active, suspended, or retired")
         object.__setattr__(self, "target_status", target)
         object.__setattr__(
             self, "evidence_ref", required("evidence_ref", self.evidence_ref)

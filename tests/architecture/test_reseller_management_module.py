@@ -22,8 +22,10 @@ MIGRATION_TEXT = MIGRATION.read_text(encoding="utf-8")
 
 def test_manifest_matches_the_immutable_namespace_allocation() -> None:
     assert RESELLER_MANAGEMENT_MIGRATION_OWNER in MIGRATION_OWNER_LEDGER
-    assert module.code == RESELLER_MANAGEMENT_MIGRATION_OWNER.owner == (
-        "reseller_management"
+    assert (
+        module.code
+        == RESELLER_MANAGEMENT_MIGRATION_OWNER.owner
+        == ("reseller_management")
     )
     assert module.short_code == "reseller"
     assert module.migration_prefix == RESELLER_MANAGEMENT_MIGRATION_OWNER.prefix == "rm"

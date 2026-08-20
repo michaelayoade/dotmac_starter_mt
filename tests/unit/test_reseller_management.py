@@ -184,14 +184,14 @@ def test_bindings_are_idempotent_and_do_not_own_collaborator_rows(db: Session) -
         evidence_ref="assignment:99",
     )
 
-    assert bind_member(
-        db, scope=scope, command=member, recorded_at=NOW
-    ).id == bind_member(db, scope=scope, command=member, recorded_at=NOW).id
-    assert bind_customer_account(
-        db, scope=scope, command=customer, recorded_at=NOW
-    ).id == bind_customer_account(
-        db, scope=scope, command=customer, recorded_at=NOW
-    ).id
+    assert (
+        bind_member(db, scope=scope, command=member, recorded_at=NOW).id
+        == bind_member(db, scope=scope, command=member, recorded_at=NOW).id
+    )
+    assert (
+        bind_customer_account(db, scope=scope, command=customer, recorded_at=NOW).id
+        == bind_customer_account(db, scope=scope, command=customer, recorded_at=NOW).id
+    )
     assert not hasattr(account, "commission_rate")
     assert not hasattr(account, "payout_account")
     assert not hasattr(account, "customer_status")

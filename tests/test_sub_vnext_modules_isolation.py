@@ -199,9 +199,7 @@ def test_reseller_live_catalog_and_cross_tenant_isolation(
             text("SELECT set_config('app.current_tenant', :tenant, false)"),
             {"tenant": str(tenant_b)},
         )
-        count = conn.scalar(
-            text("SELECT count(*) FROM mod_reseller.reseller_accounts")
-        )
+        count = conn.scalar(text("SELECT count(*) FROM mod_reseller.reseller_accounts"))
         assert count == 0
     app.dispose()
     admin.dispose()
