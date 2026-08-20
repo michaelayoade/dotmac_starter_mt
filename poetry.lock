@@ -1036,6 +1036,24 @@ type = "directory"
 url = "packages/dotmac-usage-rating"
 
 [[package]]
+name = "dotmac-workforce"
+version = "0.1.0a1"
+description = "Workforce teams, skills, scheduling, availability, and dispatch"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-workforce"
+
+[[package]]
 name = "email-validator"
 version = "2.3.0"
 description = "A robust email address syntax and deliverability validation library."
@@ -3197,4 +3215,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "9723779092088c253d70d2dd640cb11bdb55cffdd75ea609e6d9776e76926ed3"
+content-hash = "55664e2c85da3e242545e9a3c6de68730216d2b73063d2a978cd73bcc0e36169"

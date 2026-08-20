@@ -488,6 +488,11 @@ packages/dotmac-inbox-operations/ optional staffed-inbox operation owner
   src/dotmac_inbox_operations/   queues, routing, inbox presence, opaque
                  assignments and workflow events; `io` lineage in
                  `mod_inbox_ops`, tenant-only forced RLS, uncomposed.
+packages/dotmac-workforce/       optional workforce scheduling/dispatch owner
+  src/dotmac_workforce/          teams, skills, memberships, shifts,
+                 availability and opaque-work dispatch decisions; `wf`
+                 lineage in `mod_workforce`, tenant-only forced RLS,
+                 uncomposed. People and Work Order lifecycles stay out.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1350,6 +1355,7 @@ made concrete — every model has exactly one declared owner.
 | `RatingRule` / `RatedUsageObligation` | `mod_usage_rate.rating_rules`, `mod_usage_rate.rated_usage_obligations` | `dotmac-usage-rating` optional module | Effective meter pricing and immutable pre-tax rated obligations from opaque usage references. Invoice lifecycle, tax, payments, revenue recognition and GL posting remain outside. |
 | `ServiceAccessInput` / `DesiredAccessDecision` | `mod_svc_access.service_access_inputs`, `mod_svc_access.desired_access_decisions` | `dotmac-service-access-policy` optional module | Per-service FUP/prepaid/collections/admin observations and one desired ALLOW/RESTRICT/DENY projection. It owns no subscriber/account status and performs no AAA or device mutation; Network Access reconciles enforcement. |
 | `InboxQueue` / `InboxRoutingRule` / `InboxAgentPresence` / `ConversationAssignment` / `InboxWorkflowEvent` | `mod_inbox_ops.*` declared tables | `dotmac-inbox-operations` optional module | Staffed inbox operation state adjudicated from Sub and CRM. Conversation/message content remains with Inbox, providers remain transports, and shifts/field availability remain with Workforce. |
+| `WorkforceTeam` / `WorkforceSkill` / `TeamMembership` / `WorkerSkill` / `WorkforceShift` / `WorkforceAvailability` / `DispatchDecision` | `mod_workforce.*` declared tables | `dotmac-workforce` optional module | Workforce scheduling and dispatch adjudicated from Sub, ERP and CRM. Workers and work are opaque references; People, payroll, attendance consequences, Inbox presence, Work Order lifecycle and route execution remain with their owning systems. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

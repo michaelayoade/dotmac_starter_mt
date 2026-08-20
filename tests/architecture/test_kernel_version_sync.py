@@ -88,6 +88,7 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-usage-rating": "0.1.0a78",
     "dotmac-service-access-policy": "0.1.0a78",
     "dotmac-inbox-operations": "0.1.0a78",
+    "dotmac-workforce": "0.1.0a78",
     "dotmac-people": "0.1.0a71",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in

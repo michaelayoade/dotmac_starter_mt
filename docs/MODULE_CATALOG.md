@@ -73,6 +73,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`audit-complete`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
 | [`dotmac-usage`](../packages/dotmac-usage/README.md) | optional module | [`audit-complete`](../packages/dotmac-usage/EXTRACTION.toml) | [tenant · `mod_usage`](../packages/dotmac-usage/src/dotmac_usage/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
 | [`dotmac-usage-rating`](../packages/dotmac-usage-rating/README.md) | optional module | [`audit-complete`](../packages/dotmac-usage-rating/EXTRACTION.toml) | [tenant · `mod_usage_rate`](../packages/dotmac-usage-rating/src/dotmac_usage_rating/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_sub` |
+| [`dotmac-workforce`](../packages/dotmac-workforce/README.md) | optional module | [`audit-complete`](../packages/dotmac-workforce/EXTRACTION.toml) | [tenant · `mod_workforce`](../packages/dotmac-workforce/src/dotmac_workforce/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a78` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
 
 ## Contracts and ownership
 
@@ -311,3 +312,11 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-usage-rating/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-workforce`](../packages/dotmac-workforce/README.md)
+
+- **Owner:** Workforce teams, skills, shifts, availability, capacity and dispatch decisions
+- **Contract:** Own service teams, skill vocabulary, memberships, worker skill evidence, shifts, operational availability/capacity and opaque-work dispatch decisions. NOT employee identity/employment, payroll/leave/attendance consequences, Inbox agent presence, Work Order lifecycle or route execution.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-workforce/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_crm`, `dotmac_erp`, `dotmac_sub`.
