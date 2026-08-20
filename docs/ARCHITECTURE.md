@@ -693,15 +693,20 @@ in `CLAUDE.md`):
   cannot smuggle a `tenant_id IS NULL`/other-tenant write past the policy.
 
 **Resolution order** (`dotmac_kernel.settings_resolver.resolve_with_source`,
-`resolve_value` is a thin wrapper that drops the `source`): tenant row (if
-`tenant_id` is not `None`) → platform row (`tenant_id IS NULL`) → the
-`SettingSpec`'s own `default`. A stored value that fails coercion to the
-spec's `value_type`, or violates `allowed`/`min_value`/`max_value`, degrades
-all the way to the spec default (not to "ignore this row") — a corrupted
-row can never break every caller. `source` (`"tenant" | "platform" |
-"default"`) tells the settings admin API whether to mask a secret's value
-(masked whenever a real row exists; never for the built-in default — there's
-nothing to hide there).
+`resolve_value` is a thin wrapper that drops the `source`): the declared scope
+chain, most specific row first (tenant row if `tenant_id` is not `None` →
+platform row, `tenant_id IS NULL`) → the assembly's **profile default**
+(`ProductAssemblySpec.setting_defaults`, keyed `"<domain>/<key>"`, ADR-0013) →
+the `SettingSpec`'s own `default`. The environment is not in this list and is
+not a source at all — ADR-0011; `env_var` is a bootstrap that produces a row
+before anything resolves. A stored value that fails coercion to the spec's
+`value_type`, or violates `allowed`/`min_value`/`max_value`, degrades all the
+way to the spec default (not to "ignore this row", and *not* to the profile
+default either) — a corrupted row can never break every caller. `source` is the
+level that actually answered: the scope kind (`"tenant"`, `"platform"`, …),
+`"profile"`, or `"default"`. It tells the settings admin API whether to mask a
+secret's value (masked whenever a real row exists; never for the built-in
+default — there's nothing to hide there).
 
 Finer levels than `tenant` are possible — a spec resolves through the
 declared scope chain (`dotmac_kernel.setting_scopes`), most specific first,

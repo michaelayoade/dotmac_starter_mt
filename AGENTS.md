@@ -194,11 +194,15 @@ specifics) points here and must never fork these rules.
 
 21. **Settings resolution reads rows and defaults — never the environment.**
     `env_var` is a declaration whose only consumer is `seed_settings_from_env`,
-    which runs once at startup and never overwrites an existing row. Precedence
-    is `scope chain -> spec default`; the environment does not appear, because
-    it is a loader that produces a row rather than a source that competes with
+    which runs idempotently on every application-process start and never
+    overwrites an existing row — so changing the variable later does NOT
+    update or rotate the setting; the settings owner is the only way in after
+    first creation. Precedence is
+    `scope chain -> assembly profile default -> spec fallback` (the profile
+    level is ADR-0013); the environment does not appear at any rank, because it
+    is a loader that produces a row rather than a source that competes with
     one. A value in effect is therefore always one an operator can see and
-    change (ADR-0011).
+    change (ADR-0011, amended 2026-08-20).
     (`tests/unit/test_settings_resolution_ignores_env.py`,
     `tests/architecture/test_settings_env_is_bootstrap_only.py`)
 
