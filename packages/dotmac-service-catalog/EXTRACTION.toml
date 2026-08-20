@@ -1,0 +1,32 @@
+schema_version = 1
+package = "dotmac-service-catalog"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Technical service specifications, plan families, characteristics, and eligibility-input declarations"
+contract = "Own provider-neutral technical service specifications, plan-family classification, characteristic definitions, and the input vocabulary a qualification decision may consume. NOT offers, prices, discounts, contracts, subscriptions, billing cycles, tax, fixed recurrence, provisioning, or qualification decisions."
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_sub:app/models/plan_family_catalogue.py",
+  "dotmac_sub:app/models/catalog.py",
+  "dotmac_sub:app/services/catalog/plan_family_catalogues.py",
+  "dotmac_sub:app/services/catalog/validation.py",
+  "dotmac_erp:app/models/inventory/item.py",
+  "dotmac_erp:app/models/inventory/item_category.py",
+]
+preserved_tests = [
+  "dotmac_sub:tests/test_plan_family_catalogues.py",
+  "dotmac_sub:tests/test_catalog_contracts.py",
+  "dotmac_erp:tests/ifrs/inv/test_item_service.py",
+  "dotmac_starter_mt:tests/unit/test_service_catalog_service.py",
+  "dotmac_starter_mt:tests/architecture/test_service_catalog_module.py",
+  "dotmac_starter_mt:tests/test_service_catalog_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_sub"]
+composition_boundary = "Each adopter pins the package and composes the sc lineage locally. Products hold offers and prices and reference catalogue ids opaquely; Qualification consumes declared inputs through a typed API, never a sibling import."
+inventory_evidence = ["docs/inventories/isp-essential-domain-sources.md"]
+first_cutover = "Sub remains catalogue writer through backfill and read-only shadow; a separately authorized zero-drift cutover makes this module the technical catalogue owner."
+shadow_and_drift = "Compare specification/family identity, active state, characteristic type/requiredness, and eligibility-input declarations. Commercial fields are excluded rather than shadowed."
+local_copy_retirement = "After cutover, reduce Sub technical catalogue writers and fallback readers to zero while leaving offer/price/contract ownership in the product commercial domain."
+next_action = "Compose the exact package in Sub and implement the versioned technical-catalogue backfill and shadow comparison."

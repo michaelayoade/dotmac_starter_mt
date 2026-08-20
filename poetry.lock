@@ -857,6 +857,24 @@ type = "directory"
 url = "packages/dotmac-release-catalog"
 
 [[package]]
+name = "dotmac-service-catalog"
+version = "0.1.0a1"
+description = "Technical service specifications, plan families, characteristics, and eligibility inputs"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-service-catalog"
+
+[[package]]
 name = "dotmac-template-studio"
 version = "0.2.0a3"
 description = "DotMac Template Studio — tenant-authored notification and document templates (ADR-0006 M1, the first stateful module)"
@@ -3071,4 +3089,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "5dbadfa9cce99ef4db9ec3b7b9c1c1328d23e568cf72d50c53f2c6bebf48d3fe"
+content-hash = "09b1f4f78683bc98b18afa511ca323d162ce66defbf25382547495b7a3b92a91"

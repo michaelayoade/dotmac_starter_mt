@@ -454,6 +454,14 @@ packages/dotmac-customers/       optional tenant customer-account owner
                  RLS, built and tested here but not composed. Authentication,
                  reachability, addresses, qualification, commercial terms,
                  services, billing and network state remain outside.
+packages/dotmac-service-catalog/ optional technical service catalogue
+  pyproject.toml                 distribution dotmac-service-catalog;
+                                 audit-complete with Sub as qualifying source
+  src/dotmac_service_catalog/    specifications, plan families,
+                 characteristics and eligibility-input declarations; `sc`
+                 lineage in `mod_svc_cat`, tenant-only forced RLS, built and
+                 tested here but uncomposed. Offers, prices, contracts,
+                 subscriptions and fixed recurrence are excluded.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1308,6 +1316,8 @@ made concrete — every model has exactly one declared owner.
 | `CustomerAccount` | `mod_customers.customer_accounts` | `dotmac-customers` optional module | Stable tenant customer account number, display label, and account lifecycle extracted Sub-first. It is not a login, subscription, billing account, or network-access record. |
 | `CustomerProfile` | `mod_customers.customer_profiles` | `dotmac-customers` optional module | One narrow segment/notes profile per customer account. Contact reachability, addresses, location evidence and arbitrary identity fields remain with their owning systems. |
 | `CustomerPartyReference` | `mod_customers.customer_party_references` | `dotmac-customers` optional module | Typed opaque association to a Party identity owned elsewhere. The module never copies person/organization identity or dereferences a foreign application's database. |
+| `ServiceSpecification` / `PlanFamily` | `mod_svc_cat.service_specifications`, `mod_svc_cat.plan_families` | `dotmac-service-catalog` optional module | Provider-neutral technical catalogue identity and grouping extracted Sub-first. No offer, price, contract, subscription, billing cycle or fixed recurrence is stored. |
+| `CharacteristicDefinition` / `EligibilityInputDefinition` | `mod_svc_cat.characteristic_definitions`, `mod_svc_cat.eligibility_input_definitions` | `dotmac-service-catalog` optional module | Typed technical characteristic vocabulary and declared facts a Qualification owner may consume. They do not decide eligibility or provision network state. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get

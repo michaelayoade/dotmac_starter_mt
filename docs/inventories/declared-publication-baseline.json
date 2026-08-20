@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-service-catalog": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The Sub-first technical catalogue is audit-complete, uncomposed, and has no product authority cutover; offers, prices and contracts remain explicitly outside. This programme forbids publishing. Remove only in a separately authorized release paired with Sub backfill, zero-drift shadow, and writer retirement.",
+      "state": "never-published"
+    },
     "dotmac-customers": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary, extraction dossier and exact-commit Observer proof land before any product composition or authority cutover. This programme explicitly forbids publishing. Remove this row only in a separately authorized release change paired with Sub's backfill, shadow, zero-drift and writer-retirement evidence; do not infer adoption from the package existing.",
