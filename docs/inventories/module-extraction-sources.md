@@ -67,20 +67,21 @@ complete candidate with validated milestone
 `c548ef02aca10b421d1ebf4158b9c4fdf72e6025` and evidence-only head
 `abf1b9ad4c3889aa6c40ed2e01419e440452f565`; later test hardening is at
 `56517abc7f05cb6e20f9b0e5fdb6a492dbf0fdd2`. The media branch is reconciled
-through `2ade09d16c3e2d246ad361129c4700de6eff819b`, and the combined train at
-`9c0068d3c675c955c46bd3391f9d46f6685cbfcb` is Observer-green with published
-a73 followed by unreleased media a74, content a75 and publishing a76. None of
-those three packages is released or adopted. The other entries remain audit or
-implementation candidates. Backoffice is the default first adopter;
+through `2ade09d16c3e2d246ad361129c4700de6eff819b`, and the former combined train
+at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb` is historical Observer evidence.
+Published a77 now owns the vendor cohort, so the release-authorized marketing
+restack allocates media a78, content a79, publishing a80 and Sites a81; every
+package floors at the first installable cohort kernel, a81. None is released or
+adopted, and exact restack validation is still required. Backoffice is the default first adopter;
 campaigns is the ADR-0032 exception, with Sub cutover 1 and Backoffice cutover
 2 as the independent reuse proof.
 
 | Candidate distribution | Source mode and selected source | First implementation gate |
 |---|---|---|
-| `dotmac-content` | product-first from Mkt planning/content models, services and parity tests | Gate 2 is Observer-green at `6665569b41c0afa112784100ef4912fed9ffb9ce` and combined-train green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`; keep the a1/a75 candidate unpublished, unallowlisted and unadopted until its explicit release and Backoffice gates. |
-| `dotmac-publishing` | product-first from Mkt post-delivery, publishing-service and scheduler behavior, with its direct-provider and transaction defects recorded as retirement inputs rather than shared contracts | Gate 2 is Observer-green at `5a1892c3aac30b607cc28baa52217870e97bc63c` and combined-train green at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb`; keep the a1/a76 candidate unpublished, unallowlisted, uncomposed and unadopted until separately authorized release and Backoffice gates. |
-| `dotmac-sites` | greenfield after an exact six-repository audit; no qualifying source and zero consumers | The exact pins, inspected false positives, five-table local owner and publishing/Integrator boundary are frozen in [`sites-sources.md`](sites-sources.md) and [`sites-extraction-dossier.md`](sites-extraction-dossier.md). Record controlled Gate 1 RED on Observer, then implement the local immutable `SiteReleaseV1` owner at a77. Keep remote publication, release and adoption separately gated. |
-| `dotmac-media-observations` | product-first from Mkt remote-post/ad hierarchy and idempotent metric upserts | Candidate complete and parked; Mkt evidence was refreshed at `abf1b9a`, hardened at `56517ab` and reconciled through `2ade09d`. Its a1/a74 candidate is combined-train green at `9c0068d`; keep release/adoption gated. Every imported value stays observational and rebuildable; no provider SDK or authoritative campaign transition. |
+| `dotmac-content` | product-first from Mkt planning/content models, services and parity tests | Allocation a79, installable floor a81. Release is authorized and allowlisted; publication waits for restack proof, while Backoffice adoption and writer retirement remain separate. |
+| `dotmac-publishing` | product-first from Mkt post-delivery, publishing-service and scheduler behavior, with its direct-provider and transaction defects recorded as retirement inputs rather than shared contracts | Allocation a80, installable floor a81. Release is authorized and allowlisted; publication waits for restack proof, while Backoffice adoption and every PUB-R switch remain separate. |
+| `dotmac-sites` | greenfield after an exact six-repository audit; no qualifying source and zero consumers | Allocation and installable floor a81. Release is authorized and allowlisted; local snapshot behavior must be revalidated, and remote publication/adoption remain separately gated. |
+| `dotmac-media-observations` | product-first from Mkt remote-post/ad hierarchy and idempotent metric upserts | Allocation a78, installable floor a81. Release is authorized and allowlisted; publication waits for restack proof, while the adoption pause and observation-only boundary remain intact. |
 | `dotmac-web-analytics` | product-first from Mkt's normalized daily sessions/pageviews/users/bounce-rate behavior | Port normalization/aggregation only; OAuth, fetch scheduling and checkpoints stay in Integrator. |
 | `dotmac-forms` | product-first from ERP's versioned form definition/submission engine | Replace Organization and recruitment coupling with Tenant scope, typed schemas and opaque subjects. |
 | `dotmac-campaigns` | product-first from Sub, not Mkt or CRM | Implementation merged at Starter main `300ebd7`; registry-verified a72 contains the campaigns allocation and Durable Timers a1, while published a73 supplies the caller-session mechanics and is the effective campaigns floor. The package remains unpublished/unallowlisted; satisfy Sub's S7 ownership, lineage and timer-adoption gates before cutting over Sub ahead of Backoffice. |

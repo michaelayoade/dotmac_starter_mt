@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a77 — UNRELEASED
+## 0.1.0a81 — UNRELEASED
 
 Allocates the independent tenant website-composition lineage. This is physical
 namespace identity only; site behavior remains in the optional module.
@@ -16,7 +16,7 @@ namespace identity only; site behavior remains in the optional module.
 - `SITES_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_sites`,
   revision prefix `si`, and branch label `sites`.
 
-## 0.1.0a76 — UNRELEASED
+## 0.1.0a80 — UNRELEASED
 
 Allocates the independent tenant publication-lifecycle lineage. This is
 physical namespace identity only; publication behavior remains in the optional
@@ -27,7 +27,7 @@ module.
 - `PUBLISHING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
   `mod_publishing`, revision prefix `pb`, and branch label `publishing`.
 
-## 0.1.0a75 — UNRELEASED
+## 0.1.0a79 — UNRELEASED
 
 Allocates the independent tenant editorial-content lineage. This is physical
 namespace identity only; content behavior remains in the optional module.
@@ -37,7 +37,7 @@ namespace identity only; content behavior remains in the optional module.
 - `CONTENT_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_content`,
   revision prefix `ct`, and branch label `content`.
 
-## 0.1.0a74 — UNRELEASED
+## 0.1.0a78 — UNRELEASED
 
 Allocates the immutable tenant-plane database identity for the independently
 installable `dotmac-media-observations` module.
@@ -56,6 +56,63 @@ installable `dotmac-media-observations` module.
   qualified `main` namespace. This preserves the fast service-logic lane after
   the module registry crosses SQLite's hard attachment limit; namespace and
   isolation proofs remain PostgreSQL gates.
+
+## 0.1.0a77 — 2026-08-19
+
+Allocates the independent brand-profile module lineage. No kernel behaviour
+changes: one ledger row and nothing else.
+
+### Added
+
+- `BRAND_PROFILES_MIGRATION_OWNER` — `mod_brand`, prefix `bp`, branch label
+  `brand_profiles`. Genuinely dual-plane with a named assembly on each side
+  today: Sub on the tenant plane (the 897-LOC extraction source) and the vendor
+  control plane on the platform plane, which is the OEM case and the only one
+  needing host bindings. `dotmac-brand-profiles` 0.1.0a1 declares the matching
+  manifest in the same change (ADR-0026 § 8).
+
+## 0.1.0a76 — 2026-08-19
+
+Allocates the independent deployment-control module lineage. No kernel behaviour
+changes: one ledger row and nothing else.
+
+### Added
+
+- `DEPLOYMENT_CONTROL_MIGRATION_OWNER` — `mod_deploy`, prefix `dc`, branch label
+  `deployment_control`. Platform plane only, for a reason close to tautological:
+  a module that decides what a fleet of deployments should run cannot live inside
+  one of those deployments. `dotmac-deployment-control` 0.1.0a1 declares the
+  matching manifest in the same change (ADR-0026 § 8).
+
+## 0.1.0a75 — 2026-08-19
+
+Allocates the independent licensing module lineage. No kernel behaviour changes:
+one ledger row and nothing else.
+
+### Added
+
+- `LICENSING_MIGRATION_OWNER` — `mod_licensing`, prefix `li`, branch label
+  `licensing`. Platform plane only, and for this module the plane is a security
+  boundary rather than an absent consumer: issuance must not live inside the
+  deployment it authorises, and the receiving half already verifies offline
+  through `dotmac_kernel.licensing`. `dotmac-licensing` 0.1.0a1 declares the
+  matching manifest in the same change (ADR-0026 § 8).
+
+## 0.1.0a74 — 2026-08-19
+
+Allocates the independent commercial-agreement module lineage. No kernel
+behaviour changes: this release adds one ledger row and nothing else, which is
+what ADR-0017's moratorium permits — an allocation is physical identity, not a
+facility, and nothing consumes it but the module it names.
+
+### Added
+
+- `COMMERCIAL_AGREEMENTS_MIGRATION_OWNER` — `mod_agreements`, prefix `cg`,
+  branch label `commercial_agreements`. Platform plane only; ADR-0033 § 7
+  derives it from the vendor control plane as the one consumer that exists
+  today. `dotmac-commercial-agreements` 0.1.0a1 declares the matching manifest
+  in the same change, so the row is never a reservation without code behind it
+  (ADR-0026 § 8).
 
 ## 0.1.0a73 — 2026-08-19
 
@@ -85,13 +142,13 @@ kernel.
 
 ### Added
 
-- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
-  branch label `campaigns`. The module owns provider-neutral campaign
-  progression and consumes the kernel's consent, idempotency and outbox owners.
 - `DURABLE_TIMERS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
-  `mod_timers`, revision prefix `dt`, and branch label `durable_timers`. The
-  module owns timer identity, generation and terminal evidence; it consumes the
+  `mod_timers`, revision prefix `dt`, branch label `durable_timers`. The module
+  owns timer identity, generation and terminal evidence; it consumes the
   existing `outbox_relay.v1` prerequisite for delivery mechanics.
+- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
+  branch label `campaigns`. Although the a71 changelog prematurely described
+  this row, immutable release-tag inspection confirms a72 first published it.
 - A manifest-declared outbox event-type registry so timer outputs fail closed
   on an undeclared routing code instead of enqueueing work no consumer owns.
 

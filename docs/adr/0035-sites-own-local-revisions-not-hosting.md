@@ -1,4 +1,4 @@
-# ADR-0034: Sites own local revisions, not hosting
+# ADR-0035: Sites own local revisions, not hosting
 
 **Status:** Accepted for candidate implementation; release and adoption gated  
 **Date:** 2026-08-19  
@@ -76,8 +76,9 @@ into unrelated title/body fields or otherwise launder an untyped payload.
 
 ## Consequences
 
-The first kernel allocation after media observations a74, content a75 and
-publishing a76 is a77: owner/short code/branch `sites`, prefix `si`, schema
+The first free kernel allocation after the published vendor a74-a77 cohort is
+media observations a78, content a79 and publishing a80, followed by Sites a81:
+owner/short code/branch `sites`, prefix `si`, schema
 `mod_sites`. The allocation lands only with the manifest and root migration.
 
 Backoffice is the first candidate adopter, but it is not a contract consumer
@@ -85,3 +86,11 @@ until it exact-pins a release, repeats the empty-owner census, composes its own
 lineage and serves the module-owned ready snapshot. Sub remains a later,
 independent candidate. Neither publication nor adoption is authorized by this
 ADR.
+
+### Amendment — 2026-08-20: verified publication before adoption
+
+Michael authorized the restacked media/content/publishing/Sites cohort for
+release. Sites is therefore release-allowlisted at the first installable cohort
+kernel, a81. Publication does not satisfy the Backoffice composition, local
+snapshot, typed publishing-adapter or Integrator evidence gates above and does
+not make Backoffice or Sub a contract consumer.

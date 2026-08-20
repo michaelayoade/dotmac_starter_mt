@@ -3,7 +3,7 @@
 **Status:** Gate 1 controlled RED recorded at exact commit
 `9f735b4ba5d7fd6c529c9d1d289aa0e245af2541`; Gate 2 is complete and GREEN at
 exact commit `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`.
-**First adopter:** Backoffice. **Second candidate:** Sub, independently.  
+**First adopter:** Backoffice. **Second candidate:** Sub, independently.
 **Release/adoption:** separately gated.
 
 ## Outcome

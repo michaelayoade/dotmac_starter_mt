@@ -45,6 +45,23 @@ dotmac-ticketing = { path = "packages/dotmac-ticketing", develop = true }
 dotmac-release-catalog = { path = "packages/dotmac-release-catalog", develop = true }
 # The fourth installable module (ADR-0006 M4), and the second vendor-side one.
 dotmac-entitlement-allocation = { path = "packages/dotmac-entitlement-allocation", develop = true }
+# The durable vendor<->operator commercial agreement (ADR-0033 § 1). Like the
+# two above it is vendor-side: `app/assembly.py` does not compose it, and the
+# "assembly must not install vendor-only modules" contract below is what keeps
+# that true rather than merely current.
+dotmac-commercial-agreements = { path = "packages/dotmac-commercial-agreements", develop = true }
+# The ISSUER half of WS8 (ADR-0033 § 2). Vendor-side, and the most strongly
+# so of the three: it names the signing material that must never be reachable
+# from a data plane, which is what the vendor-only contract below enforces.
+dotmac-licensing = { path = "packages/dotmac-licensing", develop = true }
+# Desired deployment intent, rollout, acknowledgement and reconciliation
+# (ADR-0033 § 3). Vendor-side: it decides what a FLEET should run, which is
+# not a thing any one deployment may hold.
+dotmac-deployment-control = { path = "packages/dotmac-deployment-control", develop = true }
+# Brand profile DATA (ADR-0033 § 2). Genuinely dual-plane, and the one module
+# in the vendor programme that a tenant data plane legitimately installs —
+# which is why it is deliberately NOT on the vendor-only forbidden list below.
+dotmac-brand-profiles = { path = "packages/dotmac-brand-profiles", develop = true }
 # The third installable module (ADR-0021), and the first whose consumer is a
 # DIFFERENT assembly: the Tenant Workspace. This repository builds, tests and
 # releases it, but `app/assembly.py` deliberately does NOT compose it and
@@ -165,6 +182,10 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = [
     "dotmac_entitlement_allocation.*",
+    "dotmac_commercial_agreements.*",
+    "dotmac_licensing.*",
+    "dotmac_deployment_control.*",
+    "dotmac_brand_profiles.*",
     "dotmac_files.*",
     "dotmac_approvals.*",
     "dotmac_numbering.*",
@@ -223,6 +244,10 @@ root_packages = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
+    "dotmac_licensing",
+    "dotmac_deployment_control",
+    "dotmac_brand_profiles",
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",
@@ -290,6 +315,10 @@ source_modules = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
+    "dotmac_licensing",
+    "dotmac_deployment_control",
+    "dotmac_brand_profiles",
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",
@@ -321,14 +350,29 @@ forbidden_modules = ["app"]
 # workflow does not leak into every data plane. Putting the tables in an
 # optional module satisfies C1 only while a product assembly cannot install it.
 #
-# `dotmac-fleet`, `dotmac-fleet-health`, `dotmac-support-access` and
-# `dotmac-licence-issuance` join this list as they land; licence-issuance most
-# of all, since it holds a signing key that must never reach a data plane.
+# `dotmac-commercial-agreements`, `dotmac-licensing` and
+# `dotmac-deployment-control` are all on this list. Licensing matters most:
+# it names the signing material that must never be reachable from a data
+# plane, and its own manifest records that the plane choice is a security
+# boundary rather than merely an absent consumer.
+#
+# Two from the same programme are deliberately NOT on it.
+# `dotmac-brand-profiles` is genuinely dual-plane and a tenant data plane is
+# one of its two real consumers, so forbidding installation here would
+# contradict the manifest. `dotmac-support-access` will never join it either:
+# ADR-0033 § 4 records that the decision already has three owners and the
+# module is not built.
 [[tool.importlinter.contracts]]
 name = "The assembly must not install vendor-only modules"
 type = "forbidden"
 source_modules = ["app"]
-forbidden_modules = ["dotmac_release_catalog", "dotmac_entitlement_allocation"]
+forbidden_modules = [
+    "dotmac_release_catalog",
+    "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
+    "dotmac_licensing",
+    "dotmac_deployment_control",
+]
 
 [[tool.importlinter.contracts]]
 name = "Modules are independent of each other"
@@ -338,6 +382,10 @@ modules = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
+    "dotmac_licensing",
+    "dotmac_deployment_control",
+    "dotmac_brand_profiles",
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",
@@ -387,6 +435,10 @@ forbidden_modules = [
     "dotmac_ticketing",
     "dotmac_release_catalog",
     "dotmac_entitlement_allocation",
+    "dotmac_commercial_agreements",
+    "dotmac_licensing",
+    "dotmac_deployment_control",
+    "dotmac_brand_profiles",
     "dotmac_application_directory",
     "dotmac_files",
     "dotmac_imports",

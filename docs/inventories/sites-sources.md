@@ -1,8 +1,8 @@
 # Site-builder source audit
 
-**As of:** 2026-08-19  
-**Ruling:** `greenfield-after-inventory`  
-**Qualifying source:** none  
+**As of:** 2026-08-19
+**Ruling:** `greenfield-after-inventory`
+**Qualifying source:** none
 **First candidate adopter:** Backoffice
 
 This is the product-first absence proof for `dotmac-sites`. It narrows the

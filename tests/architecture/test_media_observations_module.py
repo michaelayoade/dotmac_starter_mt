@@ -298,7 +298,7 @@ def test_revision_and_wheel_surface_are_independently_installable() -> None:
     assert "require_prerequisites(op.get_bind(), REQUIRES)" in source
 
     package = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text())
-    assert package["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a74"
+    assert package["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == ">=0.1.0a81"
     included = package["tool"]["poetry"]["include"]
     assert any("migrations/**/*" in row["path"] for row in included)
 

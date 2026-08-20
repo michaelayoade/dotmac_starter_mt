@@ -1,6 +1,6 @@
 # Editorial content extraction dossier
 
-**As of:** 2026-08-19
+**As of:** 2026-08-20
 **Starter base:** `c6ef6cd7b13105bd95c3faf354ffee9032077625`
 **Audited Mkt source:** `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d`
 
@@ -8,8 +8,9 @@ This is the product-first contract for `dotmac-content`, the first executable
 slice of the decomposed marketing suite. Gate 1 recorded the deliberately
 absent distribution as RED on Observer at exact commit
 `85dc9bc24b169dab7bbcd38b0cd67b1a3d058881`. Gate 2 is green at exact local
-commit `6665569b41c0afa112784100ef4912fed9ffb9ce`; the package remains an
-unpublished, unallowlisted and unadopted candidate.
+commit `6665569b41c0afa112784100ef4912fed9ffb9ce`; the package is now
+release-allowlisted but remains unpublished, uncomposed and unadopted pending
+restack validation.
 
 The Mkt remote was rechecked directly on 2026-08-18 and `refs/heads/main`
 resolved to the revision above. It is one commit after the audit's original
@@ -164,10 +165,10 @@ catalog plus forced RLS, tenant-only reads across all five tables, cross-tenant
 write refusal, and unscoped-role fail-closed behavior. The disposable database
 container and network were removed; the test Compose file declares no volume.
 
-This proves the candidate's local contract, not publication or adoption.
-`dotmac-content 0.1.0a1` and kernel a75 remain unpublished; the module is absent
-from the release allowlist and every Backoffice/Mkt writer-retirement row is
-still `not-started`.
+This proved the candidate's local contract, not publication or adoption. At
+that milestone `dotmac-content 0.1.0a1` and kernel a75 were unpublished and the
+module was absent from the release allowlist; every Backoffice/Mkt
+writer-retirement row remains `not-started`.
 
 ## 7. Combined-train reconciliation evidence
 
@@ -180,3 +181,14 @@ cases and all 504 collected disposable-PostgreSQL integration cases without
 failure. The combined media/content/publishing live-catalog and forced-RLS
 suite passed all 15 cases before the isolated database and network were
 removed. This proves reconciliation only; release and adoption remain closed.
+
+## 8. Published-a77 restack and release authorization
+
+Published kernel a77 now owns the vendor cohort, so the content allocation is
+a79 after media observations a78 and before publishing a80 and Sites a81. The
+cohort publishes one kernel tip; `dotmac-content 0.1.0a1` therefore floors at
+the first installable release carrying all four rows, a81. Michael authorized
+release on 2026-08-20, and the package is allowlisted, but publication remains
+blocked until the restacked exact commit repeats the full Observer proof.
+Backoffice composition, shadowing, writer retirement and adoption remain
+separate gates.

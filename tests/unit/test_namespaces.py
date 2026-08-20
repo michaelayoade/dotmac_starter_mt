@@ -194,15 +194,24 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
     # audit found no real named platform consumer.
     # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
-    # than adding another due-work engine. `media_observations` is the
-    # fourteenth and remains tenant-only; it owns provider-neutral immutable
-    # external-media facts. `content` is the fifteenth and owns
-    # tenant editorial plans/items without absorbing publishing or campaign
-    # execution. `publishing` is the sixteenth and owns tenant publication
-    # releases, target attempts and normalized observations without provider
-    # transport. `sites` is the seventeenth and owns tenant-local immutable
-    # website composition without absorbing publication or hosting. None of
-    # these allocations installs behaviour in the kernel.
+    # than adding another due-work engine. `commercial_agreements` (ADR-0033) is
+    # the fourteenth: platform-only, because the vendor control plane is the one
+    # consumer that exists today and no tenant data plane holds a vendor<->operator
+    # agreement. `licensing` (ADR-0033 § 2) is the fifteenth, and its plane is a
+    # SECURITY boundary rather than an absent consumer — issuance must not live
+    # inside the deployment it authorises, and the receiving half already verifies
+    # offline through `dotmac_kernel.licensing`. `deployment_control`
+    # (ADR-0033 § 3) is the sixteenth, platform-only for a reason close to
+    # tautological: a module that decides what a FLEET should run cannot live
+    # inside one of the deployments it decides about. `brand_profiles`
+    # (ADR-0033 § 2) is the seventeenth and genuinely dual-plane: Sub brands
+    # its own portals and the vendor brands deployments it ships, and the
+    # second needs a HOST binding because a profile must be selectable before
+    # any tenant is resolved. `media_observations`, `content`, `publishing` and
+    # `sites` are the eighteenth through twenty-first allocations. They remain
+    # tenant-only and keep observations, editorial state, release intent and
+    # local website composition as four independent owners.
+    # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
         "ticketing",
@@ -217,6 +226,10 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "people",
         "campaigns",
         "durable_timers",
+        "commercial_agreements",
+        "licensing",
+        "deployment_control",
+        "brand_profiles",
         "media_observations",
         "content",
         "publishing",

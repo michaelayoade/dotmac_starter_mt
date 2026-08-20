@@ -145,7 +145,7 @@ def test_merged_campaigns_is_not_misreported_as_released_or_adopted() -> None:
     assert [phrase for phrase in required if phrase not in normalized] == []
 
 
-def test_parked_media_observations_is_not_misreported_as_released_or_adopted() -> None:
+def test_release_authorized_media_observations_is_not_misreported_as_adopted() -> None:
     normalized = _normalized()
     required = (
         "c548ef02aca10b421d1ebf4158b9c4fdf72e6025",
@@ -154,13 +154,13 @@ def test_parked_media_observations_is_not_misreported_as_released_or_adopted() -
         "2ade09d16c3e2d246ad361129c4700de6eff819b",
         "that commit is not validation or release evidence",
         "candidate package is `0.1.0a1`",
-        "now declares `dotmac-kernel >=0.1.0a74`",
-        "immutable published a73 lacks its allocation",
-        "first free identity is the unreleased local a74 candidate",
-        "old rebase, namespace and floor-repin gates are closed",
-        "deliberately **parked**",
-        "has not been allowlisted, tagged, published, composed or adopted",
-        "no authority has moved",
+        "published kernel a77 now owns the vendor cohort",
+        "media a78, content a79, publishing a80 and sites a81",
+        "all four packages floor at the first installable cohort kernel, a81",
+        "authorized release on 2026-08-20",
+        "now allowlisted while the restacked exact-commit observer proof remains pending",
+        "release does not resume adoption or move authority",
+        "tagged, published, composed or adopted",
         "release and adoption remain separate gates",
     )
     assert [phrase for phrase in required if phrase not in normalized] == []

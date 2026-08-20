@@ -1,11 +1,11 @@
 # Sites extraction dossier
 
-**As of:** 2026-08-19  
-**Source mode:** greenfield after six-repository inventory  
-**Candidate allocation:** kernel a77, `si`, `sites`, `mod_sites`  
+**As of:** 2026-08-19
+**Source mode:** greenfield after six-repository inventory
+**Candidate allocation:** kernel a81, `si`, `sites`, `mod_sites`
 **Gate 2 code/evidence revision:**
 `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`
-**Release/adoption:** not authorized
+**Release/adoption:** release authorized 2026-08-20; adoption not authorized
 
 No qualifying site-builder exists at the exact coordinates recorded in
 [`sites-sources.md`](sites-sources.md). This dossier therefore specifies the
@@ -108,10 +108,20 @@ fields, that contract must be extended explicitly before remote cutover.
    RED only because the distribution was absent: 13 passed, 40 failed.
 3. **Complete:** service canaries preceded the runtime service; the PostgreSQL
    isolation canary was already present in the Gate 1 commit.
-4. **Complete:** a77 was allocated in the same slice as the manifest and
+4. **Complete:** a81 was allocated in the same slice as the manifest and
    `si_0001_sites`.
 5. **Complete:** the five-table owner and local release contract passed focused,
    full unit/architecture, full disposable PostgreSQL and live-catalog/RLS
    suites on Observer at exact revision `8bf12dd`.
-6. **Still closed:** keep release, allowlisting, Backoffice composition and remote deployment
-   closed until separately authorized.
+6. **In progress:** release and allowlisting are authorized, but publication
+   waits for exact-commit restack proof on Observer. Backoffice composition,
+   adoption and remote deployment remain closed until separately proven.
+
+## 2026-08-20 restack
+
+Published kernel a77 owns the vendor cohort and cannot be repointed. Sites now
+follows media observations a78, content a79 and publishing a80 at a81. Because
+the kernel workflow publishes one tip, a81 is also every cohort module's first
+installable floor. The earlier `8bf12dd` proof remains valid historical evidence
+for behavior but is not release evidence for the restacked source; the complete
+Observer lanes must pass again before publication.

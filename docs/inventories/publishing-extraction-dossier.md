@@ -1,6 +1,6 @@
 # Publication lifecycle extraction dossier
 
-**As of:** 2026-08-19
+**As of:** 2026-08-20
 **Starter branch base:** `6c97175611ca31eb684ac1afcd6493f506eafdd7`
 **Audited Mkt source:** `7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d`
 
@@ -46,8 +46,8 @@ snapshot/target references, but neither package imports the other.
 ## 2. Revision-1 contract
 
 The module is tenant-plane only. Its proposed allocation is owner/short code/
-branch `publishing`, prefix `pb`, schema `mod_publishing`, and kernel alpha a76
-on the current local suite branch. The allocation lands only with the manifest
+branch `publishing`, prefix `pb`, schema `mod_publishing`, and kernel alpha a80
+on the restacked suite branch. The allocation lands only with the manifest
 and root migration in Gate 2; this dossier does not reserve an empty namespace.
 
 The four initial tables are:
@@ -225,11 +225,11 @@ persisted snapshots now fail closed on malformed stored fields, the namespace
 ratchet explicitly enumerates the sixteenth owner, and target order is a stored,
 uniquely constrained release fact rather than timestamp/UUID accident.
 
-This closes implementation Gate 2 only. Publishing a1 and kernel a76 remain
-unpublished; publishing is absent from the release allowlist and from this
-reference assembly; Backoffice has not pinned, migrated, shadowed or retired a
-writer; and every `PUB-R*` row remains `not-started`. Release and adoption need
-separate authorization and their own proof.
+This closed implementation Gate 2 only. At that milestone Publishing a1 and
+kernel a76 were unpublished and publishing was absent from the release
+allowlist and from this reference assembly. Backoffice still has not pinned,
+migrated, shadowed or retired a writer, and every `PUB-R*` row remains
+`not-started`.
 
 ## 9. Combined-train reconciliation evidence
 
@@ -241,5 +241,16 @@ Poetry 2.4.1 lock, passed `make check`, all 3,944 collected unit/architecture
 cases and all 504 collected disposable-PostgreSQL integration cases without
 failure. The combined media/content/publishing live-catalog and forced-RLS
 suite passed all 15 cases before the isolated database and network were
-removed. Publishing a1 and kernel a76 remain unpublished and unallowlisted;
+removed. This remains historical evidence for the pre-restack allocation;
 Backoffice has not adopted the module.
+
+## 10. Published-a77 restack and release authorization
+
+Published kernel a77 owns the vendor cohort, so publishing's permanent
+allocation moves to a80 after media observations a78 and content a79. Sites a81
+completes the cohort, and one kernel release publishes only that tip; Publishing
+a1 therefore floors at a81. Michael authorized release on 2026-08-20, and the
+package is allowlisted, but publication remains blocked until the restacked
+exact commit repeats the full Observer proof. Backoffice composition, every
+`PUB-R*` writer switch, transport certification and adoption remain separate
+gates.

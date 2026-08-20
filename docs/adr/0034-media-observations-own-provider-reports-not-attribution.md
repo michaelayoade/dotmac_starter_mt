@@ -1,4 +1,4 @@
-# ADR-0033: Media observations own provider reports, not attribution
+# ADR-0034: Media observations own provider reports, not attribution
 
 **Status:** Accepted
 **Date:** 2026-08-18
@@ -35,6 +35,15 @@ module's publication entry to land with first-adopter proof. The specified
 execution order likewise puts release after Backoffice shadow/cutover. The
 pause therefore leaves the validated package intentionally unpublished rather
 than silently reordering the programme.
+
+### Amendment — 2026-08-20: release is not adoption
+
+Michael authorized the Observer-green media, content, publishing and Sites
+cohort for release after restacking on current main. Publication is now allowed
+before product adoption so a later Backoffice cutover can exact-pin a verified
+artifact; it does not name a contract consumer, compose the module, move
+authority, or begin shadow and writer retirement. The adoption pause and every
+first-adopter obligation below remain in force.
 
 ## Decision
 

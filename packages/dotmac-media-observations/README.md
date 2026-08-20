@@ -21,7 +21,7 @@ provider conversion claims into official attribution or revenue.
 
 See the [extraction dossier](EXTRACTION.toml),
 [source audit](../../docs/inventories/media-observations-sources.md), and
-[ADR-0033](../../docs/adr/0033-media-observations-own-provider-reports-not-attribution.md).
+[ADR-0034](../../docs/adr/0034-media-observations-own-provider-reports-not-attribution.md).
 
 ## Persistence
 

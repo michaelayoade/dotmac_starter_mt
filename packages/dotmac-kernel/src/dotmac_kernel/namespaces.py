@@ -624,7 +624,102 @@ DURABLE_TIMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("timers"),
 )
 
-# `dotmac-media-observations` — the FOURTEENTH allocated installable module.
+# `dotmac-commercial-agreements` — the durable commercial agreement between the
+# platform operator and a counterparty (ADR-0033 § 1). `agreements` is plain in a
+# catalog dump for the same reason `files`, `imports` and `approvals` are — a
+# reader of `mod_agreements.agreements` needs no glossary — and the distinct `cg`
+# prefix keeps its independently released lineage inside the revision-id budget.
+# `ca` is the campaign lineage's and `a` alone is the host assembly's.
+#
+# PLATFORM PLANE ONLY, and declared rather than discovered. ADR-0033 § 7 derives
+# every plane in this programme from a consumer that exists TODAY: the vendor
+# control plane owns vendor↔operator agreements, and no tenant data plane holds
+# one. Sub sells ISP service to subscribers, which is a different subject with a
+# different owner (`dotmac-subscriptions`, ruling A2(a)). A tenant plane declared
+# "for later" is a plane whose isolation nobody tests, so `tables` stays empty.
+#
+# The row lands in the same change as the module's manifest, migration and
+# dossier, exactly as the allocation rule above requires — and for the reason
+# ADR-0026 § 8 records: a reservation ahead of the code is renumbered at every
+# rebase while the alpha train is contended.
+COMMERCIAL_AGREEMENTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="commercial_agreements",
+    prefix="cg",
+    branch_label="commercial_agreements",
+    db_schema=module_schema("agreements"),
+)
+
+# `dotmac-licensing` — the ISSUER half of WS8 (ADR-0033 § 2). `licensing` is plain
+# in a catalog dump for the same reason `files`, `imports` and `approvals` are; the
+# distinct `li` prefix keeps its independently released lineage inside the
+# revision-id budget.
+#
+# PLATFORM PLANE ONLY, and here the plane is a security boundary rather than
+# merely an absent consumer. A tenant data plane installing licence ISSUANCE
+# would put the thing that decides what a deployment may do inside the deployment
+# it decides about. The receiving half is already elsewhere and already correct:
+# `dotmac_kernel.licensing` verifies a signed envelope fully OFFLINE, so a data
+# plane learns what it may do from a document it can check without asking anyone.
+# Reading the issuer's tables instead would replace an offline cryptographic check
+# with a network dependency and a trust relationship.
+#
+# The allocation adds no kernel behaviour — nothing consumes it but the module it
+# names — which is what makes it compatible with ADR-0017's moratorium.
+LICENSING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="licensing",
+    prefix="li",
+    branch_label="licensing",
+    db_schema=module_schema("licensing"),
+)
+
+# `dotmac-deployment-control` — desired deployment intent, rollout, acknowledgement
+# and reconciliation (ADR-0033 § 3). `deploy` rather than `deployment_control`
+# because the short code is the permanent physical identity and every qualified
+# name pays for its length; `dc` leaves the revision-id budget for a readable slug.
+#
+# PLATFORM PLANE ONLY, for a reason close to tautological: a module that decides
+# what a FLEET of deployments should run cannot live inside one of those
+# deployments. The deployments are separate applications that learn what to do
+# through the Integrator and report back through a signed envelope the kernel
+# verifies (ADR-0007) — never by reading this schema (ADR-0024).
+#
+# This is the one module in the ADR-0033 programme with a SPLIT provenance: the
+# receipt half ports the never-merged Vendor V6 admission design, and the
+# plan/rollout half is greenfield with the absence evidenced across every branch,
+# stash, dangling object and reflog of the Vendor repository plus seven others.
+# Its dossier records that as `historical-mixed` rather than claiming a mode it
+# cannot support.
+DEPLOYMENT_CONTROL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="deployment_control",
+    prefix="dc",
+    branch_label="deployment_control",
+    db_schema=module_schema("deploy"),
+)
+
+# `dotmac-brand-profiles` — the data that makes one released artifact appear as
+# Dotmac Academy at one host and NDIC Academy at another (ADR-0033 § 2). `brand`
+# reads correctly in a catalog dump; `bp` leaves the revision-id budget for a
+# readable slug.
+#
+# GENUINELY DUAL-PLANE, and this is the ADR-0023 case rather than an aspiration:
+# a named assembly exists on each side today. Sub brands its own portals with a
+# reseller/organization override chain (897 LOC in production, the extraction
+# source); the vendor control plane brands deployments it ships, which is the OEM
+# case and the only one needing HOST bindings — a profile must be selectable
+# before any tenant is resolved, which is precisely why a brand profile cannot be
+# a tenant setting.
+#
+# The two planes hold structurally similar tables, which is the case ADR-0023
+# warns about: a reader cannot tell them apart from the columns alone, so the
+# plane is DECLARED rather than inferred.
+BRAND_PROFILES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="brand_profiles",
+    prefix="bp",
+    branch_label="brand_profiles",
+    db_schema=module_schema("brand"),
+)
+
+# `dotmac-media-observations` — the eighteenth allocated installable module.
 # External media hierarchy, configuration and provider-reported aggregate
 # performance are tenant data-plane observations; the source audit found no
 # platform-plane adopter. `mediaobs` remains legible in catalog output and the
@@ -636,7 +731,7 @@ MEDIA_OBSERVATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("mediaobs"),
 )
 
-# `dotmac-content` — the FIFTEENTH allocated installable module. It owns the
+# `dotmac-content` — the nineteenth allocated installable module. It owns the
 # tenant-only editorial plan and content plane extracted from Mkt. `content`
 # remains explicit in live catalogs; `ct` keeps the independent lineage's
 # revision ids compact. Publishing, outbound campaigns, files and provider
@@ -648,7 +743,7 @@ CONTENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("content"),
 )
 
-# `dotmac-publishing` — the SIXTEENTH allocated installable module. It owns
+# `dotmac-publishing` — the twentieth allocated installable module. It owns
 # tenant publication intent, immutable snapshots, per-target attempt history
 # and normalized outcome reconciliation. `publishing` stays explicit in live
 # catalogs; `pb` leaves the lineage enough revision-id budget. Integrator and
@@ -660,7 +755,7 @@ PUBLISHING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("publishing"),
 )
 
-# `dotmac-sites` — the SEVENTEENTH allocated installable module. It owns the
+# `dotmac-sites` — the twenty-first allocated installable module. It owns the
 # tenant site/page composition plane and immutable local website revisions.
 # `sites` remains explicit in live catalogs; `si` keeps the lineage compact.
 # Publishing owns delivery intent/outcomes and Integrator owns hosting I/O.
@@ -686,6 +781,10 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     PEOPLE_MIGRATION_OWNER,
     CAMPAIGNS_MIGRATION_OWNER,
     DURABLE_TIMERS_MIGRATION_OWNER,
+    COMMERCIAL_AGREEMENTS_MIGRATION_OWNER,
+    LICENSING_MIGRATION_OWNER,
+    DEPLOYMENT_CONTROL_MIGRATION_OWNER,
+    BRAND_PROFILES_MIGRATION_OWNER,
     MEDIA_OBSERVATIONS_MIGRATION_OWNER,
     CONTENT_MIGRATION_OWNER,
     PUBLISHING_MIGRATION_OWNER,
@@ -1024,21 +1123,17 @@ __all__ = [
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
-    "CONTENT_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
     "INTEGRATION_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
-    "MEDIA_OBSERVATIONS_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
-    "PUBLISHING_MIGRATION_OWNER",
-    "SITES_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",

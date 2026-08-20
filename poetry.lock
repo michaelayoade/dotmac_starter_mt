@@ -559,6 +559,25 @@ type = "directory"
 url = "packages/dotmac-auth-oidc"
 
 [[package]]
+name = "dotmac-brand-profiles"
+version = "0.1.0a1"
+description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0033 § 2)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+dotmac-ui = ">=0.1.0a7"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-brand-profiles"
+
+[[package]]
 name = "dotmac-campaigns"
 version = "0.1.0a1"
 description = "Provider-neutral outbound campaign lifecycle, immutable audiences and ordered recipient progression"
@@ -575,6 +594,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-campaigns"
+
+[[package]]
+name = "dotmac-commercial-agreements"
+version = "0.1.0a1"
+description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0033 § 1)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-commercial-agreements"
 
 [[package]]
 name = "dotmac-connector-whatsapp"
@@ -604,12 +641,30 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a75"
+dotmac-kernel = ">=0.1.0a81"
 sqlalchemy = "^2.0"
 
 [package.source]
 type = "directory"
 url = "packages/dotmac-content"
+
+[[package]]
+name = "dotmac-deployment-control"
+version = "0.1.0a1"
+description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0033 § 3)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-deployment-control"
 
 [[package]]
 name = "dotmac-durable-timers"
@@ -704,7 +759,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a77"
+version = "0.1.0a81"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -730,6 +785,24 @@ type = "directory"
 url = "packages/dotmac-kernel"
 
 [[package]]
+name = "dotmac-licensing"
+version = "0.1.0a1"
+description = "DotMac Licensing — the issuer half of WS8: signed, versioned, revocable software-use authority derived from an active agreement's allocated entitlement (ADR-0033 § 2)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-licensing"
+
+[[package]]
 name = "dotmac-media-observations"
 version = "0.1.0a1"
 description = "Provider-neutral immutable external media observations and rebuildable projections"
@@ -740,7 +813,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a74"
+dotmac-kernel = ">=0.1.0a81"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -794,7 +867,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a76"
+dotmac-kernel = ">=0.1.0a81"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -830,7 +903,7 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-kernel = ">=0.1.0a77"
+dotmac-kernel = ">=0.1.0a81"
 sqlalchemy = "^2.0"
 
 [package.source]
@@ -3052,4 +3125,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "89b87904f51965e5e461c25d37a6e29c5aa603282b508f3b3b1b77a60ca42991"
+content-hash = "281aacebcbc3ea031c0d4d0296851b998c74d46df3a129acf4ea2b16e227f162"

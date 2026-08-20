@@ -1,7 +1,7 @@
 # Media-observations product-first source dossier
 
 **Audit date:** 2026-08-18
-**Decision:** [ADR-0033](../adr/0033-media-observations-own-provider-reports-not-attribution.md)
+**Decision:** [ADR-0034](../adr/0034-media-observations-own-provider-reports-not-attribution.md)
 **Package dossier:**
 [`packages/dotmac-media-observations/EXTRACTION.toml`](../../packages/dotmac-media-observations/EXTRACTION.toml)
 
