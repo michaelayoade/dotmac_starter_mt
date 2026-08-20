@@ -70,12 +70,42 @@ the profile must be selectable by host *before* a tenant is resolved.
 It declares **both planes** under ADR-0023, because both consumers exist today:
 Sub on the tenant plane and the Vendor control plane on the platform plane.
 
-Three constraints bind the extraction:
+#### 2a. The presentation boundary, amended 2026-08-19
 
-- **ADR-0006 D8 holds.** No arbitrary CSS and no executable template in profile
-  data. Sub's `primary_color`/`secondary_color` are *value-named* and must
-  generalise to published `dotmac-ui` **role** tokens (hard rule 16). This is
-  the one place the extraction corrects its source rather than porting it.
+An earlier revision of this section said the profile's colours "must generalise
+to published `dotmac-ui` role tokens", which over-read D8 into forbidding the
+profile from holding colour values at all. Michael's 2026-08-19 ruling fixes the
+boundary three ways:
+
+| Owner | Owns |
+|---|---|
+| `dotmac-ui` | the token vocabulary, the projection logic, and contrast validation |
+| `dotmac-brand-profiles` | the scoped values, their provenance, the precedence between them, and the locks over them |
+| the assembly | mapping profile values into `dotmac_ui.BrandOverride` |
+
+**A brand profile may own constrained runtime brand/accent values.** What it may
+not own is arbitrary CSS or an open-ended token map. The allowlist is exactly
+`BrandOverride`'s accepted fields, published as `BRAND_OVERRIDE_INPUTS` and
+asserted equal to them, so it tracks the vocabulary rather than a snapshot of it.
+
+**Unsupported legacy input is reported, never dropped.**
+`translate_legacy_brand_values` returns both the accepted mapping and every
+unsupported value with a typed disposition. That is `dotmac_ui.BrandWarning`'s
+own stated rule — *"a warning, never a silent adjustment: D8 requires that
+unsupported or altered branding input be reported to the caller"* — applied to
+migration rather than to rendering.
+
+**Sub's `semantic_colors` quintet is not carried, and the reason is ownership.**
+Sub already constrains it to known tones, 6-digit hex and WCAG AA in both
+themes, so it was never the open token map an earlier draft implied. But
+`dotmac_ui.SEMANTIC_INTENTS` publishes exactly those five names as tokens with
+built-in ramps that `render_brand_css` does not seed, so a per-profile override
+would be a second authority over a published token. A product that needs one
+changes the published token. Affected values carry
+`Disposition.OWNED_BY_PUBLISHED_TOKEN`.
+
+The remaining two constraints are unchanged:
+
 - **`dotmac-files` stores the bytes.** The profile holds references.
 - **Native mobile brands stay separate signed builds from shared source.** The
   profile holds build-profile metadata *references* only, never build inputs.

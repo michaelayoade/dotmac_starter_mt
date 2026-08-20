@@ -559,6 +559,25 @@ type = "directory"
 url = "packages/dotmac-auth-oidc"
 
 [[package]]
+name = "dotmac-brand-profiles"
+version = "0.1.0a1"
+description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0033 § 2)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+dotmac-ui = ">=0.1.0a7"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-brand-profiles"
+
+[[package]]
 name = "dotmac-campaigns"
 version = "0.1.0a1"
 description = "Provider-neutral outbound campaign lifecycle, immutable audiences and ordered recipient progression"
@@ -722,7 +741,7 @@ url = "packages/dotmac-integration"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a76"
+version = "0.1.0a77"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -3034,4 +3053,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "8db9cbe795961e13b4a1fc280a9a53718cd379fac70a0dadcc83df4ac5cd6041"
+content-hash = "9b1c0d362e28314bd140076528067a64c060ca275f3cbd2e8feafabd0d835e53"

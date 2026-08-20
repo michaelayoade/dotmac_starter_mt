@@ -6,6 +6,20 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a77 — 2026-08-19
+
+Allocates the independent brand-profile module lineage. No kernel behaviour
+changes: one ledger row and nothing else.
+
+### Added
+
+- `BRAND_PROFILES_MIGRATION_OWNER` — `mod_brand`, prefix `bp`, branch label
+  `brand_profiles`. Genuinely dual-plane with a named assembly on each side
+  today: Sub on the tenant plane (the 897-LOC extraction source) and the vendor
+  control plane on the platform plane, which is the OEM case and the only one
+  needing host bindings. `dotmac-brand-profiles` 0.1.0a1 declares the matching
+  manifest in the same change (ADR-0026 § 8).
+
 ## 0.1.0a76 — 2026-08-19
 
 Allocates the independent deployment-control module lineage. No kernel behaviour

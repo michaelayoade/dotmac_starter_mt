@@ -696,6 +696,29 @@ DEPLOYMENT_CONTROL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("deploy"),
 )
 
+# `dotmac-brand-profiles` — the data that makes one released artifact appear as
+# Dotmac Academy at one host and NDIC Academy at another (ADR-0033 § 2). `brand`
+# reads correctly in a catalog dump; `bp` leaves the revision-id budget for a
+# readable slug.
+#
+# GENUINELY DUAL-PLANE, and this is the ADR-0023 case rather than an aspiration:
+# a named assembly exists on each side today. Sub brands its own portals with a
+# reseller/organization override chain (897 LOC in production, the extraction
+# source); the vendor control plane brands deployments it ships, which is the OEM
+# case and the only one needing HOST bindings — a profile must be selectable
+# before any tenant is resolved, which is precisely why a brand profile cannot be
+# a tenant setting.
+#
+# The two planes hold structurally similar tables, which is the case ADR-0023
+# warns about: a reader cannot tell them apart from the columns alone, so the
+# plane is DECLARED rather than inferred.
+BRAND_PROFILES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="brand_profiles",
+    prefix="bp",
+    branch_label="brand_profiles",
+    db_schema=module_schema("brand"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -714,6 +737,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     COMMERCIAL_AGREEMENTS_MIGRATION_OWNER,
     LICENSING_MIGRATION_OWNER,
     DEPLOYMENT_CONTROL_MIGRATION_OWNER,
+    BRAND_PROFILES_MIGRATION_OWNER,
 )
 
 
