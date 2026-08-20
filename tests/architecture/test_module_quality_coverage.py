@@ -8,6 +8,7 @@ did not mean every published typed surface had been type/security checked.
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from pathlib import Path
 
@@ -42,12 +43,26 @@ def _uncovered_sources(makefile: str, source_roots: set[str]) -> dict[str, set[s
             re.MULTILINE,
         )
     )
+    source_families = dict(
+        re.findall(
+            r"^([A-Z][A-Z0-9_]*_SOURCES)\s*:?=.*\$\(wildcard\s+(packages/[^)]+)\)",
+            makefile,
+            re.MULTILINE,
+        )
+    )
     result: dict[str, set[str]] = {}
     for target in ("type-check", "security"):
         recipe = _target_recipe(makefile, target)
         covered = {
             path for variable, path in variables.items() if f"$({variable})" in recipe
         }
+        for variable, pattern in source_families.items():
+            if f"$({variable})" in recipe:
+                covered.update(
+                    path
+                    for path in source_roots
+                    if fnmatch.fnmatchcase(path, pattern)
+                )
         result[target] = source_roots - covered
     return result
 
@@ -76,3 +91,20 @@ security:
         planted,
         {"packages/alpha/src/alpha", beta},
     ) == {"type-check": {beta}, "security": {beta}}
+
+
+def test_a_source_family_counts_only_in_targets_that_consume_it() -> None:
+    """A wildcard declaration alone cannot make an unscanned family green."""
+    planted = """\
+ALPHA_SRC ?= packages/alpha/src/alpha
+PLUGIN_SOURCES := $(sort $(wildcard packages/plugin-*/src/*))
+type-check:
+\tmypy $(ALPHA_SRC) $(PLUGIN_SOURCES)
+security:
+\tbandit $(ALPHA_SRC)
+"""
+    plugin = "packages/plugin-one/src/plugin_one"
+    assert _uncovered_sources(
+        planted,
+        {"packages/alpha/src/alpha", plugin},
+    ) == {"type-check": set(), "security": {plugin}}
