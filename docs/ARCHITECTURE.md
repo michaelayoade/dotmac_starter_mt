@@ -76,6 +76,23 @@ local owning record; a separate locally owned ticket may be created only by the
 local ticket owner. Synchronization never makes either application a writer of
 the other's lifecycle.
 
+ADR-0034 accepts the next Sub vNext parity cohort without claiming it is
+installed today. The product-first inventory and extraction dossiers are
+complete; implementation, publication and adoption remain separate gates. The
+accepted owners are `dotmac-referrals`, `dotmac-reseller-management`,
+`dotmac-ai-operations`, `dotmac-remote-access`,
+`dotmac-compliance-reporting`, `dotmac-workflow-runtime`,
+`dotmac-support-access`, `dotmac-platform-health`, and the independently
+qualified `dotmac-forms`. Fleet Control adopts the already implemented
+`dotmac-deployment-control`; there is no `dotmac-fleet-control` owner.
+
+The tenant plane is accepted for Referrals, Reseller Management, AI Operations,
+Remote Access, Compliance Reporting, Workflow Runtime and Forms. Support Access
+and Platform Health are platform-plane capabilities with the Vendor control
+plane as their first candidate assembly. These are target ownership decisions,
+not entries in the as-built module registry below; each enters that registry
+only with its manifest, lineage, catalog and live isolation canary.
+
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
 The current application implements `FeatureManifest`, `DISABLED_FEATURES`, and
@@ -131,8 +148,8 @@ quota decisions—not payment providers or raw license payloads.
 The application currently has tenant creation and `Tenant.is_active`/
 `suspended_at`/`deleted_at` fields, but no canonical tenant transition service,
 cross-module lifecycle orchestrator, outbox/inbox, onboarding workflow,
-subscription/billing/rating lifecycle, support-access workflow, or coordinated
-offboarding/purge path. The target uses separate tenant, subscription,
+subscription/billing/rating lifecycle, implemented support-access workflow, or
+coordinated offboarding/purge path. The target uses separate tenant, subscription,
 entitlement, provider-job, domain, and license state machines. Versioned policy
 maps commercial events to restriction/suspension; payment failure never directly
 deletes data.
