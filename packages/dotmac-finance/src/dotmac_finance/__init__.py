@@ -22,6 +22,7 @@ from dotmac_finance.contracts import (
     RevaluationCommand,
 )
 from dotmac_finance.manifest import module
+from dotmac_finance.migrations import versions_dir
 from dotmac_finance.service import (
     FinanceConflict,
     FinanceNotFound,
@@ -62,5 +63,6 @@ __all__ = [
     "module",
     "post_depreciation_run",
     "revalue_asset_book",
+    "versions_dir",
     "__version__",
 ]

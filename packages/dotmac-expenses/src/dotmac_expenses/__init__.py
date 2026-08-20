@@ -36,6 +36,7 @@ from dotmac_expenses.contracts import (
     SubmissionOutcome,
 )
 from dotmac_expenses.manifest import module
+from dotmac_expenses.migrations import versions_dir
 from dotmac_expenses.service import (
     add_policy_rule,
     apply_claim_decision,
@@ -115,4 +116,5 @@ __all__ = [
     "submit_claim",
     "submit_request",
     "withdraw_claim_approval",
+    "versions_dir",
 ]

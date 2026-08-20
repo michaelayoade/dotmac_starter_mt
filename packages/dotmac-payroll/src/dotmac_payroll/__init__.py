@@ -6,6 +6,7 @@ from dotmac_payroll.contracts import (
     PayRuleInput,
 )
 from dotmac_payroll.manifest import module
+from dotmac_payroll.migrations import versions_dir
 from dotmac_payroll.service import (
     PayrollConflict,
     PayrollNotFound,
@@ -45,4 +46,5 @@ __all__ = [
     "record_liability_settlement",
     "retire_pay_component",
     "update_pay_component",
+    "versions_dir",
 ]

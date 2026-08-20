@@ -11,6 +11,7 @@ from dotmac_banking.contracts import (
     StatementLineInput,
 )
 from dotmac_banking.manifest import module
+from dotmac_banking.migrations import versions_dir
 from dotmac_banking.service import (
     BankingConflict,
     BankingNotFound,
@@ -61,4 +62,5 @@ __all__ = [
     "suggest_matches",
     "update_bank_account",
     "update_bank_institution",
+    "versions_dir",
 ]

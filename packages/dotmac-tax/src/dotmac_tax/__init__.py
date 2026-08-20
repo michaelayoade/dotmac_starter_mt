@@ -9,6 +9,7 @@ from dotmac_tax.contracts import (
     TaxRuleInput,
 )
 from dotmac_tax.manifest import module
+from dotmac_tax.migrations import versions_dir
 from dotmac_tax.service import (
     TaxConflict,
     TaxNotFound,
@@ -65,4 +66,5 @@ __all__ = [
     "update_tax_authority",
     "update_tax_code",
     "update_tax_jurisdiction",
+    "versions_dir",
 ]

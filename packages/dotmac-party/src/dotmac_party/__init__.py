@@ -17,6 +17,7 @@ from dotmac_party.contracts import (
     RoleStatus,
 )
 from dotmac_party.manifest import module
+from dotmac_party.migrations import versions_dir
 from dotmac_party.models import (
     PartyContactPoint,
     PartyExternalReference,
@@ -94,4 +95,5 @@ __all__ = [
     "transition_membership",
     "transition_relationship",
     "transition_role",
+    "versions_dir",
 ]

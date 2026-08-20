@@ -26,6 +26,7 @@ from dotmac_surveys.lifecycle import (
     validate_answers,
 )
 from dotmac_surveys.manifest import module
+from dotmac_surveys.migrations import versions_dir
 from dotmac_surveys.service import (
     InvitationIssue,
     ResponseReceipt,
@@ -74,4 +75,5 @@ __all__ = [
     "transition_survey_status",
     "update_draft_survey",
     "validate_answers",
+    "versions_dir",
 ]
