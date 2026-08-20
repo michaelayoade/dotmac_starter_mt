@@ -121,8 +121,8 @@ jobs:
         run: poetry build
 
       # Wheel-content policy: py.typed and the migration lineage present, no
-      # assembly/test/tooling content, dependency closure limited to the kernel,
-      # no secret-shaped files.
+      # assembly/test/tooling content, dependency closure limited to the
+      # per-module reviewed set, no secret-shaped files.
       - name: Inspect artifacts
         run: |
           python scripts/release_module.py inspect "${{ inputs.module }}" \
@@ -137,6 +137,18 @@ jobs:
         working-directory: packages/dotmac-kernel
         run: poetry build --output "${GITHUB_WORKSPACE}/kernel-dist"
 
+      # A module may depend on another FIRST-PARTY distribution only when that
+      # name is present in its reviewed `allowed_requires`. The build job has no
+      # registry credential, so build those dependencies from this exact main
+      # checkout and supply their wheels locally. Discovery is the intersection
+      # of `allowed_requires` and packages/* metadata: merely existing in the
+      # repository never opts a package into this release.
+      - name: Build allowed first-party dependency wheels for the smoke
+        run: |
+          python scripts/release_module.py build-local-dependencies \
+            "${{ inputs.module }}" \
+            --output "${GITHUB_WORKSPACE}/dependency-dist"
+
       # Release-artifact smoke: install the freshly built wheel into a clean
       # venv and register its manifest through NamespaceRegistry. Proves the
       # bytes about to be published are installable and registrable, not merely
@@ -145,7 +157,8 @@ jobs:
         run: |
           python scripts/release_module.py verify-wheel "${{ inputs.module }}" \
             --dist "${{ steps.resolve.outputs.package_dir }}/dist" \
-            --kernel-dist "${GITHUB_WORKSPACE}/kernel-dist"
+            --kernel-dist "${GITHUB_WORKSPACE}/kernel-dist" \
+            --dependency-dist "${GITHUB_WORKSPACE}/dependency-dist"
 
       - name: Upload built artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
