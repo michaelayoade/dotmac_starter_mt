@@ -101,6 +101,24 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # Sites is the marketing cohort tip: a81 both allocates its lineage and is
     # the first installable kernel carrying all four marketing allocations.
     "dotmac-sites": "0.1.0a81",
+    # The network cohort: eleven allocations minted together in a82, and the
+    # ordinary case for all eleven. Every capability each one consumes —
+    # `requires` (a56), `tenant_requires` (a60), the prerequisite names
+    # `tenant_scope_catalog.v1` and `module_database_roles.v1` — predates the
+    # allocation, so the ledger row alone sets the floor. They share ONE kernel
+    # version deliberately: stacking eleven bumps would mint ten numbers no
+    # installer could resolve, which is the a74..a76 / a78..a80 history above.
+    "dotmac-inventory": "0.1.0a82",
+    "dotmac-assets": "0.1.0a82",
+    "dotmac-ipam": "0.1.0a82",
+    "dotmac-network-inventory": "0.1.0a82",
+    "dotmac-network-observability": "0.1.0a82",
+    "dotmac-network-topology": "0.1.0a82",
+    "dotmac-network-assurance": "0.1.0a82",
+    "dotmac-network-control": "0.1.0a82",
+    "dotmac-fiber-plant": "0.1.0a82",
+    "dotmac-network-access": "0.1.0a82",
+    "dotmac-pon-access": "0.1.0a82",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes

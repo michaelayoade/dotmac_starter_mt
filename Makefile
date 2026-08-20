@@ -51,10 +51,21 @@ CAMPAIGNS_SRC ?= packages/dotmac-campaigns/src/dotmac_campaigns
 CONTENT_SRC ?= packages/dotmac-content/src/dotmac_content
 PUBLISHING_SRC ?= packages/dotmac-publishing/src/dotmac_publishing
 SITES_SRC ?= packages/dotmac-sites/src/dotmac_sites
+INVENTORY_SRC ?= packages/dotmac-inventory/src/dotmac_inventory
+ASSETS_SRC ?= packages/dotmac-assets/src/dotmac_assets
+IPAM_SRC ?= packages/dotmac-ipam/src/dotmac_ipam
+NETWORK_INVENTORY_SRC ?= packages/dotmac-network-inventory/src/dotmac_network_inventory
+NETWORK_OBSERVABILITY_SRC ?= packages/dotmac-network-observability/src/dotmac_network_observability
+NETWORK_TOPOLOGY_SRC ?= packages/dotmac-network-topology/src/dotmac_network_topology
+NETWORK_ASSURANCE_SRC ?= packages/dotmac-network-assurance/src/dotmac_network_assurance
+NETWORK_CONTROL_SRC ?= packages/dotmac-network-control/src/dotmac_network_control
+FIBER_PLANT_SRC ?= packages/dotmac-fiber-plant/src/dotmac_fiber_plant
+NETWORK_ACCESS_SRC ?= packages/dotmac-network-access/src/dotmac_network_access
+PON_ACCESS_SRC ?= packages/dotmac-pon-access/src/dotmac_pon_access
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC) $(INVENTORY_SRC) $(ASSETS_SRC) $(IPAM_SRC) $(NETWORK_INVENTORY_SRC) $(NETWORK_OBSERVABILITY_SRC) $(NETWORK_TOPOLOGY_SRC) $(NETWORK_ASSURANCE_SRC) $(NETWORK_CONTROL_SRC) $(FIBER_PLANT_SRC) $(NETWORK_ACCESS_SRC) $(PON_ACCESS_SRC)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC) $(INVENTORY_SRC) $(ASSETS_SRC) $(IPAM_SRC) $(NETWORK_INVENTORY_SRC) $(NETWORK_OBSERVABILITY_SRC) $(NETWORK_TOPOLOGY_SRC) $(NETWORK_ASSURANCE_SRC) $(NETWORK_CONTROL_SRC) $(FIBER_PLANT_SRC) $(NETWORK_ACCESS_SRC) $(PON_ACCESS_SRC)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
