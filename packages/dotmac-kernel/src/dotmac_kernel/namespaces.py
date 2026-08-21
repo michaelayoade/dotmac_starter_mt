@@ -1036,6 +1036,57 @@ FULFILLMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("fulfillment"),
 )
 
+# ── The `sa` arbitration (three claimants, one prefix) ──────────────────────
+#
+# Three unmerged candidate trains each allocated `prefix="sa"` independently:
+# `sales` (7 branches, incl. `agent/dotmac-sales-implementation`),
+# `support_access` (the `feat/composable-*` family) and
+# `service_access_policy` (`feat/isp-essential-domain-modules`). Every one of
+# them was green, because no check a branch runs on itself can see a sibling
+# branch's allocations — uniqueness is a property of THIS canonical ledger, so
+# it can only be established by serializing allocation into it.
+#
+# Left alone it fails in the safe direction (whichever train merges first takes
+# `sa`; `NamespaceRegistry` refuses the next two with
+# `DuplicateMigrationPrefixError`) but it fails LATE: two trains would each
+# discover the clash after rebasing onto a later kernel floor, with a reviewed
+# migration lineage to rename. Allocating all three here, while none is
+# released and a rename is still free, converts a merge-order race into a
+# checked-in decision.
+#
+# `sales` keeps `sa`: it is the most entrenched claimant and the one whose
+# mnemonic is unambiguous. The two access modules take three-letter prefixes
+# rather than a second two-letter pair, because `sa`/`sp`/`sc` for three
+# neighbouring access concepts is exactly the confusion a permanent database
+# identity must not carry. All three are DORMANT allocations — no package on
+# main declares them yet, and `test_the_full_ledger_is_validated_even_when
+# _owners_are_not_installed` is the property that makes a dormant row bite.
+SALES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="sales",
+    prefix="sa",
+    branch_label="sales",
+    db_schema=module_schema("sales"),
+)
+
+# Vendor-side break-glass: whether a support actor may enter a tenant, for how
+# long, under whose approval. Platform-plane; distinct in every respect from
+# `service_access_policy` below, which is about a SUBSCRIBER's service.
+SUPPORT_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="support_access",
+    prefix="sup",
+    branch_label="support_access",
+    db_schema=module_schema("supportaccess"),
+)
+
+# Subscriber-side: whether a service stays reachable given billing/collections
+# state. Tenant-plane, and a consumer of Billing rather than of support policy.
+SERVICE_ACCESS_POLICY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="service_access_policy",
+    prefix="sap",
+    branch_label="service_access_policy",
+    db_schema=module_schema("serviceaccess"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1091,6 +1142,9 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     WORK_ORDERS_MIGRATION_OWNER,
     WEB_ANALYTICS_MIGRATION_OWNER,
     FULFILLMENT_MIGRATION_OWNER,
+    SALES_MIGRATION_OWNER,
+    SUPPORT_ACCESS_MIGRATION_OWNER,
+    SERVICE_ACCESS_POLICY_MIGRATION_OWNER,
 )
 
 
@@ -1440,6 +1494,9 @@ __all__ = [
     "REFERRALS_MIGRATION_OWNER",
     "RESELLER_MANAGEMENT_MIGRATION_OWNER",
     "WEB_ANALYTICS_MIGRATION_OWNER",
+    "SALES_MIGRATION_OWNER",
+    "SUPPORT_ACCESS_MIGRATION_OWNER",
+    "SERVICE_ACCESS_POLICY_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
