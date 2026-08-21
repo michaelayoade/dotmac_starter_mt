@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.1.0a1 — unreleased
+## 0.1.0a1 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `8b8e3d26` by release run
+`32486476087`. Publication is supply-chain evidence only; it composes no product
+and moves no authority.
 
 - Records the greenfield-after-inventory source ruling and ADR-0055 boundary.
 - Freezes typed collection, privacy, registry, projection, retention and drift
