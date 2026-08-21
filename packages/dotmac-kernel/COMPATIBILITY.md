@@ -292,7 +292,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a87`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a88`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -351,6 +351,15 @@ retired prefix is never reused.
 | `work_orders` | `mod_workorders` | `wo` | `work_orders` |
 | `web_analytics` | `mod_webanalytics` | `wa` | `web_analytics` |
 | `fulfillment` | `mod_fulfillment` | `fu` | `fulfillment` |
+| `sales` | `mod_sales` | `sa` | `sales` |
+| `support_access` | `mod_supportaccess` | `sup` | `support_access` |
+| `service_access_policy` | `mod_serviceaccess` | `sap` | `service_access_policy` |
+| `forms` | `mod_forms` | `fm` | `forms` |
+| `workflow_runtime` | `mod_workflow` | `wr` | `workflow_runtime` |
+| `platform_health` | `mod_health` | `ph` | `platform_health` |
+| `remote_access` | `mod_remoteaccess` | `ra` | `remote_access` |
+| `compliance_reporting` | `mod_compliance` | `cr` | `compliance_reporting` |
+| `ai_operations` | `mod_aiops` | `ao` | `ai_operations` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
