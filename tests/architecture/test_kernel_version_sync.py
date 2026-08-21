@@ -78,19 +78,41 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 #
 # People consumes no kernel feature newer than its allocation release. If it
 # adopts a newer capability, move its row to CAPABILITY_RAISED_FLOORS while
-# retaining the allocation release as evidence there.
+# retaining the allocation release as evidence there. Durable timers was
+# allocated in a72. Immutable a73 belongs to the caller-session transaction
+# release, a74-a77 to the vendor cohort, a78-a81 to the marketing cohort, and
+# referrals and reseller management land in a84, and the consolidated
+# ERP/Backoffice/general allocation follows in a85.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
-    "dotmac-customers": "0.1.0a78",
-    "dotmac-service-catalog": "0.1.0a78",
-    "dotmac-qualification": "0.1.0a78",
-    "dotmac-services": "0.1.0a78",
-    "dotmac-usage": "0.1.0a78",
-    "dotmac-usage-rating": "0.1.0a78",
-    "dotmac-service-access-policy": "0.1.0a78",
-    "dotmac-inbox-operations": "0.1.0a78",
-    "dotmac-workforce": "0.1.0a78",
-    "dotmac-fx-policy": "0.1.0a78",
+    "dotmac-referrals": "0.1.0a84",
+    "dotmac-reseller-management": "0.1.0a84",
+    "dotmac-accounting": "0.1.0a85",
+    "dotmac-analytics": "0.1.0a85",
+    "dotmac-banking": "0.1.0a85",
+    "dotmac-documents": "0.1.0a85",
+    "dotmac-expenses": "0.1.0a85",
+    "dotmac-finance": "0.1.0a85",
+    "dotmac-inbox": "0.1.0a85",
+    "dotmac-party": "0.1.0a85",
+    "dotmac-payables": "0.1.0a85",
+    "dotmac-payroll": "0.1.0a85",
     "dotmac-people": "0.1.0a71",
+    "dotmac-procurement": "0.1.0a85",
+    "dotmac-projects": "0.1.0a85",
+    "dotmac-records": "0.1.0a85",
+    "dotmac-surveys": "0.1.0a85",
+    "dotmac-tax": "0.1.0a85",
+    "dotmac-work-orders": "0.1.0a85",
+    "dotmac-customers": "0.1.0a85",
+    "dotmac-service-catalog": "0.1.0a85",
+    "dotmac-qualification": "0.1.0a85",
+    "dotmac-services": "0.1.0a85",
+    "dotmac-usage": "0.1.0a85",
+    "dotmac-usage-rating": "0.1.0a85",
+    "dotmac-service-access-policy": "0.1.0a85",
+    "dotmac-inbox-operations": "0.1.0a85",
+    "dotmac-workforce": "0.1.0a85",
+    "dotmac-fx-policy": "0.1.0a85",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
     # CAPABILITY_RAISED_FLOORS below rather than here.
@@ -105,6 +127,31 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # UNPUBLISHED_ALLOCATION_FLOORS below for why an allocation can fail to be
     # a floor.
     "dotmac-brand-profiles": "0.1.0a77",
+    # Sites is the marketing cohort tip: a81 both allocates its lineage and is
+    # the first installable kernel carrying all four marketing allocations.
+    "dotmac-sites": "0.1.0a81",
+    # The network cohort: eleven allocations minted together in a82, and the
+    # ordinary case for all eleven. Every capability each one consumes —
+    # `requires` (a56), `tenant_requires` (a60), the prerequisite names
+    # `tenant_scope_catalog.v1` and `module_database_roles.v1` — predates the
+    # allocation, so the ledger row alone sets the floor. They share ONE kernel
+    # version deliberately: stacking eleven bumps would mint ten numbers no
+    # installer could resolve, which is the a74..a76 / a78..a80 history above.
+    "dotmac-inventory": "0.1.0a82",
+    "dotmac-assets": "0.1.0a82",
+    "dotmac-ipam": "0.1.0a82",
+    "dotmac-network-inventory": "0.1.0a82",
+    "dotmac-network-observability": "0.1.0a82",
+    "dotmac-network-topology": "0.1.0a82",
+    "dotmac-network-assurance": "0.1.0a82",
+    "dotmac-network-control": "0.1.0a82",
+    "dotmac-fiber-plant": "0.1.0a82",
+    "dotmac-network-access": "0.1.0a82",
+    "dotmac-pon-access": "0.1.0a82",
+    # Positioning is the ordinary case once more: a83 allocates `pos`/`po` and
+    # every capability it consumes — `requires` (a56), the two prerequisite
+    # names — predates that allocation, so the ledger row alone sets the floor.
+    "dotmac-positioning": "0.1.0a83",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -237,11 +284,17 @@ CAPABILITY_RAISED_FLOORS = {
 #
 # The ADR-0033 cohort was built as four stacked pull requests, each bumping the
 # kernel to carry its own ledger row: a74 (`cg`), a75 (`li`), a76 (`dc`), a77
-# (`bp`). Only the tip is releasable — a kernel release publishes ONE version,
+# (`bp`). Only the tip was releasable — a kernel release publishes ONE version,
 # and a74..a76 exist as changelog history rather than as artifacts, exactly as
 # a53..a55 do. a77 is therefore the first installable kernel carrying any of
 # these four allocations, which makes it the floor of all four rather than of
 # the last one.
+#
+# The marketing cohort follows the same rule: a78 (`mo`), a79 (`ct`), a80
+# (`pb`) and a81 (`si`). a78..a80 are allocation history, while a81 is the first
+# kernel artifact that can load any member. Sites sits in the ordinary map
+# because its allocation equals that floor; the first three sit here because
+# their source allocations are necessarily unpublished.
 #
 # Each value is (floor, allocation). Unlike the map above, the gap is not a
 # consumer break: no released version of these modules ever floored at a74..a76,
@@ -250,6 +303,9 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
     "dotmac-commercial-agreements": ("0.1.0a77", "0.1.0a74"),
     "dotmac-licensing": ("0.1.0a77", "0.1.0a75"),
     "dotmac-deployment-control": ("0.1.0a77", "0.1.0a76"),
+    "dotmac-media-observations": ("0.1.0a81", "0.1.0a78"),
+    "dotmac-content": ("0.1.0a81", "0.1.0a79"),
+    "dotmac-publishing": ("0.1.0a81", "0.1.0a80"),
 }
 
 

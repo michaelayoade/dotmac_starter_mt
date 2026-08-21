@@ -302,3 +302,19 @@ here so it is not mistaken for solved by the arrival of an issuer.
 - **Declare a tenant plane on the three Vendor modules "for later".** Rejected by
   ADR-0023: a declared plane with no assembly is a plane whose isolation nobody
   tests.
+
+## Amendment — 2026-08-20: temporary support access is retained
+
+Section 4 remains the historical record of the 2026-08-19 audit: no complete
+support request/consent/grant/revocation source existed, and the then-proposed
+unit duplicated standing Application Access. Michael's subsequent Sub vNext
+boundary separates the missing lifecycle from standing cross-application
+access. [ADR-0034](0034-sub-vnext-parity-capabilities-have-narrow-independent-owners.md)
+therefore supersedes only section 4's *do not build* conclusion.
+
+`dotmac-support-access` is retained as a platform-plane, temporary,
+case/incident-bound support workflow. It owns neither approvals nor standing
+application-role grants; it cannot create permanent credentials or renew a
+grant in place. The Vendor control plane is its first candidate assembly. The
+absence of a qualifying product source remains true, so its provenance is
+`greenfield-after-inventory`, not a fictional port.

@@ -207,8 +207,36 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # (ADR-0033 § 2) is the seventeenth and genuinely dual-plane: Sub brands
     # its own portals and the vendor brands deployments it ships, and the
     # second needs a HOST binding because a profile must be selectable before
-    # any tenant is resolved.
-    # ADR-0034 adds the ten ISP essential owners as one allocation cohort.
+    # any tenant is resolved. `media_observations`, `content`, `publishing` and
+    # `sites` are the eighteenth through twenty-first allocations. They remain
+    # tenant-only and keep observations, editorial state, release intent and
+    # local website composition as four independent owners.
+    # `inventory` and `assets` are the twenty-second and twenty-third: the
+    # tenant stock ledger (ADR-0036) and the tenant durable-unit lifecycle
+    # (ADR-0037), deliberately separate because a part in stock and a
+    # commissioned unit have different lifecycles and different writers.
+    # The nine network-suite-v1 allocations (ADR-0038) are the twenty-fourth
+    # through thirty-second. They are minted together because their first
+    # adoption is one Sub-first cohort, but each owns an independent lineage —
+    # a suite is a release cohort, not a shared namespace.
+    # `positioning` is the thirty-third: provider-neutral position observations
+    # and nothing that follows from them (ADR-0039). It is NOT part of the
+    # network cohort above — Assets keeps a durable unit's authoritative
+    # location, so the two are separate owners rather than one.
+    # `referrals` is the thirty-fourth and tenant-only: a tenant programme owns
+    # attribution and conversion evidence while rewards leave through the
+    # outbox for the product that owns fulfilment.
+    # `reseller_management` is the thirty-fifth and tenant-only: Sub's reseller
+    # hierarchy and delegated-authority lifecycle move here while Party,
+    # Customer, commissions and payouts keep their own owners.
+    # The consolidated ERP/Backoffice/general cohort is the thirty-sixth
+    # through fifty-first allocations:
+    # sixteen independently releasable tenant owners sharing one allocation
+    # release, with Documents and Party deliberately avoiding the already-owned
+    # `dc` and `pa` prefixes.
+    # ADR-0055 adds the ten ISP essential owners as the fifty-second through
+    # sixty-first allocations. Services uses `se` because Surveys already owns
+    # `sv`; the collision was resolved before either Services release or cutover.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -228,6 +256,40 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "licensing",
         "deployment_control",
         "brand_profiles",
+        "media_observations",
+        "content",
+        "publishing",
+        "sites",
+        "inventory",
+        "assets",
+        "ipam",
+        "network_inventory",
+        "network_observability",
+        "network_topology",
+        "network_assurance",
+        "network_control",
+        "fiber_plant",
+        "network_access",
+        "pon_access",
+        "positioning",
+        "referrals",
+        "reseller_management",
+        "accounting",
+        "analytics",
+        "banking",
+        "documents",
+        "expenses",
+        "finance",
+        "inbox",
+        "party",
+        "payables",
+        "payroll",
+        "procurement",
+        "projects",
+        "records",
+        "surveys",
+        "tax",
+        "work_orders",
         "customers",
         "service_catalog",
         "qualification",
@@ -262,7 +324,7 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "customers": ("mod_customers", "cu", "customers"),
         "service_catalog": ("mod_svc_cat", "sc", "service_catalog"),
         "qualification": ("mod_qual", "qu", "qualification"),
-        "services": ("mod_services", "sv", "services"),
+        "services": ("mod_services", "se", "services"),
         "usage": ("mod_usage", "us", "usage"),
         "usage_rating": ("mod_usage_rate", "ur", "usage_rating"),
         "service_access_policy": (

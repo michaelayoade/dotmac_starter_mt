@@ -2,8 +2,9 @@
 
 Companion to `test_fleet_decomposition_matrix.py`, same division of labour: the
 script measures, this file keeps the prose honest about what was measured. It
-does not re-measure — ERP, CRM and Sub are absent from this repository's CI, and
-scoring an absent repo as "no undeclared surface" would invert the finding.
+does not re-measure — ERP, CRM, Sub and Mkt are absent from this repository's
+CI, and scoring an absent repo as "no undeclared surface" would invert the
+finding.
 
 The failure this file exists to prevent already happened once. An earlier
 revision reported "711 tables have no declared owner", "97 duplicates correspond
@@ -23,7 +24,7 @@ INVENTORIES = PROJECT_ROOT / "docs" / "inventories"
 DOC = INVENTORIES / "fleet-fact-level-decomposition.md"
 REGISTRY = INVENTORIES / "fleet-fact-registry.json"
 
-REPOS = ("dotmac_sub", "dotmac_erp", "dotmac_crm")
+REPOS = ("dotmac_sub", "dotmac_erp", "dotmac_crm", "dotmac_mkt")
 
 # The heuristic's limits, stated in the doc rather than assumed by the reader.
 REQUIRED_CAVEATS = (
@@ -44,6 +45,12 @@ WITHDRAWN_CLAIMS = (
 
 # CRM's zero is intentional for one of three classes, not all three.
 CRM_CLASSES = ("retirement_source", "extraction_source", "projection")
+MKT_CLASSIFICATION = (
+    "mkt's zero is extraction debt plus inherited retirement debt",
+    "eleven class-mapped marketing tables",
+    "twenty-eight tables are inherited",
+    "ownership characterization is a prerequisite",
+)
 
 # The linkage that would make ownership provable, per Michael 2026-08-12.
 TARGET_LINKAGE = (
@@ -206,11 +213,20 @@ def test_crm_zero_is_classified_rather_than_blanket_intentional() -> None:
     assert "ownership characterization is a prerequisite" in normalized
 
 
+def test_mkt_zero_is_split_between_extraction_and_retirement() -> None:
+    registry = _registry()
+    normalized = _normalized_doc()
+
+    assert registry["products"]["dotmac_mkt"]["declared_facts"] == 0
+    assert registry["products"]["dotmac_mkt"]["tables"] == 39
+    assert [phrase for phrase in MKT_CLASSIFICATION if phrase not in normalized] == []
+
+
 def test_doc_states_the_target_linkage_contract() -> None:
     normalized = _normalized_doc()
     assert [field for field in TARGET_LINKAGE if field not in normalized] == []
     assert "authoritative" in normalized and "observation" in normalized
 
 
-def test_registry_covers_all_three_source_monoliths() -> None:
+def test_registry_covers_all_four_source_applications() -> None:
     assert sorted(_registry()["products_measured"]) == sorted(REPOS)

@@ -30,10 +30,13 @@ KERNEL_SRC ?= packages/dotmac-kernel/src/dotmac_kernel
 UI_SRC ?= packages/dotmac-ui/src/dotmac_ui
 MODULE_SRC ?= packages/dotmac-template-studio/src/dotmac_template_studio
 TICKETING_SRC ?= packages/dotmac-ticketing/src/dotmac_ticketing
+RELEASE_CATALOG_SRC ?= packages/dotmac-release-catalog/src/dotmac_release_catalog
+ENTITLEMENT_ALLOCATION_SRC ?= packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation
 APPDIR_SRC ?= packages/dotmac-application-directory/src/dotmac_application_directory
 FILES_SRC ?= packages/dotmac-files/src/dotmac_files
 IMPORTS_SRC ?= packages/dotmac-imports/src/dotmac_imports
 APPROVALS_SRC ?= packages/dotmac-approvals/src/dotmac_approvals
+NUMBERING_SRC ?= packages/dotmac-numbering/src/dotmac_numbering
 PEOPLE_SRC ?= packages/dotmac-people/src/dotmac_people
 CUSTOMERS_SRC ?= packages/dotmac-customers/src/dotmac_customers
 SERVICE_CATALOG_SRC ?= packages/dotmac-service-catalog/src/dotmac_service_catalog
@@ -46,14 +49,55 @@ INBOX_OPERATIONS_SRC ?= packages/dotmac-inbox-operations/src/dotmac_inbox_operat
 WORKFORCE_SRC ?= packages/dotmac-workforce/src/dotmac_workforce
 FX_POLICY_SRC ?= packages/dotmac-fx-policy/src/dotmac_fx_policy
 DURABLE_TIMERS_SRC ?= packages/dotmac-durable-timers/src/dotmac_durable_timers
+COMMERCIAL_AGREEMENTS_SRC ?= packages/dotmac-commercial-agreements/src/dotmac_commercial_agreements
+LICENSING_SRC ?= packages/dotmac-licensing/src/dotmac_licensing
+DEPLOYMENT_CONTROL_SRC ?= packages/dotmac-deployment-control/src/dotmac_deployment_control
+BRAND_PROFILES_SRC ?= packages/dotmac-brand-profiles/src/dotmac_brand_profiles
 INTEGRATION_SRC ?= packages/dotmac-integration/src/dotmac_integration
+MEDIA_OBSERVATIONS_SRC ?= packages/dotmac-media-observations/src/dotmac_media_observations
 OIDC_SRC ?= packages/dotmac-auth-oidc/src/dotmac_auth_oidc
-CONNECTOR_WHATSAPP_SRC ?= packages/dotmac-connector-whatsapp/src/dotmac_connector_whatsapp
 CAMPAIGNS_SRC ?= packages/dotmac-campaigns/src/dotmac_campaigns
+CONTENT_SRC ?= packages/dotmac-content/src/dotmac_content
+PUBLISHING_SRC ?= packages/dotmac-publishing/src/dotmac_publishing
+SITES_SRC ?= packages/dotmac-sites/src/dotmac_sites
+INVENTORY_SRC ?= packages/dotmac-inventory/src/dotmac_inventory
+ASSETS_SRC ?= packages/dotmac-assets/src/dotmac_assets
+IPAM_SRC ?= packages/dotmac-ipam/src/dotmac_ipam
+NETWORK_INVENTORY_SRC ?= packages/dotmac-network-inventory/src/dotmac_network_inventory
+NETWORK_OBSERVABILITY_SRC ?= packages/dotmac-network-observability/src/dotmac_network_observability
+NETWORK_TOPOLOGY_SRC ?= packages/dotmac-network-topology/src/dotmac_network_topology
+NETWORK_ASSURANCE_SRC ?= packages/dotmac-network-assurance/src/dotmac_network_assurance
+NETWORK_CONTROL_SRC ?= packages/dotmac-network-control/src/dotmac_network_control
+FIBER_PLANT_SRC ?= packages/dotmac-fiber-plant/src/dotmac_fiber_plant
+NETWORK_ACCESS_SRC ?= packages/dotmac-network-access/src/dotmac_network_access
+PON_ACCESS_SRC ?= packages/dotmac-pon-access/src/dotmac_pon_access
+REFERRALS_SRC ?= packages/dotmac-referrals/src/dotmac_referrals
+RESELLER_MANAGEMENT_SRC ?= packages/dotmac-reseller-management/src/dotmac_reseller_management
+POSITIONING_SRC ?= packages/dotmac-positioning/src/dotmac_positioning
+ACCOUNTING_SRC ?= packages/dotmac-accounting/src/dotmac_accounting
+ANALYTICS_SRC ?= packages/dotmac-analytics/src/dotmac_analytics
+BANKING_SRC ?= packages/dotmac-banking/src/dotmac_banking
+DOCUMENTS_SRC ?= packages/dotmac-documents/src/dotmac_documents
+EXPENSES_SRC ?= packages/dotmac-expenses/src/dotmac_expenses
+FINANCE_SRC ?= packages/dotmac-finance/src/dotmac_finance
+INBOX_SRC ?= packages/dotmac-inbox/src/dotmac_inbox
+PARTY_SRC ?= packages/dotmac-party/src/dotmac_party
+PAYABLES_SRC ?= packages/dotmac-payables/src/dotmac_payables
+PAYROLL_SRC ?= packages/dotmac-payroll/src/dotmac_payroll
+PROCUREMENT_SRC ?= packages/dotmac-procurement/src/dotmac_procurement
+PROJECTS_SRC ?= packages/dotmac-projects/src/dotmac_projects
+RECORDS_SRC ?= packages/dotmac-records/src/dotmac_records
+SURVEYS_SRC ?= packages/dotmac-surveys/src/dotmac_surveys
+TAX_SRC ?= packages/dotmac-tax/src/dotmac_tax
+WORK_ORDERS_SRC ?= packages/dotmac-work-orders/src/dotmac_work_orders
+# Connector plugins are an open package family. A new provider distribution
+# enrolls in both quality gates by existing under the release-lane prefix; no
+# provider name belongs in this Makefile.
+CONNECTOR_SOURCES := $(sort $(filter-out %/__pycache__,$(wildcard packages/dotmac-connector-*/src/*)))
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(PEOPLE_SRC) $(CUSTOMERS_SRC) $(SERVICE_CATALOG_SRC) $(QUALIFICATION_SRC) $(SERVICES_SRC) $(USAGE_SRC) $(USAGE_RATING_SRC) $(SERVICE_ACCESS_POLICY_SRC) $(INBOX_OPERATIONS_SRC) $(WORKFORCE_SRC) $(FX_POLICY_SRC) $(DURABLE_TIMERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC)
+	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(CUSTOMERS_SRC) $(SERVICE_CATALOG_SRC) $(QUALIFICATION_SRC) $(SERVICES_SRC) $(USAGE_SRC) $(USAGE_RATING_SRC) $(SERVICE_ACCESS_POLICY_SRC) $(INBOX_OPERATIONS_SRC) $(WORKFORCE_SRC) $(FX_POLICY_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC) $(INVENTORY_SRC) $(ASSETS_SRC) $(IPAM_SRC) $(NETWORK_INVENTORY_SRC) $(NETWORK_OBSERVABILITY_SRC) $(NETWORK_TOPOLOGY_SRC) $(NETWORK_ASSURANCE_SRC) $(NETWORK_CONTROL_SRC) $(FIBER_PLANT_SRC) $(NETWORK_ACCESS_SRC) $(PON_ACCESS_SRC) $(POSITIONING_SRC) $(REFERRALS_SRC) $(RESELLER_MANAGEMENT_SRC) $(ACCOUNTING_SRC) $(ANALYTICS_SRC) $(BANKING_SRC) $(DOCUMENTS_SRC) $(EXPENSES_SRC) $(FINANCE_SRC) $(INBOX_SRC) $(PARTY_SRC) $(PAYABLES_SRC) $(PAYROLL_SRC) $(PROCUREMENT_SRC) $(PROJECTS_SRC) $(RECORDS_SRC) $(SURVEYS_SRC) $(TAX_SRC) $(WORK_ORDERS_SRC) $(CONNECTOR_SOURCES)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(PEOPLE_SRC) $(CUSTOMERS_SRC) $(SERVICE_CATALOG_SRC) $(QUALIFICATION_SRC) $(SERVICES_SRC) $(USAGE_SRC) $(USAGE_RATING_SRC) $(SERVICE_ACCESS_POLICY_SRC) $(INBOX_OPERATIONS_SRC) $(WORKFORCE_SRC) $(FX_POLICY_SRC) $(DURABLE_TIMERS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC) $(CAMPAIGNS_SRC)
+	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(RELEASE_CATALOG_SRC) $(ENTITLEMENT_ALLOCATION_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(NUMBERING_SRC) $(PEOPLE_SRC) $(CUSTOMERS_SRC) $(SERVICE_CATALOG_SRC) $(QUALIFICATION_SRC) $(SERVICES_SRC) $(USAGE_SRC) $(USAGE_RATING_SRC) $(SERVICE_ACCESS_POLICY_SRC) $(INBOX_OPERATIONS_SRC) $(WORKFORCE_SRC) $(FX_POLICY_SRC) $(DURABLE_TIMERS_SRC) $(COMMERCIAL_AGREEMENTS_SRC) $(LICENSING_SRC) $(DEPLOYMENT_CONTROL_SRC) $(BRAND_PROFILES_SRC) $(INTEGRATION_SRC) $(MEDIA_OBSERVATIONS_SRC) $(OIDC_SRC) $(CAMPAIGNS_SRC) $(CONTENT_SRC) $(PUBLISHING_SRC) $(SITES_SRC) $(INVENTORY_SRC) $(ASSETS_SRC) $(IPAM_SRC) $(NETWORK_INVENTORY_SRC) $(NETWORK_OBSERVABILITY_SRC) $(NETWORK_TOPOLOGY_SRC) $(NETWORK_ASSURANCE_SRC) $(NETWORK_CONTROL_SRC) $(FIBER_PLANT_SRC) $(NETWORK_ACCESS_SRC) $(PON_ACCESS_SRC) $(POSITIONING_SRC) $(REFERRALS_SRC) $(RESELLER_MANAGEMENT_SRC) $(ACCOUNTING_SRC) $(ANALYTICS_SRC) $(BANKING_SRC) $(DOCUMENTS_SRC) $(EXPENSES_SRC) $(FINANCE_SRC) $(INBOX_SRC) $(PARTY_SRC) $(PAYABLES_SRC) $(PAYROLL_SRC) $(PROCUREMENT_SRC) $(PROJECTS_SRC) $(RECORDS_SRC) $(SURVEYS_SRC) $(TAX_SRC) $(WORK_ORDERS_SRC) $(CONNECTOR_SOURCES)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py

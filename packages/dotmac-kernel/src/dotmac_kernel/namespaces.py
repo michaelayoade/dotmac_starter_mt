@@ -719,9 +719,301 @@ BRAND_PROFILES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("brand"),
 )
 
-# ADR-0034 allocates the ten missing ISP domain owners as one reviewed cohort
-# before their independent package commits. This is physical identity only: it
-# composes no lineage and moves no domain authority.
+# `dotmac-media-observations` — the eighteenth allocated installable module.
+# External media hierarchy, configuration and provider-reported aggregate
+# performance are tenant data-plane observations; the source audit found no
+# platform-plane adopter. `mediaobs` remains legible in catalog output and the
+# short `mo` revision prefix preserves the readable-slug budget.
+MEDIA_OBSERVATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="media_observations",
+    prefix="mo",
+    branch_label="media_observations",
+    db_schema=module_schema("mediaobs"),
+)
+
+# `dotmac-content` — the nineteenth allocated installable module. It owns the
+# tenant-only editorial plan and content plane extracted from Mkt. `content`
+# remains explicit in live catalogs; `ct` keeps the independent lineage's
+# revision ids compact. Publishing, outbound campaigns, files and provider
+# transport remain separate owners and are not imported by this module.
+CONTENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="content",
+    prefix="ct",
+    branch_label="content",
+    db_schema=module_schema("content"),
+)
+
+# `dotmac-publishing` — the twentieth allocated installable module. It owns
+# tenant publication intent, immutable snapshots, per-target attempt history
+# and normalized outcome reconciliation. `publishing` stays explicit in live
+# catalogs; `pb` leaves the lineage enough revision-id budget. Integrator and
+# connector plugins remain the separate provider-transport owners.
+PUBLISHING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="publishing",
+    prefix="pb",
+    branch_label="publishing",
+    db_schema=module_schema("publishing"),
+)
+
+# `dotmac-sites` — the twenty-first allocated installable module. It owns the
+# tenant site/page composition plane and immutable local website revisions.
+# `sites` remains explicit in live catalogs; `si` keeps the lineage compact.
+# Publishing owns delivery intent/outcomes and Integrator owns hosting I/O.
+SITES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="sites",
+    prefix="si",
+    branch_label="sites",
+    db_schema=module_schema("sites"),
+)
+
+# `dotmac-inventory` — the twenty-second allocated installable module. It owns
+# tenant-local stock quantities, immutable movements, reservations, lot/serial
+# traceability and valuation. Network equipment remains Inventory state only
+# while stocked; deployment is an explicit product-orchestrated handoff rather
+# than a second stock writer (ADR-0036).
+INVENTORY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="inventory",
+    prefix="iv",
+    branch_label="inventory",
+    db_schema=module_schema("inventory"),
+)
+
+# `dotmac-assets` — the twenty-third allocated installable module. It owns each
+# tenant's durable physical units, custody, maintenance and disposal. Network
+# modules may correlate an asset opaquely, but do not duplicate its physical
+# lifecycle, and finance keeps capitalization and depreciation (ADR-0037).
+ASSETS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="assets",
+    prefix="as",
+    branch_label="assets",
+    db_schema=module_schema("assets"),
+)
+
+# Network-suite-v1 — the twenty-fourth through thirty-second allocations
+# (ADR-0038). Nine tenant-only owners, released and composed independently even
+# though their first Sub adoption is one cohort. The short codes stay
+# abbreviated (`netinv`, `netobs`, …) because the schema is what appears in a
+# live catalog dump; the `owner` and `branch_label` keep the full name.
+IPAM_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="ipam",
+    prefix="ip",
+    branch_label="ipam",
+    db_schema=module_schema("ipam"),
+)
+
+NETWORK_INVENTORY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_inventory",
+    prefix="ni",
+    branch_label="network_inventory",
+    db_schema=module_schema("netinv"),
+)
+
+NETWORK_OBSERVABILITY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_observability",
+    prefix="no",
+    branch_label="network_observability",
+    db_schema=module_schema("netobs"),
+)
+
+NETWORK_TOPOLOGY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_topology",
+    prefix="nt",
+    branch_label="network_topology",
+    db_schema=module_schema("nettop"),
+)
+
+NETWORK_ASSURANCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_assurance",
+    prefix="na",
+    branch_label="network_assurance",
+    db_schema=module_schema("netassure"),
+)
+
+NETWORK_CONTROL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_control",
+    prefix="nc",
+    branch_label="network_control",
+    db_schema=module_schema("netctrl"),
+)
+
+FIBER_PLANT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="fiber_plant",
+    prefix="fp",
+    branch_label="fiber_plant",
+    db_schema=module_schema("fiber"),
+)
+
+NETWORK_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="network_access",
+    prefix="nac",
+    branch_label="network_access",
+    db_schema=module_schema("netaccess"),
+)
+
+PON_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="pon_access",
+    prefix="pn",
+    branch_label="pon_access",
+    db_schema=module_schema("pon"),
+)
+
+# `dotmac-positioning` — the thirty-third allocated installable module. It owns
+# provider-neutral position observations and nothing that follows from them
+# (ADR-0039). `positioning` stays explicit in live catalogs; `po` keeps the
+# lineage's revision ids compact. Assets owns a durable unit's authoritative
+# location, product owners decide geofence/SLA/dispatch consequences, and
+# Integrator owns provider transport — none of those move here.
+POSITIONING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="positioning",
+    prefix="po",
+    branch_label="positioning",
+    db_schema=module_schema("pos"),
+)
+
+# `dotmac-referrals` — Sub's programme/code/attribution/conversion owner,
+# extracted without Party, Customer, Lead, Billing or transport persistence.
+# Tenant-only because an ISP tenant owns its referral programme and evidence;
+# no named platform-plane consumer exists (ADR-0040).
+REFERRALS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="referrals",
+    prefix="rf",
+    branch_label="referrals",
+    db_schema=module_schema("referrals"),
+)
+
+# `dotmac-reseller-management` — Sub's tenant reseller identity, hierarchy,
+# delegated-authority and lifecycle owner. Party, Customer, Commercial
+# Agreements, Entitlement Allocation, commissions and payouts remain outside
+# this namespace (ADR-0040).
+RESELLER_MANAGEMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="reseller_management",
+    prefix="rm",
+    branch_label="reseller_management",
+    db_schema=module_schema("reseller"),
+)
+
+# ERP/Backoffice/general publish-preparation cohort. These sixteen tenant-only
+# modules were audited independently, then restacked together so their physical
+# identities are allocated once against the current kernel train. The compact
+# prefixes are permanent. In particular, Documents uses `do` because `dc`
+# already belongs to deployment control, and Party uses `pt` because `pa`
+# belongs to Payables.
+ACCOUNTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="accounting",
+    prefix="ac",
+    branch_label="accounting",
+    db_schema=module_schema("accounting"),
+)
+
+ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="analytics",
+    prefix="ay",
+    branch_label="analytics",
+    db_schema=module_schema("analytics"),
+)
+
+BANKING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="banking",
+    prefix="bk",
+    branch_label="banking",
+    db_schema=module_schema("banking"),
+)
+
+DOCUMENTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="documents",
+    prefix="do",
+    branch_label="documents",
+    db_schema=module_schema("documents"),
+)
+
+EXPENSES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="expenses",
+    prefix="ex",
+    branch_label="expenses",
+    db_schema=module_schema("expenses"),
+)
+
+FINANCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="finance",
+    prefix="fn",
+    branch_label="finance",
+    db_schema=module_schema("finance"),
+)
+
+INBOX_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="inbox",
+    prefix="ib",
+    branch_label="inbox",
+    db_schema=module_schema("inbox"),
+)
+
+PARTY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="party",
+    prefix="pt",
+    branch_label="party",
+    db_schema=module_schema("party"),
+)
+
+PAYABLES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="payables",
+    prefix="pa",
+    branch_label="payables",
+    db_schema=module_schema("payables"),
+)
+
+PAYROLL_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="payroll",
+    prefix="py",
+    branch_label="payroll",
+    db_schema=module_schema("payroll"),
+)
+
+PROCUREMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="procurement",
+    prefix="pc",
+    branch_label="procurement",
+    db_schema=module_schema("procurement"),
+)
+
+PROJECTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="projects",
+    prefix="pj",
+    branch_label="projects",
+    db_schema=module_schema("projects"),
+)
+
+RECORDS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="records",
+    prefix="re",
+    branch_label="records",
+    db_schema=module_schema("records"),
+)
+
+SURVEYS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="surveys",
+    prefix="sv",
+    branch_label="surveys",
+    db_schema=module_schema("surveys"),
+)
+
+TAX_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="tax",
+    prefix="tx",
+    branch_label="tax",
+    db_schema=module_schema("tax"),
+)
+
+WORK_ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="work_orders",
+    prefix="wo",
+    branch_label="work_orders",
+    db_schema=module_schema("workorders"),
+)
+
+# ISP essential-domain cohort (ADR-0055). Ten tenant owners share the current
+# unpublished a85 allocation release while retaining independent schemas and
+# lineages. Services uses `se`: current main had already allocated `sv`
+# permanently to Surveys before this isolated cohort was integrated.
 CUSTOMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="customers",
     prefix="cu",
@@ -745,7 +1037,7 @@ QUALIFICATION_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 
 SERVICES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="services",
-    prefix="sv",
+    prefix="se",
     branch_label="services",
     db_schema=module_schema("services"),
 )
@@ -811,6 +1103,40 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     LICENSING_MIGRATION_OWNER,
     DEPLOYMENT_CONTROL_MIGRATION_OWNER,
     BRAND_PROFILES_MIGRATION_OWNER,
+    MEDIA_OBSERVATIONS_MIGRATION_OWNER,
+    CONTENT_MIGRATION_OWNER,
+    PUBLISHING_MIGRATION_OWNER,
+    SITES_MIGRATION_OWNER,
+    INVENTORY_MIGRATION_OWNER,
+    ASSETS_MIGRATION_OWNER,
+    IPAM_MIGRATION_OWNER,
+    NETWORK_INVENTORY_MIGRATION_OWNER,
+    NETWORK_OBSERVABILITY_MIGRATION_OWNER,
+    NETWORK_TOPOLOGY_MIGRATION_OWNER,
+    NETWORK_ASSURANCE_MIGRATION_OWNER,
+    NETWORK_CONTROL_MIGRATION_OWNER,
+    FIBER_PLANT_MIGRATION_OWNER,
+    NETWORK_ACCESS_MIGRATION_OWNER,
+    PON_ACCESS_MIGRATION_OWNER,
+    POSITIONING_MIGRATION_OWNER,
+    REFERRALS_MIGRATION_OWNER,
+    RESELLER_MANAGEMENT_MIGRATION_OWNER,
+    ACCOUNTING_MIGRATION_OWNER,
+    ANALYTICS_MIGRATION_OWNER,
+    BANKING_MIGRATION_OWNER,
+    DOCUMENTS_MIGRATION_OWNER,
+    EXPENSES_MIGRATION_OWNER,
+    FINANCE_MIGRATION_OWNER,
+    INBOX_MIGRATION_OWNER,
+    PARTY_MIGRATION_OWNER,
+    PAYABLES_MIGRATION_OWNER,
+    PAYROLL_MIGRATION_OWNER,
+    PROCUREMENT_MIGRATION_OWNER,
+    PROJECTS_MIGRATION_OWNER,
+    RECORDS_MIGRATION_OWNER,
+    SURVEYS_MIGRATION_OWNER,
+    TAX_MIGRATION_OWNER,
+    WORK_ORDERS_MIGRATION_OWNER,
     CUSTOMERS_MIGRATION_OWNER,
     SERVICE_CATALOG_MIGRATION_OWNER,
     QUALIFICATION_MIGRATION_OWNER,
@@ -1157,12 +1483,11 @@ __all__ = [
     "CAMPAIGNS_MIGRATION_OWNER",
     "CUSTOMERS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
-    "FX_POLICY_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
-    "INBOX_OPERATIONS_MIGRATION_OWNER",
     "INTEGRATION_MIGRATION_OWNER",
+    "INBOX_OPERATIONS_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",
@@ -1170,6 +1495,8 @@ __all__ = [
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
     "QUALIFICATION_MIGRATION_OWNER",
+    "REFERRALS_MIGRATION_OWNER",
+    "RESELLER_MANAGEMENT_MIGRATION_OWNER",
     "SERVICE_ACCESS_POLICY_MIGRATION_OWNER",
     "SERVICE_CATALOG_MIGRATION_OWNER",
     "SERVICES_MIGRATION_OWNER",
@@ -1184,9 +1511,7 @@ __all__ = [
     "DuplicateSchemaError",
     "DuplicateTableOwnerError",
     "DURABLE_TIMERS_MIGRATION_OWNER",
-    "USAGE_MIGRATION_OWNER",
-    "USAGE_RATING_MIGRATION_OWNER",
-    "WORKFORCE_MIGRATION_OWNER",
+    "FX_POLICY_MIGRATION_OWNER",
     "HostSchemaClaimError",
     "InvalidMigrationPrefixError",
     "InvalidRevisionIdError",
@@ -1196,6 +1521,9 @@ __all__ = [
     "NamespaceError",
     "NamespaceRegistry",
     "UnallocatedNamespaceError",
+    "USAGE_MIGRATION_OWNER",
+    "USAGE_RATING_MIGRATION_OWNER",
+    "WORKFORCE_MIGRATION_OWNER",
     "module_schema",
     "qualified",
     "revision_id",

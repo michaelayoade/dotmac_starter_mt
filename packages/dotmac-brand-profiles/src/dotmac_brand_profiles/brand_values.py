@@ -91,11 +91,11 @@ class Disposition(StrEnum):
     unable to tell which one has a path forward.
     """
 
-    # `noqa: S105` — bandit's hardcoded-password heuristic fires on the word
-    # TOKEN. This is a DESIGN token (`dotmac_ui.SEMANTIC_INTENTS`), not a
-    # credential, and renaming it to dodge the heuristic would cost the one
-    # word that makes the disposition self-explanatory.
-    OWNED_BY_PUBLISHED_TOKEN = "owned_by_published_token"  # noqa: S105
+    # Ruff and Bandit hardcoded-password heuristics fire on the word TOKEN.
+    # This is a DESIGN token (`dotmac_ui.SEMANTIC_INTENTS`), not a credential,
+    # and renaming it to dodge the heuristics would cost the one word that makes
+    # the disposition self-explanatory.
+    OWNED_BY_PUBLISHED_TOKEN = "owned_by_published_token"  # noqa: S105  # nosec B105
     NOT_AN_ALLOWLISTED_INPUT = "not_an_allowlisted_input"
 
 

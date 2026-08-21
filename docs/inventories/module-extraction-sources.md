@@ -5,6 +5,11 @@
 **ERP:** `4c9f492c` (`origin/main`)  
 **Sub:** `4790737c` (`origin/dev`)
 
+**2026-08-18 marketing addendum:** Starter `c6ef6cd7`, Mkt `1a185b47`,
+Sub `510b80ca`, ERP `dd6416cd`, CRM `60daaa2d`, Backoffice `fcdd8270`.
+Exact revisions and evidence paths are in
+[`marketing-suite-sources.md`](marketing-suite-sources.md).
+
 This inventory is the evidence input to ADR-0006's product-first extraction
 amendment. It answers a narrower question than the feature-surface inventories:
 before Dotmac creates or extends a shared distribution, which product code and
@@ -46,12 +51,74 @@ shared package, or maintaining two implementations.
 | `dotmac-template-studio` | **Audit run 2026-08-10; still not an approved reusable owner** | The package's two-kind merge does not hold — ERP documents and Sub notifications disagree on syntax, engine class, identity and missing-variable policy, and the package is a third design adopted by neither. But the *capability* is real and mostly already built: the audit maps it to six owners, of which this package is one. Sub is the qualifying source for the notification renderer. Full evidence in [`template-studio-source-audit.md`](template-studio-source-audit.md). Accepted as ADR-0006 amendment 2026-08-10 (§ 5a–5c). Next slice: narrow this package to "what the message says" and re-base its renderer on Sub's single-brace contract. Separately: open dossiers for consent/suppression, channel policy, delivery/outbox and document generation — consent before delivery. |
 | `dotmac-files` | **Audit-complete; zero contract consumers** | Sub supplies the strongest provider/staged-lifecycle source; ERP supplies the production S3 owner and broad document/image checks; CRM supplies content-spoofing canaries. ADR-0023 adds a separate declared platform table over the same persistence-free physical engine for Vendor CP artifacts. Domain meaning and imports remain excluded. Full evidence in [`files-sources.md`](files-sources.md); ownership is ADR-0022. | ERP then Academy prove tenant adoption after ERP E8 and local-owner retirement. Vendor CP is candidate cutover 3 through `PlatformScope()` and a licensing-owned exact-bundle relation. The platform declaration needs `platform_tables`, introduced in kernel source at a53; because a53–a55 were not published, a56 is the earliest installable compatible kernel, and a56 is this module's declared floor. No candidate is counted yet. |
 | `dotmac-imports` | **Audit-complete; zero contract consumers** | Neither source has the whole capability: ERP's `finance/import_export/base.py` is the tabular front end (CSV/XLS/XLSX decoding, alias resolution, auto-map, preview, 23 concrete importers, 3,311 lines of tests) with no durable record of any run; Sub's `import_runs`/`import_run_rows` is the durable record with the weaker parser. CRM carries a byte-equivalent fork of Sub's row loader. Academy's `content_import` is markdown authoring, not tabular import, and Vendor CP has none. Full evidence in [`imports-sources.md`](imports-sources.md); ownership is accepted in ADR-0025 through a named owner-directed ADR-0017 exception. | Keep unreleased until the first real cutover is ready. After the Sub lineage gate and ERP E8/files prerequisites, ERP's customer-master CSV importer goes first with row-for-row dry-run parity; publish kernel a50/imports just in time. Then Sub retires `import_runs.py`; CRM deletes its forked loader. Spreadsheet extras arrive with ERP parity tests. Export stays unowned and undossiered. |
+| `dotmac-media-observations` | **Audit-complete; a1 released and registry-verified; zero contract consumers; adoption paused** | Mkt is the qualifying behavior/test source for normalized campaign/group/advertisement hierarchy and daily aggregate performance, but production use is unverified. CRM supplies negative evidence against treating provider claims as attribution; Sub remains authoritative for immutable Lead origin and customer lifecycle; Integrator owns transport. The tenant-only package is published at a1 against kernel a81; full source and validation evidence is in [`media-observations-sources.md`](media-observations-sources.md), with ownership in ADR-0034. | Keep it uncomposed while Michael's adoption pause remains active. If adoption is separately authorized, verify Mkt runtime authority, then Backoffice performs the first shadow/reconciliation/cutover proof and PR-only governance; Sub follows independently on the same exact released pins. |
 
 ## Authorized replacement candidates
 
 | Candidate | Evidence status | Product-first reading | Next gate |
 |---|---|---|---|
 | `dotmac-people` | **Audit complete; a1 released and uncomposed** | ERP is the only qualifying source for the narrow employment-directory contract. Kernel Party remains the identity owner; ERP Person, credentials, payroll, attendance, finance and integration fields do not port. The six-table `mod_people` plane, Party prerequisite, forced-RLS canaries, temporal primary-overlap enforcement and ERP parity behavior now live in `packages/dotmac-people`; no authority has moved. Full evidence in [`people-directory-sources.md`](people-directory-sources.md). | Compose exact kernel a71 and dotmac-people a1 in clean Backoffice and implement the narrow ERP projection/backfill/shadow contract. ERP's 131 FK declarations require a rebuildable compatibility projection after the sealed writer cutover; its projection ratchet remains separate from the lifecycle-writer ratchet. Backoffice composition alone moves no authority. |
+
+## ERP / Backoffice / general publication-prep cohort
+
+These packages are audit-complete implementations, not authorized releases.
+They share unpublished kernel floor a84, have zero contract consumers and are
+absent from the closed release allowlist. Exact source pins live in each
+`EXTRACTION.toml`; the joined dependency and Observer gate is
+[`erp-backoffice-general-publication-readiness.md`](erp-backoffice-general-publication-readiness.md).
+
+| Distribution | Source ruling | Cutover-1 gate |
+|---|---|---|
+| `dotmac-accounting` | product-first from ERP | ERP exact-pin composition, full ledger shadow and legacy-writer retirement |
+| `dotmac-analytics` | product-first from ERP | ERP declarations/adapters, projection digest shadow and reader retirement |
+| `dotmac-banking` | product-first from ERP | Accounting first; ERP matching/reconciliation shadow and writer retirement |
+| `dotmac-documents` | ERP base plus Sub immutable-content delta | ERP E8 plus Files/Approvals/Timers seams and handbook writer retirement |
+| `dotmac-expenses` | product-first from ERP | ERP first; Backoffice only after the ERP writer switch |
+| `dotmac-finance` | product-first from ERP fixed assets | Physical-asset and Accounting seams plus ERP book/consequence reconciliation |
+| `dotmac-inbox` | product-first from Sub Team Inbox | Sub Integrator/product-link adapters and conversation writer switch |
+| `dotmac-party` | product-first from Sub | Kernel Party binding, declaration registries and Sub reader/writer cutovers |
+| `dotmac-payables` | product-first from ERP AP | Accounting first; ERP liability/settlement/accounting-receipt reconciliation |
+| `dotmac-payroll` | product-first from ERP | stable People/Accounting seams and ERP calculation/liability writer retirement |
+| `dotmac-procurement` | product-first from ERP | Organization-to-Tenant plus supplier/item/budget/approval/receipt adapters |
+| `dotmac-projects` | product-first from Sub | product subject/consequence links and Sub project/task writer switch |
+| `dotmac-records` | greenfield after exact fleet inventory | ERP writer inventory plus Files/Approvals/Timers seams; destructive shadow disabled |
+| `dotmac-surveys` | product-first from Sub | ticket/work-order eligibility adapters and Sub response/aggregate shadow |
+| `dotmac-tax` | product-first from ERP | Accounting first; governed policy data and ERP determination/report/return shadow |
+| `dotmac-work-orders` | product-first from Sub | internal-crew path only; product subject/assignee adapters and writer switch |
+
+## Decomposed marketing suite candidates
+
+Michael activated this suite as a goal on 2026-08-18. Campaigns is implemented
+and merged but remains unreleased and unadopted. Media observations is a
+complete candidate with validated milestone
+`c548ef02aca10b421d1ebf4158b9c4fdf72e6025` and evidence-only head
+`abf1b9ad4c3889aa6c40ed2e01419e440452f565`; later test hardening is at
+`56517abc7f05cb6e20f9b0e5fdb6a492dbf0fdd2`. The media branch is reconciled
+through `2ade09d16c3e2d246ad361129c4700de6eff819b`, and the former combined train
+at `9c0068d3c675c955c46bd3391f9d46f6685cbfcb` is historical Observer evidence.
+Published a77 owns the vendor cohort, so the released marketing restack
+allocates media a78, content a79, publishing a80 and Sites a81; every package
+floors at the first installable cohort kernel, a81. PR #284 passed all sixteen
+required checks and merged as exact main revision `8f99413`; kernel a81 and all
+four a1 modules are published, registry-verified and tagged from that revision.
+None is adopted. Backoffice is the default first adopter; campaigns is the
+ADR-0032 exception, with Sub cutover 1 and Backoffice cutover 2 as the
+independent reuse proof.
+
+| Candidate distribution | Source mode and selected source | First implementation gate |
+|---|---|---|
+| `dotmac-content` | product-first from Mkt planning/content models, services and parity tests | Allocation a79, installable floor a81. Content a1 is released and registry-verified; Backoffice adoption and every writer-retirement row remain separate and not started. |
+| `dotmac-publishing` | product-first from Mkt post-delivery, publishing-service and scheduler behavior, with its direct-provider and transaction defects recorded as retirement inputs rather than shared contracts | Allocation a80, installable floor a81. Publishing a1 is released and registry-verified; Backoffice adoption and every PUB-R switch remain separate and not started. |
+| `dotmac-sites` | greenfield after an exact six-repository audit; no qualifying source and zero consumers | Allocation and installable floor a81. Sites a1 is released and registry-verified; Backoffice composition, the typed remote-publication seam and adoption remain separately gated. |
+| `dotmac-media-observations` | product-first from Mkt remote-post/ad hierarchy and idempotent metric upserts | Allocation a78, installable floor a81. Media Observations a1 is released and registry-verified; the adoption pause and observation-only boundary remain intact. |
+| `dotmac-web-analytics` | product-first from Mkt's normalized daily sessions/pageviews/users/bounce-rate behavior | Port normalization/aggregation only; OAuth, fetch scheduling and checkpoints stay in Integrator. |
+| `dotmac-forms` | product-first from ERP's versioned form definition/submission engine | Replace Organization and recruitment coupling with Tenant scope, typed schemas and opaque subjects. |
+| `dotmac-campaigns` | product-first from Sub, not Mkt or CRM | Implementation merged at Starter main `300ebd7`; registry-verified a72 contains the campaigns allocation and Durable Timers a1, while published a73 supplies the caller-session mechanics and is the effective campaigns floor. The package remains unpublished/unallowlisted; satisfy Sub's S7 ownership, lineage and timer-adoption gates before cutting over Sub ahead of Backoffice. |
+
+Every distribution gets its own `EXTRACTION.toml`, manifest, namespace,
+lineage, tenant-isolation canary and cutover/retirement evidence. The modules do
+not import one another; applications bind typed ports and synchronize across
+application boundaries only through versioned APIs/webhooks.
 
 ## Template Studio source audit
 

@@ -80,6 +80,22 @@ _PLATFORM_IMMUTABLE = ("platform_allocation_receipts", "platform_series_repairs"
 _REFUSE_FUNCTION = "mod_numbering.refuse_mutation"
 _FREEZE_TENANT_FUNCTION = "mod_numbering.refuse_tenant_identity_change"
 _FREEZE_PLATFORM_FUNCTION = "mod_numbering.refuse_platform_identity_change"
+_ALLOWED_FREEZE_ARGUMENTS = frozenset(
+    {
+        (
+            _FREEZE_TENANT_FUNCTION,
+            "series_counters",
+            "allocation_receipts",
+            "tenant",
+        ),
+        (
+            _FREEZE_PLATFORM_FUNCTION,
+            "platform_series_counters",
+            "platform_allocation_receipts",
+            "platform",
+        ),
+    }
+)
 
 # The fields that shape what a rendered number looks like, or which period it
 # belongs to. `start_value` is deliberately absent: it is a PROSPECTIVE SEED
@@ -104,9 +120,12 @@ def _identity_tuple(alias: str) -> str:
 def _freeze_function_sql(name: str, counters: str, receipts: str, scope: str) -> str:
     """The identity-freeze trigger body for one plane.
 
-    Every interpolated value is a module-level literal — the column names above
-    and the two table names for this plane. noqa: the check cannot see that.
+    Every interpolated identifier must match one complete module-owned plane.
+    The runtime allowlist makes that premise enforceable before SQL is built.
     """
+    arguments = (name, counters, receipts, scope)
+    if arguments not in _ALLOWED_FREEZE_ARGUMENTS:
+        raise ValueError("freeze SQL identifiers must name one declared plane")
     tenant_predicate = "c.tenant_id = NEW.tenant_id AND " if scope == "tenant" else ""
     receipt_predicate = "r.tenant_id = NEW.tenant_id AND " if scope == "tenant" else ""
     table = "number_series" if scope == "tenant" else "platform_number_series"
@@ -132,7 +151,7 @@ def _freeze_function_sql(name: str, counters: str, receipts: str, scope: str) ->
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-    """  # noqa: S608
+    """  # noqa: S608  # nosec B608 -- identifiers use the enforced allowlist.
 
 
 def _series_columns() -> list[sa.Column[Any]]:

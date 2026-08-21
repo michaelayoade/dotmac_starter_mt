@@ -89,8 +89,8 @@ dotmac-numbering = { path = "packages/dotmac-numbering", develop = true }
 # Tenant employment-directory owner extracted product-first from ERP. Built and
 # proven here; the clean Backoffice assembly is its first exact-pin consumer.
 dotmac-people = { path = "packages/dotmac-people", develop = true }
-# Tenant customer-account owner extracted from Sub; built and proven here but
-# deliberately uncomposed until Sub's explicit shadow/cutover programme.
+# ADR-0055 ISP essential-domain cohort. Built and proven here, but deliberately
+# uncomposed and release-unallowlisted until each source product's named cutover.
 dotmac-customers = { path = "packages/dotmac-customers", develop = true }
 dotmac-service-catalog = { path = "packages/dotmac-service-catalog", develop = true }
 dotmac-qualification = { path = "packages/dotmac-qualification", develop = true }
@@ -101,6 +101,28 @@ dotmac-service-access-policy = { path = "packages/dotmac-service-access-policy",
 dotmac-inbox-operations = { path = "packages/dotmac-inbox-operations", develop = true }
 dotmac-workforce = { path = "packages/dotmac-workforce", develop = true }
 dotmac-fx-policy = { path = "packages/dotmac-fx-policy", develop = true }
+# Tenant-only stock-ledger and traceability owner (ADR-0036). The network
+# suite reuses this owner for equipment while it is stocked; deployment does
+# not turn Network Inventory into a second quantity or valuation writer.
+dotmac-inventory = { path = "packages/dotmac-inventory", develop = true }
+# Tenant-only durable-unit owner (ADR-0037). Network modules bind to an asset
+# opaquely and retain only network-specific identity and behavior.
+dotmac-assets = { path = "packages/dotmac-assets", develop = true }
+# ADR-0038 network-suite-v1 candidates. Built and validated together here, but
+# not composed by the reference assembly and not adopted incrementally in Sub.
+dotmac-ipam = { path = "packages/dotmac-ipam", develop = true }
+dotmac-network-inventory = { path = "packages/dotmac-network-inventory", develop = true }
+dotmac-network-observability = { path = "packages/dotmac-network-observability", develop = true }
+dotmac-network-topology = { path = "packages/dotmac-network-topology", develop = true }
+dotmac-network-assurance = { path = "packages/dotmac-network-assurance", develop = true }
+dotmac-network-control = { path = "packages/dotmac-network-control", develop = true }
+dotmac-fiber-plant = { path = "packages/dotmac-fiber-plant", develop = true }
+dotmac-network-access = { path = "packages/dotmac-network-access", develop = true }
+dotmac-pon-access = { path = "packages/dotmac-pon-access", develop = true }
+# Tenant-only provider-neutral position observations (ADR-0039). Built and
+# proven here; Assets keeps a durable unit's authoritative location and product
+# owners keep every consequence, so the reference assembly installs nothing.
+dotmac-positioning = { path = "packages/dotmac-positioning", develop = true }
 # Optional dual-plane timer identity and generation owner. Delivery stays in
 # the kernel outbox relay; each real adopter composes its own selected planes.
 dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = true }
@@ -108,10 +130,47 @@ dotmac-durable-timers = { path = "packages/dotmac-durable-timers", develop = tru
 # its runtime is the separate `dotmac_integrator` assembly, so the reference
 # assembly deliberately does not compose the `ig` lineage.
 dotmac-integration = { path = "packages/dotmac-integration", develop = true }
+# Immutable, provider-neutral external media facts. Built and proven here but
+# deliberately not composed by Starter or any product while adoption is paused.
+dotmac-media-observations = { path = "packages/dotmac-media-observations", develop = true }
 # Tenant-only outbound campaign progression (ADR-0032). Built and proven here,
 # composed first by Sub and then by Backoffice; the reference assembly does not
 # install its lineage or import it from `app`.
 dotmac-campaigns = { path = "packages/dotmac-campaigns", develop = true }
+# Tenant-only editorial content owner extracted product-first from Mkt. Built
+# and proven here; Backoffice remains the first future exact-pin adopter.
+dotmac-content = { path = "packages/dotmac-content", develop = true }
+# Tenant-only publication intent, immutable target attempts and reconciled
+# outcomes. Built and proven here; Backoffice is the first candidate adopter.
+dotmac-publishing = { path = "packages/dotmac-publishing", develop = true }
+# Tenant-only website composition and immutable local release snapshots.
+# Greenfield after the fleet audit; Backoffice is the first candidate adopter.
+dotmac-sites = { path = "packages/dotmac-sites", develop = true }
+# Tenant-only referral programme/attribution owner extracted from Sub. This
+# reference assembly builds and proves the package but does not compose `rf`.
+dotmac-referrals = { path = "packages/dotmac-referrals", develop = true }
+# Tenant-only reseller identity, hierarchy and delegated-authority owner
+# extracted from Sub. The reference assembly proves but does not compose `rm`.
+dotmac-reseller-management = { path = "packages/dotmac-reseller-management", develop = true }
+# ERP/Backoffice/general publication-prep cohort. These distributions are built
+# and governed here, but remain uncomposed and release-unallowlisted until an
+# exact-pin product adopter and exact-commit Observer proof exist for each one.
+dotmac-accounting = { path = "packages/dotmac-accounting", develop = true }
+dotmac-analytics = { path = "packages/dotmac-analytics", develop = true }
+dotmac-banking = { path = "packages/dotmac-banking", develop = true }
+dotmac-documents = { path = "packages/dotmac-documents", develop = true }
+dotmac-expenses = { path = "packages/dotmac-expenses", develop = true }
+dotmac-finance = { path = "packages/dotmac-finance", develop = true }
+dotmac-inbox = { path = "packages/dotmac-inbox", develop = true }
+dotmac-party = { path = "packages/dotmac-party", develop = true }
+dotmac-payables = { path = "packages/dotmac-payables", develop = true }
+dotmac-payroll = { path = "packages/dotmac-payroll", develop = true }
+dotmac-procurement = { path = "packages/dotmac-procurement", develop = true }
+dotmac-projects = { path = "packages/dotmac-projects", develop = true }
+dotmac-records = { path = "packages/dotmac-records", develop = true }
+dotmac-surveys = { path = "packages/dotmac-surveys", develop = true }
+dotmac-tax = { path = "packages/dotmac-tax", develop = true }
+dotmac-work-orders = { path = "packages/dotmac-work-orders", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -139,6 +198,8 @@ cryptography = "^45"
 # Build/test input only. The Starter assembly never hosts provider plugins;
 # dotmac_integrator pins the independently released connector at runtime.
 dotmac-connector-whatsapp = { path = "packages/dotmac-connector-whatsapp", develop = true }
+dotmac-connector-meta-social = { path = "packages/dotmac-connector-meta-social", develop = true }
+dotmac-connector-paystack = { path = "packages/dotmac-connector-paystack", develop = true }
 
 [tool.ruff]
 line-length = 88
@@ -200,10 +261,44 @@ module = [
     "dotmac_inbox_operations.*",
     "dotmac_workforce.*",
     "dotmac_fx_policy.*",
+    "dotmac_inventory.*",
+    "dotmac_assets.*",
+    "dotmac_ipam.*",
+    "dotmac_network_inventory.*",
+    "dotmac_network_observability.*",
+    "dotmac_network_topology.*",
+    "dotmac_network_assurance.*",
+    "dotmac_network_control.*",
+    "dotmac_fiber_plant.*",
+    "dotmac_network_access.*",
+    "dotmac_pon_access.*",
+    "dotmac_positioning.*",
     "dotmac_durable_timers.*",
     "dotmac_imports.*",
     "dotmac_integration.*",
+    "dotmac_media_observations.*",
     "dotmac_campaigns.*",
+    "dotmac_content.*",
+    "dotmac_publishing.*",
+    "dotmac_sites.*",
+    "dotmac_referrals.*",
+    "dotmac_reseller_management.*",
+    "dotmac_accounting.*",
+    "dotmac_analytics.*",
+    "dotmac_banking.*",
+    "dotmac_documents.*",
+    "dotmac_expenses.*",
+    "dotmac_finance.*",
+    "dotmac_inbox.*",
+    "dotmac_party.*",
+    "dotmac_payables.*",
+    "dotmac_payroll.*",
+    "dotmac_procurement.*",
+    "dotmac_projects.*",
+    "dotmac_records.*",
+    "dotmac_surveys.*",
+    "dotmac_tax.*",
+    "dotmac_work_orders.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -270,11 +365,47 @@ root_packages = [
     "dotmac_inbox_operations",
     "dotmac_workforce",
     "dotmac_fx_policy",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
+    "dotmac_positioning",
     "dotmac_durable_timers",
     "dotmac_integration",
+    "dotmac_media_observations",
     "dotmac_auth_oidc",
     "dotmac_connector_whatsapp",
+    "dotmac_connector_meta_social",
+    "dotmac_connector_paystack",
     "dotmac_campaigns",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
+    "dotmac_referrals",
+    "dotmac_reseller_management",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
 ]
 
 [[tool.importlinter.contracts]]
@@ -335,6 +466,7 @@ source_modules = [
     "dotmac_files",
     "dotmac_imports",
     "dotmac_integration",
+    "dotmac_media_observations",
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
@@ -348,9 +480,42 @@ source_modules = [
     "dotmac_inbox_operations",
     "dotmac_workforce",
     "dotmac_fx_policy",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
+    "dotmac_positioning",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
+    "dotmac_referrals",
+    "dotmac_reseller_management",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
 ]
 forbidden_modules = ["app"]
 
@@ -408,6 +573,7 @@ modules = [
     "dotmac_files",
     "dotmac_imports",
     "dotmac_integration",
+    "dotmac_media_observations",
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
@@ -421,9 +587,42 @@ modules = [
     "dotmac_inbox_operations",
     "dotmac_workforce",
     "dotmac_fx_policy",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
+    "dotmac_positioning",
     "dotmac_durable_timers",
     "dotmac_auth_oidc",
     "dotmac_campaigns",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
+    "dotmac_referrals",
+    "dotmac_reseller_management",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -468,6 +667,7 @@ forbidden_modules = [
     "dotmac_imports",
     "dotmac_approvals",
     "dotmac_numbering",
+    "dotmac_media_observations",
     "dotmac_people",
     "dotmac_customers",
     "dotmac_service_catalog",
@@ -479,7 +679,38 @@ forbidden_modules = [
     "dotmac_inbox_operations",
     "dotmac_workforce",
     "dotmac_fx_policy",
+    "dotmac_inventory",
+    "dotmac_assets",
+    "dotmac_ipam",
+    "dotmac_network_inventory",
+    "dotmac_network_observability",
+    "dotmac_network_topology",
+    "dotmac_network_assurance",
+    "dotmac_network_control",
+    "dotmac_fiber_plant",
+    "dotmac_network_access",
+    "dotmac_pon_access",
+    "dotmac_positioning",
     "dotmac_durable_timers",
+    "dotmac_content",
+    "dotmac_publishing",
+    "dotmac_sites",
+    "dotmac_accounting",
+    "dotmac_analytics",
+    "dotmac_banking",
+    "dotmac_documents",
+    "dotmac_expenses",
+    "dotmac_finance",
+    "dotmac_inbox",
+    "dotmac_party",
+    "dotmac_payables",
+    "dotmac_payroll",
+    "dotmac_procurement",
+    "dotmac_projects",
+    "dotmac_records",
+    "dotmac_surveys",
+    "dotmac_tax",
+    "dotmac_work_orders",
     "dotmac_auth_oidc",
 ]
 

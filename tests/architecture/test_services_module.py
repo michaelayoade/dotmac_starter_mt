@@ -11,7 +11,7 @@ from dotmac_services import models, service
 from dotmac_services.manifest import module
 
 ROOT = Path(inspect.getfile(service)).parent
-MIGRATION = ROOT / "migrations/versions/sv_0001_service_lifecycle.py"
+MIGRATION = ROOT / "migrations/versions/se_0001_service_lifecycle.py"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -22,7 +22,7 @@ def test_manifest_and_secure_plane_are_exact() -> None:
         module.short_code,
         module.migration_prefix,
         module.db_schema,
-    ) == ("services", "services", "sv", "mod_services")
+    ) == ("services", "services", "se", "mod_services")
     assert tuple(module.tables) == ("service_instances", "service_lifecycle_events")
     assert tuple(module.platform_tables) == ()
     for name in module.tables:
@@ -85,7 +85,7 @@ def test_root_migration_declares_the_whole_forced_rls_plane() -> None:
         for target in node.targets
         if isinstance(target, ast.Name)
     }
-    assert ast.literal_eval(assigned["revision"]) == "sv_0001_service_lifecycle"
+    assert ast.literal_eval(assigned["revision"]) == "se_0001_service_lifecycle"
     assert ast.literal_eval(assigned["down_revision"]) is None
     assert ast.literal_eval(assigned["branch_labels"]) == ("services",)
     assert ast.literal_eval(assigned["REQUIRES"]) == tuple(module.requires)

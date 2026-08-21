@@ -23,6 +23,27 @@
 > (Team 2 — **also PROPOSED**). § 2.2 there is the consumer of § 2 here. Where
 > the two disagree, § 9 records it; neither side may treat the other as settled.
 
+## 2026-08-20 implementation note
+
+This specification remains historical intent, but its two original blocking
+gaps no longer describe the as-built platform. `dotmac-integration` 0.1.0a10
+ships SPI 1.3 ingress handlers, verification evidence, acknowledgement
+ownership, declared secret bindings and egress policy. `dotmac_integrator` at
+`d886e3c9956192fe1d5f085d352a516812c253c8` supplies the secret resolver and the
+provider-neutral ingress/product-delivery adapters. Michael's 2026-08-20
+ADR-0017 amendment authorizes separate Paystack and Flutterwave connector
+distributions; it does not authorize product adoption or financial authority
+movement.
+
+The implemented first slice is Paystack ingress only. The Integrator's delivery
+envelope owns destination, scope, source, receipt and idempotency context, which
+resolves D1 and D2 without putting tenant or source-system fields in the
+provider observation. The connector uses Paystack's documented ×100 wire scale
+for every supported currency, including XOF. That is provider protocol, not the
+hardcoded currency fallback this specification rejects: the emitted currency
+is still mandatory and copied from the authenticated event, never defaulted.
+Generic future payment transports must not infer their scale from Paystack.
+
 ---
 
 ## 0. What this document is, and the two gaps that block it

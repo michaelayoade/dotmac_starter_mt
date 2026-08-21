@@ -44,6 +44,51 @@ def _module_schemas(tables: Iterable[Table]) -> tuple[str, ...]:
     return tuple(sorted({table.schema for table in tables if table.schema}))
 
 
+_SQLITE_MAX_ATTACHED_SCHEMAS = 10
+
+
+def _sqlite_schema_plan(
+    schemas: tuple[str, ...], tables: tuple[Table, ...]
+) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Fit module namespaces inside SQLite's ten-attachment hard limit.
+
+    PostgreSQL remains the namespace and isolation proof. The fast SQLite lane
+    keeps as many real ``mod_*`` aliases as SQLite permits. Any overflow is
+    translated to SQLite's built-in, explicitly qualified ``main`` namespace,
+    but only when its table names cannot collide with public or another
+    translated table. A collision fails loudly instead of silently merging two
+    owners.
+    """
+    overflow = max(0, len(schemas) - _SQLITE_MAX_ATTACHED_SCHEMAS)
+    if overflow == 0:
+        return {}, schemas
+
+    occupied = {table.name for table in tables if table.schema is None}
+    names_by_schema = {
+        schema: {table.name for table in tables if table.schema == schema}
+        for schema in schemas
+    }
+    translated: list[str] = []
+    # Prefer the smallest safe namespace: this preserves exact ``mod_*`` SQL
+    # for the greatest number of module tables in the fast lane.
+    for schema in sorted(schemas, key=lambda item: (len(names_by_schema[item]), item)):
+        names = names_by_schema[schema]
+        if names.isdisjoint(occupied):
+            translated.append(schema)
+            occupied.update(names)
+        if len(translated) == overflow:
+            break
+    if len(translated) != overflow:
+        raise RuntimeError(
+            "SQLite cannot represent every imported module namespace within "
+            "its ten attached-database limit without a table-name collision; "
+            "run this case on PostgreSQL or reduce the imported metadata"
+        )
+    translated_set = set(translated)
+    attached = tuple(schema for schema in schemas if schema not in translated_set)
+    return {schema: "main" for schema in translated}, attached
+
+
 def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
     """A fresh in-memory SQLite engine with the selected `Base.metadata` tables.
 
@@ -55,8 +100,10 @@ def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
     A large shared test process SHOULD pass the exact assembly/package table
     snapshot it is exercising: test collection may import many uncomposed
     packages into the shared metadata, while SQLite supports at most ten
-    attached databases. Selection is explicit rather than silently flattening
-    schemas or pretending an uncomposed package belongs to the assembly.
+    attached databases. Selection is explicit rather than pretending an
+    uncomposed package belongs to the assembly. If the selected surface itself
+    crosses SQLite's attachment limit, collision-free overflow namespaces are
+    translated deterministically to SQLite's qualified ``main`` namespace.
     **Module schemas (ADR-0006 D1).** A stateful module binds its models to
     `mod_<short_code>` via `namespaces.schema_table_args`, so the ORM emits
     fully qualified `mod_x.thing` — which is the entire point of D1, and which
@@ -66,26 +113,29 @@ def create_test_engine(*, tables: Iterable[Table] | None = None) -> Engine:
     standard build, so inference from every model imported during pytest
     collection is both architecturally wrong and eventually unexecutable.
 
-    ATTACH rather than a `schema_translate_map`: translating the schema away
-    would make the unit lane exercise UNQUALIFIED SQL that no deployment ever
-    runs, quietly hiding exactly the qualification defects D1's gate exists to
-    catch. Attaching keeps the emitted SQL identical to production's.
-
+    ATTACH keeps emitted SQL identical to production's until SQLite's hard
+    limit of ten attached databases is reached. Beyond that limit, the smallest
+    collision-free overflow namespace is translated to the explicitly
+    qualified built-in ``main`` namespace. Static architecture gates and the
+    required PostgreSQL lane remain the proof of the original namespace and
+    isolation; SQLite remains a service-logic lane.
     """
     selected_tables = tuple(Base.metadata.tables.values() if tables is None else tables)
+    schemas = _module_schemas(selected_tables)
+    translated, attached = _sqlite_schema_plan(schemas, selected_tables)
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         future=True,
         connect_args={"check_same_thread": False},
+        execution_options={"schema_translate_map": translated},
     )
-    schemas = _module_schemas(selected_tables)
-    if schemas:
+    if attached:
 
         @event.listens_for(engine, "connect")
         def _attach_module_schemas(dbapi_connection: object, _record: object) -> None:
             cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
             try:
-                for schema in schemas:
+                for schema in attached:
                     # Identifier-quoted, and the names are `mod_<short_code>`
                     # already validated by `namespaces.validate_schema` — this
                     # is defence in depth, not the only check.

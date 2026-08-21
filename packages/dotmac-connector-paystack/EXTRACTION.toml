@@ -1,0 +1,46 @@
+schema_version = 1
+package = "dotmac-connector-paystack"
+classification = "stateless-protocol-adapter"
+status = "audit-complete"
+source_mode = "product-first"
+
+owner = "Paystack ingress authentication and wire translation: exact-byte HMAC-SHA512 verification, provider-event identity, charge-success normalization, and acknowledgement bytes."
+
+contract = "Implement dotmac-integration SPI >=1.3,<2.0 for connector key paystack and capability payments.settlement.observation.v1 in INGRESS mode only. Emit exact amount and provider-fee decimal strings with explicit currency, the provider's own status token verbatim, an opaque merchant reference, and transport evidence. Own no provider HTTP client, product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, retry/checkpoint engine, row, session or product database."
+
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
+
+source_paths = [
+  "dotmac_sub@94d5189b379bdae83665193264ad4dc03e613cc6:app/services/integrations/payment_capability.py",
+  "dotmac_sub@94d5189b379bdae83665193264ad4dc03e613cc6:app/services/payment_webhook_commands.py",
+  "dotmac_sub@94d5189b379bdae83665193264ad4dc03e613cc6:app/api/billing.py",
+  "dotmac_sub@94d5189b379bdae83665193264ad4dc03e613cc6:tests/test_integration_payment_capability.py",
+  "dotmac_sub@94d5189b379bdae83665193264ad4dc03e613cc6:tests/test_payment_webhook_settlement.py",
+  "dotmac_sub@94d5189b379bdae83665193264ad4dc03e613cc6:tests/architecture/test_payment_webhook_ownership.py",
+  "dotmac_erp@4aab56812d6fb243c814ada15c13fabea6234da8:app/services/finance/payments/webhook_service.py",
+  "dotmac_erp@4aab56812d6fb243c814ada15c13fabea6234da8:tests/finance/test_paystack_payments.py",
+]
+
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_paystack_connector.py",
+  "dotmac_starter_mt:tests/architecture/test_paystack_connector_boundary.py",
+]
+
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator", "dotmac_sub", "dotmac_erp"]
+
+inventory_evidence = [
+  "docs/inventories/payment-connector-sources.md",
+  "docs/inventories/payment-connector-extraction-dossier.md",
+  "docs/superpowers/specs/2026-08-14-payment-connector-and-settlement-contracts.md",
+  "docs/adr/0017-adoption-is-the-scarce-resource.md",
+  "docs/adr/0024-apps-compose-by-synchronizing-data.md",
+]
+
+first_cutover = "Sub through dotmac_integrator, in mirror mode. This package release is supply-chain evidence only: Sub's direct Paystack receiver remains authoritative until the same verified webhook stream produces zero unexplained identity, signature, amount, fee, currency, reference and provider-status drift over a full billing cycle."
+
+shadow_and_drift = "Mirror the exact raw body and signature header into Integrator while Sub's existing receiver remains the sole producer of financial consequences. Compare provider-event coverage, verification verdict, payload digest and normalized fields. The connector deliberately does not emit Sub metadata, invoice targeting, net amount or PaymentStatus. Cut over the callback only after zero unexplained drift, then remove Sub's direct Paystack verification/normalization and lower its external-connector ratchet in the same change. ERP follows as a separate cutover after its product port exists."
+
+local_copy_retirement = "Retire only provider transport. Sub keeps payment_provider_events.py, payment_reconciliation.py, every intent service, allocation, coverage and lifecycle decision. ERP keeps GL posting, expense-claim and payment allocation policy. The later outbound/poll Paystack slice retires the provider HTTP clients and tasks; this ingress-only release does not pretend that work is complete. Flutterwave is a separate distribution and cutover."
+
+next_action = "dotmac-connector-paystack 0.1.0a1 is published, installed back from the private index, conformance-checked and tagged from exact main SHA deedb35 by release run 32368987719. Exact-pin it in dotmac_integrator, reconcile the authenticated payments.settlement.observation.v1 ProductPort descriptor, and run the Sub mirror/callback cutover. Keep status audit-complete until that cutover retires the direct transport. Add provider I/O only as later payments.intent.v1, payments.refund.v1 and payments.reconcile.v1 slices after their product-owned command contracts are published."

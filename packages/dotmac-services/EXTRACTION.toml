@@ -23,7 +23,7 @@ preserved_tests = [
 ]
 contract_consumers = []
 candidate_consumers = ["dotmac_sub"]
-composition_boundary = "Adopters compose sv locally and pass opaque customer/catalogue/qualification references. The module imports no sibling module and reads no foreign application database."
+composition_boundary = "Adopters compose se locally and pass opaque customer/catalogue/qualification references. The module imports no sibling module and reads no foreign application database."
 inventory_evidence = ["docs/inventories/isp-essential-domain-sources.md"]
 first_cutover = "Sub remains service lifecycle owner until backfill, read-only shadow and transition/status comparison complete and a separately authorized writer switch occurs."
 shadow_and_drift = "Compare service identity, opaque references, current status, transition ordering, reason and occurrence time. Fulfillment and network observations stay outside."

@@ -150,7 +150,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
-| `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
+| `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `MEDIA_OBSERVATIONS_MIGRATION_OWNER`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
 | `dotmac_kernel.permissions` | `PermissionSpec`, `PermissionCatalogue`, `DuplicatePermissionError`, `UndeclaredPermissionError`, `install_permissions`, `active_permissions` (permission catalogue; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.planes` | `ModulePlane`, `ModulePlaneSelection`, `ModulePlaneSelectionError`, `install_module_plane_selections`, `installed_module_plane_selections`, `selected_module_planes`, `supported_plane_sets`, `validate_module_plane_selections` (explicit per-module persistence-plane composition; ADR-0028) |
@@ -291,7 +291,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a78`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a85`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -307,17 +307,51 @@ retired prefix is never reused.
 | `integration` | `mod_intg` | `ig` | `integration` |
 | `approvals` | `mod_approvals` | `ap` | `approvals` |
 | `numbering` | `mod_numbering` | `nu` | `numbering` |
+| `people` | `mod_people` | `pe` | `people` |
 | `campaigns` | `mod_campaigns` | `ca` | `campaigns` |
 | `durable_timers` | `mod_timers` | `dt` | `durable_timers` |
 | `commercial_agreements` | `mod_agreements` | `cg` | `commercial_agreements` |
 | `licensing` | `mod_licensing` | `li` | `licensing` |
 | `deployment_control` | `mod_deploy` | `dc` | `deployment_control` |
 | `brand_profiles` | `mod_brand` | `bp` | `brand_profiles` |
-| `people` | `mod_people` | `pe` | `people` |
+| `media_observations` | `mod_mediaobs` | `mo` | `media_observations` |
+| `content` | `mod_content` | `ct` | `content` |
+| `publishing` | `mod_publishing` | `pb` | `publishing` |
+| `sites` | `mod_sites` | `si` | `sites` |
+| `inventory` | `mod_inventory` | `iv` | `inventory` |
+| `assets` | `mod_assets` | `as` | `assets` |
+| `ipam` | `mod_ipam` | `ip` | `ipam` |
+| `network_inventory` | `mod_netinv` | `ni` | `network_inventory` |
+| `network_observability` | `mod_netobs` | `no` | `network_observability` |
+| `network_topology` | `mod_nettop` | `nt` | `network_topology` |
+| `network_assurance` | `mod_netassure` | `na` | `network_assurance` |
+| `network_control` | `mod_netctrl` | `nc` | `network_control` |
+| `fiber_plant` | `mod_fiber` | `fp` | `fiber_plant` |
+| `network_access` | `mod_netaccess` | `nac` | `network_access` |
+| `pon_access` | `mod_pon` | `pn` | `pon_access` |
+| `positioning` | `mod_pos` | `po` | `positioning` |
+| `referrals` | `mod_referrals` | `rf` | `referrals` |
+| `reseller_management` | `mod_reseller` | `rm` | `reseller_management` |
+| `accounting` | `mod_accounting` | `ac` | `accounting` |
+| `analytics` | `mod_analytics` | `ay` | `analytics` |
+| `banking` | `mod_banking` | `bk` | `banking` |
+| `documents` | `mod_documents` | `do` | `documents` |
+| `expenses` | `mod_expenses` | `ex` | `expenses` |
+| `finance` | `mod_finance` | `fn` | `finance` |
+| `inbox` | `mod_inbox` | `ib` | `inbox` |
+| `party` | `mod_party` | `pt` | `party` |
+| `payables` | `mod_payables` | `pa` | `payables` |
+| `payroll` | `mod_payroll` | `py` | `payroll` |
+| `procurement` | `mod_procurement` | `pc` | `procurement` |
+| `projects` | `mod_projects` | `pj` | `projects` |
+| `records` | `mod_records` | `re` | `records` |
+| `surveys` | `mod_surveys` | `sv` | `surveys` |
+| `tax` | `mod_tax` | `tx` | `tax` |
+| `work_orders` | `mod_workorders` | `wo` | `work_orders` |
 | `customers` | `mod_customers` | `cu` | `customers` |
 | `service_catalog` | `mod_svc_cat` | `sc` | `service_catalog` |
 | `qualification` | `mod_qual` | `qu` | `qualification` |
-| `services` | `mod_services` | `sv` | `services` |
+| `services` | `mod_services` | `se` | `services` |
 | `usage` | `mod_usage` | `us` | `usage` |
 | `usage_rating` | `mod_usage_rate` | `ur` | `usage_rating` |
 | `service_access_policy` | `mod_svc_access` | `sa` | `service_access_policy` |
