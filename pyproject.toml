@@ -163,6 +163,10 @@ dotmac-work-orders = { path = "packages/dotmac-work-orders", develop = true }
 # deterministic projections (ADR-0055). The adopting product supplies origin,
 # event, consent and retention policy; the reference assembly installs none.
 dotmac-web-analytics = { path = "packages/dotmac-web-analytics", develop = true }
+# ADR-0040 Backoffice runtime cohort. Forms is an independent data-capture
+# owner; Workflow Runtime carries only opaque definition/form references.
+dotmac-forms = { path = "packages/dotmac-forms", develop = true }
+dotmac-workflow-runtime = { path = "packages/dotmac-workflow-runtime", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -283,6 +287,8 @@ module = [
     "dotmac_tax.*",
     "dotmac_work_orders.*",
     "dotmac_web_analytics.*",
+    "dotmac_forms.*",
+    "dotmac_workflow_runtime.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -381,6 +387,8 @@ root_packages = [
     "dotmac_tax",
     "dotmac_work_orders",
     "dotmac_web_analytics",
+    "dotmac_forms",
+    "dotmac_workflow_runtime",
 ]
 
 [[tool.importlinter.contracts]]
@@ -482,6 +490,8 @@ source_modules = [
     "dotmac_tax",
     "dotmac_work_orders",
     "dotmac_web_analytics",
+    "dotmac_forms",
+    "dotmac_workflow_runtime",
 ]
 forbidden_modules = ["app"]
 
@@ -580,6 +590,8 @@ modules = [
     "dotmac_tax",
     "dotmac_work_orders",
     "dotmac_web_analytics",
+    "dotmac_forms",
+    "dotmac_workflow_runtime",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -658,6 +670,8 @@ forbidden_modules = [
     "dotmac_surveys",
     "dotmac_tax",
     "dotmac_work_orders",
+    "dotmac_forms",
+    "dotmac_workflow_runtime",
     "dotmac_auth_oidc",
 ]
 

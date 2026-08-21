@@ -66,6 +66,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-expenses`](../packages/dotmac-expenses/README.md) | optional module | [`audit-complete`](../packages/dotmac-expenses/EXTRACTION.toml) | [tenant · `mod_expenses`](../packages/dotmac-expenses/src/dotmac_expenses/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_backoffice`, `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-fiber-plant`](../packages/dotmac-fiber-plant/README.md) | optional module | [`audit-complete`](../packages/dotmac-fiber-plant/EXTRACTION.toml) | [tenant · `mod_fiber`](../packages/dotmac-fiber-plant/src/dotmac_fiber_plant/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | `tenant`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a61` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
+| [`dotmac-forms`](../packages/dotmac-forms/README.md) | optional module | [`audit-complete`](../packages/dotmac-forms/EXTRACTION.toml) | [tenant · `mod_forms`](../packages/dotmac-forms/src/dotmac_forms/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a87` | — | `dotmac_backoffice`, `dotmac_sub` |
 | [`dotmac-finance`](../packages/dotmac-finance/README.md) | optional module | [`audit-complete`](../packages/dotmac-finance/EXTRACTION.toml) | [tenant · `mod_finance`](../packages/dotmac-finance/src/dotmac_finance/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_backoffice`, `dotmac_erp` |
 | [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-inbox`](../packages/dotmac-inbox/README.md) | optional module | [`audit-complete`](../packages/dotmac-inbox/EXTRACTION.toml) | [tenant · `mod_inbox`](../packages/dotmac-inbox/src/dotmac_inbox/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
@@ -103,6 +104,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`audit-complete`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
 | [`dotmac-web-analytics`](../packages/dotmac-web-analytics/README.md) | optional module | [`audit-complete`](../packages/dotmac-web-analytics/EXTRACTION.toml) | [tenant · `mod_webanalytics`](../packages/dotmac-web-analytics/src/dotmac_web_analytics/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a86` | — | `dotmac_backoffice`, `dotmac_sub` |
 | [`dotmac-work-orders`](../packages/dotmac-work-orders/README.md) | optional module | [`audit-complete`](../packages/dotmac-work-orders/EXTRACTION.toml) | [tenant · `mod_workorders`](../packages/dotmac-work-orders/src/dotmac_work_orders/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_sub` |
+| [`dotmac-workflow-runtime`](../packages/dotmac-workflow-runtime/README.md) | optional module | [`audit-complete`](../packages/dotmac-workflow-runtime/EXTRACTION.toml) | [tenant · `mod_workflow`](../packages/dotmac-workflow-runtime/src/dotmac_workflow_runtime/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a87` | — | `dotmac_backoffice`, `dotmac_sub` |
 
 ## Contracts and ownership
 
@@ -285,6 +287,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-files/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-forms`](../packages/dotmac-forms/README.md)
+
+- **Owner:** Tenant reusable form definitions, immutable published versions, ordered sections/fields/options and validated submission/answer evidence.
+- **Contract:** Author, version and publish forms; validate idempotent submissions against the exact immutable version; retain typed answer/display snapshots and opaque subject/file references. NOT subject lifecycle, workflow execution, stored bytes, rendering or domain consequences.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-forms/EXTRACTION.toml); source mode `product-first` from ERP.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_backoffice`, `dotmac_sub`.
 
 ### [`dotmac-finance`](../packages/dotmac-finance/README.md)
 
@@ -581,3 +591,11 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-work-orders/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-workflow-runtime`](../packages/dotmac-workflow-runtime/README.md)
+
+- **Owner:** Tenant user-authored resumable workflow execution instances, ordered checkpoints, finite claims, repair evidence and runtime state.
+- **Contract:** Start against an immutable opaque definition digest; claim and settle checkpoints in order; retry within a fixed attempt ceiling; resume only after evidence-bound repair; close deterministically. NOT definition UI, domain state machines, timers, provider I/O or direct effects.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-workflow-runtime/EXTRACTION.toml); source mode `product-first` from ERP.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_backoffice`, `dotmac_sub`.
