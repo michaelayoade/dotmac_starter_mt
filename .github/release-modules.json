@@ -2026,6 +2026,45 @@
           "python"
         ]
       }
+    },
+    "dotmac-campaigns": {
+      "$comment": [
+        "Provider-neutral outbound campaign lifecycle, immutable audiences and",
+        "ordered recipient progression (ADR-0032). Product-first from Sub;",
+        "consent, delivery transport and commercial consequence stay elsewhere.",
+        "Kernel a72 allocates mod_campaigns / ca / campaigns; a73 is the floor",
+        "because the consent, idempotency and delivery services need a73's",
+        "adopter-owned Session seam rather than the eager kernel db runtime."
+      ],
+      "package_dir": "packages/dotmac-campaigns",
+      "import_name": "dotmac_campaigns",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a73",
+      "db_schema": "mod_campaigns",
+      "tag_prefix": "dotmac-campaigns-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_campaigns/py.typed",
+          "dotmac_campaigns/contracts.py",
+          "dotmac_campaigns/fakes.py",
+          "dotmac_campaigns/manifest.py",
+          "dotmac_campaigns/migrations/__init__.py",
+          "dotmac_campaigns/migrations/versions/ca_0001_campaigns.py",
+          "dotmac_campaigns/models.py",
+          "dotmac_campaigns/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

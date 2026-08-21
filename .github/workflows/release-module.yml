@@ -93,6 +93,7 @@ on:
           - dotmac-fiber-plant
           - dotmac-network-access
           - dotmac-pon-access
+          - dotmac-campaigns
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
