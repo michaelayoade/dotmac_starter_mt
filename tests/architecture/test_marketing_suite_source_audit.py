@@ -3,8 +3,8 @@
 The source audit deliberately decomposes the suite before any package exists.
 This guard prevents a future implementation from quietly turning the seven
 owners back into a marketing monolith, laundering provider transport into a
-domain module, or claiming a product-first source for the greenfield site
-builder.
+domain module, or claiming a product-first source for the greenfield Sites or
+first-party Web Analytics owners.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ EXPECTED_SOURCES = {
     "dotmac-sites": ("greenfield-after-inventory", "none"),
     "dotmac-publishing": ("product-first", "dotmac_mkt"),
     "dotmac-media-observations": ("product-first", "dotmac_mkt"),
-    "dotmac-web-analytics": ("product-first", "dotmac_mkt"),
+    "dotmac-web-analytics": ("greenfield-after-inventory", "none"),
     "dotmac-forms": ("product-first", "dotmac_erp"),
     "dotmac-campaigns": ("product-first", "dotmac_sub"),
 }
@@ -118,12 +118,14 @@ def test_transport_and_application_boundaries_are_explicit() -> None:
     assert [phrase for phrase in required if phrase not in normalized] == []
 
 
-def test_campaign_and_site_evidence_is_not_overstated() -> None:
+def test_campaign_site_and_web_evidence_is_not_overstated() -> None:
     normalized = _normalized()
     assert "sub is the mandatory campaign source" in normalized
     assert "consent and suppression are inputs owned outside campaigns" in normalized
     assert "no qualifying site-builder implementation was found" in normalized
-    assert "greenfield proof" in normalized
+    assert "greenfield-after-inventory proofs" in normalized
+    assert "no qualifying first-party observation owner" in normalized
+    assert "mkt's ga4 aggregate reader remains external/provider evidence" in normalized
 
 
 def test_merged_campaigns_is_not_misreported_as_released_or_adopted() -> None:

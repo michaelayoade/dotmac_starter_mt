@@ -2026,6 +2026,83 @@
           "python"
         ]
       }
+    },
+    "dotmac-campaigns": {
+      "$comment": [
+        "Provider-neutral outbound campaign lifecycle, immutable audiences and",
+        "ordered recipient progression (ADR-0032). Product-first from Sub;",
+        "consent, delivery transport and commercial consequence stay elsewhere.",
+        "Kernel a72 allocates mod_campaigns / ca / campaigns; a73 is the floor",
+        "because the consent, idempotency and delivery services need a73's",
+        "adopter-owned Session seam rather than the eager kernel db runtime."
+      ],
+      "package_dir": "packages/dotmac-campaigns",
+      "import_name": "dotmac_campaigns",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a73",
+      "db_schema": "mod_campaigns",
+      "tag_prefix": "dotmac-campaigns-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_campaigns/py.typed",
+          "dotmac_campaigns/contracts.py",
+          "dotmac_campaigns/fakes.py",
+          "dotmac_campaigns/manifest.py",
+          "dotmac_campaigns/migrations/__init__.py",
+          "dotmac_campaigns/migrations/versions/ca_0001_campaigns.py",
+          "dotmac_campaigns/models.py",
+          "dotmac_campaigns/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-web-analytics": {
+      "$comment": [
+        "Privacy-minimised first-party website observations and deterministic",
+        "projections. Products own property/origin/event/consent/retention",
+        "policy and every business consequence; Integrator owns remote transport."
+      ],
+      "package_dir": "packages/dotmac-web-analytics",
+      "import_name": "dotmac_web_analytics",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a86",
+      "db_schema": "mod_webanalytics",
+      "tag_prefix": "dotmac-web-analytics-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_web_analytics/py.typed",
+          "dotmac_web_analytics/manifest.py",
+          "dotmac_web_analytics/contracts.py",
+          "dotmac_web_analytics/privacy.py",
+          "dotmac_web_analytics/models.py",
+          "dotmac_web_analytics/service.py",
+          "dotmac_web_analytics/projections.py",
+          "dotmac_web_analytics/retention.py",
+          "dotmac_web_analytics/migrations/__init__.py",
+          "dotmac_web_analytics/migrations/versions/wa_0001_web_analytics.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

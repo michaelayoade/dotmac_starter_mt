@@ -1,0 +1,46 @@
+schema_version = 1
+package = "dotmac-web-analytics"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "greenfield-after-inventory"
+owner = "First-party website observations, property-scoped visitor/session evidence, deterministic analytical projections, retention and drift repair"
+contract = "Register tenant-local analytics properties and streams; accept one versioned first-party event or bounded batch through an origin/rate-limit/privacy-admitted command; validate product event codes against an immutable typed declaration registry; persist append-only privacy-minimised observations with replay/conflict and transport provenance; append classifier evidence; derive reproducible visitor/session, route/source/device/event and funnel projections; expire or privacy-delete raw observations and atomically rebuild projections; detect and repair drift. NOT websites/content, forms, campaigns, provider metrics/credentials/transport, customer identity, attribution, commercial facts, consent policy or dashboards."
+source_repositories = [
+  "dotmac_mkt",
+  "dotmac_sub",
+  "dotmac_crm",
+  "dotmac_erp",
+  "dotmac_backoffice",
+  "dotmac_integrator",
+  "dotmac_academy_app",
+  "dotmac_starter_mt",
+]
+source_paths = [
+  "dotmac_starter_mt:docs/inventories/web-analytics-sources.md",
+  "dotmac_mkt:app/adapters/google_analytics.py",
+  "dotmac_mkt:app/tasks/analytics_sync.py",
+  "dotmac_mkt:app/models/channel_metric.py",
+  "dotmac_crm:app/models/crm/chat_widget.py",
+  "dotmac_crm:static/js/chat-widget.js",
+  "dotmac_crm:app/services/crm/campaign_tracking.py",
+  "dotmac_sub:app/api/chat_widget.py",
+  "dotmac_sub:app/services/team_inbox_widget.py",
+  "dotmac_sub:app/models/sales.py",
+  "dotmac_starter_mt:packages/dotmac-integration/src/dotmac_integration/ingress.py",
+]
+preserved_tests = [
+  "dotmac_starter_mt:tests/unit/test_web_analytics_contracts.py",
+  "dotmac_starter_mt:tests/unit/test_web_analytics_engine.py",
+  "dotmac_starter_mt:tests/architecture/test_web_analytics_module.py",
+  "dotmac_starter_mt:tests/test_web_analytics_isolation.py",
+]
+inventory_evidence = [
+  "docs/inventories/web-analytics-sources.md",
+  "docs/adr/0055-web-analytics-owns-first-party-observations.md",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_backoffice", "dotmac_sub"]
+first_cutover = "Compose the exact released tenant-plane package in Backoffice for a real first-party website through adopter-owned property/origin/event/privacy/retention configuration. A remote site enters through an Integrator connector and the same versioned collection adapter as a local site; neither the hostname nor the connector is a module branch."
+shadow_and_drift = "Before switching any overlapping tracker, compare accepted, replayed, conflicting and filtered event identities; deterministic sessions; route/source/device/event aggregates; funnel results; retention expiry; and projection digests for a full agreed window. Zero unexplained drift is required. The comparison names protocol, registry, classifier, session-rule and projection versions so matching counts under different rules cannot pass."
+local_copy_retirement = "No qualifying first-party writer exists to port. After Backoffice and Sub independently adopt the release and shadow evidence is clean, retire only the overlapping visitor/session/full-URL/fingerprint analytics behavior in CRM's chat widget. Keep CRM's chat identity/lead workflow and campaigns' delivery/open/click lifecycle with their owners. Mkt's provider aggregate reader stays an external-observation concern and never writes this event ledger."
+next_action = "Validate the a85-restacked release candidate in a fresh isolated Observer worktree, merge only after all required GitHub checks are green, then publish and registry-verify the exact protected-main kernel and module artifacts. Backoffice and Sub adoption remain separate and must pin the exact release independently."

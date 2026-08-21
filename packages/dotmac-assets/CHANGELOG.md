@@ -1,6 +1,11 @@
 # Changelog — dotmac-assets
 
-## 0.1.0a1 — UNRELEASED
+## 0.1.0a1 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `bfc112fc` by release run
+`32481303479`. Publication is supply-chain evidence only; it composes no product
+and moves no authority.
 
 - Adds the tenant-only `mod_assets` lineage for durable asset identity,
   assignments, maintenance, disposal, and append-only lifecycle evidence.

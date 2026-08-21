@@ -81,6 +81,8 @@ on:
           - dotmac-fiber-plant
           - dotmac-network-access
           - dotmac-pon-access
+          - dotmac-web-analytics
+          - dotmac-campaigns
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true
