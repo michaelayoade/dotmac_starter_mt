@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.1.0a1 — UNRELEASED
+## 0.1.0a1 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `20d24703` by release run
+`32479035261`. Publication is supply-chain evidence only; it composes no product
+and moves no authority.
 
 - Adds the tenant-only `mod_inbox` lineage with forced RLS from revision 1.
 - Owns conversation threads, ordered messages, lifecycle transitions, channel
