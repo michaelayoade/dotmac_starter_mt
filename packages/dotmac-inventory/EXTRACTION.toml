@@ -30,7 +30,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_inventory_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_sub"]
+candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac-isp"]
 authority_boundary = "ADR-0036: each adopter installs one tenant-only lineage and the module is the sole writer of local stock movements, balances, reservations, lots/serials, and valuation facts. Procurement/Payables decide authorisation and accounting; product work owners link opaquely; Assets owns durable-asset lifecycle; Integrator owns provider transport."
 inventory_evidence = [
   "docs/inventories/inventory-sources.md",

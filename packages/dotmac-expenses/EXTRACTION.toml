@@ -36,7 +36,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_expenses_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_backoffice", "dotmac_crm", "dotmac_sub"]
+candidate_consumers = ["dotmac_erp", "dotmac-erp", "dotmac_crm", "dotmac_sub"]
 composition_boundary = "Each adopter pins the released package, installs the ex lineage in its own database and supplies product adapters for approvals, stored files, numbering and Finance. The module imports only dotmac-kernel, never an assembly, product ORM or sibling module. Independent applications synchronize typed commands and observations; none shares the module's rows."
 inventory_evidence = ["docs/inventories/expenses-sources.md", "docs/adr/0047-expenses-own-spend-evidence-not-payment.md"]
 first_cutover = "dotmac_erp is the qualifying source and first exact-pin adopter. ERP installs the released lineage locally, backfills and shadows categories, policy revisions/rules, requests, claims, lines, receipt metadata, lifecycle and evaluation evidence while the legacy path remains sole writer, then performs one explicitly authorized switch and retires the old writers. Backoffice is a later independent consumer of that proven release."

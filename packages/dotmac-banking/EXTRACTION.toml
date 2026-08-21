@@ -27,7 +27,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_financial_modules_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_backoffice"]
+candidate_consumers = ["dotmac_erp", "dotmac-erp"]
 composition_boundary = "Each adopter pins the package, runs the bk lineage in its own database, supplies already-authorized typed observations, and maps opaque cash_account_ref values through its accounting adapter. Provider transport remains in Integrator. The module imports neither an assembly, sibling business module, ERP model, nor provider plugin."
 inventory_evidence = ["docs/inventories/banking-sources.md"]
 first_cutover = "ERP is the qualifying source and first authority to retire, after the shared GL/accounting owner exists. Backfill configured account masters and immutable observations, run read-only matching/reconciliation shadow, seal one writer switch, then reduce ERP banking decision writers to zero. Backoffice is a later exact-pin consumer; package creation moves no authority."

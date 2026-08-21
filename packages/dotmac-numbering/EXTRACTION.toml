@@ -25,7 +25,7 @@ preserved_tests = [
   "dotmac_sub:tests/test_numbering_defaults.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac_vendor_control_plane"]
+candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac_vendor_control_plane", "dotmac-isp"]
 composition_boundary = "ADR-0024: each adopter installs its own nu lineage and owns its own series configuration, counters and receipts. Applications share the package contract, never a mod_numbering schema, a counter row or a receipt table. ADR-0023: tables (tenant, tenant_id NOT NULL, FORCE RLS) and platform_tables (no tenant column, REVOKEd from the tenant app role) are declared, not inferred; no foreign key crosses the planes and there is no nullable tenant_id, sentinel tenant or polymorphic scope column. series_code is an open registered string, never a closed enum; no product vocabulary (invoice_number, project_number, SequenceType members) enters the module. The module performs no settings lookup and reads no clock: configuration is passed in and reference_date is a required business input."
 inventory_evidence = [
   "docs/inventories/numbering-sources.md",

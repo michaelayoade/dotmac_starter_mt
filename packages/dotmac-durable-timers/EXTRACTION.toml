@@ -36,7 +36,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_platform_outbox_dispatcher_grants.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub", "dotmac_vendor_control_plane", "dotmac_crm"]
+candidate_consumers = ["dotmac_sub", "dotmac_vendor_control_plane", "dotmac_crm", "dotmac-isp"]
 composition_boundary = "ADR-0024: each adopter pins the package, selects its own plane set, runs the dt lineage in its own database and owns its own timer, rejection-evidence and outbox rows. Applications exchange only versioned observations through Integrator; they never share mod_timers tables or read another application's database. ADR-0028: tenant tables carry tenant_id NOT NULL with FORCE RLS and platform tables carry no tenant column and are fully revoked from app_user; the planes share behavior but never a row or foreign key. dotmac_kernel.outbox_relay.v1 is the sole claim/lease/retry/dead-letter owner. Output routing codes are declared by their consuming module and resolved from the installed manifest set before scheduling; product command names and business policy remain in the adopter."
 inventory_evidence = [
   "docs/inventories/durable-timers-sources.md",
