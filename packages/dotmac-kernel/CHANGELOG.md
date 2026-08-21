@@ -8,9 +8,10 @@ here.
 
 ## 0.1.0a87 — UNRELEASED
 
-Splits canonical fingerprinting out of the persistence-backed idempotency owner
-and allocates the independent tenant Fulfillment lineage. This is a new kernel
-release because a86 is already published and immutable.
+Splits canonical fingerprinting out of the persistence-backed idempotency owner,
+allocates the independent tenant Fulfillment lineage, and settles a three-way
+contest for one migration prefix. This is a new kernel release because a86 is
+already published and immutable.
 
 ### Added
 
@@ -20,6 +21,17 @@ release because a86 is already published and immutable.
 - `FULFILLMENT_MIGRATION_OWNER` — `mod_fulfillment`, revision prefix `fu`,
   branch label `fulfillment`. This allocates physical lineage identity only;
   it composes, publishes and adopts no Fulfillment module.
+- `SALES_MIGRATION_OWNER` (`mod_sales`, prefix `sa`),
+  `SUPPORT_ACCESS_MIGRATION_OWNER` (`mod_supportaccess`, prefix `sup`) and
+  `SERVICE_ACCESS_POLICY_MIGRATION_OWNER` (`mod_serviceaccess`, prefix `sap`)
+  — three unmerged candidate trains had each allocated `prefix="sa"`
+  independently and every one of them was green, because no check a branch runs
+  on itself can see a sibling branch. Arbitrated here while all three are
+  unreleased and a rename is still free: `sales` keeps `sa`, and the two access
+  modules take three-letter prefixes rather than a second two-letter pair,
+  because `sa`/`sp`/`sc` for three neighbouring access concepts is exactly the
+  confusion a permanent database identity must not carry. All three are DORMANT
+  allocations — physical lineage identity only, composing and adopting nothing.
 
 ### Changed
 
