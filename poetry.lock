@@ -523,6 +523,24 @@ type = "directory"
 url = "packages/dotmac-accounting"
 
 [[package]]
+name = "dotmac-ai-operations"
+version = "0.1.0a1"
+description = "Provider-neutral tenant AI policy, execution evidence and advisory insights"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a87"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-ai-operations"
+
+[[package]]
 name = "dotmac-analytics"
 version = "0.1.0a1"
 description = "Declared aggregate metric evidence and rebuildable tenant analytics projections"
@@ -684,6 +702,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-commercial-agreements"
+
+[[package]]
+name = "dotmac-compliance-reporting"
+version = "0.1.0a1"
+description = "Tenant regulatory evidence packs and filing lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a87"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-compliance-reporting"
 
 [[package]]
 name = "dotmac-connector-flutterwave"
@@ -916,6 +952,24 @@ type = "directory"
 url = "packages/dotmac-finance"
 
 [[package]]
+name = "dotmac-forms"
+version = "0.1.0a1"
+description = "Tenant form definitions, immutable versions and validated submission evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a87"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-forms"
+
+[[package]]
 name = "dotmac-imports"
 version = "0.1.0a2"
 description = "DotMac bulk-import run ledger, dry-run/apply promotion and column mapping"
@@ -1008,7 +1062,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a86"
+version = "0.1.0a87"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1268,6 +1322,24 @@ type = "directory"
 url = "packages/dotmac-people"
 
 [[package]]
+name = "dotmac-platform-health"
+version = "0.1.0a1"
+description = "Platform runtime-health observations, freshness projections and summaries"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a87"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-platform-health"
+
+[[package]]
 name = "dotmac-pon-access"
 version = "0.1.0a1"
 description = "Tenant provider-neutral OLT, ONT, PON commissioning, desired-state and reconciliation owner"
@@ -1412,6 +1484,24 @@ type = "directory"
 url = "packages/dotmac-release-catalog"
 
 [[package]]
+name = "dotmac-remote-access"
+version = "0.1.0a1"
+description = "Tenant approval-bound finite remote-access grants and evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a87"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-remote-access"
+
+[[package]]
 name = "dotmac-reseller-management"
 version = "0.1.0a1"
 description = "Tenant reseller identity, hierarchy, delegated authority and lifecycle"
@@ -1446,6 +1536,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-sites"
+
+[[package]]
+name = "dotmac-support-access"
+version = "0.1.0a1"
+description = "Purpose-bound temporary platform support access workflow"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a87"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-support-access"
 
 [[package]]
 name = "dotmac-surveys"
@@ -1572,6 +1680,24 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-work-orders"
+
+[[package]]
+name = "dotmac-workflow-runtime"
+version = "0.1.0a1"
+description = "Tenant user-authored resumable workflow execution and repair evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a87"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-workflow-runtime"
 
 [[package]]
 name = "email-validator"
@@ -3735,4 +3861,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d9584c91666a4c03f9801803f7b2db3ed18e7279afdb54df27ee68230a8e27fb"
+content-hash = "edfb77fa4843a4eb2f88119eb9dd115085301017ed9f57ca912aef8c21540aac"
