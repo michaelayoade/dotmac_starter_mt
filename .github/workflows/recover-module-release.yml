@@ -70,6 +70,17 @@ on:
           - dotmac-surveys
           - dotmac-tax
           - dotmac-work-orders
+          - dotmac-inventory
+          - dotmac-assets
+          - dotmac-ipam
+          - dotmac-network-inventory
+          - dotmac-network-observability
+          - dotmac-network-topology
+          - dotmac-network-assurance
+          - dotmac-network-control
+          - dotmac-fiber-plant
+          - dotmac-network-access
+          - dotmac-pon-access
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

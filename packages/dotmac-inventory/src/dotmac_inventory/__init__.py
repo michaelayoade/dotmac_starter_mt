@@ -18,6 +18,7 @@ from dotmac_inventory.contracts import (
     ValuationSnapshotCreate,
     WarehouseCreate,
 )
+from dotmac_inventory.manifest import module
 from dotmac_inventory.migrations import versions_dir
 from dotmac_inventory.service import (
     InsufficientStock,
@@ -45,6 +46,7 @@ __version__ = "0.1.0a1"
 
 __all__ = [
     "__version__",
+    "module",
     "AdjustmentCommand",
     "CostingMethod",
     "InsufficientStock",
