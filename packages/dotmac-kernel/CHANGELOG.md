@@ -6,7 +6,7 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a87 — 2026-08-21
+## 0.1.0a87 — UNRELEASED
 
 Allocates the seven retained ADR-0040 capability lineages as one immutable
 cohort. This is namespace identity only: no module is composed, published,
@@ -16,11 +16,16 @@ adopted or authoritative because of this kernel change.
 
 - Forms (`fm`, `mod_forms`) and Workflow Runtime (`wr`, `mod_workflow`).
 - Platform Health (`ph`, `mod_health`) and Support Access
-  (`sa`, `mod_supportaccess`).
+  (`sup`, `mod_supportaccess`).
 - Remote Access (`ra`, `mod_remoteaccess`), Compliance Reporting
   (`cr`, `mod_compliance`) and AI Operations (`ao`, `mod_aiops`).
 
-## 0.1.0a86 — UNRELEASED
+## 0.1.0a86 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `8b8e3d26` by release run
+`32486232199`. Publication makes the physical namespace allocation
+installable; it composes or adopts no module.
 
 Allocates the tenant first-party web-analytics lineage (ADR-0055). Physical
 namespace identity only; collection policy, origin admission and every
