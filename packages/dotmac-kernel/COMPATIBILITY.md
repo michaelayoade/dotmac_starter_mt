@@ -134,7 +134,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.messaging.worker` | `DeliveryTransport`, `LoggingTransport`, `run_once`, `run_forever` (WS3 relay polling worker; receives session factories, never builds engines; run via `scripts/run_relay.py`) |
 | `dotmac_kernel.messaging.platform_worker` | `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `run_once`, `run_forever` (platform relay worker; dispatcher claims/settles, delivery on a separate `platform_api` session with no tenant context; run via `scripts/run_platform_relay.py`) |
 | `dotmac_kernel.messaging.models` | `OutboxEvent`, `PlatformOutboxEvent`, `OutboxStatus` |
-| `dotmac_kernel.idempotency` | `execute_once`, `execute_once_platform`, `fingerprint_of`, `purge_expired`, `IdempotentOutcome`, `IdempotencyConflict`, `Operation`, `MAX_KEY_LENGTH`, `MAX_SCOPE_LENGTH` (see "At-most-once execution" below) |
+| `dotmac_kernel.fingerprints` | `fingerprint_of` (canonical payload digest, no persistence — import this rather than `idempotency` when you only need identity) |
+| `dotmac_kernel.idempotency` | `execute_once`, `execute_once_platform`, `fingerprint_of` (re-export of `fingerprints`), `purge_expired`, `IdempotentOutcome`, `IdempotencyConflict`, `Operation`, `MAX_KEY_LENGTH`, `MAX_SCOPE_LENGTH` (see "At-most-once execution" below) |
 | `dotmac_kernel.idempotency_models` | `IdempotencyRecord`, `PlatformIdempotencyRecord`, `IdempotencyStatus`, `INBOX_SCOPE` |
 | `dotmac_kernel.middleware.csrf` | `CSRFMiddleware` |
 | `dotmac_kernel.middleware.observability` | `ObservabilityMiddleware` |
@@ -291,7 +292,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a85`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a86`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -348,6 +349,7 @@ retired prefix is never reused.
 | `surveys` | `mod_surveys` | `sv` | `surveys` |
 | `tax` | `mod_tax` | `tx` | `tax` |
 | `work_orders` | `mod_workorders` | `wo` | `work_orders` |
+| `fulfillment` | `mod_fulfillment` | `fu` | `fulfillment` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
@@ -846,7 +848,10 @@ the same reason as `messaging`.
   operation reached through a second surface must land in the same ledger. An
   open string, not an enum (ADR-0008's registry principle).
 - **`fingerprint`** — `fingerprint_of(payload)` gives a stable SHA256 (sorted
-  keys, compact separators, `model_dump` honoured, `str` fallback). A key reused
+  keys, compact separators, `model_dump` honoured, `str` fallback). It is
+  DEFINED in `dotmac_kernel.fingerprints` and re-exported here; a caller that
+  wants only the digest should import it from there and not pull in this
+  module's ORM models. A key reused
   with a DIFFERENT fingerprint raises `IdempotencyConflict` (a `ConflictError` →
   409). `None` on either side means the caller asserts the key alone identifies
   the request, and the call replays.

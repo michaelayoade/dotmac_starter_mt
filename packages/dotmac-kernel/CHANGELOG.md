@@ -6,6 +6,34 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a86 — UNRELEASED
+
+Splits canonical fingerprinting out of the persistence-backed idempotency owner,
+and allocates the independent tenant Fulfillment lineage.
+
+### Added
+
+- `dotmac_kernel.fingerprints` — a persistence-free module holding
+  `fingerprint_of`. The function needs nothing but its payload to answer "is
+  this the same request?", but living in `dotmac_kernel.idempotency` forced any
+  caller wanting a digest to import the ORM models and the database-backed
+  execution ledger with it. A STATELESS module cannot do that without
+  falsifying the claim `tests/architecture/test_packages_import_without_a_
+  database.py` exists to prove. `dotmac-document-rendering` 0.1.0a1 is the first
+  such caller: it fingerprints an immutable fact to give a rendered document
+  provenance, and must import with no database in reach.
+- `FULFILLMENT_MIGRATION_OWNER` — `mod_fulfillment`, revision prefix `fu`,
+  branch label `fulfillment`. `dotmac-fulfillment` 0.1.0a1 declares the matching
+  manifest, tenant tables and root lineage in the same change. Tenant-only: the
+  manifest declares no platform tables, and none was inferred.
+
+### Changed
+
+- `dotmac_kernel.idempotency.fingerprint_of` is now a RE-EXPORT of the
+  `fingerprints` definition. Not a breaking change — the name stays in that
+  module's `__all__` and every existing caller, including
+  `dotmac_kernel.delivery_providers`, is untouched.
+
 ## 0.1.0a85 — UNRELEASED
 
 Allocates the ERP/Backoffice/general tenant-module cohort. This is physical

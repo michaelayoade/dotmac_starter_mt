@@ -81,8 +81,9 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # retaining the allocation release as evidence there. Durable timers was
 # allocated in a72. Immutable a73 belongs to the caller-session transaction
 # release, a74-a77 to the vendor cohort, a78-a81 to the marketing cohort, and
-# referrals and reseller management land in a84, and the consolidated
-# ERP/Backoffice/general allocation follows in a85.
+# referrals and reseller management land in a84, the consolidated
+# ERP/Backoffice/general allocation follows in a85, and a86 allocates
+# fulfillment beside the persistence-free fingerprint seam.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-referrals": "0.1.0a84",
     "dotmac-reseller-management": "0.1.0a84",
@@ -103,6 +104,11 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-surveys": "0.1.0a85",
     "dotmac-tax": "0.1.0a85",
     "dotmac-work-orders": "0.1.0a85",
+    # Allocated on its own rather than in the a85 cohort: fulfillment was
+    # audited separately, and every capability it consumes — the
+    # prerequisite contract (a56) and `idempotency_ledger.v1` — predates
+    # its ledger row, so the allocation is the whole floor.
+    "dotmac-fulfillment": "0.1.0a86",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
     # CAPABILITY_RAISED_FLOORS below rather than here.
@@ -299,6 +305,55 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
 }
 
 
+# The third exception: a module that owns NO lineage at all, so it has no
+# allocation for a floor to be derived from or measured against. Its floor is
+# set entirely by the newest kernel capability it imports.
+#
+# This cannot live in CAPABILITY_RAISED_FLOORS, whose whole assertion is that
+# the floor sits ABOVE the module's allocation — there is no allocation here to
+# be above, and inventing one to satisfy the shape would make the map lie about
+# what was allocated. It cannot be left unlisted either: an unlisted module is
+# an untested floor, and editing this pin down is exactly how a stateless module
+# silently becomes uninstallable.
+#
+# `dotmac-document-rendering` imports `dotmac_kernel.fingerprints`, added in a86.
+# It could not import `fingerprint_of` from `dotmac_kernel.idempotency` instead,
+# because that would pull the ORM models and the database-backed ledger into a
+# module whose entire contract is that it has neither — the claim
+# `test_packages_import_without_a_database.py` proves. So a86 is not a
+# preference: an earlier kernel raises ImportError at manifest import.
+STATELESS_CAPABILITY_FLOORS: dict[str, str] = {
+    "dotmac-document-rendering": "0.1.0a86",
+}
+
+
+@pytest.mark.parametrize(
+    ("distribution", "floor"), sorted(STATELESS_CAPABILITY_FLOORS.items())
+)
+def test_a_stateless_module_floors_on_the_capability_it_imports(
+    distribution: str, floor: str
+) -> None:
+    """And is genuinely stateless — the premise the map depends on.
+
+    Checking the pin alone would leave the row true by assertion. A module that
+    grew a lineage while sitting here would keep an untested floor AND a wrong
+    reason, so the absence of a migration package is verified rather than
+    assumed (ADR-0018: an exemption states an enforceable premise).
+    """
+    package_dir = PACKAGES / distribution
+    manifest = tomllib.loads(
+        (package_dir / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == f">={floor}"
+
+    migrations = sorted(package_dir.glob("src/*/migrations"))
+    assert not migrations, (
+        f"{distribution} now ships a lineage at {migrations}; it owns a "
+        "namespace, so its floor belongs in LEDGER_ALLOCATION_RELEASES or "
+        "CAPABILITY_RAISED_FLOORS and this row's stated reason no longer holds"
+    )
+
+
 def _alpha(release: str) -> int:
     """The alpha serial from `0.1.0aNN`.
 
@@ -432,6 +487,7 @@ def test_a_module_has_exactly_one_floor_rule() -> None:
         "LEDGER_ALLOCATION_RELEASES": set(LEDGER_ALLOCATION_RELEASES),
         "CAPABILITY_RAISED_FLOORS": set(CAPABILITY_RAISED_FLOORS),
         "UNPUBLISHED_ALLOCATION_FLOORS": set(UNPUBLISHED_ALLOCATION_FLOORS),
+        "STATELESS_CAPABILITY_FLOORS": set(STATELESS_CAPABILITY_FLOORS),
     }
     for left, right in itertools.combinations(sorted(maps), 2):
         assert not maps[left] & maps[right], (
@@ -465,6 +521,7 @@ def test_every_releasable_module_has_a_floor_rule() -> None:
         - set(LEDGER_ALLOCATION_RELEASES)
         - set(CAPABILITY_RAISED_FLOORS)
         - set(UNPUBLISHED_ALLOCATION_FLOORS)
+        - set(STATELESS_CAPABILITY_FLOORS)
     )
     assert not unruled, (
         f"releasable module(s) {unruled} have no floor rule — a module absent "
@@ -479,6 +536,7 @@ def test_every_releasable_module_has_a_floor_rule() -> None:
         {*LEDGER_ALLOCATION_RELEASES.values()}
         | {floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()}
         | {floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()}
+        | set(STATELESS_CAPABILITY_FLOORS.values())
     ),
 )
 def test_each_allocation_release_is_documented(release: str) -> None:
@@ -502,6 +560,7 @@ def test_no_vendor_module_claims_an_upstream_train_version() -> None:
         *(allocation for _, allocation in CAPABILITY_RAISED_FLOORS.values()),
         *(floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()),
         *(allocation for _, allocation in UNPUBLISHED_ALLOCATION_FLOORS.values()),
+        *STATELESS_CAPABILITY_FLOORS.values(),
     }
     assert floors, "no floors to check; this gate would pass for the wrong reason"
     assert floors & contested == set()
@@ -524,6 +583,10 @@ def test_the_kernel_is_at_least_every_module_floor() -> None:
         # least every release it has ever cut — but reading all three maps is
         # what stops the assertion going quiet if a map is renamed or emptied.
         *(floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()),
+        # A stateless module's floor is a pure capability pin, so it moves the
+        # moment it adopts a newer kernel name — the same way the capability
+        # floors above do, and for the same reason it is read here.
+        *STATELESS_CAPABILITY_FLOORS.values(),
     }
     for release in floors:
         assert _alpha(declared) >= _alpha(
