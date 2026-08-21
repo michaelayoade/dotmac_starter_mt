@@ -163,6 +163,11 @@ dotmac-records = { path = "packages/dotmac-records", develop = true }
 dotmac-surveys = { path = "packages/dotmac-surveys", develop = true }
 dotmac-tax = { path = "packages/dotmac-tax", develop = true }
 dotmac-work-orders = { path = "packages/dotmac-work-orders", develop = true }
+# ADR-0040 tenant ISP parity cohort. The packages exchange only opaque values
+# through their adopting assembly and never import one another.
+dotmac-remote-access = { path = "packages/dotmac-remote-access", develop = true }
+dotmac-compliance-reporting = { path = "packages/dotmac-compliance-reporting", develop = true }
+dotmac-ai-operations = { path = "packages/dotmac-ai-operations", develop = true }
 # Tenant-only, privacy-minimised first-party website observations and
 # deterministic projections (ADR-0055). The adopting product supplies origin,
 # event, consent and retention policy; the reference assembly installs none.
@@ -292,6 +297,9 @@ module = [
     "dotmac_surveys.*",
     "dotmac_tax.*",
     "dotmac_work_orders.*",
+    "dotmac_remote_access.*",
+    "dotmac_compliance_reporting.*",
+    "dotmac_ai_operations.*",
     "dotmac_web_analytics.*",
     "dotmac_forms.*",
     "dotmac_workflow_runtime.*",
@@ -394,6 +402,9 @@ root_packages = [
     "dotmac_surveys",
     "dotmac_tax",
     "dotmac_work_orders",
+    "dotmac_remote_access",
+    "dotmac_compliance_reporting",
+    "dotmac_ai_operations",
     "dotmac_web_analytics",
     "dotmac_forms",
     "dotmac_workflow_runtime",
@@ -499,6 +510,9 @@ source_modules = [
     "dotmac_surveys",
     "dotmac_tax",
     "dotmac_work_orders",
+    "dotmac_remote_access",
+    "dotmac_compliance_reporting",
+    "dotmac_ai_operations",
     "dotmac_web_analytics",
     "dotmac_forms",
     "dotmac_workflow_runtime",
@@ -603,6 +617,9 @@ modules = [
     "dotmac_surveys",
     "dotmac_tax",
     "dotmac_work_orders",
+    "dotmac_remote_access",
+    "dotmac_compliance_reporting",
+    "dotmac_ai_operations",
     "dotmac_web_analytics",
     "dotmac_forms",
     "dotmac_workflow_runtime",
@@ -688,6 +705,9 @@ forbidden_modules = [
     "dotmac_work_orders",
     "dotmac_forms",
     "dotmac_workflow_runtime",
+    "dotmac_remote_access",
+    "dotmac_compliance_reporting",
+    "dotmac_ai_operations",
     "dotmac_auth_oidc",
 ]
 

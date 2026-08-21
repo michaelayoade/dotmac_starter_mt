@@ -62,6 +62,16 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-ai-operations": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB FIRST-ADOPTER CUTOVER. The product-first policy, operation, attempt and advisory-insight owner is implemented without provider clients, endpoints, credentials or payloads. Publish just in time for Sub's exact pin, typed migration and first Integrator-plugin execution; then seal the corresponding Sub state/client writers.",
+      "state": "never-published"
+    },
+    "dotmac-compliance-reporting": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB FIRST-ADOPTER CUTOVER. Sub's anti-fabrication pack behavior now has an independent lineage and exact filing lifecycle, but its source packs are not backfilled or shadow-compared. Publish with that cutover and retire CRM's copied aggregator only after complete digest/refusal parity.",
+      "state": "never-published"
+    },
     "dotmac-forms": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL FIRST-ADOPTER CUTOVER. ERP is the qualifying seven-table product source and remains authoritative. The package, lineage and parity canaries are built on the ADR-0040 integration branch, but Backoffice has not exact-pinned, backfilled, shadow-compared or sealed ERP's writer. Publish just in time for that authorized cutover; package construction alone is not adoption.",
@@ -80,6 +90,11 @@
     "dotmac-platform-health": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL FIRST-ADOPTER CUTOVER. The greenfield-after-inventory platform owner is implemented with immutable bounded observations and rebuildable freshness projections, but Vendor Control Plane has not exact-pinned or shadow-compared it. Publish just in time for the authenticated-source cutover; never treat a health fact as deployment authority.",
+      "state": "never-published"
+    },
+    "dotmac-remote-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL SUB FIRST-ADOPTER CUTOVER. The greenfield-after-inventory finite grant owner is implemented, but Sub has not exact-pinned it or proven every device toggle correlates to one active grant. Publish only with the fail-closed Network Control gate and retirement of direct bypass paths.",
       "state": "never-published"
     },
     "dotmac-support-access": {
