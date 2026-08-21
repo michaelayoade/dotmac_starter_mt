@@ -182,11 +182,6 @@
       "reason": "INTENDED UNTIL SUB-FIRST ADOPTION. This package owns PON terminals, service ports and optical evidence (ADR-0038), is built and gate-proven in this repository, and floors on the kernel a82 allocation that mints its lineage. It is deliberately NOT release-allowlisted: ADR-0038 records that the network capabilities are built as one bounded suite and that Sub is the first authority, so publishing before that cutover would create an installable parallel owner beside the qualifying source \u2014 the exact failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records Sub as the first contract consumer against a registry-verified kernel a82; never by editing the declared version down.",
       "state": "never-published"
     },
-    "dotmac-positioning": {
-      "declared": "0.1.0a1",
-      "reason": "ALLOWLISTED FOR RELEASE, NOT YET RELEASED, AND NOT ADOPTED. Michael named Dotmac Sub the first adopter on 2026-08-20, so the ADR-0006 section 5 objection this row previously recorded \u2014 a package built for nobody \u2014 no longer holds, and the release lane is open. Kernel a83 is published and registry-verified, so the >=0.1.0a83 floor names an installable artifact. What remains is this module's own release, and it is deliberately not dispatched yet: two source-shape decisions are open first. The module makes position_observations.accuracy_m NOT NULL where Sub's column is nullable, and it replaces Sub's location_sharing_enabled boolean with a purpose/expiry/revocation grant, which is a privacy policy decision about tracking staff rather than a schema detail. Remove this row in the post-release record once the exact protected-main artifact is registry-verified and tagged; never by editing the declared version down.",
-      "state": "never-published"
-    },
     "dotmac-procurement": {
       "declared": "0.1.0a1",
       "reason": "INTENDED PUBLISH-PREP STATE. Procurement is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in organization-to-tenant mapping, supplier/item/budget/approval/receipt adapters, full lifecycle backfill, typed shadow digests and sealed writer retirement.",
