@@ -62,6 +62,11 @@
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
+    "dotmac-fx-policy": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Publishing is forbidden in this programme. Remove only with authorized ERP history backfill, complete selection shadow, sealed one-writer cutover and local lookup/writer retirement.",
+      "state": "never-published"
+    },
     "dotmac-workforce": {
       "declared": "0.1.0a1",
       "reason": "INTENDED FOR THE ADR-0034 BUILD COHORT, NOT RELEASED. The Sub/ERP/CRM-adjudicated workforce scheduling and dispatch owner is audit-complete and uncomposed; People, payroll, Inbox and Work Order lifecycles remain separate. Publishing is forbidden in this programme. Remove only with authorized Sub and ERP backfill/zero-drift cutovers and verified CRM decision-copy retirement.",

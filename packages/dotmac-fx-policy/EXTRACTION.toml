@@ -1,0 +1,30 @@
+schema_version = 1
+package = "dotmac-fx-policy"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Effective FX observations, source provenance, selection policy and determination evidence"
+contract = "Own rate-type vocabulary, source registry, effective observations, effective source-selection policy and immutable rate determinations. NOT Currency/Money/ExchangeRate value types, provider network/credentials, applied invoice snapshots, tax or GL revaluation."
+source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_erp:app/models/finance/core_fx/exchange_rate.py",
+  "dotmac_erp:app/models/finance/core_fx/exchange_rate_type.py",
+  "dotmac_erp:app/services/finance/platform/fx.py",
+  "dotmac_erp:app/tasks/exchange_rates.py",
+]
+preserved_tests = [
+  "dotmac_erp:tests/ifrs/platform/test_fx_service.py",
+  "dotmac_erp:tests/api/test_fx_api.py",
+  "dotmac_erp:tests/finance/test_money_boundary.py",
+  "dotmac_starter_mt:tests/unit/test_fx_policy_service.py",
+  "dotmac_starter_mt:tests/architecture/test_fx_policy_module.py",
+  "dotmac_starter_mt:tests/test_fx_policy_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_erp"]
+composition_boundary = "ERP or Integrator adapters perform provider I/O and install typed observations. Billing and Accounting request a selected immutable rate and retain their own applied/consequence snapshots. No sibling module or foreign application database is imported."
+inventory_evidence = ["docs/inventories/isp-essential-domain-sources.md"]
+first_cutover = "ERP is first after core_fx rate types, sources and history are backfilled; direct/inverse selection is shadowed by pair/type/effective instant; local lookup and create writers then retire behind a sealed switch."
+shadow_and_drift = "Compare rate-type code, source, base/quote pair, full Decimal rate, effective/observed instants, direct-versus-inverse choice, selected observation identity, policy identity and request determination identity."
+local_copy_retirement = "Retire ERP ExchangeRate/ExchangeRateType mutation and FXService selection writers plus task-side direct persistence; keep provider fetch as a thin observation importer and keep GL revaluation, Money boundaries, invoices and tax with their owners."
+next_action = "Compose first in ERP only after a released exact pin, historical quarantine/backfill, complete selection shadow, one-writer cutover and rollback evidence."

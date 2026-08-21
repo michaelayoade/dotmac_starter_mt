@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-fx-policy"
+version = "0.1.0a1"
+description = "Effective FX observations, selection policy, and determination evidence"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_fx_policy", from = "src" }]
+include = [
+  { path = "src/dotmac_fx_policy/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_fx_policy/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a78"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -493,6 +493,11 @@ packages/dotmac-workforce/       optional workforce scheduling/dispatch owner
                  availability and opaque-work dispatch decisions; `wf`
                  lineage in `mod_workforce`, tenant-only forced RLS,
                  uncomposed. People and Work Order lifecycles stay out.
+packages/dotmac-fx-policy/       optional FX observation/selection owner
+  src/dotmac_fx_policy/          rate types, sources, effective policy,
+                 observations and determination evidence; `fx` lineage in
+                 `mod_fx_policy`, tenant-only forced RLS, uncomposed. Money,
+                 invoice snapshots, tax, provider I/O and GL stay out.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -1356,6 +1361,7 @@ made concrete — every model has exactly one declared owner.
 | `ServiceAccessInput` / `DesiredAccessDecision` | `mod_svc_access.service_access_inputs`, `mod_svc_access.desired_access_decisions` | `dotmac-service-access-policy` optional module | Per-service FUP/prepaid/collections/admin observations and one desired ALLOW/RESTRICT/DENY projection. It owns no subscriber/account status and performs no AAA or device mutation; Network Access reconciles enforcement. |
 | `InboxQueue` / `InboxRoutingRule` / `InboxAgentPresence` / `ConversationAssignment` / `InboxWorkflowEvent` | `mod_inbox_ops.*` declared tables | `dotmac-inbox-operations` optional module | Staffed inbox operation state adjudicated from Sub and CRM. Conversation/message content remains with Inbox, providers remain transports, and shifts/field availability remain with Workforce. |
 | `WorkforceTeam` / `WorkforceSkill` / `TeamMembership` / `WorkerSkill` / `WorkforceShift` / `WorkforceAvailability` / `DispatchDecision` | `mod_workforce.*` declared tables | `dotmac-workforce` optional module | Workforce scheduling and dispatch adjudicated from Sub, ERP and CRM. Workers and work are opaque references; People, payroll, attendance consequences, Inbox presence, Work Order lifecycle and route execution remain with their owning systems. |
+| `FXRateType` / `FXRateSource` / `FXSelectionPolicy` / `FXRateObservation` / `FXRateDetermination` | `mod_fx_policy.*` declared tables | `dotmac-fx-policy` optional module | Effective FX observations, source provenance, selection policy and determination evidence extracted ERP-first. Kernel owns Money/ExchangeRate values; Billing, Tax, Accounting and provider adapters retain their distinct decisions and consequences. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
