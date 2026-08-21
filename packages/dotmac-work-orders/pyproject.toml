@@ -16,7 +16,6 @@ python = ">=3.11,<3.14"
 dotmac-kernel = ">=0.1.0a85"
 sqlalchemy = "^2.0"
 pydantic = "^2.9"
-alembic = ">=1.13"
 
 [build-system]
 requires = ["poetry-core"]
