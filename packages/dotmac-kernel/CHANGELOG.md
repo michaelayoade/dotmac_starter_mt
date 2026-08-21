@@ -6,11 +6,20 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a85 — UNRELEASED
+## 0.1.0a85 — 2026-08-21
+
+Published, registry-verified and tagged from exact protected-main revision
+`b031010` by release run `32462383827`.
 
 Allocates the ERP/Backoffice/general tenant-module cohort. This is physical
 namespace identity only; every business decision remains in its independently
 released module and no product composition or authority cutover is implied.
+
+Carries a84's two rows as well. a84 was authored first but never dispatched:
+a85 reached `main` and was published while a84 was still unreleased, so the
+Referrals and Reseller Management lineages became installable for the first
+time HERE. Their modules floor at a85 for that reason, not at their own
+allocation.
 
 ### Added
 
@@ -21,10 +30,19 @@ released module and no product composition or authority cutover is implied.
   (`wo`). Documents does not reuse deployment-control's `dc`; Party does not
   reuse Payables' `pa`.
 
-## 0.1.0a84 — UNRELEASED
+## 0.1.0a84 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a85
 
 Allocates the independent tenant Referral and Reseller Management lineages. No
 kernel behavior changes: two ledger rows and nothing else.
+
+Never dispatched. a85 landed on `main` and published first, carrying these two
+rows with it, so no kernel artifact was ever built at this version — the same
+shape as a53..a55, a74..a76, a78..a80 and a82. `dotmac-referrals` and
+`dotmac-reseller-management` therefore floor at `>=0.1.0a85`, the first
+INSTALLABLE kernel carrying these allocations; a floor naming this version
+would be unresolvable
+(`tests/architecture/test_kernel_version_sync.py`'s
+`UNPUBLISHED_ALLOCATION_FLOORS`).
 
 ### Added
 

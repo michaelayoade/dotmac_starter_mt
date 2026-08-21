@@ -587,7 +587,7 @@
       "package_dir": "packages/dotmac-referrals",
       "import_name": "dotmac_referrals",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a84",
+      "kernel_floor": "0.1.0a85",
       "db_schema": "mod_referrals",
       "tag_prefix": "dotmac-referrals-v",
       "wheel_contents": {
@@ -623,7 +623,7 @@
       "package_dir": "packages/dotmac-reseller-management",
       "import_name": "dotmac_reseller_management",
       "manifest_attr": "module",
-      "kernel_floor": "0.1.0a84",
+      "kernel_floor": "0.1.0a85",
       "db_schema": "mod_reseller",
       "tag_prefix": "dotmac-reseller-management-v",
       "wheel_contents": {
