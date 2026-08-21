@@ -234,6 +234,14 @@ def test_v4_fractional_unix_created_datetime_is_translated_to_utc() -> None:
     assert event.payload["occurred_at"] == "2024-12-25T08:54:02.116000Z"
 
 
+def test_v4_millisecond_event_timestamp_is_the_occurred_at_fallback() -> None:
+    event = _handler().normalize(
+        _request(_charge_completed(created_datetime=None)), config={}
+    )[0][0]
+
+    assert event.payload["occurred_at"] == "2026-08-21T10:00:00.000000Z"
+
+
 def test_v3_payload_shape_is_not_silently_accepted_by_the_v4_connector() -> None:
     payload = {
         "event": "charge.completed",
@@ -317,7 +325,6 @@ def test_verified_non_settlement_event_is_recorded_but_not_delivered() -> None:
         {"amount": "not-money"},
         {"currency": ""},
         {"status": ""},
-        {"created_datetime": None},
     ],
 )
 def test_verified_malformed_settlement_is_evidence_not_a_money_fact(
@@ -326,6 +333,17 @@ def test_verified_malformed_settlement_is_evidence_not_a_money_fact(
     event = _handler().normalize(_request(_charge_completed(**replacement)), config={})[
         0
     ][0]
+
+    assert event.disposition is InboundDisposition.RECORD_ONLY
+    assert event.event_type == "payments.settlement.malformed.v1"
+    assert event.payload["reason_code"] == "settlement_shape_invalid"
+
+
+def test_verified_settlement_without_any_provider_timestamp_is_not_delivered() -> None:
+    payload = _charge_completed(created_datetime=None)
+    payload["timestamp"] = None
+
+    event = _handler().normalize(_request(payload), config={})[0][0]
 
     assert event.disposition is InboundDisposition.RECORD_ONLY
     assert event.event_type == "payments.settlement.malformed.v1"
