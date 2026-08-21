@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "dotmac-document-rendering"
+version = "0.1.0a1"
+description = "Deterministic issued-document projection and rendering from immutable facts"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_document_rendering", from = "src" }]
+include = [
+    { path = "src/dotmac_document_rendering/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# a87 extracted fingerprint_of into `dotmac_kernel.fingerprints`, a
+# persistence-free public module. Importing the historical `idempotency`
+# spelling instead would initialize the database-backed ledger and violate this
+# module's stateless boundary, so a87 is the earliest kernel that can carry it.
+dotmac-kernel = ">=0.1.0a87"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

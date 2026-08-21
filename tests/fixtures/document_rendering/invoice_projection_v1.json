@@ -1,0 +1,1053 @@
+{
+  "digest": "66bd4f4b4e2cbfde10c702f679fe4e4c16ef09618764d22a97effde458c03940",
+  "projection": {
+    "document_profile_code": "tax-invoice",
+    "document_profile_version": 1,
+    "fact_version": 1,
+    "invoice_id": "20000000-0000-0000-0000-000000000002",
+    "media_type": "text/html",
+    "projection_contract_version": 1,
+    "renderer_code": "dotmac-html",
+    "renderer_version": "1",
+    "sections": [
+      {
+        "blocks": [
+          {
+            "label_key": "document",
+            "label_text": "Document",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Invoice",
+              "source_field": "document_kind",
+              "text": "Invoice",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "document_number",
+            "label_text": "Document number",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "identifier",
+              "minor_units": null,
+              "raw": "INV-2026-0001",
+              "source_field": "document_number",
+              "text": "INV-2026-0001",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "state",
+            "label_text": "State",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "issued",
+              "source_field": "document_state",
+              "text": "issued",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "issue_date",
+            "label_text": "Issue date",
+            "value": {
+              "currency": null,
+              "format_code": "%Y-%m-%d %H:%M %Z",
+              "kind": "datetime",
+              "minor_units": null,
+              "raw": "2026-08-19T08:00:00+01:00",
+              "source_field": "issued_at",
+              "text": "2026-08-19 08:00 WAT",
+              "timezone": "Africa/Lagos"
+            }
+          },
+          {
+            "label_key": "due_date",
+            "label_text": "Due date",
+            "value": {
+              "currency": null,
+              "format_code": "%Y-%m-%d",
+              "kind": "date",
+              "minor_units": null,
+              "raw": "2026-08-19",
+              "source_field": "due_date",
+              "text": "2026-08-19",
+              "timezone": null
+            }
+          }
+        ],
+        "key": "header",
+        "position": 1
+      },
+      {
+        "blocks": [
+          {
+            "key": "section_title",
+            "text": "Seller"
+          },
+          {
+            "label_key": "legal_name",
+            "label_text": "Legal name",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Dotmac Technologies Ltd",
+              "source_field": "seller.legal_name",
+              "text": "Dotmac Technologies Ltd",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "address",
+            "label_text": "Address",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Abuja",
+              "source_field": "seller.address_lines[0]",
+              "text": "Abuja",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "address",
+            "label_text": "Address",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Nigeria",
+              "source_field": "seller.address_lines[1]",
+              "text": "Nigeria",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "registered_identifier",
+            "label_text": "Registration",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "RC-1",
+              "source_field": "seller.registered_identifier",
+              "text": "RC-1",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "tax_identifier",
+            "label_text": "Tax identifier",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "TIN-1",
+              "source_field": "seller.tax_identifier",
+              "text": "TIN-1",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "contact",
+            "label_text": "Contact",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "billing@example.test",
+              "source_field": "seller.contact",
+              "text": "billing@example.test",
+              "timezone": null
+            }
+          }
+        ],
+        "key": "seller",
+        "position": 2
+      },
+      {
+        "blocks": [
+          {
+            "key": "section_title",
+            "text": "Customer"
+          },
+          {
+            "label_key": "legal_name",
+            "label_text": "Legal name",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Example Customer <Ltd>",
+              "source_field": "customer.legal_name",
+              "text": "Example Customer <Ltd>",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "address",
+            "label_text": "Address",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Lagos",
+              "source_field": "customer.address_lines[0]",
+              "text": "Lagos",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "address",
+            "label_text": "Address",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Nigeria",
+              "source_field": "customer.address_lines[1]",
+              "text": "Nigeria",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "tax_identifier",
+            "label_text": "Tax identifier",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "TIN-CUSTOMER",
+              "source_field": "customer.tax_identifier",
+              "text": "TIN-CUSTOMER",
+              "timezone": null
+            }
+          }
+        ],
+        "key": "customer",
+        "position": 3
+      },
+      {
+        "blocks": [
+          {
+            "key": "section_title",
+            "text": "Line items"
+          },
+          {
+            "columns": [
+              {
+                "key": "position",
+                "label_text": "#"
+              },
+              {
+                "key": "description",
+                "label_text": "Description"
+              },
+              {
+                "key": "quantity",
+                "label_text": "Quantity"
+              },
+              {
+                "key": "unit",
+                "label_text": "Unit"
+              },
+              {
+                "key": "unit_amount",
+                "label_text": "Unit amount"
+              },
+              {
+                "key": "line_total",
+                "label_text": "Line total"
+              }
+            ],
+            "rows": [
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[0].position",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 1",
+                  "source_field": "lines[0].description",
+                  "text": "Service line 1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[0].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[0].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[0].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[0].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ],
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "2",
+                  "source_field": "lines[1].position",
+                  "text": "2",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 2",
+                  "source_field": "lines[1].description",
+                  "text": "Service line 2",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[1].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[1].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[1].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[1].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ],
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "3",
+                  "source_field": "lines[2].position",
+                  "text": "3",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 3",
+                  "source_field": "lines[2].description",
+                  "text": "Service line 3",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[2].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[2].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[2].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[2].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ],
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "4",
+                  "source_field": "lines[3].position",
+                  "text": "4",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 4",
+                  "source_field": "lines[3].description",
+                  "text": "Service line 4",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[3].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[3].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[3].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[3].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ],
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "5",
+                  "source_field": "lines[4].position",
+                  "text": "5",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 5",
+                  "source_field": "lines[4].description",
+                  "text": "Service line 5",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[4].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[4].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[4].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[4].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ],
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "6",
+                  "source_field": "lines[5].position",
+                  "text": "6",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 6",
+                  "source_field": "lines[5].description",
+                  "text": "Service line 6",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[5].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[5].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[5].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[5].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ],
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "7",
+                  "source_field": "lines[6].position",
+                  "text": "7",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 7",
+                  "source_field": "lines[6].description",
+                  "text": "Service line 7",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[6].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[6].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[6].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[6].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ],
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "8",
+                  "source_field": "lines[7].position",
+                  "text": "8",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 8",
+                  "source_field": "lines[7].description",
+                  "text": "Service line 8",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[7].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[7].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[7].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[7].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ],
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "identifier",
+                  "minor_units": null,
+                  "raw": "9",
+                  "source_field": "lines[8].position",
+                  "text": "9",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Service line 9",
+                  "source_field": "lines[8].description",
+                  "text": "Service line 9",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "quantity",
+                  "minor_units": null,
+                  "raw": "1",
+                  "source_field": "lines[8].quantity",
+                  "text": "1",
+                  "timezone": null
+                },
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "month",
+                  "source_field": "lines[8].unit",
+                  "text": "month",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[8].unit_amount",
+                  "text": "USD 10.00",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 10.00",
+                  "source_field": "lines[8].line_total",
+                  "text": "USD 10.00",
+                  "timezone": null
+                }
+              ]
+            ]
+          }
+        ],
+        "key": "line_items",
+        "position": 4
+      },
+      {
+        "blocks": [
+          {
+            "key": "section_title",
+            "text": "Discounts"
+          },
+          {
+            "columns": [
+              {
+                "key": "discount",
+                "label_text": "Discount"
+              },
+              {
+                "key": "line_total",
+                "label_text": "Line total"
+              }
+            ],
+            "rows": [
+              [
+                {
+                  "currency": null,
+                  "format_code": null,
+                  "kind": "text",
+                  "minor_units": null,
+                  "raw": "Loyalty credit",
+                  "source_field": "discounts[0].description",
+                  "text": "Loyalty credit",
+                  "timezone": null
+                },
+                {
+                  "currency": "USD",
+                  "format_code": null,
+                  "kind": "money",
+                  "minor_units": 2,
+                  "raw": "USD 5.00",
+                  "source_field": "discounts[0].amount",
+                  "text": "USD 5.00",
+                  "timezone": null
+                }
+              ]
+            ]
+          }
+        ],
+        "key": "discounts",
+        "position": 5
+      },
+      {
+        "blocks": [
+          {
+            "key": "section_title",
+            "text": "Totals"
+          },
+          {
+            "label_key": "subtotal",
+            "label_text": "Subtotal",
+            "value": {
+              "currency": "USD",
+              "format_code": null,
+              "kind": "money",
+              "minor_units": 2,
+              "raw": "USD 90.00",
+              "source_field": "subtotal",
+              "text": "USD 90.00",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "tax_total",
+            "label_text": "Tax total",
+            "value": {
+              "currency": "USD",
+              "format_code": null,
+              "kind": "money",
+              "minor_units": 2,
+              "raw": "USD 0.00",
+              "source_field": "tax_total",
+              "text": "USD 0.00",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "total",
+            "label_text": "Total",
+            "value": {
+              "currency": "USD",
+              "format_code": null,
+              "kind": "money",
+              "minor_units": 2,
+              "raw": "USD 85.00",
+              "source_field": "total",
+              "text": "USD 85.00",
+              "timezone": null
+            }
+          }
+        ],
+        "key": "totals",
+        "position": 6
+      },
+      {
+        "blocks": [
+          {
+            "label_key": "payment_terms",
+            "label_text": "Payment terms",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Due on receipt",
+              "source_field": "payment_terms",
+              "text": "Due on receipt",
+              "timezone": null
+            }
+          }
+        ],
+        "key": "payment_terms",
+        "position": 7
+      },
+      {
+        "blocks": [
+          {
+            "key": "section_title",
+            "text": "Payment instructions"
+          },
+          {
+            "label_key": "bank_name",
+            "label_text": "Bank",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Example Bank",
+              "source_field": "payment_instructions.bank_name",
+              "text": "Example Bank",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "account_name",
+            "label_text": "Account name",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "text",
+              "minor_units": null,
+              "raw": "Dotmac Technologies Ltd",
+              "source_field": "payment_instructions.account_name",
+              "text": "Dotmac Technologies Ltd",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "account_number",
+            "label_text": "Account number",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "identifier",
+              "minor_units": null,
+              "raw": "0000000000",
+              "source_field": "payment_instructions.account_number",
+              "text": "0000000000",
+              "timezone": null
+            }
+          },
+          {
+            "label_key": "sort_code",
+            "label_text": "Sort code",
+            "value": {
+              "currency": null,
+              "format_code": null,
+              "kind": "identifier",
+              "minor_units": null,
+              "raw": "000001",
+              "source_field": "payment_instructions.sort_code",
+              "text": "000001",
+              "timezone": null
+            }
+          }
+        ],
+        "key": "payment_instructions",
+        "position": 8
+      }
+    ],
+    "template_code": "invoice-en",
+    "template_decisions": [
+      {
+        "key": "brand_asset",
+        "outcome": "omitted"
+      },
+      {
+        "key": "discount_rows",
+        "outcome": "shown"
+      },
+      {
+        "key": "payment_instructions",
+        "outcome": "shown"
+      },
+      {
+        "key": "tax_rows",
+        "outcome": "omitted"
+      }
+    ],
+    "template_version": "1"
+  }
+}

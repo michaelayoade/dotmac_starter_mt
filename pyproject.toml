@@ -163,6 +163,9 @@ dotmac-work-orders = { path = "packages/dotmac-work-orders", develop = true }
 # deterministic projections (ADR-0055). The adopting product supplies origin,
 # event, consent and retention policy; the reference assembly installs none.
 dotmac-web-analytics = { path = "packages/dotmac-web-analytics", develop = true }
+# Stateless semantic projection and rendering for immutable issued-document
+# facts. It is installed for verification here, but not composed or releasable.
+dotmac-document-rendering = { path = "packages/dotmac-document-rendering", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -283,6 +286,7 @@ module = [
     "dotmac_tax.*",
     "dotmac_work_orders.*",
     "dotmac_web_analytics.*",
+    "dotmac_document_rendering.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -381,6 +385,7 @@ root_packages = [
     "dotmac_tax",
     "dotmac_work_orders",
     "dotmac_web_analytics",
+    "dotmac_document_rendering",
 ]
 
 [[tool.importlinter.contracts]]
@@ -482,6 +487,7 @@ source_modules = [
     "dotmac_tax",
     "dotmac_work_orders",
     "dotmac_web_analytics",
+    "dotmac_document_rendering",
 ]
 forbidden_modules = ["app"]
 
@@ -580,6 +586,7 @@ modules = [
     "dotmac_tax",
     "dotmac_work_orders",
     "dotmac_web_analytics",
+    "dotmac_document_rendering",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -658,6 +665,7 @@ forbidden_modules = [
     "dotmac_surveys",
     "dotmac_tax",
     "dotmac_work_orders",
+    "dotmac_document_rendering",
     "dotmac_auth_oidc",
 ]
 
