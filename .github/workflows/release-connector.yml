@@ -86,6 +86,7 @@ on:
         required: true
         type: choice
         options:
+          - dotmac-connector-flutterwave
           - dotmac-connector-meta-social
           - dotmac-connector-paystack
           - dotmac-connector-whatsapp

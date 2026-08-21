@@ -686,6 +686,23 @@ type = "directory"
 url = "packages/dotmac-commercial-agreements"
 
 [[package]]
+name = "dotmac-connector-flutterwave"
+version = "0.1.0a1"
+description = "Ingress-only Flutterwave settlement connector for Dotmac Integrator"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a10"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-flutterwave"
+
+[[package]]
 name = "dotmac-connector-meta-social"
 version = "0.1.0a1"
 description = "Ingress-only Facebook and Instagram connector for Dotmac Integrator"
@@ -3701,4 +3718,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "199d3e91f4958f5aa8448fbfd238cb347dd2f464cc57f34ff84050781179624b"
+content-hash = "17ff11614548d11594cbcd4e9cb40d4d7c3a342ef01fac434721c4d46e328fa3"
