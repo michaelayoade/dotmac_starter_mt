@@ -77,6 +77,16 @@
       "reason": "OUTSTANDING ADR-0040 COHORT FOUNDATION. Kernel a86 and dotmac-web-analytics a1 are registry-verified and tagged. This branch advances the kernel to a87 solely to allocate the seven immutable namespaces, prefixes and branch labels for Forms, Workflow Runtime, Platform Health, Support Access, Remote Access, Compliance Reporting and AI Operations. Remove this row only after release-kernel.yml installs the exact a87 artifact back from the private index and writes dotmac-kernel-v0.1.0a87; package construction and publication still do not compose or adopt any module.",
       "state": "declared-unpublished"
     },
+    "dotmac-platform-health": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL FIRST-ADOPTER CUTOVER. The greenfield-after-inventory platform owner is implemented with immutable bounded observations and rebuildable freshness projections, but Vendor Control Plane has not exact-pinned or shadow-compared it. Publish just in time for the authenticated-source cutover; never treat a health fact as deployment authority.",
+      "state": "never-published"
+    },
+    "dotmac-support-access": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL FIRST-ADOPTER CUTOVER. The greenfield-after-inventory platform owner is implemented with exact approval binding and credential-free finite descriptors, but Vendor Control Plane has not exact-pinned it or correlated every enforced session to one active grant. Publish only with that cutover and retirement of direct temporary issuance paths.",
+      "state": "never-published"
+    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",

@@ -107,9 +107,10 @@ qualified `dotmac-forms`. Fleet Control adopts the already implemented
 The tenant plane is accepted for Referrals, Reseller Management, AI Operations,
 Remote Access, Compliance Reporting, Workflow Runtime and Forms. Support Access
 and Platform Health are platform-plane capabilities with the Vendor control
-plane as their first candidate assembly. These are target ownership decisions,
-not installation claims. An owner enters the as-built registry below only with
-its manifest, lineage, catalogue entry and live isolation canary.
+plane as their first candidate assembly. The seven newly constructed owners now
+have manifests, independent lineages, catalogue entries and live isolation
+canaries on this integration branch; this is construction, not composition,
+publication or adoption.
 
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
@@ -1568,6 +1569,8 @@ made concrete — every model has exactly one declared owner.
 | `Form` / `FormVersion` / `FormSection` / `FormField` / `FormFieldOption` | `mod_forms.forms`, `form_versions`, `form_sections`, `form_fields`, `form_field_options` | `dotmac-forms` optional module | Product-first port of ERP's seven-table reusable form definition owner. Published versions freeze an exact digest; subject meaning and file bytes remain opaque external references (ADR-0040). |
 | `FormSubmission` / `FormAnswer` | `mod_forms.form_submissions`, `form_answers` | `dotmac-forms` optional module | One idempotent submission against an exact published version plus immutable typed value, display and field-definition snapshots. The module validates capture but decides no subject consequence. |
 | `WorkflowExecution` / `WorkflowCheckpoint` / `WorkflowRepair` | `mod_workflow.workflow_executions`, `workflow_checkpoints`, `workflow_repairs` | `dotmac-workflow-runtime` optional module | Product-first runtime-only port from ERP: ordered finite claims, bounded retry and evidence-bound repair over opaque definition/subject/output references. Assemblies execute every external/domain effect (ADR-0040). |
+| `HealthComponent` / `HealthObservation` / `HealthProjection` | `mod_health.health_components`, `health_observations`, `health_projections` | `dotmac-platform-health` optional module | Platform-only provider-neutral component policy, immutable bounded health evidence and a disposable deterministic latest-state projection. Fresh/stale/missing is derived at read time; no health fact mutates deployment state (ADR-0040). |
+| `SupportAccessRequest` / `SupportAccessGrant` / `SupportAccessEvent` | `mod_supportaccess.support_access_requests`, `support_access_grants`, `support_access_events` | `dotmac-support-access` optional module | Platform-only purpose/case-bound request and exact Approval evidence, credential-free finite descriptor, revocation/expiry state and append-only workflow evidence. Kernel/adopter enforcement remains independent (ADR-0040). |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -1586,6 +1589,8 @@ write:
 | Tenants | `app.features.tenants.service.provision_tenant` (platform-only, control-plane security Task 2 — one transaction creating tenant + owner party/person/credential + `admin` role grant + two audit events; no update/delete service yet) |
 | Platform admins | `scripts/create_platform_admin.py::upsert_admin` (CLI-only, platform/migration DB credentials — the same trust boundary as migrations; deliberately NO HTTP write path, see ADR-0004) |
 | Platform sessions | `dotmac_kernel.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |
+| Platform runtime-health evidence and projections | `dotmac_platform_health.service.record_observation` is the sole immutable fact writer; `register_component` owns bounded freshness policy; `rebuild_projections` is the sole repair writer and `summarize_health` derives explicit fresh/stale/missing state. Observability owns raw telemetry, Ticketing owns incidents and Deployment Control alone owns desired-state mutation. |
+| Temporary support-access requests and finite grants | `dotmac_support_access.service.create_request`, `admit_request`, `revoke_grant` and `expire_grants` own the platform workflow. Approval is accepted only as exact-content evidence; the returned descriptor contains no credential and the adopter/kernel remains the enforcement owner. There is no renewal path. |
 | Tenant domains | none — no write path exists yet (rows would be inserted by a future custom-domain feature) |
 | Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` / `update_person_party` / `update_organization_party` (the `/parties` API + `/admin/parties/{id}/edit` web flow), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
 | `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `dotmac_kernel.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
