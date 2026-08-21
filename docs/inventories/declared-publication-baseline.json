@@ -87,16 +87,6 @@
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
     },
-    "dotmac-connector-flutterwave": {
-      "declared": "0.1.0a1",
-      "reason": "ALLOWLISTED FOR RELEASE, NOT YET RELEASED, AND NOT ADOPTED. ADR-0017 authorizes this separate Flutterwave connector and its product-first dossier pins Sub as the qualifying source. The first package is deliberately Flutterwave API v4 only: exact-byte HMAC-SHA256 ingress, no v3 fallback, no provider egress and no financial consequence. Remove this row only after the protected-main release installs the exact artifact back from the registry, verifies conformance and writes dotmac-connector-flutterwave-v0.1.0a1; publication does not make Sub a consumer or retire its v3 receiver.",
-      "state": "never-published"
-    },
-    "dotmac-deployment-control": {
-      "declared": "0.1.0a2",
-      "reason": "OUTSTANDING RELEASE FOR AN AUTHORIZED VENDOR ADOPTION. a1 is published but cannot satisfy its stable-verdict contract when concurrent first observations race for the canonical receipt. a2 adds savepoint recovery and a deterministic Postgres concurrency rehearsal. Remove this row when release-module.yml registry-verifies and tags dotmac-deployment-control-v0.1.0a2; Vendor must exact-pin a2 rather than a1.",
-      "state": "declared-unpublished"
-    },
     "dotmac-documents": {
       "declared": "0.1.0a1",
       "reason": "INTENDED PUBLISH-PREP STATE. Documents is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in E8 tenant/session/lineage prerequisite plus opaque Files, Approvals and Timers adapters, handbook-version backfill, shadow comparison and writer retirement.",
@@ -200,16 +190,6 @@
     "dotmac-records": {
       "declared": "0.1.0a1",
       "reason": "INTENDED PUBLISH-PREP STATE. Records is audit-complete greenfield code but release-unallowlisted. Publication waits for exact-commit Observer proof, ERP's exhaustive retention/deletion/hold writer inventory, and checked-in opaque Files, Approvals and Timers seams with destructive execution disabled through shadow.",
-      "state": "never-published"
-    },
-    "dotmac-referrals": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer, but the dossier remains audit-complete with no contract consumer or adoption evidence: no product yet pins this lineage and Sub's local writer remains authoritative. The release allowlist makes the module publishable; it does not claim adoption or silently dispatch a release. Remove this row in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills, shadows, seals and retires its local writer. Do NOT publish or edit the declared version down merely to make this ledger disappear.",
-      "state": "never-published"
-    },
-    "dotmac-reseller-management": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL SUB CUTOVER PREPARATION AUTHORIZES RELEASE. ADR-0040 and EXTRACTION.toml record Sub as the first candidate consumer and qualifying source, but no product pins this lineage and Sub's local reseller lifecycle remains authoritative. The release allowlist makes the module publishable; it does not claim adoption. Remove this row only in a separately authorized release change after exact-commit validation and immediately before Sub installs the exact pin, backfills reseller identity, hierarchy, bindings and authority revisions, graph-compares at a sealed watermark and retires its local writers. Commissions and payouts remain outside this cutover.",
       "state": "never-published"
     },
     "dotmac-surveys": {

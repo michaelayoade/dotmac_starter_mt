@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.1.0a1
+## 0.1.0a1 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `401f0006` by release run
+`32473143050`. Publication is supply-chain evidence only; it composes no product
+and moves no authority.
 
 - Add an ingress-only Flutterwave connector for
   `payments.settlement.observation.v1`.
