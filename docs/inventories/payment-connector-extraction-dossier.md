@@ -44,6 +44,23 @@ provider wire rule. Using that rule in the Paystack adapter is not the product
 currency default rejected below: currency remains mandatory on every emitted
 money value, and no connector chooses a missing currency.
 
+## Execution amendment — 2026-08-21
+
+`packages/dotmac-connector-flutterwave/` now supersedes the illustrative
+Flutterwave TOML in § 4. It targets **Flutterwave API v4 only**. The provider's
+current v4 contract authenticates the exact body using HMAC-SHA256 in
+`flutterwave-signature` and emits `type`, `webhook_id`, `reference`,
+`created_datetime` and `status = succeeded` fields. The plugin has no v3
+`verif-hash` or v3 envelope fallback.
+
+Sub remains the product-first source for payment-event normalization and the
+first cutover, but its v3 shared-header authentication is a documented
+**not-ported security delta**, not a second runtime mode. The old receiver stays
+authoritative until a v4 callback is shadowed and cut over. Flutterwave's v4
+webhook does not report `app_fee`, so the connector omits `provider_fee`
+instead of manufacturing zero; the later reconciliation capability must supply
+fee evidence before a product makes a fee-dependent decision.
+
 Every path in the TOML blocks below was confirmed to exist by `ls` / `wc -l`
 during this audit.
 
@@ -52,9 +69,10 @@ during this audit.
 ## 1. Why this is a markdown document, and why there is more than one dossier
 
 Repository convention locates a dossier at its package root.
-**`packages/dotmac-connector-paystack/` and
-`packages/dotmac-connector-flutterwave/` do not exist and this document does not
-create them.** Three gates stand in front of them, and none is met:
+**Historical measurement:** at audit time neither connector package existed.
+The dated execution amendments above supersede that construction status; the
+three original gates below are retained as review history rather than current
+blockers.
 
 1. **ADR-0017's 2026-08-12 amendment** keeps an inbound receiver for
    payment-provider events under the moratorium *"unless a live adopter is
@@ -284,9 +302,11 @@ next_action = "No implementation, no package, no entry point. The immediate next
 
 ---
 
-## 4. Dossier delta — `dotmac-connector-flutterwave`
+## 4. Historical dossier delta — `dotmac-connector-flutterwave`
 
-A separate distribution with a separate dossier. Only the fields that differ:
+A separate distribution with a separate dossier. This pre-v4 illustration is
+superseded by the package-root `EXTRACTION.toml` and the 2026-08-21 amendment;
+it remains here to preserve what the source audit actually found.
 
 ```toml
 package = "dotmac-connector-flutterwave"
