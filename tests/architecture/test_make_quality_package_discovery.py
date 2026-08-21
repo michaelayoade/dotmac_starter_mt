@@ -51,7 +51,8 @@ def test_quality_targets_consume_every_discovered_module_root() -> None:
     expected = {
         str(path.relative_to(PROJECT_ROOT))
         for path in (PROJECT_ROOT / "packages").glob("dotmac-*/src/*")
-        if path.name != "__pycache__" and not path.parts[-3].startswith("dotmac-connector-")
+        if path.name != "__pycache__"
+        and not path.parts[-3].startswith("dotmac-connector-")
     }
     assert _make_sources(PROJECT_ROOT, "MODULE_SOURCES") == expected
 
