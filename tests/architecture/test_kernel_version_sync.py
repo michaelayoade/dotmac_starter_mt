@@ -130,6 +130,9 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # prerequisite contract that predates its a84 allocation. Its ledger row
     # is therefore the effective floor.
     "dotmac-web-analytics": "0.1.0a86",
+    # Fulfillment's tenant lineage is allocated in a87, and every named
+    # prerequisite it consumes predates that allocation.
+    "dotmac-fulfillment": "0.1.0a87",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
