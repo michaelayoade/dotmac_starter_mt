@@ -130,6 +130,32 @@ specifics) points here and must never fork these rules.
     a root revision appears there is simply wrong. `alembic stamp`, a blanket
     `IF EXISTS`, and a product conditional inside a kernel migration are not
     bindings and stay forbidden.
+    **Allocation is SERIALIZED** (2026-08-21): a module's ledger row is merged
+    to `main` as an allocation-only change BEFORE any of its source is
+    written. Uniqueness is a property of the canonical ledger, and no check a
+    branch runs on itself can see a sibling branch — three unmerged trains
+    (`sales`, `support_access`, `service_access_policy`) each allocated
+    `prefix="sa"` and every one of them was green. `make allocation-gate`
+    (its own CI job, needing `fetch-depth: 0`; deliberately NOT in `make
+    check`, which stays offline-runnable) fails a branch that changes
+    `packages/<pkg>/src/**` for a module with no ledger row at the MERGE BASE,
+    and exits 2 rather than passing when it cannot establish an answer.
+    What is gated comes from each package's `EXTRACTION.toml`
+    `classification` read AT THE BRANCH HEAD — `optional-module` is gated;
+    `stateless-protocol-adapter`, `presentation-foundation` and
+    `universal-facility` legitimately own no lineage — never from a directory
+    name or from "does it have a manifest", both of which fail open. A missing,
+    unreadable or unknown classification FAILS. A genuinely stateless manifest
+    (no `short_code`/`migration_prefix`) needs no row. Deleting a module
+    passes: its row is a PERMANENT reservation, never reclaimed, so a retired
+    prefix can never be handed to a new owner and collide with rows still live
+    in a deployed database — a rename is a deletion plus an addition, and the
+    added side is gated normally. The in-tree companion,
+    `test_every_module_packages_full_allocation_matches_the_ledger`, uses the
+    same classification and the same AST parser to check the COMPLETE
+    allocation — schema, prefix AND branch label — resolving a row by `code`
+    or, if the code was renamed, by `migration_branch` against the immutable
+    `branch_label`.
     (`tests/unit/test_namespaces.py`, `tests/unit/test_migration_gate.py`,
     `tests/unit/test_prerequisites.py`,
     `tests/unit/test_live_catalog_contract.py`;

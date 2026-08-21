@@ -1,6 +1,6 @@
 # ADR 0003 — One Starter, Composable Deployment Profiles
 
-**Status:** Accepted (Amended 2026-07-30)
+**Status:** Accepted (Amended 2026-07-30, 2026-08-21)
 **Date:** 2026-07-18
 **Supersedes:** ADR-0002's 2026-07-18 deployment-positioning amendment for new development
 **Extends:** ADR-0001 multi-tenancy and the module/plugin control-plane directive
@@ -27,6 +27,50 @@
 >   errors + fake + contract suite) moves into the kernel alpha** (ruling C6); the control plane
 >   consumes it and never defines a local replacement.
 > See the plan's "Ownership rulings" section for the full text.
+
+> **Amendment 2026-08-21 (the ISP path is a controlled replacement programme, not an in-place
+> adaptation of `dotmac_sub`).** Governance ADR 0012 — *The Dotmac ISP replacement is one
+> controlled programme* — was accepted on 2026-08-20 and merged at the immutable Governance
+> revision `68c7a62e2aafd9c236662a5a69d410ea002b4cdb`
+> ([ADR 0012](https://github.com/michaelayoade/dotmac_governance/blob/68c7a62e2aafd9c236662a5a69d410ea002b4cdb/docs/adr/0012-dotmac-isp-replacement-programme.md),
+> [`programmes/dotmac-isp-replacement.json`](https://github.com/michaelayoade/dotmac_governance/blob/68c7a62e2aafd9c236662a5a69d410ea002b4cdb/programmes/dotmac-isp-replacement.json)).
+> That record cites this ADR as a technical source and requires Starter's technical replacement
+> ADR to cite the accepted revision before changing any conflicting local first-cutover
+> statement. This amendment is that citation.
+> - **What changes.** The sentence below — "the ISP path adapts the existing `dotmac_sub`
+>   rather than starting another ISP rewrite" — no longer states the accepted direction. The
+>   accepted programme (`pgm-dotmac-isp-replacement`) BUILDS an independent thin ISP assembly
+>   (`asm-dotmac-isp`, repository `https://github.com/michaelayoade/dotmac-isp`, independent
+>   database boundary, authority state `candidate`) and cuts legacy Sub
+>   (`asm-dotmac-sub-legacy`, `source-authoritative`) over cohort by cohort. Two tracks —
+>   `track-isp-target-build` and `track-isp-sub-cutover` — may advance concurrently.
+> - **What survives.** The original sentence was defending against a copied application kept as
+>   a long-lived branch and against a second uncontrolled ISP implementation. Both still hold:
+>   the target is a THIN assembly over independently released Starter owners, not a from-scratch
+>   re-invention of Sub's domain logic, and its behaviour is extracted PRODUCT-FIRST from Sub's
+>   proven implementation and tests (ADR-0006's extraction amendment; `AGENTS.md` rule 22).
+>   Each application runs its own pinned copy and lineage of a shared module and owns rows only
+>   in its own database (ADR-0024).
+> - **What in-place Sub work remains allowed.** Only bounded source-track work under a
+>   separately approved transition rule (Governance control `ctl-isp-003`, BLOCKED at the cited
+>   revision): containment, evidence repair, migration or shadow adapters, or an explicitly
+>   justified change that retires one local parallel writer. Permanent new Sub domain logic
+>   stays barred, and in-place module adoption inside Sub is neither target adoption nor a
+>   cohort cutover.
+> - **Concurrency is not concurrent authority.** For each cohort, Sub remains the sole
+>   production decision and write owner until its sealed switch (ADR-0031). Shadow paths record
+>   and compare observations only; they decide no lifecycle state and feed no production
+>   consequence. After the switch the ISP assembly is that cohort's sole authority and the
+>   displaced Sub writers and fallbacks ratchet to zero.
+> - **Who owns what.** Governance owns programme identity, control/cohort identifiers, ordering
+>   and approval state; this repository keeps technical boundaries, reusable implementation and
+>   measured inventories. The cohort list and control states are NOT restated here — read the
+>   programme record at the cited revision, which is the only place they are normative.
+> - **This amendment moves nothing.** It records an accepted direction. It advances no authority
+>   state, names no deployment host, opens no cohort, and verifies no control. `ctl-isp-002`
+>   (named target runtime database and production deployment owner) and `ctl-isp-003` are both
+>   blocked at the cited revision, and every cohort stays blocked behind the full cutover-control
+>   set.
 
 ## Context
 
@@ -140,12 +184,26 @@ existing `dotmac_sub` rather than starting another ISP rewrite. Kernel work cont
 the starter/package source; product work continues in its product repository or assembly
 directory. Products pin released kernel/module versions and receive update PRs.
 
+> Amended 2026-08-21: the second sentence is SUPERSEDED for the ISP path. Under accepted
+> Governance ADR 0012 (revision `68c7a62e2aafd9c236662a5a69d410ea002b4cdb`) the ISP path builds
+> the independent `asm-dotmac-isp` assembly and cuts `dotmac_sub` over cohort by cohort; it does
+> not adapt Sub in place. The rest of the paragraph — durable products, not long-lived branches
+> of a copied application; kernel work in the starter, product work in the product repository;
+> exact version pins and update PRs — is unchanged and applies to the ISP target as written.
+> See the 2026-08-21 amendment at the top of this ADR.
+
 The tracks may progress in parallel only across published contracts. Before the first ISP
 adoption cutover, the kernel must publish its security/session boundary, module manifest,
 product assembly, entitlement, lifecycle command/event, and versioning contracts. While
 those stabilize, `dotmac_sub` may add characterization tests, an ownership/mapping ledger,
 assembly metadata, and adapters without replacing its working identity, billing, or schema.
 Contract-dependent replacement work waits for the corresponding kernel release.
+
+> Amended 2026-08-21: this paragraph's contract-first ordering still holds, but the permitted
+> in-place Sub work is now bounded by Governance control `ctl-isp-003` rather than by this
+> paragraph's list. Until that transition rule is approved and enforced, treat the narrower
+> ADR 0012 set — containment, evidence repair, migration or shadow adapters, or a justified
+> change that retires one local parallel writer — as the operative limit.
 
 For a multi-ISP product, the ISP operator is the platform tenant and the ISP's subscribers
 are product-domain parties/customers inside that tenant. Dedicated-per-ISP deployments are

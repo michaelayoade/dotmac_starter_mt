@@ -6,19 +6,41 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a87 — UNRELEASED
+## 0.1.0a88 — UNRELEASED
 
-Allocates the seven retained ADR-0040 capability lineages as one immutable
-cohort. This is namespace identity only: no module is composed, published,
-adopted or authoritative because of this kernel change.
+Allocates the six remaining ADR-0040 capability lineages and composes them with
+Support Access's already-serialized identity as one seven-module implementation
+cohort. This is namespace identity only: no module is published, adopted or
+authoritative because of this kernel change.
 
 ### Added
 
 - Forms (`fm`, `mod_forms`) and Workflow Runtime (`wr`, `mod_workflow`).
-- Platform Health (`ph`, `mod_health`) and Support Access
-  (`sup`, `mod_supportaccess`).
+- Platform Health (`ph`, `mod_health`). Support Access consumes the permanent
+  (`sup`, `mod_supportaccess`) row allocated during the `sa` arbitration in
+  a87.
 - Remote Access (`ra`, `mod_remoteaccess`), Compliance Reporting
   (`cr`, `mod_compliance`) and AI Operations (`ao`, `mod_aiops`).
+
+## 0.1.0a87 — UNRELEASED
+
+Splits canonical fingerprinting out of the persistence-backed idempotency owner
+and allocates the independent tenant Fulfillment lineage. This is a new kernel
+release because a86 is already published and immutable.
+
+### Added
+
+- `dotmac_kernel.fingerprints` — a persistence-free module holding
+  `fingerprint_of`. Stateless consumers can now use the canonical digest
+  without importing the ORM models and database-backed idempotency ledger.
+- `FULFILLMENT_MIGRATION_OWNER` — `mod_fulfillment`, revision prefix `fu`,
+  branch label `fulfillment`. This allocates physical lineage identity only;
+  it composes, publishes and adopts no Fulfillment module.
+
+### Changed
+
+- `dotmac_kernel.idempotency.fingerprint_of` is now a re-export of the
+  persistence-free definition. Existing imports remain supported.
 
 ## 0.1.0a86 — 2026-08-21
 

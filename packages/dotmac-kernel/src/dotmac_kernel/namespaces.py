@@ -1022,9 +1022,74 @@ WEB_ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("webanalytics"),
 )
 
+# `dotmac-fulfillment` — the tenant-only owner of a fulfillment saga: its runs,
+# steps, participant attempts, outcome receipts and compensation. It is NOT part
+# of the ERP cohort above; it was audited on its own and is allocated here
+# against the current kernel train. `fu` was free and reads directly, and
+# `fulfillment` is plain in a catalog dump for the same reason `files` and
+# `approvals` are. The allocation is physical identity only: the optional
+# module will declare its tenant tables and an assembly will bind its contracts.
+FULFILLMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="fulfillment",
+    prefix="fu",
+    branch_label="fulfillment",
+    db_schema=module_schema("fulfillment"),
+)
+
+# ── The `sa` arbitration (three claimants, one prefix) ──────────────────────
+#
+# Three unmerged candidate trains each allocated `prefix="sa"` independently:
+# `sales` (7 branches, incl. `agent/dotmac-sales-implementation`),
+# `support_access` (the `feat/composable-*` family) and
+# `service_access_policy` (`feat/isp-essential-domain-modules`). Every one of
+# them was green, because no check a branch runs on itself can see a sibling
+# branch's allocations — uniqueness is a property of THIS canonical ledger, so
+# it can only be established by serializing allocation into it.
+#
+# Left alone it fails in the safe direction (whichever train merges first takes
+# `sa`; `NamespaceRegistry` refuses the next two with
+# `DuplicateMigrationPrefixError`) but it fails LATE: two trains would each
+# discover the clash after rebasing onto a later kernel floor, with a reviewed
+# migration lineage to rename. Allocating all three here, while none is
+# released and a rename is still free, converts a merge-order race into a
+# checked-in decision.
+#
+# `sales` keeps `sa`: it is the most entrenched claimant and the one whose
+# mnemonic is unambiguous. The two access modules take three-letter prefixes
+# rather than a second two-letter pair, because `sa`/`sp`/`sc` for three
+# neighbouring access concepts is exactly the confusion a permanent database
+# identity must not carry. Sales and Service Access Policy remain dormant in
+# this assembly; Support Access consumes its serialized row below.
+SALES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="sales",
+    prefix="sa",
+    branch_label="sales",
+    db_schema=module_schema("sales"),
+)
+
+# Vendor-side break-glass: whether a support actor may enter a tenant, for how
+# long, under whose approval. Platform-plane; distinct in every respect from
+# `service_access_policy` below, which is about a SUBSCRIBER's service.
+SUPPORT_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="support_access",
+    prefix="sup",
+    branch_label="support_access",
+    db_schema=module_schema("supportaccess"),
+)
+
+# Subscriber-side: whether a service stays reachable given billing/collections
+# state. Tenant-plane, and a consumer of Billing rather than of support policy.
+SERVICE_ACCESS_POLICY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="service_access_policy",
+    prefix="sap",
+    branch_label="service_access_policy",
+    db_schema=module_schema("serviceaccess"),
+)
+
 # ADR-0040 retained seven narrow capability owners after the fleet-wide source
-# audit. They are allocated as one cohort so every focused implementation
-# branch shares the same immutable physical identity and kernel floor.
+# audit. Support Access received its immutable identity in the serialized `sa`
+# arbitration above; the remaining six are allocated together at the next
+# kernel floor so every implementation branch composes against one ledger.
 FORMS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="forms",
     prefix="fm",
@@ -1044,13 +1109,6 @@ PLATFORM_HEALTH_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     prefix="ph",
     branch_label="platform_health",
     db_schema=module_schema("health"),
-)
-
-SUPPORT_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
-    owner="support_access",
-    prefix="sup",
-    branch_label="support_access",
-    db_schema=module_schema("supportaccess"),
 )
 
 REMOTE_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
@@ -1128,10 +1186,13 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     TAX_MIGRATION_OWNER,
     WORK_ORDERS_MIGRATION_OWNER,
     WEB_ANALYTICS_MIGRATION_OWNER,
+    FULFILLMENT_MIGRATION_OWNER,
+    SALES_MIGRATION_OWNER,
+    SUPPORT_ACCESS_MIGRATION_OWNER,
+    SERVICE_ACCESS_POLICY_MIGRATION_OWNER,
     FORMS_MIGRATION_OWNER,
     WORKFLOW_RUNTIME_MIGRATION_OWNER,
     PLATFORM_HEALTH_MIGRATION_OWNER,
-    SUPPORT_ACCESS_MIGRATION_OWNER,
     REMOTE_ACCESS_MIGRATION_OWNER,
     COMPLIANCE_REPORTING_MIGRATION_OWNER,
     AI_OPERATIONS_MIGRATION_OWNER,
@@ -1472,6 +1533,7 @@ __all__ = [
     "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "FORMS_MIGRATION_OWNER",
+    "FULFILLMENT_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
@@ -1488,7 +1550,9 @@ __all__ = [
     "REFERRALS_MIGRATION_OWNER",
     "RESELLER_MANAGEMENT_MIGRATION_OWNER",
     "WEB_ANALYTICS_MIGRATION_OWNER",
+    "SALES_MIGRATION_OWNER",
     "SUPPORT_ACCESS_MIGRATION_OWNER",
+    "SERVICE_ACCESS_POLICY_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "WORKFLOW_RUNTIME_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",

@@ -90,7 +90,7 @@ def test_source_ruling_precedes_the_package() -> None:
     assert dossier["source_mode"] == "greenfield-after-inventory"
     assert dossier["status"] == "audit-complete"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == ["dotmac_backoffice", "dotmac_sub"]
+    assert dossier["candidate_consumers"] == ["dotmac-erp", "dotmac_sub"]
     assert "No audited implementation" in INVENTORY.read_text()
     assert "greenfield-after-inventory" in ADR.read_text()
 

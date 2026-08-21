@@ -49,7 +49,7 @@ def test_product_first_dossier_pins_the_qualifying_mkt_source() -> None:
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"][0] == "dotmac_backoffice"
+    assert dossier["candidate_consumers"][0] == "dotmac-erp"
     assert dossier["source_revisions"] == [
         "dotmac_mkt:7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d"
     ]

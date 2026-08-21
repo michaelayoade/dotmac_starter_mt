@@ -32,7 +32,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_approval_workflow_source_audit.py",
 ]
 contract_consumers = ["dotmac_vendor_control_plane"]
-candidate_consumers = ["dotmac_erp"]
+candidate_consumers = ["dotmac_erp", "dotmac-isp"]
 adoption_evidence = [
   "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",
   "dotmac_vendor_control_plane:production-deploy#32022599873",

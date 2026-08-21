@@ -9,6 +9,8 @@ rejections live in `test_migration_gate.py`; this file is the declaration side.
 from __future__ import annotations
 
 import dataclasses
+import tomllib
+from pathlib import Path
 
 import pytest
 from dotmac_kernel.features import FeatureManifest, load_manifests
@@ -41,6 +43,12 @@ from dotmac_kernel.namespaces import (
 )
 
 from app.features import FEATURE_MODULES
+from scripts.check_allocation_serialized import (
+    EXEMPT_CLASSIFICATIONS,
+    GATED_CLASSIFICATIONS,
+    GateError,
+    declared_allocation,
+)
 
 
 def _module(
@@ -295,14 +303,161 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "tax",
         "work_orders",
         "web_analytics",
+        "fulfillment",
+        "sales",
+        "support_access",
+        "service_access_policy",
         "forms",
         "workflow_runtime",
         "platform_health",
-        "support_access",
         "remote_access",
         "compliance_reporting",
         "ai_operations",
     }
+
+
+def test_the_shipped_ledger_itself_composes() -> None:
+    """A direct assertion on the shipped constant, not an incidental one.
+
+    `NamespaceRegistry.from_manifests` already defaults `ledger` to
+    `MIGRATION_OWNER_LEDGER`, and many suites call it that way, so the shipped
+    ledger was ALREADY validated as a side effect of unrelated tests. This adds
+    no new coverage of a single tree; it makes the property explicit and
+    attributable, so a duplicate reports as "the shipped ledger collides"
+    rather than as a puzzling failure inside an isolation test that has nothing
+    to do with allocation.
+
+    What no in-tree check can do is see another branch — which is the whole
+    reason the `sa` collision survived. That is the job of serialized
+    allocation, not of this test.
+    """
+    registry = NamespaceRegistry.from_manifests([], ledger=MIGRATION_OWNER_LEDGER)
+
+    assert registry is not None
+    prefixes = [owner.prefix for owner in MIGRATION_OWNER_LEDGER]
+    assert len(prefixes) == len(set(prefixes)), "two owners claim one prefix"
+    labels = [owner.branch_label for owner in MIGRATION_OWNER_LEDGER]
+    assert len(labels) == len(set(labels)), "two owners claim one branch label"
+    schemas = [o.db_schema for o in MIGRATION_OWNER_LEDGER if o.db_schema is not None]
+    assert len(schemas) == len(set(schemas)), "two owners claim one schema"
+
+
+def test_the_three_way_sa_arbitration_holds() -> None:
+    """`sales` keeps `sa`; the two access modules are separated permanently.
+
+    Named rather than folded into the set-equality pin above because the point
+    is not that three rows exist — it is that these three specific owners hold
+    three DIFFERENT prefixes, which is exactly what a rebase could quietly undo
+    by resurrecting one train's original `sa`.
+    """
+    allocated = {o.owner: o.prefix for o in MIGRATION_OWNER_LEDGER}
+
+    assert allocated["sales"] == "sa"
+    assert allocated["support_access"] == "sup"
+    assert allocated["service_access_policy"] == "sap"
+
+
+def test_every_module_packages_full_allocation_matches_the_ledger() -> None:
+    """Current-tree integrity: declaration and ledger agree, in every field.
+
+    This is NOT the serialization gate, and naming it as one was wrong. It sees
+    only the tree it runs in, so two parallel branches can each add a colliding
+    allocation together with its migrations and both pass. Serialization is a
+    merge-base question: `scripts/check_allocation_serialized.py`, proven in
+    `tests/architecture/test_allocation_serialized_gate.py`.
+
+    What this establishes is that nothing in THIS tree drifted: a stateful
+    module's `short_code`, `migration_prefix` and `migration_branch` must match
+    its ledger row's `db_schema`, `prefix` and `branch_label` — the complete
+    allocation, not just the prefix. Comparing only code and prefix would miss
+    a module that quietly re-pointed its schema or branch label, which are
+    equally load-bearing and equally immutable.
+
+    Which packages are gated comes from each dossier's `classification` — the
+    same source of truth the merge-base gate uses, and the same parser — rather
+    than from a directory name or from "does it have a manifest", both of which
+    fail open.
+    """
+    ledger = {owner.owner: owner for owner in MIGRATION_OWNER_LEDGER}
+    by_label = {owner.branch_label: owner for owner in MIGRATION_OWNER_LEDGER}
+    packages = Path(__file__).resolve().parents[2] / "packages"
+
+    problems: list[str] = []
+    stateful = 0
+    for package in sorted(entry for entry in packages.iterdir() if entry.is_dir()):
+        dossier = package / "EXTRACTION.toml"
+        if not dossier.exists():
+            problems.append(f"{package.name}: no EXTRACTION.toml to classify it")
+            continue
+        classification = tomllib.loads(dossier.read_text()).get("classification")
+        if classification in EXEMPT_CLASSIFICATIONS:
+            continue
+        if classification not in GATED_CLASSIFICATIONS:
+            problems.append(
+                f"{package.name}: unknown classification {classification!r}"
+            )
+            continue
+
+        manifests = sorted(package.glob("src/*/manifest.py"))
+        revisions = [
+            path
+            for path in package.glob("src/*/migrations/versions/*.py")
+            if path.name != "__init__.py"
+        ]
+        if len(manifests) > 1:
+            problems.append(f"{package.name}: {len(manifests)} manifests")
+            continue
+        if not manifests:
+            # A dossier-only stub with no source yet is a legitimate state; a
+            # package owning a lineage without declaring an owner is not.
+            if revisions:
+                problems.append(
+                    f"{package.name}: {len(revisions)} migration(s) but no manifest"
+                )
+            continue
+
+        try:
+            declared = declared_allocation(manifests[0].read_text(), str(manifests[0]))
+        except GateError as exc:
+            problems.append(f"{package.name}: {exc}")
+            continue
+
+        if declared["short_code"] is None and declared["migration_prefix"] is None:
+            if revisions:
+                problems.append(
+                    f"{package.name}: stateless manifest owning "
+                    f"{len(revisions)} migration(s)"
+                )
+            continue
+
+        stateful += 1
+        # Resolve by `code`, then `migration_branch` against `branch_label`.
+        # The branch label is the immutable lineage identity, so a module whose
+        # code was renamed after allocation still resolves to the row it owns
+        # rather than looking unallocated and inviting a duplicate row.
+        owner = ledger.get(str(declared["code"])) or by_label.get(
+            str(declared["migration_branch"])
+        )
+        if owner is None:
+            problems.append(
+                f"{package.name}: neither code {declared['code']!r} nor "
+                f"migration_branch {declared['migration_branch']!r} is allocated"
+            )
+            continue
+        expected = (
+            module_schema(str(declared["short_code"])),
+            declared["migration_prefix"],
+            declared["migration_branch"],
+        )
+        actual = (owner.db_schema, owner.prefix, owner.branch_label)
+        if expected != actual:
+            problems.append(
+                f"{declared['code']!r}: declares (schema, prefix, branch) "
+                f"{expected!r} but the ledger granted {actual!r}"
+            )
+
+    assert stateful, "found no stateful module packages — the scan is broken"
+    assert not problems, "; ".join(problems)
 
 
 # ── The two planes (ADR-0023) ───────────────────────────────────────────────

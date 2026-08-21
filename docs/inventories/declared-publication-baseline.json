@@ -83,8 +83,8 @@
       "state": "never-published"
     },
     "dotmac-kernel": {
-      "declared": "0.1.0a87",
-      "reason": "OUTSTANDING ADR-0040 COHORT FOUNDATION. Kernel a86 and dotmac-web-analytics a1 are registry-verified and tagged. This branch advances the kernel to a87 solely to allocate the seven immutable namespaces, prefixes and branch labels for Forms, Workflow Runtime, Platform Health, Support Access, Remote Access, Compliance Reporting and AI Operations. Remove this row only after release-kernel.yml installs the exact a87 artifact back from the private index and writes dotmac-kernel-v0.1.0a87; package construction and publication still do not compose or adopt any module.",
+      "declared": "0.1.0a88",
+      "reason": "OUTSTANDING FOUNDATION RELEASE, SEPARATE FROM MODULE ADOPTION. Kernel a86 is published and immutable; a87 on main adds the persistence-free fingerprint seam, Fulfillment allocation and the serialized Sales/Support Access/Service Access Policy identities. This integration advances to a88 for the six remaining ADR-0040 capability identities and gives all seven implemented modules one installable floor. Remove this row only after release-kernel.yml installs the exact a88 artifact back from the private index and writes dotmac-kernel-v0.1.0a88. Neither source landing nor kernel publication publishes, composes or adopts a module.",
       "state": "declared-unpublished"
     },
     "dotmac-platform-health": {

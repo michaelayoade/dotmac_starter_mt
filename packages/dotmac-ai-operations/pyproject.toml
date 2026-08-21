@@ -9,7 +9,7 @@ include = [{ path = "src/dotmac_ai_operations/py.typed", format = ["sdist", "whe
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a87"
+dotmac-kernel = ">=0.1.0a88"
 sqlalchemy = "^2.0"
 
 [build-system]

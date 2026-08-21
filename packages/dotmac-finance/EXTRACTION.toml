@@ -45,7 +45,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_finance_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_backoffice"]
+candidate_consumers = ["dotmac_erp", "dotmac-erp"]
 inventory_evidence = [
   "docs/inventories/finance-asset-accounting-sources.md",
   "docs/adr/0048-finance-owns-asset-books-and-accounting-consequences.md",

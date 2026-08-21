@@ -34,7 +34,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_projects_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub", "dotmac_erp"]
+candidate_consumers = ["dotmac_sub", "dotmac_erp", "dotmac-isp"]
 composition_boundary = "ADR-0024 and ADR-0051: every adopter installs its own pj lineage and owns only its local project rows. Applications share a released contract, never a mod_projects schema or database. Products own project subject links and consequences through typed ports; dotmac-projects contains no subscriber, customer, lead, quote, sales-order, buildout, work-order, ticket, cost-centre, business-unit, region, project-type, provider, or connector column. Actor and assignee identifiers are opaque UUIDs with no product identity foreign key. A product-owned link may reference a module project only through its local lineage and service validation; the module imports neither the assembly nor another module."
 inventory_evidence = [
   "docs/inventories/projects-sources.md",

@@ -85,12 +85,12 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather than here — and the
 # consolidated ERP/Backoffice/general allocation follows in a85.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
-    "dotmac-forms": "0.1.0a87",
-    "dotmac-platform-health": "0.1.0a87",
-    "dotmac-support-access": "0.1.0a87",
-    "dotmac-ai-operations": "0.1.0a87",
-    "dotmac-compliance-reporting": "0.1.0a87",
-    "dotmac-remote-access": "0.1.0a87",
+    "dotmac-forms": "0.1.0a88",
+    "dotmac-platform-health": "0.1.0a88",
+    "dotmac-support-access": "0.1.0a88",
+    "dotmac-ai-operations": "0.1.0a88",
+    "dotmac-compliance-reporting": "0.1.0a88",
+    "dotmac-remote-access": "0.1.0a88",
     "dotmac-accounting": "0.1.0a85",
     "dotmac-analytics": "0.1.0a85",
     "dotmac-banking": "0.1.0a85",
@@ -108,7 +108,7 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-surveys": "0.1.0a85",
     "dotmac-tax": "0.1.0a85",
     "dotmac-work-orders": "0.1.0a85",
-    "dotmac-workflow-runtime": "0.1.0a87",
+    "dotmac-workflow-runtime": "0.1.0a88",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
     # CAPABILITY_RAISED_FLOORS below rather than here.
