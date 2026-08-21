@@ -64,12 +64,12 @@
   "unpublished": {
     "dotmac-accounting": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Accounting is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in exact-pin composition, backfill, shadow comparison and sealed legacy-writer retirement slice; package creation alone moves no ledger authority.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: ERP's checked-in exact-pin composition, backfill, shadow comparison and sealed legacy-writer retirement slice. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-analytics": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Analytics is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in declaration, typed aggregate adapter, projection-shadow, digest-rebuild and reader-retirement slice; Backoffice can only follow as an independent consumer.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: ERP's checked-in declaration, typed aggregate adapter, projection-shadow, digest-rebuild and reader-retirement slice, with Backoffice following only as an independent consumer. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-assets": {
@@ -79,7 +79,7 @@
     },
     "dotmac-banking": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Banking is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof, an installable Accounting owner, and ERP's checked-in account, observation, matching and reconciliation backfill-shadow-cutover seam; Backoffice is explicitly later.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: an installable Accounting owner and ERP's checked-in account, observation, matching and reconciliation backfill-shadow-cutover seam, with Backoffice explicitly later. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-campaigns": {
@@ -89,12 +89,12 @@
     },
     "dotmac-documents": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Documents is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in E8 tenant/session/lineage prerequisite plus opaque Files, Approvals and Timers adapters, handbook-version backfill, shadow comparison and writer retirement.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: ERP's checked-in E8 tenant/session/lineage prerequisite plus opaque Files, Approvals and Timers adapters, handbook-version backfill, shadow comparison and writer retirement. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-expenses": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Expenses is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in exact-pin adapters, backfill, shadow and sealed writer-retirement slice. Backoffice stays uncomposed until ERP proves cutover one.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: ERP's checked-in exact-pin adapters, backfill, shadow and sealed writer-retirement slice, with Backoffice uncomposed until ERP proves cutover one. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-fiber-plant": {
@@ -104,7 +104,7 @@
     },
     "dotmac-finance": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Finance is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in fixed-asset backfill, corrected parity fixtures, opaque physical-asset and Accounting consequence adapters, shadow reconciliation and authority-switch rehearsal.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: ERP's checked-in fixed-asset backfill, corrected parity fixtures, opaque physical-asset and Accounting consequence adapters, shadow reconciliation and authority-switch rehearsal. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-imports": {
@@ -114,7 +114,7 @@
     },
     "dotmac-inbox": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Inbox is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin lineage, typed Integrator receive adapter, conversation backfill, shadow comparison, product-link projection and sole-writer cutover.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: Sub's checked-in exact-pin lineage, typed Integrator receive adapter, conversation backfill, shadow comparison, product-link projection and sole-writer cutover. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-inventory": {
@@ -159,17 +159,17 @@
     },
     "dotmac-party": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Party is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin composition, party_person_catalog binding, declaration registries, backfill, reader migration, shadow comparison and transferred-writer retirement.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: Sub's checked-in exact-pin composition, party_person_catalog binding, declaration registries, backfill, reader migration, shadow comparison and transferred-writer retirement. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-payables": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Payables is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof, ERP's completed Accounting adoption, and a checked-in exact-pin AP backfill, shadow, settlement-observation and accounting-receipt reconciliation seam with legacy-writer retirement.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: ERP's completed Accounting adoption and a checked-in exact-pin AP backfill, shadow, settlement-observation and accounting-receipt reconciliation seam with legacy-writer retirement. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-payroll": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Payroll is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof, stable People and Accounting reference seams, and ERP's checked-in exact-pin calculation/liability backfill, source parity, shadow comparison and writer-retirement slice.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: stable People and Accounting reference seams and ERP's checked-in exact-pin calculation/liability backfill, source parity, shadow comparison and writer-retirement slice. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-pon-access": {
@@ -179,27 +179,27 @@
     },
     "dotmac-procurement": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Procurement is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in organization-to-tenant mapping, supplier/item/budget/approval/receipt adapters, full lifecycle backfill, typed shadow digests and sealed writer retirement.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: ERP's checked-in organization-to-tenant mapping, supplier/item/budget/approval/receipt adapters, full lifecycle backfill, typed shadow digests and sealed writer retirement. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-projects": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Projects is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin lineage, neutral project/task/dependency backfill, product-owned subject and consequence adapters, shadow comparison and authoritative writer cutover.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: Sub's checked-in exact-pin lineage, neutral project/task/dependency backfill, product-owned subject and consequence adapters, shadow comparison and authoritative writer cutover. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-records": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Records is audit-complete greenfield code but release-unallowlisted. Publication waits for exact-commit Observer proof, ERP's exhaustive retention/deletion/hold writer inventory, and checked-in opaque Files, Approvals and Timers seams with destructive execution disabled through shadow.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: ERP's exhaustive retention/deletion/hold writer inventory and checked-in opaque Files, Approvals and Timers seams with destructive execution disabled through shadow. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-surveys": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Surveys is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin lineage, definition/invitation/response backfill, product-owned ticket and work-order eligibility adapters, aggregate shadow and old-writer retirement.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: the adopting product's checked-in exact-pin lineage, invitation/response backfill, shadow comparison and subject-consequence retirement (ADR-0035). Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-tax": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Tax is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof, an installable Accounting owner, and ERP's checked-in governed policy-data extraction, determination/report/return backfill, source-parity shadow and sealed writer retirement.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: the adopting product's checked-in policy-version backfill, computed-tax shadow comparison and retirement of its local tax writers. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     },
     "dotmac-template-studio": {
@@ -209,7 +209,7 @@
     },
     "dotmac-work-orders": {
       "declared": "0.1.0a1",
-      "reason": "INTENDED PUBLISH-PREP STATE. Work Orders is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin internal-crew lineage, product-subject and assignee adapters, full execution backfill, shadow comparison and sole-writer cutover.",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Audit-complete, gate-proven in this repository, and floored on the PUBLISHED kernel a85 that mints its lineage. Release-allowlisted in this change under Michael's explicit release authorization of 2026-08-21, which separates publishing an artifact from adopting it: an artifact sitting on the private index composes nothing, runs no migration and moves no authority, so it cannot create the parallel owner a COMPOSED module would. Remove this row only after release-module.yml installs the exact artifact back from the index, registers its manifest and writes the tag. Adoption remains separately owed and is entirely unchanged by publication: Sub's checked-in exact-pin lineage, work-order backfill, dispatch/assignment shadow comparison and retirement of its local work-order writers. Publication is not evidence of any of that; status stays audit-complete and contract_consumers stays empty until a cutover proves otherwise.",
       "state": "never-published"
     }
   }

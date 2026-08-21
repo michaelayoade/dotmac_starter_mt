@@ -144,10 +144,23 @@ def test_the_root_revision_declares_and_verifies_its_prerequisites() -> None:
 
 
 def test_the_reference_assembly_does_not_claim_candidate_adoption() -> None:
+    """Adoption is composition plus a named consumer, not an allowlist row.
+
+    This asserted absence from `alembic.ini` AND from
+    `.github/release-modules.json`, which made a publication permission read as
+    an adoption claim. Michael's 2026-08-21 release authorization separates
+    them: an artifact on the private index composes nothing, runs no migration
+    and moves no authority.
+
+    So the lineage assertion stays and the allowlist clause is replaced by the
+    dossier's `contract_consumers`, which is what an adoption claim actually
+    looks like. `test_distribution_runtime_and_dossier_versions_agree` below
+    asserts the same emptiness independently.
+    """
     alembic = (REPO_ROOT / "alembic.ini").read_text(encoding="utf-8")
-    allowlist = (REPO_ROOT / ".github/release-modules.json").read_text(encoding="utf-8")
+    dossier = tomllib.loads((PACKAGE_ROOT / "EXTRACTION.toml").read_text())
     assert "dotmac-surveys" not in alembic
-    assert "dotmac-surveys" not in allowlist
+    assert dossier["contract_consumers"] == []
 
 
 def test_distribution_runtime_and_dossier_versions_agree() -> None:

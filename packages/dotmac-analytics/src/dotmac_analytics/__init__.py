@@ -24,6 +24,7 @@ from dotmac_analytics.contracts import (
     SourceProvenance,
     UnknownMetricDeclaration,
 )
+from dotmac_analytics.manifest import module
 from dotmac_analytics.migrations import versions_dir
 from dotmac_analytics.service import (
     compare_periods,
@@ -60,6 +61,7 @@ __all__ = [
     "SourceProvenance",
     "UnknownMetricDeclaration",
     "__version__",
+    "module",
     "compare_periods",
     "get_history",
     "get_latest",

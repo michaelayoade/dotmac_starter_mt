@@ -1547,7 +1547,6 @@ files = []
 develop = true
 
 [package.dependencies]
-alembic = ">=1.13"
 dotmac-kernel = ">=0.1.0a85"
 pydantic = "^2.9"
 sqlalchemy = "^2.0"
