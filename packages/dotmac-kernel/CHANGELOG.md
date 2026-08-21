@@ -6,7 +6,12 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a86 — UNRELEASED
+## 0.1.0a86 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `8b8e3d26` by release run
+`32486232199`. Publication makes the physical namespace allocation
+installable; it composes or adopts no module.
 
 Allocates the tenant first-party web-analytics lineage (ADR-0055). Physical
 namespace identity only; collection policy, origin admission and every
