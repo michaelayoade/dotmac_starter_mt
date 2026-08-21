@@ -53,7 +53,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_analytics_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_backoffice", "dotmac_crm", "dotmac_academy_app"]
+candidate_consumers = ["dotmac_erp", "dotmac-erp", "dotmac_crm", "dotmac_academy_app"]
 composition_boundary = "ADR-0024: each application pins the package, runs its own ay lineage and owns its local mod_analytics rows. Domain owners calculate metrics and publish typed aggregate facts through local adapters or versioned APIs/webhooks; Integrator may transport remote facts but owns no metric meaning or product projection. The module imports no assembly, sibling module, product or provider. TenantScope is structural: every table has tenant_id NOT NULL, tenant-composite identity and FORCE RLS. No platform adopter exists, so the manifest declares no platform plane."
 inventory_evidence = [
   "docs/inventories/analytics-sources.md",

@@ -47,7 +47,7 @@ def test_greenfield_dossier_pins_the_complete_six_repository_census() -> None:
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "greenfield-after-inventory"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"][0] == "dotmac_backoffice"
+    assert dossier["candidate_consumers"][0] == "dotmac-erp"
     assert dossier["source_revisions"] == [
         "dotmac_starter_mt:c6ef6cd7b13105bd95c3faf354ffee9032077625",
         "dotmac_mkt:7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d",

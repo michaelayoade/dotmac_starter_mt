@@ -42,7 +42,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_campaigns_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub", "dotmac_backoffice", "dotmac_crm"]
+candidate_consumers = ["dotmac_sub", "dotmac-erp", "dotmac_crm"]
 inventory_evidence = [
   "docs/inventories/campaigns-sources.md",
   "docs/adr/0032-campaigns-own-outbound-progression.md",

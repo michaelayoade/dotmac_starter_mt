@@ -54,7 +54,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_procurement_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_backoffice", "dotmac_sub"]
+candidate_consumers = ["dotmac_erp", "dotmac-erp", "dotmac_sub"]
 inventory_evidence = [
   "docs/inventories/procurement-sources.md",
   "docs/adr/0050-procurement-owns-sourcing-and-purchasing-decisions.md",

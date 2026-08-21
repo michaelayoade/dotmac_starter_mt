@@ -194,7 +194,7 @@ def test_first_slice_is_pre_registered_against_the_selected_source() -> None:
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"][0] == "dotmac_backoffice"
+    assert dossier["candidate_consumers"][0] == "dotmac-erp"
     assert any(
         source.startswith("dotmac_mkt:app/models/campaign.py")
         for source in dossier["source_paths"]
@@ -225,7 +225,7 @@ def test_publishing_slice_is_pre_registered_against_mkt_delivery_behavior() -> N
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"][0] == "dotmac_backoffice"
+    assert dossier["candidate_consumers"][0] == "dotmac-erp"
     assert dossier["source_revisions"] == [
         "dotmac_mkt:7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d"
     ]

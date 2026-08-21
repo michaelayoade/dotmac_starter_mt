@@ -17,6 +17,48 @@ Read them with two cautions:
    qualifying product implementation and tests to be the starting point rather
    than rebuilding the behaviour beside them.
 
+## Adopter naming — corrected 2026-08-21
+
+Two adopter names in these inventories and in `packages/*/EXTRACTION.toml`
+moved, and the dossiers were reconciled to them:
+
+- **The back-office destination is the commercial Dotmac ERP product**, not an
+  internally framed `dotmac_backoffice` application. Michael corrected this on
+  2026-08-19. Forward-looking dossier fields (`candidate_consumers`,
+  `first_cutover`, `next_action`) now name `dotmac-erp`.
+
+  Four names, and only four — do not introduce a fifth:
+
+  | Role | Name |
+  |---|---|
+  | Product / repository slug | `dotmac-erp` |
+  | Authority / assembly id | `asm-dotmac-erp` |
+  | Historical source repository | `dotmac_erp` |
+  | Human name | Dotmac ERP |
+
+  Dossier **consumer** fields take the product slug `dotmac-erp`. **Authority**
+  fields take the assembly id `asm-dotmac-erp` — that is why ERP's writer
+  ledger records `asm-dotmac-erp/dotmac-people` rather than the slug. The
+  legacy `dotmac_erp` repository is the extraction SOURCE and is archived or
+  renamed at final retirement.
+- **`dotmac-isp` is a real adopter.** Every module the accepted ISP replacement
+  programme (governance ADR 0012) assigns to a cohort now names it in
+  `candidate_consumers`. It is a CANDIDATE only: `contract_consumers` drives
+  the evidence ratchet in `test_product_first_extraction.py` and still requires
+  a proven, exact-pinned composition, which the ISP assembly — today
+  `modules=()` — does not yet have for any of them.
+
+`source_repositories` and `source_revisions` were deliberately NOT rewritten.
+They record which repository a sweep actually ran against, at which commit;
+repointing them would falsify the evidence rather than correct a plan. Where
+narrative text still says "Backoffice" about a PRIOR plan or sequence, that is
+also left standing as history — read it against this correction.
+
+Three platform-plane modules — Support Access, Platform Health and Deployment
+Control — deliberately do NOT name `dotmac-isp`: the ISP assembly declares
+`platform_surface_enabled=False` and cannot compose them. Their target is open
+decision `dec-isp-005` in the programme matrix.
+
 Authority hierarchy is unchanged: `docs/ARCHITECTURE.md` is as-built truth for
 this repo, `docs/adr/` holds decisions, and these inventories are characterization
 across repos.

@@ -157,4 +157,4 @@ def test_distribution_runtime_and_dossier_versions_agree() -> None:
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_erp"]
+    assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_erp", "dotmac-isp"]

@@ -381,7 +381,7 @@ def test_dossier_keeps_adoption_paused_and_attribution_outside() -> None:
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == ["dotmac_backoffice", "dotmac_sub"]
+    assert dossier["candidate_consumers"] == ["dotmac-erp", "dotmac_sub"]
     assert "PAUSED" in dossier["first_cutover"]
     assert "official attribution" in dossier["contract"]
 
