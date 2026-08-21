@@ -1,5 +1,11 @@
 # Document rendering — extraction sources
 
+> **Audit completion addendum — 2026-08-19.** The mandatory ERP read is now
+> complete at `0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf`, alongside Sub at
+> `91c1ec477b3af37931424bced856a16bbc2c6d3f`. ADR-0030 authorized the named
+> stateless package after this file was drafted; the checked-in implementation
+> and canonical dossier are under `packages/dotmac-document-rendering/`.
+
 Dated 2026-08-14. As-built characterisation of what already exists in the
 fleet, written before any rendering code, per hard rule 24 (product-first
 extraction). **Facts, not mandates**, and explicitly not a licence to extract
@@ -756,21 +762,28 @@ sent/final/superseded lifecycle"*, and `GeneratedDocument` carrying
 and `superseded_by`. That audit calls it *"the only concrete implementation of
 the SOT criterion 'every projection has provenance' in either product"*.
 
-**This inventory did not read ERP.** It is scoped to Sub, which the task named
-as the source repository, and asserting ERP's shape second-hand would be
-exactly the "same shape built twice, on the strength of a name collision"
-error ADR-0020 A4 records. **Reading `dotmac_erp`'s
-`DocumentGeneratorService`, `GeneratedDocument` and its 10 integration tests is
-a prerequisite for the dossier's `source_paths` to be complete** — recorded as
-the dossier's first `next_action`, not glossed over here.
+**ERP was read on 2026-08-19.** The audit covered
+`app/services/automation/document_generator.py`, both automation models, and
+`tests/integration/services/test_document_generator.py` at exact source
+`0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf`; the generator inputs were not
+dirty. It confirms a production-shaped but non-reusable aggregate owner:
 
-Two things are worth flagging from the Template Studio audit's own findings
-regardless: ERP's `automation.document_template` and
-`automation.generated_document` have **no organization filter** in their status
-mutators, and `DocumentTemplate` has no `version` column, so
-`GeneratedDocument.template_version` *"names a revision that cannot be
-reproduced"* — the same provenance hole this contract closes with
-`template_version` + `projection_digest`.
+- selection, Jinja rendering, PDF generation, local-file persistence and
+  `GeneratedDocument` mutation are fused into one DB-bound service;
+- the service injects its current clock into template context, so identical
+  stored business input is not semantically deterministic;
+- `content_hash` and a sanitised `context_snapshot` are valuable provenance
+  behavior and were preserved as canonical fact/projection fingerprints;
+- a generated row can be overwritten through mutable version/lifecycle paths,
+  while the template itself has no immutable artifact version; and
+- status mutations are not organization-scoped and the tables have no RLS.
+
+Those findings disqualify a code copy. The extracted contract preserves ERP's
+provenance evidence and its focused behavior proof, but separates the pure
+projection/renderer from persistence and refuses a live clock. Sub supplies the
+issued-document parity surface and the nine-line truncation canary. The package
+therefore uses `source_mode = "product-first"` while porting only the reusable
+behaviors from each source.
 
 ---
 
