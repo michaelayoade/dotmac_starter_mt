@@ -64,6 +64,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_integrator` |
 | [`dotmac-content`](../packages/dotmac-content/README.md) | optional module | [`audit-complete`](../packages/dotmac-content/EXTRACTION.toml) | [tenant · `mod_content`](../packages/dotmac-content/src/dotmac_content/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
 | [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md) | optional module | [`audit-complete`](../packages/dotmac-deployment-control/EXTRACTION.toml) | [platform · `mod_deploy`](../packages/dotmac-deployment-control/src/dotmac_deployment_control/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
+| [`dotmac-document-rendering`](../packages/dotmac-document-rendering/README.md) | optional module | [`audit-complete`](../packages/dotmac-document-rendering/EXTRACTION.toml) | [stateless](../packages/dotmac-document-rendering/src/dotmac_document_rendering/manifest.py) | — | — | not allowlisted | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-documents`](../packages/dotmac-documents/README.md) | optional module | [`audit-complete`](../packages/dotmac-documents/EXTRACTION.toml) | [tenant · `mod_documents`](../packages/dotmac-documents/src/dotmac_documents/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-durable-timers`](../packages/dotmac-durable-timers/README.md) | optional module | [`audit-complete`](../packages/dotmac-durable-timers/EXTRACTION.toml) | [tenant+platform · `mod_timers`](../packages/dotmac-durable-timers/src/dotmac_durable_timers/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a72` | — | `dotmac-isp`, `dotmac_crm`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`adopted`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a6` | `>=0.1.0a68` | `dotmac_vendor_control_plane` | — |
@@ -273,6 +274,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-deployment-control/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_vendor_control_plane`.
+
+### [`dotmac-document-rendering`](../packages/dotmac-document-rendering/README.md)
+
+- **Owner:** Stateless selection, semantic projection, exact formatting, and renderer provenance for issued billing documents
+- **Contract:** Accept one complete immutable InvoiceDocumentFactV1 by value; select one immutable template through an assembly-declared document-profile binding; produce one canonical semantic projection; and render complete HTML or PDF bytes with stable provenance and typed permanent/retryable failures. Billing remains authoritative for document meaning, numbering, frozen facts, and the official artifact relation; dotmac-files owns bytes at rest; the consuming assembly owns orchestration, idempotency, retry, and reconciliation. The renderer owns no rows, transactions, clocks, external I/O, delivery, numbering, invoice decisions, or storage.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-document-rendering/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`, `dotmac_vendor_control_plane`.
 
 ### [`dotmac-documents`](../packages/dotmac-documents/README.md)
 

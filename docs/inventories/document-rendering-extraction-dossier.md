@@ -1,5 +1,13 @@
 # Document rendering — extraction dossier
 
+> **Implementation addendum — 2026-08-19.** ADR-0017 P11 is now met and
+> ADR-0030 § 6 explicitly authorizes `dotmac-document-rendering`. The Sub and
+> ERP audits are complete, and the machine-checked dossier now lives at
+> `packages/dotmac-document-rendering/EXTRACTION.toml` beside the stateless
+> `0.1.0a1` package. This file remains the pre-implementation reasoning record;
+> where its old moratorium/status wording conflicts with that package dossier,
+> the package dossier and accepted ADRs are current.
+
 Dated 2026-08-14. **Dossier CONTENT, not a dossier.** There is no package
 directory, no `EXTRACTION.toml` at a package root, no module, no model, no
 migration and no namespace allocation. Document rendering is capability area

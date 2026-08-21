@@ -67,6 +67,11 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-document-rendering": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE BILLING DOCUMENT CUTOVER. This stateless source is built and gate-proven but deliberately not release-allowlisted. Its required kernel a88 floor is registry-verified and installable; publication is withheld until Vendor Control Plane's Billing fact producer, the dotmac-files storage binding, and the assembly-owned idempotent reconciler are ready in one cutover slice. No product is claimed as a consumer and no old writer is retired. Remove this row only in the reviewed publication and adoption sequence; never by editing the declared version or floor down.",
+      "state": "never-published"
+    },
     "dotmac-connector-flutterwave": {
       "declared": "0.1.0a2",
       "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. Version a2 adds Flutterwave-v4-only OAuth charge reconciliation beside the already published ingress contract and floors on the declared Integration a11 POLL engine. Remove this row after the exact wheel is registry-verified and tagged. Sub's v3-to-v4 shadow, callback and polling cutover, direct-client deletion and ratchet reduction remain independently owed; publication moves no financial authority.",

@@ -1,5 +1,15 @@
 # Document rendering — contracts, invariants and the renderer port
 
+> **Implementation addendum — 2026-08-19.** ADR-0030 subsequently authorized
+> `dotmac-document-rendering`, and Billing's frozen producer spelling is
+> `document_profile_code`. Package `0.1.0a1` implements the stateless
+> selection → semantic projection → renderer pipeline and conformance kit under
+> `packages/dotmac-document-rendering/`; its public contracts and
+> `EXTRACTION.toml` are now the as-built source. Kernel a88 is the first published release exposing the same
+> canonical algorithm as persistence-free `dotmac_kernel.fingerprints` while
+> `dotmac_kernel.idempotency` keeps its compatibility re-export. The proposal banner below is
+> retained as historical status, not rewritten into proof of current behavior.
+
 > **Review status: PROPOSED — not reviewed, not frozen.** Appearing in the tree
 > does not freeze a contract. `RenderedDocumentV1` and `DocumentProjectionV1`
 > are this workstream's proposals; the consumer reading of
@@ -365,7 +375,8 @@ class RenderedValue:
     format_code: str | None  # which declared format string was applied
 ```
 
-`digest` is computed with `dotmac_kernel.idempotency.fingerprint_of`, which
+`digest` is computed with `dotmac_kernel.fingerprints.fingerprint_of`, also
+compatibly re-exported by `dotmac_kernel.idempotency`, which
 already pins *"sorted keys and compact separators, meaning dict ordering and
 incidental whitespace cannot change the digest."* That is the kernel's
 fingerprint mechanism, not a second one (hard rule 23).
