@@ -119,24 +119,9 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     # Sites is the marketing cohort tip: a81 both allocates its lineage and is
     # the first installable kernel carrying all four marketing allocations.
     "dotmac-sites": "0.1.0a81",
-    # The network cohort: eleven allocations minted together in a82, and the
-    # ordinary case for all eleven. Every capability each one consumes —
-    # `requires` (a56), `tenant_requires` (a60), the prerequisite names
-    # `tenant_scope_catalog.v1` and `module_database_roles.v1` — predates the
-    # allocation, so the ledger row alone sets the floor. They share ONE kernel
-    # version deliberately: stacking eleven bumps would mint ten numbers no
-    # installer could resolve, which is the a74..a76 / a78..a80 history above.
-    "dotmac-inventory": "0.1.0a82",
-    "dotmac-assets": "0.1.0a82",
-    "dotmac-ipam": "0.1.0a82",
-    "dotmac-network-inventory": "0.1.0a82",
-    "dotmac-network-observability": "0.1.0a82",
-    "dotmac-network-topology": "0.1.0a82",
-    "dotmac-network-assurance": "0.1.0a82",
-    "dotmac-network-control": "0.1.0a82",
-    "dotmac-fiber-plant": "0.1.0a82",
-    "dotmac-network-access": "0.1.0a82",
-    "dotmac-pon-access": "0.1.0a82",
+    # The network cohort is NOT here: a82 minted all eleven allocations but was
+    # never published, so their floor is a83 and their rows live in
+    # UNPUBLISHED_ALLOCATION_FLOORS below.
     # Positioning is the ordinary case once more: a83 allocates `pos`/`po` and
     # every capability it consumes — `requires` (a56), the two prerequisite
     # names — predates that allocation, so the ledger row alone sets the floor.
@@ -300,6 +285,26 @@ UNPUBLISHED_ALLOCATION_FLOORS = {
     # so the floor named a version no installer can resolve and every gate
     # stayed green. Moving them here is what puts them under the tag-backed
     # `skipped` check below.
+    # The ADR-0036/0037/0038 network cohort: eleven allocations minted together
+    # in a82, which the kernel changelog itself records as NOT PUBLISHED
+    # SEPARATELY; INCLUDED IN 0.1.0a83. a83 allocated positioning on top and is
+    # the first kernel ARTIFACT carrying any of the eleven, so it is the floor of
+    # all eleven — exactly the a74..a76 -> a77 and a78..a80 -> a81 shape above.
+    # They sat in LEDGER_ALLOCATION_RELEASES pinned to a82, where the assertion
+    # is only that the pin equals the allocation; nothing asked whether a82 was
+    # installable, so eleven packages declared an unresolvable floor and every
+    # gate passed.
+    "dotmac-inventory": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-assets": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-ipam": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-inventory": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-observability": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-topology": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-assurance": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-control": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-fiber-plant": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-access": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-pon-access": ("0.1.0a83", "0.1.0a82"),
     "dotmac-referrals": ("0.1.0a85", "0.1.0a84"),
     "dotmac-reseller-management": ("0.1.0a85", "0.1.0a84"),
     "dotmac-commercial-agreements": ("0.1.0a77", "0.1.0a74"),
