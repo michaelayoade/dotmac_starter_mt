@@ -47,7 +47,12 @@ from dotmac_deployment_control import (
     record_observation,
     register_target,
 )
-from dotmac_kernel.audit_actions import AuditActionRegistry, install_audit_actions
+from dotmac_kernel.audit_actions import (
+    AuditActionRegistry,
+    AuditActionsNotInstalledError,
+    active_audit_actions,
+    install_audit_actions,
+)
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError, ProgrammingError
@@ -512,13 +517,28 @@ class _ReceiptLookupGate:
 
 
 @pytest.fixture
+def _module_audit_actions() -> Iterator[None]:
+    """Install this standalone module's vocabulary without leaking process state."""
+    try:
+        previous_audit_actions = active_audit_actions()
+    except AuditActionsNotInstalledError:
+        previous_audit_actions = None
+    install_audit_actions(AuditActionRegistry.from_manifests([module]))
+    try:
+        yield
+    finally:
+        if previous_audit_actions is not None:
+            install_audit_actions(previous_audit_actions)
+
+
+@pytest.fixture
 def observation_race(
     migrated_scratch: tuple[str, str, str],
+    _module_audit_actions: None,
 ) -> Iterator[tuple[Engine, str, str]]:
     """One target with an active public credential in the migrated schema."""
     admin_url, _, _ = migrated_scratch
     engine = create_engine(admin_url, future=True)
-    install_audit_actions(AuditActionRegistry.from_manifests([module]))
     suffix = uuid.uuid4().hex[:10]
     target_ref = f"race-target-{suffix}"
     key_id = f"race-key-{suffix}"
