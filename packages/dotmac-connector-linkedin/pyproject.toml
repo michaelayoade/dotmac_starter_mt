@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "dotmac-connector-linkedin"
+version = "0.1.0a1"
+description = "Dotmac Integrator connector for LinkedIn webhook observations"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_connector_linkedin", from = "src" }]
+include = [
+    { path = "src/dotmac_connector_linkedin/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-integration = ">=0.1.0a11"
+
+[tool.poetry.plugins."dotmac_integration.connectors"]
+linkedin = "dotmac_connector_linkedin:PLUGIN"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

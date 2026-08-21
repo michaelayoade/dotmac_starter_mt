@@ -110,6 +110,11 @@ def validate_next_chunk(
     """
     run = _locked_run(db, tenant_id=tenant_id, run_id=run_id)
     _require_processable(run, dry_run=True)
+    # The bounded-worker lane has its own immutable partition checkpoint. A run
+    # may use one lane or the other, never advance two ledgers in parallel.
+    from dotmac_imports.partitioning import require_unpartitioned
+
+    require_unpartitioned(db, run)
     rows = _rows_from_verified_bytes(run, data=data, fields=fields)
     return _process_next_chunk(
         db,
@@ -167,6 +172,11 @@ def promote(
     )
     db.add(applied)
     db.flush()
+    # If validation used the partition ledger, applying must use the exact same
+    # immutable stored artifacts rather than repartitioning the source.
+    from dotmac_imports.partitioning import clone_partition_plan
+
+    clone_partition_plan(db, source_run=validated, target_run=applied)
     return applied
 
 
@@ -189,6 +199,9 @@ def apply_next_chunk(
     """
     run = _locked_run(db, tenant_id=tenant_id, run_id=run_id)
     _require_processable(run, dry_run=False)
+    from dotmac_imports.partitioning import require_unpartitioned
+
+    require_unpartitioned(db, run)
     if run.source_run_id is None:
         raise InvalidRunState(
             f"apply run {run.id} has no source run — an apply run exists only "

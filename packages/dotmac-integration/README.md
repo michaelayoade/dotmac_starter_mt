@@ -12,12 +12,14 @@ verified.
 
 ## Release state
 
-**Released: `0.1.0a1` through `0.1.0a10`.** Releases a2–a4 implement SPI 1.1;
+**Released: `0.1.0a1` through `0.1.0a10`; `0.1.0a11` is declared and
+unreleased.** Releases a2–a4 implement SPI 1.1;
 a5–a9 implement SPI 1.2; a10 adds SPI 1.3's
 manifest-owned secret-binding and egress declarations. See `CHANGELOG.md`,
 which is the authority on what has and has not shipped. a8 adds indexed,
 revisioned shadow-comparison evidence; a9 adds finite replay-evidence retention
-and durable legal-hold history.
+and durable legal-hold history. a11 makes the existing POLL protocol executable
+through a session-free provider phase followed by atomic receipt/cursor commit.
 
 Capability `config_schema` declarations are executable contracts, not catalog
 metadata. A revision is accepted only when it matches every capability bound to

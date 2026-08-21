@@ -247,6 +247,22 @@ from dotmac_integration.operations import (
     replay_receipt,
 )
 from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
+from dotmac_integration.polling import (
+    CursorInvalid,
+    PollBatch,
+    PollConnectorRaised,
+    PollContractError,
+    PollError,
+    PollHandlerUnavailable,
+    PollResult,
+    PollSecretsUnavailable,
+    PollUnavailable,
+    PreparedPoll,
+    invoke_poll,
+    poll_once,
+    prepare_poll,
+    record_poll_batch,
+)
 from dotmac_integration.receipt_delivery import (
     DeliveryError,
     DeliveryReport,
@@ -367,7 +383,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a10"
+__version__ = "0.1.0a11"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -570,6 +586,20 @@ __all__ = [
     "claim_receipt",
     "claim_delivery",
     "advance_checkpoint",
+    "CursorInvalid",
+    "PollBatch",
+    "PollConnectorRaised",
+    "PollContractError",
+    "PollError",
+    "PollHandlerUnavailable",
+    "PollResult",
+    "PollSecretsUnavailable",
+    "PollUnavailable",
+    "PreparedPoll",
+    "invoke_poll",
+    "poll_once",
+    "prepare_poll",
+    "record_poll_batch",
     "ProviderEventIdentityCollision",
     "PollingCheckpoint",
     "OutcomeStatus",

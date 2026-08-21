@@ -67,16 +67,17 @@ def _charge_success(**overrides: object) -> dict[str, object]:
 
 def test_manifest_is_the_versioned_ingress_runtime_contract() -> None:
     assert MANIFEST.connector_key == "paystack"
-    assert MANIFEST.version == __version__ == "0.1.0a1"
+    assert MANIFEST.version == __version__ == "0.1.0a2"
     assert MANIFEST.capability_ids == {CAPABILITY_ID}
     assert MANIFEST.spi_range.minimum.minor == 3
-    assert PLUGIN.modes == frozenset({ConnectorMode.INGRESS})
+    assert PLUGIN.modes == frozenset({ConnectorMode.INGRESS, ConnectorMode.POLL})
     assert tuple(binding.name for binding in MANIFEST.secret_bindings or ()) == (
         WEBHOOK_SIGNING_SECRET,
         WEBHOOK_SIGNING_PREVIOUS_SECRET,
+        "api_secret_key",
     )
     assert MANIFEST.egress is not None
-    assert MANIFEST.egress.hosts == ()
+    assert MANIFEST.egress.hosts == ("api.paystack.co",)
     assert_plugin_conforms(PLUGIN)
 
 

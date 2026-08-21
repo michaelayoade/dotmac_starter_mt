@@ -87,8 +87,11 @@ on:
         type: choice
         options:
           - dotmac-connector-flutterwave
+          - dotmac-connector-linkedin
           - dotmac-connector-meta-social
+          - dotmac-connector-mono
           - dotmac-connector-paystack
+          - dotmac-connector-remita
           - dotmac-connector-whatsapp
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"

@@ -58,6 +58,21 @@ before the version was cut. They are not four releases.
 
 Nothing in this file is a publication claim except this section.
 
+## 0.1.0a11 — unreleased
+
+### Executable polling engine
+
+- Adds a three-phase POLL seam: short configuration/checkpoint prepare,
+  session-free provider invocation, then one atomic receipt-and-checkpoint
+  transaction.
+- Refuses a stale checkpoint with the existing optimistic version guard, so a
+  losing worker cannot commit receipts past a cursor it did not advance.
+- Carries connector exceptions and secret-resolver failures only through typed,
+  material-free errors. The handler receives materialized held secrets and no
+  database/session by signature.
+- Extends the shipped conformance fake with explicit poll exception and
+  wrong-return-shape controls.
+
 ## 0.1.0a10 — released 2026-08-19
 
 ### Manifest-owned runtime boundaries (SPI 1.3)

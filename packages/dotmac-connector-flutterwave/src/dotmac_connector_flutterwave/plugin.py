@@ -9,10 +9,12 @@ import hmac
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Final
 
+import httpx
 from dotmac_integration.spi import (
     Acknowledgement,
     CapabilityDeclaration,
@@ -24,35 +26,55 @@ from dotmac_integration.spi import (
     InboundEvent,
     IngressHandler,
     IngressRequest,
+    PollHandler,
     SecretBindingDeclaration,
     SpiRange,
     VerificationResult,
 )
 
+from dotmac_connector_flutterwave.polling import (
+    IDENTITY_HOST,
+    LIVE_HOST,
+    SANDBOX_HOST,
+    FlutterwavePollHandler,
+)
+
 CONNECTOR_KEY: Final = "flutterwave"
 CAPABILITY_ID: Final = "payments.settlement.observation.v1"
 VERSION: Final = "0.1.0a1"
+CURRENT_VERSION: Final = "0.1.0a2"
 
 HMAC_SHA256: Final = "hmac_sha256"
 SIGNATURE_HEADER: Final = "flutterwave-signature"
 WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
 WEBHOOK_SIGNING_PREVIOUS_SECRET: Final = "webhook_signing_previous_secret"
+API_CLIENT_ID: Final = "api_client_id"
+API_CLIENT_SECRET: Final = "api_client_secret"
 
 ACKNOWLEDGEMENT: Final = Acknowledgement(body=b"")
 
 CONFIG_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
+    "properties": {
+        "environment": {"type": "string", "enum": ["sandbox", "live"]},
+        "reconcile_from": {"type": "string", "format": "date-time"},
+        "page_size": {"type": "integer", "minimum": 10, "maximum": 50},
+    },
+}
+LEGACY_CONFIG_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "additionalProperties": False,
 }
 
-MANIFEST: Final = ConnectorManifest(
+LEGACY_MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
     version=VERSION,
     spi_range=SpiRange.parse(">=1.3,<2.0"),
     capabilities=(
         CapabilityDeclaration(
             capability_id=CAPABILITY_ID,
-            config_schema=CONFIG_SCHEMA,
+            config_schema=LEGACY_CONFIG_SCHEMA,
         ),
     ),
     secret_bindings=(
@@ -67,6 +89,35 @@ MANIFEST: Final = ConnectorManifest(
         ),
     ),
     egress=EgressDeclaration(),
+)
+
+MANIFEST: Final = ConnectorManifest(
+    connector_key=CONNECTOR_KEY,
+    version=CURRENT_VERSION,
+    spi_range=SpiRange.parse(">=1.3,<2.0"),
+    capabilities=(CapabilityDeclaration(CAPABILITY_ID, CONFIG_SCHEMA),),
+    secret_bindings=(
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_SECRET,
+            description="Primary v4 HMAC-SHA256 exact-byte webhook signing key.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_PREVIOUS_SECRET,
+            required=False,
+            description="Previous webhook authentication material during rotation.",
+        ),
+        SecretBindingDeclaration(
+            name=API_CLIENT_ID,
+            required=False,
+            description="Flutterwave v4 OAuth client identifier for reconciliation.",
+        ),
+        SecretBindingDeclaration(
+            name=API_CLIENT_SECRET,
+            required=False,
+            description="Flutterwave v4 OAuth client secret for reconciliation.",
+        ),
+    ),
+    egress=EgressDeclaration(hosts=(SANDBOX_HOST, LIVE_HOST, IDENTITY_HOST)),
 )
 
 
@@ -408,16 +459,37 @@ class FlutterwaveIngressHandler:
         return (normalized,), ACKNOWLEDGEMENT
 
 
-class FlutterwaveConnector:
-    """One independently released Flutterwave ingress plugin."""
+def _poll_event(data: Mapping[str, object]) -> InboundEvent:
+    event = {"type": "charge.reconciled", "data": data}
+    identity, source = _identity("charge.reconciled", data, event)
+    return _settlement_event(
+        identity=identity,
+        event_type="charge.reconciled",
+        data=data,
+        event=event,
+        identity_source=source,
+    )
 
-    manifest: Final = MANIFEST
-    historical_manifests: Final[tuple[ConnectorManifest, ...]] = ()
-    modes: Final = frozenset({ConnectorMode.INGRESS})
+
+@dataclass(frozen=True, slots=True)
+class FlutterwaveConnector:
+    """One independently released Flutterwave v4 ingress and poll plugin."""
+
+    transport: httpx.BaseTransport | None = field(default=None, repr=False)
+    timeout_seconds: float = 30.0
+    manifest: ConnectorManifest = MANIFEST
+    historical_manifests: tuple[ConnectorManifest, ...] = (LEGACY_MANIFEST,)
+    modes: frozenset[ConnectorMode] = frozenset(
+        {ConnectorMode.INGRESS, ConnectorMode.POLL}
+    )
 
     def ingress_handler_for(self, capability_id: str) -> IngressHandler:
         self.manifest.require_declares(capability_id)
         return FlutterwaveIngressHandler()
+
+    def poll_handler_for(self, capability_id: str) -> PollHandler:
+        self.manifest.require_declares(capability_id)
+        return FlutterwavePollHandler(_poll_event, self.transport, self.timeout_seconds)
 
     def validate_connection(
         self,
@@ -425,7 +497,11 @@ class FlutterwaveConnector:
         config: dict[str, object],
         secrets: dict[str, object],
     ) -> tuple[Diagnostic, ...]:
-        del config
+        if "reconcile_from" in config and (
+            _material(secrets, API_CLIENT_ID) is None
+            or _material(secrets, API_CLIENT_SECRET) is None
+        ):
+            return (Diagnostic(ok=False, code="required_material_unavailable"),)
         if _material(secrets, WEBHOOK_SIGNING_SECRET) is None:
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
         return ()

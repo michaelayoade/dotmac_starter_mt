@@ -46,6 +46,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 |---|---|---|---|---|---|---|---:|---|---|---|
 | [`dotmac-accounting`](../packages/dotmac-accounting/README.md) | optional module | [`audit-complete`](../packages/dotmac-accounting/EXTRACTION.toml) | [tenant · `mod_accounting`](../packages/dotmac-accounting/src/dotmac_accounting/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp` |
 | [`dotmac-analytics`](../packages/dotmac-analytics/README.md) | optional module | [`audit-complete`](../packages/dotmac-analytics/EXTRACTION.toml) | [tenant · `mod_analytics`](../packages/dotmac-analytics/src/dotmac_analytics/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_academy_app`, `dotmac_crm`, `dotmac_erp` |
+| [`dotmac-app-sync`](../packages/dotmac-app-sync/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-app-sync/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
 | [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac-isp`, `dotmac_erp` |
 | [`dotmac-assets`](../packages/dotmac-assets/README.md) | optional module | [`audit-complete`](../packages/dotmac-assets/EXTRACTION.toml) | [tenant · `mod_assets`](../packages/dotmac-assets/src/dotmac_assets/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac-isp`, `dotmac_erp` |
@@ -54,9 +55,12 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-brand-profiles`](../packages/dotmac-brand-profiles/README.md) | optional module | [`audit-complete`](../packages/dotmac-brand-profiles/EXTRACTION.toml) | [tenant+platform · `mod_brand`](../packages/dotmac-brand-profiles/src/dotmac_brand_profiles/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac-isp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md) | optional module | [`audit-complete`](../packages/dotmac-campaigns/EXTRACTION.toml) | [tenant · `mod_campaigns`](../packages/dotmac-campaigns/src/dotmac_campaigns/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac-erp`, `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-commercial-agreements`](../packages/dotmac-commercial-agreements/README.md) | optional module | [`audit-complete`](../packages/dotmac-commercial-agreements/EXTRACTION.toml) | [platform · `mod_agreements`](../packages/dotmac-commercial-agreements/src/dotmac_commercial_agreements/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
-| [`dotmac-connector-flutterwave`](../packages/dotmac-connector-flutterwave/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-flutterwave/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator`, `dotmac_sub` |
+| [`dotmac-connector-flutterwave`](../packages/dotmac-connector-flutterwave/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-flutterwave/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_integrator`, `dotmac_sub` |
+| [`dotmac-connector-linkedin`](../packages/dotmac-connector-linkedin/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-linkedin/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac-erp`, `dotmac_integrator`, `dotmac_sub` |
 | [`dotmac-connector-meta-social`](../packages/dotmac-connector-meta-social/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-meta-social/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator`, `dotmac_sub` |
-| [`dotmac-connector-paystack`](../packages/dotmac-connector-paystack/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-paystack/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_integrator`, `dotmac_sub` |
+| [`dotmac-connector-mono`](../packages/dotmac-connector-mono/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-mono/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_integrator` |
+| [`dotmac-connector-paystack`](../packages/dotmac-connector-paystack/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-paystack/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_erp`, `dotmac_integrator`, `dotmac_sub` |
+| [`dotmac-connector-remita`](../packages/dotmac-connector-remita/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-remita/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_integrator` |
 | [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_integrator` |
 | [`dotmac-content`](../packages/dotmac-content/README.md) | optional module | [`audit-complete`](../packages/dotmac-content/EXTRACTION.toml) | [tenant · `mod_content`](../packages/dotmac-content/src/dotmac_content/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
 | [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md) | optional module | [`audit-complete`](../packages/dotmac-deployment-control/EXTRACTION.toml) | [platform · `mod_deploy`](../packages/dotmac-deployment-control/src/dotmac_deployment_control/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
@@ -67,9 +71,9 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-fiber-plant`](../packages/dotmac-fiber-plant/README.md) | optional module | [`audit-complete`](../packages/dotmac-fiber-plant/EXTRACTION.toml) | [tenant · `mod_fiber`](../packages/dotmac-fiber-plant/src/dotmac_fiber_plant/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac-isp`, `dotmac_sub` |
 | [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | `tenant`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a61` | — | `dotmac-isp`, `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
 | [`dotmac-finance`](../packages/dotmac-finance/README.md) | optional module | [`audit-complete`](../packages/dotmac-finance/EXTRACTION.toml) | [tenant · `mod_finance`](../packages/dotmac-finance/src/dotmac_finance/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_erp` |
-| [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-inbox`](../packages/dotmac-inbox/README.md) | optional module | [`audit-complete`](../packages/dotmac-inbox/EXTRACTION.toml) | [tenant · `mod_inbox`](../packages/dotmac-inbox/src/dotmac_inbox/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-isp`, `dotmac_erp`, `dotmac_sub` |
-| [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a10` | `>=0.1.0a68` | `dotmac_integrator` | — |
+| [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a11` | `>=0.1.0a68` | `dotmac_integrator` | — |
 | [`dotmac-inventory`](../packages/dotmac-inventory/README.md) | optional module | [`audit-complete`](../packages/dotmac-inventory/EXTRACTION.toml) | [tenant · `mod_inventory`](../packages/dotmac-inventory/src/dotmac_inventory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac-isp`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ipam`](../packages/dotmac-ipam/README.md) | optional module | [`audit-complete`](../packages/dotmac-ipam/EXTRACTION.toml) | [tenant · `mod_ipam`](../packages/dotmac-ipam/src/dotmac_ipam/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac-isp`, `dotmac_sub` |
 | [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a88` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
@@ -125,6 +129,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-analytics/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac-erp`, `dotmac_academy_app`, `dotmac_crm`, `dotmac_erp`.
+
+### [`dotmac-app-sync`](../packages/dotmac-app-sync/README.md)
+
+- **Owner:** The provider-neutral, versioned inter-application observation envelope and the authenticated hand-off to a destination-owned atomic receiver.
+- **Contract:** Encode and validate source identity, capability version, opaque scope/subject references, correlation, destination-owned JSON Schema, stable idempotency identity and payload fingerprint. Own no HTTP route, peer authentication mechanism, database, session, outbox row, domain model, resolver or consequence.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-app-sync/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`.
 
 ### [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md)
 
@@ -192,11 +204,19 @@ and the next gate.
 
 ### [`dotmac-connector-flutterwave`](../packages/dotmac-connector-flutterwave/README.md)
 
-- **Owner:** Flutterwave v4 ingress authentication and wire translation: exact-byte HMAC-SHA256 authentication, provider-event identity, charge-completed normalization, and acknowledgement bytes.
-- **Contract:** Implement Flutterwave API v4 through dotmac-integration SPI >=1.3,<2.0 for connector key flutterwave and capability payments.settlement.observation.v1 in INGRESS mode only. Verify flutterwave-signature over the exact request bytes with HMAC-SHA256 and accept no v3 fallback. Carry an exact amount decimal string with explicit currency, the provider's own status token verbatim, an opaque merchant reference, and transport evidence. Do not invent provider_fee because the v4 webhook does not report it. Own no provider HTTP client, product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, retry/checkpoint engine, row, session or product database.
+- **Owner:** Flutterwave v4 ingress and reconciliation transport: exact-byte HMAC-SHA256 authentication, OAuth-authenticated charge-list polling, provider-event identity, charge-completed normalization, and acknowledgement bytes.
+- **Contract:** Implement Flutterwave API v4 through dotmac-integration SPI >=1.3,<2.0 for connector key flutterwave and capability payments.settlement.observation.v1 in INGRESS and POLL modes. Verify flutterwave-signature over exact bytes, authenticate reconciliation through v4 OAuth, page only the v4 charge list and accept no v3 fallback. Carry exact amount, currency, provider status, merchant reference and transport evidence. Do not invent provider_fee. Own no product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, retry/checkpoint engine, row, session or product database.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-flutterwave/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_integrator`, `dotmac_sub`.
+
+### [`dotmac-connector-linkedin`](../packages/dotmac-connector-linkedin/README.md)
+
+- **Owner:** LinkedIn webhook challenge, exact-byte authentication and provider-neutral organization-social and lead notification translation.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key linkedin and social.activity.observation.v1 plus marketing.lead.observation.v1 in INGRESS mode only. Own no contact, campaign, qualification, assignment, ticket, publication, retry, checkpoint, row, session or product database.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-linkedin/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_integrator`, `dotmac_sub`.
 
 ### [`dotmac-connector-meta-social`](../packages/dotmac-connector-meta-social/README.md)
 
@@ -206,13 +226,29 @@ and the next gate.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_integrator`, `dotmac_sub`.
 
+### [`dotmac-connector-mono`](../packages/dotmac-connector-mono/README.md)
+
+- **Owner:** Mono Financial Data v2 transport: authenticated account transaction polling, same-origin pagination and provider-neutral transaction observation translation.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key mono and capability banking.transaction.observation.v1 in POLL mode only. Preserve lowest-denomination integer amounts, currency, provider debit/credit direction, timestamps, transaction identity and optional provider balance/category evidence. Own no bank statement, ledger, reconciliation, tenant, product identity, checkpoint, retry engine, session or product database.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-mono/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_integrator`.
+
 ### [`dotmac-connector-paystack`](../packages/dotmac-connector-paystack/README.md)
 
-- **Owner:** Paystack ingress authentication and wire translation: exact-byte HMAC-SHA512 verification, provider-event identity, charge-success normalization, and acknowledgement bytes.
-- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key paystack and capability payments.settlement.observation.v1 in INGRESS mode only. Emit exact amount and provider-fee decimal strings with explicit currency, the provider's own status token verbatim, an opaque merchant reference, and transport evidence. Own no provider HTTP client, product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, retry/checkpoint engine, row, session or product database.
+- **Owner:** Paystack ingress and reconciliation transport: exact-byte HMAC-SHA512 verification, authenticated transaction-list polling, provider-event identity, charge-success normalization, and acknowledgement bytes.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key paystack and capability payments.settlement.observation.v1 in INGRESS and POLL modes. Emit exact amount and provider-fee decimal strings with explicit currency, provider status verbatim, merchant reference and transport evidence; reconcile through the authenticated paged transaction list. Own no product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, retry/checkpoint engine, row, session or product database.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-paystack/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_integrator`, `dotmac_sub`.
+
+### [`dotmac-connector-remita`](../packages/dotmac-connector-remita/README.md)
+
+- **Owner:** Remita transport: authenticated RRR status polling, provider response parsing and provider-neutral status observation translation.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key remita and capability payments.reference.status.observation.v1 in POLL mode only. Carry provider status, message, amount, reference, transaction and date evidence verbatim. Own no RRR lifecycle, biller policy, payment-state mapping, source linkage, tenant, product identity, ledger, journal, checkpoint, retry engine, session or product database.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-remita/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_integrator`.
 
 ### [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md)
 
@@ -296,11 +332,11 @@ and the next gate.
 
 ### [`dotmac-imports`](../packages/dotmac-imports/README.md)
 
-- **Owner:** The durable record of a bulk import: the run, its rows, and what became of each one
-- **Contract:** Record an operator-initiated import of one stored document; verify the raw bytes against the recorded SHA-256 at both validation and apply; validate without holding anything that could mutate; promote one validated run into one apply run; advance one FOR UPDATE-locked, caller-transaction-owned chunk from the durable checkpoint per call; commit each domain effect with its minimised row outcome; resume a running run and make completed re-delivery a no-op. Persist only a row fingerprint, bounded typed safe errors and an opaque result — never mapped row values or raw exception text. Decode CSV strictly and resolve source headings onto a domain-declared field set. NOT the field vocabulary, business validation, duplicate policy, the domain mutation, any reversal of it, the stored bytes, or export.
+- **Owner:** The durable record of a bulk import: the run, its immutable partition plan, its rows, and what became of each one
+- **Contract:** Record an operator-initiated import of one stored document; verify immutable source/partition SHA-256; validate without holding anything that could mutate; promote one validated run into one apply run; advance either one locked ordinary chunk or one atomically claimed bounded partition; and commit each domain effect with its minimised row outcome plus the owning checkpoint. Stream large CSVs into bounded dotmac-files artifacts, clone the exact validated plan on promotion and refuse stale claim settlement. Persist only opaque file ids, ranges, checksums, row fingerprints, bounded typed safe errors and opaque results — never mapped row values or raw exception text. NOT field vocabulary, business validation, duplicate policy, domain mutation/reversal, stored bytes, worker-count policy, database extraction, COPY or export.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-imports/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
-- **Candidate consumers:** `dotmac_crm`, `dotmac_erp`, `dotmac_sub`.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
 
 ### [`dotmac-inbox`](../packages/dotmac-inbox/README.md)
 

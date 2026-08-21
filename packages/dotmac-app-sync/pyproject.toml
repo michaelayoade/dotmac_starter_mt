@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "dotmac-app-sync"
+version = "0.1.0a1"
+description = "Provider-neutral contracts for independent Dotmac applications"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_app_sync", from = "src" }]
+include = [{ path = "src/dotmac_app_sync/py.typed", format = ["sdist", "wheel"] }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+jsonschema = ">=4.23,<5.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -38,20 +38,20 @@ def test_connector_imports_only_the_spi_among_dotmac_packages() -> None:
     assert internal - {"dotmac_connector_flutterwave"} == {"dotmac_integration"}
 
 
-def test_ingress_slice_has_no_network_persistence_or_private_retry_dependency() -> None:
+def test_network_is_v4_provider_io_and_no_persistence_or_private_retry_exists() -> None:
     forbidden = {
         "alembic",
         "apscheduler",
         "asyncpg",
         "backoff",
         "celery",
-        "httpx",
         "psycopg",
         "requests",
         "sqlalchemy",
         "tenacity",
         "urllib3",
     }
+    assert "httpx" in _imports()
     assert not (_imports() & forbidden)
 
 

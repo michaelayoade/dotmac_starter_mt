@@ -541,6 +541,23 @@ type = "directory"
 url = "packages/dotmac-analytics"
 
 [[package]]
+name = "dotmac-app-sync"
+version = "0.1.0a1"
+description = "Provider-neutral contracts for independent Dotmac applications"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+jsonschema = ">=4.23,<5.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-app-sync"
+
+[[package]]
 name = "dotmac-application-directory"
 version = "0.1.0a3"
 description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
@@ -687,8 +704,8 @@ url = "packages/dotmac-commercial-agreements"
 
 [[package]]
 name = "dotmac-connector-flutterwave"
-version = "0.1.0a1"
-description = "Ingress-only Flutterwave settlement connector for Dotmac Integrator"
+version = "0.1.0a2"
+description = "Flutterwave API v4 settlement ingress and reconciliation connector"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["dev"]
@@ -696,11 +713,29 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a10"
+dotmac-integration = ">=0.1.0a11"
+httpx = ">=0.27,<1.0"
 
 [package.source]
 type = "directory"
 url = "packages/dotmac-connector-flutterwave"
+
+[[package]]
+name = "dotmac-connector-linkedin"
+version = "0.1.0a1"
+description = "Dotmac Integrator connector for LinkedIn webhook observations"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a11"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-linkedin"
 
 [[package]]
 name = "dotmac-connector-meta-social"
@@ -720,9 +755,9 @@ type = "directory"
 url = "packages/dotmac-connector-meta-social"
 
 [[package]]
-name = "dotmac-connector-paystack"
+name = "dotmac-connector-mono"
 version = "0.1.0a1"
-description = "Ingress-only Paystack settlement connector for Dotmac Integrator"
+description = "Dotmac Integrator connector for Mono Financial Data v2"
 optional = false
 python-versions = ">=3.11,<3.14"
 groups = ["dev"]
@@ -730,11 +765,48 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a10"
+dotmac-integration = ">=0.1.0a11"
+httpx = ">=0.27,<1.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-mono"
+
+[[package]]
+name = "dotmac-connector-paystack"
+version = "0.1.0a2"
+description = "Paystack settlement ingress and reconciliation connector"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a11"
+httpx = ">=0.27,<1.0"
 
 [package.source]
 type = "directory"
 url = "packages/dotmac-connector-paystack"
+
+[[package]]
+name = "dotmac-connector-remita"
+version = "0.1.0a1"
+description = "Dotmac Integrator connector for Remita RRR status observations"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a11"
+httpx = ">=0.27,<1.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-remita"
 
 [[package]]
 name = "dotmac-connector-whatsapp"
@@ -953,7 +1025,7 @@ url = "packages/dotmac-inbox"
 
 [[package]]
 name = "dotmac-integration"
-version = "0.1.0a10"
+version = "0.1.0a11"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -3735,4 +3807,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d9584c91666a4c03f9801803f7b2db3ed18e7279afdb54df27ee68230a8e27fb"
+content-hash = "34eb0eecf8827606701095740cf9c68866f142bb2a2a47001dab0de80111d080"

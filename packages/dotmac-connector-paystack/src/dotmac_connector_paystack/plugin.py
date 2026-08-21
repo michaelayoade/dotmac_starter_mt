@@ -7,9 +7,11 @@ import hmac
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Final
 
+import httpx
 from dotmac_integration.spi import (
     Acknowledgement,
     CapabilityDeclaration,
@@ -21,18 +23,23 @@ from dotmac_integration.spi import (
     InboundEvent,
     IngressHandler,
     IngressRequest,
+    PollHandler,
     SecretBindingDeclaration,
     SpiRange,
     VerificationResult,
 )
 
+from dotmac_connector_paystack.polling import PaystackPollHandler
+
 CONNECTOR_KEY: Final = "paystack"
 CAPABILITY_ID: Final = "payments.settlement.observation.v1"
 VERSION: Final = "0.1.0a1"
+CURRENT_VERSION: Final = "0.1.0a2"
 
 SIGNATURE_HEADER: Final = "x-paystack-signature"
 WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
 WEBHOOK_SIGNING_PREVIOUS_SECRET: Final = "webhook_signing_previous_secret"
+API_SECRET_KEY: Final = "api_secret_key"
 SIGNATURE_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-f]{128}")
 
 # Paystack's wire contract represents every supported currency by multiplying
@@ -46,16 +53,24 @@ ACKNOWLEDGEMENT: Final = Acknowledgement(body=b"")
 CONFIG_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
+    "properties": {
+        "reconcile_from": {"type": "string", "format": "date-time"},
+        "page_size": {"type": "integer", "minimum": 1, "maximum": 100},
+    },
+}
+LEGACY_CONFIG_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "additionalProperties": False,
 }
 
-MANIFEST: Final = ConnectorManifest(
+LEGACY_MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
     version=VERSION,
     spi_range=SpiRange.parse(">=1.3,<2.0"),
     capabilities=(
         CapabilityDeclaration(
             capability_id=CAPABILITY_ID,
-            config_schema=CONFIG_SCHEMA,
+            config_schema=LEGACY_CONFIG_SCHEMA,
         ),
     ),
     secret_bindings=(
@@ -70,6 +85,30 @@ MANIFEST: Final = ConnectorManifest(
         ),
     ),
     egress=EgressDeclaration(),
+)
+
+MANIFEST: Final = ConnectorManifest(
+    connector_key=CONNECTOR_KEY,
+    version=CURRENT_VERSION,
+    spi_range=SpiRange.parse(">=1.3,<2.0"),
+    capabilities=(CapabilityDeclaration(CAPABILITY_ID, CONFIG_SCHEMA),),
+    secret_bindings=(
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_SECRET,
+            description="Primary HMAC-SHA512 exact-byte webhook signing key.",
+        ),
+        SecretBindingDeclaration(
+            name=WEBHOOK_SIGNING_PREVIOUS_SECRET,
+            required=False,
+            description="Previous webhook signing key during bounded rotation.",
+        ),
+        SecretBindingDeclaration(
+            name=API_SECRET_KEY,
+            required=False,
+            description="Paystack server secret for authenticated reconciliation I/O.",
+        ),
+    ),
+    egress=EgressDeclaration(hosts=("api.paystack.co",)),
 )
 
 
@@ -331,16 +370,36 @@ class PaystackIngressHandler:
         return (normalized,), ACKNOWLEDGEMENT
 
 
-class PaystackConnector:
-    """One independently released Paystack ingress plugin."""
+def _poll_event(data: Mapping[str, object]) -> InboundEvent:
+    event_type = "transaction.reconciled"
+    identity, source = _identity(event_type, data, data)
+    return _settlement_event(
+        identity=identity,
+        event_type=event_type,
+        data=data,
+        identity_source=source,
+    )
 
-    manifest: Final = MANIFEST
-    historical_manifests: Final[tuple[ConnectorManifest, ...]] = ()
-    modes: Final = frozenset({ConnectorMode.INGRESS})
+
+@dataclass(frozen=True, slots=True)
+class PaystackConnector:
+    """One independently released Paystack ingress and poll plugin."""
+
+    transport: httpx.BaseTransport | None = field(default=None, repr=False)
+    timeout_seconds: float = 30.0
+    manifest: ConnectorManifest = MANIFEST
+    historical_manifests: tuple[ConnectorManifest, ...] = (LEGACY_MANIFEST,)
+    modes: frozenset[ConnectorMode] = frozenset(
+        {ConnectorMode.INGRESS, ConnectorMode.POLL}
+    )
 
     def ingress_handler_for(self, capability_id: str) -> IngressHandler:
         self.manifest.require_declares(capability_id)
         return PaystackIngressHandler()
+
+    def poll_handler_for(self, capability_id: str) -> PollHandler:
+        self.manifest.require_declares(capability_id)
+        return PaystackPollHandler(_poll_event, self.transport, self.timeout_seconds)
 
     def validate_connection(
         self,
@@ -348,7 +407,8 @@ class PaystackConnector:
         config: dict[str, object],
         secrets: dict[str, object],
     ) -> tuple[Diagnostic, ...]:
-        del config
+        if "reconcile_from" in config and _material(secrets, API_SECRET_KEY) is None:
+            return (Diagnostic(ok=False, code="required_material_unavailable"),)
         if _material(secrets, WEBHOOK_SIGNING_SECRET) is None:
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
         return ()
