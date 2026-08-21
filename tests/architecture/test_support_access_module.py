@@ -14,14 +14,14 @@ from dotmac_support_access import models
 from dotmac_support_access.manifest import module
 
 ROOT = Path(inspect.getfile(models)).parent
-MIGRATION = ROOT / "migrations/versions/sa_0001_support_access.py"
+MIGRATION = ROOT / "migrations/versions/sup_0001_support_access.py"
 
 
 def test_support_access_is_one_declared_platform_lineage() -> None:
     assert SUPPORT_ACCESS_MIGRATION_OWNER in MIGRATION_OWNER_LEDGER
     assert module.code == SUPPORT_ACCESS_MIGRATION_OWNER.owner == "support_access"
     assert module.short_code == "supportaccess"
-    assert module.migration_prefix == "sa"
+    assert module.migration_prefix == "sup"
     assert module.migration_branch == "support_access"
     assert module.db_schema == "mod_supportaccess"
     assert module.tables == ()

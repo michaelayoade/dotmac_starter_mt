@@ -1048,7 +1048,7 @@ PLATFORM_HEALTH_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
 
 SUPPORT_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     owner="support_access",
-    prefix="sa",
+    prefix="sup",
     branch_label="support_access",
     db_schema=module_schema("supportaccess"),
 )

@@ -1,6 +1,6 @@
 """Create temporary support-access request, grant and event evidence.
 
-Revision ID: sa_0001_support_access
+Revision ID: sup_0001_support_access
 Revises: (lineage root)
 Create Date: 2026-08-21
 """
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "sa_0001_support_access"
+revision = "sup_0001_support_access"
 down_revision = None
 branch_labels = ("support_access",)
 REQUIRES = ("module_database_roles.v1",)
