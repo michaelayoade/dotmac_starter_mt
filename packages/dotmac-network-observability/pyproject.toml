@@ -9,7 +9,7 @@ include = [{ path = "src/dotmac_network_observability/py.typed", format = ["sdis
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-dotmac-kernel = ">=0.1.0a82"
+dotmac-kernel = ">=0.1.0a83"
 sqlalchemy = "^2.0"
 
 [build-system]
