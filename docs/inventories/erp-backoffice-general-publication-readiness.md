@@ -21,8 +21,9 @@ validation view. It does not authorize publication or move product authority.
 - Starter builds and governs the packages but does not compose them. They are
   absent from `.github/release-modules.json`, so the release workflow refuses
   them.
-- The declared-publication ledger records kernel a84 and every package a1 as an
-  intentional unpublished state. No artifact should be dispatched from this
+- Kernel a85 is already published and registry-verified. The
+  declared-publication ledger records every cohort package a1 as an intentional
+  unpublished state. No module artifact should be dispatched from this
   preparation change.
 - No exact-commit Observer claim exists for the combined cohort yet. That proof
   requires a committed revision and a fresh isolated Observer worktree at that
@@ -73,9 +74,9 @@ fresh isolated writable worktree with the repository-pinned Poetry version
 Do not publish the cohort as one undifferentiated batch. Publish a package only
 when its cutover-1 product branch has the disabled-by-default exact-version
 composition, typed adapters, backfill/shadow proof and writer-retirement gate
-ready for review. Add the package to the closed release allowlist in that
-authorization change, publish kernel a84 at the first approved slice, and then
-registry-verify the exact package before enabling the adopter.
+ready for review. In that authorization change, add the package to the closed
+release allowlist, pin the already-published kernel a85, publish the exact
+module package and registry-verify that package before enabling the adopter.
 
 Accounting is the dependency hub for Banking, Payables, Payroll, Tax and the
 Finance consequence seam, so it is the first ERP financial release candidate.
