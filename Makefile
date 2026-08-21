@@ -92,6 +92,9 @@ security: ## Bandit security scan (assembly + kernel + UI + module packages)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
+ALLOCATION_BASE ?= origin/main
+allocation-gate: ## Serialized allocation (ADR-0006 D1): a module's ledger row must be merged BEFORE its source
+	poetry run python scripts/check_allocation_serialized.py --base $(ALLOCATION_BASE)
 FLEET_ROOT ?= ..
 fleet-matrix: ## Re-measure the ERP/CRM/Sub duplication baseline (needs the fleet beside this checkout; not in `check`)
 	poetry run python scripts/fleet_decomposition_sweep.py --fleet-root $(FLEET_ROOT) --check
