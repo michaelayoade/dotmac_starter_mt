@@ -83,6 +83,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-network-topology`](../packages/dotmac-network-topology/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-topology/EXTRACTION.toml) | [tenant · `mod_nettop`](../packages/dotmac-network-topology/src/dotmac_network_topology/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-party`](../packages/dotmac-party/README.md) | optional module | [`audit-complete`](../packages/dotmac-party/EXTRACTION.toml) | [tenant · `mod_party`](../packages/dotmac-party/src/dotmac_party/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_backoffice`, `dotmac_sub` |
+| [`dotmac-platform-health`](../packages/dotmac-platform-health/README.md) | optional module | [`audit-complete`](../packages/dotmac-platform-health/EXTRACTION.toml) | [platform · `mod_health`](../packages/dotmac-platform-health/src/dotmac_platform_health/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a87` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-payables`](../packages/dotmac-payables/README.md) | optional module | [`audit-complete`](../packages/dotmac-payables/EXTRACTION.toml) | [tenant · `mod_payables`](../packages/dotmac-payables/src/dotmac_payables/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp` |
 | [`dotmac-payroll`](../packages/dotmac-payroll/README.md) | optional module | [`audit-complete`](../packages/dotmac-payroll/EXTRACTION.toml) | [tenant · `mod_payroll`](../packages/dotmac-payroll/src/dotmac_payroll/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_backoffice`, `dotmac_erp` |
 | [`dotmac-people`](../packages/dotmac-people/README.md) | optional module | [`audit-complete`](../packages/dotmac-people/EXTRACTION.toml) | [tenant · `mod_people`](../packages/dotmac-people/src/dotmac_people/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac_backoffice` |
@@ -97,6 +98,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-reseller-management`](../packages/dotmac-reseller-management/README.md) | optional module | [`audit-complete`](../packages/dotmac-reseller-management/EXTRACTION.toml) | [tenant · `mod_reseller`](../packages/dotmac-reseller-management/src/dotmac_reseller_management/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_sub` |
 | [`dotmac-sites`](../packages/dotmac-sites/README.md) | optional module | [`audit-complete`](../packages/dotmac-sites/EXTRACTION.toml) | [tenant · `mod_sites`](../packages/dotmac-sites/src/dotmac_sites/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac_backoffice`, `dotmac_sub` |
 | [`dotmac-surveys`](../packages/dotmac-surveys/README.md) | optional module | [`audit-complete`](../packages/dotmac-surveys/EXTRACTION.toml) | [tenant · `mod_surveys`](../packages/dotmac-surveys/src/dotmac_surveys/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-support-access`](../packages/dotmac-support-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-support-access/EXTRACTION.toml) | [platform · `mod_supportaccess`](../packages/dotmac-support-access/src/dotmac_support_access/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a87` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-tax`](../packages/dotmac-tax/README.md) | optional module | [`audit-complete`](../packages/dotmac-tax/EXTRACTION.toml) | [tenant · `mod_tax`](../packages/dotmac-tax/src/dotmac_tax/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_backoffice`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
@@ -422,6 +424,14 @@ and the next gate.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_backoffice`, `dotmac_sub`.
 
+### [`dotmac-platform-health`](../packages/dotmac-platform-health/README.md)
+
+- **Owner:** Platform application/runtime-health observation receipts, freshness projections and incident-ready summaries.
+- **Contract:** Accept bounded provider-neutral observations from a caller-proven source identity; retain immutable evidence; deterministically project latest state and explicit fresh/stale/missing classifications. NOT telemetry storage, alerts, incident lifecycle or deployment mutation.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-platform-health/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_vendor_control_plane`.
+
 ### [`dotmac-payables`](../packages/dotmac-payables/README.md)
 
 - **Owner:** Tenant supplier invoice, credit-note, liability and payment-obligation lifecycle
@@ -533,6 +543,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-surveys/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-support-access`](../packages/dotmac-support-access/README.md)
+
+- **Owner:** Platform temporary support-access requests, finite grants, revocation/expiry and audit workflow.
+- **Contract:** Bind a purpose/case/least-privilege request to exact Approval evidence; separately admit consent or break-glass under finite ceilings; expose a credential-free enforcement descriptor; revoke immediately and expire without renewal. NOT standing access, approval policy, authentication enforcement or credentials.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-support-access/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_vendor_control_plane`.
 
 ### [`dotmac-tax`](../packages/dotmac-tax/README.md)
 
