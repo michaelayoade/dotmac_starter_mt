@@ -773,6 +773,23 @@ type = "directory"
 url = "packages/dotmac-deployment-control"
 
 [[package]]
+name = "dotmac-document-rendering"
+version = "0.1.0a1"
+description = "Deterministic issued-document projection and rendering from immutable facts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a86"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-document-rendering"
+
+[[package]]
 name = "dotmac-documents"
 version = "0.1.0a1"
 description = "Controlled document identity, immutable versions and document-scoped lifecycle"
@@ -899,6 +916,24 @@ type = "directory"
 url = "packages/dotmac-finance"
 
 [[package]]
+name = "dotmac-fulfillment"
+version = "0.1.0a1"
+description = "DotMac tenant-scoped fulfillment saga, participant attempt, outcome, compensation, and convergence ownership"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a86"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-fulfillment"
+
+[[package]]
 name = "dotmac-imports"
 version = "0.1.0a2"
 description = "DotMac bulk-import run ledger, dry-run/apply promotion and column mapping"
@@ -991,7 +1026,7 @@ url = "packages/dotmac-ipam"
 
 [[package]]
 name = "dotmac-kernel"
-version = "0.1.0a85"
+version = "0.1.0a86"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -3701,4 +3736,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "199d3e91f4958f5aa8448fbfd238cb347dd2f464cc57f34ff84050781179624b"
+content-hash = "1b542daa40f8f86db0faf78a4e4a1fe49c8e8c9df7b4a38fc939c2c7d5079aff"
