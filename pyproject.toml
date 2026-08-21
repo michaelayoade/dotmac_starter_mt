@@ -200,6 +200,7 @@ cryptography = "^45"
 dotmac-connector-whatsapp = { path = "packages/dotmac-connector-whatsapp", develop = true }
 dotmac-connector-meta-social = { path = "packages/dotmac-connector-meta-social", develop = true }
 dotmac-connector-paystack = { path = "packages/dotmac-connector-paystack", develop = true }
+dotmac-connector-flutterwave = { path = "packages/dotmac-connector-flutterwave", develop = true }
 
 [tool.ruff]
 line-length = 88

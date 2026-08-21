@@ -137,6 +137,11 @@
       "reason": "INTENDED UNTIL PRODUCT-FIRST CUTOVER. The audited campaign lifecycle and exact-commit Observer validation are complete; kernel a73 and Durable Timers a1 are registry-verified, but current Sub authority evidence still blocks adoption: Sub pins kernel a50, does not compose its lineage, and records consent, idempotency and outbox as unresolved S7+ owner collisions. ADR-0032 requires those cutovers and Sub as the first campaigns authority, using the released kernel/timer contracts. Publishing earlier would create installable parallel owners beside the qualifying source. Remove this row only in the release change that records Sub as the first contract consumer and verifies the exact kernel, timers and campaigns artifacts; do not edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-connector-flutterwave": {
+      "declared": "0.1.0a1",
+      "reason": "ALLOWLISTED FOR RELEASE, NOT YET RELEASED, AND NOT ADOPTED. ADR-0017 authorizes this separate Flutterwave connector and its product-first dossier pins Sub as the qualifying source. The first package is deliberately Flutterwave API v4 only: exact-byte HMAC-SHA256 ingress, no v3 fallback, no provider egress and no financial consequence. Remove this row only after the protected-main release installs the exact artifact back from the registry, verifies conformance and writes dotmac-connector-flutterwave-v0.1.0a1; publication does not make Sub a consumer or retire its v3 receiver.",
+      "state": "never-published"
+    },
     "dotmac-documents": {
       "declared": "0.1.0a1",
       "reason": "INTENDED PUBLISH-PREP STATE. Documents is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and ERP's checked-in E8 tenant/session/lineage prerequisite plus opaque Files, Approvals and Timers adapters, handbook-version backfill, shadow comparison and writer retirement.",

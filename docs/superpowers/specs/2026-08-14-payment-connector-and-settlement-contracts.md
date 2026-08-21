@@ -1,8 +1,8 @@
 # The payment connector plugin and the settlement contracts
 
-> **Review status: PROPOSED — not reviewed, not frozen.** Nothing here
-> authorizes implementation. `packages/dotmac-connector-*` does not exist and
-> this document does not create it.
+> **Review status: PROPOSED — not reviewed, not frozen.** This is historical
+> intent, not proof of current behavior. Package-root `EXTRACTION.toml` files
+> and accepted ADR amendments govern implemented connector slices.
 >
 > **Status:** specification of intent, `docs/superpowers/specs/` —
 > non-authoritative. The accepted decisions are ADR-0024 §§ 6–7 and ADR-0020's
@@ -43,6 +43,22 @@ for every supported currency, including XOF. That is provider protocol, not the
 hardcoded currency fallback this specification rejects: the emitted currency
 is still mandatory and copied from the authenticated event, never defaulted.
 Generic future payment transports must not infer their scale from Paystack.
+
+## 2026-08-21 Flutterwave v4 implementation note
+
+The Flutterwave package targets API v4 only. It verifies the current
+`flutterwave-signature` as Base64 HMAC-SHA256 over the exact request bytes and
+accepts only the v4 `type`/`webhook_id` event envelope. It has no v3
+`verif-hash`, `event` or `tx_ref` fallback. Sub's v3 implementation remains the
+product-first normalization and cutover source, but its authentication scheme
+is deliberately not ported.
+
+The v4 charge webhook carries amount, currency, reference and provider status
+but no `app_fee`. The connector therefore omits `provider_fee`; zero would be a
+fabricated financial fact. Fee evidence is deferred to
+`payments.reconcile.v1`. The package's `EXTRACTION.toml` is authoritative for
+this released slice; the historical v3 findings remain evidence about the
+legacy product surface that cutover must retire.
 
 ---
 
