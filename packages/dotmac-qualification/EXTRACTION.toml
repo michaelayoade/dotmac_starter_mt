@@ -9,8 +9,6 @@ source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_sub:app/models/qualification.py",
   "dotmac_sub:app/services/qualification.py",
-  "dotmac_sub:app/services/gis_qualification_imports.py",
-  "dotmac_erp:app/models/inventory/item.py",
 ]
 preserved_tests = [
   "dotmac_sub:tests/test_qualification_services.py",

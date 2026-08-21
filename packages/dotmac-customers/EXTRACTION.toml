@@ -12,14 +12,11 @@ source_paths = [
   "dotmac_sub:app/services/customer_context.py",
   "dotmac_sub:app/services/subscriber.py",
   "dotmac_sub:app/services/customer_portal_contacts.py",
-  "dotmac_erp:app/models/finance/ar/customer.py",
-  "dotmac_erp:app/services/finance/ar/customer.py",
 ]
 preserved_tests = [
-  "dotmac_sub:tests/unit/test_customer_context.py",
-  "dotmac_sub:tests/unit/test_subscriber_party_binding.py",
-  "dotmac_sub:tests/unit/test_subscriber_profile_cleanup.py",
-  "dotmac_erp:tests/ifrs/ar/test_customer_service.py",
+  "dotmac_sub:tests/test_customer_context.py",
+  "dotmac_sub:tests/test_subscriber_party_binding.py",
+  "dotmac_sub:tests/test_subscriber_profile_cleanup.py",
   "dotmac_starter_mt:tests/unit/test_customers_service.py",
   "dotmac_starter_mt:tests/architecture/test_customers_module.py",
   "dotmac_starter_mt:tests/test_customers_isolation.py",

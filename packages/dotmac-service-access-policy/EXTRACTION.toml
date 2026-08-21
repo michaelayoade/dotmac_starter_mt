@@ -7,16 +7,20 @@ owner = "Per-service desired access decisions from operational policy inputs"
 contract = "Own current per-service FUP, prepaid, collections and administrative policy observations plus the derived desired ALLOW/RESTRICT/DENY state. Consequences are scoped to the affected service. NOT customer/subscriber status, balance/collections ownership, AAA facts, network-device state or enforcement."
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
-  "dotmac_sub:app/models/network_access.py",
-  "dotmac_sub:app/services/network_access_policy.py",
+  "dotmac_sub:app/models/fup.py",
+  "dotmac_sub:app/models/fup_state.py",
+  "dotmac_sub:app/models/prepaid_coverage.py",
+  "dotmac_sub:app/services/subscriber_access_policy.py",
   "dotmac_sub:app/services/fup.py",
-  "dotmac_sub:app/services/collections.py",
-  "dotmac_erp:app/models/subscription.py",
+  "dotmac_sub:app/services/prepaid_service_coverage.py",
+  "dotmac_sub:app/services/enforcement.py",
 ]
 preserved_tests = [
-  "dotmac_sub:tests/test_network_access_policy.py",
-  "dotmac_sub:tests/test_fup.py",
-  "dotmac_sub:tests/test_collections_service_scope.py",
+  "dotmac_sub:tests/architecture/test_subscription_service_access_boundary.py",
+  "dotmac_sub:tests/architecture/test_fup_rule_engine_boundary.py",
+  "dotmac_sub:tests/test_fup_period_aware_evaluation.py",
+  "dotmac_sub:tests/test_prepaid_service_coverage.py",
+  "dotmac_sub:tests/test_fup_enforcement_scope_and_evidence.py",
   "dotmac_starter_mt:tests/unit/test_service_access_policy_service.py",
   "dotmac_starter_mt:tests/architecture/test_service_access_policy_module.py",
   "dotmac_starter_mt:tests/test_service_access_policy_isolation.py",

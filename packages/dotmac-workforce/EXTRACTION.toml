@@ -23,13 +23,14 @@ source_paths = [
   "dotmac_crm:app/models/workforce.py",
   "dotmac_crm:app/services/workforce.py",
   "dotmac_crm:app/services/dotmac_erp/shift_sync.py",
+  "dotmac_crm:app/services/dotmac_erp/team_sync.py",
+  "dotmac_crm:app/services/dotmac_erp/technician_sync.py",
 ]
 preserved_tests = [
   "dotmac_sub:tests/test_service_team_lifecycle.py",
+  "dotmac_sub:tests/test_service_team_composition.py",
   "dotmac_sub:tests/test_capacity_planning.py",
-  "dotmac_sub:tests/test_dispatch.py",
-  "dotmac_crm:tests/test_workforce_sync.py",
-  "dotmac_erp:tests/services/test_skills_matrix_service.py",
+  "dotmac_sub:tests/test_dispatch_services.py",
   "dotmac_erp:tests/services/test_schedule_generator_rotating_work_days.py",
   "dotmac_erp:tests/services/test_attendance_service.py",
   "dotmac_starter_mt:tests/unit/test_workforce_service.py",

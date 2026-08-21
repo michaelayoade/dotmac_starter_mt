@@ -16,6 +16,8 @@ source_paths = [
   "dotmac_crm:app/models/workqueue.py",
   "dotmac_crm:app/services/crm/inbox/queue.py",
   "dotmac_crm:app/services/crm/inbox/routing.py",
+  "dotmac_crm:app/services/crm/presence.py",
+  "dotmac_crm:app/services/workqueue/aggregator.py",
 ]
 preserved_tests = [
   "dotmac_sub:tests/test_team_inbox_assignment.py",

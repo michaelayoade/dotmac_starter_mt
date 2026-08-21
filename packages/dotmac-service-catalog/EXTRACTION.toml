@@ -11,13 +11,11 @@ source_paths = [
   "dotmac_sub:app/models/catalog.py",
   "dotmac_sub:app/services/catalog/plan_family_catalogues.py",
   "dotmac_sub:app/services/catalog/validation.py",
-  "dotmac_erp:app/models/inventory/item.py",
-  "dotmac_erp:app/models/inventory/item_category.py",
 ]
 preserved_tests = [
   "dotmac_sub:tests/test_plan_family_catalogues.py",
+  "dotmac_sub:tests/architecture/test_plan_family_catalogue_boundary.py",
   "dotmac_sub:tests/test_catalog_contracts.py",
-  "dotmac_erp:tests/ifrs/inv/test_item_service.py",
   "dotmac_starter_mt:tests/unit/test_service_catalog_service.py",
   "dotmac_starter_mt:tests/architecture/test_service_catalog_module.py",
   "dotmac_starter_mt:tests/test_service_catalog_isolation.py",

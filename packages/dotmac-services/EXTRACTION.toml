@@ -7,14 +7,16 @@ owner = "Tenant service-instance identity and lifecycle transitions"
 contract = "Own service instances, their current lifecycle status and immutable transition history. Customer, specification and qualification identities are opaque references. NOT customer identity, catalogue, qualification, fulfillment, network/access enforcement, subscription contracts, usage, rating, invoicing or accounting."
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
-  "dotmac_sub:app/models/service.py",
-  "dotmac_sub:app/services/service_lifecycle.py",
-  "dotmac_sub:app/services/service_activation.py",
-  "dotmac_erp:app/models/subscription.py",
+  "dotmac_sub:app/models/subscription_engine.py",
+  "dotmac_sub:app/models/subscription_change.py",
+  "dotmac_sub:app/services/subscription_lifecycle.py",
+  "dotmac_sub:app/services/subscription_lifecycle_commands.py",
+  "dotmac_sub:app/services/subscription_lifecycle_evidence.py",
 ]
 preserved_tests = [
-  "dotmac_sub:tests/test_service_lifecycle.py",
-  "dotmac_sub:tests/test_service_activation.py",
+  "dotmac_sub:tests/test_subscription_lifecycle_contract.py",
+  "dotmac_sub:tests/test_subscription_lifecycle_commands.py",
+  "dotmac_sub:tests/architecture/test_generic_subscription_lifecycle_boundary.py",
   "dotmac_starter_mt:tests/unit/test_services_service.py",
   "dotmac_starter_mt:tests/architecture/test_services_module.py",
   "dotmac_starter_mt:tests/test_services_isolation.py",

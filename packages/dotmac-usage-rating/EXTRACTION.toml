@@ -7,14 +7,12 @@ owner = "Effective usage rating and immutable pre-tax obligations"
 contract = "Own versioned/effective meter rating rules and immutable rated usage obligations. Usage and service identities are opaque references. NOT usage collection, catalogue offers, subscription contracts, invoicing, tax, payment, revenue recognition or general-ledger posting."
 source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
 source_paths = [
-  "dotmac_sub:app/models/usage_rating.py",
-  "dotmac_sub:app/services/usage_rating.py",
-  "dotmac_sub:app/services/billing_usage.py",
-  "dotmac_erp:app/models/accounts/invoice.py",
+  "dotmac_sub:app/services/billing/rating.py",
+  "dotmac_sub:app/models/usage.py",
 ]
 preserved_tests = [
-  "dotmac_sub:tests/test_usage_rating.py",
-  "dotmac_sub:tests/test_usage_billing.py",
+  "dotmac_sub:tests/test_billing_rating.py",
+  "dotmac_sub:tests/test_usage_rollover.py",
   "dotmac_starter_mt:tests/unit/test_usage_rating_service.py",
   "dotmac_starter_mt:tests/architecture/test_usage_rating_module.py",
   "dotmac_starter_mt:tests/test_usage_rating_isolation.py",
