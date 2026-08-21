@@ -59,9 +59,10 @@ def test_forms_has_no_product_sibling_transport_or_transaction_authority() -> No
             elif isinstance(node, ast.ImportFrom) and node.module:
                 assert node.module.split(".", 1)[0] not in forbidden
             elif isinstance(node, ast.Call):
-                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                name = getattr(node.func, "id", None) or getattr(
+                    node.func, "attr", None
+                )
                 assert name not in forbidden_calls
     service = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
     assert ".commit(" not in service
     assert ".rollback(" not in service
-

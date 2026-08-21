@@ -34,4 +34,3 @@ class FiniteGrantDescriptor:
     mode: str
     issued_at: datetime
     expires_at: datetime
-

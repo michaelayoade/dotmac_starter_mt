@@ -22,4 +22,3 @@ class RemoteAccessIntent:
     grant_id: UUID
     target_ref: str
     scopes: tuple[str, ...]
-

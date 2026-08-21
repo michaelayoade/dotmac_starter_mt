@@ -1,7 +1,11 @@
 """Installable declaration for the tenant Workflow Runtime owner."""
 
 from dotmac_kernel.modules import ModuleManifest
-from dotmac_kernel.prerequisites import MODULE_DATABASE_ROLES_V1, TENANT_SCOPE_CATALOG_V1
+from dotmac_kernel.prerequisites import (
+    MODULE_DATABASE_ROLES_V1,
+    TENANT_SCOPE_CATALOG_V1,
+)
+
 from dotmac_workflow_runtime.models import TENANT_TABLES
 
 module = ModuleManifest(

@@ -13,9 +13,10 @@ from collections.abc import Iterable
 from typing import Any
 
 import sqlalchemy as sa
-from alembic import op
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
+
+from alembic import op
 
 revision = "wr_0001_runtime"
 down_revision = None
@@ -117,12 +118,18 @@ def upgrade() -> None:
         *_tenant_constraints("workflow_checkpoints"),
         sa.ForeignKeyConstraint(
             ["tenant_id", "execution_id"],
-            ["mod_workflow.workflow_executions.tenant_id", "mod_workflow.workflow_executions.id"],
+            [
+                "mod_workflow.workflow_executions.tenant_id",
+                "mod_workflow.workflow_executions.id",
+            ],
             ondelete="CASCADE",
             name="fk_workflow_checkpoints_execution",
         ),
         sa.UniqueConstraint(
-            "tenant_id", "execution_id", "code", name="uq_workflow_checkpoints_execution_code"
+            "tenant_id",
+            "execution_id",
+            "code",
+            name="uq_workflow_checkpoints_execution_code",
         ),
         sa.UniqueConstraint(
             "tenant_id",
@@ -153,13 +160,19 @@ def upgrade() -> None:
         *_tenant_constraints("workflow_repairs"),
         sa.ForeignKeyConstraint(
             ["tenant_id", "execution_id"],
-            ["mod_workflow.workflow_executions.tenant_id", "mod_workflow.workflow_executions.id"],
+            [
+                "mod_workflow.workflow_executions.tenant_id",
+                "mod_workflow.workflow_executions.id",
+            ],
             ondelete="RESTRICT",
             name="fk_workflow_repairs_execution",
         ),
         sa.ForeignKeyConstraint(
             ["tenant_id", "checkpoint_id"],
-            ["mod_workflow.workflow_checkpoints.tenant_id", "mod_workflow.workflow_checkpoints.id"],
+            [
+                "mod_workflow.workflow_checkpoints.tenant_id",
+                "mod_workflow.workflow_checkpoints.id",
+            ],
             ondelete="RESTRICT",
             name="fk_workflow_repairs_checkpoint",
         ),

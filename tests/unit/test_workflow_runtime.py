@@ -31,7 +31,9 @@ def db() -> Session:
         "sqlite:///:memory:",
         execution_options={"schema_translate_map": {"mod_workflow": None}},
     )
-    Base.metadata.create_all(engine, tables=[Tenant.__table__, *(m.__table__ for m in TENANT_MODELS)])
+    Base.metadata.create_all(
+        engine, tables=[Tenant.__table__, *(m.__table__ for m in TENANT_MODELS)]
+    )
     session = Session(engine)
     try:
         yield session
@@ -89,17 +91,65 @@ def test_execution_identity_replays_only_with_the_same_fingerprint(db: Session) 
         )
 
 
-def test_checkpoints_are_claimed_in_order_and_complete_the_execution(db: Session) -> None:
+def test_checkpoints_are_claimed_in_order_and_complete_the_execution(
+    db: Session,
+) -> None:
     tenant = _tenant(db)
     receipt = _start(db, tenant.id)
     at = datetime(2026, 8, 21, 8, 1, tzinfo=UTC)
     with pytest.raises(CheckpointUnavailable, match="earlier"):
-        claim_checkpoint(db, tenant_id=tenant.id, execution_id=receipt.execution.id, checkpoint_code="request_approval", worker_ref="worker:1", claimed_at=at, lease_until=at + timedelta(minutes=5))
+        claim_checkpoint(
+            db,
+            tenant_id=tenant.id,
+            execution_id=receipt.execution.id,
+            checkpoint_code="request_approval",
+            worker_ref="worker:1",
+            claimed_at=at,
+            lease_until=at + timedelta(minutes=5),
+        )
 
-    first = claim_checkpoint(db, tenant_id=tenant.id, execution_id=receipt.execution.id, checkpoint_code="validate", worker_ref="worker:1", claimed_at=at, lease_until=at + timedelta(minutes=5))
-    settle_checkpoint(db, tenant_id=tenant.id, command=SettleCheckpoint(first.id, "worker:1", "succeeded", output_ref="validation:ok", output_digest="d" * 64), settled_at=at + timedelta(seconds=1))
-    second = claim_checkpoint(db, tenant_id=tenant.id, execution_id=receipt.execution.id, checkpoint_code="request_approval", worker_ref="worker:2", claimed_at=at + timedelta(seconds=2), lease_until=at + timedelta(minutes=5))
-    settle_checkpoint(db, tenant_id=tenant.id, command=SettleCheckpoint(second.id, "worker:2", "succeeded", output_ref="approval:intent:42", output_digest="e" * 64), settled_at=at + timedelta(seconds=3))
+    first = claim_checkpoint(
+        db,
+        tenant_id=tenant.id,
+        execution_id=receipt.execution.id,
+        checkpoint_code="validate",
+        worker_ref="worker:1",
+        claimed_at=at,
+        lease_until=at + timedelta(minutes=5),
+    )
+    settle_checkpoint(
+        db,
+        tenant_id=tenant.id,
+        command=SettleCheckpoint(
+            first.id,
+            "worker:1",
+            "succeeded",
+            output_ref="validation:ok",
+            output_digest="d" * 64,
+        ),
+        settled_at=at + timedelta(seconds=1),
+    )
+    second = claim_checkpoint(
+        db,
+        tenant_id=tenant.id,
+        execution_id=receipt.execution.id,
+        checkpoint_code="request_approval",
+        worker_ref="worker:2",
+        claimed_at=at + timedelta(seconds=2),
+        lease_until=at + timedelta(minutes=5),
+    )
+    settle_checkpoint(
+        db,
+        tenant_id=tenant.id,
+        command=SettleCheckpoint(
+            second.id,
+            "worker:2",
+            "succeeded",
+            output_ref="approval:intent:42",
+            output_digest="e" * 64,
+        ),
+        settled_at=at + timedelta(seconds=3),
+    )
     assert receipt.execution.status == "succeeded"
     assert receipt.execution.completed_at == at + timedelta(seconds=3)
 
@@ -108,20 +158,58 @@ def test_failed_checkpoint_retries_then_requires_explicit_repair(db: Session) ->
     tenant = _tenant(db)
     receipt = _start(db, tenant.id)
     at = datetime(2026, 8, 21, 8, 1, tzinfo=UTC)
-    checkpoint = claim_checkpoint(db, tenant_id=tenant.id, execution_id=receipt.execution.id, checkpoint_code="validate", worker_ref="worker:1", claimed_at=at, lease_until=at + timedelta(minutes=5))
-    settle_checkpoint(db, tenant_id=tenant.id, command=SettleCheckpoint(checkpoint.id, "worker:1", "failed", error_code="invalid"), settled_at=at + timedelta(seconds=1))
+    checkpoint = claim_checkpoint(
+        db,
+        tenant_id=tenant.id,
+        execution_id=receipt.execution.id,
+        checkpoint_code="validate",
+        worker_ref="worker:1",
+        claimed_at=at,
+        lease_until=at + timedelta(minutes=5),
+    )
+    settle_checkpoint(
+        db,
+        tenant_id=tenant.id,
+        command=SettleCheckpoint(
+            checkpoint.id, "worker:1", "failed", error_code="invalid"
+        ),
+        settled_at=at + timedelta(seconds=1),
+    )
     assert checkpoint.status == "retryable"
-    checkpoint = claim_checkpoint(db, tenant_id=tenant.id, execution_id=receipt.execution.id, checkpoint_code="validate", worker_ref="worker:2", claimed_at=at + timedelta(seconds=2), lease_until=at + timedelta(minutes=5))
-    settle_checkpoint(db, tenant_id=tenant.id, command=SettleCheckpoint(checkpoint.id, "worker:2", "failed", error_code="still-invalid"), settled_at=at + timedelta(seconds=3))
+    checkpoint = claim_checkpoint(
+        db,
+        tenant_id=tenant.id,
+        execution_id=receipt.execution.id,
+        checkpoint_code="validate",
+        worker_ref="worker:2",
+        claimed_at=at + timedelta(seconds=2),
+        lease_until=at + timedelta(minutes=5),
+    )
+    settle_checkpoint(
+        db,
+        tenant_id=tenant.id,
+        command=SettleCheckpoint(
+            checkpoint.id, "worker:2", "failed", error_code="still-invalid"
+        ),
+        settled_at=at + timedelta(seconds=3),
+    )
     assert receipt.execution.status == "failed"
 
     repaired = record_repair(
         db,
         tenant_id=tenant.id,
-        command=RepairCommand(receipt.execution.id, "validate", "source evidence corrected", "f" * 64, "operator:7"),
+        command=RepairCommand(
+            receipt.execution.id,
+            "validate",
+            "source evidence corrected",
+            "f" * 64,
+            "operator:7",
+        ),
         repaired_at=at + timedelta(minutes=1),
     )
     assert checkpoint.status == "pending"
     assert receipt.execution.status == "running"
-    assert db.scalar(select(WorkflowRepair).where(WorkflowRepair.id == repaired.id)) is repaired
-
+    assert (
+        db.scalar(select(WorkflowRepair).where(WorkflowRepair.id == repaired.id))
+        is repaired
+    )

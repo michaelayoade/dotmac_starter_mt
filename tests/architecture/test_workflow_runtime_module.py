@@ -68,4 +68,3 @@ def test_runtime_cannot_execute_product_effects_or_own_transactions() -> None:
     service = (MODULE_ROOT / "service.py").read_text(encoding="utf-8")
     for forbidden_call in (".commit(", ".rollback(", "SessionLocal(", "sessionmaker("):
         assert forbidden_call not in service
-

@@ -9,6 +9,10 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 from uuid import UUID
 
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from dotmac_forms.contracts import (
     AnswerInput,
     AnswerValue,
@@ -29,9 +33,6 @@ from dotmac_forms.models import (
     FormSubmission,
     FormVersion,
 )
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 CHOICE_TYPES = {FieldType.SINGLE_CHOICE, FieldType.MULTI_CHOICE, FieldType.DROPDOWN}
 FILE_TYPES = {FieldType.FILE, FieldType.IMAGE, FieldType.PDF}
@@ -207,7 +208,9 @@ def add_option(
     definition: OptionDefinition,
 ) -> FormFieldOption:
     field = db.scalar(
-        select(FormField).where(FormField.tenant_id == tenant_id, FormField.id == field_id)
+        select(FormField).where(
+            FormField.tenant_id == tenant_id, FormField.id == field_id
+        )
     )
     if field is None:
         raise FormUnavailable("form field not found")
@@ -328,7 +331,9 @@ def _blank(value: AnswerValue) -> bool:
     return value is None or value == "" or value == ()
 
 
-def _review(field: FormField, value: AnswerValue, options: dict[str, str]) -> ReviewedAnswer:
+def _review(
+    field: FormField, value: AnswerValue, options: dict[str, str]
+) -> ReviewedAnswer:
     kind = FieldType(field.field_type)
     if _blank(value):
         if field.required:
@@ -339,7 +344,10 @@ def _review(field: FormField, value: AnswerValue, options: dict[str, str]) -> Re
             raise FormValidationError(f"{field.key} must be text")
         return ReviewedAnswer(value.strip(), value.strip())
     if kind is FieldType.EMAIL:
-        if not isinstance(value, str) or re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value.strip()) is None:
+        if (
+            not isinstance(value, str)
+            or re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value.strip()) is None
+        ):
             raise FormValidationError(f"{field.key} must be a valid email")
         normalized = value.strip().lower()
         return ReviewedAnswer(normalized, normalized)
@@ -370,7 +378,11 @@ def _review(field: FormField, value: AnswerValue, options: dict[str, str]) -> Re
             raise FormValidationError(f"{field.key} must name a declared option")
         return ReviewedAnswer(value, options[value])
     if kind is FieldType.MULTI_CHOICE:
-        if not isinstance(value, tuple) or not value or any(v not in options for v in value):
+        if (
+            not isinstance(value, tuple)
+            or not value
+            or any(v not in options for v in value)
+        ):
             raise FormValidationError(f"{field.key} must name declared options")
         selected = tuple(dict.fromkeys(value))
         return ReviewedAnswer(list(selected), ", ".join(options[v] for v in selected))
@@ -423,12 +435,14 @@ def submit_form(
         )
     ).all()
     options: dict[UUID, dict[str, str]] = {}
-    for row in option_rows:
-        options.setdefault(row.field_id, {})[row.value] = row.label
+    for option_row in option_rows:
+        options.setdefault(option_row.field_id, {})[option_row.value] = option_row.label
     reviewed: list[tuple[FormField, ReviewedAnswer]] = []
     for field in fields:
         answer = supplied.get(field.key, AnswerInput(field.key, None))
-        reviewed.append((field, _review(field, answer.value, options.get(field.id, {}))))
+        reviewed.append(
+            (field, _review(field, answer.value, options.get(field.id, {})))
+        )
     request_fingerprint = fingerprint(
         {
             "form_version_id": str(version.id),
@@ -447,7 +461,7 @@ def submit_form(
         if existing.request_fingerprint != request_fingerprint:
             raise SubmissionConflict("submission key was reused with different content")
         return SubmissionReceipt(existing, replayed=True)
-    row = FormSubmission(
+    submission = FormSubmission(
         tenant_id=tenant_id,
         submission_key=request.submission_key,
         form_version_id=version.id,
@@ -461,7 +475,7 @@ def submit_form(
 
     try:
         with conflict_savepoint(db):
-            db.add(row)
+            db.add(submission)
             db.flush()
     except IntegrityError as exc:
         replay = db.scalar(
@@ -477,7 +491,7 @@ def submit_form(
         [
             FormAnswer(
                 tenant_id=tenant_id,
-                submission_id=row.id,
+                submission_id=submission.id,
                 field_id=field.id,
                 field_key_snapshot=field.key,
                 field_label_snapshot=field.label,
@@ -491,7 +505,7 @@ def submit_form(
         ]
     )
     db.flush()
-    return SubmissionReceipt(row)
+    return SubmissionReceipt(submission)
 
 
 __all__ = [

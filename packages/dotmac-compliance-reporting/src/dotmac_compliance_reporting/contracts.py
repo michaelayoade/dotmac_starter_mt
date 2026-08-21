@@ -28,4 +28,3 @@ class AcknowledgementInput:
     outcome: str
     acknowledged_at: datetime
     evidence_ref: str
-

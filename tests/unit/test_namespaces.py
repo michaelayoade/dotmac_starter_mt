@@ -237,6 +237,10 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # `web_analytics` is the fifty-second: privacy-minimised first-party
     # observations and deterministic projections (ADR-0055). Property, origin,
     # consent and consequence policy remains with each adopting product.
+    # The ADR-0040 composable-unit cohort is the fifty-third through
+    # fifty-ninth: Forms, Workflow Runtime, Platform Health, Support Access,
+    # Remote Access, Compliance Reporting and AI Operations. Each has its own
+    # namespace and lineage even when products adopt them as a release cohort.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -291,6 +295,13 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "tax",
         "work_orders",
         "web_analytics",
+        "forms",
+        "workflow_runtime",
+        "platform_health",
+        "support_access",
+        "remote_access",
+        "compliance_reporting",
+        "ai_operations",
     }
 
 

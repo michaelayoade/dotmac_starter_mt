@@ -84,9 +84,13 @@ class FormVersion(Base):
     form_id: Mapped[UUID] = mapped_column(Uuid(), nullable=False)
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
-    settings: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    settings: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     content_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -171,17 +175,19 @@ class FormField(Base):
     field_type: Mapped[str] = mapped_column(String(32), nullable=False)
     required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     help_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    settings: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
-    validation: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    settings: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    validation: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class FormFieldOption(Base):
     __tablename__ = "form_field_options"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "id", name="uq_form_field_options_tenant_id_id"
-        ),
+        UniqueConstraint("tenant_id", "id", name="uq_form_field_options_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
             "field_id",
@@ -215,9 +221,7 @@ class FormFieldOption(Base):
 class FormSubmission(Base):
     __tablename__ = "form_submissions"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "id", name="uq_form_submissions_tenant_id_id"
-        ),
+        UniqueConstraint("tenant_id", "id", name="uq_form_submissions_tenant_id_id"),
         UniqueConstraint(
             "tenant_id", "submission_key", name="uq_form_submissions_tenant_key"
         ),
@@ -239,7 +243,9 @@ class FormSubmission(Base):
     submitted_by_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="submitted")
-    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class FormAnswer(Base):

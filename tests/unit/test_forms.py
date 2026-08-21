@@ -37,7 +37,9 @@ def db() -> Session:
         "sqlite:///:memory:",
         execution_options={"schema_translate_map": {"mod_forms": None}},
     )
-    Base.metadata.create_all(engine, tables=[Tenant.__table__, *(m.__table__ for m in TENANT_MODELS)])
+    Base.metadata.create_all(
+        engine, tables=[Tenant.__table__, *(m.__table__ for m in TENANT_MODELS)]
+    )
     session = Session(engine)
     try:
         yield session
@@ -65,7 +67,9 @@ def _published_form(db: Session, tenant_id):
         ),
         created_at=now,
     )
-    version = create_draft_version(db, tenant_id=tenant_id, form_id=form.id, created_at=now)
+    version = create_draft_version(
+        db, tenant_id=tenant_id, form_id=form.id, created_at=now
+    )
     section = add_section(
         db,
         tenant_id=tenant_id,
@@ -104,11 +108,15 @@ def _published_form(db: Session, tenant_id):
         field_id=role.id,
         definition=OptionDefinition(value="noc", label="NOC", position=1),
     )
-    published = publish_version(db, tenant_id=tenant_id, version_id=version.id, published_at=now)
+    published = publish_version(
+        db, tenant_id=tenant_id, version_id=version.id, published_at=now
+    )
     return published, section, email
 
 
-def test_published_version_is_immutable_and_carries_a_content_digest(db: Session) -> None:
+def test_published_version_is_immutable_and_carries_a_content_digest(
+    db: Session,
+) -> None:
     tenant = _tenant(db)
     version, section, _ = _published_form(db, tenant.id)
     assert version.status == "published"
@@ -132,34 +140,63 @@ def test_published_version_is_immutable_and_carries_a_content_digest(db: Session
 def test_submission_validates_required_email_and_closed_choice(db: Session) -> None:
     tenant = _tenant(db)
     version, _, _ = _published_form(db, tenant.id)
-    base = dict(
-        submission_key="application:42",
-        form_version_id=version.id,
-        subject_ref="candidate:42",
-        submitted_at=datetime(2026, 8, 21, 9, tzinfo=UTC),
-    )
+    base = {
+        "submission_key": "application:42",
+        "form_version_id": version.id,
+        "subject_ref": "candidate:42",
+        "submitted_at": datetime(2026, 8, 21, 9, tzinfo=UTC),
+    }
 
     with pytest.raises(FormValidationError, match="email"):
-        submit_form(db, tenant_id=tenant.id, request=SubmissionRequest(**base, answers=(AnswerInput("email", "not-an-email"), AnswerInput("role", "noc"))))
+        submit_form(
+            db,
+            tenant_id=tenant.id,
+            request=SubmissionRequest(
+                **base,
+                answers=(
+                    AnswerInput("email", "not-an-email"),
+                    AnswerInput("role", "noc"),
+                ),
+            ),
+        )
     with pytest.raises(FormValidationError, match="role"):
-        submit_form(db, tenant_id=tenant.id, request=SubmissionRequest(**base, answers=(AnswerInput("email", "ops@example.com"), AnswerInput("role", "sales"))))
+        submit_form(
+            db,
+            tenant_id=tenant.id,
+            request=SubmissionRequest(
+                **base,
+                answers=(
+                    AnswerInput("email", "ops@example.com"),
+                    AnswerInput("role", "sales"),
+                ),
+            ),
+        )
 
     receipt = submit_form(
         db,
         tenant_id=tenant.id,
         request=SubmissionRequest(
             **base,
-            answers=(AnswerInput("email", "ops@example.com"), AnswerInput("role", "noc")),
+            answers=(
+                AnswerInput("email", "ops@example.com"),
+                AnswerInput("role", "noc"),
+            ),
         ),
     )
-    answers = db.scalars(select(FormAnswer).where(FormAnswer.submission_id == receipt.submission.id)).all()
-    assert [(a.field_key_snapshot, a.field_label_snapshot, a.display_value) for a in answers] == [
+    answers = db.scalars(
+        select(FormAnswer).where(FormAnswer.submission_id == receipt.submission.id)
+    ).all()
+    assert [
+        (a.field_key_snapshot, a.field_label_snapshot, a.display_value) for a in answers
+    ] == [
         ("email", "Email", "ops@example.com"),
         ("role", "Role", "NOC"),
     ]
 
 
-def test_submission_key_is_idempotent_and_conflicts_on_different_answers(db: Session) -> None:
+def test_submission_key_is_idempotent_and_conflicts_on_different_answers(
+    db: Session,
+) -> None:
     tenant = _tenant(db)
     version, _, _ = _published_form(db, tenant.id)
     request = SubmissionRequest(
@@ -184,7 +221,9 @@ def test_submission_key_is_idempotent_and_conflicts_on_different_answers(db: Ses
                 form_version_id=version.id,
                 subject_ref=request.subject_ref,
                 submitted_at=request.submitted_at,
-                answers=(AnswerInput("email", "two@example.com"), AnswerInput("role", "noc")),
+                answers=(
+                    AnswerInput("email", "two@example.com"),
+                    AnswerInput("role", "noc"),
+                ),
             ),
         )
-

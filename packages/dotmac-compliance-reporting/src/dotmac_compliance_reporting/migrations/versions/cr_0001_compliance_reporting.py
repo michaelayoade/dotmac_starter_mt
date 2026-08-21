@@ -5,33 +5,276 @@ Revision ID: cr_0001_compliance_reporting
 Revises: (lineage root)
 Create Date: 2026-08-21
 """
+
 from __future__ import annotations
+
+from typing import Any
+
 import sqlalchemy as sa
-from alembic import op
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
 from sqlalchemy.dialects import postgresql
 
-revision = "cr_0001_compliance_reporting"; down_revision = None; branch_labels = ("compliance_reporting",)
-REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1"); depends_on = resolve_depends_on(REQUIRES); _SCHEMA = "mod_compliance"
+from alembic import op
+
+revision = "cr_0001_compliance_reporting"
+down_revision = None
+branch_labels = ("compliance_reporting",)
+REQUIRES = ("tenant_scope_catalog.v1", "module_database_roles.v1")
+depends_on = resolve_depends_on(REQUIRES)
+_SCHEMA = "mod_compliance"
 
 
-def _tenant_columns() -> list[sa.Column[object]]:
-    return [sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False), sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False)]
+def _tenant_columns() -> list[sa.Column[Any]]:
+    return [
+        sa.Column(
+            "id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False
+        ),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=True), nullable=False),
+    ]
 
 
 def upgrade() -> None:
-    require_prerequisites(op.get_bind(), REQUIRES); op.execute("CREATE SCHEMA IF NOT EXISTS mod_compliance;"); op.execute("GRANT USAGE ON SCHEMA mod_compliance TO app_user, app_admin;")
-    op.create_table("reporting_obligations", *_tenant_columns(), sa.Column("code", sa.String(120), nullable=False), sa.Column("jurisdiction", sa.String(120), nullable=False), sa.Column("title", sa.String(240), nullable=False), sa.Column("active", sa.Boolean(), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False), sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False), sa.ForeignKeyConstraint(["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"), sa.UniqueConstraint("tenant_id", "id", name="uq_reporting_obligations_tenant_id_id"), sa.UniqueConstraint("tenant_id", "code", name="uq_reporting_obligations_code"), schema=_SCHEMA)
-    op.create_table("classification_revisions", *_tenant_columns(), sa.Column("obligation_id", postgresql.UUID(as_uuid=True), nullable=False), sa.Column("version", sa.Integer(), nullable=False), sa.Column("section_codes", postgresql.JSONB(), nullable=False), sa.Column("content_digest", sa.String(64), nullable=False), sa.Column("effective_from", sa.Date(), nullable=False), sa.Column("published_at", sa.DateTime(timezone=True), nullable=False), sa.ForeignKeyConstraint(["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"), sa.ForeignKeyConstraint(["tenant_id", "obligation_id"], ["mod_compliance.reporting_obligations.tenant_id", "mod_compliance.reporting_obligations.id"], ondelete="RESTRICT"), sa.UniqueConstraint("tenant_id", "id", name="uq_classification_revisions_tenant_id_id"), sa.UniqueConstraint("tenant_id", "obligation_id", "version", name="uq_classification_revisions_version"), schema=_SCHEMA)
-    op.create_table("evidence_packs", *_tenant_columns(), sa.Column("obligation_id", postgresql.UUID(as_uuid=True), nullable=False), sa.Column("classification_revision_id", postgresql.UUID(as_uuid=True), nullable=False), sa.Column("period_start", sa.Date(), nullable=False), sa.Column("period_end", sa.Date(), nullable=False), sa.Column("pack_digest", sa.String(64), nullable=False), sa.Column("status", sa.String(24), nullable=False), sa.Column("assembled_at", sa.DateTime(timezone=True), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False), sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False), sa.ForeignKeyConstraint(["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"), sa.ForeignKeyConstraint(["tenant_id", "obligation_id"], ["mod_compliance.reporting_obligations.tenant_id", "mod_compliance.reporting_obligations.id"], ondelete="RESTRICT"), sa.ForeignKeyConstraint(["tenant_id", "classification_revision_id"], ["mod_compliance.classification_revisions.tenant_id", "mod_compliance.classification_revisions.id"], ondelete="RESTRICT"), sa.UniqueConstraint("tenant_id", "id", name="uq_evidence_packs_tenant_id_id"), sa.UniqueConstraint("tenant_id", "obligation_id", "period_start", "period_end", name="uq_evidence_packs_period"), schema=_SCHEMA)
-    op.create_table("evidence_sections", *_tenant_columns(), sa.Column("pack_id", postgresql.UUID(as_uuid=True), nullable=False), sa.Column("section_code", sa.String(120), nullable=False), sa.Column("source_owner", sa.String(120), nullable=False), sa.Column("state", sa.String(20), nullable=False), sa.Column("evidence_ref", sa.String(240)), sa.Column("evidence_digest", sa.String(64)), sa.Column("unavailable_reason", sa.Text()), sa.ForeignKeyConstraint(["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"), sa.ForeignKeyConstraint(["tenant_id", "pack_id"], ["mod_compliance.evidence_packs.tenant_id", "mod_compliance.evidence_packs.id"], ondelete="CASCADE"), sa.UniqueConstraint("tenant_id", "id", name="uq_evidence_sections_tenant_id_id"), sa.UniqueConstraint("tenant_id", "pack_id", "section_code", name="uq_evidence_sections_pack_code"), schema=_SCHEMA)
-    op.create_table("filing_submissions", *_tenant_columns(), sa.Column("pack_id", postgresql.UUID(as_uuid=True), nullable=False), sa.Column("submitted_pack_digest", sa.String(64), nullable=False), sa.Column("submission_ref", sa.String(240), nullable=False), sa.Column("status", sa.String(24), nullable=False), sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False), sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False), sa.ForeignKeyConstraint(["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"), sa.ForeignKeyConstraint(["tenant_id", "pack_id"], ["mod_compliance.evidence_packs.tenant_id", "mod_compliance.evidence_packs.id"], ondelete="RESTRICT"), sa.UniqueConstraint("tenant_id", "id", name="uq_filing_submissions_tenant_id_id"), sa.UniqueConstraint("tenant_id", "pack_id", name="uq_filing_submissions_pack"), sa.UniqueConstraint("tenant_id", "submission_ref", name="uq_filing_submissions_ref"), schema=_SCHEMA)
-    op.create_table("regulator_acknowledgements", *_tenant_columns(), sa.Column("submission_id", postgresql.UUID(as_uuid=True), nullable=False), sa.Column("acknowledgement_key", sa.String(200), nullable=False), sa.Column("outcome", sa.String(24), nullable=False), sa.Column("acknowledged_at", sa.DateTime(timezone=True), nullable=False), sa.Column("evidence_ref", sa.String(240), nullable=False), sa.ForeignKeyConstraint(["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"), sa.ForeignKeyConstraint(["tenant_id", "submission_id"], ["mod_compliance.filing_submissions.tenant_id", "mod_compliance.filing_submissions.id"], ondelete="RESTRICT"), sa.UniqueConstraint("tenant_id", "id", name="uq_regulator_acknowledgements_tenant_id_id"), sa.UniqueConstraint("tenant_id", "acknowledgement_key", name="uq_regulator_acknowledgements_key"), schema=_SCHEMA)
-    for table in ("reporting_obligations", "classification_revisions", "evidence_packs", "evidence_sections", "filing_submissions", "regulator_acknowledgements"):
-        op.execute(f"ALTER TABLE {_SCHEMA}.{table} ENABLE ROW LEVEL SECURITY;"); op.execute(f"ALTER TABLE {_SCHEMA}.{table} FORCE ROW LEVEL SECURITY;"); op.execute(f"CREATE POLICY {table}_tenant_isolation ON {_SCHEMA}.{table} USING (tenant_id = public.app_current_tenant_id()) WITH CHECK (tenant_id = public.app_current_tenant_id());"); op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {_SCHEMA}.{table} TO app_user, app_admin;")
+    require_prerequisites(op.get_bind(), REQUIRES)
+    op.execute("CREATE SCHEMA IF NOT EXISTS mod_compliance;")
+    op.execute("GRANT USAGE ON SCHEMA mod_compliance TO app_user, app_admin;")
+    op.create_table(
+        "reporting_obligations",
+        *_tenant_columns(),
+        sa.Column("code", sa.String(120), nullable=False),
+        sa.Column("jurisdiction", sa.String(120), nullable=False),
+        sa.Column("title", sa.String(240), nullable=False),
+        sa.Column("active", sa.Boolean(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"
+        ),
+        sa.UniqueConstraint(
+            "tenant_id", "id", name="uq_reporting_obligations_tenant_id_id"
+        ),
+        sa.UniqueConstraint("tenant_id", "code", name="uq_reporting_obligations_code"),
+        schema=_SCHEMA,
+    )
+    op.create_table(
+        "classification_revisions",
+        *_tenant_columns(),
+        sa.Column("obligation_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("version", sa.Integer(), nullable=False),
+        sa.Column("section_codes", postgresql.JSONB(), nullable=False),
+        sa.Column("content_digest", sa.String(64), nullable=False),
+        sa.Column("effective_from", sa.Date(), nullable=False),
+        sa.Column("published_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "obligation_id"],
+            [
+                "mod_compliance.reporting_obligations.tenant_id",
+                "mod_compliance.reporting_obligations.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint(
+            "tenant_id", "id", name="uq_classification_revisions_tenant_id_id"
+        ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "obligation_id",
+            "version",
+            name="uq_classification_revisions_version",
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_table(
+        "evidence_packs",
+        *_tenant_columns(),
+        sa.Column("obligation_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "classification_revision_id", postgresql.UUID(as_uuid=True), nullable=False
+        ),
+        sa.Column("period_start", sa.Date(), nullable=False),
+        sa.Column("period_end", sa.Date(), nullable=False),
+        sa.Column("pack_digest", sa.String(64), nullable=False),
+        sa.Column("status", sa.String(24), nullable=False),
+        sa.Column("assembled_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "obligation_id"],
+            [
+                "mod_compliance.reporting_obligations.tenant_id",
+                "mod_compliance.reporting_obligations.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "classification_revision_id"],
+            [
+                "mod_compliance.classification_revisions.tenant_id",
+                "mod_compliance.classification_revisions.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint("tenant_id", "id", name="uq_evidence_packs_tenant_id_id"),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "obligation_id",
+            "period_start",
+            "period_end",
+            name="uq_evidence_packs_period",
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_table(
+        "evidence_sections",
+        *_tenant_columns(),
+        sa.Column("pack_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("section_code", sa.String(120), nullable=False),
+        sa.Column("source_owner", sa.String(120), nullable=False),
+        sa.Column("state", sa.String(20), nullable=False),
+        sa.Column("evidence_ref", sa.String(240)),
+        sa.Column("evidence_digest", sa.String(64)),
+        sa.Column("unavailable_reason", sa.Text()),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "pack_id"],
+            [
+                "mod_compliance.evidence_packs.tenant_id",
+                "mod_compliance.evidence_packs.id",
+            ],
+            ondelete="CASCADE",
+        ),
+        sa.UniqueConstraint(
+            "tenant_id", "id", name="uq_evidence_sections_tenant_id_id"
+        ),
+        sa.UniqueConstraint(
+            "tenant_id",
+            "pack_id",
+            "section_code",
+            name="uq_evidence_sections_pack_code",
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_table(
+        "filing_submissions",
+        *_tenant_columns(),
+        sa.Column("pack_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("submitted_pack_digest", sa.String(64), nullable=False),
+        sa.Column("submission_ref", sa.String(240), nullable=False),
+        sa.Column("status", sa.String(24), nullable=False),
+        sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "pack_id"],
+            [
+                "mod_compliance.evidence_packs.tenant_id",
+                "mod_compliance.evidence_packs.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint(
+            "tenant_id", "id", name="uq_filing_submissions_tenant_id_id"
+        ),
+        sa.UniqueConstraint("tenant_id", "pack_id", name="uq_filing_submissions_pack"),
+        sa.UniqueConstraint(
+            "tenant_id", "submission_ref", name="uq_filing_submissions_ref"
+        ),
+        schema=_SCHEMA,
+    )
+    op.create_table(
+        "regulator_acknowledgements",
+        *_tenant_columns(),
+        sa.Column("submission_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("acknowledgement_key", sa.String(200), nullable=False),
+        sa.Column("outcome", sa.String(24), nullable=False),
+        sa.Column("acknowledged_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("evidence_ref", sa.String(240), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"], ["public.tenants.id"], ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "submission_id"],
+            [
+                "mod_compliance.filing_submissions.tenant_id",
+                "mod_compliance.filing_submissions.id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint(
+            "tenant_id", "id", name="uq_regulator_acknowledgements_tenant_id_id"
+        ),
+        sa.UniqueConstraint(
+            "tenant_id", "acknowledgement_key", name="uq_regulator_acknowledgements_key"
+        ),
+        schema=_SCHEMA,
+    )
+    for table in (
+        "reporting_obligations",
+        "classification_revisions",
+        "evidence_packs",
+        "evidence_sections",
+        "filing_submissions",
+        "regulator_acknowledgements",
+    ):
+        op.execute(f"ALTER TABLE {_SCHEMA}.{table} ENABLE ROW LEVEL SECURITY;")
+        op.execute(f"ALTER TABLE {_SCHEMA}.{table} FORCE ROW LEVEL SECURITY;")
+        op.execute(
+            f"CREATE POLICY {table}_tenant_isolation ON {_SCHEMA}.{table} USING (tenant_id = public.app_current_tenant_id()) WITH CHECK (tenant_id = public.app_current_tenant_id());"
+        )
+        op.execute(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON {_SCHEMA}.{table} TO app_user, app_admin;"
+        )
 
 
 def downgrade() -> None:
-    for table in ("regulator_acknowledgements", "filing_submissions", "evidence_sections", "evidence_packs", "classification_revisions", "reporting_obligations"): op.drop_table(table, schema=_SCHEMA)
+    for table in (
+        "regulator_acknowledgements",
+        "filing_submissions",
+        "evidence_sections",
+        "evidence_packs",
+        "classification_revisions",
+        "reporting_obligations",
+    ):
+        op.drop_table(table, schema=_SCHEMA)
     op.execute("DROP SCHEMA IF EXISTS mod_compliance;")

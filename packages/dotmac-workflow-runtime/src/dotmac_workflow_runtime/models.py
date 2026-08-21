@@ -33,9 +33,7 @@ def tenant_id_column() -> Mapped[UUID]:
 class WorkflowExecution(Base):
     __tablename__ = "workflow_executions"
     __table_args__ = (
-        UniqueConstraint(
-            "tenant_id", "id", name="uq_workflow_executions_tenant_id_id"
-        ),
+        UniqueConstraint("tenant_id", "id", name="uq_workflow_executions_tenant_id_id"),
         UniqueConstraint(
             "tenant_id",
             "source_owner",
@@ -46,9 +44,7 @@ class WorkflowExecution(Base):
             "status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')",
             name="ck_workflow_executions_status",
         ),
-        Index(
-            "ix_workflow_executions_tenant_subject", "tenant_id", "subject_ref"
-        ),
+        Index("ix_workflow_executions_tenant_subject", "tenant_id", "subject_ref"),
         schema_table_args(SCHEMA),
     )
 
@@ -61,7 +57,9 @@ class WorkflowExecution(Base):
     source_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -157,7 +155,9 @@ class WorkflowRepair(Base):
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     repaired_by_ref: Mapped[str] = mapped_column(String(255), nullable=False)
-    repaired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    repaired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 TENANT_MODELS = (WorkflowExecution, WorkflowCheckpoint, WorkflowRepair)

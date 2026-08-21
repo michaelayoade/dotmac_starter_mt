@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from dotmac_workflow_runtime.contracts import (
     RepairCommand,
     SettleCheckpoint,
@@ -16,9 +20,6 @@ from dotmac_workflow_runtime.models import (
     WorkflowExecution,
     WorkflowRepair,
 )
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 
 class WorkflowError(ValueError):
@@ -82,7 +83,9 @@ def start_execution(
     existing = db.scalar(select(WorkflowExecution).where(*identity))
     if existing is not None:
         if existing.request_fingerprint != command.request_fingerprint:
-            raise WorkflowConflict("source event was replayed with a different fingerprint")
+            raise WorkflowConflict(
+                "source event was replayed with a different fingerprint"
+            )
         return ExecutionReceipt(existing, replayed=True)
     row = WorkflowExecution(
         tenant_id=tenant_id,
@@ -103,7 +106,10 @@ def start_execution(
             db.flush()
     except IntegrityError as exc:
         replay = db.scalar(select(WorkflowExecution).where(*identity))
-        if replay is not None and replay.request_fingerprint == command.request_fingerprint:
+        if (
+            replay is not None
+            and replay.request_fingerprint == command.request_fingerprint
+        ):
             return ExecutionReceipt(replay, replayed=True)
         raise WorkflowConflict("workflow execution identity conflicts") from exc
     db.add_all(
@@ -210,7 +216,9 @@ def settle_checkpoint(
         raise CheckpointUnavailable("checkpoint does not have an active lease")
     if checkpoint.lease_owner_ref != command.worker_ref:
         raise CheckpointUnavailable("checkpoint lease belongs to another worker")
-    if checkpoint.lease_expires_at is None or _instant(checkpoint.lease_expires_at) <= _instant(settled_at):
+    if checkpoint.lease_expires_at is None or _instant(
+        checkpoint.lease_expires_at
+    ) <= _instant(settled_at):
         raise CheckpointUnavailable("checkpoint lease expired before settlement")
     execution = _execution(db, tenant_id, checkpoint.execution_id)
     checkpoint.lease_owner_ref = None
@@ -265,7 +273,11 @@ def record_repair(
         )
         .with_for_update()
     )
-    if execution.status != "failed" or checkpoint is None or checkpoint.status != "failed":
+    if (
+        execution.status != "failed"
+        or checkpoint is None
+        or checkpoint.status != "failed"
+    ):
         raise CheckpointUnavailable("only a terminal failed checkpoint may be repaired")
     row = WorkflowRepair(
         tenant_id=tenant_id,

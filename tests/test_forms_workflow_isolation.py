@@ -15,9 +15,16 @@ from dotmac_workflow_runtime.manifest import module as workflow_module
 from sqlalchemy import create_engine, text
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-KERNEL_VERSIONS = REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
-FORMS_VERSIONS = REPO_ROOT / "packages/dotmac-forms/src/dotmac_forms/migrations/versions"
-WORKFLOW_VERSIONS = REPO_ROOT / "packages/dotmac-workflow-runtime/src/dotmac_workflow_runtime/migrations/versions"
+KERNEL_VERSIONS = (
+    REPO_ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
+)
+FORMS_VERSIONS = (
+    REPO_ROOT / "packages/dotmac-forms/src/dotmac_forms/migrations/versions"
+)
+WORKFLOW_VERSIONS = (
+    REPO_ROOT
+    / "packages/dotmac-workflow-runtime/src/dotmac_workflow_runtime/migrations/versions"
+)
 
 
 def _superuser_url() -> str:
@@ -86,7 +93,10 @@ def test_forms_and_workflow_are_cross_tenant_isolated(
     with admin.begin() as conn:
         for tenant_id, slug in ((tenant_a, "alpha"), (tenant_b, "bravo")):
             conn.execute(
-                text("INSERT INTO public.tenants (id, slug, name) VALUES (:id, :slug, :name)"),
+                text(
+                    "INSERT INTO public.tenants (id, slug, name) "
+                    "VALUES (:id, :slug, :name)"
+                ),
                 {"id": tenant_id, "slug": slug, "name": slug.title()},
             )
         conn.execute(
@@ -99,9 +109,10 @@ def test_forms_and_workflow_are_cross_tenant_isolated(
         conn.execute(
             text(
                 "INSERT INTO mod_workflow.workflow_executions "
-                "(id, tenant_id, definition_version_ref, definition_digest, subject_ref, "
-                "source_owner, source_event_id, request_fingerprint, status, started_at) "
-                "VALUES (:id, :tenant, 'workflow:v1', :digest, 'expense:1', 'expenses', "
+                "(id, tenant_id, definition_version_ref, definition_digest, "
+                "subject_ref, source_owner, source_event_id, request_fingerprint, "
+                "status, started_at) VALUES (:id, :tenant, 'workflow:v1', :digest, "
+                "'expense:1', 'expenses', "
                 "'event:1', :digest, 'pending', now())"
             ),
             {"id": uuid.uuid4(), "tenant": tenant_a, "digest": "a" * 64},
@@ -115,6 +126,9 @@ def test_forms_and_workflow_are_cross_tenant_isolated(
             {"tenant": str(tenant_b)},
         )
         assert conn.scalar(text("SELECT count(*) FROM mod_forms.forms")) == 0
-        assert conn.scalar(text("SELECT count(*) FROM mod_workflow.workflow_executions")) == 0
+        assert (
+            conn.scalar(text("SELECT count(*) FROM mod_workflow.workflow_executions"))
+            == 0
+        )
     app.dispose()
     admin.dispose()

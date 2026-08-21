@@ -1,5 +1,7 @@
 """Provider-neutral AI commands, execution observations and intents."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -33,4 +35,3 @@ class InsightInput:
     advisory_value: str
     confidence: float | None
     source_output_digest: str
-

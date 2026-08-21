@@ -13,9 +13,10 @@ from collections.abc import Iterable
 from typing import Any
 
 import sqlalchemy as sa
-from alembic import op
 from dotmac_kernel.migrations.verify import require_prerequisites
 from dotmac_kernel.prerequisites import resolve_depends_on
+
+from alembic import op
 
 revision = "fm_0001_forms"
 down_revision = None
@@ -104,7 +105,9 @@ def upgrade() -> None:
         *_tenant_constraints("forms"),
         schema=_SCHEMA,
     )
-    op.create_index("ix_forms_tenant_type", "forms", ["tenant_id", "form_type"], schema=_SCHEMA)
+    op.create_index(
+        "ix_forms_tenant_type", "forms", ["tenant_id", "form_type"], schema=_SCHEMA
+    )
 
     op.create_table(
         "form_versions",
@@ -124,10 +127,14 @@ def upgrade() -> None:
             name="fk_form_versions_form",
         ),
         sa.UniqueConstraint(
-            "tenant_id", "form_id", "version_number", name="uq_form_versions_tenant_form_number"
+            "tenant_id",
+            "form_id",
+            "version_number",
+            name="uq_form_versions_tenant_form_number",
         ),
         sa.CheckConstraint(
-            "status IN ('draft', 'published', 'archived')", name="ck_form_versions_status"
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_form_versions_status",
         ),
         sa.CheckConstraint("version_number > 0", name="ck_form_versions_number"),
         schema=_SCHEMA,
@@ -165,7 +172,10 @@ def upgrade() -> None:
             "tenant_id", "version_id", "key", name="uq_form_sections_version_key"
         ),
         sa.UniqueConstraint(
-            "tenant_id", "version_id", "position", name="uq_form_sections_version_position"
+            "tenant_id",
+            "version_id",
+            "position",
+            name="uq_form_sections_version_position",
         ),
         schema=_SCHEMA,
     )
@@ -232,7 +242,10 @@ def upgrade() -> None:
             "tenant_id", "field_id", "value", name="uq_form_field_options_field_value"
         ),
         sa.UniqueConstraint(
-            "tenant_id", "field_id", "position", name="uq_form_field_options_field_position"
+            "tenant_id",
+            "field_id",
+            "position",
+            name="uq_form_field_options_field_position",
         ),
         schema=_SCHEMA,
     )
@@ -291,7 +304,10 @@ def upgrade() -> None:
             name="fk_form_answers_field",
         ),
         sa.UniqueConstraint(
-            "tenant_id", "submission_id", "field_id", name="uq_form_answers_submission_field"
+            "tenant_id",
+            "submission_id",
+            "field_id",
+            name="uq_form_answers_submission_field",
         ),
         schema=_SCHEMA,
     )

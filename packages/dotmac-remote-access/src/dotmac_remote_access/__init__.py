@@ -2,6 +2,25 @@
 
 from dotmac_remote_access.contracts import RemoteAccessIntent, RemoteAccessRequestInput
 from dotmac_remote_access.manifest import module
-from dotmac_remote_access.service import AccessRefused, admit_request, create_request, expire_grants, record_observation, revoke_grant
+from dotmac_remote_access.migrations import versions_dir
+from dotmac_remote_access.service import (
+    AccessRefused,
+    admit_request,
+    create_request,
+    expire_grants,
+    record_observation,
+    revoke_grant,
+)
 
-__all__ = ["AccessRefused", "RemoteAccessIntent", "RemoteAccessRequestInput", "admit_request", "create_request", "expire_grants", "module", "record_observation", "revoke_grant"]
+__all__ = [
+    "AccessRefused",
+    "RemoteAccessIntent",
+    "RemoteAccessRequestInput",
+    "admit_request",
+    "create_request",
+    "expire_grants",
+    "module",
+    "record_observation",
+    "revoke_grant",
+    "versions_dir",
+]

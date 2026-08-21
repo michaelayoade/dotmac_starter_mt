@@ -1,8 +1,12 @@
 """Installable declaration for the tenant Forms owner."""
 
-from dotmac_forms.models import TENANT_TABLES
 from dotmac_kernel.modules import ModuleManifest
-from dotmac_kernel.prerequisites import MODULE_DATABASE_ROLES_V1, TENANT_SCOPE_CATALOG_V1
+from dotmac_kernel.prerequisites import (
+    MODULE_DATABASE_ROLES_V1,
+    TENANT_SCOPE_CATALOG_V1,
+)
+
+from dotmac_forms.models import TENANT_TABLES
 
 module = ModuleManifest(
     code="forms",

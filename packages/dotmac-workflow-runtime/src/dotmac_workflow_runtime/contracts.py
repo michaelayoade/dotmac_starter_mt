@@ -43,9 +43,20 @@ class StartExecution:
             "source_event_id",
         ):
             object.__setattr__(self, name, required(name, getattr(self, name)))
-        object.__setattr__(self, "definition_digest", digest("definition_digest", self.definition_digest))
-        object.__setattr__(self, "request_fingerprint", digest("request_fingerprint", self.request_fingerprint))
-        codes = tuple(required("checkpoint code", code, 80).lower() for code in self.checkpoint_codes)
+        object.__setattr__(
+            self,
+            "definition_digest",
+            digest("definition_digest", self.definition_digest),
+        )
+        object.__setattr__(
+            self,
+            "request_fingerprint",
+            digest("request_fingerprint", self.request_fingerprint),
+        )
+        codes = tuple(
+            required("checkpoint code", code, 80).lower()
+            for code in self.checkpoint_codes
+        )
         if not codes or len(codes) != len(set(codes)):
             raise ContractError("checkpoint_codes must be non-empty and unique")
         object.__setattr__(self, "checkpoint_codes", codes)
@@ -69,11 +80,17 @@ class SettleCheckpoint:
             raise ContractError("outcome must be succeeded or failed")
         object.__setattr__(self, "outcome", outcome)
         if self.output_ref is not None:
-            object.__setattr__(self, "output_ref", required("output_ref", self.output_ref, 500))
+            object.__setattr__(
+                self, "output_ref", required("output_ref", self.output_ref, 500)
+            )
         if self.output_digest is not None:
-            object.__setattr__(self, "output_digest", digest("output_digest", self.output_digest))
+            object.__setattr__(
+                self, "output_digest", digest("output_digest", self.output_digest)
+            )
         if self.error_code is not None:
-            object.__setattr__(self, "error_code", required("error_code", self.error_code, 120))
+            object.__setattr__(
+                self, "error_code", required("error_code", self.error_code, 120)
+            )
         if outcome == "failed" and self.error_code is None:
             raise ContractError("a failed checkpoint requires error_code")
 
@@ -87,10 +104,18 @@ class RepairCommand:
     repaired_by_ref: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "checkpoint_code", required("checkpoint_code", self.checkpoint_code, 80).lower())
+        object.__setattr__(
+            self,
+            "checkpoint_code",
+            required("checkpoint_code", self.checkpoint_code, 80).lower(),
+        )
         object.__setattr__(self, "reason", required("reason", self.reason, 2000))
-        object.__setattr__(self, "evidence_digest", digest("evidence_digest", self.evidence_digest))
-        object.__setattr__(self, "repaired_by_ref", required("repaired_by_ref", self.repaired_by_ref))
+        object.__setattr__(
+            self, "evidence_digest", digest("evidence_digest", self.evidence_digest)
+        )
+        object.__setattr__(
+            self, "repaired_by_ref", required("repaired_by_ref", self.repaired_by_ref)
+        )
 
 
 __all__ = ["ContractError", "RepairCommand", "SettleCheckpoint", "StartExecution"]

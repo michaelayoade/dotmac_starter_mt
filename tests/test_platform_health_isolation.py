@@ -16,9 +16,20 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 ROOT = Path(__file__).resolve().parent.parent
 KERNEL = ROOT / "packages/dotmac-kernel/src/dotmac_kernel/migrations/versions"
-VERSIONS = ROOT / "packages/dotmac-platform-health/src/dotmac_platform_health/migrations/versions"
+VERSIONS = (
+    ROOT
+    / "packages/dotmac-platform-health/src/dotmac_platform_health/migrations/versions"
+)
 TABLES = module.platform_tables
-PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
+PRIVILEGES = (
+    "SELECT",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "TRUNCATE",
+    "REFERENCES",
+    "TRIGGER",
+)
 
 
 def _url(base: str, database: str, user: str | None = None) -> str:
@@ -31,7 +42,9 @@ def _url(base: str, database: str, user: str | None = None) -> str:
 
 @pytest.fixture(scope="module")
 def database() -> Iterator[tuple[str, str, str]]:
-    superuser = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv("TEST_DATABASE_URL")
+    superuser = os.getenv("TEST_MIGRATION_DATABASE_URL") or os.getenv(
+        "TEST_DATABASE_URL"
+    )
     if not superuser:
         pytest.skip("TEST_DATABASE_URL not set — platform grants need Postgres")
     name = f"health_{uuid.uuid4().hex[:10]}"
@@ -56,10 +69,20 @@ def database() -> Iterator[tuple[str, str, str]]:
         cfg.set_main_option("version_locations", f"{KERNEL} {VERSIONS}")
         os.environ["MIGRATION_DATABASE_URL"] = admin
         command.upgrade(cfg, "heads")
-        yield admin, _url(superuser, name, "platform_api"), _url(superuser, name, "app_user")
+        yield (
+            admin,
+            _url(superuser, name, "platform_api"),
+            _url(superuser, name, "app_user"),
+        )
     finally:
         with server.connect() as conn:
-            conn.execute(text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :name AND pid <> pg_backend_pid()"), {"name": name})
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
             conn.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
         server.dispose()
 
@@ -68,19 +91,42 @@ def test_health_platform_catalog_and_privileges(database: tuple[str, str, str]) 
     admin_url, platform_url, app_url = database
     engine = create_engine(admin_url)
     with engine.connect() as conn:
-        assert audit_live_schemas(conn, NamespaceRegistry.from_manifests([module])) == ()
+        assert (
+            audit_live_schemas(conn, NamespaceRegistry.from_manifests([module])) == ()
+        )
         for table in TABLES:
-            enabled, forced = conn.execute(text("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = CAST(:table AS regclass)"), {"table": f"mod_health.{table}"}).one()
+            enabled, forced = conn.execute(
+                text(
+                    "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
+                    "WHERE oid = CAST(:table AS regclass)"
+                ),
+                {"table": f"mod_health.{table}"},
+            ).one()
             assert not enabled and not forced
-            assert any(conn.scalar(text("SELECT has_table_privilege('platform_api', :table, :privilege)"), {"table": f"mod_health.{table}", "privilege": p}) for p in ("SELECT", "INSERT", "UPDATE", "DELETE"))
-            assert not any(conn.scalar(text("SELECT has_table_privilege('app_user', :table, :privilege)"), {"table": f"mod_health.{table}", "privilege": p}) for p in PRIVILEGES)
+            assert any(
+                conn.scalar(
+                    text(
+                        "SELECT has_table_privilege('platform_api', :table, :privilege)"
+                    ),
+                    {"table": f"mod_health.{table}", "privilege": p},
+                )
+                for p in ("SELECT", "INSERT", "UPDATE", "DELETE")
+            )
+            assert not any(
+                conn.scalar(
+                    text("SELECT has_table_privilege('app_user', :table, :privilege)"),
+                    {"table": f"mod_health.{table}", "privilege": p},
+                )
+                for p in PRIVILEGES
+            )
     engine.dispose()
     platform = create_engine(platform_url)
     with platform.connect() as conn:
-        assert conn.scalar(text("SELECT count(*) FROM mod_health.health_components")) == 0
+        assert (
+            conn.scalar(text("SELECT count(*) FROM mod_health.health_components")) == 0
+        )
     platform.dispose()
     app = create_engine(app_url)
     with app.connect() as conn, pytest.raises((DBAPIError, ProgrammingError)):
         conn.execute(text("SELECT 1 FROM mod_health.health_components"))
     app.dispose()
-

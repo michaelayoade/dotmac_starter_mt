@@ -6,7 +6,10 @@ import ast
 import inspect
 from pathlib import Path
 
-from dotmac_kernel.namespaces import MIGRATION_OWNER_LEDGER, SUPPORT_ACCESS_MIGRATION_OWNER
+from dotmac_kernel.namespaces import (
+    MIGRATION_OWNER_LEDGER,
+    SUPPORT_ACCESS_MIGRATION_OWNER,
+)
 from dotmac_support_access import models
 from dotmac_support_access.manifest import module
 
@@ -28,10 +31,27 @@ def test_support_access_is_one_declared_platform_lineage() -> None:
 
 
 def test_support_access_stores_no_credential_or_enforcement_secret() -> None:
-    forbidden_names = {"token", "credential", "password", "secret", "session_cookie", "private_key"}
-    columns = {column.name for model in models.PLATFORM_MODELS for column in model.__table__.columns}
+    forbidden_names = {
+        "token",
+        "credential",
+        "password",
+        "secret",
+        "session_cookie",
+        "private_key",
+    }
+    columns = {
+        column.name
+        for model in models.PLATFORM_MODELS
+        for column in model.__table__.columns
+    }
     assert not columns & forbidden_names
-    forbidden_imports = {"app", "dotmac_approvals", "dotmac_integration", "httpx", "requests"}
+    forbidden_imports = {
+        "app",
+        "dotmac_approvals",
+        "dotmac_integration",
+        "httpx",
+        "requests",
+    }
     for path in ROOT.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         roots: set[str] = set()
@@ -48,9 +68,14 @@ def test_support_access_stores_no_credential_or_enforcement_secret() -> None:
 
 def test_support_access_migration_states_both_halves_of_platform_isolation() -> None:
     source = MIGRATION.read_text(encoding="utf-8")
-    assert "GRANT USAGE ON SCHEMA mod_supportaccess TO platform_api, app_admin" in source
+    assert (
+        "GRANT USAGE ON SCHEMA mod_supportaccess TO platform_api, app_admin" in source
+    )
     for table in module.platform_tables:
-        assert f"GRANT SELECT, INSERT, UPDATE, DELETE ON mod_supportaccess.{table} TO platform_api" in source
+        grant = (
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON "
+            f"mod_supportaccess.{table} TO platform_api"
+        )
+        assert grant in source
         assert f"REVOKE ALL ON mod_supportaccess.{table} FROM app_user" in source
     assert "ROW LEVEL SECURITY" not in source
-
