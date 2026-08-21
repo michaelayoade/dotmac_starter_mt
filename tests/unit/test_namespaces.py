@@ -308,6 +308,17 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "sales",
         "support_access",
         "service_access_policy",
+        # The ADR-0040 composable-unit cohort. Support Access already has its
+        # row from the `sa` arbitration above; these six complete the seven, so
+        # the whole cohort composes against one ledger and shares one floor.
+        # Allocation only — no module is published, adopted or authoritative
+        # because of this.
+        "forms",
+        "workflow_runtime",
+        "platform_health",
+        "remote_access",
+        "compliance_reporting",
+        "ai_operations",
     }
 
 

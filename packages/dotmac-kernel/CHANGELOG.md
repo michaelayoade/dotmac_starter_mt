@@ -6,11 +6,13 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a87 — UNRELEASED
+## 0.1.0a88 — UNRELEASED
 
-Splits canonical fingerprinting out of the persistence-backed idempotency owner
-and allocates the independent tenant Fulfillment lineage. This is a new kernel
-release because a86 is already published and immutable.
+Splits canonical fingerprinting out of the persistence-backed idempotency owner,
+allocates the independent tenant Fulfillment lineage, settles a three-way
+contest for one migration prefix, and allocates the six remaining ADR-0040
+capability lineages. This is a new kernel release because a86 is
+already published and immutable.
 
 ### Added
 
@@ -20,11 +22,40 @@ release because a86 is already published and immutable.
 - `FULFILLMENT_MIGRATION_OWNER` — `mod_fulfillment`, revision prefix `fu`,
   branch label `fulfillment`. This allocates physical lineage identity only;
   it composes, publishes and adopts no Fulfillment module.
+- `SALES_MIGRATION_OWNER` (`mod_sales`, prefix `sa`),
+  `SUPPORT_ACCESS_MIGRATION_OWNER` (`mod_supportaccess`, prefix `sup`) and
+  `SERVICE_ACCESS_POLICY_MIGRATION_OWNER` (`mod_serviceaccess`, prefix `sap`).
+  Three unmerged candidate trains had each allocated `prefix="sa"`
+  independently, and every one of them was green — no check a branch runs on
+  itself can see a sibling branch, so uniqueness can only be settled in this
+  canonical ledger. Arbitrated while all three are unreleased and a rename is
+  still free: `sales` keeps `sa`, and the two access modules take three-letter
+  prefixes rather than a second two-letter pair, because `sa`/`sp`/`sc` for
+  three neighbouring access concepts is exactly the confusion a permanent
+  database identity must not carry. All three are DORMANT allocations —
+  physical lineage identity only, composing and adopting nothing.
+- The six remaining ADR-0040 capability lineages, allocated together so every
+  implementation branch composes against one ledger: Forms (`fm`,
+  `mod_forms`), Workflow Runtime (`wr`, `mod_workflow`), Platform Health
+  (`ph`, `mod_health`), Remote Access (`ra`, `mod_remoteaccess`), Compliance
+  Reporting (`cr`, `mod_compliance`) and AI Operations (`ao`, `mod_aiops`).
+  Support Access consumes the permanent (`sup`, `mod_supportaccess`) row from
+  the `sa` arbitration above, so the seven-module cohort has one floor. This
+  is namespace identity only: no module is published, adopted or authoritative
+  because of this kernel change.
 
 ### Changed
 
 - `dotmac_kernel.idempotency.fingerprint_of` is now a re-export of the
   persistence-free definition. Existing imports remain supported.
+
+## 0.1.0a87 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a88
+
+Carried the fingerprint seam and the Fulfillment allocation above. Never
+dispatched: the `sa` arbitration landed on `main` before a87 was built, so the
+version bumped to a88 rather than publishing an artifact whose changelog no
+longer described its contents. No kernel artifact was ever built at this
+version, and no consumer can pin it.
 
 ## 0.1.0a86 — 2026-08-21
 
