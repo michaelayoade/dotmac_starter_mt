@@ -1639,6 +1639,393 @@
           "python"
         ]
       }
+    },
+    "dotmac-inventory": {
+      "$comment": [
+        "Tenant stock ledger: immutable movements, reservations, lot/serial",
+        "traceability and valuation (ADR-0036). Product-first from Sub.",
+        "Kernel a82 allocates mod_inventory / iv / inventory; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-inventory",
+      "import_name": "dotmac_inventory",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_inventory",
+      "tag_prefix": "dotmac-inventory-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_inventory/py.typed",
+          "dotmac_inventory/contracts.py",
+          "dotmac_inventory/manifest.py",
+          "dotmac_inventory/migrations/__init__.py",
+          "dotmac_inventory/migrations/versions/iv_0001_inventory.py",
+          "dotmac_inventory/models.py",
+          "dotmac_inventory/service.py",
+          "dotmac_inventory/valuation.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-assets": {
+      "$comment": [
+        "Tenant durable-unit identity, custody, maintenance and disposal",
+        "(ADR-0037). Finance and product extensions stay opaque collaborators.",
+        "Kernel a82 allocates mod_assets / as / assets; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-assets",
+      "import_name": "dotmac_assets",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_assets",
+      "tag_prefix": "dotmac-assets-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_assets/py.typed",
+          "dotmac_assets/contracts.py",
+          "dotmac_assets/lifecycle.py",
+          "dotmac_assets/manifest.py",
+          "dotmac_assets/migrations/__init__.py",
+          "dotmac_assets/migrations/versions/as_0001_assets.py",
+          "dotmac_assets/models.py",
+          "dotmac_assets/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-ipam": {
+      "$comment": [
+        "Tenant address-space allocation and assignment (ADR-0038).",
+        "Subscriber and service consequences stay in the adopting product.",
+        "Kernel a82 allocates mod_ipam / ip / ipam; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-ipam",
+      "import_name": "dotmac_ipam",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_ipam",
+      "tag_prefix": "dotmac-ipam-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_ipam/py.typed",
+          "dotmac_ipam/contracts.py",
+          "dotmac_ipam/manifest.py",
+          "dotmac_ipam/migrations/__init__.py",
+          "dotmac_ipam/migrations/versions/ip_0001_ipam.py",
+          "dotmac_ipam/models.py",
+          "dotmac_ipam/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-network-inventory": {
+      "$comment": [
+        "Tenant network-element identity and lifecycle (ADR-0038).",
+        "Vendor, dispatch and commercial state stay product-owned.",
+        "Kernel a82 allocates mod_netinv / ni / network_inventory; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-network-inventory",
+      "import_name": "dotmac_network_inventory",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_netinv",
+      "tag_prefix": "dotmac-network-inventory-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_network_inventory/py.typed",
+          "dotmac_network_inventory/contracts.py",
+          "dotmac_network_inventory/manifest.py",
+          "dotmac_network_inventory/migrations/__init__.py",
+          "dotmac_network_inventory/migrations/versions/ni_0001_network_inventory.py",
+          "dotmac_network_inventory/models.py",
+          "dotmac_network_inventory/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-network-observability": {
+      "$comment": [
+        "Tenant collected network measurements (ADR-0038). Observations only:",
+        "impact assessment belongs to network assurance, alerting to products.",
+        "Kernel a82 allocates mod_netobs / no / network_observability; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-network-observability",
+      "import_name": "dotmac_network_observability",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_netobs",
+      "tag_prefix": "dotmac-network-observability-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_network_observability/py.typed",
+          "dotmac_network_observability/contracts.py",
+          "dotmac_network_observability/manifest.py",
+          "dotmac_network_observability/migrations/__init__.py",
+          "dotmac_network_observability/migrations/versions/no_0001_net_observability.py",
+          "dotmac_network_observability/models.py",
+          "dotmac_network_observability/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-network-topology": {
+      "$comment": [
+        "Tenant declared link and path structure (ADR-0038).",
+        "Physical plant belongs to fiber plant; service impact to assurance.",
+        "Kernel a82 allocates mod_nettop / nt / network_topology; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-network-topology",
+      "import_name": "dotmac_network_topology",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_nettop",
+      "tag_prefix": "dotmac-network-topology-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_network_topology/py.typed",
+          "dotmac_network_topology/contracts.py",
+          "dotmac_network_topology/manifest.py",
+          "dotmac_network_topology/migrations/__init__.py",
+          "dotmac_network_topology/migrations/versions/nt_0001_network_topology.py",
+          "dotmac_network_topology/models.py",
+          "dotmac_network_topology/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-network-assurance": {
+      "$comment": [
+        "Tenant derived service-impact assessment (ADR-0038). Derives from",
+        "observations and topology; customer consequence stays in the product.",
+        "Kernel a82 allocates mod_netassure / na / network_assurance; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-network-assurance",
+      "import_name": "dotmac_network_assurance",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_netassure",
+      "tag_prefix": "dotmac-network-assurance-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_network_assurance/py.typed",
+          "dotmac_network_assurance/contracts.py",
+          "dotmac_network_assurance/manifest.py",
+          "dotmac_network_assurance/migrations/__init__.py",
+          "dotmac_network_assurance/migrations/versions/na_0001_network_assurance.py",
+          "dotmac_network_assurance/models.py",
+          "dotmac_network_assurance/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-network-control": {
+      "$comment": [
+        "Tenant requested and executed control actions (ADR-0038).",
+        "Device transport stays in Integrator; authorization in the product.",
+        "Kernel a82 allocates mod_netctrl / nc / network_control; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-network-control",
+      "import_name": "dotmac_network_control",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_netctrl",
+      "tag_prefix": "dotmac-network-control-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_network_control/py.typed",
+          "dotmac_network_control/contracts.py",
+          "dotmac_network_control/manifest.py",
+          "dotmac_network_control/migrations/__init__.py",
+          "dotmac_network_control/migrations/versions/nc_0001_network_control.py",
+          "dotmac_network_control/models.py",
+          "dotmac_network_control/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-fiber-plant": {
+      "$comment": [
+        "Tenant outside-plant structures, strands, splices and continuity",
+        "(ADR-0038). Logical topology stays in network topology.",
+        "Kernel a82 allocates mod_fiber / fp / fiber_plant; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-fiber-plant",
+      "import_name": "dotmac_fiber_plant",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_fiber",
+      "tag_prefix": "dotmac-fiber-plant-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_fiber_plant/py.typed",
+          "dotmac_fiber_plant/contracts.py",
+          "dotmac_fiber_plant/manifest.py",
+          "dotmac_fiber_plant/migrations/__init__.py",
+          "dotmac_fiber_plant/migrations/versions/fp_0001_fiber_plant.py",
+          "dotmac_fiber_plant/models.py",
+          "dotmac_fiber_plant/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-network-access": {
+      "$comment": [
+        "Tenant subscriber access sessions and authorization facts (ADR-0038).",
+        "Subscriber identity and commercial policy stay product-owned.",
+        "Kernel a82 allocates mod_netaccess / nac / network_access; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-network-access",
+      "import_name": "dotmac_network_access",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_netaccess",
+      "tag_prefix": "dotmac-network-access-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_network_access/py.typed",
+          "dotmac_network_access/contracts.py",
+          "dotmac_network_access/manifest.py",
+          "dotmac_network_access/migrations/__init__.py",
+          "dotmac_network_access/migrations/versions/nac_0001_network_access.py",
+          "dotmac_network_access/models.py",
+          "dotmac_network_access/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-pon-access": {
+      "$comment": [
+        "Tenant PON terminals, service ports and optical evidence (ADR-0038).",
+        "Provisioning decisions and customer consequence stay in the product.",
+        "Kernel a82 allocates mod_pon / pn / pon_access; a83 ships it."
+      ],
+      "package_dir": "packages/dotmac-pon-access",
+      "import_name": "dotmac_pon_access",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a83",
+      "db_schema": "mod_pon",
+      "tag_prefix": "dotmac-pon-access-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_pon_access/py.typed",
+          "dotmac_pon_access/contracts.py",
+          "dotmac_pon_access/manifest.py",
+          "dotmac_pon_access/migrations/__init__.py",
+          "dotmac_pon_access/migrations/versions/pn_0001_pon_access.py",
+          "dotmac_pon_access/models.py",
+          "dotmac_pon_access/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
     }
   }
 }

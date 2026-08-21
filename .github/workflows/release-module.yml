@@ -82,6 +82,17 @@ on:
           - dotmac-surveys
           - dotmac-tax
           - dotmac-work-orders
+          - dotmac-inventory
+          - dotmac-assets
+          - dotmac-ipam
+          - dotmac-network-inventory
+          - dotmac-network-observability
+          - dotmac-network-topology
+          - dotmac-network-assurance
+          - dotmac-network-control
+          - dotmac-fiber-plant
+          - dotmac-network-access
+          - dotmac-pon-access
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true
