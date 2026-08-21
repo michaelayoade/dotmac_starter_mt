@@ -94,7 +94,9 @@ the other's lifecycle.
 
 ADR-0040 accepts the next Sub vNext parity cohort without claiming it is
 installed today. The product-first inventory and extraction dossiers are
-complete; implementation, publication and adoption remain separate gates. The
+complete. Forms and Workflow Runtime now have audit-complete implementation
+candidates on the a86 integration branch; publication and adoption remain
+separate gates. The
 accepted owners are `dotmac-referrals`, `dotmac-reseller-management`,
 `dotmac-ai-operations`, `dotmac-remote-access`,
 `dotmac-compliance-reporting`, `dotmac-workflow-runtime`,
@@ -106,8 +108,8 @@ The tenant plane is accepted for Referrals, Reseller Management, AI Operations,
 Remote Access, Compliance Reporting, Workflow Runtime and Forms. Support Access
 and Platform Health are platform-plane capabilities with the Vendor control
 plane as their first candidate assembly. These are target ownership decisions,
-not entries in the as-built module registry below; each enters that registry
-only with its manifest, lineage, catalog and live isolation canary.
+not installation claims. An owner enters the as-built registry below only with
+its manifest, lineage, catalogue entry and live isolation canary.
 
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
@@ -1563,6 +1565,9 @@ made concrete — every model has exactly one declared owner.
 | `ReferralCode` / `Referral` / `ReferralConversion` | `mod_referrals.referral_codes`, `referrals`, `referral_conversions` | `dotmac-referrals` optional module | Finite invitation identity, idempotent source attribution and evidence-bound conversion. The conversion writes a provider-neutral reward request to the kernel outbox; it never creates a lead/customer or applies a credit. |
 | `ResellerAccount` / `ResellerAuthorityRevision` | `mod_reseller.reseller_accounts`, `reseller_authority_revisions` | `dotmac-reseller-management` optional module | Product-first from Sub: tenant reseller identity, cycle-safe hierarchy, active/suspended/retired lifecycle and immutable least-privilege delegated authority. Party roles are opaque references; Commercial Agreements and Entitlement Allocation remain independent owners (ADR-0040). |
 | `ResellerMemberBinding` / `ResellerCustomerAccountBinding` | `mod_reseller.reseller_member_bindings`, `reseller_customer_account_bindings` | `dotmac-reseller-management` optional module | Tenant-scoped bindings to opaque member and customer-account identities. They authorize no login and copy no Party or Customer state; commissions, payouts, invoices and customer lifecycle do not enter this namespace. |
+| `Form` / `FormVersion` / `FormSection` / `FormField` / `FormFieldOption` | `mod_forms.forms`, `form_versions`, `form_sections`, `form_fields`, `form_field_options` | `dotmac-forms` optional module | Product-first port of ERP's seven-table reusable form definition owner. Published versions freeze an exact digest; subject meaning and file bytes remain opaque external references (ADR-0040). |
+| `FormSubmission` / `FormAnswer` | `mod_forms.form_submissions`, `form_answers` | `dotmac-forms` optional module | One idempotent submission against an exact published version plus immutable typed value, display and field-definition snapshots. The module validates capture but decides no subject consequence. |
+| `WorkflowExecution` / `WorkflowCheckpoint` / `WorkflowRepair` | `mod_workflow.workflow_executions`, `workflow_checkpoints`, `workflow_repairs` | `dotmac-workflow-runtime` optional module | Product-first runtime-only port from ERP: ordered finite claims, bounded retry and evidence-bound repair over opaque definition/subject/output references. Assemblies execute every external/domain effect (ADR-0040). |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -1611,6 +1616,8 @@ write:
 | Outbound campaign identity and recipient progression | `dotmac_campaigns.service` — `create_campaign`/`revise_campaign`, `ingest_audience`, `schedule_campaign`, `accept_due_work`, `record_observation`, pause/resume/cancel/complete, `authorize_delivery`, `request_unsubscribe`, counter rebuild and publication/privacy repair. Every path receives and flushes the caller session. Kernel consent decides eligibility, kernel idempotency owns replay, kernel outbox owns publication, Durable Timers owns due-work mechanics, and product adapters supply audience/render/sender/Sales facts; none is a parallel campaigns writer (ADR-0032). |
 | Referral programmes, codes, attribution and conversions | `dotmac_referrals.service` — `create_programme`, `issue_code`, `capture_referral`, and `record_conversion`. Every call receives an explicit tenant scope and caller session; conversion evidence and its reward-request outbox fact flush atomically. Party, Customer, Lead and Billing mutations remain outside the module (ADR-0040). |
 | Reseller account identity, hierarchy, delegated authority, bindings and lifecycle | `dotmac_reseller_management.service` — `create_account`, `set_parent`, `publish_authority`, `bind_member`, `bind_customer_account`, and `transition_account`. The owner receives an explicit tenant scope and caller session, rejects hierarchy cycles and authority broader than the parent revision, and flushes provider-neutral status facts through the kernel outbox. Party, Customer, Commercial Agreements, Entitlement Allocation, authentication, commissions, payouts and invoices remain outside the module (ADR-0040). |
+| Reusable form definitions, versions, fields/options, submissions and answer snapshots | `dotmac_forms.service` — `create_form`, `create_draft_version`, `add_section`, `add_field`, `add_option`, `publish_version`, and `submit_form`. Published definitions are digest-frozen; stable submission keys conflict on different content. Subject lifecycle, file bytes, rendering and consequences remain outside the module (ADR-0040). |
+| User-authored workflow execution, checkpoint claims/results and repair evidence | `dotmac_workflow_runtime.service` — `start_execution`, `claim_checkpoint`, `settle_checkpoint`, and `record_repair`. Checkpoints advance strictly in order under finite leases and bounded attempts; a terminal failure resumes only from explicit repair evidence. Definition authoring, timers, transport and every domain/provider effect remain assembly-owned (ADR-0040). |
 | Durable timer generations, cancellation and acceptance/rejection evidence | `dotmac_durable_timers.service` is the sole lifecycle writer on both declared planes: `schedule_timer`, `cancel_timer`, `accept_trigger`, `current_timer`, and `purge_history`. Identity-level PostgreSQL advisory locks serialize even the first schedule; cancellation names the observed generation and refuses a newer current generation; trigger acceptance re-derives current state and records stale evidence with observed/current generations and the opaque source version. The package exports typed ports, never ORM models. A schedule resolves the consuming module's manifest-declared outbox event type, calls the kernel outbox writer in the same transaction and sets `available_at=due_at`; `dotmac_kernel.messaging.relay` remains the sole owner of claim, lease, retry and dead-letter behavior. Business deadline policy and the effect after an accepted trigger remain with the adopting product. This reference assembly builds and proves the optional package but does not compose its `dt` lineage. |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
 
