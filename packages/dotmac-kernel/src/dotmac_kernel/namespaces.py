@@ -1022,6 +1022,58 @@ WEB_ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("webanalytics"),
 )
 
+# ADR-0040 retained seven narrow capability owners after the fleet-wide source
+# audit. They are allocated as one cohort so every focused implementation
+# branch shares the same immutable physical identity and kernel floor.
+FORMS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="forms",
+    prefix="fm",
+    branch_label="forms",
+    db_schema=module_schema("forms"),
+)
+
+WORKFLOW_RUNTIME_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="workflow_runtime",
+    prefix="wr",
+    branch_label="workflow_runtime",
+    db_schema=module_schema("workflow"),
+)
+
+PLATFORM_HEALTH_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="platform_health",
+    prefix="ph",
+    branch_label="platform_health",
+    db_schema=module_schema("health"),
+)
+
+SUPPORT_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="support_access",
+    prefix="sa",
+    branch_label="support_access",
+    db_schema=module_schema("supportaccess"),
+)
+
+REMOTE_ACCESS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="remote_access",
+    prefix="ra",
+    branch_label="remote_access",
+    db_schema=module_schema("remoteaccess"),
+)
+
+COMPLIANCE_REPORTING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="compliance_reporting",
+    prefix="cr",
+    branch_label="compliance_reporting",
+    db_schema=module_schema("compliance"),
+)
+
+AI_OPERATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="ai_operations",
+    prefix="ao",
+    branch_label="ai_operations",
+    db_schema=module_schema("aiops"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1076,6 +1128,13 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     TAX_MIGRATION_OWNER,
     WORK_ORDERS_MIGRATION_OWNER,
     WEB_ANALYTICS_MIGRATION_OWNER,
+    FORMS_MIGRATION_OWNER,
+    WORKFLOW_RUNTIME_MIGRATION_OWNER,
+    PLATFORM_HEALTH_MIGRATION_OWNER,
+    SUPPORT_ACCESS_MIGRATION_OWNER,
+    REMOTE_ACCESS_MIGRATION_OWNER,
+    COMPLIANCE_REPORTING_MIGRATION_OWNER,
+    AI_OPERATIONS_MIGRATION_OWNER,
 )
 
 
@@ -1406,11 +1465,13 @@ class NamespaceRegistry:
 
 
 __all__ = [
+    "AI_OPERATIONS_MIGRATION_OWNER",
     "APPLICATION_DIRECTORY_MIGRATION_OWNER",
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
+    "FORMS_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
@@ -1421,10 +1482,15 @@ __all__ = [
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
+    "PLATFORM_HEALTH_MIGRATION_OWNER",
+    "COMPLIANCE_REPORTING_MIGRATION_OWNER",
+    "REMOTE_ACCESS_MIGRATION_OWNER",
     "REFERRALS_MIGRATION_OWNER",
     "RESELLER_MANAGEMENT_MIGRATION_OWNER",
     "WEB_ANALYTICS_MIGRATION_OWNER",
+    "SUPPORT_ACCESS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
+    "WORKFLOW_RUNTIME_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
     "MODULE_SCHEMA_PREFIX",

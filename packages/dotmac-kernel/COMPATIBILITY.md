@@ -291,7 +291,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a85`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a87`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -348,6 +348,13 @@ retired prefix is never reused.
 | `surveys` | `mod_surveys` | `sv` | `surveys` |
 | `tax` | `mod_tax` | `tx` | `tax` |
 | `work_orders` | `mod_workorders` | `wo` | `work_orders` |
+| `forms` | `mod_forms` | `fm` | `forms` |
+| `workflow_runtime` | `mod_workflow` | `wr` | `workflow_runtime` |
+| `platform_health` | `mod_health` | `ph` | `platform_health` |
+| `support_access` | `mod_supportaccess` | `sa` | `support_access` |
+| `remote_access` | `mod_remoteaccess` | `ra` | `remote_access` |
+| `compliance_reporting` | `mod_compliance` | `cr` | `compliance_reporting` |
+| `ai_operations` | `mod_aiops` | `ao` | `ai_operations` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
