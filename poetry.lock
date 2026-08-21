@@ -862,6 +862,23 @@ type = "directory"
 url = "packages/dotmac-deployment-control"
 
 [[package]]
+name = "dotmac-document-rendering"
+version = "0.1.0a1"
+description = "Deterministic issued-document projection and rendering from immutable facts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a87"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-document-rendering"
+
+[[package]]
 name = "dotmac-documents"
 version = "0.1.0a1"
 description = "Controlled document identity, immutable versions and document-scoped lifecycle"
@@ -3807,4 +3824,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "34eb0eecf8827606701095740cf9c68866f142bb2a2a47001dab0de80111d080"
+content-hash = "b85e99c53938dd1408835fdcb1bea796332cae34dd2370bfe74f8163f2990152"
