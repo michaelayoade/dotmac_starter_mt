@@ -85,6 +85,9 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather than here — and the
 # consolidated ERP/Backoffice/general allocation follows in a85.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
+    "dotmac-ai-operations": "0.1.0a87",
+    "dotmac-compliance-reporting": "0.1.0a87",
+    "dotmac-remote-access": "0.1.0a87",
     "dotmac-accounting": "0.1.0a85",
     "dotmac-analytics": "0.1.0a85",
     "dotmac-banking": "0.1.0a85",
