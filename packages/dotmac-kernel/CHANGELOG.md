@@ -6,6 +6,26 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a87 — UNRELEASED
+
+Splits canonical fingerprinting out of the persistence-backed idempotency owner
+and allocates the independent tenant Fulfillment lineage. This is a new kernel
+release because a86 is already published and immutable.
+
+### Added
+
+- `dotmac_kernel.fingerprints` — a persistence-free module holding
+  `fingerprint_of`. Stateless consumers can now use the canonical digest
+  without importing the ORM models and database-backed idempotency ledger.
+- `FULFILLMENT_MIGRATION_OWNER` — `mod_fulfillment`, revision prefix `fu`,
+  branch label `fulfillment`. This allocates physical lineage identity only;
+  it composes, publishes and adopts no Fulfillment module.
+
+### Changed
+
+- `dotmac_kernel.idempotency.fingerprint_of` is now a re-export of the
+  persistence-free definition. Existing imports remain supported.
+
 ## 0.1.0a86 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and

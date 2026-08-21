@@ -1022,6 +1022,20 @@ WEB_ANALYTICS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("webanalytics"),
 )
 
+# `dotmac-fulfillment` — the tenant-only owner of a fulfillment saga: its runs,
+# steps, participant attempts, outcome receipts and compensation. It is NOT part
+# of the ERP cohort above; it was audited on its own and is allocated here
+# against the current kernel train. `fu` was free and reads directly, and
+# `fulfillment` is plain in a catalog dump for the same reason `files` and
+# `approvals` are. The allocation is physical identity only: the optional
+# module will declare its tenant tables and an assembly will bind its contracts.
+FULFILLMENT_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="fulfillment",
+    prefix="fu",
+    branch_label="fulfillment",
+    db_schema=module_schema("fulfillment"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1076,6 +1090,7 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     TAX_MIGRATION_OWNER,
     WORK_ORDERS_MIGRATION_OWNER,
     WEB_ANALYTICS_MIGRATION_OWNER,
+    FULFILLMENT_MIGRATION_OWNER,
 )
 
 
@@ -1411,6 +1426,7 @@ __all__ = [
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
+    "FULFILLMENT_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
