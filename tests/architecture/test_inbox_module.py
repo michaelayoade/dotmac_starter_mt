@@ -361,16 +361,30 @@ def test_transport_and_product_policy_stay_outside_the_conversation_owner() -> N
     assert not ({column.name for column in columns} & forbidden_columns)
 
 
-def test_candidate_is_built_here_but_not_composed_or_publishable_yet() -> None:
+def test_candidate_is_built_here_but_not_composed_by_this_assembly() -> None:
+    """Publishable is not composed, and this guard is about the second one.
+
+    It used to assert both — absent from the assembly, absent from
+    `alembic.ini`, and absent from `.github/release-modules.json` — so
+    "nothing installs this module here" and "no workflow may publish it"
+    failed or passed together. Michael's 2026-08-21 release authorization
+    separates them: an artifact on the private index composes nothing, runs no
+    migration and moves no authority, so an allowlist row is a publication
+    permission and never an adoption claim.
+
+    The composition assertions are the teeth and they stay. The dossier
+    assertion below replaces the allowlist clause with the thing that actually
+    distinguishes adoption: a named consumer.
+    """
     root = MODULE_ROOT.parents[3]
     assembly = (root / "app/assembly.py").read_text(encoding="utf-8")
     alembic = (root / "alembic.ini").read_text(encoding="utf-8")
-    allowlist = json.loads(
-        (root / ".github/release-modules.json").read_text(encoding="utf-8")
-    )["modules"]
+    dossier = tomllib.loads(
+        (MODULE_ROOT.parents[1] / "EXTRACTION.toml").read_text(encoding="utf-8")
+    )
     assert "dotmac_inbox" not in assembly
     assert "dotmac-inbox" not in alembic
-    assert "dotmac-inbox" not in allowlist
+    assert dossier["contract_consumers"] == []
 
 
 def test_the_dossier_records_product_first_candidate_status() -> None:
