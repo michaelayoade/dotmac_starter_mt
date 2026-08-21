@@ -231,6 +231,11 @@
       "declared": "0.1.0a1",
       "reason": "INTENDED PUBLISH-PREP STATE. Work Orders is audit-complete but release-unallowlisted. Publication waits for exact-commit Observer proof and Sub's checked-in exact-pin internal-crew lineage, product-subject and assignee adapters, full execution backfill, shadow comparison and sole-writer cutover.",
       "state": "never-published"
+    },
+    "dotmac-document-rendering": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE BILLING DOCUMENT CUTOVER. This package is the stateless issued-document projector and renderer accepted by ADR-0030: it owns no models, no lineage, no namespace and no session, and is built and gate-proven here. It is deliberately NOT release-allowlisted for two independent reasons, and BOTH must clear. First, its floor is kernel 0.1.0a86 \u2014 the release that extracts fingerprint_of into the persistence-free dotmac_kernel.fingerprints, without which this module cannot obtain a canonical digest at all without pulling in the database-backed ledger \u2014 and a86 is itself unpublished, so the floor is not yet resolvable by an installer and is therefore not yet a floor. Second, its own EXTRACTION.toml next_action withholds publication until Vendor Control Plane's Billing fact producer, the dotmac-files storage binding and the assembly-owned idempotent reconciler are ready in ONE cutover slice; no product is claimed as a consumer and no old writer has been retired. Remove this row only in the release change that publishes kernel a86, adds the allowlist entry and records that first contract consumer; never by editing the declared version down.",
+      "state": "never-published"
     }
   }
 }
