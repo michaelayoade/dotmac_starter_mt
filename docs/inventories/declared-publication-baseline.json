@@ -67,9 +67,19 @@
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
       "state": "never-published"
     },
+    "dotmac-kernel": {
+      "declared": "0.1.0a86",
+      "reason": "OUTSTANDING RELEASE CANDIDATE. This revision bumps the kernel to 0.1.0a86 to allocate the tenant first-party web-analytics lineage (ADR-0055): schema mod_webanalytics, revision prefix wa, branch label web_analytics. a85 is published, registry-verified and tagged, so a86 needs its own number rather than growing a published entry - the same rule a83 applied over a82. dotmac-web-analytics 0.1.0a1 floors on a86 and cannot be installed until this kernel is published, which is why the module is release-allowlisted in the same change rather than earlier. Remove this row in the change that records the a86 publication, after release-kernel.yml installs the exact artifact back from the private index and writes dotmac-kernel-v0.1.0a86; never by editing the declared version down.",
+      "state": "declared-unpublished"
+    },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
       "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "state": "never-published"
+    },
+    "dotmac-web-analytics": {
+      "declared": "0.1.0a1",
+      "reason": "AUTHORIZED WEB ANALYTICS RELEASE CANDIDATE. The greenfield-after-inventory module owns privacy-minimised first-party observations and deterministic projections under ADR-0055, is release-allowlisted in this change, and floors on the a86 kernel allocation that mints its lineage. Backoffice and Sub remain candidate adopters; publication does not compose the module or move property, consent, attribution, customer or commercial authority. Remove this row only after the exact protected-main module artifact is registry-verified and tagged; adoption evidence remains separate.",
       "state": "never-published"
     }
   }

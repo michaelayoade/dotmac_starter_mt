@@ -140,7 +140,7 @@ correction are also complete; release and adoption remain separate gates.
 | `dotmac-sites` | `greenfield-after-inventory` | `none` | No qualifying site-builder implementation was found in Starter, `dotmac_mkt`, ERP, CRM, Sub or Backoffice. Gate 2 is historically green at `8bf12ddc5cb938714d090fc0b0e69b83fa78f2d2`, including all five Sites isolation/immutability canaries. Allocation and floor a81 plus Sites a1 are released and registry-verified; the module remains uncomposed and unadopted. |
 | `dotmac-publishing` | `product-first` | `dotmac_mkt` | The owner keeps immutable releases, ordered opaque-target deliveries, monotonic attempts, normalized observations and explicit partial/all-failed reconciliation; Integrator retains transport. Allocation a80 is installable through released kernel a81; Publishing a1 is registry-verified but remains uncomposed and unadopted. |
 | `dotmac-media-observations` | `product-first` | `dotmac_mkt` | Preserve normalized remote post/ad hierarchy and idempotent metric upserts from the qualifying Mkt implementation without provider transport or authoritative business consequences. Allocation a78 is installable through released kernel a81; Media Observations a1 is registry-verified but remains uncomposed and unadopted under the active adoption pause. |
-| `dotmac-web-analytics` | `product-first` | `dotmac_mkt` | Preserve the provider-neutral daily web metric vocabulary and aggregation behavior for sessions, pageviews, users and bounce rate. GA4 HTTP/OAuth code is rejected; Integrator records typed observations that this local owner projects and reconciles. |
+| `dotmac-web-analytics` | `greenfield-after-inventory` | `none` | The focused privacy-first audit found no qualifying first-party observation owner. The module owns privacy-minimised events, property-scoped visitor/session evidence and deterministic rebuildable projections. Mkt's GA4 aggregate reader remains external/provider evidence for `dotmac-media-observations`; its HTTP/OAuth code is rejected. Integrator transports remote typed observations but never classifies, sessionises or attributes them. Allocation and floor a84 are the authorized release candidate; publication remains distinct from Backoffice/Sub adoption. |
 | `dotmac-forms` | `product-first` | `dotmac_erp` | Preserve organization-scoped definitions, immutable versions, sections, typed fields/options, validation, submissions and answer snapshots from ERP's `forms` models and `FormEngineService`. Replace Organization and domain entity coupling with Tenant scope and opaque subject references. |
 | `dotmac-campaigns` | `product-first` | `dotmac_sub` | Implemented on Starter main, but deliberately unreleased and unadopted. Registry-verified a72 contains its namespace allocation and Durable Timers a1; published a73 supplies the caller-session mechanics required by Sub and is therefore the effective package floor. Satisfy Sub's owner, lineage and timer-adoption gates before publication. Preserve audience building, sequences, send windows, canonical senders, attempt/outcome state, unsubscribe and pre-send suppression rechecks. Sub is the mandatory campaign source and cutover 1; Backoffice is cutover 2. CRM and `dotmac_mkt` are parity/retirement inputs, not competing owners. |
 
@@ -262,8 +262,9 @@ marketing suite and follow their independently selected project/work owner.
 1. Keep the verified `dotmac_mkt` pin current and freeze every source revision
    in its package dossier before the first code port.
 2. Extract source parity canaries before implementation: content/media/
-   publishing/web analytics from `dotmac_mkt`, campaigns from Sub, and forms
-   from ERP. `dotmac-sites` starts with its greenfield proof and adopter canary.
+   publishing from `dotmac_mkt`, campaigns from Sub, and forms from ERP.
+   `dotmac-sites` and first-party Web Analytics start with their focused
+   greenfield-after-inventory proofs and adopter canaries.
 3. Implement one module slice at a time with its manifest, `mod_*` namespace,
    independent migration lineage, RLS canary, typed ports and owner row in
    `docs/ARCHITECTURE.md`.
