@@ -6,7 +6,12 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a88 — UNRELEASED
+## 0.1.0a88 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `8673a2d9` by release run
+`32531270821`. Publication makes these physical namespace allocations
+installable; it composes or adopts no module.
 
 Splits canonical fingerprinting out of the persistence-backed idempotency owner,
 allocates the independent tenant Fulfillment lineage, settles a three-way
