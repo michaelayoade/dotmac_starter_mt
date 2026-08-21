@@ -66,6 +66,22 @@ on:
           - dotmac-sites
           - dotmac-referrals
           - dotmac-reseller-management
+          - dotmac-accounting
+          - dotmac-analytics
+          - dotmac-banking
+          - dotmac-documents
+          - dotmac-expenses
+          - dotmac-finance
+          - dotmac-inbox
+          - dotmac-party
+          - dotmac-payables
+          - dotmac-payroll
+          - dotmac-procurement
+          - dotmac-projects
+          - dotmac-records
+          - dotmac-surveys
+          - dotmac-tax
+          - dotmac-work-orders
       version:
         description: "Version to publish (MUST equal the package's pyproject version)"
         required: true

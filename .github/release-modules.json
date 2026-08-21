@@ -59,7 +59,7 @@
     "",
     "So the row is gone and the PACKAGE is untouched: it keeps its declared",
     "0.1.0a2, its catalogue entry, its kernel floor and its dossier. Removal is",
-    "not retirement — it is the absence that is the safety mechanism, the rule",
+    "not retirement \u2014 it is the absence that is the safety mechanism, the rule",
     "ADR-0026 section 8 set for dotmac-approvals and PR #180 applied to",
     "dotmac-auth-oidc: the entry lands WITH the proof, never ahead of it.",
     "",
@@ -112,7 +112,7 @@
         "lineage order; both are DDL-free and both are required wheel content.",
         "",
         "EVERY migration is a required wheel content, deliberately. This",
-        "repository does not compose the module — `app/assembly.py` omits it,",
+        "repository does not compose the module \u2014 `app/assembly.py` omits it,",
         "`alembic.ini` carries no `ea` lineage, and an import-linter contract",
         "forbids the assembly importing it, because allocating is the vendor",
         "half and a data plane installing it would acquire the wrong one",
@@ -120,7 +120,7 @@
         "would therefore fail first in the vendor control plane's deployment,",
         "not here. ea_0002 and ea_0003 are the load-bearing ones for this rule:",
         "they create nothing, so a wheel that dropped either would install a",
-        "module whose prerequisite is declared and never verified — exactly",
+        "module whose prerequisite is declared and never verified \u2014 exactly",
         "the state a6 exists to end."
       ],
       "package_dir": "packages/dotmac-entitlement-allocation",
@@ -1068,6 +1068,575 @@
         "allowed_requires": [
           "dotmac-kernel",
           "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-accounting": {
+      "$comment": [
+        "Tenant double-entry ledger, journals, periods and trial balance.",
+        "Product-first from ERP; every operational subject stays an opaque reference.",
+        "Kernel a85 allocates mod_accounting / ac / accounting."
+      ],
+      "package_dir": "packages/dotmac-accounting",
+      "import_name": "dotmac_accounting",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_accounting",
+      "tag_prefix": "dotmac-accounting-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_accounting/py.typed",
+          "dotmac_accounting/contracts.py",
+          "dotmac_accounting/manifest.py",
+          "dotmac_accounting/migrations/__init__.py",
+          "dotmac_accounting/migrations/versions/ac_0001_accounting.py",
+          "dotmac_accounting/models.py",
+          "dotmac_accounting/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-analytics": {
+      "$comment": [
+        "Tenant analytical aggregates and rebuildable digests over typed facts.",
+        "Product-first from ERP; sources, dimensions and consequences stay in products.",
+        "Kernel a85 allocates mod_analytics / ay / analytics."
+      ],
+      "package_dir": "packages/dotmac-analytics",
+      "import_name": "dotmac_analytics",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_analytics",
+      "tag_prefix": "dotmac-analytics-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_analytics/py.typed",
+          "dotmac_analytics/contracts.py",
+          "dotmac_analytics/manifest.py",
+          "dotmac_analytics/migrations/__init__.py",
+          "dotmac_analytics/migrations/versions/ay_0001_analytics.py",
+          "dotmac_analytics/models.py",
+          "dotmac_analytics/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-banking": {
+      "$comment": [
+        "Tenant bank accounts, imported statement observations and matching.",
+        "Product-first from ERP; settlement consequence belongs to Accounting/Payables.",
+        "Kernel a85 allocates mod_banking / bk / banking."
+      ],
+      "package_dir": "packages/dotmac-banking",
+      "import_name": "dotmac_banking",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_banking",
+      "tag_prefix": "dotmac-banking-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_banking/py.typed",
+          "dotmac_banking/contracts.py",
+          "dotmac_banking/manifest.py",
+          "dotmac_banking/migrations/__init__.py",
+          "dotmac_banking/migrations/versions/bk_0001_banking.py",
+          "dotmac_banking/models.py",
+          "dotmac_banking/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-documents": {
+      "$comment": [
+        "Tenant document handbooks, versions and controlled distribution.",
+        "Product-first from ERP; Files, Approvals and Timers remain opaque seams.",
+        "Kernel a85 allocates mod_documents / do / documents."
+      ],
+      "package_dir": "packages/dotmac-documents",
+      "import_name": "dotmac_documents",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_documents",
+      "tag_prefix": "dotmac-documents-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_documents/py.typed",
+          "dotmac_documents/contracts.py",
+          "dotmac_documents/manifest.py",
+          "dotmac_documents/migrations/__init__.py",
+          "dotmac_documents/migrations/versions/do_0001_documents.py",
+          "dotmac_documents/models.py",
+          "dotmac_documents/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-expenses": {
+      "$comment": [
+        "Tenant expense claims, lines, policy versions and reimbursement facts.",
+        "Product-first from ERP; accounting consequence stays with Accounting.",
+        "Kernel a85 allocates mod_expenses / ex / expenses."
+      ],
+      "package_dir": "packages/dotmac-expenses",
+      "import_name": "dotmac_expenses",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_expenses",
+      "tag_prefix": "dotmac-expenses-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_expenses/py.typed",
+          "dotmac_expenses/contracts.py",
+          "dotmac_expenses/manifest.py",
+          "dotmac_expenses/migrations/__init__.py",
+          "dotmac_expenses/migrations/versions/ex_0001_expenses.py",
+          "dotmac_expenses/models.py",
+          "dotmac_expenses/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-finance": {
+      "$comment": [
+        "Tenant fixed-asset register, depreciation calculation and disposal.",
+        "Product-first from ERP; physical assets and postings stay opaque collaborators.",
+        "Kernel a85 allocates mod_finance / fn / finance."
+      ],
+      "package_dir": "packages/dotmac-finance",
+      "import_name": "dotmac_finance",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_finance",
+      "tag_prefix": "dotmac-finance-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_finance/py.typed",
+          "dotmac_finance/calculation.py",
+          "dotmac_finance/contracts.py",
+          "dotmac_finance/manifest.py",
+          "dotmac_finance/migrations/__init__.py",
+          "dotmac_finance/migrations/versions/fn_0001_asset_accounting.py",
+          "dotmac_finance/models.py",
+          "dotmac_finance/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-inbox": {
+      "$comment": [
+        "Tenant conversations, threading and channel-neutral message evidence.",
+        "Product-first from Sub; Integrator owns transport, products own consequences.",
+        "Kernel a85 allocates mod_inbox / ib / inbox."
+      ],
+      "package_dir": "packages/dotmac-inbox",
+      "import_name": "dotmac_inbox",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_inbox",
+      "tag_prefix": "dotmac-inbox-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_inbox/py.typed",
+          "dotmac_inbox/channels.py",
+          "dotmac_inbox/lifecycle.py",
+          "dotmac_inbox/manifest.py",
+          "dotmac_inbox/migrations/__init__.py",
+          "dotmac_inbox/migrations/versions/ib_0001_conversations.py",
+          "dotmac_inbox/models.py",
+          "dotmac_inbox/service.py",
+          "dotmac_inbox/threading.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-party": {
+      "$comment": [
+        "Tenant party context, identity vocabulary and relationship structure.",
+        "Product-first from Sub; customer, subscriber and commercial state stay in products.",
+        "Kernel a85 allocates mod_party / pt / party."
+      ],
+      "package_dir": "packages/dotmac-party",
+      "import_name": "dotmac_party",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_party",
+      "tag_prefix": "dotmac-party-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_party/py.typed",
+          "dotmac_party/contracts.py",
+          "dotmac_party/manifest.py",
+          "dotmac_party/migrations/__init__.py",
+          "dotmac_party/migrations/versions/pt_0001_party_context.py",
+          "dotmac_party/models.py",
+          "dotmac_party/service.py",
+          "dotmac_party/vocabulary.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-payables": {
+      "$comment": [
+        "Tenant supplier invoices, approval state and payment-request evidence.",
+        "Product-first from ERP; the ledger consequence belongs to Accounting.",
+        "Kernel a85 allocates mod_payables / pa / payables."
+      ],
+      "package_dir": "packages/dotmac-payables",
+      "import_name": "dotmac_payables",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_payables",
+      "tag_prefix": "dotmac-payables-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_payables/py.typed",
+          "dotmac_payables/contracts.py",
+          "dotmac_payables/manifest.py",
+          "dotmac_payables/migrations/__init__.py",
+          "dotmac_payables/migrations/versions/pa_0001_payables.py",
+          "dotmac_payables/models.py",
+          "dotmac_payables/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-payroll": {
+      "$comment": [
+        "Tenant payroll runs, calculation evidence and liability facts.",
+        "Product-first from ERP; People and Accounting remain opaque reference seams.",
+        "Kernel a85 allocates mod_payroll / py / payroll."
+      ],
+      "package_dir": "packages/dotmac-payroll",
+      "import_name": "dotmac_payroll",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_payroll",
+      "tag_prefix": "dotmac-payroll-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_payroll/py.typed",
+          "dotmac_payroll/contracts.py",
+          "dotmac_payroll/manifest.py",
+          "dotmac_payroll/migrations/__init__.py",
+          "dotmac_payroll/migrations/versions/py_0001_payroll.py",
+          "dotmac_payroll/models.py",
+          "dotmac_payroll/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-procurement": {
+      "$comment": [
+        "Tenant requisitions, purchase orders, receipts and supplier commitments.",
+        "Product-first from ERP; budget and ledger consequences stay with their owners.",
+        "Kernel a85 allocates mod_procurement / pc / procurement."
+      ],
+      "package_dir": "packages/dotmac-procurement",
+      "import_name": "dotmac_procurement",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_procurement",
+      "tag_prefix": "dotmac-procurement-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_procurement/py.typed",
+          "dotmac_procurement/contracts.py",
+          "dotmac_procurement/manifest.py",
+          "dotmac_procurement/migrations/__init__.py",
+          "dotmac_procurement/migrations/versions/pc_0001_procurement.py",
+          "dotmac_procurement/models.py",
+          "dotmac_procurement/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-projects": {
+      "$comment": [
+        "Tenant project and task structure, dependencies and scheduling facts.",
+        "Product-first from Sub; subject and consequence adapters stay product-owned.",
+        "Kernel a85 allocates mod_projects / pj / projects."
+      ],
+      "package_dir": "packages/dotmac-projects",
+      "import_name": "dotmac_projects",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_projects",
+      "tag_prefix": "dotmac-projects-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_projects/py.typed",
+          "dotmac_projects/contracts.py",
+          "dotmac_projects/lifecycle.py",
+          "dotmac_projects/manifest.py",
+          "dotmac_projects/migrations/__init__.py",
+          "dotmac_projects/migrations/versions/pj_0001_projects.py",
+          "dotmac_projects/models.py",
+          "dotmac_projects/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-records": {
+      "$comment": [
+        "Tenant retention schedules, legal holds and disposition evidence.",
+        "Greenfield-after-inventory; destructive execution stays disabled through shadow.",
+        "Kernel a85 allocates mod_records / re / records."
+      ],
+      "package_dir": "packages/dotmac-records",
+      "import_name": "dotmac_records",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_records",
+      "tag_prefix": "dotmac-records-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_records/py.typed",
+          "dotmac_records/contracts.py",
+          "dotmac_records/manifest.py",
+          "dotmac_records/migrations/__init__.py",
+          "dotmac_records/migrations/versions/re_0001_records.py",
+          "dotmac_records/models.py",
+          "dotmac_records/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-surveys": {
+      "$comment": [
+        "Tenant survey definitions, invitations and immutable response evidence.",
+        "Product-first from ERP/Sub; subject consequences stay with the product (ADR-0035).",
+        "Kernel a85 allocates mod_surveys / sv / surveys."
+      ],
+      "package_dir": "packages/dotmac-surveys",
+      "import_name": "dotmac_surveys",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_surveys",
+      "tag_prefix": "dotmac-surveys-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_surveys/py.typed",
+          "dotmac_surveys/contracts.py",
+          "dotmac_surveys/lifecycle.py",
+          "dotmac_surveys/manifest.py",
+          "dotmac_surveys/migrations/__init__.py",
+          "dotmac_surveys/migrations/versions/sv_0001_surveys.py",
+          "dotmac_surveys/models.py",
+          "dotmac_surveys/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-tax": {
+      "$comment": [
+        "Tenant tax policy versions, jurisdictions and computed tax evidence.",
+        "Product-first from ERP; pricing and posting consequences stay with their owners.",
+        "Kernel a85 allocates mod_tax / tx / tax."
+      ],
+      "package_dir": "packages/dotmac-tax",
+      "import_name": "dotmac_tax",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_tax",
+      "tag_prefix": "dotmac-tax-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_tax/py.typed",
+          "dotmac_tax/contracts.py",
+          "dotmac_tax/manifest.py",
+          "dotmac_tax/migrations/__init__.py",
+          "dotmac_tax/migrations/versions/tx_0001_tax.py",
+          "dotmac_tax/models.py",
+          "dotmac_tax/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "python"
+        ]
+      }
+    },
+    "dotmac-work-orders": {
+      "$comment": [
+        "Tenant work orders, scheduling, assignment and completion evidence.",
+        "Product-first from Sub; dispatch policy and customer consequence stay in products.",
+        "Kernel a85 allocates mod_workorders / wo / work_orders."
+      ],
+      "package_dir": "packages/dotmac-work-orders",
+      "import_name": "dotmac_work_orders",
+      "manifest_attr": "module",
+      "kernel_floor": "0.1.0a85",
+      "db_schema": "mod_workorders",
+      "tag_prefix": "dotmac-work-orders-v",
+      "wheel_contents": {
+        "required": [
+          "dotmac_work_orders/py.typed",
+          "dotmac_work_orders/lifecycle.py",
+          "dotmac_work_orders/manifest.py",
+          "dotmac_work_orders/migrations/__init__.py",
+          "dotmac_work_orders/migrations/versions/wo_0001_work_orders.py",
+          "dotmac_work_orders/models.py",
+          "dotmac_work_orders/schemas.py",
+          "dotmac_work_orders/service.py"
+        ],
+        "forbidden_prefixes": [
+          "app/",
+          "tests/",
+          "alembic/",
+          "scripts/"
+        ],
+        "allowed_requires": [
+          "dotmac-kernel",
+          "sqlalchemy",
+          "pydantic",
+          "alembic",
           "python"
         ]
       }

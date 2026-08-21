@@ -18,13 +18,16 @@ validation view. It does not authorize publication or move product authority.
 - Kernel `0.1.0a85` allocates all sixteen lineages. The allocations are new and
   immutable: Documents uses prefix `do` because `dc` belongs to Deployment
   Control; Party uses `pt` because `pa` belongs to Payables.
-- Starter builds and governs the packages but does not compose them. They are
-  absent from `.github/release-modules.json`, so the release workflow refuses
-  them.
-- Kernel a85 is already published and registry-verified. The
-  declared-publication ledger records every cohort package a1 as an intentional
-  unpublished state. No module artifact should be dispatched from this
-  preparation change.
+- Starter builds and governs the packages but does not compose them. As of the
+  2026-08-21 release authorization all sixteen ARE listed in
+  `.github/release-modules.json`, so the workflow will build and publish them
+  on dispatch. Allowlisting is a publication permission and nothing else: this
+  assembly still composes none of them.
+- Kernel a85 is already published and registry-verified, so the floor every
+  package declares is installable.
+- The declared-publication ledger now records each package as an authorized
+  release candidate rather than an intentional unpublished state, and each row
+  still carries that package's untouched adoption obligation.
 - No exact-commit Observer claim exists for the combined cohort yet. That proof
   requires a committed revision and a fresh isolated Observer worktree at that
   exact commit; an uncommitted local worktree is not evidence.
@@ -71,12 +74,23 @@ fresh isolated writable worktree with the repository-pinned Poetry version
 
 ## Recommended release discipline
 
-Do not publish the cohort as one undifferentiated batch. Publish a package only
-when its cutover-1 product branch has the disabled-by-default exact-version
-composition, typed adapters, backfill/shadow proof and writer-retirement gate
-ready for review. In that authorization change, add the package to the closed
-release allowlist, pin the already-published kernel a85, publish the exact
-module package and registry-verify that package before enabling the adopter.
+Do not publish the cohort as one undifferentiated batch, and do not read a
+publication as a cutover. Michael's 2026-08-21 authorization separates the two
+deliberately: an artifact on the private index composes nothing, runs no
+migration and moves no authority, so publishing it cannot create the parallel
+owner a COMPOSED module would. Publication is therefore permitted ahead of
+adoption for every audit-complete package that passes the release gates.
+
+Dispatch one distribution per run, each from the exact protected-main tip, on
+the already-published kernel a85, and registry-verify the artifact before the
+tag is written.
+
+What publication does NOT do, and what each row below still requires
+unchanged: the cutover-1 product branch must have the disabled-by-default
+exact-version composition, typed adapters, backfill/shadow proof and
+writer-retirement gate ready for review BEFORE that product installs the pin.
+A package stays `audit-complete` with empty `contract_consumers` until its
+local writer is actually gone.
 
 Accounting is the dependency hub for Banking, Payables, Payroll, Tax and the
 Finance consequence seam, so it is the first ERP financial release candidate.
