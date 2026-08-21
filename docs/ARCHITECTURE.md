@@ -622,7 +622,7 @@ being observable without the product having to remember.
 ### ERP / Backoffice / general publication-prep ownership map
 
 The following tenant-only packages are as-built in this repository at
-`0.1.0a1`, allocated by unpublished kernel `0.1.0a85`, and deliberately not
+`0.1.0a1`, allocated by published kernel `0.1.0a85`, and deliberately not
 composed or release-allowlisted. Each row names the package's decision owner;
 products retain their current authority until the dossier's sealed cutover and
 writer-retirement gate completes. The cohort validation and adopter dependency

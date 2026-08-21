@@ -81,11 +81,10 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # retaining the allocation release as evidence there. Durable timers was
 # allocated in a72. Immutable a73 belongs to the caller-session transaction
 # release, a74-a77 to the vendor cohort, a78-a81 to the marketing cohort, and
-# referrals and reseller management land in a84, and the consolidated
-# ERP/Backoffice/general allocation follows in a85.
+# referrals and reseller management are ALLOCATED in a84 — never published,
+# so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather than here — and the
+# consolidated ERP/Backoffice/general allocation follows in a85.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
-    "dotmac-referrals": "0.1.0a84",
-    "dotmac-reseller-management": "0.1.0a84",
     "dotmac-accounting": "0.1.0a85",
     "dotmac-analytics": "0.1.0a85",
     "dotmac-banking": "0.1.0a85",
@@ -290,6 +289,19 @@ CAPABILITY_RAISED_FLOORS = {
 # consumer break: no released version of these modules ever floored at a74..a76,
 # because none of them has been released at all.
 UNPUBLISHED_ALLOCATION_FLOORS = {
+    # The ADR-0040 pair, and the shortest possible instance of this rule: a84
+    # allocates `rf` and `rm` and nothing else, and a85 — the consolidated
+    # ERP/Backoffice/general allocation — landed on `main` and was published
+    # before a84 was ever dispatched. So a84 is allocation history, exactly as
+    # a53..a55, a74..a76, a78..a80 and a82 are, and a85 is the first kernel
+    # artifact that can register either module. Both modules pinned `>=0.1.0a84`
+    # while sitting in LEDGER_ALLOCATION_RELEASES, which asserted only that the
+    # pin equals the allocation and never that the allocation is installable —
+    # so the floor named a version no installer can resolve and every gate
+    # stayed green. Moving them here is what puts them under the tag-backed
+    # `skipped` check below.
+    "dotmac-referrals": ("0.1.0a85", "0.1.0a84"),
+    "dotmac-reseller-management": ("0.1.0a85", "0.1.0a84"),
     "dotmac-commercial-agreements": ("0.1.0a77", "0.1.0a74"),
     "dotmac-licensing": ("0.1.0a77", "0.1.0a75"),
     "dotmac-deployment-control": ("0.1.0a77", "0.1.0a76"),
