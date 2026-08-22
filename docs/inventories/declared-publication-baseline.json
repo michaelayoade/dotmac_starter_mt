@@ -92,11 +92,6 @@
       "reason": "AUTHORIZED RELEASE CANDIDATE - PUBLICATION, NOT ADOPTION. The product-first Remita connector performs authenticated RRR status transport, parses the provider response and carries status evidence verbatim without ERP's disputed lifecycle mapping. Remove this row after registry verification and tagging. ERP's exact pin, shadow comparison, RRR transport cutover, direct-client deletion and ratchet reduction remain independently owed.",
       "state": "never-published"
     },
-    "dotmac-integration": {
-      "declared": "0.1.0a11",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. Version a11 makes the already declared POLL SPI executable through short prepare and atomic receipt-plus-checkpoint phases, and it is the installable floor required by this connector cohort. Remove this row after release-module registry verification writes the a11 tag; connector releases must follow it, while product adoption remains separate.",
-      "state": "declared-newer-than-published"
-    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
