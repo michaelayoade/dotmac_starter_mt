@@ -14,9 +14,13 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
+from uuid import uuid4
 
+from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.providers.provisioning import (
     ApplyResult,
+    CompensationDisposition,
+    CompensationResult,
     ObserveResult,
     PlanResult,
     ProvisioningApplyError,
@@ -48,11 +52,15 @@ class FakeProvisioningProvider:
         fail_plan: bool = False,
         fail_apply: bool = False,
         partial_first_apply: bool = False,
+        compensation_disposition: CompensationDisposition = (
+            CompensationDisposition.SUCCEEDED
+        ),
     ) -> None:
         self._steps = tuple(steps)
         self._fail_plan = fail_plan
         self._fail_apply = fail_apply
         self._partial_first = partial_first_apply
+        self._compensation_disposition = compensation_disposition
         self.calls: list[tuple[str, str]] = []
         self._ops: dict[str, ApplyResult] = {}
 
@@ -60,7 +68,13 @@ class FakeProvisioningProvider:
     @staticmethod
     def _plan_hash(request: ProvisioningRequest) -> str:
         payload = json.dumps(
-            {"intent": request.intent_id, "spec": dict(request.spec)}, sort_keys=True
+            {
+                "participant": request.participant_code,
+                "scope": str(request.scope),
+                "intent": request.intent_id,
+                "spec": dict(request.spec),
+            },
+            sort_keys=True,
         )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
@@ -168,6 +182,22 @@ class FakeProvisioningProvider:
             plan_hash=prior.plan_hash if prior else None,
         )
 
+    def compensate(self, operation_id: str, reason: str) -> CompensationResult:
+        self.calls.append(("compensate", operation_id))
+        if not reason.strip():
+            raise ValueError("compensation reason must not be blank")
+        snapshot = self.observe(operation_id)
+        return CompensationResult(
+            operation_id=operation_id,
+            disposition=self._compensation_disposition,
+            snapshot=snapshot,
+            reason_code=(
+                None
+                if self._compensation_disposition is CompensationDisposition.SUCCEEDED
+                else self._compensation_disposition.value
+            ),
+        )
+
 
 def check_provisioning_provider_contract(
     make_provider: Callable[..., ProvisioningProvider],
@@ -179,7 +209,12 @@ def check_provisioning_provider_contract(
     real provider's factory should accept and honor the same behavioral knobs,
     or wrap itself so the contract can drive them. Run this from a consumer's
     test suite: `check_provisioning_provider_contract(MyProvider.for_tests)`."""
-    req = ProvisioningRequest(intent_id="i-1", spec={"size": 1})
+    req = ProvisioningRequest(
+        participant_code="fake.provisioning",
+        scope=TenantScope(uuid4()),
+        intent_id="i-1",
+        spec={"size": 1},
+    )
 
     # Structural conformance.
     provider = make_provider()
@@ -207,7 +242,11 @@ def check_provisioning_provider_contract(
     assert first.outstanding_steps  # something remains
     resumed = partial_provider.apply(
         ProvisioningRequest(
-            intent_id="i-1", spec={"size": 1}, operation_id=first.operation_id
+            participant_code=req.participant_code,
+            scope=req.scope,
+            intent_id="i-1",
+            spec={"size": 1},
+            operation_id=first.operation_id,
         )
     )
     assert resumed.status is ProvisioningStatus.SUCCEEDED
@@ -233,6 +272,15 @@ def check_provisioning_provider_contract(
     op = cancel_provider.apply(req).operation_id
     snapshot = cancel_provider.cancel(op)
     assert snapshot.status is ProvisioningStatus.CANCELLED
+
+    # Compensation is a distinct, explicit decision after settlement.
+    compensation_provider = make_provider()
+    compensated_op = compensation_provider.apply(req).operation_id
+    compensation = compensation_provider.compensate(
+        compensated_op, "conformance reversal"
+    )
+    assert compensation.operation_id == compensated_op
+    assert compensation.disposition is CompensationDisposition.SUCCEEDED
 
     # The apply/plan error classification is stable.
     assert ProvisioningApplyError("x").retryable is False

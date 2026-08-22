@@ -164,9 +164,11 @@ class ModuleManifest:
     # `dotmac_kernel.audit.write_audit_event`; see `dotmac_kernel.audit_actions`.
     audit_actions: Sequence[str] = field(default_factory=tuple)
     # Durable outbox routing codes this module consumes and owns. A producer
-    # may enqueue one only after `OutboxEventTypeRegistry` resolves it against
-    # the installed manifest set; the database column remains open text.
+    # may enqueue one only after the installed manifest set declares it.
     outbox_event_types: Sequence[str] = field(default_factory=tuple)
+    # Product-neutral provisioning participants implemented by this module.
+    # The codes are an open manifest-owned vocabulary consumed by Fulfillment.
+    provisioning_participants: Sequence[str] = field(default_factory=tuple)
     # Setting domains this module declares and owns. Enforced when a spec is
     # registered and at the write; see `dotmac_kernel.setting_domains`.
     setting_domains: Sequence[str] = field(default_factory=tuple)
@@ -251,6 +253,7 @@ class ModuleManifest:
             "permissions",
             "audit_actions",
             "outbox_event_types",
+            "provisioning_participants",
             "setting_domains",
             "setting_value_types",
             "scope_kinds",
@@ -477,6 +480,7 @@ class ModuleManifest:
             permissions=manifest.permissions,
             audit_actions=manifest.audit_actions,
             outbox_event_types=manifest.outbox_event_types,
+            provisioning_participants=manifest.provisioning_participants,
             setting_domains=manifest.setting_domains,
             setting_value_types=manifest.setting_value_types,
             scope_kinds=manifest.scope_kinds,
