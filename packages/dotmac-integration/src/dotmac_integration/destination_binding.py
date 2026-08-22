@@ -125,11 +125,13 @@ __all__ = [
     "ProductPortDescriptorInvalid",
     "ProductPortDescriptorSnapshot",
     "UntrustedDestination",
+    "capability_bindings_for",
     "corroborate",
     "destination_client",
     "install_destination_profiles",
     "product_port_descriptor_digest",
     "reconcile_product_port_descriptor",
+    "reconcile_product_port_descriptor_for_capability",
     "require_corroborated",
     "require_profile",
     "establish_destination",
@@ -629,6 +631,72 @@ def reconcile_product_port_descriptor(
     db.add(row)
     db.flush()
     return _destination_binding(binding=binding, contract=contract, established=row)
+
+
+def capability_bindings_for(
+    db: Any, *, capability_id: str
+) -> tuple[CapabilityBinding, ...]:
+    """Return every durable binding carrying ``capability_id``.
+
+    This is intentionally broader than dispatch selection. A destination is a
+    routing prerequisite established before activation, so configured,
+    disabled and enabled bindings all need the product-owned projection.
+    Filtering through dispatch's usability predicate would recreate the
+    circular activation failure the ingress handshake already avoids: the
+    route would exist only after the binding needed it.
+
+    The module owns this query because it owns the binding lifecycle and schema.
+    A composing assembly must not hand-roll a second opinion about which rows
+    carry a capability.
+    """
+
+    from sqlalchemy import select
+
+    rows = db.execute(
+        select(CapabilityBinding)
+        .where(CapabilityBinding.capability_id == capability_id)
+        .order_by(CapabilityBinding.id)
+    ).scalars()
+    return tuple(rows)
+
+
+def reconcile_product_port_descriptor_for_capability(
+    db: Any,
+    *,
+    descriptor: ProductPortDescriptorSnapshot,
+    registry: CapabilityRegistry,
+    reconciled_by: str | None = None,
+) -> tuple[DestinationBinding, ...]:
+    """Project one authenticated declaration onto every matching binding.
+
+    Several independently installed connectors may implement one capability.
+    The product declares that capability once, while each connector has its own
+    durable binding and therefore needs its own append-only destination
+    revision. The assembly supplies one transaction; this function supplies the
+    complete module-owned set and never commits.
+
+    An empty set is a refusal rather than an idempotent no-op. Otherwise an
+    operator could approve a descriptor, start a green deployment and discover
+    only after provider traffic arrives that no local binding was addressable.
+    """
+
+    _require_valid_descriptor(descriptor)
+    bindings = capability_bindings_for(db, capability_id=descriptor.capability_id)
+    if not bindings:
+        raise DestinationNotBound(
+            f"no capability binding carries {descriptor.capability_id!r}; "
+            "there is nothing to reconcile"
+        )
+    return tuple(
+        reconcile_product_port_descriptor(
+            db,
+            capability_binding_id=binding.id,
+            descriptor=descriptor,
+            registry=registry,
+            reconciled_by=reconciled_by,
+        )
+        for binding in bindings
+    )
 
 
 def resolve_destination(
