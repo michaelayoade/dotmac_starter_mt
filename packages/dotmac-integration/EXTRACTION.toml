@@ -1,7 +1,7 @@
 schema_version = 1
 package = "dotmac-integration"
 classification = "optional-module"
-status = "adopted"
+status = "audit-complete"
 source_mode = "product-first"
 owner = "External connector control plane"
 # ADR-0024 §§ 6-7. "Independently deployed" is a RUNTIME boundary, not a
@@ -98,8 +98,19 @@ not_ported = ["connectors/*", "*_capability.py", "crm_ticket_readiness.py", "bac
 # Products are deliberately
 # absent from both sets: they consume typed observations over their own ports,
 # never this module, and Sub keeps only its capability handlers after cutover.
-contract_consumers = ["dotmac_integrator"]
-candidate_consumers = []
+# Demoted from `adopted` on 2026-08-22. The dossier claimed a proven consumer
+# while `first_cutover` described the Meta/WhatsApp capability as INTENDED and
+# `shadow_and_drift` described activation in the future tense — "only then is one
+# binding activated". A status ahead of its own prose is the ADR-0031 overclaim,
+# and this module is about to be cited as a governance prerequisite by Vendor
+# ADR-0010 gate 2b, which is exactly when an overclaim does damage.
+#
+# `dotmac_integrator` returns to CANDIDATE. Gate 2b creates the first addressable
+# adoption evidence; a later change promotes this back with that evidence
+# attached, in that order and not before.
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator"]
+adoption_evidence = []
 inventory_evidence = [
   "docs/inventories/integration-platform-sources.md",
   "docs/inventories/external-connector-sources.md",
