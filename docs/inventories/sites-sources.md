@@ -19,7 +19,6 @@ site builder.
 | `dotmac_sub` | `510b80ca7fab4f54a57f261872f94b5e972c8eb6` | Public landing and lead-capture routes are product adapters; no reusable site/page revision owner exists. |
 | `dotmac_erp` | `dd6416cd981ffdf48564e2770b87d3cd7201186c` | Configurable landing/app-page content is application presentation; no versioned site composition or release owner exists. |
 | `dotmac_crm` | `60daaa2dd305696636632f48505ab784110a55d2` | Admin landing routes exist; no site/page/revision owner exists. |
-| `dotmac_backoffice` | `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d` | No site-builder term or writer was found; this is the greenfield first-adopter premise. |
 
 The audit searched the pinned trees for site builder, website builder, CMS,
 landing page, page revision, site revision, navigation, redirect, SEO and

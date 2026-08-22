@@ -3,7 +3,7 @@
 **Audit date:** 2026-08-18
 **Decision:** ERP-first metric projection extraction
 **Package:** tenant-only `dotmac-analytics`
-**First cutover:** `dotmac_erp`; `dotmac_backoffice` is candidate consumer two
+**First cutover:** `dotmac-erp`, using `dotmac_erp` as its historical source
 
 This is the mandatory ADR-0006 product-first inventory for a reusable general
 analytics owner. It does not treat every route named `analytics`, every product
@@ -20,7 +20,6 @@ latest/history/comparison reads without querying the source owner's tables.
 | `dotmac_erp` | `dd6416cd981ffdf48564e2770b87d3cd7201186c` (`origin/main`) | **Qualifying source.** `OrgMetricSnapshot`, `BaseComputer`, `MetricStore`, scheduled computers, dashboard and coach readers form a production-used, tested metric projection path. |
 | `dotmac_sub` | `510b80ca7fab4f54a57f261872f94b5e972c8eb6` (`origin/main`) | KPI configuration/aggregate CRUD exists, but `compute_kpis()` returns an empty list. Operational reports remain domain-owned. Not the base. |
 | `dotmac_crm` | `60daaa2dd305696636632f48505ab784110a55d2` (`origin/main`) | Many direct domain report/dashboard queries and a local metrics store, but no reusable declared metric contract or rebuildable general projection. |
-| `dotmac_backoffice` | `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d` (`HEAD`; repository has no `origin`) | No analytics implementation. Clean candidate for the second independent consumer after ERP proves cutover. |
 | `dotmac_academy_app` | `a5e25e4e829350e503e66a03d73739529ba7da7f` (`origin/main`) | Domain-specific learner, admissions and success analytics query Academy-owned tables. Candidate producer/consumer, not the base. |
 | `dotmac_mkt` | `1a185b47164e34601769c84976e95578996c4523` (`main`) | Google/provider aggregate sync and marketing presentation. Those observations belong to `dotmac-media-observations`; this is not the general owner. |
 | `dotmac-insights` | `fa67dd5105b4349ced926e052286911d7b671908` (`main`) | A copied cross-domain BOS monolith. Routes query replicated domain ORM tables directly and its data explorer exposes a hardcoded model list. It is retirement/decomposition evidence, not source code for the module boundary. |

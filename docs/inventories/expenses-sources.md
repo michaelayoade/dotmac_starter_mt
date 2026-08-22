@@ -11,7 +11,6 @@ adoption or authority-cutover claim.
 | `dotmac_erp` | `b969a889e8aba7255e32aa466960c22347c02fd8` (`origin/main`, 2026-08-18) | Qualifying production source. Owns the mature claim/category/line lifecycle, receipt validation, limit evaluation, approval application and reimbursement handoff. |
 | `dotmac_crm` | `60daaa2dd305696636632f48505ab784110a55d2` (`origin/main`, 2026-08-18) | A replaceable field-request copy. It creates request/line rows, pushes them to ERP as claims and mirrors ERP terminal state. It is not an independent expense authority. |
 | `dotmac_sub` | `510b80ca7fab4f54a57f261872f94b5e972c8eb6` (`origin/main`, 2026-08-18) | A second replaceable field-request copy associated with a work-order mirror. It owns local submission durability today but queues the back-office claim and mirrors its outcome. |
-| `dotmac_backoffice` | `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d` (local branch; repository has no `origin`) | No expense persistence or service implementation. Candidate independent consumer only after ERP proves cutover 1. |
 | `dotmac_starter_mt` | `300ebd7523e85dff7e94efcdf81d8c1f34b80de5` (`origin/main`, 2026-08-18) | Supplies tenant scope/RLS, Party identity, module manifests, migration composition and the separate files/approvals contracts. |
 
 The working checkouts of ERP and CRM were dirty, so the audit read fetched

@@ -559,6 +559,14 @@ cutover gates are in
 This amendment does not authorize a merge, release, deployment, production
 mutation or destructive retirement.
 
+**Correction — 2026-08-22.** The historical reference above used the working
+name `dotmac_backoffice` for a local composition sketch. It was never a
+separate repository or product. The destination is the commercial Dotmac ERP
+product (`dotmac-erp`), vertically recomposed from Starter modules; the
+historical extraction source is the `dotmac_erp` repository. The vertical
+replacement mechanics remain accepted, but the separate-application identity
+is withdrawn.
+
 ### Live defects found while taking the inventory (owned elsewhere)
 
 F0 is documentation-only and fixed nothing. Three defects surfaced that are

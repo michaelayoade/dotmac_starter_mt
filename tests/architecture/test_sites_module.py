@@ -54,7 +54,6 @@ def test_greenfield_dossier_pins_the_complete_six_repository_census() -> None:
         "dotmac_sub:510b80ca7fab4f54a57f261872f94b5e972c8eb6",
         "dotmac_erp:dd6416cd981ffdf48564e2770b87d3cd7201186c",
         "dotmac_crm:60daaa2dd305696636632f48505ab784110a55d2",
-        "dotmac_backoffice:fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d",
     ]
 
 

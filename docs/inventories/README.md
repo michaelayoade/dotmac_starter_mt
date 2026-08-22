@@ -23,9 +23,11 @@ Two adopter names in these inventories and in `packages/*/EXTRACTION.toml`
 moved, and the dossiers were reconciled to them:
 
 - **The back-office destination is the commercial Dotmac ERP product**, not an
-  internally framed `dotmac_backoffice` application. Michael corrected this on
-  2026-08-19. Forward-looking dossier fields (`candidate_consumers`,
-  `first_cutover`, `next_action`) now name `dotmac-erp`.
+  independently deployed `dotmac_backoffice` application. Michael corrected
+  this on 2026-08-19 and clarified on 2026-08-22 that the local composition
+  sketch was never a separate repository. It is therefore not valid source or
+  consumer evidence. Dossier consumer fields name `dotmac-erp`; historical
+  source evidence names only the real `dotmac_erp` repository.
 
   Four names, and only four — do not introduce a fifth:
 

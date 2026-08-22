@@ -1,14 +1,13 @@
-# People directory extraction audit — ERP, Starter, Sub, CRM and Backoffice
+# People directory extraction audit — ERP, Starter, Sub and CRM
 
 - **As of:** 2026-08-18
 - **Starter:** `01c4ffa2` (`origin/main`)
 - **ERP:** `dd6416cd` (`origin/main`)
 - **Sub:** `a9da9209` (`origin/dev`)
 - **CRM:** `d363af3d` (`origin/main`)
-- **Backoffice:** `fcdd8270` (`feat/composition-bindings-and-tenancy-gate`)
 
-This is the product-first source audit for the first vertical replacement slice
-named by `dotmac_backoffice/AGENTS.md`: the people / identity seam. It is an
+This is the product-first source audit for the first commercial Dotmac ERP
+vertical replacement slice: the people / identity seam. It is an
 inventory and ownership ruling, not a release, composition, deployment or
 authority cutover.
 

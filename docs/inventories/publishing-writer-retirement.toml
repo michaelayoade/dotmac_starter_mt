@@ -1,7 +1,7 @@
 schema_version = 1
 as_of = "2026-08-19"
 target_package = "dotmac-publishing"
-first_adopter = "dotmac_backoffice"
+first_adopter = "dotmac-erp"
 source_repository = "dotmac_mkt"
 source_revision = "7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d"
 status_vocabulary = ["not-started", "shadowing", "cut-over", "retired"]

@@ -9,9 +9,8 @@
 Every product fact below was read with `git show`/`git grep` at the named
 revision.  The checked-out ERP, CRM, Vendor CP and Starter trees all had
 unrelated local changes, so no citation relies on their working-tree content.
-`dotmac_backoffice` has no configured `origin`; its clean local HEAD is recorded
-as the only available revision and the failed refresh is not treated as zero
-coverage.
+The discarded local ERP composition sketch was not an independent repository
+and contributes no separate source or consumer evidence.
 
 | Repository | Revision | Procurement reading |
 |---|---|---|
@@ -19,7 +18,6 @@ coverage.
 | `dotmac_sub` | `510b80ca7fab4f54a57f261872f94b5e972c8eb6` | Mature installation-project bidding and vendor-work decisions; not a generic procurement owner. ERP purchase orders and invoices are replaceable back-office projections. |
 | `dotmac_crm` | `60daaa2dd305696636632f48505ab784110a55d2` | Predecessor copy of the project/vendor quotation workflow now consolidated toward Sub; not an independent reference implementation. |
 | `dotmac_academy_app` | `a5e25e4e829350e503e66a03d73739529ba7da7f` | Course content about vendor procurement only; no runtime purchasing state or writer. |
-| `dotmac_backoffice` | `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d` | Thin composition plan names expense/procurement as a future vertical slice; no implementation. Repository has no fetchable `origin`. |
 | `dotmac_vendor_control_plane` | `2c4d88ab877aeae1c8d5aef0637bc013edf07aa9` | Vendor-platform accounts, offers and commercial contracts. Those are Dotmac-as-vendor sales contracts, not Dotmac-as-buyer procurement. No requisition/RFQ/purchase-order owner. |
 | `dotmac_starter_mt` | `1c33910b2c3a20e7f75968b024970eadcf50babe` | Existing Approvals, Inventory, People, Projects, Money, idempotency and outbox boundaries; no procurement package at the audit pin. |
 
