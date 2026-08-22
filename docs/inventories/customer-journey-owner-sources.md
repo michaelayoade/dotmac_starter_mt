@@ -60,6 +60,14 @@ external settlement fact.
   a second partial index (`uq_payments_active_crm_external_id`) to stop a
   concurrent push double-recording cash. The module makes external-reference
   uniqueness unconditional per (tenant, provider type, reference).
+- Shape change on port: opening and cancellation times are SUPPLIED by the
+  caller, not read from the module's wall clock. `opened_at` is an
+  authoritative business fact — when the payer was asked to pay — and the
+  backfill carries Sub's real value; expiry is validated against it rather
+  than against the moment the import runs, so an intent whose entire timeline
+  has already passed is admitted on ordering alone. Without this the shadow
+  below cannot be run at all: every migrated row would carry an import
+  timestamp and report settlement-time drift against its own source.
 
 ## 3. Service Changes — Sub first
 

@@ -25,6 +25,7 @@ from dotmac_payments.contracts import (
 )
 from dotmac_payments.models import TENANT_TABLES, PaymentConfirmationImmutableError
 from dotmac_payments.service import (
+    cancel_payment_intent,
     expire_payment_intent,
     open_payment_intent,
     record_confirmation,
@@ -36,12 +37,13 @@ from sqlalchemy.orm import Session
 
 TENANT_A = uuid.uuid4()
 TENANT_B = uuid.uuid4()
-# Anchored to the real clock, not a fixed date. `open_payment_intent` compares
-# `expires_at` against `datetime.now(UTC)` — the one function in this module
-# that reads the wall clock rather than taking the caller's timestamp — so a
-# hardcoded NOW makes `test_a_confirmation_observed_after_expiry_is_refused`
-# pass only until wall-clock time overtakes NOW + 1h, and fail every run after.
-NOW = datetime.now(UTC).replace(microsecond=0)
+# A FIXED instant, and the tests below drive the module from it. This is only
+# sound because `opened_at` is a supplied business fact: `open_payment_intent`
+# validates `expires_at` against the opening time it is given, never against
+# the moment the suite happens to run. An earlier revision read the wall clock
+# there, which made a fixed NOW a delayed-action failure — green until
+# wall-clock time overtook NOW + 1h, red on every run after.
+NOW = datetime(2026, 8, 22, tzinfo=UTC)
 NGN = currency("NGN")
 USD = currency("USD")
 
@@ -68,6 +70,7 @@ def db() -> Iterator[Session]:
 
 
 def _intent(db: Session, scope: TenantScope, reference: str = "ref-1", **kwargs):
+    kwargs.setdefault("opened_at", NOW)
     return open_payment_intent(
         db,
         scope=scope,
@@ -191,6 +194,109 @@ def test_a_confirmation_observed_after_expiry_is_refused(db: Session) -> None:
         db, scope=scope, intent_id=intent.id, now=NOW + timedelta(hours=2)
     )
     assert intent.status is PaymentIntentStatus.EXPIRED
+
+
+def test_a_historical_import_opens_and_expires_wholly_in_the_past(
+    db: Session,
+) -> None:
+    """The adoption case: a backfilled intent whose real timeline has passed.
+
+    Sub's history is full of intents opened months ago and expired shortly
+    after. Both timestamps are in the past on the day the backfill runs, and
+    the module must accept them on the strength of their ORDERING alone — an
+    expiry checked against import wall time would refuse every migrated row,
+    and stamping `opened_at` with the import moment would make the shadow's
+    settlement-time comparison report drift on all of them.
+    """
+    scope = TenantScope(TENANT_A)
+    opened = datetime(2025, 3, 4, 9, 30, tzinfo=UTC)
+    expired = opened + timedelta(days=1)
+
+    intent = _intent(db, scope, opened_at=opened, expires_at=expired)
+
+    assert intent.opened_at == opened
+    assert intent.expires_at == expired
+    expire_payment_intent(db, scope=scope, intent_id=intent.id, now=expired)
+    assert intent.status is PaymentIntentStatus.EXPIRED
+    assert intent.settled_at == expired
+
+
+def test_an_expiry_at_or_before_the_opening_time_is_refused(db: Session) -> None:
+    """Ordering is the invariant, not futureness."""
+    scope = TenantScope(TENANT_A)
+    opened = datetime(2025, 3, 4, 9, 30, tzinfo=UTC)
+    for expires_at in (opened, opened - timedelta(seconds=1)):
+        with pytest.raises(Conflict):
+            _intent(
+                db,
+                scope,
+                reference="ref-bad",
+                opened_at=opened,
+                expires_at=expires_at,
+            )
+
+
+def test_a_replay_keeps_the_stored_opening_time(db: Session) -> None:
+    """Omitting `opened_at` on a retry must not re-derive it.
+
+    A retry that defaulted to "now" would silently move an authoritative
+    business fact every time the caller retried — the drift would be invisible
+    because the call succeeds and returns the same intent.
+    """
+    scope = TenantScope(TENANT_A)
+    opened = datetime(2025, 3, 4, 9, 30, tzinfo=UTC)
+    first = _intent(db, scope, opened_at=opened)
+
+    replay = open_payment_intent(
+        db,
+        scope=scope,
+        command=OpenPaymentIntent(
+            payer_reference="customer:1",
+            purpose=PaymentPurpose.INVOICE_SETTLEMENT,
+            requested=Money.of(Decimal("15000.00"), NGN),
+            reference="ref-1",
+            provider_type="paystack",
+            channel="web",
+        ),
+    )
+    assert replay.id == first.id
+    assert replay.opened_at == opened
+
+
+def test_a_replay_naming_a_different_opening_time_is_refused(db: Session) -> None:
+    """Two callers disagreeing about when the payer was asked to pay is the
+    same class of defect as disagreeing about the amount, and is refused the
+    same way rather than resolved by last-writer-wins."""
+    scope = TenantScope(TENANT_A)
+    opened = datetime(2025, 3, 4, 9, 30, tzinfo=UTC)
+    _intent(db, scope, opened_at=opened)
+    with pytest.raises(Conflict):
+        _intent(db, scope, opened_at=opened + timedelta(hours=1))
+
+
+def test_a_cancellation_settles_at_the_moment_the_caller_names(db: Session) -> None:
+    scope = TenantScope(TENANT_A)
+    opened = datetime(2025, 3, 4, 9, 30, tzinfo=UTC)
+    cancelled = opened + timedelta(hours=6)
+    intent = _intent(db, scope, opened_at=opened)
+
+    cancel_payment_intent(db, scope=scope, intent_id=intent.id, cancelled_at=cancelled)
+
+    assert intent.status is PaymentIntentStatus.CANCELLED
+    assert intent.settled_at == cancelled
+
+
+def test_a_cancellation_before_the_opening_time_is_refused(db: Session) -> None:
+    scope = TenantScope(TENANT_A)
+    opened = datetime(2025, 3, 4, 9, 30, tzinfo=UTC)
+    intent = _intent(db, scope, opened_at=opened)
+    with pytest.raises(Conflict):
+        cancel_payment_intent(
+            db,
+            scope=scope,
+            intent_id=intent.id,
+            cancelled_at=opened - timedelta(seconds=1),
+        )
 
 
 def test_an_accepted_transfer_proof_confirms_through_the_one_path(db: Session) -> None:

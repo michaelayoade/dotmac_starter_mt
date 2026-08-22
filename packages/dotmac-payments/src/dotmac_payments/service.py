@@ -107,10 +107,18 @@ def open_payment_intent(
             raise Conflict("reference was reused for a different amount")
         if existing.payer_reference != command.payer_reference.strip():
             raise Conflict("reference was reused for a different payer")
+        # A replay keeps the STORED opening time. Omitting `opened_at` means
+        # "now" only when there is nothing to replay — re-deriving it here
+        # would let a retry silently move an authoritative business fact.
+        # An explicitly different one is a conflict, not a correction: two
+        # callers disagreeing about when the payer was asked to pay is the
+        # same class of defect as disagreeing about the amount.
+        if command.opened_at is not None and command.opened_at != existing.opened_at:
+            raise Conflict("reference was reused for a different opening time")
         return existing
-    now = datetime.now(UTC)
-    if command.expires_at is not None and command.expires_at <= now:
-        raise Conflict("expiry must be in the future")
+    opened_at = command.opened_at or datetime.now(UTC)
+    if command.expires_at is not None and command.expires_at <= opened_at:
+        raise Conflict("expiry must be after the opening time")
     row = PaymentIntent(
         tenant_id=tenant_id,
         reference=reference,
@@ -122,7 +130,7 @@ def open_payment_intent(
         currency_code=requested.currency.code,
         requested_amount=requested.amount,
         status=_OPEN,
-        opened_at=now,
+        opened_at=opened_at,
         expires_at=command.expires_at,
     )
     db.add(row)
@@ -131,13 +139,27 @@ def open_payment_intent(
 
 
 def cancel_payment_intent(
-    db: Session, *, scope: TenantScope, intent_id: UUID
+    db: Session,
+    *,
+    scope: TenantScope,
+    intent_id: UUID,
+    cancelled_at: datetime | None = None,
 ) -> PaymentIntent:
+    """Cancel a pending intent, settling it at `cancelled_at`.
+
+    Takes the caller's moment for the same reason `expire_payment_intent`
+    does: `settled_at` is compared against the source system during the
+    backfill shadow, and a cancelled history stamped with import wall time
+    reports drift on every row.
+    """
     intent = _intent(db, _tenant(scope), intent_id)
+    moment = cancelled_at or datetime.now(UTC)
     if intent.status is not _OPEN:
         raise Conflict("only a pending payment intent can be cancelled")
+    if moment < intent.opened_at:
+        raise Conflict("cancellation cannot precede the opening time")
     intent.status = PaymentIntentStatus.CANCELLED
-    intent.settled_at = datetime.now(UTC)
+    intent.settled_at = moment
     db.flush()
     return intent
 

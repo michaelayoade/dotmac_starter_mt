@@ -53,6 +53,21 @@ class TransferProofState(enum.StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class OpenPaymentIntent:
+    """Open an intent.
+
+    `opened_at` is an authoritative business fact, not a clock seam: it is WHEN
+    the payer was asked to pay, and a history backfill or a provider
+    reconciliation import carries the real one. Omitting it means "now"; the
+    module never overrides a supplied value with its own wall clock, because a
+    migrated intent whose `opened_at` is its import timestamp cannot be
+    compared against its source and fails the dossier's settlement-time drift
+    check.
+
+    `expires_at` is validated against `opened_at`, never against the moment the
+    import happens to run. Both may be in the past for a historical intent, so
+    long as they are correctly ordered.
+    """
+
     payer_reference: str
     purpose: PaymentPurpose
     requested: Money
@@ -61,6 +76,7 @@ class OpenPaymentIntent:
     channel: str
     target_reference: str | None = None
     expires_at: datetime | None = None
+    opened_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
