@@ -80,15 +80,32 @@ def _write_repair_audit(
     )
 
 
-def _run(
-    db: Session, tenant_id: UUID, run_id: UUID, *, for_update: bool
-) -> FulfillmentRun:
-    statement = select(FulfillmentRun).where(
-        FulfillmentRun.tenant_id == tenant_id, FulfillmentRun.id == run_id
+def _run(db: Session, tenant_id: UUID, run_id: UUID) -> FulfillmentRun:
+    """Resolve the run, or refuse. This does NOT lock the aggregate.
+
+    An earlier form took `SELECT ... FOR UPDATE` on the run to serialize two
+    writers on one step. It cannot: PostgreSQL requires UPDATE privilege for a
+    row lock, and `fu_0001` grants the online role only SELECT and INSERT on
+    every table here — deliberately, because this ledger is append-only and
+    `FulfillmentRun` has no mutable column at all. Taking that lock would have
+    meant granting mutation rights on an immutable aggregate purely to obtain
+    mutual exclusion, which is a worse trade than the one it was buying.
+
+    Mutual exclusion comes from the constraints that already state the rule:
+    `uq_fulfillment_attempts_step_sequence` admits one attempt per
+    (tenant, run, step, sequence), and `uq_fulfillment_comp_requests_attempt`
+    one compensation per original attempt. A loser blocks on the index until
+    the winner commits, then fails on flush — before `publish` is reached, so
+    no command escapes for an effect that was rolled back — and
+    `_request_attempt`/`request_compensation` translate that `IntegrityError`
+    into `FulfillmentConflict`. The database enforces the invariant; the lock
+    only ever moved where the refusal happened.
+    """
+    row = db.scalar(
+        select(FulfillmentRun).where(
+            FulfillmentRun.tenant_id == tenant_id, FulfillmentRun.id == run_id
+        )
     )
-    if for_update:
-        statement = statement.with_for_update()
-    row = db.scalar(statement)
     if row is None:
         raise FulfillmentNotFound("fulfillment run not found")
     return row
@@ -192,7 +209,7 @@ def create_run(
         raise FulfillmentConflict(
             "the commercial intent or run identity already has a fulfillment run"
         ) from exc
-    return _run(db, tenant_id, UUID(str(outcome.result["run_id"])), for_update=False)
+    return _run(db, tenant_id, UUID(str(outcome.result["run_id"])))
 
 
 def _participant_command(
@@ -246,7 +263,7 @@ def _request_attempt(
     )
 
     def operation(session: Session) -> dict[str, object]:
-        _run(session, tenant_id, run_id, for_update=True)
+        _run(session, tenant_id, run_id)
         if redrive:
             if repair_actor is None or authorize_repair is None:
                 raise FulfillmentConflict(
@@ -618,7 +635,7 @@ def derive_run_progress(
     db: Session, *, tenant_id: UUID, run_id: UUID
 ) -> RunProgressSnapshot:
     """Derive aggregate progress exclusively from immutable attempts/receipts."""
-    _run(db, tenant_id, run_id, for_update=False)
+    _run(db, tenant_id, run_id)
     steps = tuple(
         db.scalars(
             select(FulfillmentStep)
@@ -799,7 +816,7 @@ def request_compensation(
     )
 
     def operation(session: Session) -> dict[str, object]:
-        _run(session, tenant_id, run_id, for_update=True)
+        _run(session, tenant_id, run_id)
         authorize(
             session,
             tenant_id,
@@ -948,15 +965,25 @@ def request_compensation(
         )
         return {"request_id": str(row.id)}
 
-    outcome = execute_once(
-        db,
-        tenant_id=tenant_id,
-        scope=_COMPENSATION_SCOPE,
-        key=request.idempotency_key,
-        operation=operation,
-        operation_name="fulfillment.request_compensation",
-        fingerprint=request_fingerprint,
-    )
+    try:
+        outcome = execute_once(
+            db,
+            tenant_id=tenant_id,
+            scope=_COMPENSATION_SCOPE,
+            key=request.idempotency_key,
+            operation=operation,
+            operation_name="fulfillment.request_compensation",
+            fingerprint=request_fingerprint,
+        )
+    except IntegrityError as exc:
+        # `uq_fulfillment_comp_requests_attempt` is what refuses a second
+        # compensation for one original attempt now that `_run` no longer
+        # locks — see its docstring. Same translation the attempt path already
+        # makes, so a concurrent caller is refused in this module's own
+        # vocabulary rather than with a driver error.
+        raise FulfillmentConflict(
+            "the original attempt already has a compensation request"
+        ) from exc
     row = db.scalar(
         select(FulfillmentCompensationRequest).where(
             FulfillmentCompensationRequest.tenant_id == tenant_id,

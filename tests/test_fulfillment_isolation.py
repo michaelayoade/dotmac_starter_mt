@@ -67,9 +67,8 @@ def fulfillment_database() -> Iterator[tuple[str, str]]:
     admin_url = _url_for(superuser, name, user="app_admin")
     previous_url = os.environ.get("MIGRATION_DATABASE_URL")
     try:
-        from alembic.config import Config
-
         from alembic import command
+        from alembic.config import Config
 
         config = Config(str(REPO_ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(REPO_ROOT / "alembic"))

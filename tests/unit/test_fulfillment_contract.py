@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 from dotmac_fulfillment import (
     AttemptRequest,
+    CompensationCommand,
     CompensationDisposition,
     CompensationOutcome,
     CompensationRequest,
@@ -96,6 +98,22 @@ def db(fulfillment_engine) -> Iterator[Session]:
     """
     with isolated_session(fulfillment_engine) as session:
         yield session
+
+
+def _round_tripped(command: CompensationCommand) -> CompensationCommand:
+    """The same command with a naive `requested_at` read back as UTC.
+
+    `request_compensation` returns a command rebuilt from the stored row, while
+    the one handed to `publish` is still in memory. The column is TIMESTAMPTZ
+    and PostgreSQL returns it aware, so the two are equal there and this is a
+    no-op. SQLite has no timezone-aware type and hands the value back naive, so
+    on this lane alone they differ by tzinfo and nothing else. Normalizing is
+    honest about that; comparing field-by-field would quietly stop checking the
+    timestamp at all.
+    """
+    if command.requested_at.tzinfo is not None:
+        return command
+    return replace(command, requested_at=command.requested_at.replace(tzinfo=UTC))
 
 
 def _registry(*codes: str) -> ParticipantRegistry:
@@ -577,7 +595,7 @@ def test_three_way_partial_progress_and_reverse_compensation_with_refusal(
         authorize=lambda *_: None,
     )
     assert compensation.step_id == "line-1"
-    assert commands == [compensation]
+    assert commands == [_round_tripped(compensation)]
 
     recorded = record_compensation_outcome(
         db,
