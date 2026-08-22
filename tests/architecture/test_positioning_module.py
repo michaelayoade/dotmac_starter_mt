@@ -91,10 +91,7 @@ def test_positioning_package_has_one_tenant_lineage_and_extraction_dossier() -> 
 
 def test_canonical_check_type_and_security_scan_positioning() -> None:
     source = MAKEFILE.read_text(encoding="utf-8")
-    assert (
-        "POSITIONING_SRC ?= packages/dotmac-positioning/src/dotmac_positioning"
-        in source
-    )
+    assert "$(wildcard packages/dotmac-*/src/*)" in source
 
     type_target = re.search(
         r"^type-check:.*?(?=^[A-Za-z][A-Za-z0-9_-]*:|\Z)",
@@ -108,8 +105,8 @@ def test_canonical_check_type_and_security_scan_positioning() -> None:
     )
     assert type_target is not None
     assert security_target is not None
-    assert "$(POSITIONING_SRC)" in type_target.group(0)
-    assert "$(POSITIONING_SRC)" in security_target.group(0)
+    assert "$(MODULE_SOURCES)" in type_target.group(0)
+    assert "$(MODULE_SOURCES)" in security_target.group(0)
 
 
 def test_positioning_python_has_no_product_provider_or_presentation_branch() -> None:
