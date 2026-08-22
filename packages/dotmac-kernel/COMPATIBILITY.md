@@ -117,6 +117,8 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.delivery_providers` | `DeliveryProvider`, `OutboundMessage`, `ProviderResult`, `Sent`, `Suppressed`, `send` |
 | `dotmac_kernel.tenancy` | `bind_single_tenant`, `single_tenant_binding`, `clear_single_tenant_binding` (which tenant, if any, this deployment is bound to) |
 | `dotmac_kernel.deps` | `require_tenant`, `require_user_auth`, `require_role`, `require_permission`, `permission_guard`, `authorize_party`, `get_db`, `get_platform_db`, `authenticate_request`, `Depends` |
+| `dotmac_kernel.machine_auth` | `MachinePrincipal`, `authenticate_machine`, `require_machine_scope`, `hash_machine_key`, `API_KEY_HEADER`, `MACHINE_KEY_SECRET_NAME`, `MachineKeyUnavailableError` — an `X-Api-Key` principal that is not a person; empty scopes authorize nothing and there is no wildcard |
+| `dotmac_kernel.machine_models` | `MachineCredential` |
 | `dotmac_kernel.external_identity` | `finalize_external_login`, `resolve_external_identity`, `bind_external_identity`, `disable_external_identity_binding`, `record_external_authentication` (DEPRECATED — see "External identity" below), `ResolvedExternalIdentity` |
 | `dotmac_kernel.errors` | `register_error_handlers` |
 | `dotmac_kernel.exceptions` | `DomainError`, `NotFoundError`, `BadRequestError`, `ConflictError`, `UnauthorizedError`, `ForbiddenError` |

@@ -99,6 +99,16 @@ from dotmac_kernel.flags import (
     install_flags,
 )
 from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.machine_auth import (
+    API_KEY_HEADER,
+    MACHINE_KEY_SECRET_NAME,
+    MachineKeyUnavailableError,
+    MachinePrincipal,
+    authenticate_machine,
+    hash_machine_key,
+    require_machine_scope,
+)
+from dotmac_kernel.machine_models import MachineCredential
 from dotmac_kernel.models import (
     AuthSession,
     Base,
@@ -209,7 +219,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a89"
+__version__ = "0.1.0a90"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -473,6 +483,14 @@ __all__ = [
     "PartyRoleGrant",
     "AuthSession",
     "ExternalIdentityBinding",
+    "require_machine_scope",
+    "hash_machine_key",
+    "authenticate_machine",
+    "MachinePrincipal",
+    "MachineKeyUnavailableError",
+    "MachineCredential",
+    "MACHINE_KEY_SECRET_NAME",
+    "API_KEY_HEADER",
     "UserCredential",
     "PlatformAdmin",
     "PlatformSession",
