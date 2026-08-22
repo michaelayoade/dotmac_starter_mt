@@ -22,6 +22,7 @@ from dotmac_imports.contracts import (
     MalformedSource,
     PromotionRefused,
     RowRejected,
+    RowSkipped,
     RowStatus,
     RunStatus,
     SourceDocument,
@@ -35,6 +36,7 @@ from dotmac_imports.service import (
     apply_next_chunk,
     create_dry_run,
     get_run,
+    get_run_outcomes,
     mark_failed,
     promote,
     validate_next_chunk,
@@ -376,6 +378,69 @@ def test_a_dry_run_records_every_row_and_changes_no_domain_state(
     assert _domain_rows(db) == []
 
 
+def test_a_typed_skip_is_preserved_through_validation_and_apply(db: Session) -> None:
+    """ERP's first adopter legitimately treats an existing customer as a
+    skipped row. Losing that distinction would either block promotion or count
+    a row the domain did not write as successfully applied."""
+    data = b"Ref No,Amount Paid\nR-1,10\nR-2,20\n"
+    source = _source(data)
+
+    class SkipsSecond(Validator):
+        def validate(self, row: Mapping[str, str]) -> Sequence[ImportIssue]:
+            if row["reference"] == "R-2":
+                raise RowSkipped(
+                    "duplicate_reference",
+                    "an existing domain record already owns this reference",
+                )
+            return super().validate(row)
+
+    run = _dry_run(db, source)
+    while True:
+        progress = validate_next_chunk(
+            db,
+            tenant_id=TENANT,
+            run_id=run.id,
+            data=data,
+            fields=_fields(),
+            validator=SkipsSecond(),
+        )
+        db.commit()
+        if progress.is_complete:
+            break
+
+    validated = get_run(db, tenant_id=TENANT, run_id=run.id)
+    assert (validated.ok_rows, validated.failed_rows, validated.skipped_rows) == (
+        1,
+        0,
+        1,
+    )
+    assert [row.status for row in _rows(db, validated)] == [
+        RowStatus.OK,
+        RowStatus.SKIPPED,
+    ]
+
+    applied = promote(db, tenant_id=TENANT, run_id=validated.id, source=source)
+    applier = Applier(db)
+    while True:
+        progress = apply_next_chunk(
+            db,
+            tenant_id=TENANT,
+            run_id=applied.id,
+            data=data,
+            fields=_fields(),
+            validator=SkipsSecond(),
+            applier=applier,
+        )
+        db.commit()
+        if progress.is_complete:
+            break
+
+    restored = get_run(db, tenant_id=TENANT, run_id=applied.id)
+    assert (restored.ok_rows, restored.failed_rows, restored.skipped_rows) == (1, 0, 1)
+    assert applier.calls == 1
+    assert _domain_rows(db) == ["R-1"]
+
+
 def test_the_ledger_fingerprints_a_row_without_persisting_its_values(
     db: Session,
 ) -> None:
@@ -387,6 +452,27 @@ def test_the_ledger_fingerprints_a_row_without_persisting_its_values(
     assert len(outcome.row_fingerprint_sha256) == 64
     assert "PRIVATE-REF" not in repr(outcome)
     assert "customer secret" not in repr(outcome)
+
+
+def test_run_outcomes_are_tenant_scoped_detached_safe_projections(
+    db: Session,
+) -> None:
+    data = b"Ref No,Amount Paid\nPRIVATE-REF,10\nR-2,twelve\n"
+    run = _dry_run(db, _source(data))
+    run = _validate_all(db, run, data)
+
+    outcomes = get_run_outcomes(db, tenant_id=TENANT, run_id=run.id)
+
+    assert [(item.row_number, item.status, item.error_code) for item in outcomes] == [
+        (1, RowStatus.OK, None),
+        (2, RowStatus.ERROR, "invalid_amount"),
+    ]
+    assert all(len(item.row_fingerprint_sha256) == 64 for item in outcomes)
+    assert "PRIVATE-REF" not in repr(outcomes)
+    assert all(not isinstance(item, ImportRunRow) for item in outcomes)
+
+    with pytest.raises(ImportRunNotFound):
+        get_run_outcomes(db, tenant_id=uuid.uuid4(), run_id=run.id)
 
 
 def test_validation_rejects_untyped_error_text_instead_of_persisting_it(

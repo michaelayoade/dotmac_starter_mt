@@ -16,6 +16,7 @@ from dotmac_imports.contracts import (
     ImportIssue,
     InvalidRunState,
     RowApplier,
+    RowSkipped,
     RunStatus,
     SourceDocument,
     SourceMismatch,
@@ -28,6 +29,7 @@ from dotmac_imports.partitioning import (
     apply_claimed_partition,
     claim_partition,
     iter_csv_partitions,
+    read_claimed_partition,
     register_partition_plan,
     validate_claimed_partition,
 )
@@ -204,31 +206,18 @@ def test_workers_claim_distinct_bounded_partitions(db: Session) -> None:
     assert "lease_token" not in repr(first)
 
 
-def test_checksum_is_verified_before_any_domain_callback_can_run(db: Session) -> None:
+def test_checksum_is_verified_before_database_settlement(db: Session) -> None:
     source = _source()
     run, stored = _plan(db, source, partition_rows=3)
     claim = claim_partition(db, tenant_id=TENANT, run_id=run.id)
     assert claim is not None
     stored[claim.file_id] += b"tampered"
-    calls = 0
-
-    class CountingValidator(Validator):
-        def validate(self, row: Mapping[str, str]) -> Sequence[ImportIssue]:
-            nonlocal calls
-            calls += 1
-            return super().validate(row)
-
     with pytest.raises(SourceMismatch):
-        validate_claimed_partition(
-            db,
+        read_claimed_partition(
             claim,
-            source=source,
             open_partition=lambda file_id: io.BytesIO(stored[file_id]),
-            fields=_fields(),
-            validator=CountingValidator(),
         )
 
-    assert calls == 0
     assert db.scalars(select(ImportRunRow)).all() == []
 
 
@@ -238,12 +227,14 @@ def test_validation_settles_each_partition_and_finalizes_the_run(db: Session) ->
 
     results = []
     while claim := claim_partition(db, tenant_id=TENANT, run_id=run.id):
+        prepared = read_claimed_partition(
+            claim,
+            open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+        )
         results.append(
             validate_claimed_partition(
                 db,
-                claim,
-                source=source,
-                open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+                prepared,
                 fields=_fields(),
                 validator=Validator(),
             )
@@ -257,6 +248,40 @@ def test_validation_settles_each_partition_and_finalizes_the_run(db: Session) ->
         row.row_number
         for row in db.scalars(select(ImportRunRow).order_by(ImportRunRow.row_number))
     ] == [1, 2, 3]
+
+
+def test_partition_settlement_counts_a_typed_skip_without_calling_the_applier(
+    db: Session,
+) -> None:
+    data = b"Ref No,Amount Paid\nR-1,10\nR-2,20\n"
+    source = _source(data)
+    run, stored = _plan(db, source, data=data, partition_rows=2)
+    claim = claim_partition(db, tenant_id=TENANT, run_id=run.id)
+    assert claim is not None
+    prepared = read_claimed_partition(
+        claim,
+        open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+    )
+
+    class SkipsSecond(Validator):
+        def validate(self, row: Mapping[str, str]) -> Sequence[ImportIssue]:
+            if row["reference"] == "R-2":
+                raise RowSkipped(
+                    "duplicate_reference",
+                    "an existing domain record already owns this reference",
+                )
+            return super().validate(row)
+
+    result = validate_claimed_partition(
+        db,
+        prepared,
+        fields=_fields(),
+        validator=SkipsSecond(),
+    )
+
+    db.refresh(run)
+    assert result.skipped == 1
+    assert (run.ok_rows, run.failed_rows, run.skipped_rows) == (1, 0, 1)
 
 
 def test_an_expired_or_replaced_claim_cannot_apply(db: Session) -> None:
@@ -279,13 +304,15 @@ def test_an_expired_or_replaced_claim_cannot_apply(db: Session) -> None:
     )
     assert replacement is not None
     applier = Applier()
+    prepared = read_claimed_partition(
+        stale,
+        open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+    )
 
     with pytest.raises(PartitionClaimLost):
         apply_claimed_partition(
             db,
-            stale,
-            source=source,
-            open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+            prepared,
             fields=_fields(),
             validator=Validator(),
             applier=applier,
@@ -300,11 +327,13 @@ def test_promotion_clones_the_verified_plan_and_apply_uses_it(db: Session) -> No
     run, stored = _plan(db, source, data=data, partition_rows=2)
     claim = claim_partition(db, tenant_id=TENANT, run_id=run.id)
     assert claim is not None
+    prepared = read_claimed_partition(
+        claim,
+        open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+    )
     validate_claimed_partition(
         db,
-        claim,
-        source=source,
-        open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+        prepared,
         fields=_fields(),
         validator=Validator(),
     )
@@ -312,12 +341,14 @@ def test_promotion_clones_the_verified_plan_and_apply_uses_it(db: Session) -> No
     apply_claim = claim_partition(db, tenant_id=TENANT, run_id=applied.id)
     assert apply_claim is not None
     applier: RowApplier = Applier()
+    apply_prepared = read_claimed_partition(
+        apply_claim,
+        open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+    )
 
     result = apply_claimed_partition(
         db,
-        apply_claim,
-        source=source,
-        open_partition=lambda file_id: io.BytesIO(stored[file_id]),
+        apply_prepared,
         fields=_fields(),
         validator=Validator(),
         applier=applier,

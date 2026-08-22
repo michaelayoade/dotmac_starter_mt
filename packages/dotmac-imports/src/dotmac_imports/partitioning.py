@@ -23,11 +23,11 @@ from sqlalchemy.orm import Session
 from dotmac_imports.contracts import (
     ColumnMapping,
     FieldSet,
-    ImportIssue,
     InvalidRunState,
     MalformedSource,
     RowApplier,
     RowRejected,
+    RowSkipped,
     RowStatus,
     RowValidator,
     RunStatus,
@@ -38,7 +38,7 @@ from dotmac_imports.contracts import (
     normalize_column,
 )
 from dotmac_imports.models import ImportPartition, ImportRun
-from dotmac_imports.service import _record, _validation_detail
+from dotmac_imports.service import _inspect_row, _record, _validation_detail
 from dotmac_imports.tabular import apply_mapping
 
 DEFAULT_PARTITION_ROWS = 200
@@ -114,6 +114,19 @@ class PartitionClaim:
     row_count: int
     checksum_sha256: str
     byte_size: int
+    source_file_id: UUID
+    source_checksum_sha256: str
+    source_layout: SourceLayout
+    source_delimiter: str
+    source_encoding: str
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class PreparedPartition:
+    """Verified, bounded rows detached from both storage and a DB session."""
+
+    claim: PartitionClaim
+    rows: tuple[tuple[tuple[str, str], ...], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +136,7 @@ class PartitionProgress:
     processed: int
     ok: int
     failed: int
+    skipped: int
     run_complete: bool
 
 
@@ -414,6 +428,9 @@ def claim_partition(
     if partition is None:  # pragma: no cover - returned id is the row
         raise PartitionPlanInvalid("claimed partition disappeared")
     db.refresh(partition)
+    run = db.get(ImportRun, partition.run_id)
+    if run is None or run.tenant_id != tenant_id:
+        raise InvalidRunState("partition run does not exist")
     return PartitionClaim(
         partition_id=partition.id,
         run_id=partition.run_id,
@@ -425,6 +442,11 @@ def claim_partition(
         row_count=partition.row_count,
         checksum_sha256=partition.partition_checksum_sha256,
         byte_size=partition.byte_size,
+        source_file_id=run.source_file_id,
+        source_checksum_sha256=run.source_checksum_sha256,
+        source_layout=SourceLayout(run.source_layout),
+        source_delimiter=run.source_delimiter,
+        source_encoding=run.source_encoding,
     )
 
 
@@ -469,19 +491,16 @@ def finalize_partitioned_run(
     return True
 
 
-def _claimed_rows(
+def read_claimed_partition(
     claim: PartitionClaim,
     *,
     open_partition: PartitionOpener,
-    source: SourceDocument,
-    mapping: ColumnMapping,
-    fields: FieldSet,
-) -> tuple[dict[str, str], ...]:
-    missing = fields.required_names - mapping.fields
-    if missing:
-        raise UnmappedRequiredField(
-            f"required field(s) {sorted(missing)} have no source column"
-        )
+) -> PreparedPartition:
+    """Read, verify and decode one bounded object without a DB session.
+
+    The returned rows are safe to carry into a later settlement transaction.
+    Its repr is disabled because imported values are transient material.
+    """
     digest = hashlib.sha256()
     read_bytes = 0
 
@@ -497,22 +516,27 @@ def _claimed_rows(
                 "stored partition differs from its immutable descriptor"
             )
         with open_partition(claim.file_id) as raw:
+            source = SourceDocument(
+                file_id=claim.file_id,
+                checksum_sha256=claim.checksum_sha256,
+                layout=claim.source_layout,
+                delimiter=claim.source_delimiter,
+                encoding=claim.source_encoding,
+            )
             columns, rows = _raw_rows(raw, source)
             del columns
-            mapped = tuple(apply_mapping(row, mapping) for row in rows)
+            decoded = tuple(tuple(sorted(row.items())) for row in rows)
     except (OSError, ValueError):
         raise SourceMismatch("stored partition could not be read") from None
-    if len(mapped) != claim.row_count:
+    if len(decoded) != claim.row_count:
         raise SourceMismatch("stored partition row count differs from its descriptor")
-    return mapped
+    return PreparedPartition(claim=claim, rows=decoded)
 
 
 def validate_claimed_partition(
     db: Session,
-    claim: PartitionClaim,
+    prepared: PreparedPartition,
     *,
-    source: SourceDocument,
-    open_partition: PartitionOpener,
     fields: FieldSet,
     validator: RowValidator,
     now: datetime | None = None,
@@ -520,9 +544,7 @@ def validate_claimed_partition(
     """Validate one claimed partition with no domain writer in scope."""
     return _process_claimed_partition(
         db,
-        claim,
-        source=source,
-        open_partition=open_partition,
+        prepared,
         fields=fields,
         validator=validator,
         now=now,
@@ -531,10 +553,8 @@ def validate_claimed_partition(
 
 def apply_claimed_partition(
     db: Session,
-    claim: PartitionClaim,
+    prepared: PreparedPartition,
     *,
-    source: SourceDocument,
-    open_partition: PartitionOpener,
     fields: FieldSet,
     validator: RowValidator,
     applier: RowApplier,
@@ -543,9 +563,7 @@ def apply_claimed_partition(
     """Apply one claimed partition with its row outcomes in one transaction."""
     return _process_claimed_partition(
         db,
-        claim,
-        source=source,
-        open_partition=open_partition,
+        prepared,
         fields=fields,
         validator=validator,
         applier=applier,
@@ -555,16 +573,15 @@ def apply_claimed_partition(
 
 def _process_claimed_partition(
     db: Session,
-    claim: PartitionClaim,
+    prepared: PreparedPartition,
     *,
-    source: SourceDocument,
-    open_partition: PartitionOpener,
     fields: FieldSet,
     validator: RowValidator,
     applier: RowApplier | None = None,
     now: datetime | None = None,
 ) -> PartitionProgress:
     """Verify and settle one bounded partition in the caller's transaction."""
+    claim = prepared.claim
     moment = now or datetime.now(UTC)
     partition = db.execute(
         select(ImportPartition)
@@ -588,41 +605,44 @@ def _process_claimed_partition(
     if run is None or run.tenant_id != claim.tenant_id:
         raise InvalidRunState("partition run does not exist")
     if (
-        run.source_file_id != source.file_id
-        or run.source_checksum_sha256 != source.checksum_sha256
+        run.source_file_id != claim.source_file_id
+        or run.source_checksum_sha256 != claim.source_checksum_sha256
+        or SourceLayout(run.source_layout) != claim.source_layout
+        or run.source_delimiter != claim.source_delimiter
+        or run.source_encoding != claim.source_encoding
     ):
-        raise SourceMismatch("partition worker was given another source identity")
+        raise SourceMismatch("partition claim no longer matches its source identity")
     if run.dry_run is (applier is not None):
         raise InvalidRunState("dry-run and apply partition entry points are distinct")
-    source_for_partition = SourceDocument(
-        file_id=claim.file_id,
-        checksum_sha256=claim.checksum_sha256,
-        layout=SourceLayout(run.source_layout),
-        delimiter=run.source_delimiter,
-        encoding=run.source_encoding,
-    )
     mapping = ColumnMapping(
         tuple((str(pair[0]), str(pair[1])) for pair in (run.column_mapping or []))
     )
-    rows = _claimed_rows(
-        claim,
-        open_partition=open_partition,
-        source=source_for_partition,
-        mapping=mapping,
-        fields=fields,
-    )
+    missing = fields.required_names - mapping.fields
+    if missing:
+        raise UnmappedRequiredField(
+            f"required field(s) {sorted(missing)} have no source column"
+        )
+    rows = tuple(apply_mapping(dict(row), mapping) for row in prepared.rows)
     ok = 0
     failed = 0
+    skipped = 0
     with db.begin_nested():
         for offset, row in enumerate(rows):
             number = claim.start_row + offset + 1
-            issues = tuple(validator.validate(row))
-            if any(not isinstance(issue, ImportIssue) for issue in issues):
-                raise TypeError(
-                    "RowValidator.validate() must return ImportIssue values"
+            inspection = _inspect_row(validator, row)
+            if isinstance(inspection, RowSkipped):
+                _record(
+                    db,
+                    run,
+                    number,
+                    row,
+                    RowStatus.SKIPPED,
+                    error_code=inspection.issue.code,
+                    error_message=inspection.issue.message,
                 )
-            if issues:
-                code, message = _validation_detail(issues)
+                skipped += 1
+            elif inspection:
+                code, message = _validation_detail(inspection)
                 _record(
                     db,
                     run,
@@ -689,6 +709,7 @@ def _process_claimed_partition(
                 total_rows=ImportRun.total_rows + claim.row_count,
                 ok_rows=ImportRun.ok_rows + ok,
                 failed_rows=ImportRun.failed_rows + failed,
+                skipped_rows=ImportRun.skipped_rows + skipped,
             )
             .execution_options(synchronize_session=False)
         )
@@ -702,7 +723,7 @@ def _process_claimed_partition(
         now=moment,
     )
     return PartitionProgress(
-        run.id, partition.id, claim.row_count, ok, failed, complete
+        run.id, partition.id, claim.row_count, ok, failed, skipped, complete
     )
 
 
@@ -765,11 +786,13 @@ __all__ = [
     "PartitionPayload",
     "PartitionPlanInvalid",
     "PartitionProgress",
+    "PreparedPartition",
     "apply_claimed_partition",
     "claim_partition",
     "clone_partition_plan",
     "finalize_partitioned_run",
     "iter_csv_partitions",
+    "read_claimed_partition",
     "register_partition_plan",
     "require_unpartitioned",
     "validate_claimed_partition",

@@ -27,11 +27,13 @@ from dotmac_imports.contracts import (
     ColumnMapping,
     FieldSet,
     ImportIssue,
+    ImportRowOutcome,
     ImportRunNotFound,
     InvalidRunState,
     PromotionRefused,
     RowApplier,
     RowRejected,
+    RowSkipped,
     RowStatus,
     RowValidator,
     RunProgress,
@@ -90,6 +92,31 @@ def get_run(db: Session, *, tenant_id: UUID, run_id: UUID) -> ImportRun:
     if run is None:
         raise ImportRunNotFound(f"no import run {run_id} in this tenant")
     return run
+
+
+def get_run_outcomes(
+    db: Session, *, tenant_id: UUID, run_id: UUID
+) -> tuple[ImportRowOutcome, ...]:
+    """Return ordered, detached row verdicts for one tenant-scoped run."""
+    get_run(db, tenant_id=tenant_id, run_id=run_id)
+    rows = db.scalars(
+        select(ImportRunRow)
+        .where(
+            ImportRunRow.tenant_id == tenant_id,
+            ImportRunRow.run_id == run_id,
+        )
+        .order_by(ImportRunRow.row_number)
+    )
+    return tuple(
+        ImportRowOutcome(
+            row_number=row.row_number,
+            row_fingerprint_sha256=row.row_fingerprint_sha256,
+            status=RowStatus(row.status),
+            error_code=row.error_code,
+            error_message=row.error_message,
+        )
+        for row in rows
+    )
 
 
 def validate_next_chunk(
@@ -291,14 +318,20 @@ def _process_next_chunk(
         for index in range(processed, stop):
             number = index + 1
             row = rows[index]
-            issues = tuple(validator.validate(row))
-            if any(not isinstance(issue, ImportIssue) for issue in issues):
-                raise TypeError(
-                    "RowValidator.validate() must return ImportIssue values; "
-                    "raw strings are not persistence-safe"
+            inspection = _inspect_row(validator, row)
+            if isinstance(inspection, RowSkipped):
+                _record(
+                    db,
+                    run,
+                    number,
+                    row,
+                    RowStatus.SKIPPED,
+                    error_code=inspection.issue.code,
+                    error_message=inspection.issue.message,
                 )
-            if issues:
-                code, message = _validation_detail(issues)
+                skipped += 1
+            elif inspection:
+                code, message = _validation_detail(inspection)
                 _record(
                     db,
                     run,
@@ -326,6 +359,22 @@ def _process_next_chunk(
         db.flush()
 
     return _progress(run)
+
+
+def _inspect_row(
+    validator: RowValidator, row: Mapping[str, str]
+) -> tuple[ImportIssue, ...] | RowSkipped:
+    """Return typed validation issues or one deliberate skip outcome."""
+    try:
+        issues = tuple(validator.validate(row))
+    except RowSkipped as skipped:
+        return skipped
+    if any(not isinstance(issue, ImportIssue) for issue in issues):
+        raise TypeError(
+            "RowValidator.validate() must return ImportIssue values; "
+            "raw strings are not persistence-safe"
+        )
+    return issues
 
 
 def _rows_from_verified_bytes(
@@ -487,6 +536,7 @@ __all__ = [
     "apply_next_chunk",
     "create_dry_run",
     "get_run",
+    "get_run_outcomes",
     "mark_failed",
     "promote",
     "validate_next_chunk",
