@@ -15,7 +15,10 @@ from dotmac_support_access.service import (
     revoke_grant,
 )
 
+__version__ = "0.1.0a1"
+
 __all__ = [
+    "__version__",
     "AccessMode",
     "AccessRefused",
     "FiniteGrantDescriptor",

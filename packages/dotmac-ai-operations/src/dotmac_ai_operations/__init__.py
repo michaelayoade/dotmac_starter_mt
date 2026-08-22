@@ -14,7 +14,10 @@ from dotmac_ai_operations.service import (
     start_operation,
 )
 
+__version__ = "0.1.0a1"
+
 __all__ = [
+    "__version__",
     "AIOperationIntent",
     "AIOperationRefused",
     "AttemptInput",
