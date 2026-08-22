@@ -1059,6 +1059,24 @@ type = "directory"
 url = "packages/dotmac-forms"
 
 [[package]]
+name = "dotmac-fulfillment"
+version = "0.1.0a1"
+description = "DotMac tenant-scoped fulfillment saga, participant attempt, outcome, compensation, and convergence ownership"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a89"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-fulfillment"
+
+[[package]]
 name = "dotmac-imports"
 version = "0.1.0a2"
 description = "DotMac bulk-import run ledger, dry-run/apply promotion and column mapping"
@@ -3950,4 +3968,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "11e9cad1b9c20f23c2d9b49f05fd782b33de2b70e4aba8fdfda54e83f4471fc1"
+content-hash = "8694aa1fb210c321eb9a008832af855bd877c2fd3324d8aab6cc4b73130de6bd"
