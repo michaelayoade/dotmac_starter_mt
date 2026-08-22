@@ -6,6 +6,64 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a91 — 2026-08-22
+
+**Fourteen lineage allocations, no behaviour.** This release adds rows to
+`MIGRATION_OWNER_LEDGER` and changes nothing else: no new module, no new
+function, no migration of the kernel's own. A consumer on a90 that installs
+none of these fourteen modules sees no difference.
+
+### Added — the ADR-0055 ISP essential-domain cohort
+
+`customers`/`cu`, `service_catalog`/`sc`, `qualification`/`qu`, `services`/`se`,
+`usage`/`us`, `usage_rating`/`ur`, `service_access_policy`/`sap`,
+`inbox_operations`/`io`, `workforce`/`wf`, `fx_policy`/`fx`.
+
+These ten were authored against an "a85" that only ever existed on their own
+branch. Every PUBLISHED a85..a90 artifact carries none of them, so that a85 was
+never an installable floor — a module pinned to it would have named a version no
+resolver can satisfy while every in-tree gate stayed green. a91 is the first
+kernel carrying the rows and is therefore their floor.
+
+`services` takes `se` because Surveys holds `sv`. `service_access_policy` takes
+the `sap` settled by the three-way `sa` arbitration on `main` rather than the
+`sa` its own branch had claimed while unable to see Sales — the branch was green
+for exactly the reason that arbitration exists: no check a branch runs on itself
+can see a sibling branch's allocations.
+
+### Added — the customer-journey owners
+
+`service_orders`/`so`, `payments`/`pm`, `service_changes`/`sch`,
+`operational_escalations`/`oe`.
+
+Four owners the 2026-08-22 audit of `dotmac_sub` PR #2624 found to have
+substantive durable state in Sub and no owner in this ledger. Each is
+deliberately narrower than the journey it closes:
+
+- `service_orders` owns the service-delivery order and its activation-readiness
+  decision. `orders` (commercial), `fulfillment` (saga mechanics), `work_orders`
+  (field execution) and `services` (realized lifecycle) keep their own rows.
+- `payments` owns payment intent and confirmation correlation. `billing` keeps
+  receivables and settlement allocation, `banking` keeps accounts,
+  `integration` keeps provider transport.
+- `service_changes` owns the durable plan-change/relocation/vacation request,
+  its evidence and its checkpoints across the owners it crosses.
+- `operational_escalations` owns versioned escalation policy, instances,
+  acknowledgement and cancellation. `durable_timers` provides scheduling;
+  Messaging/Integrator performs delivery.
+
+`sch` rather than a second two-letter `sc`-alike: `sc` is Service Catalog and
+`so` is Service Orders, and three neighbouring service concepts sharing a
+mnemonic shape is precisely what the `sa` arbitration says a permanent database
+identity must not carry. `pm` rather than `pa`/`pb`/`py`, already Party,
+Payables and Payroll.
+
+### Allocation is not adoption
+
+None of the fourteen is published, composed by this assembly, or authoritative
+because of this release. `NamespaceRegistry` can now register them; nothing
+else changed.
+
 ## 0.1.0a90 — 2026-08-22
 
 **Machine credentials** — an `X-Api-Key` principal that is not a person.
@@ -184,9 +242,10 @@ a86 kernel is the first release candidate carrying the web-analytics row.
 Published, registry-verified and tagged from exact protected-main revision
 `b031010` by release run `32462383827`.
 
-Allocates the ERP/Backoffice/general tenant-module cohort. This is physical
-namespace identity only; every business decision remains in its independently
-released module and no product composition or authority cutover is implied.
+Allocates the ERP/Backoffice/general and ISP-essential tenant-module cohorts.
+This is physical namespace identity only; every business decision remains in
+its independently released module and no product composition or authority
+cutover is implied.
 
 Carries a84's two rows as well. a84 was authored first but never dispatched:
 a85 reached `main` and was published while a84 was still unreleased, so the
@@ -202,6 +261,12 @@ allocation.
   Projects (`pj`), Records (`re`), Surveys (`sv`), Tax (`tx`) and Work Orders
   (`wo`). Documents does not reuse deployment-control's `dc`; Party does not
   reuse Payables' `pa`.
+- Permanent migration owners for Customers (`cu`), Service Catalog (`sc`),
+  Qualification (`qu`), Services (`se`), Usage (`us`), Usage Rating (`ur`),
+  Service Access Policy (`sa`), Inbox Operations (`io`), Workforce (`wf`) and
+  FX Policy (`fx`) (ADR-0055). Services uses `se` because Surveys already owns
+  `sv`; the collision was resolved before either Services publication or
+  product composition.
 
 ## 0.1.0a84 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a85
 

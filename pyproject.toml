@@ -99,6 +99,18 @@ dotmac-numbering = { path = "packages/dotmac-numbering", develop = true }
 # Tenant employment-directory owner extracted product-first from ERP. Built and
 # proven here; the clean Backoffice assembly is its first exact-pin consumer.
 dotmac-people = { path = "packages/dotmac-people", develop = true }
+# ADR-0055 ISP essential-domain cohort. Built and proven here, but deliberately
+# uncomposed and release-unallowlisted until each source product's named cutover.
+dotmac-customers = { path = "packages/dotmac-customers", develop = true }
+dotmac-service-catalog = { path = "packages/dotmac-service-catalog", develop = true }
+dotmac-qualification = { path = "packages/dotmac-qualification", develop = true }
+dotmac-services = { path = "packages/dotmac-services", develop = true }
+dotmac-usage = { path = "packages/dotmac-usage", develop = true }
+dotmac-usage-rating = { path = "packages/dotmac-usage-rating", develop = true }
+dotmac-service-access-policy = { path = "packages/dotmac-service-access-policy", develop = true }
+dotmac-inbox-operations = { path = "packages/dotmac-inbox-operations", develop = true }
+dotmac-workforce = { path = "packages/dotmac-workforce", develop = true }
+dotmac-fx-policy = { path = "packages/dotmac-fx-policy", develop = true }
 # Tenant-only stock-ledger and traceability owner (ADR-0036). The network
 # suite reuses this owner for equipment while it is stocked; deployment does
 # not turn Network Inventory into a second quantity or valuation writer.
@@ -268,6 +280,16 @@ module = [
     "dotmac_approvals.*",
     "dotmac_numbering.*",
     "dotmac_people.*",
+    "dotmac_customers.*",
+    "dotmac_service_catalog.*",
+    "dotmac_qualification.*",
+    "dotmac_services.*",
+    "dotmac_usage.*",
+    "dotmac_usage_rating.*",
+    "dotmac_service_access_policy.*",
+    "dotmac_inbox_operations.*",
+    "dotmac_workforce.*",
+    "dotmac_fx_policy.*",
     "dotmac_inventory.*",
     "dotmac_assets.*",
     "dotmac_ipam.*",
@@ -371,6 +393,16 @@ root_packages = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_customers",
+    "dotmac_service_catalog",
+    "dotmac_qualification",
+    "dotmac_services",
+    "dotmac_usage",
+    "dotmac_usage_rating",
+    "dotmac_service_access_policy",
+    "dotmac_inbox_operations",
+    "dotmac_workforce",
+    "dotmac_fx_policy",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -485,6 +517,16 @@ source_modules = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_customers",
+    "dotmac_service_catalog",
+    "dotmac_qualification",
+    "dotmac_services",
+    "dotmac_usage",
+    "dotmac_usage_rating",
+    "dotmac_service_access_policy",
+    "dotmac_inbox_operations",
+    "dotmac_workforce",
+    "dotmac_fx_policy",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -593,6 +635,16 @@ modules = [
     "dotmac_approvals",
     "dotmac_numbering",
     "dotmac_people",
+    "dotmac_customers",
+    "dotmac_service_catalog",
+    "dotmac_qualification",
+    "dotmac_services",
+    "dotmac_usage",
+    "dotmac_usage_rating",
+    "dotmac_service_access_policy",
+    "dotmac_inbox_operations",
+    "dotmac_workforce",
+    "dotmac_fx_policy",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",
@@ -684,6 +736,16 @@ forbidden_modules = [
     "dotmac_numbering",
     "dotmac_media_observations",
     "dotmac_people",
+    "dotmac_customers",
+    "dotmac_service_catalog",
+    "dotmac_qualification",
+    "dotmac_services",
+    "dotmac_usage",
+    "dotmac_usage_rating",
+    "dotmac_service_access_policy",
+    "dotmac_inbox_operations",
+    "dotmac_workforce",
+    "dotmac_fx_policy",
     "dotmac_inventory",
     "dotmac_assets",
     "dotmac_ipam",

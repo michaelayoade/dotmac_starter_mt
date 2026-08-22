@@ -1174,6 +1174,131 @@ SUBSCRIPTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("subscriptions"),
 )
 
+# ISP essential-domain cohort (ADR-0055). Ten tenant owners share the current
+# unpublished a85 allocation release while retaining independent schemas and
+# lineages. Services uses `se`: current main had already allocated `sv`
+# permanently to Surveys before this isolated cohort was integrated.
+CUSTOMERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="customers",
+    prefix="cu",
+    branch_label="customers",
+    db_schema=module_schema("customers"),
+)
+
+SERVICE_CATALOG_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="service_catalog",
+    prefix="sc",
+    branch_label="service_catalog",
+    db_schema=module_schema("svc_cat"),
+)
+
+QUALIFICATION_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="qualification",
+    prefix="qu",
+    branch_label="qualification",
+    db_schema=module_schema("qual"),
+)
+
+SERVICES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="services",
+    prefix="se",
+    branch_label="services",
+    db_schema=module_schema("services"),
+)
+
+USAGE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="usage",
+    prefix="us",
+    branch_label="usage",
+    db_schema=module_schema("usage"),
+)
+
+USAGE_RATING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="usage_rating",
+    prefix="ur",
+    branch_label="usage_rating",
+    db_schema=module_schema("usage_rate"),
+)
+
+INBOX_OPERATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="inbox_operations",
+    prefix="io",
+    branch_label="inbox_operations",
+    db_schema=module_schema("inbox_ops"),
+)
+
+WORKFORCE_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="workforce",
+    prefix="wf",
+    branch_label="workforce",
+    db_schema=module_schema("workforce"),
+)
+
+FX_POLICY_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="fx_policy",
+    prefix="fx",
+    branch_label="fx_policy",
+    db_schema=module_schema("fx_policy"),
+)
+
+# ── The customer-journey owners (audit of Sub PR #2624, 2026-08-22) ─────────
+#
+# Four journey-shaped owners the Sub journey audit found have substantive
+# durable state in Sub and no owner anywhere in this ledger. Allocated together,
+# and allocated BEFORE their packages land, for the same reason the commerce and
+# ADR-0040 rows above were: uniqueness is a property of THIS ledger and no
+# branch can see a sibling branch's claim.
+#
+# Each is deliberately NARROWER than the journey it closes. The journey crosses
+# owners; the module owns one decision inside it.
+
+# Service delivery: the readiness decision between a sold commercial order and a
+# realized service. `orders` (commercial), `fulfillment` (saga mechanics),
+# `work_orders` (field execution) and `services` (realized lifecycle) each keep
+# their own row above — this one owns only the delivery order and whether it is
+# ready to activate. `so` was free and reads directly.
+SERVICE_ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="service_orders",
+    prefix="so",
+    branch_label="service_orders",
+    db_schema=module_schema("serviceorders"),
+)
+
+# Payment intent and its confirmation correlation. NOT receivables: `billing`
+# owns settlement allocation, `banking` owns accounts and `integration` owns
+# provider transport. `pm` rather than `pa`/`pb`/`py`, which are already Party,
+# Payables and Payroll — three neighbouring money concepts whose permanent
+# database identity must not be confusable.
+PAYMENTS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="payments",
+    prefix="pm",
+    branch_label="payments",
+    db_schema=module_schema("payments"),
+)
+
+# The durable customer-initiated change request — plan change, relocation,
+# vacation hold/resume — and its checkpoints across Qualification, Billing,
+# Fulfillment, Services and Access. A three-letter `sch` rather than a second
+# two-letter `sc`-alike, because `sc` is Service Catalog and `so` is Service
+# Orders: three neighbouring service concepts, exactly the case the `sa`
+# arbitration above says must not share a mnemonic shape.
+SERVICE_CHANGES_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="service_changes",
+    prefix="sch",
+    branch_label="service_changes",
+    db_schema=module_schema("servicechanges"),
+)
+
+# Versioned escalation policy, its instances, acknowledgement and cancellation
+# across tickets, outages and Inbox. `durable_timers` provides scheduling and
+# Messaging/Integrator performs delivery; neither decides who is escalated to.
+OPERATIONAL_ESCALATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="operational_escalations",
+    prefix="oe",
+    branch_label="operational_escalations",
+    db_schema=module_schema("escalations"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1242,6 +1367,19 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     COLLECTIONS_MIGRATION_OWNER,
     ORDERS_MIGRATION_OWNER,
     SUBSCRIPTIONS_MIGRATION_OWNER,
+    CUSTOMERS_MIGRATION_OWNER,
+    SERVICE_CATALOG_MIGRATION_OWNER,
+    QUALIFICATION_MIGRATION_OWNER,
+    SERVICES_MIGRATION_OWNER,
+    USAGE_MIGRATION_OWNER,
+    USAGE_RATING_MIGRATION_OWNER,
+    INBOX_OPERATIONS_MIGRATION_OWNER,
+    WORKFORCE_MIGRATION_OWNER,
+    FX_POLICY_MIGRATION_OWNER,
+    SERVICE_ORDERS_MIGRATION_OWNER,
+    PAYMENTS_MIGRATION_OWNER,
+    SERVICE_CHANGES_MIGRATION_OWNER,
+    OPERATIONAL_ESCALATIONS_MIGRATION_OWNER,
 )
 
 
@@ -1576,18 +1714,21 @@ __all__ = [
     "APPROVALS_MIGRATION_OWNER",
     "ASSEMBLY_MIGRATION_OWNER",
     "CAMPAIGNS_MIGRATION_OWNER",
+    "CUSTOMERS_MIGRATION_OWNER",
     "FILES_MIGRATION_OWNER",
     "FULFILLMENT_MIGRATION_OWNER",
     "HOST_MIGRATION_OWNERS",
     "HOST_SCHEMA",
     "IMPORTS_MIGRATION_OWNER",
     "INTEGRATION_MIGRATION_OWNER",
+    "INBOX_OPERATIONS_MIGRATION_OWNER",
     "KERNEL_MIGRATION_OWNER",
     "MAX_IDENTIFIER_LENGTH",
     "MAX_MIGRATION_PREFIX_LENGTH",
     "MAX_REVISION_ID_LENGTH",
     "MIGRATION_OWNER_LEDGER",
     "PEOPLE_MIGRATION_OWNER",
+    "QUALIFICATION_MIGRATION_OWNER",
     "REFERRALS_MIGRATION_OWNER",
     "RESELLER_MANAGEMENT_MIGRATION_OWNER",
     "WEB_ANALYTICS_MIGRATION_OWNER",
@@ -1604,6 +1745,12 @@ __all__ = [
     "COLLECTIONS_MIGRATION_OWNER",
     "ORDERS_MIGRATION_OWNER",
     "SUBSCRIPTIONS_MIGRATION_OWNER",
+    "SERVICE_CATALOG_MIGRATION_OWNER",
+    "SERVICES_MIGRATION_OWNER",
+    "SERVICE_ORDERS_MIGRATION_OWNER",
+    "PAYMENTS_MIGRATION_OWNER",
+    "SERVICE_CHANGES_MIGRATION_OWNER",
+    "OPERATIONAL_ESCALATIONS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
@@ -1615,6 +1762,7 @@ __all__ = [
     "DuplicateSchemaError",
     "DuplicateTableOwnerError",
     "DURABLE_TIMERS_MIGRATION_OWNER",
+    "FX_POLICY_MIGRATION_OWNER",
     "HostSchemaClaimError",
     "InvalidMigrationPrefixError",
     "InvalidRevisionIdError",
@@ -1624,6 +1772,9 @@ __all__ = [
     "NamespaceError",
     "NamespaceRegistry",
     "UnallocatedNamespaceError",
+    "USAGE_MIGRATION_OWNER",
+    "USAGE_RATING_MIGRATION_OWNER",
+    "WORKFORCE_MIGRATION_OWNER",
     "module_schema",
     "qualified",
     "revision_id",

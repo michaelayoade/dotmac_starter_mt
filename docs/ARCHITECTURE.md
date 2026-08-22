@@ -573,6 +573,60 @@ packages/dotmac-assets/          optional tenant durable-unit owner
                  reference assembly. Capitalization, depreciation, stock,
                  position observations and product extensions remain separate
                  owners.
+packages/dotmac-customers/       optional tenant customer-account owner
+  pyproject.toml                 distribution dotmac-customers; audit-complete,
+  EXTRACTION.toml                with Sub as the qualifying source and first
+                                 candidate consumer
+  src/dotmac_customers/          account identity/lifecycle, narrow profiles,
+                 and typed opaque Party references; manifest plus independent
+                 `cu` lineage in `mod_customers`. Tenant plane only, forced
+                 RLS, built and tested here but not composed. Authentication,
+                 reachability, addresses, qualification, commercial terms,
+                 services, billing and network state remain outside.
+packages/dotmac-service-catalog/ optional technical service catalogue
+  pyproject.toml                 distribution dotmac-service-catalog;
+                                 audit-complete with Sub as qualifying source
+  src/dotmac_service_catalog/    specifications, plan families,
+                 characteristics and eligibility-input declarations; `sc`
+                 lineage in `mod_svc_cat`, tenant-only forced RLS, built and
+                 tested here but uncomposed. Offers, prices, contracts,
+                 subscriptions and fixed recurrence are excluded.
+packages/dotmac-qualification/   optional qualification-decision owner
+  src/dotmac_qualification/      time-bounded observation evidence and
+                 expiring decisions; `qu` lineage in `mod_qual`, tenant-only
+                 forced RLS, uncomposed. Positioning/network systems supply
+                 facts but never write the authoritative decision.
+packages/dotmac-services/        optional service-instance lifecycle owner
+  src/dotmac_services/           current status plus immutable transition
+                 history; `se` lineage in `mod_services`, tenant-only forced
+                 RLS, uncomposed. Customer, catalogue and qualification
+                 identities remain opaque; enforcement and billing stay out.
+packages/dotmac-usage/           optional normalized usage-fact owner
+  src/dotmac_usage/              immutable observations, append-only corrections
+                 and rebuildable aggregates; `us` lineage in `mod_usage`,
+                 tenant-only forced RLS, uncomposed. Raw AAA and rating stay out.
+packages/dotmac-usage-rating/    optional pre-tax usage-rating owner
+  src/dotmac_usage_rating/       effective rules and immutable obligations;
+                 `ur` lineage in `mod_usage_rate`, tenant-only forced RLS,
+                 uncomposed. Invoices, tax, payments and accounting stay out.
+packages/dotmac-service-access-policy/ optional desired-access decision owner
+  src/dotmac_service_access_policy/ per-service policy inputs and desired state;
+                 `sap` lineage in `mod_serviceaccess`, tenant-only forced RLS,
+                 uncomposed. Network Access remains the only enforcer.
+packages/dotmac-inbox-operations/ optional staffed-inbox operation owner
+  src/dotmac_inbox_operations/   queues, routing, inbox presence, opaque
+                 assignments and workflow events; `io` lineage in
+                 `mod_inbox_ops`, tenant-only forced RLS, uncomposed.
+packages/dotmac-workforce/       optional workforce scheduling/dispatch owner
+  src/dotmac_workforce/          teams, skills, memberships, shifts,
+                 availability and opaque-work dispatch decisions; `wf`
+                 lineage in `mod_workforce`, tenant-only forced RLS,
+                 uncomposed. People and Work Order lifecycles stay out.
+packages/dotmac-fx-policy/       optional FX observation/selection owner
+  src/dotmac_fx_policy/          rate types, sources, effective policy,
+                 observations and determination evidence; `fx` lineage in
+                 `mod_fx_policy`, tenant-only forced RLS, uncomposed. Money,
+                 invoice snapshots, tax, provider I/O and GL stay out.
 packages/dotmac-ipam/            network-suite-v1: tenant address-space owner
 packages/dotmac-network-inventory/    network-suite-v1: managed sites, nodes,
                                  interfaces, ports, VLANs and admission
@@ -1590,6 +1644,19 @@ made concrete — every model has exactly one declared owner.
 | `ReportingObligation` / `ClassificationRevision` / `EvidencePack` / `EvidenceSection` | `mod_compliance.reporting_obligations`, `classification_revisions`, `evidence_packs`, `evidence_sections` | `dotmac-compliance-reporting` optional module | Product-first from Sub's NCC pack: immutable section vocabulary and exact period snapshot with explicit missing evidence. Source domains remain authoritative and a missing source never fabricates a value (ADR-0040). |
 | `FilingSubmission` / `RegulatorAcknowledgement` | `mod_compliance.filing_submissions`, `regulator_acknowledgements` | `dotmac-compliance-reporting` optional module | Submission is bound to the exact pack digest; regulator acceptance/rejection is immutable evidence. Rendering, scheduling and transport remain separate owners. |
 | `AIPolicy` / `AIPolicyVersion` / `AIOperation` / `AIExecutionAttempt` / `AIInsight` | `mod_aiops.ai_policies`, `ai_policy_versions`, `ai_operations`, `ai_execution_attempts`, `ai_insights` | `dotmac-ai-operations` optional module | Product-first from Sub: immutable allowed-operation/input-contract policy, provider-neutral intents, opaque provider/model/request observation strings and advisory insights. Integrator owns provider I/O; products alone own prompts and consequences (ADR-0040). |
+| `CustomerAccount` | `mod_customers.customer_accounts` | `dotmac-customers` optional module | Stable tenant customer account number, display label, and account lifecycle extracted Sub-first. It is not a login, subscription, billing account, or network-access record. |
+| `CustomerProfile` | `mod_customers.customer_profiles` | `dotmac-customers` optional module | One narrow segment/notes profile per customer account. Contact reachability, addresses, location evidence and arbitrary identity fields remain with their owning systems. |
+| `CustomerPartyReference` | `mod_customers.customer_party_references` | `dotmac-customers` optional module | Typed opaque association to a Party identity owned elsewhere. The module never copies person/organization identity or dereferences a foreign application's database. |
+| `ServiceSpecification` / `PlanFamily` | `mod_svc_cat.service_specifications`, `mod_svc_cat.plan_families` | `dotmac-service-catalog` optional module | Provider-neutral technical catalogue identity and grouping extracted Sub-first. No offer, price, contract, subscription, billing cycle or fixed recurrence is stored. |
+| `CharacteristicDefinition` / `EligibilityInputDefinition` | `mod_svc_cat.characteristic_definitions`, `mod_svc_cat.eligibility_input_definitions` | `dotmac-service-catalog` optional module | Typed technical characteristic vocabulary and declared facts a Qualification owner may consume. They do not decide eligibility or provision network state. |
+| `QualificationCase` / `QualificationEvidence` / `QualificationDecision` | `mod_qual.qualification_cases`, `mod_qual.qualification_evidence`, `mod_qual.qualification_decisions` | `dotmac-qualification` optional module | Time-bounded observation evidence and the one expiring service-eligibility decision. Positioning and Network Access contribute facts; they do not assign the outcome or service lifecycle. |
+| `ServiceInstance` / `ServiceLifecycleEvent` | `mod_services.service_instances`, `mod_services.service_lifecycle_events` | `dotmac-services` optional module | One tenant service identity, current lifecycle state and immutable transition history. Customer/catalogue/qualification identifiers are opaque; fulfillment, access enforcement, subscriptions, rating and billing remain outside. |
+| `UsageObservation` / `UsageCorrection` / `UsageAggregate` | `mod_usage.usage_observations`, `mod_usage.usage_corrections`, `mod_usage.usage_aggregates` | `dotmac-usage` optional module | Normalized immutable meter facts, append-only corrections and rebuildable projections. Raw AAA remains an upstream collector concern; tariff selection, monetary rating, invoices and ledgers remain outside. |
+| `RatingRule` / `RatedUsageObligation` | `mod_usage_rate.rating_rules`, `mod_usage_rate.rated_usage_obligations` | `dotmac-usage-rating` optional module | Effective meter pricing and immutable pre-tax rated obligations from opaque usage references. Invoice lifecycle, tax, payments, revenue recognition and GL posting remain outside. |
+| `ServiceAccessInput` / `DesiredAccessDecision` | `mod_serviceaccess.service_access_inputs`, `mod_serviceaccess.desired_access_decisions` | `dotmac-service-access-policy` optional module | Per-service FUP/prepaid/collections/admin observations and one desired ALLOW/RESTRICT/DENY projection. It owns no subscriber/account status and performs no AAA or device mutation; Network Access reconciles enforcement. |
+| `InboxQueue` / `InboxRoutingRule` / `InboxAgentPresence` / `ConversationAssignment` / `InboxWorkflowEvent` | `mod_inbox_ops.*` declared tables | `dotmac-inbox-operations` optional module | Staffed inbox operation state adjudicated from Sub and CRM. Conversation/message content remains with Inbox, providers remain transports, and shifts/field availability remain with Workforce. |
+| `WorkforceTeam` / `WorkforceSkill` / `TeamMembership` / `WorkerSkill` / `WorkforceShift` / `WorkforceAvailability` / `DispatchDecision` | `mod_workforce.*` declared tables | `dotmac-workforce` optional module | Workforce scheduling and dispatch adjudicated from Sub, ERP and CRM. Workers and work are opaque references; People, payroll, attendance consequences, Inbox presence, Work Order lifecycle and route execution remain with their owning systems. |
+| `FXRateType` / `FXRateSource` / `FXSelectionPolicy` / `FXRateObservation` / `FXRateDetermination` | `mod_fx_policy.*` declared tables | `dotmac-fx-policy` optional module | Effective FX observations, source provenance, selection policy and determination evidence extracted ERP-first. Kernel owns Money/ExchangeRate values; Billing, Tax, Accounting and provider adapters retain their distinct decisions and consequences. |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -1646,6 +1713,16 @@ write:
 | Remote-access requests, grants and observations | `dotmac_remote_access.service.create_request`, `admit_request`, `revoke_grant`, `expire_grants` and `record_observation`. Exact Approval evidence gates one finite grant; activation/revocation are provider-neutral intents. Network Control/Integrator execute and observe them without becoming grant writers. |
 | Regulatory classification, packs and filing state | `dotmac_compliance_reporting.service.create_obligation`, `publish_classification`, `assemble_pack`, `submit_pack` and `acknowledge_submission`. Pack digests bind classification, period and every present/missing section; source owners retain their facts and the module never queries them directly. |
 | AI intake policy, operation evidence and advisory insights | `dotmac_ai_operations.service.create_policy`, `publish_policy_version`, `activate_policy_version`, `start_operation`, `record_attempt`, `create_insight` and `acknowledge_insight`. Integrator plugins own provider I/O, while products own prompts, domain context and any action recorded only as opaque evidence. |
+| Customer accounts, profiles and Party references | `dotmac_customers.service` — `create_account`, `set_profile`, `link_party_reference`, and `transition_account` are the only writers. Every path takes an explicit tenant scope, mutates and flushes the caller session, and leaves identity, reachability, qualification, services, billing and network state with their owners (ADR-0055). |
+| Technical service catalogue | `dotmac_service_catalog.service` — specification, plan-family, characteristic and eligibility-input creation plus `set_specification_active` are the only writers. Qualification consumes declared inputs but never writes catalogue state (ADR-0055). |
+| Qualification cases, evidence and decisions | `dotmac_qualification.service` — `open_qualification`, `record_evidence`, and `record_decision` are the only writers. Evidence remains observation data; the decision writer alone derives the time-bounded outcome (ADR-0055). |
+| Service instances and lifecycle history | `dotmac_services.service` — `create_service` and `transition_service` are the only writers. The transition function writes current state and immutable history in one caller-owned transaction; access enforcement and billing remain separate consequences (ADR-0055). |
+| Usage observations, corrections and aggregates | `dotmac_usage.service` — `record_usage_observation`, `record_usage_correction`, and `project_usage_aggregate` are the only writers. Aggregates are rebuildable from immutable observations and append-only corrections; raw AAA and monetary rating remain separate (ADR-0055). |
+| Rating rules and rated usage obligations | `dotmac_usage_rating.service` — `create_rating_rule` and `rate_usage` are the only writers. Rating creates immutable pre-tax obligations and never writes invoice, tax, payment or accounting state (ADR-0055). |
+| Desired service-access policy | `dotmac_service_access_policy.service` — `record_access_input` and `resolve_desired_access` are the only writers. The module decides desired state; Network Access alone reconciles enforcement (ADR-0055). |
+| Staffed-inbox queues, routing, presence and assignments | `dotmac_inbox_operations.service` — `create_queue`, `create_routing_rule`, `set_agent_presence`, and `assign_conversation` are the only writers. Inbox retains conversation/message content and Workforce retains shift and field availability (ADR-0055). |
+| Workforce teams, skills, schedules, availability and dispatch | `dotmac_workforce.service` is the only writer through its team, skill, membership, certification, shift, availability and dispatch commands. People and Work Orders remain authoritative for worker and work lifecycle (ADR-0055). |
+| FX rate types, sources, policies, observations and determinations | `dotmac_fx_policy.service` is the only writer through catalogue, policy, observation and determination commands. Direct-rate selection precedes inverse fallback; Billing, Tax and Accounting consume the immutable determination but own their snapshots and consequences (ADR-0055). |
 | Durable timer generations, cancellation and acceptance/rejection evidence | `dotmac_durable_timers.service` is the sole lifecycle writer on both declared planes: `schedule_timer`, `cancel_timer`, `accept_trigger`, `current_timer`, and `purge_history`. Identity-level PostgreSQL advisory locks serialize even the first schedule; cancellation names the observed generation and refuses a newer current generation; trigger acceptance re-derives current state and records stale evidence with observed/current generations and the opaque source version. The package exports typed ports, never ORM models. A schedule resolves the consuming module's manifest-declared outbox event type, calls the kernel outbox writer in the same transaction and sets `available_at=due_at`; `dotmac_kernel.messaging.relay` remains the sole owner of claim, lease, retry and dead-letter behavior. Business deadline policy and the effect after an accepted trigger remain with the adopting product. This reference assembly builds and proves the optional package but does not compose its `dt` lineage. |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
 
