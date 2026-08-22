@@ -16,7 +16,10 @@ from dotmac_compliance_reporting.service import (
     submit_pack,
 )
 
+__version__ = "0.1.0a1"
+
 __all__ = [
+    "__version__",
     "AcknowledgementInput",
     "ComplianceRefused",
     "EvidenceSectionInput",
