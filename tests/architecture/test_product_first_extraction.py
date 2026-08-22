@@ -881,7 +881,9 @@ def test_a_writer_that_never_retires_is_refused() -> None:
             evidence_paths=["app/x.py"],
         )
     )
-    assert any("second permanent authority" in problem for problem in problems), problems
+    assert any("second permanent authority" in problem for problem in problems), (
+        problems
+    )
 
 
 def test_a_non_writer_with_retirement_work_is_refused() -> None:
@@ -904,19 +906,25 @@ def test_a_moving_revision_is_refused() -> None:
     """A claim measured against a branch is not a claim."""
 
     problems = _product_writer_problems(_writers(revision="main"))
-    assert any("immutable 40-character commit" in problem for problem in problems), problems
+    assert any("immutable 40-character commit" in problem for problem in problems), (
+        problems
+    )
 
 
 def test_an_untyped_writer_state_is_refused_rather_than_ignored() -> None:
     problems = _product_writer_problems(_writers(writer_state="probably fine"))
-    assert any("writer_state must be one of" in problem for problem in problems), problems
+    assert any("writer_state must be one of" in problem for problem in problems), (
+        problems
+    )
 
 
 def test_a_claim_about_an_uninventoried_product_is_refused() -> None:
     """A writer claim about a product nobody inventoried is a guess."""
 
     problems = _product_writer_problems(_writers(product="dotmac_crm"))
-    assert any("not in source_repositories" in problem for problem in problems), problems
+    assert any("not in source_repositories" in problem for problem in problems), (
+        problems
+    )
 
 
 def test_adopted_without_evidence_is_rejected() -> None:
