@@ -1627,6 +1627,24 @@ type = "directory"
 url = "packages/dotmac-reseller-management"
 
 [[package]]
+name = "dotmac-sales"
+version = "0.1.0a1"
+description = "DotMac leads, pipelines and immutable accepted-Quote handoff"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-sales"
+
+[[package]]
 name = "dotmac-sites"
 version = "0.1.0a1"
 description = "Tenant sites, immutable page revisions, and local release snapshots"
@@ -3968,4 +3986,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "8694aa1fb210c321eb9a008832af855bd877c2fd3324d8aab6cc4b73130de6bd"
+content-hash = "46a0d75ed1c0862a9a8ffa01e95ea43d82a80ce65beddf26b0122a1abc540e82"

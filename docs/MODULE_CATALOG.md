@@ -106,6 +106,7 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
 | [`dotmac-remote-access`](../packages/dotmac-remote-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-remote-access/EXTRACTION.toml) | [tenant · `mod_remoteaccess`](../packages/dotmac-remote-access/src/dotmac_remote_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_sub` |
 | [`dotmac-reseller-management`](../packages/dotmac-reseller-management/README.md) | optional module | [`audit-complete`](../packages/dotmac-reseller-management/EXTRACTION.toml) | [tenant · `mod_reseller`](../packages/dotmac-reseller-management/src/dotmac_reseller_management/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_sub` |
+| [`dotmac-sales`](../packages/dotmac-sales/README.md) | optional module | [`audit-complete`](../packages/dotmac-sales/EXTRACTION.toml) | [tenant · `mod_sales`](../packages/dotmac-sales/src/dotmac_sales/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_crm`, `dotmac_sub` |
 | [`dotmac-sites`](../packages/dotmac-sites/README.md) | optional module | [`audit-complete`](../packages/dotmac-sites/EXTRACTION.toml) | [tenant · `mod_sites`](../packages/dotmac-sites/src/dotmac_sites/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
 | [`dotmac-support-access`](../packages/dotmac-support-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-support-access/EXTRACTION.toml) | [platform · `mod_supportaccess`](../packages/dotmac-support-access/src/dotmac_support_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_vendor_control_plane` |
 | [`dotmac-surveys`](../packages/dotmac-surveys/README.md) | optional module | [`audit-complete`](../packages/dotmac-surveys/EXTRACTION.toml) | [tenant · `mod_surveys`](../packages/dotmac-surveys/src/dotmac_surveys/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
@@ -618,6 +619,14 @@ and the next gate.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-reseller-management/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-sales`](../packages/dotmac-sales/README.md)
+
+- **Owner:** Commercial intent from Lead qualification through an immutable accepted Quote and its versioned owner-output handoff
+- **Contract:** Own tenant-scoped pipelines, stages, Leads, append-only Lead-origin evidence, Quote authoring, exact money, discount revisions, Quote lifecycle and exactly-once acceptance. Acceptance freezes one canonical snapshot and publishes sales.accepted-quote.v1. Stop there: never create, import or identify a subscriber, SalesOrder, project, work order, invoice, service or campaign; never own delivery transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-sales/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_crm`, `dotmac_sub`.
 
 ### [`dotmac-sites`](../packages/dotmac-sites/README.md)
 
