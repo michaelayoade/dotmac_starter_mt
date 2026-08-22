@@ -46,6 +46,21 @@ def _ledger() -> dict[str, dict]:
     return json.loads(LEDGER.read_text(encoding="utf-8"))["unpublished"]
 
 
+def _state_mismatches(
+    ledger: dict[str, dict], computed: dict[str, str]
+) -> dict[str, tuple]:
+    """Rows whose recorded `state` disagrees with the sweep's.
+
+    Pure, so the live check below and its sensitivity proof exercise the same
+    comparison rather than two hand-written ones that can drift apart.
+    """
+    return {
+        distribution: (entry.get("state"), computed.get(distribution))
+        for distribution, entry in ledger.items()
+        if entry.get("state") != computed.get(distribution)
+    }
+
+
 def _survey():
     """The sweep, or a FAILURE — never a skip.
 
@@ -96,6 +111,41 @@ def test_the_ledger_holds_no_stale_absolution() -> None:
         if finding["state"] == sweep.PUBLISHED
     }
     assert not published & set(_ledger()), "a published distribution is still excused"
+
+
+def test_each_ledger_state_matches_what_the_sweep_computes() -> None:
+    """`state` is a FACT the sweep derives, so a hand-written one can be wrong.
+
+    Both existing directions check MEMBERSHIP — is a distribution recorded, is
+    a recorded one still unpublished. Neither reads the `state` field, so it
+    could say anything at all and every gate stayed green.
+
+    It did. `dotmac-kernel` was recorded `never-published` while ninety kernel
+    versions were tagged; only `0.1.0a91` was unpublished, which is
+    `declared-unpublished`. The row entered the ledger by hand during a
+    conflict resolution and nothing compared it to the oracle that owns the
+    answer.
+
+    The distinction is the whole point of having two labels. `never-published`
+    means nobody has ever been able to install this distribution — the state of
+    a package built but withheld. `declared-unpublished` means it ships, and
+    this particular version has not gone out yet. Reading the first where the
+    second is true understates what consumers already depend on.
+    """
+    sweep, survey = _survey()
+    computed = {
+        distribution: finding["state"]
+        for distribution, finding in sweep.unpublished(survey).items()
+    }
+    wrong = _state_mismatches(_ledger(), computed)
+    assert not wrong, (
+        "ledger state disagrees with the sweep, which owns the answer: "
+        + "; ".join(
+            f"{name} records {recorded!r} but is {actual!r}"
+            for name, (recorded, actual) in sorted(wrong.items())
+        )
+        + " — regenerate with `make publication-baseline`, or correct the row"
+    )
 
 
 def test_no_ledger_entry_is_a_bare_label() -> None:
@@ -316,6 +366,25 @@ def test_the_guard_fires_when_a_bump_outruns_its_ledger_entry() -> None:
         {"dotmac-thing": {"declared": "0.1.0a2", "reason": "x" * 200}},
     )
     assert any("the ledger records" in problem for problem in problems)
+
+
+def test_the_state_comparison_fires_on_a_hand_written_label() -> None:
+    """SENSITIVITY for the live state check (ADR-0018: a detector carries a
+    proof that it bites). The exact defect it was written for — a row calling a
+    long-published distribution `never-published` — and the specificity case
+    that an agreeing row is left alone."""
+    sweep = _sweep()
+    wrong = _state_mismatches(
+        {"dotmac-thing": {"declared": "0.1.0a91", "state": sweep.NEVER_PUBLISHED}},
+        {"dotmac-thing": sweep.DECLARED_UNPUBLISHED},
+    )
+    assert wrong == {
+        "dotmac-thing": (sweep.NEVER_PUBLISHED, sweep.DECLARED_UNPUBLISHED)
+    }
+    assert not _state_mismatches(
+        {"dotmac-thing": {"declared": "0.1.0a91", "state": sweep.DECLARED_UNPUBLISHED}},
+        {"dotmac-thing": sweep.DECLARED_UNPUBLISHED},
+    )
 
 
 def test_a_consistent_state_produces_no_findings() -> None:
