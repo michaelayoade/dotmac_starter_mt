@@ -79,8 +79,10 @@ on:
           - dotmac-network-observability
           - dotmac-network-topology
           - dotmac-numbering
+          - dotmac-operational-escalations
           - dotmac-party
           - dotmac-payables
+          - dotmac-payments
           - dotmac-payroll
           - dotmac-people
           - dotmac-platform-health
@@ -94,6 +96,8 @@ on:
           - dotmac-release-catalog
           - dotmac-remote-access
           - dotmac-reseller-management
+          - dotmac-service-changes
+          - dotmac-service-orders
           - dotmac-sites
           - dotmac-support-access
           - dotmac-surveys
