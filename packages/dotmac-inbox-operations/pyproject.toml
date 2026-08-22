@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-inbox-operations"
+version = "0.1.0a2"
+description = "Staffed inbox queues, routing, presence, and assignments"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_inbox_operations", from = "src" }]
+include = [
+  { path = "src/dotmac_inbox_operations/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_inbox_operations/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

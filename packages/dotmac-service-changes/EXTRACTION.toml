@@ -1,0 +1,27 @@
+schema_version = 1
+package = "dotmac-service-changes"
+classification = "optional-module"
+status = "audit-complete"
+source_mode = "product-first"
+owner = "Durable customer service-change requests, their evidence and cross-domain checkpoint ordering"
+contract = "Own the customer-initiated plan-change, relocation and vacation request, its approval decision, append-only per-domain checkpoint evidence, and the single guarded execution chain. Subject, offer, location and evidence identifiers are opaque. NOT eligibility decisions, pricing or fee raising, receivables, payment confirmation, delivery orders, field work, service lifecycle or access enforcement."
+source_repositories = ["dotmac_sub", "dotmac_erp", "dotmac_starter_mt"]
+source_paths = [
+  "dotmac_sub:app/models/subscription_change.py",
+  "dotmac_sub:app/services/subscription_change_execution.py",
+  "dotmac_sub:app/services/events/handlers/subscription_change_execution.py",
+]
+preserved_tests = [
+  "dotmac_sub:tests/test_subscription_change_execution.py",
+  "dotmac_starter_mt:tests/unit/test_service_changes_service.py",
+  "dotmac_starter_mt:tests/architecture/test_service_changes_module.py",
+  "dotmac_starter_mt:tests/test_service_changes_isolation.py",
+]
+contract_consumers = []
+candidate_consumers = ["dotmac_sub"]
+composition_boundary = "Adopters compose sch locally and record each crossed owner's outcome through commands. Qualification, Billing, Payments, Fulfillment, Service Orders, Work Orders and Service Access identifiers are opaque references; no sibling module import or foreign application database read is permitted. Cohorts 2-5 must be composable before a cutover is meaningful."
+inventory_evidence = ["docs/inventories/customer-journey-owner-sources.md"]
+first_cutover = "Sub remains the change-request owner until history backfill, read-only shadow and zero-drift checkpoint comparison complete and a separately authorized writer switch occurs."
+shadow_and_drift = "Compare request identity and confirmation key, change type, approval decision and rationale, execution state at each transition, and the checkpoint set by domain/evidence reference/observation time; the crossed domains' own state remains outside."
+local_copy_retirement = "After cutover, reduce Sub's subscription-change writers and execution-state handlers to zero while the crossed owners keep their own lifecycles."
+next_action = "Compose in Sub after cohorts 2-5, then implement the request/checkpoint backfill plus the zero-drift execution shadow."

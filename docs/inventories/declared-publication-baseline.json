@@ -67,9 +67,19 @@
       "reason": "INTENDED UNTIL A REAL PRODUCT PILOT. The provider-neutral contract, four flow proofs and architecture boundary are complete, but the stateless-adapter release lane deliberately requires one exact-SHA destination-owned receiver before publication. This package is therefore not allowlisted and cannot be dispatched. Remove this row only with the pilot evidence and the reviewed adapter-lane entry; do not treat its source tests as adoption or edit the declared version down.",
       "state": "never-published"
     },
+    "dotmac-customers": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first account/profile boundary is audit-complete and uncomposed. Publishing is forbidden in this programme. Remove only with an authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "state": "never-published"
+    },
     "dotmac-document-rendering": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL THE BILLING DOCUMENT CUTOVER. This stateless package is built and gate-proven here but deliberately NOT release-allowlisted. Its kernel floor was corrected from an unpublished a87 to the published a88 in the #337 follow-up, so the floor resolves and the kernel is not what holds this row open; its EXTRACTION.toml withholds publication until Vendor Control Plane's Billing fact producer, the dotmac-files storage binding and the assembly-owned idempotent reconciler are ready in one cutover slice. No product is claimed as a consumer and no old writer is retired. Remove this row only in the reviewed publication and adoption sequence for the package itself; never by editing the declared version or floor down.",
+      "state": "never-published"
+    },
+    "dotmac-fx-policy": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The ERP-first FX observation and selection-policy owner is audit-complete and uncomposed; Money values, invoice snapshots, tax, provider I/O and GL consequences remain separate. Remove only with authorized ERP backfill, selection shadow and sealed writer retirement.",
       "state": "never-published"
     },
     "dotmac-imports": {
@@ -77,14 +87,59 @@
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
       "state": "never-published"
     },
+    "dotmac-inbox-operations": {
+      "declared": "0.1.0a2",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/CRM-adjudicated staffed-inbox owner is audit-complete and uncomposed; a2 adds Sub's durable FIFO admission and round-robin rotation state (io_0002). Remove only with authorized Sub backfill/zero-drift cutover and verified CRM decision-copy retirement.",
+      "state": "never-published"
+    },
     "dotmac-kernel": {
       "declared": "0.1.0a91",
       "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a91 allocates fourteen module lineages and installs no behaviour: the ten ADR-0055 ISP essential owners, whose rows were authored against an isolated a85 that only ever existed on their own branch, and the four customer-journey owners from the 2026-08-22 audit of Sub PR #2624 (service_orders/so, payments/pm, service_changes/sch, operational_escalations/oe). Every published a85..a90 artifact carries none of the fourteen, so a91 is the first kernel that can register any of them and is their floor. a90 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a91 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything.",
       "state": "never-published"
     },
+    "dotmac-operational-escalations": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE CUSTOMER-JOURNEY BUILD COHORT, NOT RELEASED. Versioned escalation policy, instances, acknowledgement and cancellation are extracted product-first from Sub's operational_escalation state and are uncomposed. Durable Timers keeps scheduling and Messaging/Integrator keeps delivery. Remove only with an authorized Sub backfill, zero-drift escalation shadow and writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-payments": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE CUSTOMER-JOURNEY BUILD COHORT, NOT RELEASED. Payment intent and confirmation correlation are extracted product-first from Sub's top-up/transfer-proof/gateway-observation path and are uncomposed. Billing keeps receivables and settlement allocation, Banking keeps accounts, Integrator keeps provider transport. Remove only with an authorized Sub backfill, zero-drift correlation shadow and writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-qualification": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first evidence/decision owner is audit-complete and uncomposed; positioning and Network Access remain observation sources. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "state": "never-published"
+    },
     "dotmac-sales": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL THE FIRST SUB ADOPTION. The accepted-quote owner is audit-complete and uncomposed: the assembly does not install it, and it is deliberately absent from the release allowlist. Its kernel floor is 0.1.0a88 — `sales` won the three-way `sa` arbitration in #321 and the row entered kernel source at a87, which was never dispatched, so a88 is the first installable kernel that can register the lineage. THE KERNEL IS NOT WHAT HOLDS THIS ROW OPEN; adoption is. Publishing before Sub's backfill and shadow would put an installable sales owner beside a product still writing its own quotes. Remove this row in the release change that adds the allowlist entry and records the Sub adoption; never by editing the declared version or the floor down.",
+      "state": "never-published"
+    },
+    "dotmac-service-access-policy": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first desired-access owner is audit-complete and uncomposed; Network Access remains the enforcer. Remove only with authorized input backfill, desired-state shadow and parallel policy-writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-service-catalog": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first technical catalogue is audit-complete and uncomposed; offers, prices and contracts remain outside. Remove only with authorized Sub backfill, zero-drift shadow and writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-service-changes": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE CUSTOMER-JOURNEY BUILD COHORT, NOT RELEASED. The durable plan-change/relocation/vacation request, its evidence and its cross-domain checkpoints are extracted product-first from Sub's subscription_change state and are uncomposed; it additionally requires cohorts 2-5 to be composable before a cutover is meaningful. Remove only with an authorized Sub backfill, zero-drift checkpoint shadow and writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-service-orders": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE CUSTOMER-JOURNEY BUILD COHORT, NOT RELEASED. The service-delivery order and its activation-readiness decision are extracted product-first from Sub's provisioning lifecycle and are uncomposed. Commercial Orders, Fulfillment mechanics, Work Orders and realized Services keep their own owners. Remove only with an authorized Sub backfill, zero-drift readiness shadow and writer retirement.",
+      "state": "never-published"
+    },
+    "dotmac-services": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first service lifecycle owner is audit-complete and uncomposed; fulfillment, Network Access, subscriptions and billing stay outside. Remove only with authorized Sub backfill, lifecycle shadow and sole-writer cutover.",
       "state": "never-published"
     },
     "dotmac-template-studio": {
@@ -95,6 +150,21 @@
     "dotmac-fulfillment": {
       "declared": "0.1.0a1",
       "reason": "INTENDED UNTIL THE FIRST PARTICIPANT ADAPTER. This package owns the fulfillment saga \u2014 runs, steps, participant attempts, outcome receipts, compensation and convergence \u2014 as a tenant-only module with FORCEd RLS and append-only evidence, built and gate-proven here. Its floor is kernel 0.1.0a89: a86 minted the mod_fulfillment lineage, but the package also consumes the typed provisioning participant, scoped request, asynchronous outcome envelope and participant-decided compensation contract that land in a89, and the highest consumed capability wins. a89 is published, registry-verified and tagged, so unlike the earlier a86 reading this floor is one an installer can resolve. THE KERNEL IS THEREFORE NO LONGER WHAT HOLDS THIS ROW OPEN. What holds it open is adoption: it is deliberately NOT release-allowlisted until the released dotmac-durable-timers dependency is composed and the first Dotmac Cloud participant adapter exists. Package supply alone is not adoption, and publishing before a named participant would put an installable saga owner beside products that still drive their own \u2014 the failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records that first participant; never by editing the declared version down.",
+      "state": "never-published"
+    },
+    "dotmac-usage": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first normalized usage owner is audit-complete and uncomposed; raw AAA, rating, billing and accounting remain separate. Remove only with authorized history backfill, dedupe proof, aggregate shadow and writer cutover.",
+      "state": "never-published"
+    },
+    "dotmac-usage-rating": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub-first pre-tax usage-rating owner is audit-complete and uncomposed; invoices, tax, payments and accounting remain separate. Remove only with authorized rule/obligation backfill, amount shadow and sole-writer cutover.",
+      "state": "never-published"
+    },
+    "dotmac-workforce": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED FOR THE ADR-0055 BUILD COHORT, NOT RELEASED. The Sub/ERP/CRM-adjudicated workforce scheduling and dispatch owner is audit-complete and uncomposed. Remove only with authorized Sub/ERP backfill and shadow cutovers plus verified CRM decision-copy retirement.",
       "state": "never-published"
     }
   }

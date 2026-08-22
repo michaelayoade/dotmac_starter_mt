@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "dotmac-service-orders"
+version = "0.1.0a1"
+description = "Service-delivery orders and activation-readiness decisions"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_service_orders", from = "src" }]
+include = [
+  { path = "src/dotmac_service_orders/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_service_orders/migrations/**/*", format = ["sdist", "wheel"] },
+]
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

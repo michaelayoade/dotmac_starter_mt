@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "dotmac-operational-escalations"
+version = "0.1.0a1"
+description = "Versioned operational escalation policy, instances and acknowledgement"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_operational_escalations", from = "src" }]
+include = [
+  { path = "src/dotmac_operational_escalations/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_operational_escalations/migrations/**/*", format = ["sdist", "wheel"] },
+]
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

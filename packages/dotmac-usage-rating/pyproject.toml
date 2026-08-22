@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-usage-rating"
+version = "0.1.0a1"
+description = "Effective usage-rating rules and pre-tax obligations"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_usage_rating", from = "src" }]
+include = [
+  { path = "src/dotmac_usage_rating/py.typed", format = ["sdist", "wheel"] },
+  { path = "src/dotmac_usage_rating/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a91"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

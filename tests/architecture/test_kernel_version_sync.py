@@ -109,6 +109,28 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
     "dotmac-tax": "0.1.0a85",
     "dotmac-work-orders": "0.1.0a85",
     "dotmac-workflow-runtime": "0.1.0a88",
+    # The ISP essential-domain cohort (ADR-0055) and the four customer-journey
+    # owners land their ledger rows together in a91. The cohort was authored
+    # against an isolated a85 that only ever existed on its own branch: every
+    # PUBLISHED a85..a90 artifact carries none of these fourteen rows, so a85
+    # was never an installable floor for them and is not recorded as one here.
+    # a91 is both the allocation and the first kernel that can register any of
+    # them, which is the ordinary rule rather than an exception — none of the
+    # fourteen consumes a kernel capability newer than its own allocation.
+    "dotmac-customers": "0.1.0a91",
+    "dotmac-service-catalog": "0.1.0a91",
+    "dotmac-qualification": "0.1.0a91",
+    "dotmac-services": "0.1.0a91",
+    "dotmac-usage": "0.1.0a91",
+    "dotmac-usage-rating": "0.1.0a91",
+    "dotmac-service-access-policy": "0.1.0a91",
+    "dotmac-inbox-operations": "0.1.0a91",
+    "dotmac-workforce": "0.1.0a91",
+    "dotmac-fx-policy": "0.1.0a91",
+    "dotmac-service-orders": "0.1.0a91",
+    "dotmac-payments": "0.1.0a91",
+    "dotmac-service-changes": "0.1.0a91",
+    "dotmac-operational-escalations": "0.1.0a91",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
     # CAPABILITY_RAISED_FLOORS below rather than here.
