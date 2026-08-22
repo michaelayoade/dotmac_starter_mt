@@ -18,10 +18,18 @@
 # record is already complete, and this exits 0 without opening an empty PR.
 # Re-running a release, or racing a hand repair, converges.
 #
-# Never fails the release. The artifact is already published and tagged by the
-# time this runs; a bookkeeping PR that could not be opened is a message to
-# read, not a reason to report a successful publication as failed. It says
-# loudly what to run by hand instead.
+# FAILS LOUDLY when it cannot open the record. An earlier version of this
+# script exited 0 and printed a `::warning::`, on the reasoning that the
+# artifact is already published so the run should not report a successful
+# publication as failed. That reasoning was wrong, and it recreated the exact
+# failure class the script exists to close: correctness went back to depending
+# on somebody READING a warning in a green run. A green run with no record is
+# indistinguishable, at a glance, from a green run with one.
+#
+# So the run goes RED. The failure message states plainly that the artifact IS
+# published and tagged — nobody should re-run the publish — and names the
+# command that closes the gap. "Tag exists, record missing" is now visible in
+# the place people already look.
 set -uo pipefail
 
 DISTRIBUTION=""
@@ -54,11 +62,17 @@ if [ -n "${PACKAGE_DIR}" ]; then
 fi
 
 give_up() {
-  echo "::warning::the ${TAG} release record was NOT opened: $1"
-  echo "::warning::${DISTRIBUTION} ${VERSION} IS published and tagged. main is"
-  echo "::warning::red until the record lands. Run by hand, on a branch:"
-  echo "::warning::  ${MANUAL}"
-  exit 0
+  echo "::error::the ${TAG} release record was NOT opened: $1"
+  echo "::error::"
+  echo "::error::DO NOT RE-RUN THE PUBLISH. ${DISTRIBUTION} ${VERSION} is already"
+  echo "::error::published and tagged; the artifact is fine and this failure is"
+  echo "::error::bookkeeping only. main is RED until the record lands."
+  echo "::error::"
+  echo "::error::Close it by hand, on a branch off main:"
+  echo "::error::  ${MANUAL}"
+  echo "::error::then open a pull request titled:"
+  echo "::error::  chore(release): record the ${DISTRIBUTION} ${VERSION} publication"
+  exit 1
 }
 
 BRANCH="chore/record-${DISTRIBUTION}-${VERSION}"
@@ -81,6 +95,8 @@ fi
 echo "${OUTPUT}"
 
 if git diff --quiet; then
+  # A real success, and the ONLY one besides opening the pull request: the
+  # writer found both ledgers already correct, so there is nothing to record.
   echo "the ${TAG} record is already complete — no pull request needed"
   exit 0
 fi
