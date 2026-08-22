@@ -670,11 +670,13 @@ necessary at the completion gate:
 - **`dotmac_kernel.namespaces`** / **`prerequisites`** — one immutable
   `mod_<code>` schema, one lineage, effects declared via `requires`/`provides`
   and bound by the assembly (hard rule 14).
-- **`dotmac_kernel.durable_timers`** — **does not exist yet.** ADR-0030 §4 and
-  §6 name it as a prerequisite; there is no `durable_timers.py` in
-  `packages/dotmac-kernel/src/dotmac_kernel/` at `e6ba2022f3d7`. Until it
-  lands, the saga has no sanctioned way to schedule a re-observation, and it
-  must not invent one. This is a hard sequencing dependency, not a nice-to-have.
+- **`dotmac-durable-timers`** — now released as the separately installable,
+  selectable dual-plane timing owner (`0.1.0a1`, kernel floor a72). Fulfillment
+  declares it as a module-code dependency but imports no sibling package; an
+  adopter binds `ReobservationSchedule` to the timer service. The timer in turn
+  reuses the kernel outbox relay for claim, lease, retry and dead-letter
+  mechanics. The negative fact remains true: there is no
+  `dotmac_kernel.durable_timers` implementation to call or duplicate.
 - **Not consumed:** `dotmac_kernel.money`. The saga carries no amounts — money
   belongs to Billing, Orders and Subscriptions. Recording this now so the floor
   proof can show it is necessary as well as sufficient.

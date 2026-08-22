@@ -194,13 +194,23 @@ MAPPED: Final[tuple[Facility, ...]] = (
 FROZEN: Final[dict[str, tuple[str, frozenset[str]]]] = {
     "audit:write_audit_event": (
         "TENANT AUDIT — no published consumer. The persisted-runtime-dependency "
-        "inventory found its only module caller is `dotmac-template-studio`, "
-        "which has no tag in any version and sits in no release lane, so there "
-        "is nothing in the field to protect and no evidence yet for what a "
-        "prerequisite would have to verify. Frozen so the first PUBLISHED "
-        "consumer is a visible diff rather than a discovery.",
+        "inventory found its module callers are `dotmac-template-studio` and "
+        "`dotmac-fulfillment`, and NEITHER is published: template-studio has no "
+        "tag in any version and sits in no release lane, and fulfillment is "
+        "deliberately unallowlisted until its first participant adapter exists. "
+        "So there is still nothing in the field to protect and no evidence yet "
+        "for what a prerequisite would have to verify. Frozen so the first "
+        "PUBLISHED consumer is a visible diff rather than a discovery.\n\n"
+        "Fulfillment joined 2026-08-22 with its source landing. It was added "
+        "deliberately, not to silence the ratchet: it writes repair evidence "
+        "through this facility BECAUSE audit has one tenant owner, so the "
+        "alternative was a module-local audit table — a parallel writer, and a "
+        "worse defect than the debt recorded here. The two convert together "
+        "when the prerequisite is built; whichever is published first is what "
+        "forces it.",
         frozenset(
             {
+                "dotmac-fulfillment/src/dotmac_fulfillment/service.py",
                 "dotmac-template-studio/src/dotmac_template_studio/router.py",
                 "dotmac-template-studio/src/dotmac_template_studio/web.py",
             }
