@@ -466,3 +466,12 @@ CI remains the merge acceptance owner.
   a stop condition, not permission to greenfield the shared version.
 - Zero-consumer code is deleted, not kept. Every new concept gets its owner
   row in `docs/ARCHITECTURE.md`'s provenance/ownership tables.
+- **Publishing writes a RECORD, not just a tag.** A tag makes that
+  distribution's `declared-publication-baseline.json` row false immediately,
+  and its released migrations become bytes that must not change, so five gates
+  fail from the instant of the tag until both are recorded. The release
+  workflows now open that record themselves
+  (`scripts/open_release_record_pr.sh` calling
+  `scripts/write_release_record.py`, straight after tagging) — merge that pull
+  request as soon as it is green. Run the writer by hand only to repair an
+  older gap; never edit a declared version down to make the gates agree.
