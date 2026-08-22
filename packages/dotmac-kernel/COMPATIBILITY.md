@@ -716,17 +716,21 @@ submodule (`from dotmac_kernel.providers.provisioning import
 ProvisioningProvider`); `dotmac_kernel.providers` re-exports the same names.
 
 - **Protocol** — `ProvisioningProvider` (`typing.Protocol`, `runtime_checkable`)
-  with four methods, all keyed on opaque identifiers:
+  with five methods, all keyed on opaque identifiers:
   - `plan(request: ProvisioningRequest) -> PlanResult` — read-only; diff the
     opaque desired-state `spec` and return ordered steps + a stable `plan_hash`.
   - `apply(request: ProvisioningRequest) -> ApplyResult` — execute the plan;
     idempotent by `operation_id`; may return a partial result.
   - `observe(operation_id: str) -> ObserveResult` — read-only status snapshot.
   - `cancel(operation_id: str) -> ObserveResult` — cooperative cancellation.
-- **Input** — `ProvisioningRequest(intent_id, spec, operation_id=None)`: an
-  opaque intent id, an opaque product-neutral desired-state `spec`
-  (`Mapping[str, object]`, never interpreted by the kernel), and the optional
-  idempotency/resume key.
+  - `compensate(operation_id: str, reason: str) -> CompensationResult` — ask
+    the participant to reverse a settled effect; it may refuse, report that the
+    effect is not reversible, or require manual work.
+- **Input** — `ProvisioningRequest(participant_code, scope, intent_id, spec,
+  operation_id=None)`: a manifest-owned open participant code, explicit
+  `TenantScope`/`PlatformScope`, opaque intent id, opaque product-neutral
+  desired-state `spec` (`Mapping[str, object]`, never interpreted by the
+  kernel), and the optional idempotency/resume key.
 - **Result types (frozen)** — `PlanResult` (`intent_id`, `plan_hash`, `steps`),
   `ApplyResult` (`intent_id`, `operation_id`, `plan_hash`, `status`, `steps`),
   `ObserveResult` (`intent_id`, `operation_id`, `status`, `steps`, `plan_hash`).
@@ -736,6 +740,15 @@ ProvisioningProvider`); `dotmac_kernel.providers` re-exports the same names.
   `PlanResult.is_noop`; `ApplyResult.{is_terminal, is_partial, succeeded,
   outstanding_steps}`; `ObserveResult.{is_terminal, outstanding_steps}`;
   `ProvisioningStep.is_settled`.
+- **Asynchronous result** — `ProvisioningOutcomeEnvelope` is the typed push
+  counterpart to `observe`: it repeats participant, scope, intent and operation
+  identity, carries a timezone-aware occurrence time, and classifies the fact
+  as succeeded, retryable, reconciliation-required or terminal. A transport
+  adapter translates the wire message; it never writes a consumer's tables.
+- **Compensation result** — `CompensationResult` carries the same observed
+  snapshot plus a disposition of succeeded, refused, not-supported or
+  manual-required. Compensation is an explicit participant decision, never a
+  guessed inverse operation.
 - **Error hierarchy (stable API)** — `ProvisioningError` base with a
   machine-readable `retryable` class attribute (unknown errors fail closed as
   terminal). `ProvisioningRetryableError` (`retryable = True`) means the same

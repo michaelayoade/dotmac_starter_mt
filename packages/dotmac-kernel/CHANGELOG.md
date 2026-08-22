@@ -6,6 +6,33 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
+## 0.1.0a89 — UNRELEASED
+
+Completes the product-neutral provisioning participant contract required by
+Fulfillment. This is a new kernel version because a88 is published and
+immutable. It publishes, composes and adopts no Fulfillment module.
+
+### Added
+
+- Manifest-owned `provisioning_participants` declarations on both manifest
+  shapes, giving Fulfillment one open vocabulary without a kernel-owned fixed
+  provider list.
+- Explicit participant and tenant/platform scope identity on
+  `ProvisioningRequest`, plus `ProvisioningOutcomeEnvelope` for typed
+  asynchronous observations.
+- `ProvisioningProvider.compensate` and the closed
+  `CompensationDisposition`/`CompensationResult` response contract. A
+  participant decides whether reversal succeeded, was refused, is unsupported,
+  or requires manual work; callers never invent an inverse operation.
+- Matching deterministic fake/provider conformance coverage in
+  `dotmac_kernel.testing`.
+
+### Changed
+
+- `ProvisioningRequest` now requires `participant_code` and explicit `Scope`.
+  This is an intentional pre-1.0 breaking change: ambient or nullable scope and
+  unowned provider identities are no longer valid inputs.
+
 ## 0.1.0a88 — 2026-08-21
 
 Published, installed back from the private index, conformance-checked and

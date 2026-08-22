@@ -8,10 +8,12 @@ provisioning-provider contract driven against `FakeProvisioningProvider`.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
 from dotmac_kernel import ProductAssemblySpec, create_app
+from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.models import Base
 from dotmac_kernel.providers.provisioning import (
     ProvisioningProvider,
@@ -162,28 +164,55 @@ def test_fake_provisioning_provider_satisfies_the_contract() -> None:
 def test_fake_provisioning_records_calls_and_conforms_to_protocol() -> None:
     provider = FakeProvisioningProvider()
     assert isinstance(provider, ProvisioningProvider)
-    req = ProvisioningRequest(intent_id="i-9", spec={"n": 1})
+    req = ProvisioningRequest(
+        participant_code="fake",
+        scope=TenantScope(UUID(int=1)),
+        intent_id="i-9",
+        spec={"n": 1},
+    )
     provider.plan(req)
     op = provider.apply(req).operation_id
     provider.observe(op)
     provider.cancel(op)
-    assert [c[0] for c in provider.calls] == ["plan", "apply", "observe", "cancel"]
+    provider.compensate(op, "test reversal")
+    assert [c[0] for c in provider.calls] == [
+        "plan",
+        "apply",
+        "observe",
+        "cancel",
+        "compensate",
+        "observe",
+    ]
 
 
 def test_fake_provisioning_partial_then_resume() -> None:
     provider = FakeProvisioningProvider(partial_first_apply=True)
-    req = ProvisioningRequest(intent_id="i-1", spec={"n": 1})
+    req = ProvisioningRequest(
+        participant_code="fake",
+        scope=TenantScope(UUID(int=1)),
+        intent_id="i-1",
+        spec={"n": 1},
+    )
     first = provider.apply(req)
     assert first.status is ProvisioningStatus.PARTIAL
     resume = ProvisioningRequest(
-        intent_id="i-1", spec={"n": 1}, operation_id=first.operation_id
+        participant_code=req.participant_code,
+        scope=req.scope,
+        intent_id="i-1",
+        spec={"n": 1},
+        operation_id=first.operation_id,
     )
     assert provider.apply(resume).status is ProvisioningStatus.SUCCEEDED
 
 
 def test_fake_provisioning_cancel_is_terminal_and_idempotent() -> None:
     provider = FakeProvisioningProvider()
-    req = ProvisioningRequest(intent_id="i-1", spec={"n": 1})
+    req = ProvisioningRequest(
+        participant_code="fake",
+        scope=TenantScope(UUID(int=1)),
+        intent_id="i-1",
+        spec={"n": 1},
+    )
     op = provider.apply(req).operation_id
     assert provider.cancel(op).status is ProvisioningStatus.CANCELLED
     # A re-apply after cancel is a no-op that stays CANCELLED (terminal).
