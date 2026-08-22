@@ -8,7 +8,7 @@
   "governance_model": {
     "kind": "pinned",
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
-    "revision": "916ec923633e5f82f84ad61e10e91cbde45e6172",
+    "revision": "e0f636c3f5adea77da136f75f49c2349fbf9eeaa",
     "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
     "status": "accepted"
   },
@@ -210,7 +210,7 @@
       "webhook_surface": 0,
       "provider_credential": 0,
       "connector_task": 0,
-      "sync_checkpoint": 2,
+      "sync_checkpoint": 1,
       "delivery_retry": 0
     },
     "conserved_exclusions": []
