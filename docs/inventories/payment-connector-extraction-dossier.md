@@ -12,6 +12,55 @@ ADR-0009, ADR-0018, ADR-0017
 **Evidence base:** `docs/inventories/payment-connector-sources.md`
 **Contract spec:** `docs/superpowers/specs/2026-08-14-payment-connector-and-settlement-contracts.md`
 
+## Execution amendment — 2026-08-20
+
+The historical audit below is retained as measured. Its three construction
+gates have since changed state:
+
+1. `dotmac-integration` 0.1.0a10 publishes SPI 1.3, including immutable raw
+   ingress bytes, headers, exact-byte connector verification, normalization,
+   acknowledgement ownership, declared secret bindings and deny-all-capable
+   egress declarations. The SPI gap is resolved.
+2. `dotmac_integrator` at
+   `d886e3c9956192fe1d5f085d352a516812c253c8` owns the assembly secret resolver
+   and loads declared material for the connector call without adding a
+   provider branch. The missing-owner claim in G2 is resolved.
+3. Michael's dated amendment to ADR-0017 authorizes Paystack and Flutterwave
+   connector construction. The authority is scoped to separate
+   provider-specific adapters and does not claim adoption or cutover.
+
+The first executable package is therefore
+`packages/dotmac-connector-paystack/`, whose own `EXTRACTION.toml` supersedes
+the illustrative TOML in § 3. It is deliberately INGRESS-only and deny-all on
+egress. Publication is supply-chain evidence; Sub remains authoritative until
+the recorded shadow and callback cutover retires its direct transport.
+
+Two contract ambiguities are also closed by the as-built assembly boundary.
+The Integrator delivery envelope supplies destination, scope, contract,
+receipt and idempotency context; the connector neither accepts nor derives a
+tenant or source-system identity from provider metadata. Paystack's documented
+×100 amount representation for every supported currency, including XOF, is a
+provider wire rule. Using that rule in the Paystack adapter is not the product
+currency default rejected below: currency remains mandatory on every emitted
+money value, and no connector chooses a missing currency.
+
+## Execution amendment — 2026-08-21
+
+`packages/dotmac-connector-flutterwave/` now supersedes the illustrative
+Flutterwave TOML in § 4. It targets **Flutterwave API v4 only**. The provider's
+current v4 contract authenticates the exact body using HMAC-SHA256 in
+`flutterwave-signature` and emits `type`, `webhook_id`, `reference`,
+`created_datetime` and `status = succeeded` fields. The plugin has no v3
+`verif-hash` or v3 envelope fallback.
+
+Sub remains the product-first source for payment-event normalization and the
+first cutover, but its v3 shared-header authentication is a documented
+**not-ported security delta**, not a second runtime mode. The old receiver stays
+authoritative until a v4 callback is shadowed and cut over. Flutterwave's v4
+webhook does not report `app_fee`, so the connector omits `provider_fee`
+instead of manufacturing zero; the later reconciliation capability must supply
+fee evidence before a product makes a fee-dependent decision.
+
 Every path in the TOML blocks below was confirmed to exist by `ls` / `wc -l`
 during this audit.
 
@@ -20,9 +69,10 @@ during this audit.
 ## 1. Why this is a markdown document, and why there is more than one dossier
 
 Repository convention locates a dossier at its package root.
-**`packages/dotmac-connector-paystack/` and
-`packages/dotmac-connector-flutterwave/` do not exist and this document does not
-create them.** Three gates stand in front of them, and none is met:
+**Historical measurement:** at audit time neither connector package existed.
+The dated execution amendments above supersede that construction status; the
+three original gates below are retained as review history rather than current
+blockers.
 
 1. **ADR-0017's 2026-08-12 amendment** keeps an inbound receiver for
    payment-provider events under the moratorium *"unless a live adopter is
@@ -252,9 +302,11 @@ next_action = "No implementation, no package, no entry point. The immediate next
 
 ---
 
-## 4. Dossier delta — `dotmac-connector-flutterwave`
+## 4. Historical dossier delta — `dotmac-connector-flutterwave`
 
-A separate distribution with a separate dossier. Only the fields that differ:
+A separate distribution with a separate dossier. This pre-v4 illustration is
+superseded by the package-root `EXTRACTION.toml` and the 2026-08-21 amendment;
+it remains here to preserve what the source audit actually found.
 
 ```toml
 package = "dotmac-connector-flutterwave"

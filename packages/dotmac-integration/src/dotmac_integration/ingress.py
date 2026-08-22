@@ -141,7 +141,7 @@ from contextlib import AbstractContextManager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Final
+from typing import Any, Final, Protocol
 from uuid import UUID
 
 from dotmac_integration.discovery import ConnectorRegistry
@@ -237,6 +237,23 @@ def _ignore_verification(_result: VerificationResult) -> None:
 #: preference: hand-composed by a caller it would be enforced only by that
 #: caller getting it right.
 UnitOfWork = Callable[[], AbstractContextManager[Any]]
+
+
+class ReceiptBatchAddress(Protocol):
+    """The trusted address needed to record any normalized inbound batch.
+
+    Ingress and polling arrive through different phase-1 seams, but both end in
+    the same inbox ledger. Keeping this as the smallest structural shape lets
+    them share the one atomic batch writer without making polling pretend it
+    owns an ingress endpoint or request.
+    """
+
+    @property
+    def installation_id(self) -> UUID: ...
+
+    @property
+    def binding_id(self) -> UUID: ...
+
 
 #: The engine's defaults, used when a connector leaves `media_type` unset.
 #: `text/plain` for a handshake because providers compare the RAW echoed body;
@@ -1036,7 +1053,7 @@ def challenge_response(
 
 
 def record_batch(
-    db: Any, prepared: PreparedIngress, events: tuple[InboundEvent, ...]
+    db: Any, prepared: ReceiptBatchAddress, events: tuple[InboundEvent, ...]
 ) -> tuple[tuple[UUID, bool], ...]:
     """Record the WHOLE tuple. Mutates and flushes; the caller's unit of work
     decides the transaction.

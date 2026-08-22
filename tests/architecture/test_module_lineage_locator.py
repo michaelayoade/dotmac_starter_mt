@@ -103,7 +103,6 @@ LOCATOR = "versions_dir"
 # which is why they are not all fixed at once: six releases in one change is six
 # untested claims, and the repo's own rule is one coherent slice per change.
 PRE_RULE_DEBT = {
-    "dotmac-imports": "no locator; lineage `im`",
     "dotmac-integration": "no locator; lineage `ig`, eight revisions",
     "dotmac-template-studio": "no locator; lineage `ts`, two revisions",
     "dotmac-ticketing": "no locator; lineage `tk`",

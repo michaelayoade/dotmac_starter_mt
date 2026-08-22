@@ -44,7 +44,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_files_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_academy_app", "dotmac_vendor_control_plane"]
+candidate_consumers = ["dotmac_erp", "dotmac_academy_app", "dotmac_vendor_control_plane", "dotmac_sub"]
 composition_boundary = "ADR-0024: each adopter installs its own fi lineage, owns its own metadata rows and binds its own provider adapter. Applications share the package contract, never a mod_files schema, object-key authority or provider credential. Cross-app file data moves only through the owning application's versioned API/webhook; any local copy is a provenance-bearing repairable projection. Provider codes and SDK/wire mappings remain assembly declarations/adapters, never product/provider branches in dotmac-files."
 inventory_evidence = [
   "docs/inventories/files-sources.md",

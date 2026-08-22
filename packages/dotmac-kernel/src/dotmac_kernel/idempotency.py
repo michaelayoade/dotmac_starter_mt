@@ -40,12 +40,16 @@ reservation on top of this contract.
 Follows the kernel transaction-authority rule: RECEIVES a `Session`, never
 builds one; does `add`/`flush`, never `commit`/`rollback` (the request boundary
 owns that).
+
+`fingerprint_of` is RE-EXPORTED here and defined in
+`dotmac_kernel.fingerprints`. It needs no persistence to answer "is this the
+same request?", and leaving it here forced a stateless caller to import the
+ledger — and with it the ORM models — to get a digest. Existing callers are
+unaffected; the name remains part of this module's public surface.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -56,11 +60,13 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_kernel._transactions import conflict_savepoint
+
 if TYPE_CHECKING:
     from sqlalchemy.engine import CursorResult
 
-from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.exceptions import BadRequestError, ConflictError
+from dotmac_kernel.fingerprints import fingerprint_of
 from dotmac_kernel.idempotency_models import (
     IdempotencyRecord,
     IdempotencyStatus,
@@ -96,25 +102,6 @@ class IdempotentOutcome:
     key: str
     result: Mapping[str, object]
     replayed: bool
-
-
-def fingerprint_of(payload: Any) -> str:
-    """A stable SHA256 over `payload`, for detecting a key reused with a
-    different request.
-
-    Stability is the whole point, so the encoding is pinned: sorted keys and
-    compact separators, meaning dict ordering and incidental whitespace cannot
-    change the digest. Objects exposing `model_dump` (pydantic models, without
-    importing pydantic here) are dumped in JSON mode first; anything else
-    non-serializable falls back to `str`, so a UUID or Decimal fingerprints
-    consistently instead of raising.
-    """
-    if hasattr(payload, "model_dump"):
-        payload = payload.model_dump(mode="json")
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), default=str
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _validate(scope: str, key: str) -> None:

@@ -44,26 +44,116 @@ confusion ADR-0028 supersedes ADR-0027 to remove.
 
 | Distribution | Classification | Evidence | Module capability | Supported installation sets | This assembly installs | Release policy | Declared version | Kernel requirement | Proven consumers | Candidate consumers |
 |---|---|---|---|---|---|---|---:|---|---|---|
+| [`dotmac-accounting`](../packages/dotmac-accounting/README.md) | optional module | [`audit-complete`](../packages/dotmac-accounting/EXTRACTION.toml) | [tenant · `mod_accounting`](../packages/dotmac-accounting/src/dotmac_accounting/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp` |
+| [`dotmac-ai-operations`](../packages/dotmac-ai-operations/README.md) | optional module | [`audit-complete`](../packages/dotmac-ai-operations/EXTRACTION.toml) | [tenant · `mod_aiops`](../packages/dotmac-ai-operations/src/dotmac_ai_operations/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_sub` |
+| [`dotmac-analytics`](../packages/dotmac-analytics/README.md) | optional module | [`audit-complete`](../packages/dotmac-analytics/EXTRACTION.toml) | [tenant · `mod_analytics`](../packages/dotmac-analytics/src/dotmac_analytics/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_academy_app`, `dotmac_crm`, `dotmac_erp` |
+| [`dotmac-app-sync`](../packages/dotmac-app-sync/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-app-sync/EXTRACTION.toml) | n/a | — | — | not allowlisted | `0.1.0a1` | — | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md) | optional module | [`adopted`](../packages/dotmac-application-directory/EXTRACTION.toml) | [tenant · `mod_appdir`](../packages/dotmac-application-directory/src/dotmac_application_directory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a56` | `dotmac_workspace` | — |
-| [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp` |
+| [`dotmac-approvals`](../packages/dotmac-approvals/README.md) | optional module | [`adopted`](../packages/dotmac-approvals/EXTRACTION.toml) | [tenant+platform · `mod_approvals`](../packages/dotmac-approvals/src/dotmac_approvals/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a5` | `>=0.1.0a67` | `dotmac_vendor_control_plane` | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-assets`](../packages/dotmac-assets/README.md) | optional module | [`audit-complete`](../packages/dotmac-assets/EXTRACTION.toml) | [tenant · `mod_assets`](../packages/dotmac-assets/src/dotmac_assets/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md) | stateless protocol adapter | [`adopted`](../packages/dotmac-auth-oidc/EXTRACTION.toml) | n/a | — | — | [adapter allowlist](../.github/release-adapters.json) | `0.1.0a1` | — | `dotmac_workspace` | `dotmac_erp`, `dotmac_workspace` |
-| [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator` |
+| [`dotmac-banking`](../packages/dotmac-banking/README.md) | optional module | [`audit-complete`](../packages/dotmac-banking/EXTRACTION.toml) | [tenant · `mod_banking`](../packages/dotmac-banking/src/dotmac_banking/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_erp` |
+| [`dotmac-brand-profiles`](../packages/dotmac-brand-profiles/README.md) | optional module | [`audit-complete`](../packages/dotmac-brand-profiles/EXTRACTION.toml) | [tenant+platform · `mod_brand`](../packages/dotmac-brand-profiles/src/dotmac_brand_profiles/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | — | `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md) | optional module | [`audit-complete`](../packages/dotmac-campaigns/EXTRACTION.toml) | [tenant · `mod_campaigns`](../packages/dotmac-campaigns/src/dotmac_campaigns/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a73` | — | `dotmac-erp`, `dotmac_crm`, `dotmac_sub` |
+| [`dotmac-commercial-agreements`](../packages/dotmac-commercial-agreements/README.md) | optional module | [`adopted`](../packages/dotmac-commercial-agreements/EXTRACTION.toml) | [platform · `mod_agreements`](../packages/dotmac-commercial-agreements/src/dotmac_commercial_agreements/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | `dotmac_vendor_control_plane` | — |
+| [`dotmac-compliance-reporting`](../packages/dotmac-compliance-reporting/README.md) | optional module | [`audit-complete`](../packages/dotmac-compliance-reporting/EXTRACTION.toml) | [tenant · `mod_compliance`](../packages/dotmac-compliance-reporting/src/dotmac_compliance_reporting/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_sub` |
+| [`dotmac-connector-flutterwave`](../packages/dotmac-connector-flutterwave/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-flutterwave/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_integrator`, `dotmac_sub` |
+| [`dotmac-connector-linkedin`](../packages/dotmac-connector-linkedin/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-linkedin/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac-erp`, `dotmac_integrator`, `dotmac_sub` |
+| [`dotmac-connector-meta-social`](../packages/dotmac-connector-meta-social/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-meta-social/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_integrator`, `dotmac_sub` |
+| [`dotmac-connector-mono`](../packages/dotmac-connector-mono/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-mono/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_integrator` |
+| [`dotmac-connector-paystack`](../packages/dotmac-connector-paystack/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-paystack/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_erp`, `dotmac_integrator`, `dotmac_sub` |
+| [`dotmac-connector-remita`](../packages/dotmac-connector-remita/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-remita/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a1` | — | — | `dotmac_erp`, `dotmac_integrator` |
+| [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md) | stateless protocol adapter | [`audit-complete`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml) | n/a | — | — | [connector allowlist](../.github/release-connectors.json) | `0.1.0a2` | — | — | `dotmac_integrator` |
+| [`dotmac-content`](../packages/dotmac-content/README.md) | optional module | [`audit-complete`](../packages/dotmac-content/EXTRACTION.toml) | [tenant · `mod_content`](../packages/dotmac-content/src/dotmac_content/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
+| [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md) | optional module | [`audit-complete`](../packages/dotmac-deployment-control/EXTRACTION.toml) | [platform · `mod_deploy`](../packages/dotmac-deployment-control/src/dotmac_deployment_control/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a77` | — | `dotmac_vendor_control_plane` |
+| [`dotmac-document-rendering`](../packages/dotmac-document-rendering/README.md) | optional module | [`audit-complete`](../packages/dotmac-document-rendering/EXTRACTION.toml) | [stateless](../packages/dotmac-document-rendering/src/dotmac_document_rendering/manifest.py) | — | — | not allowlisted | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-documents`](../packages/dotmac-documents/README.md) | optional module | [`audit-complete`](../packages/dotmac-documents/EXTRACTION.toml) | [tenant · `mod_documents`](../packages/dotmac-documents/src/dotmac_documents/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-durable-timers`](../packages/dotmac-durable-timers/README.md) | optional module | [`audit-complete`](../packages/dotmac-durable-timers/EXTRACTION.toml) | [tenant+platform · `mod_timers`](../packages/dotmac-durable-timers/src/dotmac_durable_timers/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a72` | — | `dotmac_crm`, `dotmac_sub`, `dotmac_vendor_control_plane` |
 | [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md) | optional module | [`adopted`](../packages/dotmac-entitlement-allocation/EXTRACTION.toml) | [platform · `mod_ealloc`](../packages/dotmac-entitlement-allocation/src/dotmac_entitlement_allocation/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a6` | `>=0.1.0a68` | `dotmac_vendor_control_plane` | — |
-| [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | `tenant`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a61` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane` |
-| [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
-| [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`adopted`](../packages/dotmac-integration/EXTRACTION.toml) | [tenant+platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a9` | `>=0.1.0a68` | `dotmac_integrator` | — |
-| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a70` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-expenses`](../packages/dotmac-expenses/README.md) | optional module | [`audit-complete`](../packages/dotmac-expenses/EXTRACTION.toml) | [tenant · `mod_expenses`](../packages/dotmac-expenses/src/dotmac_expenses/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_crm`, `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-fiber-plant`](../packages/dotmac-fiber-plant/README.md) | optional module | [`audit-complete`](../packages/dotmac-fiber-plant/EXTRACTION.toml) | [tenant · `mod_fiber`](../packages/dotmac-fiber-plant/src/dotmac_fiber_plant/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
+| [`dotmac-files`](../packages/dotmac-files/README.md) | optional module | [`audit-complete`](../packages/dotmac-files/EXTRACTION.toml) | [tenant+platform · `mod_files`](../packages/dotmac-files/src/dotmac_files/manifest.py) | `tenant`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a3` | `>=0.1.0a61` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-finance`](../packages/dotmac-finance/README.md) | optional module | [`audit-complete`](../packages/dotmac-finance/EXTRACTION.toml) | [tenant · `mod_finance`](../packages/dotmac-finance/src/dotmac_finance/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_erp` |
+| [`dotmac-forms`](../packages/dotmac-forms/README.md) | optional module | [`audit-complete`](../packages/dotmac-forms/EXTRACTION.toml) | [tenant · `mod_forms`](../packages/dotmac-forms/src/dotmac_forms/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac-erp`, `dotmac_sub` |
+| [`dotmac-fulfillment`](../packages/dotmac-fulfillment/README.md) | optional module | [`audit-complete`](../packages/dotmac-fulfillment/EXTRACTION.toml) | [tenant · `mod_fulfillment`](../packages/dotmac-fulfillment/src/dotmac_fulfillment/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a1` | `>=0.1.0a89` | — | `dotmac_cloud`, `dotmac_sub` |
+| [`dotmac-imports`](../packages/dotmac-imports/README.md) | optional module | [`audit-complete`](../packages/dotmac-imports/EXTRACTION.toml) | [tenant · `mod_imports`](../packages/dotmac-imports/src/dotmac_imports/manifest.py) | atomic (all declared planes) | not installed here | not allowlisted | `0.1.0a2` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-inbox`](../packages/dotmac-inbox/README.md) | optional module | [`audit-complete`](../packages/dotmac-inbox/EXTRACTION.toml) | [tenant · `mod_inbox`](../packages/dotmac-inbox/src/dotmac_inbox/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-integration`](../packages/dotmac-integration/README.md) | optional module | [`audit-complete`](../packages/dotmac-integration/EXTRACTION.toml) | [platform · `mod_intg`](../packages/dotmac-integration/src/dotmac_integration/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a12` | `>=0.1.0a68` | — | `dotmac_integrator` |
+| [`dotmac-inventory`](../packages/dotmac-inventory/README.md) | optional module | [`audit-complete`](../packages/dotmac-inventory/EXTRACTION.toml) | [tenant · `mod_inventory`](../packages/dotmac-inventory/src/dotmac_inventory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-ipam`](../packages/dotmac-ipam/README.md) | optional module | [`audit-complete`](../packages/dotmac-ipam/EXTRACTION.toml) | [tenant · `mod_ipam`](../packages/dotmac-ipam/src/dotmac_ipam/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
+| [`dotmac-kernel`](../packages/dotmac-kernel/README.md) | universal facility | [`historical-pre-rule`](../packages/dotmac-kernel/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-kernel.yml) | `0.1.0a90` | — | `dotmac_starter_mt` | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-licensing`](../packages/dotmac-licensing/README.md) | optional module | [`adopted`](../packages/dotmac-licensing/EXTRACTION.toml) | [platform · `mod_licensing`](../packages/dotmac-licensing/src/dotmac_licensing/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a77` | `dotmac_vendor_control_plane` | — |
+| [`dotmac-media-observations`](../packages/dotmac-media-observations/README.md) | optional module | [`audit-complete`](../packages/dotmac-media-observations/EXTRACTION.toml) | [tenant · `mod_mediaobs`](../packages/dotmac-media-observations/src/dotmac_media_observations/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
+| [`dotmac-network-access`](../packages/dotmac-network-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-access/EXTRACTION.toml) | [tenant · `mod_netaccess`](../packages/dotmac-network-access/src/dotmac_network_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
+| [`dotmac-network-assurance`](../packages/dotmac-network-assurance/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-assurance/EXTRACTION.toml) | [tenant · `mod_netassure`](../packages/dotmac-network-assurance/src/dotmac_network_assurance/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
+| [`dotmac-network-control`](../packages/dotmac-network-control/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-control/EXTRACTION.toml) | [tenant · `mod_netctrl`](../packages/dotmac-network-control/src/dotmac_network_control/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
+| [`dotmac-network-inventory`](../packages/dotmac-network-inventory/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-inventory/EXTRACTION.toml) | [tenant · `mod_netinv`](../packages/dotmac-network-inventory/src/dotmac_network_inventory/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
+| [`dotmac-network-observability`](../packages/dotmac-network-observability/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-observability/EXTRACTION.toml) | [tenant · `mod_netobs`](../packages/dotmac-network-observability/src/dotmac_network_observability/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
+| [`dotmac-network-topology`](../packages/dotmac-network-topology/README.md) | optional module | [`audit-complete`](../packages/dotmac-network-topology/EXTRACTION.toml) | [tenant · `mod_nettop`](../packages/dotmac-network-topology/src/dotmac_network_topology/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
 | [`dotmac-numbering`](../packages/dotmac-numbering/README.md) | optional module | [`audit-complete`](../packages/dotmac-numbering/EXTRACTION.toml) | [tenant+platform · `mod_numbering`](../packages/dotmac-numbering/src/dotmac_numbering/manifest.py) | `tenant`, `platform`, `platform+tenant` | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a2` | `>=0.1.0a66` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
+| [`dotmac-party`](../packages/dotmac-party/README.md) | optional module | [`audit-complete`](../packages/dotmac-party/EXTRACTION.toml) | [tenant · `mod_party`](../packages/dotmac-party/src/dotmac_party/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_sub` |
+| [`dotmac-payables`](../packages/dotmac-payables/README.md) | optional module | [`audit-complete`](../packages/dotmac-payables/EXTRACTION.toml) | [tenant · `mod_payables`](../packages/dotmac-payables/src/dotmac_payables/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp` |
+| [`dotmac-payroll`](../packages/dotmac-payroll/README.md) | optional module | [`audit-complete`](../packages/dotmac-payroll/EXTRACTION.toml) | [tenant · `mod_payroll`](../packages/dotmac-payroll/src/dotmac_payroll/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_erp` |
+| [`dotmac-people`](../packages/dotmac-people/README.md) | optional module | [`audit-complete`](../packages/dotmac-people/EXTRACTION.toml) | [tenant · `mod_people`](../packages/dotmac-people/src/dotmac_people/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a71` | — | `dotmac-erp` |
+| [`dotmac-platform-health`](../packages/dotmac-platform-health/README.md) | optional module | [`audit-complete`](../packages/dotmac-platform-health/EXTRACTION.toml) | [platform · `mod_health`](../packages/dotmac-platform-health/src/dotmac_platform_health/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_vendor_control_plane` |
+| [`dotmac-pon-access`](../packages/dotmac-pon-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-pon-access/EXTRACTION.toml) | [tenant · `mod_pon`](../packages/dotmac-pon-access/src/dotmac_pon_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_sub` |
+| [`dotmac-positioning`](../packages/dotmac-positioning/README.md) | optional module | [`audit-complete`](../packages/dotmac-positioning/EXTRACTION.toml) | [tenant · `mod_pos`](../packages/dotmac-positioning/src/dotmac_positioning/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a83` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-procurement`](../packages/dotmac-procurement/README.md) | optional module | [`audit-complete`](../packages/dotmac-procurement/EXTRACTION.toml) | [tenant · `mod_procurement`](../packages/dotmac-procurement/src/dotmac_procurement/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-projects`](../packages/dotmac-projects/README.md) | optional module | [`audit-complete`](../packages/dotmac-projects/EXTRACTION.toml) | [tenant · `mod_projects`](../packages/dotmac-projects/src/dotmac_projects/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-publishing`](../packages/dotmac-publishing/README.md) | optional module | [`audit-complete`](../packages/dotmac-publishing/EXTRACTION.toml) | [tenant · `mod_publishing`](../packages/dotmac-publishing/src/dotmac_publishing/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
+| [`dotmac-records`](../packages/dotmac-records/README.md) | optional module | [`audit-complete`](../packages/dotmac-records/EXTRACTION.toml) | [tenant · `mod_records`](../packages/dotmac-records/src/dotmac_records/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-referrals`](../packages/dotmac-referrals/README.md) | optional module | [`audit-complete`](../packages/dotmac-referrals/EXTRACTION.toml) | [tenant · `mod_referrals`](../packages/dotmac-referrals/src/dotmac_referrals/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_sub` |
 | [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md) | optional module | [`adopted`](../packages/dotmac-release-catalog/EXTRACTION.toml) | [platform · `mod_rel`](../packages/dotmac-release-catalog/src/dotmac_release_catalog/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a56` | `dotmac_vendor_control_plane` | — |
+| [`dotmac-remote-access`](../packages/dotmac-remote-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-remote-access/EXTRACTION.toml) | [tenant · `mod_remoteaccess`](../packages/dotmac-remote-access/src/dotmac_remote_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_sub` |
+| [`dotmac-reseller-management`](../packages/dotmac-reseller-management/README.md) | optional module | [`audit-complete`](../packages/dotmac-reseller-management/EXTRACTION.toml) | [tenant · `mod_reseller`](../packages/dotmac-reseller-management/src/dotmac_reseller_management/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_sub` |
+| [`dotmac-sites`](../packages/dotmac-sites/README.md) | optional module | [`audit-complete`](../packages/dotmac-sites/EXTRACTION.toml) | [tenant · `mod_sites`](../packages/dotmac-sites/src/dotmac_sites/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a81` | — | `dotmac-erp`, `dotmac_sub` |
+| [`dotmac-support-access`](../packages/dotmac-support-access/README.md) | optional module | [`audit-complete`](../packages/dotmac-support-access/EXTRACTION.toml) | [platform · `mod_supportaccess`](../packages/dotmac-support-access/src/dotmac_support_access/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac_vendor_control_plane` |
+| [`dotmac-surveys`](../packages/dotmac-surveys/README.md) | optional module | [`audit-complete`](../packages/dotmac-surveys/EXTRACTION.toml) | [tenant · `mod_surveys`](../packages/dotmac-surveys/src/dotmac_surveys/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_erp`, `dotmac_sub` |
+| [`dotmac-tax`](../packages/dotmac-tax/README.md) | optional module | [`audit-complete`](../packages/dotmac-tax/EXTRACTION.toml) | [tenant · `mod_tax`](../packages/dotmac-tax/src/dotmac_tax/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac-erp`, `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md) | optional module | [`audit-required`](../packages/dotmac-template-studio/EXTRACTION.toml) | [tenant · `mod_tstudio`](../packages/dotmac-template-studio/src/dotmac_template_studio/manifest.py) | atomic (all declared planes) | atomic — no selection required | not allowlisted | `0.2.0a3` | `>=0.1.0a56` | — | `dotmac_erp`, `dotmac_sub` |
 | [`dotmac-ticketing`](../packages/dotmac-ticketing/README.md) | optional module | [`audit-complete`](../packages/dotmac-ticketing/EXTRACTION.toml) | [tenant+platform · `mod_tkt`](../packages/dotmac-ticketing/src/dotmac_ticketing/manifest.py) | `tenant`, `platform`, `platform+tenant` | `platform+tenant` | [module allowlist](../.github/release-modules.json) | `0.1.0a4` | `>=0.1.0a61` | — | `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane` |
-| [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`reuse-proven`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
+| [`dotmac-ui`](../packages/dotmac-ui/README.md) | presentation foundation | [`audit-complete`](../packages/dotmac-ui/EXTRACTION.toml) | n/a | — | — | [dedicated workflow](../.github/workflows/release-ui.yml) | `0.1.0a7` | — | `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub` | `dotmac_crm` |
+| [`dotmac-web-analytics`](../packages/dotmac-web-analytics/README.md) | optional module | [`audit-complete`](../packages/dotmac-web-analytics/EXTRACTION.toml) | [tenant · `mod_webanalytics`](../packages/dotmac-web-analytics/src/dotmac_web_analytics/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a86` | — | `dotmac-erp`, `dotmac_sub` |
+| [`dotmac-work-orders`](../packages/dotmac-work-orders/README.md) | optional module | [`audit-complete`](../packages/dotmac-work-orders/EXTRACTION.toml) | [tenant · `mod_workorders`](../packages/dotmac-work-orders/src/dotmac_work_orders/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a85` | — | `dotmac_sub` |
+| [`dotmac-workflow-runtime`](../packages/dotmac-workflow-runtime/README.md) | optional module | [`audit-complete`](../packages/dotmac-workflow-runtime/EXTRACTION.toml) | [tenant · `mod_workflow`](../packages/dotmac-workflow-runtime/src/dotmac_workflow_runtime/manifest.py) | atomic (all declared planes) | not installed here | [module allowlist](../.github/release-modules.json) | `0.1.0a1` | `>=0.1.0a88` | — | `dotmac-erp`, `dotmac_sub` |
 
 ## Contracts and ownership
 
 The dossier linked from each entry remains authoritative for source
 paths, parity tests, first cutover, drift proof, local-copy retirement
 and the next gate.
+
+### [`dotmac-accounting`](../packages/dotmac-accounting/README.md)
+
+- **Owner:** Tenant chart, fiscal periods, accounting dimensions, balanced journal posting, reversal and immutable ledger evidence
+- **Contract:** Configure a tenant chart, fiscal years/periods and open accounting dimensions; create draft journals from typed source facts; decide balanced posting against an admissible period and posting accounts; append immutable ledger/dimension evidence; correct with a linked opposite-side reversal; close, reopen with explicit authority, and irreversibly lock periods while appending transition evidence. NOT receivables/payables documents, supplier/customer identity, procurement, assets, inventory, tax calculation/filing, banking/payment execution, budgets, exchange-rate sourcing, numbering, approvals, report presentation, or provider I/O.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-accounting/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`.
+
+### [`dotmac-ai-operations`](../packages/dotmac-ai-operations/README.md)
+
+- **Owner:** Provider-neutral AI intake policy, transcription/model-execution evidence, resumable operator workflow state and advisory insight lifecycle
+- **Contract:** Version and activate product-authored intake policies; record opaque input observations and immutable transcription/model-execution attempts; advance a provider-neutral workflow through typed outcomes; create advisory insights and record acknowledgement/action evidence without executing a domain consequence. Provider/model/request names are observation strings only. NOT provider selection, credentials, endpoints, APIs, wire formats, prompts owned by a product domain, connector retries, domain mutation or autonomous decisions.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-ai-operations/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-analytics`](../packages/dotmac-analytics/README.md)
+
+- **Owner:** Immutable declared aggregate metric evidence and the deterministic rebuildable current-point projection for one application's tenants
+- **Contract:** Given an installed immutable metric declaration and a typed tenant-scoped aggregate batch from that declaration's named domain owner, validate exact Decimal values and bounded dimensions, delegate replay/fingerprint conflict/concurrent-key handling to dotmac_kernel.idempotency, preserve an append-only domain receipt and observation evidence, maintain one deterministic rebuildable winning-point projection, and provide bounded latest/history/explicit-period comparison reads plus digest-backed repair evidence. The receipt is not a second replay ledger. NOT source-domain calculations or lifecycle decisions, raw rows/events, arbitrary SQL, subject identity, web analytics, provider media observations, attribution, observability, saved dashboards, report scheduling/rendering/delivery, connector transport, or transaction control.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-analytics/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_academy_app`, `dotmac_crm`, `dotmac_erp`.
+
+### [`dotmac-app-sync`](../packages/dotmac-app-sync/README.md)
+
+- **Owner:** The provider-neutral, versioned inter-application observation envelope and the authenticated hand-off to a destination-owned atomic receiver.
+- **Contract:** Encode and validate source identity, capability version, opaque scope/subject references, correlation, destination-owned JSON Schema, stable idempotency identity and payload fingerprint. Own no HTTP route, peer authentication mechanism, database, session, outbox row, domain model, resolver or consequence.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-app-sync/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`.
 
 ### [`dotmac-application-directory`](../packages/dotmac-application-directory/README.md)
 
@@ -79,7 +169,15 @@ and the next gate.
 - **Contract:** Publish immutable (policy_code, version) revisions with ordered levels; open a request bound to a declared subject type, an opaque subject id and a canonical content digest, idempotent by command key; resolve eligibility by user or role from an Actor value supplied at the call site; enforce per-level distinct-actor quorum, ordered level advancement, separation of duties, self-approval exclusion and MFA; record append-only decisions that a unique constraint makes unrepeatable; evaluate to pending \| approved \| rejected \| cancelled; refuse a decision whose digest no longer matches; fail closed when a policy or version is missing; emit approval.requested/approved/rejected/cancelled as values, with an optional kernel-outbox adapter. Tenant and platform planes are named separately in the API and declared separately in persistence. NOT threshold or FX routing, the subject vocabulary, the business transition, any consuming domain's tables, or transaction control.
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-approvals/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** `dotmac_vendor_control_plane`.
-- **Candidate consumers:** `dotmac_erp`.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-assets`](../packages/dotmac-assets/README.md)
+
+- **Owner:** Tenant-scoped individual durable asset identity, custody, assignment, maintenance, physical lifecycle, disposal state and lifecycle evidence
+- **Contract:** Create one stable tenant record per durable asset; guard physical lifecycle transitions with expected state; maintain at most one active opaque-custodian assignment while preserving issue, return, loss and transfer history; record opaque location moves; schedule, start, complete and cancel maintenance while keeping asset availability coherent; request, separately approve and complete disposal only after custody and maintenance are resolved; and append immutable lifecycle evidence in the caller's transaction. NOT depreciation, impairment, revaluation, GL posting, stock/parts, product identity, vehicle specifications, GPS observations, fuel, incidents, reservations, documents, authorization policy, notification delivery or product consequences.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-assets/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
 
 ### [`dotmac-auth-oidc`](../packages/dotmac-auth-oidc/README.md)
 
@@ -89,13 +187,141 @@ and the next gate.
 - **Proven consumers:** `dotmac_workspace`.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_workspace`.
 
+### [`dotmac-banking`](../packages/dotmac-banking/README.md)
+
+- **Owner:** Tenant bank-account masters, statement and cash observations, configurable matching decisions, and reconciliation evidence
+- **Contract:** Configure bank institutions and accounts against opaque cash-account references; record source-versioned statement lines and cash-account observations; propose matches from tenant-authored policy; accept exact allocations; and prepare/approve immutable reconciliation snapshots. NOT provider connectivity, credentials, polling, bank-specific formats, payment meaning, collection-account routing, GL accounts, journal entries, fiscal periods, or cash-ledger balances.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-banking/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_erp`.
+
+### [`dotmac-brand-profiles`](../packages/dotmac-brand-profiles/README.md)
+
+- **Owner:** Brand profile DATA: the stable profile identity, display and product names, legal identity, brand colours as two hex values, opaque logo/icon file references, host bindings, sender presentation, support presentation, enabled surfaces, locale and timezone defaults, a mobile build-profile reference, and the per-field precedence and locking that make a multi-layer brand safe
+- **Contract:** Hold brand profiles on either plane; upsert as DRAFT and make resolvable only by explicit activation; merge an ordered caller-supplied scope chain highest-precedence-first with first-non-null-wins; report the source scope of EVERY resolved field; let a higher layer LOCK a field from LOCKABLE_FIELDS against lower-precedence override, with IDENTITY_FIELDS naming the legal/support/sender subset that ADR-0006 s3 keeps separate from display brand; refuse a lock naming a field that does not participate in precedence; bind an already-NORMALISED host to a platform profile and resolve a brand by host BEFORE any tenant exists; hold the constrained runtime brand/accent values dotmac_ui.BrandOverride accepts, publishing BRAND_OVERRIDE_INPUTS as the allowlist the ASSEMBLY maps through; validate them on write through dotmac-ui's own parser; and translate a legacy brand record onto that allowlist while REPORTING every unsupported value with its disposition rather than dropping it. NOT a design system, not a file store, not a host-to-tenant resolver, not a mobile build pipeline, and not a holder of any CSS, token map, colour parser, file byte, certificate or key.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-brand-profiles/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-campaigns`](../packages/dotmac-campaigns/README.md)
+
+- **Owner:** Provider-neutral outbound campaign identity, immutable audience/recipient evidence and ordered recipient progression
+- **Contract:** Create and revise a tenant campaign; freeze one active revision, its ordered one-time/nurture steps, its audience and recipient snapshots when sending begins; record consent decisions without making policy; schedule due work through a typed Durable Timers seam; publish one provider-neutral delivery intent per recipient/step through the kernel outbox; consume deduplicated delivery/open/click/reply facts without regressing terminal state; record unsubscribe and response/correlation facts; rebuild counters, report drift, reconcile missing publication and scrub PII at explicit retention deadlines. NOT Party/customer identity, audience business rules, Leads/Sales conversion, orders/subscriptions/billing/collections, consent policy, Inbox messages/conversations, provider I/O/retry/credentials, templates, advertising hierarchy/raw metrics, attribution, retention cases or service cancellation.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-campaigns/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_crm`, `dotmac_sub`.
+
+### [`dotmac-commercial-agreements`](../packages/dotmac-commercial-agreements/README.md)
+
+- **Owner:** The durable commercial agreement between the platform operator and a counterparty: its identity and reference, its immutable accepted commercial snapshot, its evidence-bound lifecycle, its amendments and supersession, and the append-only record of every transition
+- **Contract:** Open a draft against an opaque counterparty reference with promised lines naming a product, an opaque release/offer reference, a capability code and terms frozen as exact text; validate every promised code against the declaring product through a caller-supplied catalogue port; freeze an immutable accepted snapshot and its SHA-256 digest at propose; move draft -> proposed -> approved -> active -> suspended -> terminated \| expired, plus reject, cancel and amend; require ApprovalEvidence whose content_digest equals the frozen digest for both approve and activate, and separate ActivationEvidence naming a satisfied rule with a reference; refuse a stale expected status or record version; make every command idempotent through the kernel's one at-most-once owner; append one immutable history row per transition carrying its evidence document; and emit one versioned fact per transition on the platform outbox. NOT product or release definitions, entitlement balances or allocations, licences, deployment state, invoices or collections decisions, approval workflow internals, counterparty master data, or stored bytes.
+- **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-commercial-agreements/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** `dotmac_vendor_control_plane`.
+- **Candidate consumers:** —.
+
+### [`dotmac-compliance-reporting`](../packages/dotmac-compliance-reporting/README.md)
+
+- **Owner:** Tenant regulatory reporting classifications, evidence-pack snapshots, submissions, acknowledgements and filing status
+- **Contract:** Define a jurisdiction/reporting obligation and immutable classification revision; assemble a period evidence pack from typed source-domain observations with content digests and explicit missing sections; submit the exact pack; record regulator acknowledgement/rejection evidence and filing status. NOT complaints/cases, ticket lifecycle, tax calculation, ledger facts, subscriber facts, stored bytes, rendering, scheduling or transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-compliance-reporting/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-connector-flutterwave`](../packages/dotmac-connector-flutterwave/README.md)
+
+- **Owner:** Flutterwave v4 ingress and reconciliation transport: exact-byte HMAC-SHA256 authentication, OAuth-authenticated charge-list polling, provider-event identity, charge-completed normalization, and acknowledgement bytes.
+- **Contract:** Implement Flutterwave API v4 through dotmac-integration SPI >=1.3,<2.0 for connector key flutterwave and capability payments.settlement.observation.v1 in INGRESS and POLL modes. Verify flutterwave-signature over exact bytes, authenticate reconciliation through v4 OAuth, page only the v4 charge list and accept no v3 fallback. Carry exact amount, currency, provider status, merchant reference and transport evidence. Do not invent provider_fee. Own no product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, retry/checkpoint engine, row, session or product database.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-flutterwave/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_sub`.
+
+### [`dotmac-connector-linkedin`](../packages/dotmac-connector-linkedin/README.md)
+
+- **Owner:** LinkedIn webhook challenge, exact-byte authentication and provider-neutral organization-social and lead notification translation.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key linkedin and social.activity.observation.v1 plus marketing.lead.observation.v1 in INGRESS mode only. Own no contact, campaign, qualification, assignment, ticket, publication, retry, checkpoint, row, session or product database.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-linkedin/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_integrator`, `dotmac_sub`.
+
+### [`dotmac-connector-meta-social`](../packages/dotmac-connector-meta-social/README.md)
+
+- **Owner:** Meta Social ingress authentication and wire translation: Facebook and Instagram subscription challenge, exact-byte signature verification, provider event identity, message/comment normalization, and acknowledgement bytes.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key meta_social and capability messaging.receive.v1 in INGRESS mode only. The connector receives immutable request bytes and already-materialized declared secret material. It emits one provider-neutral fact per Meta message/comment or record-only transport evidence. It owns no rows, sessions, retries, checkpoints, product identity, conversation state, tickets, subscriber state, HTTP status, profile lookup, or outbound Graph I/O.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-meta-social/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`, `dotmac_sub`.
+
+### [`dotmac-connector-mono`](../packages/dotmac-connector-mono/README.md)
+
+- **Owner:** Mono Financial Data v2 transport: authenticated account transaction polling, same-origin pagination and provider-neutral transaction observation translation.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key mono and capability banking.transaction.observation.v1 in POLL mode only. Preserve lowest-denomination integer amounts, currency, provider debit/credit direction, timestamps, transaction identity and optional provider balance/category evidence. Own no bank statement, ledger, reconciliation, tenant, product identity, checkpoint, retry engine, session or product database.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-mono/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_integrator`.
+
+### [`dotmac-connector-paystack`](../packages/dotmac-connector-paystack/README.md)
+
+- **Owner:** Paystack ingress and reconciliation transport: exact-byte HMAC-SHA512 verification, authenticated transaction-list polling, provider-event identity, charge-success normalization, and acknowledgement bytes.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key paystack and capability payments.settlement.observation.v1 in INGRESS and POLL modes. Emit exact amount and provider-fee decimal strings with explicit currency, provider status verbatim, merchant reference and transport evidence; reconcile through the authenticated paged transaction list. Own no product identifier, tenant, allocation, coverage, balance, receivable state, net-amount arithmetic, retry/checkpoint engine, row, session or product database.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-paystack/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_integrator`, `dotmac_sub`.
+
+### [`dotmac-connector-remita`](../packages/dotmac-connector-remita/README.md)
+
+- **Owner:** Remita transport: authenticated RRR status polling, provider response parsing and provider-neutral status observation translation.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key remita and capability payments.reference.status.observation.v1 in POLL mode only. Carry provider status, message, amount, reference, transaction and date evidence verbatim. Own no RRR lifecycle, biller policy, payment-state mapping, source linkage, tenant, product identity, ledger, journal, checkpoint, retry engine, session or product database.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-remita/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_integrator`.
+
 ### [`dotmac-connector-whatsapp`](../packages/dotmac-connector-whatsapp/README.md)
 
 - **Owner:** Meta WhatsApp Cloud API ingress authentication and wire translation: subscription challenge, exact-byte request verification, provider event identity, typed message/status/error observations, and provider acknowledgement bytes.
-- **Contract:** Implement dotmac-integration SPI >=1.2,<2.0 for connector key meta_whatsapp and capability messaging.receive.v1 in INGRESS mode only. The connector receives immutable request bytes plus already-materialized configuration and secret material; it returns verification evidence and normalized provider facts. It owns no rows, sessions, retries, checkpoints, product identity, conversation state, tickets, subscribers, HTTP response status, or destination decision.
+- **Contract:** Implement dotmac-integration SPI >=1.3,<2.0 for connector key meta_whatsapp and capability messaging.receive.v1 in INGRESS mode only. The connector declares and reads only webhook_signing_secret, optional webhook_signing_previous_secret, and webhook_verify_token, with explicit deny-all provider egress. It receives immutable request bytes plus already-materialized secret material; it returns verification evidence and normalized provider facts. It owns no rows, sessions, retries, checkpoints, product identity, conversation state, tickets, subscribers, HTTP response status, or destination decision.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-connector-whatsapp/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_integrator`.
+
+### [`dotmac-content`](../packages/dotmac-content/README.md)
+
+- **Owner:** Dotmac editorial content
+- **Contract:** Tenant-scoped editorial plans, canonical content items, provider-neutral variants, editorial calendar placement and opaque creative-file references. NOT outbound campaign audiences, delivery scheduling, publication state, provider transport, stored bytes, people, permissions or generic work management.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-content/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.
+
+### [`dotmac-deployment-control`](../packages/dotmac-deployment-control/README.md)
+
+- **Owner:** Desired deployment intent for licensed Dotmac application deployments: the target and its identity credentials, the immutable approved plan, the rollout decision and its attempts, the authenticated acknowledgements a target reports, and the drift between what was rolled out and what is observed
+- **Contract:** Register a deployment target with an opaque subject, product, environment and stable target reference; declare a versioned desired specification with opaque release, licence and brand-profile references; enrol a target's own PUBLIC verification key as PENDING and admit it only after the caller proves possession through the kernel (ADR-0007); freeze the current desired state into an immutable plan with a SHA-256 digest, superseding any earlier undecided plan; require ApprovalEvidence whose content_digest equals the plan digest for a plan declared sensitive; request a rollout only against an approved-or-exempt plan and an active target; open attempts one at a time and return a provider-neutral DeliveryIntent carrying WHAT to deploy and never HOW; settle an attempt without failing the rollout, so a transient transport error is not a deployment decision; distinguish timed-out from failed and manual-repair from cancelled; record EVERY inbound observation as an append-only attempt including the ones that never resolve to an identity, admit only valid-and-eligible-and-matching arrivals, return a replay's ORIGINAL verdict verbatim, and keep the proven identity in a different column from the reported claim under a CHECK; and compute drift on demand against the plan that was actually rolled out. NOT provider credentials, provider clients, webhook verification, connector retry or checkpoint state, the release catalogue, licence authority, brand definition, application-domain migrations, billing/entitlement/support decisions, or general infrastructure observability.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-deployment-control/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_vendor_control_plane`.
+
+### [`dotmac-document-rendering`](../packages/dotmac-document-rendering/README.md)
+
+- **Owner:** Stateless selection, semantic projection, exact formatting, and renderer provenance for issued billing documents
+- **Contract:** Accept one complete immutable InvoiceDocumentFactV1 by value; select one immutable template through an assembly-declared document-profile binding; produce one canonical semantic projection; and render complete HTML or PDF bytes with stable provenance and typed permanent/retryable failures. Billing remains authoritative for document meaning, numbering, frozen facts, and the official artifact relation; dotmac-files owns bytes at rest; the consuming assembly owns orchestration, idempotency, retry, and reconciliation. The renderer owns no rows, transactions, clocks, external I/O, delivery, numbering, invoice decisions, or storage.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-document-rendering/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-documents`](../packages/dotmac-documents/README.md)
+
+- **Owner:** Controlled document identity, immutable exact-content versions, document lifecycle, document-scoped access/collaboration and acknowledgements
+- **Contract:** Create tenant libraries and immutable document-type policy versions; create stable document identity independent of filename/folder; allocate immutable major/minor versions under a locked current pointer with explicit author/time/reason/provenance and opaque Files evidence; bind renditions and approvals to the exact version checksum; perform the configured Documents-owned lifecycle; record checkout, classifications, relations, annotations, access grants, acknowledgements and append-only evidence. NOT bytes/provider lifecycle, billing rendering, approval decisions, durable timer delivery, general conversation, external delivery, OCR/provider I/O, records retention/holds/disposition or source-domain business meaning.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-documents/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-durable-timers`](../packages/dotmac-durable-timers/README.md)
+
+- **Owner:** Timer identity, generation allocation, scheduling and rescheduling, supersession, cancellation, current-generation verification, stale-trigger rejection, append-only timer history and terminal-history retention
+- **Contract:** Given an explicit tenant or platform scope, an opaque (owner, entity_kind, entity_id, purpose) identity, a required timezone-aware due_at, a manifest-declared output code and optional opaque expected_source_version, atomically allocate the next generation, supersede the prior current generation, append history and enqueue one kernel outbox event whose available_at equals due_at. Cancellation returns one of Canceled, AlreadyFired, NothingScheduled or Stale and names both observed and current generations. Trigger acceptance locks and re-derives current identity state, records stale-rejection evidence, and returns observed_generation, current_generation and expected_source_version before the caller may run its effect. Retention never deletes a scheduled timer. The module declares and reuses outbox_relay.v1 for claiming, leasing, stale-lease recovery, retry, backoff, dead-letter handling and dispatcher privileges; it contains no due-row scanner, claim loop, retry engine, consumer decision or ambient clock read.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-durable-timers/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_crm`, `dotmac_sub`, `dotmac_vendor_control_plane`.
 
 ### [`dotmac-entitlement-allocation`](../packages/dotmac-entitlement-allocation/README.md)
 
@@ -105,29 +331,93 @@ and the next gate.
 - **Proven consumers:** `dotmac_vendor_control_plane`.
 - **Candidate consumers:** —.
 
+### [`dotmac-expenses`](../packages/dotmac-expenses/README.md)
+
+- **Owner:** Tenant expense requests, incurred claims, receipt meaning, effective-dated limit evaluation, guarded lifecycle and derived reimbursement eligibility
+- **Contract:** Own intended-spend requests and immutable submitted lines; incurred-expense claims and claimed/approved line amounts; tenant category and receipt-domain metadata around opaque file ids; immutable published policy revisions, limit rules and evaluation evidence; guarded submission/decision transitions that apply an opaque Approvals decision; and a computed answer whether an approved claim is eligible to be presented to Finance. NOT Party/employee identity, approval quorum, stored bytes, numbering, projects/work orders, advances/cards, AP/GL/tax, bank details, disbursement, settlement or payment coverage.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-expenses/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_crm`, `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-fiber-plant`](../packages/dotmac-fiber-plant/README.md)
+
+- **Owner:** Outside-plant structures, cables, strands, splices, terminations, continuity, field evidence and controlled as-built changes
+- **Contract:** Register plant identities, record splice/termination/field evidence, resolve continuity and approve/accept as-built changes. NOT projects, work orders, tickets, customer/service lifecycles, generic inventory or provider GIS clients.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-fiber-plant/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
 ### [`dotmac-files`](../packages/dotmac-files/README.md)
 
 - **Owner:** Stored bytes and their repairable physical lifecycle on explicit tenant and platform planes
 - **Contract:** Validate and persist opaque bytes beneath immutable trusted keys selected by a required TenantScope or PlatformScope; record size, media type, checksum, provider binding and physical state; stream, delete and reconcile them through one shared physical engine and two structurally separate persistence tables. NOT domain attachment meaning or authorization, document generation, PDF/spreadsheet semantic parsing, import mapping, dry-run/apply, or domain mutation.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-files/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
-- **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_vendor_control_plane`.
+- **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
+
+### [`dotmac-finance`](../packages/dotmac-finance/README.md)
+
+- **Owner:** Tenant fixed-asset accounting books, valuation balances and immutable balanced accounting consequences
+- **Contract:** Capitalize an opaque physical-asset reference into a functional-currency book; calculate and post prospective depreciation with stale-snapshot and creator/poster separation; assess impairment using the higher recoverable amount and cap reversals at the no-impairment carrying amount; apply revaluation increases/decreases against running reserve and prior-loss balances; derecognize the book and calculate gain/loss from net proceeds; append one source-versioned accounting event and one balanced consequence in the same transaction as each book mutation. NOT physical asset identity/lifecycle/custody/maintenance/disposal approval, chart of accounts, fiscal periods, journals, tax/statutory books, foreign-exchange policy, payments or cash.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-finance/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_erp`.
+
+### [`dotmac-forms`](../packages/dotmac-forms/README.md)
+
+- **Owner:** Tenant reusable form definitions, immutable published versions, ordered sections/fields/options and validated submission/answer evidence
+- **Contract:** Author a form and draft version; define ordered sections, typed fields and closed options; validate and publish an immutable version; accept an idempotent submission against that exact version and persist typed answer/display snapshots; retain opaque subject/file references. NOT subject lifecycle, workflow execution, approvals, file bytes, identity resolution, presentation rendering, delivery, recruitment or domain consequences.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-forms/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.
+
+### [`dotmac-fulfillment`](../packages/dotmac-fulfillment/README.md)
+
+- **Owner:** Tenant-scoped fulfillment saga identity, ordered business steps, append-only participant attempts, idempotent asynchronous outcome receipts, derived partial progress, explicit compensation requests and receipts, convergence and operator-repair evidence
+- **Contract:** Create one immutable run per opaque commercial intent with ordered steps bound to manifest-declared participant codes; append one immutable attempt for each transactional dispatch and schedule its durable re-observation so callback loss converges; record or replay one typed outcome per participant command with fingerprint conflict; derive aggregate, contiguous progress and repair attention from attempts and receipts; schedule uncertain participant and compensation outcomes only through an assembly-supplied dotmac-durable-timers adapter; request compensation in reverse successful-settle order and record the participant's succeeded, refused, not-supported, manual-required, retryable or reconciliation-required answer; require an explicit non-system actor plus assembly authorizer for redrive, compensation and reviewed-terminal settlement, and append a declared kernel audit event in the same transaction. Every mutation receives the caller's Session and flushes without commit or rollback. NOT order, invoice, settlement, subscription, service status, participant policy, provider I/O, credentials, connector delivery retry, leases, backoff, dead-letter state, handler ordering, or a wall-clock reaper.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-fulfillment/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_cloud`, `dotmac_sub`.
 
 ### [`dotmac-imports`](../packages/dotmac-imports/README.md)
 
-- **Owner:** The durable record of a bulk import: the run, its rows, and what became of each one
-- **Contract:** Record an operator-initiated import of one stored document; verify the raw bytes against the recorded SHA-256 at both validation and apply; validate without holding anything that could mutate; promote one validated run into one apply run; advance one FOR UPDATE-locked, caller-transaction-owned chunk from the durable checkpoint per call; commit each domain effect with its minimised row outcome; resume a running run and make completed re-delivery a no-op. Persist only a row fingerprint, bounded typed safe errors and an opaque result — never mapped row values or raw exception text. Decode CSV strictly and resolve source headings onto a domain-declared field set. NOT the field vocabulary, business validation, duplicate policy, the domain mutation, any reversal of it, the stored bytes, or export.
+- **Owner:** The durable record of a bulk import: the run, its immutable partition plan, its rows, and what became of each one
+- **Contract:** Record an operator-initiated import of one stored document; verify immutable source/partition SHA-256; validate without holding anything that could mutate; promote one validated run into one apply run; advance either one locked ordinary chunk or one atomically claimed bounded partition; and commit each domain effect with its minimised row outcome plus the owning checkpoint. Stream large CSVs into bounded dotmac-files artifacts, clone the exact validated plan on promotion and refuse stale claim settlement. Persist only opaque file ids, ranges, checksums, row fingerprints, bounded typed safe errors and opaque results — never mapped row values or raw exception text. NOT field vocabulary, business validation, duplicate policy, domain mutation/reversal, stored bytes, worker-count policy, database extraction, COPY or export.
 - **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-imports/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** —.
-- **Candidate consumers:** `dotmac_crm`, `dotmac_erp`, `dotmac_sub`.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-inbox`](../packages/dotmac-inbox/README.md)
+
+- **Owner:** Tenant-scoped conversation identity, lifecycle, message ordering, channel-trait threading, message identity, and per-operator read cursors
+- **Contract:** Create one durable tenant conversation per declared thread; append ordered inbound, outbound, and internal messages with one canonical identity that replays exact redelivery and rejects key reuse with different content; transition open, pending, snoozed, and resolved state through expected-state commands; reopen a resolved thread on a new inbound message; and maintain a monotonic opaque-actor read cursor. Every mutation participates in the caller's transaction and flushes without commit or rollback. NOT provider transport, connector installation, webhook authentication, raw provider payloads, delivery/retry, contact resolution, routing, assignment, presence, queues, attachments, realtime, templates, AI intake, tickets, subscribers, leads, customers, or product consequences.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-inbox/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
 
 ### [`dotmac-integration`](../packages/dotmac-integration/README.md)
 
 - **Owner:** External connector control plane
-- **Contract:** The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, authenticated product-port descriptor snapshots, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, indexed shadow evidence, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state.
-- **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-integration/EXTRACTION.toml); source mode `product-first`.
-- **Proven consumers:** `dotmac_integrator`.
-- **Candidate consumers:** —.
+- **Contract:** The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, authenticated product-port descriptor snapshots, manifest-owned secret binding names and exact egress destinations, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, indexed shadow evidence, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-integration/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_integrator`.
+
+### [`dotmac-inventory`](../packages/dotmac-inventory/README.md)
+
+- **Owner:** Dotmac inventory stock ledger, traceability, reservation, and valuation
+- **Contract:** Tenant-local SKU and warehouse identity; immutable stock movements; rebuildable on-hand/reserved/value projections; reservation lifecycle; lot/serial traceability; and inventory valuation. Excludes procurement sourcing/approval, product work, finance journals, assets, and provider transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-inventory/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-ipam`](../packages/dotmac-ipam/README.md)
+
+- **Owner:** Tenant address-space, pool, address, reservation, assignment, utilization and repair lifecycle
+- **Contract:** Create address spaces and pools; reserve, assign and release addresses against opaque product subjects; prevent collisions; record utilization observations; repair projections; return immutable snapshots and ordered evidence. NOT subscriber/service/NAS/OLT/VLAN authority, RADIUS/route projection, provider I/O or credentials.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-ipam/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
 
 ### [`dotmac-kernel`](../packages/dotmac-kernel/README.md)
 
@@ -137,6 +427,70 @@ and the next gate.
 - **Proven consumers:** `dotmac_starter_mt`.
 - **Candidate consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
 
+### [`dotmac-licensing`](../packages/dotmac-licensing/README.md)
+
+- **Owner:** The licences that translate an active agreement's allocated entitlement into signed, versioned, revocable software-use authority: the lineage, each immutable issued version and its lifecycle, the acknowledgements a deployment reports, and the revocation record and published revocation lists
+- **Contract:** Issue the next version of a lineage from a caller-supplied LicensableGrant (opaque subject, product, capabilities with limits, validity window, grace days, optional deployment binding, opaque agreement and allocation references); sign the payload bytes ONCE through a caller-supplied LicenceSigner sequence, where more than one signer is a rotation overlap; register every signer's PUBLIC half before signing; round-trip the envelope through the pinned kernel verifier and refuse to record anything it would reject; freeze digest, key_id and envelope immutably, one issued version per allocation and per digest; move issued -> active -> suspended -> reinstated, and issued\|active\|suspended -> revoked \| expired, plus replaced on supersession; refuse a stale expected status or record version; record installation acknowledgements only after matching their licence/version/digest against an issuance this module produced; revoke by LINEAGE, permanently, minting a new generation as the contracted recovery path; publish immutable signed revocation lists that must be a SUPERSET of the previous published list; and expose a typed inspection API that answers what a deployment would see. NOT the product catalogue, commercial negotiation, entitlement arithmetic, deployment orchestration, signing secret material, application authentication or authorization, billing, or provider delivery.
+- **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-licensing/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** `dotmac_vendor_control_plane`.
+- **Candidate consumers:** —.
+
+### [`dotmac-media-observations`](../packages/dotmac-media-observations/README.md)
+
+- **Owner:** Provider-neutral external media observation facts and rebuildable projections
+- **Contract:** Record tenant-scoped immutable external media entity, hierarchy and aggregate period-metric facts with source/receipt provenance, exact replay/conflict/restatement semantics, exact typed values, drift detection and rebuildable projections. Preserve provider-reported conversion claims only. NOT provider transport, credentials or raw payloads; NOT Lead/Party/customer identity, official attribution, campaign effectiveness, revenue or any business consequence.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-media-observations/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.
+
+### [`dotmac-network-access`](../packages/dotmac-network-access/README.md)
+
+- **Owner:** Provider-neutral access projections, authentication/accounting observations, sessions, reconciliation and drift evidence
+- **Contract:** Project access state from typed product decisions; ingest deduplicated auth/accounting facts; maintain sessions and reconcile drift. NOT commercial eligibility, IPAM, generic inventory, provider clients or credentials.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-network-access/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-network-assurance`](../packages/dotmac-network-assurance/README.md)
+
+- **Owner:** Network incident/outage, maintenance, impact classification, notification evidence, SLA evidence and escalation recommendation lifecycle
+- **Contract:** Open/update/resolve incidents, classify opaque impacted subjects, record maintenance/notification/SLA evidence and recommend escalation. NOT ticket/work-order decisions, measurement collection, topology or delivery.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-network-assurance/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-network-control`](../packages/dotmac-network-control/README.md)
+
+- **Owner:** Provider-neutral command intent, approval, dispatch, execution evidence, reconciliation and recovery
+- **Contract:** Request, approve/reject and dispatch commands; ingest typed execution observations; reconcile and recover idempotently. NOT provider clients, credentials, schedules, retry transport, inventory, outages or entitlements.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-network-control/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-network-inventory`](../packages/dotmac-network-inventory/README.md)
+
+- **Owner:** Managed sites, nodes, interfaces, ports, VLANs, roles/capabilities, admission, archive and configuration snapshot metadata
+- **Contract:** Admit and archive managed nodes, register interfaces/ports/VLANs, attach VLANs and record configuration fingerprints through immutable contracts. NOT stock, durable physical lifecycle, IPAM, observations, topology, incidents, commands, RADIUS or PON.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-network-inventory/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-network-observability`](../packages/dotmac-network-observability/README.md)
+
+- **Owner:** Typed network observations, measurements, availability facts, alert evidence and rebuildable health projections
+- **Contract:** Ingest deduplicated collector-neutral facts, derive local health projections, retain alert evidence and repair projections. NOT production telemetry control-plane ownership, provider collection, outage decisions, topology or commands.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-network-observability/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-network-topology`](../packages/dotmac-network-topology/README.md)
+
+- **Owner:** Declared/observed network links, forwarding resolution, paths, reachability and rebuildable topology projections
+- **Contract:** Accept opaque identity and observation references, decide link/path/reachability state, expose immutable projections and idempotent rebuild. NOT inventory, fiber physical ledger, incidents, tickets or commands.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-network-topology/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
 ### [`dotmac-numbering`](../packages/dotmac-numbering/README.md)
 
 - **Owner:** Concurrency-safe allocation and formatting of explicitly configured document series on separate tenant and platform planes, with one counter per (scope, series, period) and one append-only receipt per allocation
@@ -145,6 +499,102 @@ and the next gate.
 - **Proven consumers:** —.
 - **Candidate consumers:** `dotmac_erp`, `dotmac_sub`, `dotmac_vendor_control_plane`.
 
+### [`dotmac-party`](../packages/dotmac-party/README.md)
+
+- **Owner:** Tenant Party business capacities, exact capacity relationships, organization memberships, reachability evidence, and external-reference provenance
+- **Contract:** Extend the kernel Party identity with concurrent temporal PartyRole rows, role-to-role PartyRelationship facts, Person-to-Organization PartyMembership context, PartyContactPoint reachability with separate verification/consent, and tenant-scoped external-reference provenance. NOT person/organization identity, authentication, sessions, RBAC grants, accounts, customers, contacts, leads, subscribers, billing, tickets, conversations, or provider transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-party/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.
+
+### [`dotmac-payables`](../packages/dotmac-payables/README.md)
+
+- **Owner:** Tenant supplier invoice, credit-note, liability and payment-obligation lifecycle
+- **Contract:** Create, submit, approve and void draft supplier invoices/credit notes from opaque supplier/procurement evidence; recognize approved liabilities/credits; materialize due-date obligations; apply supplier credit without double-recognizing it; accept deduplicated external settlement observations; produce typed balanced accounting consequences and record immutable accounting receipts. NOT supplier identity/compliance/bank details, procurement commitments/receipts, tax policy, inventory valuation, approval decisions, numbering, journal posting, bank/payment execution, provider I/O or retry.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-payables/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`.
+
+### [`dotmac-payroll`](../packages/dotmac-payroll/README.md)
+
+- **Owner:** Tenant payroll component policy, immutable structure revisions, employee calculation evidence, and employee/external liabilities
+- **Contract:** Configure component masters and typed structure rules; assign effective revisions to opaque employee references; calculate source-evidenced gross, deductions, net pay and employer liabilities; enforce run separation of duties; materialize liabilities; and record settlement observations. NOT employee identity/lifecycle, compensation authority, time/attendance, leave, statutory tax policy, bank/payment execution, GL accounts, journal entries, fiscal periods, provider exports, or remittance transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-payroll/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_erp`.
+
+### [`dotmac-people`](../packages/dotmac-people/README.md)
+
+- **Owner:** Tenant employment directory, positions, temporal assignments, and date-aware reporting resolution
+- **Contract:** Link a kernel Party person to one tenant employment relationship; own employee code and lifecycle state/dates, departments, designations, employment types, positions, temporal occupancy, and derived manager/direct-report/approval resolution. NOT personal identity, authentication, RBAC, attendance, leave, scheduling, discipline, performance, training, compensation, payroll, banking, tax, GL dimensions, physical locations, files, notifications, or external provisioning.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-people/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`.
+
+### [`dotmac-platform-health`](../packages/dotmac-platform-health/README.md)
+
+- **Owner:** Platform general application/runtime-health observation receipts, freshness projections and incident-ready summaries
+- **Contract:** Ingest a bounded provider-neutral runtime-health observation under an authenticated source identity supplied by the caller; retain immutable observation evidence; project latest component state and fresh/stale/missing classification; build incident-ready summaries with explicit unknowns; and rebuild projections deterministically. NOT raw telemetry, metric/log/trace storage, network monitoring, alert delivery, incident case lifecycle or any deployment/configuration mutation.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-platform-health/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_vendor_control_plane`.
+
+### [`dotmac-pon-access`](../packages/dotmac-pon-access/README.md)
+
+- **Owner:** Provider-neutral OLT/ONT/PON inventory, admission, assignment, commissioning, desired service state, observations, backup evidence and reconciliation
+- **Contract:** Register OLT/PON identities, admit/assign/commission ONTs, hold desired service state, ingest observations/backup evidence and reconcile drift. NOT subscriber/commercial decisions, fiber plant, generic inventory or vendor clients.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-pon-access/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-positioning`](../packages/dotmac-positioning/README.md)
+
+- **Owner:** Provider-neutral tracked-unit position evidence, projections, collection grants, source assignments, retention, and geofence facts
+- **Contract:** Tenant-scoped opaque tracked units; temporal source assignments; purpose-bound collection grants; immutable replay-safe observations with device and receipt time, accuracy, source, and opaque context; deterministic current/trail projections; caller-selected retention; and neutral circle/polygon entry/exit facts evaluated only for explicit product-selected opaque fence ids. Products own subject links, fence applicability, authorization, policy defaults, business consequences, transports, and presentation.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-positioning/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-procurement`](../packages/dotmac-procurement/README.md)
+
+- **Owner:** Tenant purchase-requisition, sourcing-event, supplier-offer, award and purchase-order commitment decisions
+- **Contract:** Create and freeze an internal purchase requisition; bind exact budget and approval facts; publish one active direct/selective/open-competitive sourcing event with an aware window and an immutable exact requisition-line/criteria snapshot; receive one immutable offer per supplier; score every submitted offer against every criterion and bind the selected offer to an approved award; create at most one purchase commitment from each exact requisition/award source; ingest deduplicated receipt observations as batch-atomic line/order fulfilment without writing stock. NOT Party/requester/supplier identity, annual budgets, approval policy, statutory thresholds, supplier prequalification, contract administration, Inventory, Assets, AP invoices/three-way match/payments/journals, product work, numbering, files/rendering, notifications or provider transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-procurement/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-projects`](../packages/dotmac-projects/README.md)
+
+- **Owner:** Tenant-scoped project and task identity, lifecycle, hierarchy, dependency integrity, template instantiation, schedule constraints, and task assignment membership
+- **Contract:** Create tenant projects and tasks; enforce closed project/task lifecycle states with stale-state and terminal-state refusal; keep parent and dependency edges active, acyclic, and inside one authoritative project; replace a task's reviewed dependency set atomically; prevent completion while a dependency remains incomplete; define reusable project templates; instantiate their tasks and dependency graph deterministically; calculate schedules for finish-to-start, start-to-start, finish-to-finish, and start-to-finish constraints with explicit lag; and maintain opaque task-assignee membership. Every mutation participates in the caller's transaction and flushes without commit or rollback. NOT subscriber/customer/buildout meaning, project types, finance/budget/costing, milestones, time entry, work orders, tickets, SLA/escalation, numbering policy, notification delivery, files, or product-specific consequences.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-projects/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-publishing`](../packages/dotmac-publishing/README.md)
+
+- **Owner:** Dotmac publication lifecycle
+- **Contract:** Tenant-scoped immutable publication requests, selected opaque targets, requested delivery time, retry-safe attempt history, normalized delivery observations and one derived aggregate publication state. NOT editorial content, audience progression, target installation/configuration, provider identity, credentials, SDKs, wire mapping, raw transport evidence or connector scheduling/checkpoints.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-publishing/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.
+
+### [`dotmac-records`](../packages/dotmac-records/README.md)
+
+- **Owner:** Managed-record declaration snapshots, retention schedules/triggers, legal holds, preservation/custody and disposition authority
+- **Contract:** Define immutable tenant record-series and retention-schedule versions; explicitly declare one exact source artifact and optional Files evidence as a record; deduplicate authoritative trigger observations and calculate retention deterministically; return Durable Timer review requests; place/release independent record/series/snapshotted-cohort holds; evaluate disposition with source-state and all-hold rechecks; freeze batch membership and bind Approvals digest; authorize Files destruction and finalize only from matching physical confirmation; record preservation/fixity/custody and append-only events. NOT source-domain meaning, ordinary undeclared attachment retention, bytes/provider deletion, approval decisions, scheduling mechanics, OCR/search authority or external archive delivery.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-records/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-referrals`](../packages/dotmac-referrals/README.md)
+
+- **Owner:** Tenant referral programmes, invitation/code identity, attribution, qualification and immutable conversion/reward evidence
+- **Contract:** Create and version referral programmes; issue a stable invitation/code to an opaque referrer; attribute a referred party/prospect without resolving identity from unverified contact data; preserve conversion and reward-request evidence; enforce idempotent capture and terminal rejection/expiry; and emit typed outbox facts. NOT Party/Customer/Lead creation, billing credits, reward payment, campaigns, delivery transport or provider I/O.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-referrals/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
 ### [`dotmac-release-catalog`](../packages/dotmac-release-catalog/README.md)
 
 - **Owner:** Dotmac published-artifact catalogue
@@ -152,6 +602,54 @@ and the next gate.
 - **Evidence:** `adopted` from [`EXTRACTION.toml`](../packages/dotmac-release-catalog/EXTRACTION.toml); source mode `greenfield-after-inventory`.
 - **Proven consumers:** `dotmac_vendor_control_plane`.
 - **Candidate consumers:** —.
+
+### [`dotmac-remote-access`](../packages/dotmac-remote-access/README.md)
+
+- **Owner:** Tenant device/network remote-access requests, approval-bound grants, finite expiry and revocation evidence
+- **Contract:** Record a purpose-bound request for an opaque network/device target and least-privilege scope; bind an external Approval decision digest without owning it; admit one finite grant; emit provider-neutral activation/revocation intents; close expiry and revocation fail-closed; and retain immutable execution observations. NOT approval policy/decision, device command execution, network desired state, credentials, provider transport, VPN configuration or support impersonation.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-remote-access/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-reseller-management`](../packages/dotmac-reseller-management/README.md)
+
+- **Owner:** Tenant reseller account identity, reseller hierarchy, delegated commercial authority revisions, membership bindings and lifecycle
+- **Contract:** Create a reseller account referencing an opaque Party role; manage active/suspended/retired lifecycle, parent-child hierarchy without cycles, and versioned least-privilege delegated commercial authority; bind opaque member and customer-account references without owning either. NOT Party identity, Customer lifecycle, Commercial Agreements, Entitlement Allocation, authentication, commissions, payouts, invoices or catalog decisions.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-reseller-management/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-sites`](../packages/dotmac-sites/README.md)
+
+- **Owner:** Dotmac website composition
+- **Contract:** Tenant-scoped site and page identity, immutable page revisions, immutable composed site revisions, navigation, SEO, redirects and the one revision eligible for release. NOT publication scheduling/outcomes, hosting, domains, DNS, certificates, provider identity, credentials, stored bytes, forms, leads or analytics.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-sites/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.
+
+### [`dotmac-support-access`](../packages/dotmac-support-access/README.md)
+
+- **Owner:** Platform temporary support-access requests, finite grants, revocation/expiry and audit workflow
+- **Contract:** Record a case/incident-bound, purpose-bound, least-privilege support request; bind exact Approval evidence without owning approver state; admit consent or break-glass classification under separate TTL ceilings; issue only a finite grant descriptor for kernel enforcement; revoke immediately; expire without renewal; and seal closure/audit evidence. NOT standing application access, Workspace role grants, approval policy/quorum, authentication enforcement, device commands, credentials or provider transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-support-access/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_vendor_control_plane`.
+
+### [`dotmac-surveys`](../packages/dotmac-surveys/README.md)
+
+- **Owner:** Tenant-scoped survey definition, invitation identity, response evidence, answer validation, and rebuildable feedback aggregates
+- **Contract:** Create draft survey definitions over the tested rating, NPS, multiple-choice and free-text question vocabulary; activate, pause, reactivate and close them under guarded lifecycle rules; issue one durable tracked invitation for an opaque recipient and owner-produced source event; capture at most one immutable response per tracked invitation plus explicitly public responses; validate answers, rating and NPS authoritatively; and rebuild invitation count, response count, mean rating and NPS from canonical rows. Every mutation participates in the caller's transaction and flushes without commit or rollback. NOT subject eligibility, audience selection, ticket/work-order/service/conversation/employee lifecycle, rerating policy, product identity, delivery/channel/provider state, agent or technician performance, business consequences, or retention policy.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-surveys/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_erp`, `dotmac_sub`.
+
+### [`dotmac-tax`](../packages/dotmac-tax/README.md)
+
+- **Owner:** Tenant tax policy data, effective-dated determinations, statutory reporting snapshots, filing obligations, and tax-return lifecycle evidence
+- **Contract:** Configure authorities, jurisdictions, tax codes, effective rules and progressive bands; determine tax from typed source facts; aggregate configured report boxes into versioned snapshots; schedule explicit filing obligations; and govern prepare/review/file/accept/reject/amend transitions. NOT a country-specific rate/calendar/code enum, taxpayer identity validation transport, invoice/order/payroll ownership, government portal client, GL account, journal entry, fiscal period, payment, or remittance transport.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-tax/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_erp`, `dotmac_sub`.
 
 ### [`dotmac-template-studio`](../packages/dotmac-template-studio/README.md)
 
@@ -172,7 +670,31 @@ and the next gate.
 ### [`dotmac-ui`](../packages/dotmac-ui/README.md)
 
 - **Owner:** Dotmac design system
-- **Contract:** Two published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) inert Jinja component templates with their declared contracts and token-native CSS. The headline status is the weaker of the two.
-- **Evidence:** `reuse-proven` from [`EXTRACTION.toml`](../packages/dotmac-ui/EXTRACTION.toml); source mode `product-first`.
+- **Contract:** Three published contracts, tracked as slices below: (tokens) framework-independent semantic tokens and compiled self-hosted assets; (components) the reuse-proven empty-state inert Jinja component; (map-frame) an audit-complete provider-neutral accessible map canvas and generic view-state presentation. The headline status is the weakest of the three.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-ui/EXTRACTION.toml); source mode `product-first`.
 - **Proven consumers:** `dotmac_academy_app`, `dotmac_erp`, `dotmac_sub`.
 - **Candidate consumers:** `dotmac_crm`.
+
+### [`dotmac-web-analytics`](../packages/dotmac-web-analytics/README.md)
+
+- **Owner:** First-party website observations, property-scoped visitor/session evidence, deterministic analytical projections, retention and drift repair
+- **Contract:** Register tenant-local analytics properties and streams; accept one versioned first-party event or bounded batch through an origin/rate-limit/privacy-admitted command; validate product event codes against an immutable typed declaration registry; persist append-only privacy-minimised observations with replay/conflict and transport provenance; append classifier evidence; derive reproducible visitor/session, route/source/device/event and funnel projections; expire or privacy-delete raw observations and atomically rebuild projections; detect and repair drift. NOT websites/content, forms, campaigns, provider metrics/credentials/transport, customer identity, attribution, commercial facts, consent policy or dashboards.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-web-analytics/EXTRACTION.toml); source mode `greenfield-after-inventory`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.
+
+### [`dotmac-work-orders`](../packages/dotmac-work-orders/README.md)
+
+- **Owner:** Dotmac physical work execution
+- **Contract:** A tenant-scoped physical work order: identity and product-neutral header mutation, guarded execution lifecycle, assignment/unassignment history, work logs, notes and evidence references. The module owns whether execution is scheduled, dispatched, active, paused, completed or cancelled. It does not own the customer, project, ticket, workforce roster, routing policy, inventory, topology/as-built state, vendor commercials, notifications or file bytes.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-work-orders/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac_sub`.
+
+### [`dotmac-workflow-runtime`](../packages/dotmac-workflow-runtime/README.md)
+
+- **Owner:** Tenant user-authored resumable workflow execution instances, ordered checkpoints, repair evidence and runtime state
+- **Contract:** Start an execution against an immutable opaque definition/version digest; claim and settle one checkpoint at a time; record typed output/evidence references; resume deterministically after failure; require explicit repair evidence for operator correction; and close/cancel terminally. NOT workflow definition UI, domain status machines, Fulfillment sagas, provisioning, scheduling/timers, provider I/O, arbitrary code, webhooks, email or direct domain mutation.
+- **Evidence:** `audit-complete` from [`EXTRACTION.toml`](../packages/dotmac-workflow-runtime/EXTRACTION.toml); source mode `product-first`.
+- **Proven consumers:** —.
+- **Candidate consumers:** `dotmac-erp`, `dotmac_sub`.

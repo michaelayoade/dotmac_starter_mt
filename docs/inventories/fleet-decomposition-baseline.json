@@ -1,7 +1,7 @@
 {
   "duplicated_table_names": {
-    "aliased": 23,
-    "exact": 126
+    "aliased": 22,
+    "exact": 131
   },
   "families": {
     "analytics-reporting": {
@@ -9,6 +9,7 @@
       "collisions": 2,
       "dotmac_crm": 2,
       "dotmac_erp": 16,
+      "dotmac_mkt": 0,
       "dotmac_sub": 3,
       "dotmac_vendor_control_plane": 0
     },
@@ -17,6 +18,7 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 3,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 2
     },
@@ -25,6 +27,7 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 23,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 0
     },
@@ -33,6 +36,7 @@
       "collisions": 2,
       "dotmac_crm": 2,
       "dotmac_erp": 6,
+      "dotmac_mkt": 1,
       "dotmac_sub": 7,
       "dotmac_vendor_control_plane": 0
     },
@@ -41,14 +45,16 @@
       "collisions": 4,
       "dotmac_crm": 5,
       "dotmac_erp": 4,
+      "dotmac_mkt": 4,
       "dotmac_sub": 8,
       "dotmac_vendor_control_plane": 0
     },
     "billing-revenue": {
       "aliased": 0,
-      "collisions": 2,
+      "collisions": 4,
       "dotmac_crm": 3,
       "dotmac_erp": 12,
+      "dotmac_mkt": 8,
       "dotmac_sub": 74,
       "dotmac_vendor_control_plane": 0
     },
@@ -57,7 +63,17 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 1,
+      "dotmac_mkt": 0,
       "dotmac_sub": 1,
+      "dotmac_vendor_control_plane": 0
+    },
+    "campaigns-marketing": {
+      "aliased": 3,
+      "collisions": 1,
+      "dotmac_crm": 4,
+      "dotmac_erp": 0,
+      "dotmac_mkt": 1,
+      "dotmac_sub": 4,
       "dotmac_vendor_control_plane": 0
     },
     "commercial-offers": {
@@ -65,6 +81,7 @@
       "collisions": 1,
       "dotmac_crm": 0,
       "dotmac_erp": 0,
+      "dotmac_mkt": 0,
       "dotmac_sub": 2,
       "dotmac_vendor_control_plane": 1
     },
@@ -73,14 +90,25 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 7,
+      "dotmac_mkt": 1,
       "dotmac_sub": 2,
+      "dotmac_vendor_control_plane": 0
+    },
+    "content-publishing": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 0,
+      "dotmac_mkt": 4,
+      "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 0
     },
     "engagement-inbox": {
       "aliased": 9,
       "collisions": 0,
-      "dotmac_crm": 28,
+      "dotmac_crm": 27,
       "dotmac_erp": 0,
+      "dotmac_mkt": 0,
       "dotmac_sub": 29,
       "dotmac_vendor_control_plane": 0
     },
@@ -89,6 +117,7 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 0,
+      "dotmac_mkt": 1,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 2
     },
@@ -97,15 +126,17 @@
       "collisions": 0,
       "dotmac_crm": 5,
       "dotmac_erp": 14,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 0
     },
     "field-workforce": {
       "aliased": 0,
-      "collisions": 15,
-      "dotmac_crm": 26,
+      "collisions": 13,
+      "dotmac_crm": 24,
       "dotmac_erp": 10,
-      "dotmac_sub": 38,
+      "dotmac_mkt": 0,
+      "dotmac_sub": 36,
       "dotmac_vendor_control_plane": 0
     },
     "finance-ledger": {
@@ -113,6 +144,7 @@
       "collisions": 1,
       "dotmac_crm": 0,
       "dotmac_erp": 82,
+      "dotmac_mkt": 0,
       "dotmac_sub": 7,
       "dotmac_vendor_control_plane": 0
     },
@@ -121,6 +153,7 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 0,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 4
     },
@@ -129,6 +162,7 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 7,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 0
     },
@@ -137,6 +171,7 @@
       "collisions": 5,
       "dotmac_crm": 6,
       "dotmac_erp": 2,
+      "dotmac_mkt": 0,
       "dotmac_sub": 11,
       "dotmac_vendor_control_plane": 0
     },
@@ -145,6 +180,7 @@
       "collisions": 8,
       "dotmac_crm": 10,
       "dotmac_erp": 5,
+      "dotmac_mkt": 4,
       "dotmac_sub": 17,
       "dotmac_vendor_control_plane": 0
     },
@@ -153,6 +189,7 @@
       "collisions": 4,
       "dotmac_crm": 10,
       "dotmac_erp": 6,
+      "dotmac_mkt": 1,
       "dotmac_sub": 27,
       "dotmac_vendor_control_plane": 0
     },
@@ -161,6 +198,7 @@
       "collisions": 0,
       "dotmac_crm": 3,
       "dotmac_erp": 39,
+      "dotmac_mkt": 0,
       "dotmac_sub": 4,
       "dotmac_vendor_control_plane": 0
     },
@@ -169,23 +207,35 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 0,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 10
+    },
+    "marketing-observations": {
+      "aliased": 0,
+      "collisions": 0,
+      "dotmac_crm": 0,
+      "dotmac_erp": 0,
+      "dotmac_mkt": 5,
+      "dotmac_sub": 0,
+      "dotmac_vendor_control_plane": 0
     },
     "network-operations": {
       "aliased": 0,
       "collisions": 1,
       "dotmac_crm": 2,
       "dotmac_erp": 3,
+      "dotmac_mkt": 0,
       "dotmac_sub": 72,
       "dotmac_vendor_control_plane": 0
     },
     "notifications-comms": {
-      "aliased": 5,
+      "aliased": 1,
       "collisions": 11,
-      "dotmac_crm": 18,
+      "dotmac_crm": 14,
       "dotmac_erp": 7,
-      "dotmac_sub": 22,
+      "dotmac_mkt": 1,
+      "dotmac_sub": 18,
       "dotmac_vendor_control_plane": 0
     },
     "outside-plant": {
@@ -193,6 +243,7 @@
       "collisions": 30,
       "dotmac_crm": 33,
       "dotmac_erp": 0,
+      "dotmac_mkt": 0,
       "dotmac_sub": 94,
       "dotmac_vendor_control_plane": 0
     },
@@ -201,6 +252,7 @@
       "collisions": 4,
       "dotmac_crm": 7,
       "dotmac_erp": 5,
+      "dotmac_mkt": 2,
       "dotmac_sub": 12,
       "dotmac_vendor_control_plane": 1
     },
@@ -209,7 +261,17 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 101,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
+      "dotmac_vendor_control_plane": 0
+    },
+    "positioning": {
+      "aliased": 0,
+      "collisions": 2,
+      "dotmac_crm": 3,
+      "dotmac_erp": 0,
+      "dotmac_mkt": 0,
+      "dotmac_sub": 2,
       "dotmac_vendor_control_plane": 0
     },
     "projects-tasks": {
@@ -217,6 +279,7 @@
       "collisions": 10,
       "dotmac_crm": 11,
       "dotmac_erp": 10,
+      "dotmac_mkt": 1,
       "dotmac_sub": 11,
       "dotmac_vendor_control_plane": 0
     },
@@ -225,6 +288,7 @@
       "collisions": 8,
       "dotmac_crm": 13,
       "dotmac_erp": 7,
+      "dotmac_mkt": 0,
       "dotmac_sub": 24,
       "dotmac_vendor_control_plane": 2
     },
@@ -233,6 +297,7 @@
       "collisions": 1,
       "dotmac_crm": 1,
       "dotmac_erp": 9,
+      "dotmac_mkt": 1,
       "dotmac_sub": 6,
       "dotmac_vendor_control_plane": 0
     },
@@ -241,14 +306,16 @@
       "collisions": 4,
       "dotmac_crm": 7,
       "dotmac_erp": 6,
+      "dotmac_mkt": 1,
       "dotmac_sub": 9,
       "dotmac_vendor_control_plane": 0
     },
     "subscriber-service": {
       "aliased": 0,
-      "collisions": 3,
+      "collisions": 5,
       "dotmac_crm": 9,
       "dotmac_erp": 2,
+      "dotmac_mkt": 3,
       "dotmac_sub": 74,
       "dotmac_vendor_control_plane": 0
     },
@@ -257,6 +324,7 @@
       "collisions": 10,
       "dotmac_crm": 17,
       "dotmac_erp": 6,
+      "dotmac_mkt": 0,
       "dotmac_sub": 22,
       "dotmac_vendor_control_plane": 0
     },
@@ -265,6 +333,7 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 1,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 0
     },
@@ -273,6 +342,7 @@
       "collisions": 0,
       "dotmac_crm": 0,
       "dotmac_erp": 3,
+      "dotmac_mkt": 0,
       "dotmac_sub": 0,
       "dotmac_vendor_control_plane": 0
     }
@@ -280,12 +350,14 @@
   "repos_measured": [
     "dotmac_crm",
     "dotmac_erp",
+    "dotmac_mkt",
     "dotmac_sub",
     "dotmac_vendor_control_plane"
   ],
   "totals": {
     "dotmac_crm": 218,
     "dotmac_erp": 397,
+    "dotmac_mkt": 39,
     "dotmac_sub": 576,
     "dotmac_vendor_control_plane": 22
   }

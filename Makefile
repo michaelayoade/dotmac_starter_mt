@@ -26,24 +26,21 @@ lint-imports: ## Import boundary contracts
 	poetry run lint-imports
 format: ## Ruff format
 	poetry run ruff format .
-KERNEL_SRC ?= packages/dotmac-kernel/src/dotmac_kernel
-UI_SRC ?= packages/dotmac-ui/src/dotmac_ui
-MODULE_SRC ?= packages/dotmac-template-studio/src/dotmac_template_studio
-TICKETING_SRC ?= packages/dotmac-ticketing/src/dotmac_ticketing
-APPDIR_SRC ?= packages/dotmac-application-directory/src/dotmac_application_directory
-FILES_SRC ?= packages/dotmac-files/src/dotmac_files
-IMPORTS_SRC ?= packages/dotmac-imports/src/dotmac_imports
-APPROVALS_SRC ?= packages/dotmac-approvals/src/dotmac_approvals
-INTEGRATION_SRC ?= packages/dotmac-integration/src/dotmac_integration
-OIDC_SRC ?= packages/dotmac-auth-oidc/src/dotmac_auth_oidc
-CONNECTOR_WHATSAPP_SRC ?= packages/dotmac-connector-whatsapp/src/dotmac_connector_whatsapp
+CONNECTOR_SOURCES := $(sort $(filter-out %/__pycache__,$(wildcard packages/dotmac-connector-*/src/*)))
+MODULE_SOURCES := $(sort $(filter-out %/__pycache__ $(CONNECTOR_SOURCES),$(wildcard packages/dotmac-*/src/*)))
+# Module and connector packages are open families. A new distribution enrolls
+# in both quality gates by existing under packages/dotmac-*/src/*; no package
+# name belongs in this Makefile.
 type-check: ## mypy (assembly + kernel + UI + module packages)
-	poetry run mypy app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC)
+	poetry run mypy app $(MODULE_SOURCES) $(CONNECTOR_SOURCES)
 security: ## Bandit security scan (assembly + kernel + UI + module packages)
-	poetry run bandit -c pyproject.toml -r app $(KERNEL_SRC) $(UI_SRC) $(MODULE_SRC) $(TICKETING_SRC) $(APPDIR_SRC) $(FILES_SRC) $(IMPORTS_SRC) $(APPROVALS_SRC) $(INTEGRATION_SRC) $(OIDC_SRC) $(CONNECTOR_WHATSAPP_SRC)
+	poetry run bandit -c pyproject.toml -r app $(MODULE_SOURCES) $(CONNECTOR_SOURCES)
 ALEMBIC_INI ?= alembic.ini
 migration-gate: ## Composed migration gate (ADR-0006 D1): revisions/prefixes/branches/schemas/table ownership
 	ALEMBIC_INI=$(ALEMBIC_INI) poetry run python scripts/migration_gate.py
+ALLOCATION_BASE ?= origin/main
+allocation-gate: ## Serialized allocation (ADR-0006 D1): a module's ledger row must be merged BEFORE its source
+	poetry run python scripts/check_allocation_serialized.py --base $(ALLOCATION_BASE)
 FLEET_ROOT ?= ..
 fleet-matrix: ## Re-measure the ERP/CRM/Sub duplication baseline (needs the fleet beside this checkout; not in `check`)
 	poetry run python scripts/fleet_decomposition_sweep.py --fleet-root $(FLEET_ROOT) --check

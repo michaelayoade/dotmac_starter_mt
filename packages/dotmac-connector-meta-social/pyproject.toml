@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "dotmac-connector-meta-social"
+version = "0.1.0a1"
+description = "Ingress-only Facebook and Instagram connector for Dotmac Integrator"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_connector_meta_social", from = "src" }]
+include = [
+    { path = "src/dotmac_connector_meta_social/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-integration = ">=0.1.0a10"
+
+[tool.poetry.plugins."dotmac_integration.connectors"]
+meta_social = "dotmac_connector_meta_social:PLUGIN"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

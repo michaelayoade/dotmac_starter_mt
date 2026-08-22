@@ -1,7 +1,7 @@
-# Fleet decomposition matrix — ERP, CRM, Sub, Vendor CP
+# Fleet decomposition matrix — ERP, CRM, Sub, Mkt, Vendor CP
 
-**As of:** 2026-08-14 classification amendment over the frozen 2026-08-12 source snapshot
-**ERP:** `0f4b1698` (`origin/main`) · **CRM:** `c64b5aa0` (`main`) · **Sub:** `9f6f9f36` (`feat/kernel-pin-a40`) · **Vendor CP:** `eb667fa` (`main`) · **Starter:** `10bd4a6`
+**As of:** 2026-08-18 Mkt addendum over the frozen 2026-08-12 source snapshot
+**ERP:** `0f4b1698` · **CRM:** `c64b5aa0` · **Sub:** `9f6f9f36` · **Mkt:** `1a185b47` · **Vendor CP:** `eb667fa` · **Starter:** `c6ef6cd7`
 **Measured by:** `scripts/fleet_decomposition_sweep.py`
 **Frozen baseline:** [`fleet-decomposition-baseline.json`](fleet-decomposition-baseline.json)
 
@@ -28,7 +28,7 @@ product-first amendment still gate every move. A capability family below is a
 
 **Duplication determines sequencing. It does not determine final scope.**
 
-The end state is not "three monoliths with the overlaps removed":
+The end state is not "four source applications with the overlaps removed":
 
 ```text
 Starter
@@ -68,9 +68,9 @@ class body under each repository's model root — grep over the same tree
 over-reports (docstrings, migration comments) and under-reports (assignments
 beside `__table_args__`), the same lesson `restatement_sweep.py` records.
 
-The model root is per-repo (`MODEL_ROOTS`), not assumed: the three monoliths use
-`app/models/`, the vendor control plane keeps models beside their feature under
-`src/vendor_cp/`. Hardcoding one convention would have scored the fourth
+The model root is per-repo (`MODEL_ROOTS`), not assumed: ERP, CRM, Sub and Mkt
+use `app/models/`; the vendor control plane keeps models beside its feature
+under `src/vendor_cp/`. Hardcoding one convention would have scored the vendor
 repository as zero — the exact reading the next paragraph refuses.
 
 Two counts, because one of them lies on its own:
@@ -90,12 +90,13 @@ entire subsystem as zero.
 **A missing repository is UNMEASURED, never zero.** The sweep names absent repos
 and the ratchet abstains rather than reporting the duplication as solved.
 
-## The fourth repository is not a fourth monolith
+## The fifth measured repository is not a fifth source application
 
-`dotmac_vendor_control_plane` was added to the measurement on 2026-08-12. It
-joins the table for a different reason than the three it follows, and reading
-its column as "a fourth monolith to de-duplicate" gets everything downstream
-wrong.
+`dotmac_vendor_control_plane` was added to the measurement on 2026-08-12. Mkt
+joined on 2026-08-18 as the fourth source application. The vendor control plane
+therefore remains different from the four source columns even though it is now
+the fifth measured repository; reading its column as another application to
+decompose gets everything downstream wrong.
 
 It is a **consumer assembly** — 22 tables against Sub's 576 — and it plays two
 roles at once:
@@ -119,29 +120,38 @@ rather than trivia. Plan:
 
 ## Frozen duplication baseline
 
-1,213 tables across the four measured repositories.
-**149 duplicated table names** (126 exact + 23 aliased).
+1,252 tables across the five measured repositories.
+**153 duplicated table names** (131 exact + 22 aliased).
 
-| | ERP | CRM | Sub | Vendor CP |
-|---|---:|---:|---:|---:|
-| Tables | 397 | 218 | 576 | 22 |
+| | ERP | CRM | Sub | Mkt | Vendor CP |
+|---|---:|---:|---:|---:|---:|
+| Tables | 397 | 218 | 576 | 39 | 22 |
 
 Where the duplication actually is:
 
 | Pairing | Duplicated names |
 |---|---:|
-| CRM ↔ Sub only | **133** (110 exact + 23 aliased) |
-| All three monoliths | 11 |
-| ERP ↔ CRM only | 2 |
-| ERP ↔ Sub only | 2 |
-| Sub ↔ Vendor CP | **1** — `offer_versions` |
+| CRM ↔ Sub only | **131** (109 exact + 22 aliased) |
+| ERP ↔ CRM ↔ Mkt ↔ Sub | 10 exact platform tables |
+| Mkt ↔ Sub only | **5 exact** — `campaigns`, `invoices`, `payment_methods`, `subscriptions`, `usage_records` |
+| ERP ↔ CRM ↔ Mkt | 2 exact — `people`, `person_roles` |
+| ERP ↔ Sub only | 2 exact |
+| ERP ↔ CRM ↔ Sub | 1 exact — `project_template_task_dependency` |
+| CRM ↔ Mkt ↔ Sub | 1 exact — `notifications` |
+| Sub ↔ Vendor CP | **1 exact** — `offer_versions` |
 
-**Nine tenths of the fleet's countable duplication is CRM ↔ Sub.** ERP shares
-15 table names with anything at all, and 11 of those are the platform tables the
-kernel already owns (`sessions`, `user_credentials`, `mfa_methods`, `api_keys`,
-`roles`, `permissions`, `role_permissions`, `audit_events`, `domain_settings`,
-`scheduled_tasks`). The *only* non-platform table implemented in all three
-products is `project_template_task_dependency`.
+**Eighty-six percent of the fleet's countable duplication is CRM ↔ Sub only.**
+Mkt adds 39 class-mapped tables, 18 of which exactly collide with another
+product. Thirteen were already duplicated in the earlier fleet, so adding Mkt
+creates five new exact collision names. It also turns `campaigns` into an exact
+Mkt↔Sub collision; the CRM-prefixed campaign names therefore stop counting as
+one of the aliased-only stems. That is why the headline moves from 149 to 153,
+not by all 18 inherited collisions.
+
+The *only* non-platform table implemented in ERP, CRM and Sub remains
+`project_template_task_dependency`. Mkt's ten four-application collisions are
+kernel/platform state inherited from Starter-era scaffolding, not marketing
+behavior to extract.
 
 The vendor control plane collides with the fleet exactly **once**: `offer_versions`,
 with Sub. Its commercial-contract tables (`contracts`, `contract_lines`) collide
@@ -164,42 +174,46 @@ into a module.
 Counts are per product; `exact`/`alias` are duplicated *names*, not per-product
 tables. Disposition vocabulary is defined under [Dispositions](#dispositions).
 
-| Capability family | ERP | CRM | Sub | Vendor | exact | alias | Disposition |
-|---|---:|---:|---:|---:|---:|---:|---|
-| identity-access | 5 | 10 | 17 | 0 | 8 | 0 | kernel |
-| authorization | 4 | 5 | 8 | 0 | 4 | 0 | kernel |
-| party-identity | 5 | 7 | 12 | 1 | 4 | 0 | kernel |
-| audit-events | 6 | 2 | 7 | 0 | 2 | 0 | kernel |
-| settings | 6 | 7 | 9 | 0 | 4 | 1 | kernel (cutover in flight) |
-| scheduling-runtime | 9 | 1 | 6 | 0 | 1 | 0 | kernel |
-| integration-external | 6 | 10 | 27 | 0 | 4 | 0 | module ← Sub |
-| branding-templates | 1 | 0 | 1 | 0 | 0 | 0 | dotmac-ui + template studio |
-| ticketing-sla | 6 | 17 | 22 | 0 | 10 | 6 | `dotmac-ticketing`; ERP cutover 1, Vendor CP cutover 2 |
-| projects-tasks | 10 | 11 | 11 | 0 | 10 | 0 | consolidate CRM → Sub; module source **unassigned** |
-| notifications-comms | 7 | 18 | 22 | 0 | 11 | 5 | kernel (consent + outbox) + module ← Sub |
-| engagement-inbox | 0 | 28 | 29 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
-| sales-agreements | 7 | 13 | 24 | 2 | 8 | 2 | consolidate CRM → Sub; `dotmac-sales` ← Sub through accepted Quote; SalesOrder follows `dotmac-orders`; vendor rows are a distinct module ← vendor CP (A2(a), ruled 2026-08-12) |
-| commercial-offers | 0 | 0 | 2 | 1 | 1 | 0 | module source **unassigned** (Sub or vendor CP) — A2 |
-| billing-revenue | 12 | 3 | 74 | 0 | 2 | 0 | module ← Sub + contract with ERP |
-| outside-plant | 0 | 33 | 94 | 0 | 30 | 0 | consolidate → Sub, then module ← Sub |
-| field-workforce | 10 | 26 | 38 | 0 | 15 | 0 | consolidate → Sub, then module ← Sub |
-| geospatial-qualification | 2 | 6 | 11 | 0 | 5 | 0 | consolidate → Sub, then module ← Sub |
-| subscriber-service | 2 | 9 | 74 | 0 | 3 | 0 | consolidate → Sub, then module ← Sub |
-| network-operations | 3 | 2 | 72 | 0 | 1 | 0 | module ← Sub |
-| finance-ledger | 82 | 0 | 7 | 0 | 1 | 0 | module ← ERP + contract with Sub |
-| people-payroll | 101 | 0 | 0 | 0 | 0 | 0 | module ← ERP |
-| inventory-procurement | 39 | 3 | 4 | 0 | 0 | 0 | module ← ERP; CRM/Sub copies consolidate → ERP |
-| assets-fleet | 23 | 0 | 0 | 0 | 0 | 0 | module ← ERP |
-| expenses | 14 | 5 | 0 | 0 | 0 | 0 | module ← ERP; CRM copies consolidate → ERP |
-| approvals | 3 | 0 | 0 | 2 | 0 | 0 | module ← ERP + mandatory Vendor CP deltas — accepted, ADR-0026 |
-| workflow-automation | 3 | 0 | 0 | 0 | 0 | 0 | module ← ERP; separate audit required |
-| forms-data-capture | 7 | 0 | 0 | 0 | 0 | 0 | module ← ERP; separate audit required |
-| work-items | 1 | 0 | 0 | 0 | 0 | 0 | module source **unassigned**; ERP orphan retires |
-| licensing-issuance | 0 | 0 | 0 | 10 | 0 | 0 | module ← vendor CP |
-| entitlement-allocation | 0 | 0 | 0 | 2 | 0 | 0 | module ← vendor CP |
-| fleet-deployment | 0 | 0 | 0 | 4 | 0 | 0 | module ← vendor CP (partial — see gaps) |
-| analytics-reporting | 16 | 2 | 3 | 0 | 2 | 0 | module source **unassigned** (ERP or Sub) |
-| content-help | 7 | 0 | 2 | 0 | 0 | 0 | module ← ERP |
+| Capability family | ERP | CRM | Sub | Mkt | Vendor | exact | alias | Disposition |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| identity-access | 5 | 10 | 17 | 4 | 0 | 8 | 0 | kernel |
+| authorization | 4 | 5 | 8 | 4 | 0 | 4 | 0 | kernel |
+| party-identity | 5 | 7 | 12 | 2 | 1 | 4 | 0 | kernel |
+| audit-events | 6 | 2 | 7 | 1 | 0 | 2 | 0 | kernel |
+| settings | 6 | 7 | 9 | 1 | 0 | 4 | 1 | kernel (cutover in flight) |
+| scheduling-runtime | 9 | 1 | 6 | 1 | 0 | 1 | 0 | kernel |
+| integration-external | 6 | 10 | 27 | 1 | 0 | 4 | 0 | module ← Sub |
+| branding-templates | 1 | 0 | 1 | 0 | 0 | 0 | 0 | dotmac-ui + template studio |
+| ticketing-sla | 6 | 17 | 22 | 0 | 0 | 10 | 6 | `dotmac-ticketing`; ERP cutover 1, Vendor CP cutover 2 |
+| projects-tasks | 10 | 11 | 11 | 1 | 0 | 10 | 0 | consolidate CRM → Sub; module source **unassigned**; Mkt's generic task is excluded |
+| campaigns-marketing | 0 | 4 | 4 | 1 | 0 | 1 | 3 | `dotmac-campaigns` ← Sub; CRM/Mkt copies retire |
+| notifications-comms | 7 | 14 | 18 | 1 | 0 | 11 | 1 | kernel (consent + outbox) + module ← Sub; Mkt copy retires |
+| content-publishing | 0 | 0 | 0 | 4 | 0 | 0 | 0 | `dotmac-content` + `dotmac-publishing` ← Mkt |
+| marketing-observations | 0 | 0 | 0 | 5 | 0 | 0 | 0 | `dotmac-media-observations` + `dotmac-web-analytics` ← Mkt |
+| engagement-inbox | 0 | 27 | 29 | 0 | 0 | 0 | 9 | consolidate → Sub, then module ← Sub |
+| sales-agreements | 7 | 13 | 24 | 0 | 2 | 8 | 2 | consolidate CRM → Sub; `dotmac-sales` ← Sub through accepted Quote; SalesOrder follows `dotmac-orders`; vendor rows are a distinct module ← vendor CP (A2(a), ruled 2026-08-12) |
+| commercial-offers | 0 | 0 | 2 | 0 | 1 | 1 | 0 | module source **unassigned** (Sub or vendor CP) — A2 |
+| billing-revenue | 12 | 3 | 74 | 8 | 0 | 4 | 0 | module ← Sub + contract with ERP; Mkt's inherited copy retires |
+| outside-plant | 0 | 33 | 94 | 0 | 0 | 30 | 0 | consolidate → Sub, then module ← Sub |
+| field-workforce | 10 | 24 | 36 | 0 | 0 | 13 | 0 | consolidate → Sub, then module ← Sub |
+| positioning | 0 | 3 | 2 | 0 | 0 | 2 | 0 | `dotmac-positioning`; Sub cutover 1, ERP cutover 2 |
+| geospatial-qualification | 2 | 6 | 11 | 0 | 0 | 5 | 0 | consolidate → Sub, then module ← Sub |
+| subscriber-service | 2 | 9 | 74 | 3 | 0 | 5 | 0 | consolidate → Sub, then module ← Sub; Mkt's inherited copy retires |
+| network-operations | 3 | 2 | 72 | 0 | 0 | 1 | 0 | module ← Sub |
+| finance-ledger | 82 | 0 | 7 | 0 | 0 | 1 | 0 | module ← ERP + contract with Sub |
+| people-payroll | 101 | 0 | 0 | 0 | 0 | 0 | 0 | module ← ERP |
+| inventory-procurement | 39 | 3 | 4 | 0 | 0 | 0 | 0 | module ← ERP; CRM/Sub copies consolidate → ERP |
+| assets-fleet | 23 | 0 | 0 | 0 | 0 | 0 | 0 | module ← ERP |
+| expenses | 14 | 5 | 0 | 0 | 0 | 0 | 0 | module ← ERP; CRM copies consolidate → ERP |
+| approvals | 3 | 0 | 0 | 0 | 2 | 0 | 0 | module ← ERP + mandatory Vendor CP deltas — accepted, ADR-0026 |
+| workflow-automation | 3 | 0 | 0 | 0 | 0 | 0 | 0 | module ← ERP; separate audit required |
+| forms-data-capture | 7 | 0 | 0 | 0 | 0 | 0 | 0 | `dotmac-forms` ← ERP; source audit complete 2026-08-18 |
+| work-items | 1 | 0 | 0 | 0 | 0 | 0 | 0 | module source **unassigned**; ERP orphan retires |
+| licensing-issuance | 0 | 0 | 0 | 0 | 10 | 0 | 0 | module ← vendor CP |
+| entitlement-allocation | 0 | 0 | 0 | 1 | 2 | 0 | 0 | module ← vendor CP; Mkt's inherited copy retires |
+| fleet-deployment | 0 | 0 | 0 | 0 | 4 | 0 | 0 | module ← vendor CP (partial — see gaps) |
+| analytics-reporting | 16 | 2 | 3 | 0 | 0 | 2 | 0 | module source **unassigned** (ERP or Sub) |
+| content-help | 7 | 0 | 2 | 1 | 0 | 0 | 0 | module ← ERP; Mkt file-upload copy retires into `dotmac-files` |
 
 Four families were new in the 2026-08-12 measurement, and one existing family
 lost rows to them. `commercial-offers` took Sub's `offer_versions` and
@@ -225,6 +239,22 @@ same bucket also contains SalesOrder, contract and referral rows that remain
 with their separate owners. The counts stay frozen for reproducibility; the
 disposition is now disaggregated rather than pretending the bucket is a module.
 
+The 2026-08-18 Mkt addendum adds three measurement families:
+`campaigns-marketing`, `content-publishing` and `marketing-observations`. They
+are measurement buckets, not packages. The source audit decomposes them into
+`dotmac-content`, `dotmac-publishing`, `dotmac-media-observations`,
+`dotmac-web-analytics` and `dotmac-campaigns`, with ERP-sourced `dotmac-forms`
+and greenfield `dotmac-sites` completing the suite. See
+[`marketing-suite-sources.md`](marketing-suite-sources.md).
+
+Mkt has 39 class-mapped tables: 11 marketing tables and 28 inherited platform,
+billing, file and task tables. The sweep intentionally measures only class-body
+`__tablename__` declarations, so its total excludes the three SQLAlchemy
+association tables `campaign_assets`, `campaign_members` and `post_assets`.
+Those still belong to the product-first audit and bring Mkt's marketing
+persistence surface to 14 tables; they do not enter this frozen class-table
+baseline by hand.
+
 ### Dispositions
 
 Every row resolves to kernel, a Starter module, or a contract. Nothing stays in
@@ -248,7 +278,7 @@ row — and a document made only of measured rows silently reads as though the
 unbuilt were out of scope. These six are the reason the vendor control plane
 needed a plan rather than a column.
 
-Each was checked against all four repositories *and* the kernel. They are
+Each was checked against all five repositories *and* the kernel. They are
 absences, not zeroes: there is nothing to consolidate, no qualifying source to
 extract from, and no second implementation paying a duplication cost.
 
@@ -271,12 +301,12 @@ families and the ratchet applies.
 
 | Capability | Owner today (writers) | Competing implementations | DB / migration owner | Authority overlap | Target layer | Retirement condition |
 |---|---|---|---|---|---|---|
-| identity-access | `dotmac_kernel.models` + `deps.authenticate_request`; ERP `app/services/auth*.py`; CRM `app/services/auth*.py`, `portal_auth.py`; Sub `app/services/auth*.py`, `access_*` | 3 local session/credential stores; 8 exact collisions | kernel `public` lineage vs each product's Alembic | none — same facts, three writers | `dotmac-kernel` | Product boots on the kernel lineage and deletes its local `sessions`/`user_credentials`/`mfa_methods`/`api_keys` writers. |
-| authorization | kernel `rbac`; ERP `services/rbac.py`; CRM `services/rbac.py`; Sub `services/rbac.py` | 3 role/permission stores | as above | none | `dotmac-kernel` | Permission checks resolve through the kernel registry; local `roles`/`permissions` tables dropped. |
-| party-identity | kernel `Party` (+ subtype tables); ERP `people`/`person`; CRM `person*`, `people`; Sub `parties`, `party_*` | 3 identity models, 4 exact collisions | as above | **Guard rail:** a CRM lead, a Sub subscriber and an ERP financial account must not collapse into one aggregate (PRODUCT_VISION § "Source-of-truth boundaries survive decomposition"). | `dotmac-kernel` | Each product's local person table is a view over kernel `Party`; subtype/profile data stays product-owned. |
-| audit-events | kernel `audit.write_audit_event`; 3 local `audit_events` | 3 | as above | none | `dotmac-kernel` | Local `write_audit_*` helpers deleted; ADR-0008 declaration registry is the only vocabulary. |
-| settings | kernel `settings_resolver` (`0.1.0a40`); ERP + Sub `app/models/domain_settings.py` native enums | 3 stores + native `SettingDomain` enums | kernel `0014`/`0021` vs product enums | ERP's 21-member and Sub's 28-member enums are the live non-conformance | `dotmac-kernel` | Task #22: `ALTER TYPE`-avoiding migration to the kernel shape, Governance repin, then `0.1.0a40` adoption. Tracked in [`module-extraction-sources.md`](module-extraction-sources.md). |
-| scheduling-runtime | kernel `idempotency` (ADR-0014), `messaging`; ERP `saga_*`, `event_outbox`, `scheduled_tasks`; Sub `system_jobs`, `durable_timer`, `task_executions` | 3 at-most-once mechanisms + 2 outboxes | product lineages | ADR-0014 gives at-most-once ONE owner; today it holds no product row | `dotmac-kernel` | A product runs a real workload through `dotmac_kernel.idempotency` and retires its local reservation table. |
+| identity-access | `dotmac_kernel.models` + `deps.authenticate_request`; ERP, CRM, Sub and Mkt local auth services | 4 local session/credential stores; 8 exact collisions | kernel `public` lineage vs each product's Alembic | none — same facts, four writers | `dotmac-kernel` | Product boots on the kernel lineage and deletes its local `sessions`/`user_credentials`/`mfa_methods`/`api_keys` writers. |
+| authorization | kernel `rbac`; ERP, CRM, Sub and Mkt local RBAC services | 4 role/permission stores | as above | none | `dotmac-kernel` | Permission checks resolve through the kernel registry; local `roles`/`permissions` tables dropped. |
+| party-identity | kernel `Party` (+ subtype tables); ERP `people`/`person`; CRM `person*`, `people`; Sub `parties`, `party_*`; Mkt `people` | 4 identity models, 4 exact collisions | as above | **Guard rail:** a CRM lead, a Sub subscriber, an ERP financial account and an Mkt author reference must not collapse into one aggregate. | `dotmac-kernel` | Each product adopts kernel Party contracts; subtype/profile data stays product-owned and Mkt's inherited copy retires. |
+| audit-events | kernel `audit.write_audit_event`; 4 local `audit_events` | 4 | as above | none | `dotmac-kernel` | Local `write_audit_*` helpers deleted; ADR-0008 declaration registry is the only vocabulary. |
+| settings | kernel `settings_resolver`; ERP, CRM, Sub and Mkt local setting stores | 4 stores plus product-native vocabularies | kernel lineage vs product lineages | Product-local setting vocabularies remain non-conforming | `dotmac-kernel` | Each application adopts the kernel registry/resolver and retires the local competing owner. |
+| scheduling-runtime | kernel `idempotency`, `messaging` and durable timers; ERP, Sub and Mkt local schedulers/tasks | 3 local runtime stacks plus product outboxes | product lineages | ADR-0014 gives at-most-once ONE owner | `dotmac-kernel` | Real workloads use kernel facilities; Mkt's `scheduled_tasks` and task-owned sessions retire rather than enter marketing modules. |
 
 ### Shared-module candidates
 
@@ -285,7 +315,12 @@ families and the ratchet applies.
 | integration-external | Sub `services/integration_*`, `connector.py`; CRM `services/connector.py`, `integration_http.py`; ERP `services/sync/` | 3 connector/webhook/retry stacks | ERP, Sub, Academy and future products through the separately deployed `dotmac_integrator` assembly | Product lineages today; the extracted `dotmac-integration` module owns one `mod_*` schema and lineage composed only by the Integrator assembly | None on transport mechanics; every product remains authority for its domain payload and consequences. Central runtime ownership is required for provider-account credentials, rate limits, backoff and idempotency. | module ← Sub | Add the no-new-direct-connector ratchet; extract Sub's installation/binding/inbox/outbox/retry/checkpoint engine and parity tests into Starter; compose that module with kernel and connector plugins in the thin `dotmac_integrator` assembly; shadow one capability; then delete its provider client, route, task, credential and mapping from products. The module core contains no provider catalogue. |
 | ticketing-sla | Sub `support_ticket*` + SLA services; CRM `tickets`, `ticket_*`; ERP `app/models/support/ticket.py` | **3**, 10 exact + 6 aliased collisions | admin portals, field app, CRM agent inbox, NCC complaints return | Each adopter runs its own `mod_tkt` lineage and owns its own rows; applications synchronize observations through API/webhook (ADR-0024) | Vocabularies provably cannot merge; the product-neutral core plus per-product reasons can ([`ticket-sources.md`](ticket-sources.md)). Ownership follows the local workflow: Sub customer/service, ERP internal back-office, vendor CP vendor support. | `dotmac-ticketing` module | **Adopter named 2026-08-13: ERP is cutover 1, vendor CP cutover 2** (ADR-0017 ticketing amendment; ADR-0023 made the module dual-plane so the vendor CP can use it). Still blocked on ERP's E8 Organization→Tenant gate. ERP must classify local versus remotely owned rows before migration; CRM/ERPNext/Sub syncs become observations/projections and cannot assign the local lifecycle. No product runs a non-kernel module lineage yet. |
 | projects-tasks | ERP `pm/`; CRM `projects.py`; Sub `installation_projects`, `project_*` | **3**, 10 exact collisions incl. the only three-way non-platform table `project_template_task_dependency` | ERP delivery, CRM buildout, Sub installation | 3 lineages | CRM's copy is settled (consolidate → Sub); ERP↔Sub is not. Project *templates* and task DAGs look identical; project *subjects* (a buildout, an install, an internal delivery) do not | unassigned pending audit | Needs the same audit ticketing got: one contract for template/task/dependency, product-owned subject linkage. Do not start before ticketing has an adopter. See [Contested](#contested--genuinely-unassigned). |
-| notifications-comms | Sub `notification*`, `comms_*`; CRM `notification.py`, `comms.py`, campaigns; ERP `notification.py` | 3, 11 exact + 5 aliased | every surface | 3 lineages | Consent/suppression exists only in Sub; delivery/outbox is the kernel outbox built twice ([`consent-suppression-sources.md`](consent-suppression-sources.md), [`delivery-outbox-sources.md`](delivery-outbox-sources.md)) | consent + outbox → kernel; template rendering → template studio; channel policy → settings; campaigns → module | Four open dossiers, **consent before delivery**. A campaign module that ships before the consent owner will send to suppressed recipients. |
+| notifications-comms | Sub `notification*`, `comms_*`; CRM `notification.py`, `comms.py`; ERP `notification.py`; Mkt inherited `notifications` | 4, 11 exact + 1 aliased | every surface | 4 product lineages | Consent/suppression exists only in Sub; delivery/outbox is the kernel outbox built repeatedly ([`consent-suppression-sources.md`](consent-suppression-sources.md), [`delivery-outbox-sources.md`](delivery-outbox-sources.md)) | consent + outbox → kernel; template rendering → template studio; channel policy → settings | **Consent before delivery.** Mkt's notification copy retires and campaigns stay a separate owner. |
+| campaigns-marketing | Sub `comms_campaigns`; CRM campaign services; Mkt `CampaignService` | 3 implementations, 1 exact + 3 aliased names | Backoffice first; Sub later independently | One `mod_*` lineage per adopter; no shared rows | Sub alone proves build-time and pre-send suppression, global marketing unsubscribe, sequences and send windows | `dotmac-campaigns` ← Sub | Port Sub parity tests, accept typed audience candidates, compose Backoffice, shadow/reconcile, then retire the selected old writer. CRM/Mkt are comparison and retirement inputs. |
+| content-publishing | Mkt campaign calendar, posts, assets and deliveries | 1 implementation, 4 class tables plus 3 association tables | Backoffice first | Separate content and publishing module lineages per adopter | Content lifecycle and publication intent are distinct; stored bytes stay in `dotmac-files`, remote delivery stays in Integrator | `dotmac-content` + `dotmac-publishing` ← Mkt | Preserve planning and partial-delivery parity, replace provider adapters with typed outbox commands, cut Backoffice over, then retire Mkt writers. |
+| marketing-observations | Mkt channel/ad metrics and GA4-normalized daily aggregates | 1 implementation, 5 class tables | Backoffice first | Separate media-observation and web-analytics lineages per adopter | Imported provider facts are observations and cannot decide content, campaign or publication lifecycle | `dotmac-media-observations` + `dotmac-web-analytics` ← Mkt | Port normalized upsert/aggregation parity only; Integrator owns OAuth, provider clients, fetch schedules and checkpoints. |
+| forms-data-capture | ERP `forms` models and `FormEngineService` | 1 implementation, 7 tables | Backoffice first | `dotmac-forms` lineage in each adopter | Generic definition/submission authority is separable from recruitment and other product subjects | `dotmac-forms` ← ERP | Replace Organization/product FKs with tenant scope and opaque subject references; backfill/shadow before retiring each ERP form writer slice. |
+| sites | No qualifying implementation in the audited five repositories | none | Backoffice first | future `dotmac-sites` lineage | Local immutable site/page revisions own content; hosting execution is transport | `dotmac-sites` (greenfield-after-inventory) | Land greenfield proof and adopter canary first; store a local immutable snapshot before emitting `SiteRelease` to Integrator. |
 
 ### Authority consolidation — CRM's operational duplicates
 
@@ -307,7 +342,7 @@ consolidation:
   row.**
 
 So CRM is a **retirement target, not a decomposition source for operational
-state**. Its 133 duplicated table names are the schema-level view of that
+state**. Its 131 CRM↔Sub-only duplicated table names are the schema-level view of that
 retirement ledger. None of them is an extraction source — the qualifying
 implementation for the eventual module is Sub's, not CRM's.
 
@@ -396,9 +431,10 @@ The focused execution plan is
 
 ERP's back office — people-payroll (101), inventory-procurement (39),
 assets-fleet (23), expenses (14), forms-data-capture (7) and
-workflow-automation (3) — has **zero measured duplication with CRM or Sub**.
-The last two are separate candidates, not a revived generic workflow family;
-each needs its own audit.
+workflow-automation (3) — has **zero measured duplication with CRM, Sub or
+Mkt**. Forms and automation are separate candidates, not a revived generic
+workflow family. The forms audit completed on 2026-08-18 and selected ERP;
+automation still needs its own audit.
 
 That is a statement about *when*, not *whether*. Each of these is a coherent
 domain and becomes a Starter `dotmac-<domain>` module sourced from ERP. Zero
@@ -432,11 +468,11 @@ constraint that adoption — not scope — is the scarce resource.
 | Wave | Work | Why here |
 |---|---|---|
 | **0** | Finish kernel lineage adoption: Sub on `0.1.0a40`, settings task #22, ERP's E8 tenancy gate. CRM has **no kernel pin and zero `dotmac_kernel` imports** — it needs an entry plan, not a module. | ADR-0017. No product runs a non-kernel module lineage; every later wave is blocked behind this. |
-| **1** | CRM → Sub authority consolidation, driven by Sub's existing `crm_web_retirement` ledger: outside-plant, engagement-inbox, field-workforce, sales-agreements, geospatial, subscriber projections. **Entry gate:** declare an owner in Sub's registry for the 28 duplicates that have none — see [`fleet-fact-level-decomposition.md`](fleet-fact-level-decomposition.md). | 72 of the 133 CRM↔Sub duplicated names, and it needs no new package to start. The authority questions are already adjudicated; this is capability closure and reconciliation against a named owner. Intermediate — these domains follow into modules in wave 4. |
+| **1** | CRM → Sub authority consolidation, driven by Sub's existing `crm_web_retirement` ledger: outside-plant, engagement-inbox, field-workforce, sales-agreements, geospatial, subscriber projections. **Entry gate:** declare an owner in Sub's registry for the 28 CRM↔Sub duplicates that have none — see [`fleet-fact-level-decomposition.md`](fleet-fact-level-decomposition.md). | 72 of the 131 CRM↔Sub-only duplicated names, and it needs no new package to start. The authority questions are already adjudicated; this is capability closure and reconciliation against a named owner. Intermediate — these domains follow into modules in wave 4. |
 | **2** | `dotmac-ticketing` cutover — name the adopter, adopt in Sub, then land CRM's ticket retirement into the module. | The package and its source audit already exist; the only open gate is an adopter. The **first proof that a non-kernel module lineage runs in production**, which every later module wave depends on. |
-| **3** | Consent → delivery/outbox → channel policy → campaigns, in that order. | Consent is a kernel owner and a legal boundary; shipping delivery first ships a suppression bypass. |
+| **3** | Consent → delivery/outbox → channel policy → `dotmac-campaigns`, in that order. | Consent is a kernel owner and a legal boundary; shipping delivery first ships a suppression bypass. Sub's source audit is now recorded in `marketing-suite-sources.md`. |
 | **4** | Sub-sourced modules: network-operations, subscriber-service, outside-plant, field-workforce, engagement-inbox, `dotmac-sales` through accepted Quote, billing. SalesOrder is sequenced with `dotmac-orders`, not bundled into sales. | The domains consolidated in wave 1, now extracted product-first from Sub and consumed back by Sub as an assembly. Depends on wave 2's lineage proof. |
-| **5** | ERP-sourced modules: finance-ledger, people-payroll, inventory-procurement, assets-fleet, expenses, content-help; separately audit forms-data-capture and workflow-automation. | Zero duplication, so nobody is paying for a second implementation today — that sequences it late, and does not exempt it. ERP's kernel/UI adoption must land first. A1 proved the two workflow-named candidates cannot be bundled. |
+| **5** | ERP-sourced modules: finance-ledger, people-payroll, inventory-procurement, assets-fleet, expenses, content-help and audited `dotmac-forms`; separately audit workflow-automation. | Zero duplication, so nobody is paying for a second implementation today — that sequences it late, and does not exempt it. ERP's kernel/UI adoption must land first. A1 proved the workflow-named candidates cannot be bundled. |
 | **6** | Source adjudication for projects-tasks (ERP vs Sub) and analytics-reporting, then extraction. | Target layer settled, qualifying source unsettled. Needs the audit `dotmac-ticketing` got. |
 
 Running beside those, on the vendor track — sequenced independently because it
@@ -448,6 +484,17 @@ blocks on none of the CRM↔Sub consolidation and shares no table with it:
 | **V1** | Kernel primitives for the gaps that are protocols, not domains: resumable run engine, update authority, support-access enforcement, health envelope. | Uncontested — no repository holds a competing table. The run engine also gives ADR-0014's at-most-once owner its first real workload, which wave 0 above has been waiting for. |
 | **V2** | Extract the vendor CP's existing domain code to Starter modules: licensing-issuance (10 tables), entitlement-allocation (2), commercial contracts (2); after A1 acceptance, make Vendor CP the first `dotmac-approvals` adopter. | The first three are the only implementation of each. Approvals is different: ERP is the source and Vendor contributes mandatory platform/content-binding deltas, then retires its two local tables after shadow comparison. This still proves module-lineage machinery without pretending Vendor owns the whole contract. |
 | **V3** | Build the release catalogue, fleet desired state, support-access workflow and fleet health as Starter modules. | Greenfield with no source to port. Built in Starter from the start so they are never an extraction later. |
+
+Michael activated the decomposed marketing suite on 2026-08-18. Its focused
+track refines, rather than bypasses, the general waves above:
+
+| Wave | Work | Gate |
+|---|---|---|
+| **M0** | Pin the five-product audit, classify all seven owners and add Mkt to the fleet/fact measurements. | Complete in the source dossier; refresh the inaccessible Mkt remote before porting code. |
+| **M1** | Port parity canaries for Mkt content/publishing/media/web analytics, Sub campaigns and ERP forms; add the sites greenfield/adopter canary. | Tests first; campaigns retain the consent/suppression dependency. |
+| **M2** | Implement and release one independent module at a time, with manifest, lineage, RLS, typed ports/outbox and owner documentation. | No sibling imports, provider clients, product switches or zero-consumer code. |
+| **M3** | Compose exact releases in Backoffice, backfill, shadow, reconcile, flip writers and retire the selected Mkt/ERP/Sub local owner slice. | Backoffice is cutover 1; a copied source that still writes is not adoption. |
+| **M4** | Let Sub adopt selected releases independently. | Separate rows and lineages; API/webhook synchronization only; no shared database. |
 
 Running in parallel, on the contract track: the ERP↔Sub billing contract repair
 and its drift detection. It has known money-correctness defects. Modularizing

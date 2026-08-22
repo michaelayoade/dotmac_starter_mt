@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "dotmac-document-rendering"
+version = "0.1.0a1"
+description = "Deterministic issued-document projection and rendering from immutable facts"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_document_rendering", from = "src" }]
+include = [
+    { path = "src/dotmac_document_rendering/py.typed", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+# `dotmac_kernel.fingerprints` is a persistence-free public module holding
+# `fingerprint_of`. Importing the historical `idempotency` spelling instead
+# would initialize the database-backed ledger and violate this module's
+# stateless boundary, so that seam sets the floor.
+#
+# The seam entered kernel SOURCE at a87, but a87 was never dispatched — its
+# changelog records it as NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a88, and
+# no `dotmac-kernel-v0.1.0a87` tag exists. a88 is therefore the earliest
+# INSTALLABLE kernel carrying it, which is what a floor has to name: as
+# `.github/release-modules.json` puts it, "a floor naming an unpublished
+# version cannot be resolved by an installer, so it is not a floor at all".
+dotmac-kernel = ">=0.1.0a88"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

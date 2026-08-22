@@ -44,7 +44,11 @@ from dotmac_kernel import (
     write_audit_event,
 )
 from dotmac_kernel.deps import require_permission, require_tenant
-from dotmac_kernel.models import Party
+from dotmac_kernel.models import Base, Party
+from dotmac_kernel.outbox_event_types import (
+    OutboxEventTypeRegistry,
+    install_outbox_event_types,
+)
 from dotmac_kernel.setting_domains import (
     DuplicateSettingDomainError,
     SettingDomainRegistry,
@@ -72,6 +76,12 @@ _EXCLUDED_FILES = {
     "dotmac_kernel/audit_actions.py",
     "dotmac_kernel/setting_domains.py",
 }
+
+
+def _public_tables():
+    """Only host tables are needed to prove declaration refusal paths."""
+    return tuple(table for table in Base.metadata.tables.values() if not table.schema)
+
 
 # Burn-down allowlists — do NOT add without a task/plan reference in the
 # comment; a new orphan should get a real consumer instead. Both EMPTY as of the
@@ -123,6 +133,7 @@ def _restore_process_declarations() -> None:
     manifests = _assembly_manifests()
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
     install_setting_domains(SettingDomainRegistry.from_manifests(manifests))
     install_surface_globals(manifests, disabled=set(), web_enabled=True)
 
@@ -227,7 +238,7 @@ def test_an_audit_event_with_an_undeclared_action_fails() -> None:
         )
     )
     try:
-        engine = create_test_engine()
+        engine = create_test_engine(tables=_public_tables())
         with isolated_session(engine) as db:
             with pytest.raises(UndeclaredAuditActionError) as exc:
                 write_audit_event(
@@ -251,7 +262,7 @@ def test_a_setting_write_to_an_undeclared_domain_fails() -> None:
         )
     )
     try:
-        engine = create_test_engine()
+        engine = create_test_engine(tables=_public_tables())
         with isolated_session(engine) as db:
             with pytest.raises(UndeclaredSettingDomainError) as exc:
                 upsert_by_key(

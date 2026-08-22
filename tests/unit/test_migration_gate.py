@@ -59,6 +59,20 @@ BILLING_MANIFEST = ModuleManifest(
     tables=("invoices",),
 )
 
+# A module the ledger will never carry. `billing` used to serve this purpose
+# and stopped the moment Billing was actually allocated: the unallocated-owner
+# test then handed the gate a module that WAS allocated, so it no longer
+# exercised the fault it exists to prove. A fixture that doubles as a plausible
+# domain name has an expiry date, so this one is unmistakably fictional.
+NEVER_ALLOCATED_MANIFEST = ModuleManifest(
+    code="never_allocated",
+    version="1.0.0",
+    short_code="neverallocated",
+    migration_prefix="zz",
+    migration_branch="never_allocated",
+    tables=("invoices",),
+)
+
 
 def _write(
     location: Path,
@@ -137,10 +151,11 @@ def test_the_real_repo_composes() -> None:
     # Non-vacuity: a gate that walked an empty set would pass silently. Bump
     # this deliberately when a lineage gains a revision.
     #
-    # 32 -> 33 in a68: `0026_platform_audit_log` on the kernel lineage. The
+    # 32 -> 33 in a68: `0026_platform_audit_log` on the kernel lineage.
+    # 33 -> 34 in a90: `0027_machine_credential` on the kernel lineage. The
     # "deliberately" is the point — this number is not maintenance overhead, it
     # is the reason a migration cannot be added without somebody noticing.
-    assert len(report.revisions) == 33
+    assert len(report.revisions) == 34
     owners = {a["owner"] for a in report.attribution.values()}
     assert owners == {"kernel", "assembly", "template_studio", "ticketing"}
 
@@ -240,9 +255,16 @@ def test_the_gate_reports_a_namespace_fault_instead_of_raising(
 ) -> None:
     """`run_gate` never raises for a composition problem — an operator should
     see every fault in one CI run, not one per run."""
-    location = tmp_path / "billing"
-    _billing_root(location)
-    report = run_gate([BILLING_MANIFEST], [location])  # unallocated in the ledger
+    location = tmp_path / "never_allocated"
+    _write(
+        location,
+        "zz_0001_invoices",
+        revision="zz_0001_invoices",
+        down_revision=None,
+        branch_labels=("never_allocated",),
+        body='    op.create_table("invoices", schema="mod_neverallocated")',
+    )
+    report = run_gate([NEVER_ALLOCATED_MANIFEST], [location])  # never in the ledger
     assert not report.ok
     assert "namespace composition:" in _messages(report)
     assert "MIGRATION_OWNER_LEDGER" in _messages(report)
@@ -613,6 +635,106 @@ def test_accepts_module_raw_sql_that_is_fully_qualified(tmp_path: Path) -> None:
     )
     report = _gate(location)
     assert report.ok, report.render()
+
+
+def test_accepts_schema_qualified_sql_over_a_bounded_table_loop(
+    tmp_path: Path,
+) -> None:
+    """Released modules emit repetitive policy DDL from constant table sets."""
+    location = tmp_path / "billing"
+    _billing_root(
+        location,
+        body=(
+            '    op.create_table("invoices", schema="mod_bill")\n'
+            '    for table in ("invoices", "invoice_lines"):\n'
+            '        op.execute(f"ALTER TABLE mod_bill.{table} "\n'
+            '                   "ENABLE ROW LEVEL SECURITY")'
+        ),
+    )
+    report = _gate(location)
+    assert report.ok, report.render()
+
+
+def test_accepts_schema_qualified_sql_from_a_pure_local_builder(
+    tmp_path: Path,
+) -> None:
+    """A local builder is inspectable when every return names the owner schema."""
+    location = tmp_path / "billing"
+    _billing_root(
+        location,
+        body=(
+            '    op.create_table("invoices", schema="mod_bill")\n'
+            '    op.execute(_policy_sql("invoices"))'
+        ),
+        extra=(
+            "\n\ndef _policy_sql(table: str) -> str:\n"
+            '    return f"ALTER TABLE mod_bill.{table} " \\\n'
+            '        "ENABLE ROW LEVEL SECURITY"\n'
+        ),
+    )
+    report = _gate(location)
+    assert report.ok, report.render()
+
+
+def test_rejects_a_local_sql_builder_without_owner_schema_evidence(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity: recognizing helpers must not turn dynamic SQL into a pass."""
+    location = tmp_path / "billing"
+    _billing_root(
+        location,
+        body=(
+            '    op.create_table("invoices", schema="mod_bill")\n'
+            '    op.execute(_policy_sql("invoices"))'
+        ),
+        extra=(
+            "\n\ndef _policy_sql(table: str) -> str:\n"
+            '    return f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY"\n'
+        ),
+    )
+    report = _gate(location)
+    assert not report.ok
+    assert "raw SQL never names 'mod_bill'" in _messages(report)
+
+
+def test_rejects_an_external_builder_that_matches_a_local_function_name(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity: an attribute call must not borrow a local helper's proof."""
+    location = tmp_path / "billing"
+    _billing_root(
+        location,
+        body=(
+            '    op.create_table("invoices", schema="mod_bill")\n'
+            '    op.execute(external.policy_sql("invoices"))'
+        ),
+        extra=(
+            "\n\ndef policy_sql(table: str) -> str:\n"
+            '    return f"ALTER TABLE mod_bill.{table} " \\\n'
+            '        "ENABLE ROW LEVEL SECURITY"\n'
+        ),
+    )
+    report = _gate(location)
+    assert not report.ok
+    assert "<uninspectable dynamic SQL>" in _messages(report)
+
+
+def test_rejects_an_external_text_wrapper_even_with_qualified_input(
+    tmp_path: Path,
+) -> None:
+    """Sensitivity: a runtime wrapper cannot certify the string it receives."""
+    location = tmp_path / "billing"
+    _billing_root(
+        location,
+        body=(
+            '    op.create_table("invoices", schema="mod_bill")\n'
+            '    op.execute(external.text("ALTER TABLE mod_bill.invoices "\n'
+            '                             "ENABLE ROW LEVEL SECURITY"))'
+        ),
+    )
+    report = _gate(location)
+    assert not report.ok
+    assert "<uninspectable dynamic SQL>" in _messages(report)
 
 
 def test_rejects_a_stateful_module_that_ships_no_lineage(tmp_path: Path) -> None:

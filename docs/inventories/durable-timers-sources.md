@@ -1,17 +1,74 @@
 # Durable timers — source revalidation
 
-**As of:** 2026-08-15
-**Subject:** `dotmac_kernel.durable_timers`, ADR-0030 §5 build-order step 6.
+**As of:** 2026-08-19
+**Subject:** `dotmac-durable-timers`, ADR-0030 §5 build-order step 6.
 **Authorizing decision:** ADR-0030 §6 — "Where a dossier is incomplete, the
 exception permits completing the audit; it does not turn missing evidence into
 permission to greenfield." ADR-0030 §5 build order places step 6 immediately
 after step 5 (`dotmac-numbering`, landed at starter `0b8d47a`, PR #193).
 
-This document is **read-only evidence**. It creates no package, no module, no
-model, no migration, no namespace, no version. `EXTRACTION.toml` content is
-drafted inline in §7 and is deliberately not written as a file.
+This document began as **source evidence** and the original audit remains below
+as provenance. The resulting package, model, migration, namespace and version
+now live under `packages/dotmac-durable-timers/`; its checked-in
+`EXTRACTION.toml` is the machine-readable current contract. Candidate revision
+`a3c82cd266141d80fdd0a128e74cc5b276bc04a4` is rebased on the merged campaigns
+foundation and preserves both namespace allocations and root-lock inputs.
 
-## Heads resolved for this revalidation
+## Implementation evidence — 2026-08-18
+
+The implementation and its accepted contract are complete at candidate
+`a3c82cd266141d80fdd0a128e74cc5b276bc04a4`. In a fresh isolated writable
+checkout on the Dotmac Observer, pinned Poetry 2.4.1 regenerated and validated
+the combined lock, `make check` passed, the complete unit/architecture suite
+passed, and the complete PostgreSQL integration suite passed after migrating a
+disposable database. The database, network and container were removed after
+the run.
+
+`tests/test_durable_timers_isolation.py` contains all ten PostgreSQL proofs from
+§11 and one named sensitivity companion for each failure mechanism: concurrent
+first schedule, concurrent reschedule, exclusive relay claims, stale-lease
+recovery, cancel/accept ordering, stale-generation rejection, poison isolation,
+tenant RLS/composite identity, platform revocation/reachability, and dual-plane
+parity/append-only history. This closes the implementation-proof gate; it is not
+adoption evidence. Sub remains the required first adopter, one timer family at
+a time, after kernel a72 and module a1 are pinned exactly.
+
+Both release gates are now closed. Protected workflows `32212290704` and
+`32212698520` built, inspected, published and registry-verified
+`dotmac-kernel==0.1.0a72` followed by
+`dotmac-durable-timers==0.1.0a1`; annotated tags
+`dotmac-kernel-v0.1.0a72` and `dotmac-durable-timers-v0.1.0a1` both peel to
+protected-main merge commit
+`f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685`. Publication is prerequisite
+evidence, not a cutover: `contract_consumers` remains empty until Sub's first
+timer family changes authority and its local path begins retirement.
+
+## Revalidation 2026-08-17 — decision and released prerequisite
+
+The 2026-08-15 source audit remains valid, but its placement recommendation and
+draft extraction block predated Michael's accepted ruling later that day.
+ADR-0017 and ADR-0030 now authoritatively assign this capability to the
+selectable dual-plane `dotmac-durable-timers` module. The module owns timer
+identity and history; kernel `outbox_relay.v1` owns every claim, lease,
+stale-lease recovery, retry, backoff and dead-letter operation. There is no
+timer due-row scanner.
+
+The prerequisite gate is now met. Annotated release tag
+`dotmac-kernel-v0.1.0a67` points to
+`ed3ac864b350d4556808a69496f999f764682442`; its published package version is
+`0.1.0a67`, it exports `OUTBOX_RELAY_V1` with name `outbox_relay.v1`, and its
+live-catalog verifier is registered as `verify_outbox_relay`. A module root
+migration must declare and verify that prerequisite, while each composing
+application binds it to kernel provider revision `0012_platform_outbox`.
+
+Fresh dedicated worktrees pin Starter at
+`7e0543004864845f0035c9ec325e3f5064c281cc` and Sub at
+`4489ca1712f3c263d914f2af0ebfcf044aa70605`. The Sub model, service, task and
+preserved behavior tests are byte-identical to the original `27c76aa` dossier
+pin. `scheduler_config.py` has an unrelated nine-line change; the timer
+dispatcher and legacy sweep registrations remain present.
+
+## Heads resolved for the original 2026-08-15 revalidation
 
 Every citation below is a revision-pinned read against `origin/main`
 (`git show origin/main:<path>`, `git grep <pattern> origin/main`), never a
@@ -34,6 +91,10 @@ empty patch for each). This is the numbering lesson repeating: byte-identity is
 not reassurance. Two of the collections dossier's citations *have* drifted —
 `support.py:2213` → `:2288` and `team_inbox_commands.py:840` → `:987` — so the
 dossier's line numbers were correct when written and are wrong now.
+
+The 2026-08-17 pins and byte-identity result above supersede this historical
+checkout table for implementation. The original table remains as provenance
+for the citations and findings below.
 
 ---
 
@@ -179,7 +240,7 @@ not eight.
 `runtime_durable_timers`: `advance_renewal_invoicing.py:17`,
 `billing/contracts.py:44`, `billing/unwall_paid_accounts.py:40` (queries at
 `:346-352` and `:427-437`). The owner does not own all reads of its own table.
-In a kernel package this becomes a cross-package model import; the port must
+In an installable module this becomes an application-to-module model import; the port must
 publish a typed read API instead.
 
 ### 2.3 `dotmac_sub:tests/test_durable_timers.py` (267 lines)
@@ -416,7 +477,7 @@ leave the column at its `default=1`, so the stored value asserts "source version
 
 ### 4.3 What a correct one needs
 
-The kernel must make staleness a **module guarantee, not a consumer
+The module must make staleness a **module guarantee, not a consumer
 convention**:
 
 1. The fired trigger carries `(timer_id, identity, generation)` and the module
@@ -484,11 +545,11 @@ Two caveats to carry forward:
 - This depends on **READ COMMITTED**. Under REPEATABLE READ or SERIALIZABLE the
   blocked `SELECT … FOR UPDATE` raises `40001` instead of silently returning
   `None`. Nothing in Sub declares or tests the required isolation level. The
-  kernel must state it, and prove the behaviour at it.
+  module must state it, and prove the behaviour at it.
 - `cancel_timer` returning `False` is **ambiguous**: it means both "there was no
   timer" and "the timer just fired and you lost the race". A caller that cancels
   a deadline because the entity was settled cannot tell whether a consequence is
-  already in flight. The kernel contract must distinguish
+  already in flight. The module contract must distinguish
   `NothingScheduled` from `AlreadyFired`.
 
 ### 5.3 The reschedule race — a first-use defect of the ERP shape
@@ -520,7 +581,16 @@ a lost race.
 
 ---
 
-## 6. Kernel placement — the honest cost
+## 6. Placement decision — selectable module
+
+**Resolved 2026-08-15.** Michael accepted the module side of the candidate
+decision recorded in §6.4. `dotmac-durable-timers` is a selectable module under
+ADR-0028, with tenant-only, platform-only and both-plane selections. It imports
+the kernel contract and declares `outbox_relay.v1`; it does not live in the
+kernel lineage and it never imports a sibling module or a product assembly.
+
+Sections 6.1–6.4 retain the cost analysis that informed that ruling. Their
+kernel-placement recommendation is historical evidence, not current direction.
 
 ### 6.1 What the floor is today
 
@@ -585,18 +655,18 @@ key becomes `(tenant_id, owner, entity_kind, entity_id, purpose) WHERE status =
 in either direction is a cross-tenant timer collision or a silently
 tenant-global deadline.
 
-### 6.4 The candidate decision this raises — surfaced, not decided
+### 6.4 The candidate decision this raised — resolved by ADR amendment
 
-ADR-0030 §4 names the owner `dotmac_kernel.durable_timers`, and this audit does
-not overturn an accepted decision. But the evidence produces a question that
-should be answered explicitly rather than by default:
+The original ADR-0030 §4 named the owner `dotmac_kernel.durable_timers`. This
+audit could not itself overturn an accepted decision, so it surfaced the
+following question for Michael:
 
 > Should durable timers be kernel-resident (unconditional floor for every
 > adopter), or a **selectable dual-plane module** under ADR-0028 with
 > `supported_plane_sets` — the shape `dotmac-approvals` already uses to support
 > tenant-only, platform-only and both?
 
-Arguments recorded, not adjudicated. For the kernel: the claiming engine it must
+Arguments originally recorded before adjudication. For the kernel: the claiming engine it must
 reuse (`messaging.relay`, migrations `0011`/`0012`) is kernel-resident, and a
 module cannot depend on kernel *migration internals* without a prerequisite
 binding; the outbox is already there; timers and the outbox are one drain
@@ -604,7 +674,8 @@ concern. For a module: seven of eight would-be adopters in this fleet today
 schedule nothing, the floor is already the binding constraint on two cutovers,
 and ADR-0028 exists precisely to stop unconditional plane installation.
 
-**Recommendation:** keep it in the kernel as ADR-0030 directs, *and* make the
+**Historical recommendation, superseded by the 2026-08-15 ADR amendments:**
+keep it in the kernel as the original ADR-0030 directed, *and* make the
 reuse binding explicit in the same change — durable timers must be layered on
 `claim_outbox_batch`-shaped SQL and the `RelayPolicy` retry/dead-letter
 discipline, not beside them. If instead the implementation writes a fresh claim
@@ -680,7 +751,7 @@ string-match the payload to decide whether the event is theirs —
 `support_lifecycle_projection.py:48-56`, `identity_lifecycle_projection.py:32-36`,
 `sales_lifecycle_projection.py`, `billing_lifecycle_projection.py:77`. N handlers
 each doing a payload compare is a fan-out anti-pattern and a routing bug waiting
-to happen. **Do not port.** In the kernel, `output_event_type` must be a declared
+to happen. **Do not port.** In the module contract, `output_event_type` must be a declared
 code under manifest rule 12, and routing must be by declared type.
 
 ### D8 — `output_event_type` is an unvalidated free string (**newly found**)
@@ -711,7 +782,7 @@ the typed read API; do not export the model.
 retention or purge path in Sub. Every reschedule of a frequently-changing
 deadline appends a permanent row. Contrast `IdempotencyRecord`, which carries
 `expires_at` with an index (`idempotency_models.py:89`) and leaves retention as
-the product's policy per ADR-0014. The kernel table must do the same.
+the product's policy per ADR-0014. The module history must do the same.
 
 ### D12 — the secondary source hardcodes its lease and reads the host (**newly found**, in `subscription_lifecycle_schedules.py`)
 
@@ -757,12 +828,12 @@ ADR-0018 they carry no sensitivity proof and cannot be treated as evidence.
   (`app/services/owner_commands.py:341-427`) are a Sub-specific transaction
   authority that `db.begin()`s, `commit()`s and `rollback()`s, and validates a
   command manifest. It contradicts starter hard rules 8 and 9 head-on. The
-  kernel equivalent of the "you must be inside the owning transition" guarantee
+  module equivalent of the "you must be inside the owning transition" guarantee
   is structural, not runtime: the schedule/cancel functions receive a `Session`
   and never commit, so they *cannot* be durable without the caller's
   transaction. **Record the loss honestly** — the fail-closed error
   `runtime.durable_timers.timer_requires_owner_command`, the one behaviour Sub's
-  suite asserts by exact code, has no kernel counterpart and its guarantee
+  suite asserts by exact code, has no module counterpart and its guarantee
   becomes an architecture test rather than a runtime check.
 - **`emit_event` / `EventType.custom` / Sub's event store.** The kernel's
   outbox is the transport. See D7.
@@ -775,12 +846,12 @@ ADR-0018 they carry no sensitivity proof and cannot be treated as evidence.
   `access_invitation`, `subscription`, `billing_contract`, `subscriber`,
   `collections_case`, `cx_handoff`, `sla_clock`, `support_ticket`,
   `inbox_conversation`, and every `*_due` trigger name. `owner`, `entity_kind`
-  and `purpose` are open registered strings; the kernel must know none of these
+  and `purpose` are open registered strings; the module must know none of these
   values.
 - **The native `timerstatus` enum** (D6).
 - **The dialect-branching and SQLite compatibility posture.** `sqlite_where` on
   the partial index (`durable_timer.py:70`, migration `:99`) exists to make the
-  SQLite lane build the index. The kernel targets PostgreSQL; a SQLite
+  SQLite lane build the index. The module targets PostgreSQL; a SQLite
   accommodation inside a shared owner is the `numbering-source-variance.md` S5
   finding and ADR-0024's "no product/provider switches".
 - **Hardcoded lease duration and `socket.gethostname()`** (D12).
@@ -797,24 +868,41 @@ ADR-0018 they carry no sensitivity proof and cannot be treated as evidence.
 
 ## 9. The boundary — what the timer owns and what it does not
 
-Sub's own docstrings state this well and the kernel should adopt the wording
+Sub's own docstrings state this well and the module should adopt the wording
 verbatim: the runtime *"performs no customer, invoice, funding, or access
 decision — those belong to the consumer that declared the timer"*
 (`durable_timer.py:13-14`). Generalised:
 
-**`dotmac_kernel.durable_timers` OWNS:**
+**`dotmac-durable-timers` OWNS:**
 
 - the durable record that *something* should happen for
   `(scope, owner, entity_kind, entity_id, purpose)` at `due_at`;
 - the generation of that record, its supersede-on-replace, its cancellation, and
   the database-enforced invariant of at most one current timer per identity;
-- the bounded, indexed due scan; the claim and lease of due timers; stale-claim
-  reclaim; bounded retry; dead-lettering;
+- scheduling and rescheduling by atomically enqueueing one kernel outbox event
+  per generation with `available_at = due_at`; the module owns no due-row scan;
+- cancellation and stale-trigger rejection at acceptance time, including a
+  typed stale verdict that returns both observed and current generations;
 - emission of the caller's **declared** output as an opaque token, carrying
   identity, generation and `expected_source_version` and nothing else;
 - the atomic staleness verdict at consume time (§4.3);
 - both persistence planes, declared;
-- append-only firing history with a stated retention policy.
+- append-only timer history and a retention mechanism that never deletes a
+  currently scheduled timer.
+
+**`dotmac_kernel.messaging` OWNS and the module REUSES:**
+
+- due-event claiming and exclusive leasing through the tenant/platform outbox
+  claim functions;
+- stale-lease recovery, retry, bounded backoff and retained dead-letter state;
+- dispatcher privileges and per-event batch isolation.
+
+The timer module calls the kernel's enqueue surface and sets the returned
+outbox row's `available_at` to the required `due_at` in the same transaction as
+the timer transition. It never reads, claims or scans due timer rows. A relay
+delivery calls the module's acceptance surface before any consumer effect; an
+old or canceled generation therefore remains harmless even if its immutable
+outbox record is delivered.
 
 **The CALLER owns, and the module must be structurally unable to touch:**
 
@@ -822,7 +910,8 @@ decision — those belong to the consumer that declared the timer"*
   snooze wake. The module never branches on `purpose`.
 - **when the deadline is** — business-calendar arithmetic, timezones, working
   hours, proration, contract terms. `due_at` is a required, timezone-aware
-  input; the module reads no clock except to compare against a supplied `now`.
+  input; the behavior engine reads no ambient clock. Any comparison instant is
+  a required timezone-aware input.
 - **whether the work should still happen** — the entity's current state. A
   non-stale timer means "your deadline arrived", never "act".
 - **the work itself**, and its transaction. The module emits; it does not
@@ -838,38 +927,36 @@ string means, it does not belong in the kernel.*
 
 ---
 
-## 10. Draft `EXTRACTION.toml`
+## 10. Original draft `EXTRACTION.toml`
 
-**Draft only. Do not create this file.** Durable timers lands in an existing
-distribution, so unlike `dotmac-numbering` there is no new `EXTRACTION.toml` to
-write — this is a **delta to be merged into
-`packages/dotmac-kernel/EXTRACTION.toml`**, whose current header is
-`status = "historical-pre-rule"` / `source_mode = "historical-mixed"`. Rule 22
-requires owner, contract and consumers to be recorded there. Presented below as
-a standalone block for review; the write agent merges the `source_paths`,
-`preserved_tests`, `inventory_evidence` and `candidate_consumers` entries into
-the existing arrays and appends the capability prose.
+This is the audit's original draft, retained as provenance. The reconciled
+contract is now `packages/dotmac-durable-timers/EXTRACTION.toml`; it is not
+merged into the kernel dossier. The package is a selectable stateful module and
+records the kernel relay as a reused source and declared prerequisite, not as
+timer-owned behavior.
 
 ```toml
-# --- delta for packages/dotmac-kernel/EXTRACTION.toml -----------------------
-# capability = "durable_timers"  (ADR-0030 build-order step 6)
 schema_version = 1
-package = "dotmac-kernel"
-capability = "durable_timers"
-classification = "universal-facility"
+package = "dotmac-durable-timers"
+classification = "optional-module"
 status = "audit-complete"
-source_mode = "product-first-with-mandatory-port-delta"
-owner = "The durable record that an owner's named deadline exists for one entity, at most one current generation at a time, and the claimed, leased, bounded-retry emission of that deadline's declared trigger when it arrives"
-contract = "Given a declared scope (tenant or platform), an open registered (owner, entity_kind, entity_id, purpose) identity, a required timezone-aware due_at, a declared output code and an optional opaque expected_source_version, record exactly one current timer for that identity inside the caller's transaction, superseding any previous generation. Cancellation is idempotent and distinguishes nothing-scheduled from already-fired. A bounded, indexed due scan claims and leases due timers under FOR UPDATE SKIP LOCKED, emits each timer's declared output through the kernel outbox carrying identity and generation only, retries a failed emission with bounded backoff, dead-letters at max attempts, and reclaims a stale lease. A consumer accepts a fired trigger only through an atomic staleness verdict that re-derives the current generation for the identity inside the consumer's transaction. NOT what the deadline means, when the deadline should be, whether the work should still happen, the work itself, the caller's vocabulary, recurring cadence, or business-calendar arithmetic."
+source_mode = "product-first"
+owner = "Timer identity, generation allocation, scheduling and rescheduling, supersession, cancellation, current-generation verification, stale-trigger rejection, append-only timer history and terminal-history retention"
+contract = "Given an explicit tenant or platform scope, an opaque (owner, entity_kind, entity_id, purpose) identity, a required timezone-aware due_at, a declared output code and optional opaque source evidence, atomically allocate the next generation, supersede the prior current generation, append history and enqueue one kernel outbox event whose available_at equals due_at. Cancellation returns one of Canceled, AlreadyFired, NothingScheduled or Stale. Trigger acceptance locks and re-derives the current identity state and returns both observed_generation and current_generation when stale, before the caller may run its effect. Retention never deletes a scheduled timer. The module declares and reuses outbox_relay.v1 for all claiming, leasing, stale-lease recovery, retry, backoff, dead-letter handling and dispatcher privileges; it contains no due-row scanner, claim loop, retry engine, consumer decision or ambient clock read."
 source_repositories = [
+  "dotmac_erp",
   "dotmac_sub",
   "dotmac_starter_mt",
 ]
 source_revisions = [
-  "dotmac_sub:f336170b6f136e74401561677e3b40de35b8f7ee",
-  "dotmac_starter_mt:1e9c4332dc1dbc2cc81fd18ba3401a079c81d839",
+  "dotmac_erp:9d67c3990e01e20409ab118badb5dfdf7ce045a7",
+  "dotmac_sub:4489ca1712f3c263d914f2af0ebfcf044aa70605",
+  "dotmac_starter_mt:7e0543004864845f0035c9ec325e3f5064c281cc",
+  "dotmac-kernel-v0.1.0a67:ed3ac864b350d4556808a69496f999f764682442",
 ]
 source_paths = [
+  # inventoried scheduling false positive; reference constraint, not code source
+  "dotmac_erp:app/models/scheduler.py",
   # identity, generation, one-current-per-identity, decision-free fire
   "dotmac_sub:app/models/durable_timer.py",
   "dotmac_sub:app/services/runtime_durable_timers.py",
@@ -878,7 +965,11 @@ source_paths = [
   "dotmac_sub:app/models/subscription_lifecycle_schedule.py",
   "dotmac_sub:app/services/subscription_lifecycle_schedules.py",
   # the claiming engine, REUSED not re-implemented (in-repo, already kernel-resident)
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/outbox.py",
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/relay.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/platform_relay.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/worker.py",
+  "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/platform_worker.py",
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/messaging/models.py",
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/migrations/versions/20260731_0011_outbox_relay_leasing.py",
   "dotmac_starter_mt:packages/dotmac-kernel/src/dotmac_kernel/migrations/versions/20260731_0012_platform_outbox.py",
@@ -899,7 +990,7 @@ candidate_consumers = [
   "dotmac_crm",
   "dotmac_vendor_control_plane",
 ]
-composition_boundary = "Kernel-resident per ADR-0030 §4, therefore UNCONDITIONAL for every adopter: two tables (tenant durable_timers, tenant_id NOT NULL with ENABLE + FORCE ROW LEVEL SECURITY and a tenant-isolation policy; platform platform_durable_timers with no tenant column, GRANTed to platform_api/app_admin and REVOKEd from app_user across every table and column privilege), declared not inferred per ADR-0023. No foreign key crosses the planes; no nullable tenant_id, sentinel tenant or polymorphic scope column. The tenant current-timer partial unique is (tenant_id, owner, entity_kind, entity_id, purpose) WHERE status = 'scheduled'; the platform one omits tenant_id. owner, entity_kind, purpose and output_event_type are open registered strings, never enums, and output_event_type is a declared code under manifest rule 12. status is a constrained string, not a native PostgreSQL enum. The module reads no clock: due_at and the scan instant are required timezone-aware inputs. Schedule and cancel receive a Session and never commit (hard rule 8); the dispatcher owns its own transaction boundary exactly as messaging.relay does. The claim/lease/retry/dead-letter engine REUSES the existing claim_outbox_batch/settle_outbox_event discipline and RelayPolicy; a second claim loop inside the same kernel is forbidden, because that is precisely the duplication ADR-0030 §4 names this owner to prevent."
+composition_boundary = "Selectable dual-plane module under ADR-0028: the manifest declares disjoint tenant and platform tables plus tenant-only, platform-only and both-plane supported sets; every assembly makes one explicit ModulePlaneSelection. Tenant tables carry tenant_id UUID NOT NULL, composite identities, RLS ENABLE and FORCE, policy and exact grants in their creating migration. Platform tables carry no tenant column or RLS, are reachable by the online platform role and are revoked from app_user across all table and column privileges. No foreign key crosses planes. Status and caller vocabulary are constrained/open strings, never PostgreSQL enums. The module imports kernel contracts only, declares outbox_relay.v1 as a common prerequisite and enqueues through the kernel outbox with available_at = due_at. It imports no application or sibling module and implements no scanner, claim, lease, retry, backoff, dead-letter or dispatcher privilege. Schedule, cancel, accept and retention receive a Session and explicit timezone-aware instants where needed, never commit and never read an ambient clock."
 inventory_evidence = [
   "docs/inventories/durable-timers-sources.md",
   "docs/inventories/collections-sources.md",
@@ -910,9 +1001,9 @@ inventory_evidence = [
   "docs/adr/0030-cloud-commerce-is-composed-from-complete-domain-owners.md",
 ]
 first_cutover = "dotmac_sub, tenant plane, ONE timer family at a time, ordered by consumer discipline rather than by volume. Slice 1 is financial.walled_account_healing (app/services/billing/unwall_paid_accounts.py:363 schedule, :391 consume): it is the only owner in the fleet that already re-derives the current generation (:431) and the only one that raises a typed evidence error (:412-421), so it is the one caller whose consumer semantics the module can adopt without inventing them — and cutting it over first converts that untested convention into a proved module guarantee. Slice 2 is billing.contracts (contracts.py:731, :976, consume :1014), the only owner that uses expected_source_version, which forces the opaque-carry contract to be exercised. Slice 3 is auth.access_invitations, the simplest full schedule/cancel/consume triangle. Only then the five owners whose consumers discard generation entirely (support.ticket_lifecycle x2, communications.team_inbox_commands, customer.experience_handoff, financial.advance_renewal_invoicing): each must first choose between the generation verdict and an explicit entity-state guard, and declare which. collections.lifecycle is NOT a cutover, it is a repair: it schedules collections.case_action_due with no consumer anywhere (lifecycle.py:282) from a class no production path calls, so it needs a consumer or a deletion before it means anything. dotmac_crm follows on the tenant plane, retiring crm_response_obligations' next_escalation_at drain (services/crm/inbox/response_obligations.py:383-471). dotmac_vendor_control_plane is the first platform-plane adopter; the platform plane has no product-first source and is written fresh against the same parameterised suite."
-shadow_and_drift = "Neither the timer facility nor any of its consumers has a real-database test, so the shadow phase is the first genuine evidence and the ten PostgreSQL proofs in the audit's §11 land before any caller is touched. For each Sub timer family: schedule into BOTH the local durable_timers row and the module in the same transaction, fire both, and compare the identity, generation, due instant and declared output of every emission, recording divergence rather than failing. Divergence classes to expect and adjudicate before cutover: (a) the module refuses a concurrent reschedule that Sub's LIMIT-1 lock lets collide (runtime_durable_timers.py:91-102) — expect the module to succeed where the local path raises UniqueViolation, and count those; (b) a poison emission that rolls back Sub's whole 200-timer batch (:261-314) while the module dead-letters one timer and drains the rest — the difference in drained count IS the D1 evidence; (c) a fired-then-superseded trigger that the module marks stale and seven of Sub's eight consumers accept today; (d) tenant_id attribution, since Sub's rows carry none and the module requires one — every backfilled row needs a decided tenant and there is no source column to derive it from. Do not backfill fired/canceled/superseded history: it has no retention policy in Sub (D11) and copying it imports an unbounded table into every adopter database. Backfill only rows with status = 'scheduled'."
+shadow_and_drift = "Neither the timer facility nor any of its consumers has a real-database test, so the shadow phase is the first genuine evidence and the ten PostgreSQL proofs in the audit's §11 land before any caller is touched. For each Sub timer family: schedule into BOTH the local durable_timers row and the module in the same transaction, let the local task and kernel relay deliver independently, and compare identity, generation, due instant, cancellation and declared output, recording divergence rather than failing. Divergence classes to expect and adjudicate before cutover: (a) the module succeeds under a concurrent reschedule where Sub's LIMIT-1 lock can raise UniqueViolation (runtime_durable_timers.py:91-102); (b) a poison emission rolls back Sub's whole 200-timer batch (:261-314), while the kernel relay dead-letters only the poison outbox event and delivers the remainder; (c) the module rejects a fired-then-superseded trigger that seven of Sub's eight consumers accept today; (d) tenant_id attribution, since Sub's rows carry none and the module requires one. Do not backfill fired/canceled/superseded history: it has no retention policy in Sub. Backfill only rows whose current status is scheduled, and give every row a decided tenant because the source has no tenant column."
 local_copy_retirement = "dotmac_sub retires, in order: the eight owners' direct DurableTimer imports and queries (advance_renewal_invoicing.py:17, billing/contracts.py:44, billing/unwall_paid_accounts.py:40 including the queries at :346-352 and :427-437); the dead public reader current_timer (runtime_durable_timers.py:197-215, zero production callers); schedule_timer/cancel_timer/fire_due_timers and the durable_timers table; app/tasks/durable_timers.py and the durable_timer_dispatch_runner registration (scheduler_config.py:1947-1953); the collections.case_action_due emission (collections/lifecycle.py:274-285) or the collections owner itself; and the two rescan-instead-of-timer paths the facility exists to replace, dunning_runner (scheduler_config.py:719) and prepaid_balance_sweep (:741), whose retirement is the ADR 0007 Phase 5 cutover gate Sub's own SOT registry records as unmet (sot_registry/domains/financial_access/durable_timers.py:130-152). subscription_lifecycle_schedules is a SEPARATE decision: it is a command ledger with a lease, not only a timer, and only its claim/lease/retry columns are in scope. dotmac_crm retires crm_response_obligations' next_escalation_at drain loop but KEEPS the obligation row, which carries escalation policy the module must never learn. A two-directional import/caller ratchet reaches zero in each repository before its local owner is deleted. No permanent mirrored timer table and no second due scan is allowed in either product."
-next_action = "Before any code: obtain an explicit ruling on §6.4 — kernel-resident (as ADR-0030 §4 directs) versus a selectable dual-plane module under ADR-0028 — because the answer changes the migration, the version floor and the plane declaration, and because the floor is already the binding constraint on the Vendor CP (a45) and Sub (a50) cutovers. Then land the ten PostgreSQL proofs as the capability's first commit, since neither source contributes a single real-database timer test and the one generation-safety implementation in the fleet (unwall_paid_accounts.py:431) is itself untested. Then shadow the walled-account-healing family. Do not touch a caller whose consumer discards generation until that consumer has declared its staleness discipline."
+next_action = "The selectable-module decision and released outbox_relay.v1 gate are met. Wait for the active starter-billing changes to the namespace ledger, kernel metadata and root lockfile to settle; integrate their exact head before allocating the timer namespace or creating the package. Then write the ten PostgreSQL proofs before the first behavior implementation, run them only in an isolated exact-revision worktree on Observe, and shadow financial.walled_account_healing first. Do not touch a caller whose consumer discards generation until that consumer has declared its stale-generation discipline."
 ```
 
 ---
@@ -934,8 +1025,8 @@ follow.
 - **Independent connections.** Separate `Session` objects on separate DBAPI
   connections. Sub's `db_session` shape (one connection, one outer transaction)
   makes every race test pass vacuously and must not be copied.
-- **Distinct roles.** `app_user` (tenant, RLS forced), a platform role, and a
-  dedicated timer-dispatcher role or the reused `outbox_dispatcher`. Assert
+- **Distinct roles.** `app_user` (tenant, RLS forced), a platform role, and the
+  kernel's reused `outbox_dispatcher` / `platform_outbox_dispatcher`. Assert
   `current_user` inside the test — a proof run as the migration owner or a
   superuser silently bypasses RLS.
 - **A two-thread rendezvous** (`threading.Barrier(2)`) so both actors are
@@ -998,9 +1089,11 @@ the `LIMIT 1` lock cannot see the row inserted by the transaction it waited on.
 
 ---
 
-### Proof 3 — claim exclusivity across two connections
+### Proof 3 — kernel-relay claim exclusivity across two connections
 
-**Setup.** Twelve due timers across distinct identities in one scope.
+**Setup.** Schedule twelve due timers across distinct identities in one scope
+and capture the twelve kernel outbox ids written by the module. The module has
+no claim API and no due-row scan.
 
 **Mechanism.** Two dispatcher sessions on independent connections. A claims a
 batch of 5 inside an **open, uncommitted** transaction; B then claims a batch of
@@ -1008,7 +1101,7 @@ batch of 5 inside an **open, uncommitted** transaction; B then claims a batch of
 the one already proved in this repository.)
 
 **Pass.** `a_claim` and `b_claim` are disjoint **and** their union is exactly the
-twelve seeded ids — the coverage half is what stops two empty claims passing
+twelve captured outbox ids — the coverage half is what stops two empty claims passing
 vacuously. `len(a_claim) == 5`. Every claimed row's `leased_by` equals the exact
 worker id that claimed it.
 
@@ -1021,7 +1114,7 @@ timeout (SQLSTATE **`57014`**).
 
 ---
 
-### Proof 4 — crash recovery: a lease is reclaimed, and the timer fires exactly once
+### Proof 4 — kernel-relay crash recovery and one accepted timer effect
 
 **Setup.** One due timer.
 
@@ -1029,13 +1122,17 @@ timeout (SQLSTATE **`57014`**).
 closed without settling — the crash. Age `leased_at` by an hour with a direct
 `UPDATE`. Worker `w2` claims with `stale_lease_seconds=60`.
 
-**Pass.** `leased_by` is **exactly `'w2'`** (an exact value, not "some worker").
-`attempts` is exactly 1 at reclaim. After `w2` settles, exactly **one** emitted
-trigger exists for that timer — assert on a count of 1 against the outbox, not
-on "at least one". The timer's terminal `status` is exactly `'fired'`.
+**Pass.** `leased_by` is **exactly `'w2'`** (an exact value, not "some worker")
+and `attempts` remains exactly 0 because reclaim is not a delivery failure.
+`w2` delivers the existing trigger through the module acceptance surface and
+settles it. Exactly one outbox row exists for that generation, the consumer
+effect count is exactly one, and the timer's current state is exactly `fired`.
+The at-least-once control re-delivers that same payload and proves acceptance
+does not execute the effect twice.
 
-**Failing run.** `leased_by` still `'w1'` (no reclaim); or two trigger rows (the
-crash re-emitted); or the timer stuck in `'claimed'` forever.
+**Failing run.** `leased_by` still `'w1'` (no reclaim); a second trigger row is
+inserted; the consumer effect count becomes 2; or the outbox row remains
+`claimed` forever.
 
 **Sensitivity.** Set `stale_lease_seconds` to a value larger than the aged
 interval and assert `w2` claims nothing — proving the reclaim is time-bounded
@@ -1048,26 +1145,28 @@ rather than unconditional.
 **Setup.** One due `'scheduled'` timer. Assert
 `SHOW transaction_isolation = 'read committed'` in both sessions.
 
-**Mechanism, case A (fire wins).** Dispatcher claims the row and holds its
-transaction open. A second session calls cancel and blocks. Dispatcher settles
-and commits. Cancel unblocks.
+**Mechanism, case A (fire wins).** Relay delivery enters the module acceptance
+transaction, locks the timer identity and holds it open. A second session calls
+cancel and blocks. Acceptance records `fired` and commits; cancel unblocks.
 
 **Pass A.** Cancel returns the typed **`AlreadyFired`** outcome (not `False`,
 not `NothingScheduled` — D14). The row's `status` is exactly `'fired'`. Exactly
 one trigger emitted.
 
-**Mechanism, case B (cancel wins).** Cancel claims the row and holds open. The
-dispatcher's due scan runs.
+**Mechanism, case B (cancel wins).** Cancel locks the timer identity and holds
+its transaction open. Relay delivery invokes acceptance on a separate
+connection and blocks on that same identity.
 
-**Pass B.** The dispatcher claims **zero** rows this batch (`SKIP LOCKED`).
-After cancel commits, `status` is exactly `'canceled'` and a second dispatcher
-pass emits **zero** triggers.
+**Pass B.** After cancel commits, acceptance rejects the already-enqueued
+trigger as canceled and the consumer effect count remains exactly zero. The
+timer's current state is exactly `canceled`; relay settlement succeeds, so the
+immutable outbox event is not replayed forever.
 
 **Mechanism, case C (nothing there).** Cancel an identity with no timer.
 
 **Pass C.** Typed **`NothingScheduled`**, distinct from case A's value.
 
-**Failing run.** A returning the same value as C; a trigger emitted in B; or,
+**Failing run.** A returning the same value as C; a consumer effect in B; or,
 under REPEATABLE READ, an unhandled SQLSTATE **`40001`** — which is the D15
 observable and should be asserted explicitly in a variant that sets
 `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`, so the isolation requirement
@@ -1080,8 +1179,8 @@ produces a `'canceled'` row after a `'fired'` one — a lost update.
 
 ### Proof 6 — generation safety under concurrency (the load-bearing proof)
 
-**Setup.** One timer at generation N, due and fired, its trigger emitted and
-**not yet consumed**.
+**Setup.** One timer at generation N whose due outbox trigger is claimed but
+**not yet accepted**.
 
 **Mechanism.** Thread 1 (the owning transition) reschedules the identity to
 generation N+1 and commits. Thread 2 then delivers the generation-N trigger to
@@ -1111,18 +1210,19 @@ proof fails — demonstrating that field validation is not staleness detection.
 
 ### Proof 7 — one poison timer does not block the batch
 
-**Setup.** Twenty due timers. One of them is configured so its emission raises
-deterministically.
+**Setup.** Twenty due timers and their twenty module-created outbox rows. One
+delivery transport raises deterministically for one outbox id.
 
 **Mechanism.** Run the dispatcher once, then repeatedly to `max_attempts`.
 
-**Pass.** After the first pass: exactly **19** timers are `'fired'` with 19
-triggers emitted, and the poison timer's `attempts` is exactly 1 with a future
-`available_at`. After `max_attempts` passes: the poison timer's status is
-exactly `'dead'`, its `last_error` is populated, the row is **retained**, and
-the other 19 were never re-emitted (still exactly 19 triggers).
+**Pass.** After the first pass: exactly **19** timer effects are accepted and
+their timers are `fired`; the poison timer remains `scheduled`, while its
+kernel outbox row has `attempts = 1` and a future `available_at`. After
+`max_attempts` passes, that outbox row is exactly `dead`, has `last_error`, and
+is retained. The poison timer remains retained for explicit reconciliation;
+the other 19 effects remain exactly once and are never replayed.
 
-**Failing run.** Zero timers fired on the first pass — Sub's D1 behaviour, where
+**Failing run.** Zero timer effects run on the first pass — Sub's D1 behaviour, where
 one failure rolls back the whole batch. Or the poison timer retrying forever
 with no `attempts` ceiling. Or the 19 good timers emitting twice because the
 batch was retried wholesale.
@@ -1142,7 +1242,7 @@ statement; no `BYPASSRLS`.
 
 **Pass.** From A's context: only A's rows are visible; a direct
 `SELECT`/`UPDATE`/`DELETE` naming B's row id affects **exactly zero** rows;
-firing A's timer leaves B's `status` unchanged; both tenants hold a
+accepting A's timer leaves B's current state unchanged; both tenants hold a
 `'scheduled'` timer for the identical identity simultaneously, proving the
 partial unique is `(tenant_id, …)` and not `(…)`. Assert inside the test that
 `current_user = 'app_user'` and that `pg_class.relforcerowsecurity` is true for
@@ -1156,7 +1256,7 @@ which means `tenant_id` was left out of the key.
 
 ### Proof 9 — platform-plane revocation and reachability
 
-**Setup.** A configured platform timer with one firing and one emitted trigger.
+**Setup.** A configured platform timer with one accepted outbox trigger.
 
 **Mechanism.** As `app_user`, attempt `SELECT`, `INSERT`, `UPDATE`, `DELETE`
 against every declared platform table, **and a column-level `SELECT` of each
@@ -1187,16 +1287,17 @@ scope from **one shared test body** — a fixture returning
 one plane. Assert the parameterisation count is exactly twice the case count.
 
 **Pass, parity.** Identical inputs produce identical generation sequences,
-identical staleness verdicts, identical cancellation outcomes and identical
-retry behaviour on both planes.
+identical staleness verdicts and identical cancellation outcomes on both
+planes; module-created events traverse the corresponding kernel relay with the
+same claim/retry/dead-letter policy.
 
-**Pass, no clock.** Drive the whole suite with `due_at` and scan instants in a
+**Pass, no clock.** Drive the whole suite with `due_at`, `recorded_at` and
+acceptance instants in a
 period unrelated to today (e.g. 2029), and assert the outputs are byte-identical
 to a run where they coincide with the real clock. Pair it with a static guard —
 an architecture test asserting the capability's source contains no
-`date.today`, `datetime.now`, `datetime.utcnow` or `time.time` outside the
-adapter entry point — with its own sensitivity proof, since a check over an
-empty set passes for the wrong reason.
+`date.today`, `datetime.now`, `datetime.utcnow` or `time.time` — with its own
+sensitivity proof, since a check over an empty set passes for the wrong reason.
 
 **Pass, append-only.** As `app_user`, attempt to `UPDATE` a `'fired'` row's
 `generation` or `fired_at` and to `DELETE` it; assert refusal by grant
@@ -1217,43 +1318,47 @@ cross-plane foreign key.
 
 ## 12. Adoption and retirement
 
-1. **Answer §6.4 before writing code.** Kernel-resident versus ADR-0028
-   selectable module changes the migration, the plane declaration and the
-   version floor. The floor is already what blocks the Vendor CP (`a45`) and Sub
-   (`a50`) cutovers; raising it again without a decision repeats a known cost.
-2. **Land the ten proofs first.** Neither source contributes a real-database
-   timer test; Sub's suite runs where the lock does not exist. This matrix is the
-   capability's entire correctness evidence base, not an addition to an
-   inherited one.
-3. **Reuse the claiming engine; do not rewrite it.** If revision `0026` ships a
-   fresh claim loop next to `claim_outbox_batch`, the kernel has grown the second
-   scheduler ledger that ADR-0030 §4 named this owner to prevent.
-4. **Sequence Sub's cutover by consumer discipline, not volume.** Slice 1 is
+1. **Placement and prerequisite gates are met.** ADR-0017/0030 select the
+   module, P11 is met, and released kernel `0.1.0a67` publishes the structurally
+   verified `outbox_relay.v1` prerequisite.
+2. **Shared-state integration is complete at the candidate.** The timer
+   namespace, kernel metadata and root lock were rebased over the merged
+   campaigns allocation and regenerated with pinned Poetry 2.4.1 rather than
+   overwriting either owner.
+3. **The ten proofs landed first and are green.** Neither source contributes a
+   real-database timer test; Sub's suite runs where the lock does not exist.
+   The complete matrix and its sensitivity companions passed on Observer at
+   exact candidate `a3c82cd266141d80fdd0a128e74cc5b276bc04a4` before any caller
+   was touched.
+4. **Reuse the claiming engine; do not rewrite it.** The module schedules by
+   writing a kernel outbox row with `available_at = due_at`. Any module claim
+   function, timer due scan or timer dispatcher role is a boundary violation.
+5. **Sequence Sub's cutover by consumer discipline, not volume.** Slice 1 is
    `financial.walled_account_healing` — the only owner that already re-derives
    the current generation, and therefore the only one whose consumer semantics
    the module can adopt rather than invent. Slice 2 is `billing.contracts`, the
    only user of `expected_source_version`. The five owners whose consumers
    discard `generation` must each declare a staleness discipline before they are
    touched.
-5. **Treat `collections.lifecycle` as a repair, not a cutover.** It emits
+6. **Treat `collections.lifecycle` as a repair, not a cutover.** It emits
    `collections.case_action_due` with no consumer anywhere, from a class no
    production path calls. It needs a consumer or a deletion before "cutting it
    over" means anything.
-6. **Sub's cutover is not complete until the sweeps are gone.**
+7. **Sub's cutover is not complete until the sweeps are gone.**
    `dunning_runner` (`scheduler_config.py:719`) and `prepaid_balance_sweep`
    (`:741`) are the `fallback_retirement` Sub's own registry records as unmet.
    Until they are removed, the fleet is running a timer *and* a rescan for the
    same deadlines.
-7. **`dotmac_crm` is the second adopter and a genuine retirement.**
+8. **`dotmac_crm` is the second adopter and a genuine retirement.**
    `crm_response_obligations`' `next_escalation_at` drain
    (`services/crm/inbox/response_obligations.py:383-471`) is a per-entity
    scheduler ledger. Retire the drain; keep the obligation row, which carries
    escalation policy the module must never learn.
-8. **Backfill only `'scheduled'` rows.** Fired history has no retention policy in
+9. **Backfill only `'scheduled'` rows.** Fired history has no retention policy in
    Sub (D11); copying it imports an unbounded table into every adopter database.
    And note the attribution problem: Sub's rows carry no `tenant_id`, so every
    backfilled row needs a decided tenant with no source column to derive it from.
-9. **A green suite is not a cutover.** A local writer is deleted only after its
+10. **A green suite is not a cutover.** A local writer is deleted only after its
    two-directional import/caller ratchet reaches zero in that repository, the
    shadow divergence classes in §10's `shadow_and_drift` have each been
    adjudicated, and the legacy scan it replaces has been removed from the

@@ -75,6 +75,16 @@ rotation traffic through a provider-neutral observer without importing or
 branching on a connector. SPI 1.1's boolean result remains accepted and is
 adapted to evidence with no positions, so honest ``>=1.0,<2.0`` connectors keep
 working unchanged.
+
+## SPI 1.3 declares the runtime boundary
+
+A connector now declares its named secret bindings and exact external DNS
+destinations in the same manifest as its executable contract. The Integrator
+projects those declarations into deployment policy; it does not maintain a
+provider allowlist of its own. Both declarations are explicit, so an empty
+egress tuple means DENY ALL rather than "not configured". SPI 1.2 manifests
+remain readable during adoption and retain their persisted digest, but a
+connector whose minimum SPI is 1.3 cannot omit either declaration.
 """
 
 from __future__ import annotations
@@ -101,6 +111,7 @@ __all__ = [
     "DeliveryPlugin",
     "Diagnostic",
     "DispatchRequest",
+    "EgressDeclaration",
     "InboundDisposition",
     "InboundEvent",
     "IngressHandler",
@@ -113,6 +124,7 @@ __all__ = [
     "ModeNotDeclaredError",
     "PollHandler",
     "PollPlugin",
+    "SecretBindingDeclaration",
     "SpiIncompatibleError",
     "SpiRange",
     "SpiVersion",
@@ -166,6 +178,14 @@ _DIAGNOSTIC_CODE_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}
 #: connector may implement independently.
 _CAPABILITY_RE: Final[re.Pattern[str]] = re.compile(
     r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+\.v[1-9][0-9]*$"
+)
+_SECRET_BINDING_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
+#: Exact, lower-case DNS hostnames only. No URL, path, wildcard, IP literal or
+#: trailing root dot: each of those broadens what an allowlist entry means.
+_EGRESS_HOST_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?=.{1,253}\Z)"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"
 )
 #: `type/subtype`, optionally with a charset. Anchored and character-restricted
 #: because this string is written into a RESPONSE HEADER: an unvalidated one
@@ -226,8 +246,9 @@ class SpiVersion:
 # protocol, a poll protocol, and the verification that a declared mode is real.
 # A major bump would have excluded every honest `>=1.0,<2.0` delivery connector
 # in order to protect a compatibility promise nothing ever consumed. SPI 1.2
-# then added verification evidence without changing the handler protocols.
-CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 2)
+# then added verification evidence without changing the handler protocols. SPI
+# 1.3 adds deployment declarations while keeping every handler protocol intact.
+CURRENT_SPI_VERSION: Final[SpiVersion] = SpiVersion(1, 3)
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,6 +320,50 @@ class CapabilityDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class SecretBindingDeclaration:
+    """One logical secret binding a connector needs.
+
+    ``name`` identifies the PURPOSE, never a value or an OpenBao path. A
+    deployment binds that name to a reference and proves separately that only
+    the Integrator workload identity can dereference the resulting path.
+    """
+
+    name: str
+    required: bool = True
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        if not _SECRET_BINDING_RE.fullmatch(self.name):
+            raise InvalidManifestError(
+                f"secret binding name {self.name!r} must be lower snake_case"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class EgressDeclaration:
+    """Exact provider hosts the connector may reach.
+
+    The empty tuple is an explicit DENY-ALL policy. Installation-provided hosts
+    are deliberately absent: a mutable configuration value is not a manifest
+    declaration and would let an operator widen reachability without installing
+    a reviewed connector release.
+    """
+
+    hosts: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        seen: set[str] = set()
+        for host in self.hosts:
+            if not _EGRESS_HOST_RE.fullmatch(host):
+                raise InvalidManifestError(
+                    f"egress host {host!r} must be an exact lower-case DNS hostname"
+                )
+            if host in seen:
+                raise InvalidManifestError(f"egress host {host!r} is declared twice")
+            seen.add(host)
+
+
+@dataclass(frozen=True, slots=True)
 class ConnectorManifest:
     """What one connector distribution publishes about itself."""
 
@@ -306,6 +371,12 @@ class ConnectorManifest:
     version: str
     spi_range: SpiRange
     capabilities: tuple[CapabilityDeclaration, ...]
+    # ``None`` means a pre-1.3 legacy manifest during its bounded adoption
+    # window. Empty tuples/hosts mean the current contract explicitly needs no
+    # secret and no provider egress; conflating those states would make deny-all
+    # indistinguishable from an omitted policy.
+    secret_bindings: tuple[SecretBindingDeclaration, ...] | None = None
+    egress: EgressDeclaration | None = None
 
     def __post_init__(self) -> None:
         if not _KEY_RE.fullmatch(self.connector_key):
@@ -322,6 +393,27 @@ class ConnectorManifest:
                 f"connector {self.connector_key!r} declares no capabilities — a "
                 "connector that implements nothing cannot be bound to anything"
             )
+        if (self.secret_bindings is None) != (self.egress is None):
+            raise InvalidManifestError(
+                f"connector {self.connector_key!r} must declare secret bindings "
+                "and egress together"
+            )
+        if (
+            self.spi_range.minimum >= SpiVersion(1, 3)
+            and not self.declares_runtime_boundaries
+        ):
+            raise InvalidManifestError(
+                f"connector {self.connector_key!r} targets SPI >=1.3 but omits "
+                "its runtime boundaries"
+            )
+        secret_names: set[str] = set()
+        for binding in self.secret_bindings or ():
+            if binding.name in secret_names:
+                raise InvalidManifestError(
+                    f"connector {self.connector_key!r} declares secret binding "
+                    f"{binding.name!r} twice"
+                )
+            secret_names.add(binding.name)
         seen: set[str] = set()
         for capability in self.capabilities:
             if capability.capability_id in seen:
@@ -341,15 +433,37 @@ class ConnectorManifest:
         """
         import hashlib
 
-        material = "|".join(
-            (
-                self.connector_key,
-                self.version,
-                str(self.spi_range),
-                ",".join(sorted(self.capability_ids)),
+        fields = [
+            self.connector_key,
+            self.version,
+            str(self.spi_range),
+            ",".join(sorted(self.capability_ids)),
+        ]
+        if self.declares_runtime_boundaries:
+            # Description text is documentation, not policy. Names,
+            # requiredness and destinations are the reviewable contract and
+            # therefore change every installation pin when they change.
+            fields.extend(
+                (
+                    "secrets="
+                    + ",".join(
+                        f"{binding.name}:{int(binding.required)}"
+                        for binding in sorted(
+                            self.secret_bindings or (), key=lambda item: item.name
+                        )
+                    ),
+                    "egress="
+                    + ",".join(sorted((self.egress or EgressDeclaration()).hosts)),
+                )
             )
-        )
+        material = "|".join(fields)
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+    @property
+    def declares_runtime_boundaries(self) -> bool:
+        """Whether omission has been retired in favour of explicit deny-all."""
+
+        return self.secret_bindings is not None and self.egress is not None
 
     @property
     def capability_ids(self) -> frozenset[str]:

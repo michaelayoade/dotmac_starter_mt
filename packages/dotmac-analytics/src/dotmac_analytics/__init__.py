@@ -1,0 +1,72 @@
+"""Public surface for the reusable Dotmac analytics projection owner."""
+
+from dotmac_analytics.contracts import (
+    MAX_BATCH_POINTS,
+    MAX_HISTORY_POINTS,
+    AnalyticsError,
+    DimensionKind,
+    DimensionSpec,
+    DimensionValue,
+    DuplicateMetricDeclaration,
+    IngestResult,
+    InvalidAnalyticsContract,
+    MetricComparison,
+    MetricDeclaration,
+    MetricDeclarationRegistry,
+    MetricGranularity,
+    MetricIdentityConflict,
+    MetricPointInput,
+    MetricSelector,
+    MetricValue,
+    MetricValueKind,
+    ProjectionRebuildResult,
+    RecordMetricBatchCommand,
+    SourceProvenance,
+    UnknownMetricDeclaration,
+)
+from dotmac_analytics.manifest import module
+from dotmac_analytics.migrations import versions_dir
+from dotmac_analytics.service import (
+    compare_periods,
+    get_history,
+    get_latest,
+    projection_digest,
+    rebuild_projection,
+    record_batch,
+)
+
+__version__ = "0.1.0a1"
+
+__all__ = [
+    "MAX_BATCH_POINTS",
+    "MAX_HISTORY_POINTS",
+    "AnalyticsError",
+    "DimensionKind",
+    "DimensionSpec",
+    "DimensionValue",
+    "DuplicateMetricDeclaration",
+    "IngestResult",
+    "InvalidAnalyticsContract",
+    "MetricComparison",
+    "MetricDeclaration",
+    "MetricDeclarationRegistry",
+    "MetricGranularity",
+    "MetricIdentityConflict",
+    "MetricPointInput",
+    "MetricSelector",
+    "MetricValue",
+    "MetricValueKind",
+    "ProjectionRebuildResult",
+    "RecordMetricBatchCommand",
+    "SourceProvenance",
+    "UnknownMetricDeclaration",
+    "__version__",
+    "module",
+    "compare_periods",
+    "get_history",
+    "get_latest",
+    "projection_digest",
+    "rebuild_projection",
+    "record_batch",
+    "versions_dir",
+]

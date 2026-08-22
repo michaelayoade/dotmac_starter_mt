@@ -128,6 +128,39 @@ DISTRIBUTIONS: dict[str, Path] = {
     "dotmac-files": (
         REPO_ROOT / "packages/dotmac-files/src/dotmac_files/migrations/versions"
     ),
+    "dotmac-forms": (
+        REPO_ROOT / "packages/dotmac-forms/src/dotmac_forms" / "migrations/versions"
+    ),
+    "dotmac-workflow-runtime": (
+        REPO_ROOT
+        / "packages/dotmac-workflow-runtime/src/dotmac_workflow_runtime"
+        / "migrations/versions"
+    ),
+    "dotmac-platform-health": (
+        REPO_ROOT
+        / "packages/dotmac-platform-health/src/dotmac_platform_health"
+        / "migrations/versions"
+    ),
+    "dotmac-support-access": (
+        REPO_ROOT
+        / "packages/dotmac-support-access/src/dotmac_support_access"
+        / "migrations/versions"
+    ),
+    "dotmac-remote-access": (
+        REPO_ROOT
+        / "packages/dotmac-remote-access/src/dotmac_remote_access"
+        / "migrations/versions"
+    ),
+    "dotmac-compliance-reporting": (
+        REPO_ROOT
+        / "packages/dotmac-compliance-reporting/src/dotmac_compliance_reporting"
+        / "migrations/versions"
+    ),
+    "dotmac-ai-operations": (
+        REPO_ROOT
+        / "packages/dotmac-ai-operations/src/dotmac_ai_operations"
+        / "migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -138,6 +171,13 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-integration": "ig_*.py",
     "dotmac-entitlement-allocation": "ea_*.py",
     "dotmac-files": "fi_*.py",
+    "dotmac-forms": "fm_*.py",
+    "dotmac-workflow-runtime": "wr_*.py",
+    "dotmac-platform-health": "ph_*.py",
+    "dotmac-support-access": "sup_*.py",
+    "dotmac-remote-access": "ra_*.py",
+    "dotmac-compliance-reporting": "cr_*.py",
+    "dotmac-ai-operations": "ao_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -480,6 +520,91 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # a10 adds SPI 1.3 runtime declarations and changes no migration bytes.
+    # The release workflow installed the exact wheel from the private index,
+    # registered its manifest and only then created this tag.
+    # a11 records the finite replay-evidence retention already on main; the
+    # migration bytes are unchanged from a10 apart from ig_0011. The release
+    # workflow installed the exact wheel from the private index, registered its
+    # manifest and only then created this tag.
+    "dotmac-integration-v0.1.0a11": (
+        "dotmac-integration",
+        "d6087285",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+            "ig_0008_platform_audit_log.py": (
+                "1e2cb215be0e71edf1af33b41cd53630ba9583168c2ff270c568483fdff15825"
+            ),
+            "ig_0009_product_port_descriptors.py": (
+                "f95ec953d0ec9d561b5d7d438d1865e817fc4d15b2178c87e5f67350a07ab2d9"
+            ),
+            "ig_0010_shadow_evidence.py": (
+                "eb897df97435c63ec4844753d8afa497391fa2eabfa0673312725995c231b4ed"
+            ),
+            "ig_0011_replay_retention.py": (
+                "96336372ac879518ad46f6657b8c81cf60afd133d500c4bc6310017f94c59b42"
+            ),
+        },
+    ),
+    "dotmac-integration-v0.1.0a10": (
+        "dotmac-integration",
+        "7a59864",
+        {
+            "ig_0001_connector_control_plane.py": (
+                "dd9d566c4708980fa4d5c5c9c13301b9d9b558ed622a15712dd98c2148d745f1"
+            ),
+            "ig_0002_execution.py": (
+                "745f1b23ccaf45964099c41b6aa5ee7a63b2623a3cf9a1c3736000046ae33d42"
+            ),
+            "ig_0003_ingress_endpoint.py": (
+                "feb1a66e2f0f1558bea00a221c02a9e1da5a4bc6536c35a93805d0681f670066"
+            ),
+            "ig_0004_destinations.py": (
+                "80da09cbb492006a3cf6334466d4c79e3ee6cce676013edfb897845b09d38201"
+            ),
+            "ig_0005_receipt_delivery.py": (
+                "b762d17591ccd877143c36a72269b083adab13ab3a57e326b20aa9dd3d99371d"
+            ),
+            "ig_0006_retention.py": (
+                "51a40ae5290e71baa2879b9bb87ea7bb06f75d5372ebdfc378eed6e836a42aaa"
+            ),
+            "ig_0007_idempotency_ledger.py": (
+                "9f6336e88e016c37d8c5a1b6d0548f8a5a91bde6e41a5093676709136c68e54b"
+            ),
+            "ig_0008_platform_audit_log.py": (
+                "1e2cb215be0e71edf1af33b41cd53630ba9583168c2ff270c568483fdff15825"
+            ),
+            "ig_0009_product_port_descriptors.py": (
+                "f95ec953d0ec9d561b5d7d438d1865e817fc4d15b2178c87e5f67350a07ab2d9"
+            ),
+            "ig_0010_shadow_evidence.py": (
+                "eb897df97435c63ec4844753d8afa497391fa2eabfa0673312725995c231b4ed"
+            ),
+            "ig_0011_replay_retention.py": (
+                "96336372ac879518ad46f6657b8c81cf60afd133d500c4bc6310017f94c59b42"
+            ),
+        },
+    ),
     # ── dotmac-entitlement-allocation ───────────────────────────────────────
     #
     # Four tags, one migration, one digest. `ea_0001` has not moved a byte
@@ -559,6 +684,89 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    "dotmac-files-v0.1.0a3": (
+        "dotmac-files",
+        "c6ef6cd",
+        {
+            "fi_0001_stored_files.py": (
+                "58976eab44ccfaaa77af255c52f92ef333e650e89ee3f6808211820b3c3b4fd0"
+            ),
+            "fi_0002_selectable_planes.py": (
+                "9cdaf0da282402777d6c2e694c60d29f8078a0d48c64211e9a6a67dc1ac05581"
+            ),
+        },
+    ),
+    # ── the ADR-0040 composable-unit cohort ─────────────────────────────────
+    #
+    # Seven modules published in one serial series on 2026-08-22, each from the
+    # same protected-main revision, each composition-checked against every
+    # sibling already published and kernel 0.1.0a88. Enrolled here at their
+    # FIRST release rather than after an in-place edit forced the issue, which
+    # is the only cheap moment to do it: one migration, one digest, no history
+    # to reconstruct and no divergence to grandfather.
+    "dotmac-forms-v0.1.0a1": (
+        "dotmac-forms",
+        "8f52abc",
+        {
+            "fm_0001_forms.py": (
+                "0778d4f950acf049851c6876dcd5d34bb6ef23f37a4dcc35c6af38af3e6b8267"
+            ),
+        },
+    ),
+    "dotmac-workflow-runtime-v0.1.0a1": (
+        "dotmac-workflow-runtime",
+        "8f52abc",
+        {
+            "wr_0001_runtime.py": (
+                "f959ef451f951e8c1bf314f8e1e4438731685f5aaf040c8a01bae4da3bb8311f"
+            ),
+        },
+    ),
+    "dotmac-platform-health-v0.1.0a1": (
+        "dotmac-platform-health",
+        "8f52abc",
+        {
+            "ph_0001_platform_health.py": (
+                "ed2be6b9a295f0e5a25f45c8d32e4168a33a25ecc4a59a69b0633606c1d52b9e"
+            ),
+        },
+    ),
+    "dotmac-support-access-v0.1.0a1": (
+        "dotmac-support-access",
+        "8f52abc",
+        {
+            "sup_0001_support_access.py": (
+                "22b75f92e04756cf05bffce76e303b06a7afbb3170b527f180477657351890a9"
+            ),
+        },
+    ),
+    "dotmac-remote-access-v0.1.0a1": (
+        "dotmac-remote-access",
+        "8f52abc",
+        {
+            "ra_0001_remote_access.py": (
+                "8958e4cb85ac62a1c923a62b7a4b4b25691e32a085dc81639f5f642b283f377a"
+            ),
+        },
+    ),
+    "dotmac-compliance-reporting-v0.1.0a1": (
+        "dotmac-compliance-reporting",
+        "8f52abc",
+        {
+            "cr_0001_compliance_reporting.py": (
+                "82e16095b9ae50f397010657755fb95b18444052aca9222490f0c2dd6a7fcf31"
+            ),
+        },
+    ),
+    "dotmac-ai-operations-v0.1.0a1": (
+        "dotmac-ai-operations",
+        "8f52abc",
+        {
+            "ao_0001_ai_operations.py": (
+                "211d35dfd814d6c93a5e984053c60a1a2444c176b5aa8d08066261f9cfd96538"
+            ),
+        },
+    ),
 }
 
 
@@ -616,7 +824,7 @@ GRANDFATHERED_DIVERGENCES: dict[tuple[str, str], GrandfatheredDivergence] = {
 #: migration must be named here, and a file may only move from here into
 #: `RELEASED_TAGS` — never the other way, and never out of both.
 #:
-#: Approvals a5, Integration a9 and Allocation a6 are published, so their
+#: Approvals a5, Integration a10, Allocation a6 and Files a3 are published, so their
 #: editable sets are empty; the next migration must enter this map before it
 #: can ship. The release lane does not wait for an open branch, which is why
 #: "released" is read from tags rather than from an intended version number.
@@ -624,7 +832,14 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-approvals": frozenset(),
     "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
-    "dotmac-files": frozenset({"fi_0002_selectable_planes.py"}),
+    "dotmac-files": frozenset(),
+    "dotmac-forms": frozenset(),
+    "dotmac-workflow-runtime": frozenset(),
+    "dotmac-platform-health": frozenset(),
+    "dotmac-support-access": frozenset(),
+    "dotmac-remote-access": frozenset(),
+    "dotmac-compliance-reporting": frozenset(),
+    "dotmac-ai-operations": frozenset(),
 }
 
 

@@ -33,14 +33,63 @@ on:
         required: true
         type: choice
         options:
-          - dotmac-release-catalog
-          - dotmac-entitlement-allocation
-          - dotmac-files
-          - dotmac-ticketing
-          - dotmac-numbering
-          - dotmac-integration
-          - dotmac-approvals
+          - dotmac-accounting
+          - dotmac-ai-operations
+          - dotmac-analytics
           - dotmac-application-directory
+          - dotmac-approvals
+          - dotmac-assets
+          - dotmac-banking
+          - dotmac-brand-profiles
+          - dotmac-campaigns
+          - dotmac-commercial-agreements
+          - dotmac-compliance-reporting
+          - dotmac-content
+          - dotmac-deployment-control
+          - dotmac-documents
+          - dotmac-durable-timers
+          - dotmac-entitlement-allocation
+          - dotmac-expenses
+          - dotmac-fiber-plant
+          - dotmac-files
+          - dotmac-finance
+          - dotmac-forms
+          - dotmac-inbox
+          - dotmac-integration
+          - dotmac-inventory
+          - dotmac-ipam
+          - dotmac-licensing
+          - dotmac-media-observations
+          - dotmac-network-access
+          - dotmac-network-assurance
+          - dotmac-network-control
+          - dotmac-network-inventory
+          - dotmac-network-observability
+          - dotmac-network-topology
+          - dotmac-numbering
+          - dotmac-party
+          - dotmac-payables
+          - dotmac-payroll
+          - dotmac-people
+          - dotmac-platform-health
+          - dotmac-pon-access
+          - dotmac-positioning
+          - dotmac-procurement
+          - dotmac-projects
+          - dotmac-publishing
+          - dotmac-records
+          - dotmac-referrals
+          - dotmac-release-catalog
+          - dotmac-remote-access
+          - dotmac-reseller-management
+          - dotmac-sites
+          - dotmac-support-access
+          - dotmac-surveys
+          - dotmac-tax
+          - dotmac-ticketing
+          - dotmac-web-analytics
+          - dotmac-work-orders
+          - dotmac-workflow-runtime
       version:
         description: "The already-published version to recover, e.g. 0.1.0a1"
         required: true

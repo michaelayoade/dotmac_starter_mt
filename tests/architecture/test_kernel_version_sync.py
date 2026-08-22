@@ -24,6 +24,8 @@ together — which is the failure this test exists to catch.
 
 from __future__ import annotations
 
+import importlib.util
+import itertools
 import json
 import re
 import tomllib
@@ -74,21 +76,67 @@ def test_the_version_is_a_pep440_release_or_prerelease() -> None:
 # unable to say which a42 it pinned, so the vendor modules renumbered to a44/a45
 # rather than the foundations renumbering around them.
 #
-# EMPTY today, and that is a fact about the fleet rather than an oversight:
-# every releasable module has now outlived its own allocation floor. The last
-# occupant was `dotmac-integration`, which held a58 — its own ledger row,
-# higher than `platform_tables` (a53) and the a56 prerequisite contract — until
-# integration `0.1.0a4` declared `idempotency_ledger.v1` and moved to a66.
-#
-# An empty map is a parametrize over nothing, and a test that collects nothing
-# passes for the wrong reason. `test_every_releasable_module_has_a_floor_rule`
-# below is what keeps this map watched while it is empty: a module may not be
-# absent from BOTH maps, so emptying this one is only ever safe because the
-# other one grew.
+# People consumes no kernel feature newer than its allocation release. If it
+# adopts a newer capability, move its row to CAPABILITY_RAISED_FLOORS while
+# retaining the allocation release as evidence there. Durable timers was
+# allocated in a72. Immutable a73 belongs to the caller-session transaction
+# release, a74-a77 to the vendor cohort, a78-a81 to the marketing cohort, and
+# referrals and reseller management are ALLOCATED in a84 — never published,
+# so they sit in UNPUBLISHED_ALLOCATION_FLOORS rather than here — and the
+# consolidated ERP/Backoffice/general allocation follows in a85.
 LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
+    "dotmac-forms": "0.1.0a88",
+    "dotmac-platform-health": "0.1.0a88",
+    "dotmac-support-access": "0.1.0a88",
+    "dotmac-ai-operations": "0.1.0a88",
+    "dotmac-compliance-reporting": "0.1.0a88",
+    "dotmac-remote-access": "0.1.0a88",
+    "dotmac-accounting": "0.1.0a85",
+    "dotmac-analytics": "0.1.0a85",
+    "dotmac-banking": "0.1.0a85",
+    "dotmac-documents": "0.1.0a85",
+    "dotmac-expenses": "0.1.0a85",
+    "dotmac-finance": "0.1.0a85",
+    "dotmac-inbox": "0.1.0a85",
+    "dotmac-party": "0.1.0a85",
+    "dotmac-payables": "0.1.0a85",
+    "dotmac-payroll": "0.1.0a85",
+    "dotmac-people": "0.1.0a71",
+    "dotmac-procurement": "0.1.0a85",
+    "dotmac-projects": "0.1.0a85",
+    "dotmac-records": "0.1.0a85",
+    "dotmac-surveys": "0.1.0a85",
+    "dotmac-tax": "0.1.0a85",
+    "dotmac-work-orders": "0.1.0a85",
+    "dotmac-workflow-runtime": "0.1.0a88",
     # ADR-0026 allocated `mod_approvals` in a59; the corrected explicit
     # plane-selection contract lands in a61, so its row lives in
     # CAPABILITY_RAISED_FLOORS below rather than here.
+    # Durable timers consumes a67's relay contract, but its own namespace is
+    # allocated later, so the allocation remains the effective floor.
+    "dotmac-durable-timers": "0.1.0a72",
+    # Brand profiles is the ordinary case for a fourth time: `BRAND_PROFILES_
+    # MIGRATION_OWNER` and this module landed in the same a77 change, and every
+    # capability it consumes — `platform_tables` (a53), the prerequisite
+    # contract (a56), `supported_plane_sets` (a61) — predates that allocation.
+    # Its three siblings from the same ADR-0033 cohort do NOT sit here; see
+    # UNPUBLISHED_ALLOCATION_FLOORS below for why an allocation can fail to be
+    # a floor.
+    "dotmac-brand-profiles": "0.1.0a77",
+    # Sites is the marketing cohort tip: a81 both allocates its lineage and is
+    # the first installable kernel carrying all four marketing allocations.
+    "dotmac-sites": "0.1.0a81",
+    # The network cohort is NOT here: a82 minted all eleven allocations but was
+    # never published, so their floor is a83 and their rows live in
+    # UNPUBLISHED_ALLOCATION_FLOORS below.
+    # Positioning is the ordinary case once more: a83 allocates `pos`/`po` and
+    # every capability it consumes — `requires` (a56), the two prerequisite
+    # names — predates that allocation, so the ledger row alone sets the floor.
+    "dotmac-positioning": "0.1.0a83",
+    # Web Analytics owns a fresh tenant-only lineage and consumes only the
+    # prerequisite contract that predates its a84 allocation. Its ledger row
+    # is therefore the effective floor.
+    "dotmac-web-analytics": "0.1.0a86",
 }
 
 # The exceptions: a module whose floor is set by a kernel CAPABILITY it consumes
@@ -100,6 +148,13 @@ LEDGER_ALLOCATION_RELEASES: dict[str, str] = {
 # from the one above: an unlisted module is an untested floor, and "this one is
 # special" has to say why.
 CAPABILITY_RAISED_FLOORS = {
+    # Immutable tag inspection is the evidence here: a71's changelog described
+    # the campaign allocation early, but CAMPAIGNS_MIGRATION_OWNER first exists
+    # in published tag a72. a73 is the operative floor because Sub-first
+    # adoption invokes consent, idempotency and delivery with Sub's assembly-
+    # owned Session; before a73 those services imported dotmac_kernel.db and
+    # constructed a second engine/session runtime.
+    "dotmac-campaigns": ("0.1.0a73", "0.1.0a72"),
     # ADR-0006 D1 amendment: every lineage below declares `ModuleManifest
     # .requires` and its root calls `resolve_depends_on` /
     # `require_prerequisites`. All three arrived in a56, so a kernel below that
@@ -199,6 +254,113 @@ CAPABILITY_RAISED_FLOORS = {
     "dotmac-entitlement-allocation": ("0.1.0a68", "0.1.0a45"),
 }
 
+# The third rule, and the one the other two maps cannot state: a module whose
+# own allocation IS the highest thing it needs, in a kernel release that was
+# never published.
+#
+# `dotmac-release-catalog`'s entry above already records the operative test —
+# "earliest PUBLISHED", not "earliest" — but it applies it to a CAPABILITY
+# (`platform_tables`, source a53, first installable a56). These three apply it
+# to the allocation itself. Putting them in CAPABILITY_RAISED_FLOORS would
+# assert a capability raised them and none did; putting them in
+# LEDGER_ALLOCATION_RELEASES would assert `floor == allocation` and pin three
+# versions no installer can resolve. So they get a map that says the true
+# reason, which is this file's standing preference over a stretched one.
+#
+# The ADR-0033 cohort was built as four stacked pull requests, each bumping the
+# kernel to carry its own ledger row: a74 (`cg`), a75 (`li`), a76 (`dc`), a77
+# (`bp`). Only the tip was releasable — a kernel release publishes ONE version,
+# and a74..a76 exist as changelog history rather than as artifacts, exactly as
+# a53..a55 do. a77 is therefore the first installable kernel carrying any of
+# these four allocations, which makes it the floor of all four rather than of
+# the last one.
+#
+# The marketing cohort follows the same rule: a78 (`mo`), a79 (`ct`), a80
+# (`pb`) and a81 (`si`). a78..a80 are allocation history, while a81 is the first
+# kernel artifact that can load any member. Sites sits in the ordinary map
+# because its allocation equals that floor; the first three sit here because
+# their source allocations are necessarily unpublished.
+#
+# Each value is (floor, allocation). Unlike the map above, the gap is not a
+# consumer break: no released version of these modules ever floored at a74..a76,
+# because none of them has been released at all.
+UNPUBLISHED_ALLOCATION_FLOORS = {
+    # The ADR-0040 pair, and the shortest possible instance of this rule: a84
+    # allocates `rf` and `rm` and nothing else, and a85 — the consolidated
+    # ERP/Backoffice/general allocation — landed on `main` and was published
+    # before a84 was ever dispatched. So a84 is allocation history, exactly as
+    # a53..a55, a74..a76, a78..a80 and a82 are, and a85 is the first kernel
+    # artifact that can register either module. Both modules pinned `>=0.1.0a84`
+    # while sitting in LEDGER_ALLOCATION_RELEASES, which asserted only that the
+    # pin equals the allocation and never that the allocation is installable —
+    # so the floor named a version no installer can resolve and every gate
+    # stayed green. Moving them here is what puts them under the tag-backed
+    # `skipped` check below.
+    # The ADR-0036/0037/0038 network cohort: eleven allocations minted together
+    # in a82, which the kernel changelog itself records as NOT PUBLISHED
+    # SEPARATELY; INCLUDED IN 0.1.0a83. a83 allocated positioning on top and is
+    # the first kernel ARTIFACT carrying any of the eleven, so it is the floor of
+    # all eleven — exactly the a74..a76 -> a77 and a78..a80 -> a81 shape above.
+    # They sat in LEDGER_ALLOCATION_RELEASES pinned to a82, where the assertion
+    # is only that the pin equals the allocation; nothing asked whether a82 was
+    # installable, so eleven packages declared an unresolvable floor and every
+    # gate passed.
+    "dotmac-inventory": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-assets": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-ipam": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-inventory": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-observability": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-topology": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-assurance": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-control": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-fiber-plant": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-network-access": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-pon-access": ("0.1.0a83", "0.1.0a82"),
+    "dotmac-referrals": ("0.1.0a85", "0.1.0a84"),
+    "dotmac-reseller-management": ("0.1.0a85", "0.1.0a84"),
+    "dotmac-commercial-agreements": ("0.1.0a77", "0.1.0a74"),
+    "dotmac-licensing": ("0.1.0a77", "0.1.0a75"),
+    "dotmac-deployment-control": ("0.1.0a77", "0.1.0a76"),
+    "dotmac-media-observations": ("0.1.0a81", "0.1.0a78"),
+    "dotmac-content": ("0.1.0a81", "0.1.0a79"),
+    "dotmac-publishing": ("0.1.0a81", "0.1.0a80"),
+}
+
+
+# A stateless module owns no lineage, so it has no namespace allocation from
+# which to derive a floor. Its floor is the first kernel release exporting the
+# newest capability it imports. Keeping this separate from the allocation maps
+# avoids inventing a namespace merely to fit their shape.
+STATELESS_CAPABILITY_FLOORS: dict[str, str] = {
+    # `dotmac_kernel.fingerprints` entered kernel SOURCE at a87 but first
+    # SHIPPED in a88: a87 was never dispatched ("NOT PUBLISHED SEPARATELY;
+    # INCLUDED IN 0.1.0a88") and carries no tag. A floor must name an
+    # installable release, so it is a88. Importing the legacy re-export from
+    # `dotmac_kernel.idempotency` would instead pull the database-backed ledger
+    # across Document Rendering's persistence-free boundary.
+    "dotmac-document-rendering": "0.1.0a88",
+}
+
+
+@pytest.mark.parametrize(
+    ("distribution", "floor"), sorted(STATELESS_CAPABILITY_FLOORS.items())
+)
+def test_a_stateless_module_floors_on_the_capability_it_imports(
+    distribution: str, floor: str
+) -> None:
+    """Pin the capability floor and enforce the no-lineage premise."""
+    package_dir = PACKAGES / distribution
+    manifest = tomllib.loads(
+        (package_dir / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == f">={floor}"
+
+    migrations = sorted(package_dir.glob("src/*/migrations"))
+    assert not migrations, (
+        f"{distribution} now ships a lineage at {migrations}; move its floor "
+        "to an allocation-backed rule"
+    )
+
 
 def _alpha(release: str) -> int:
     """The alpha serial from `0.1.0aNN`.
@@ -256,21 +418,100 @@ def test_a_capability_raised_floor_is_above_its_allocation(
     )
 
 
+def _kernel_tag_serials() -> set[int]:
+    """Every PUBLISHED kernel alpha serial, read from immutable tags.
+
+    Reuses the publication sweep's tag reader rather than a second
+    `git tag` of its own, so "what is published" has one answer in this
+    repository. A refusal is a FAILURE, never a skip: `actions/checkout`
+    fetches no tags by default, and a tag-blind version of this test would
+    report green while comparing an empty set against everything — the exact
+    hole `test_declared_publication.py` documents having had.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "declared_publication_sweep",
+        PACKAGES.parent / "scripts" / "declared_publication_sweep.py",
+    )
+    assert spec is not None and spec.loader is not None
+    sweep = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sweep)
+    tags = sweep.git_tags()
+    serials = {
+        int(match.group(1))
+        for tag in tags
+        if (match := re.fullmatch(r"dotmac-kernel-v0\.1\.0a(\d+)", tag))
+    }
+    assert serials, (
+        "no dotmac-kernel-v0.1.0a* tag is visible, so this test would pass by "
+        "seeing nothing. Fetch tags (`git fetch --tags`) — a tag-blind run is "
+        "a hole, not a pass"
+    )
+    return serials
+
+
+@pytest.mark.parametrize(
+    ("distribution", "floors"), sorted(UNPUBLISHED_ALLOCATION_FLOORS.items())
+)
+def test_an_unpublished_allocation_rounds_up_to_the_first_installable_kernel(
+    distribution: str, floors: tuple[str, str]
+) -> None:
+    """The third rule, proven against tags rather than against prose.
+
+    Two halves, and the second is the one that matters. The first says the
+    module pins the floor. The second says the floor is honestly derived: NO
+    kernel was ever published in `[allocation, floor)`, so rounding up was
+    forced rather than chosen. Without it the map would accept any floor above
+    the allocation, which is how a module quietly acquires a floor higher than
+    it needs and stops installing on kernels that would have run it perfectly.
+    """
+    floor, allocation = floors
+    manifest = tomllib.loads(
+        (PACKAGES / distribution / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert manifest["tool"]["poetry"]["dependencies"]["dotmac-kernel"] == f">={floor}"
+    assert _alpha(floor) > _alpha(allocation), (
+        f"{distribution}'s floor {floor} is not above its allocation "
+        f"{allocation}; if the allocation IS installable this row belongs in "
+        "LEDGER_ALLOCATION_RELEASES"
+    )
+    lower, upper = _alpha(allocation), _alpha(floor)
+    skipped = sorted(s for s in _kernel_tag_serials() if lower <= s < upper)
+    assert not skipped, (
+        f"{distribution} floors at {floor} but kernel 0.1.0a{skipped[0]} is "
+        f"published and already carries the {allocation} allocation — the floor "
+        "must name the FIRST installable kernel, not a later one"
+    )
+
+
 def test_a_module_has_exactly_one_floor_rule() -> None:
-    """The two maps must not overlap, or a module's floor has two answers."""
-    assert not set(LEDGER_ALLOCATION_RELEASES) & set(CAPABILITY_RAISED_FLOORS)
+    """The maps must not overlap, or a module's floor has more than one answer.
+
+    Checked pairwise rather than by summing three lengths against a set: a
+    module listed in all three would leave the totals wrong in a way that is
+    obvious, but one listed in two of three is the realistic mistake and the
+    pairwise form names which two.
+    """
+    maps = {
+        "LEDGER_ALLOCATION_RELEASES": set(LEDGER_ALLOCATION_RELEASES),
+        "CAPABILITY_RAISED_FLOORS": set(CAPABILITY_RAISED_FLOORS),
+        "UNPUBLISHED_ALLOCATION_FLOORS": set(UNPUBLISHED_ALLOCATION_FLOORS),
+        "STATELESS_CAPABILITY_FLOORS": set(STATELESS_CAPABILITY_FLOORS),
+    }
+    for left, right in itertools.combinations(sorted(maps), 2):
+        assert not maps[left] & maps[right], (
+            f"{sorted(maps[left] & maps[right])} is in both {left} and {right}; "
+            "a module's floor must have exactly one rule"
+        )
 
 
 def test_every_releasable_module_has_a_floor_rule() -> None:
     """The other half of "exactly one" — and what keeps an EMPTY map watched.
 
-    `LEDGER_ALLOCATION_RELEASES` is currently empty, so the test parametrized
-    over it collects nothing and reports green having asserted nothing. That is
-    only tolerable because a module cannot fall out of both maps: this reads
-    the release allowlist — the closed set of things that may be PUBLISHED, so
-    the set whose floors are public facts — and requires each one to be
-    somewhere. Discovery, not enumeration: adding an allowlist entry enrols it
-    here, the way `test_module_version_sync.py` already does for versions.
+    The map has been empty before, so this does not trust parametrization alone:
+    it reads the release allowlist — the closed set of things that may be
+    PUBLISHED — and requires every member to appear in exactly one floor map.
+    Discovery, not enumeration: adding an allowlist entry enrols it here, the
+    way `test_module_version_sync.py` already does for versions.
 
     The union may legitimately be a superset. `dotmac-imports` and
     `dotmac-template-studio` carry floors while still unpublishable, which is
@@ -284,7 +525,11 @@ def test_every_releasable_module_has_a_floor_rule() -> None:
     )
     assert allowlist, "the allowlist is empty; this gate would prove nothing"
     unruled = sorted(
-        allowlist - set(LEDGER_ALLOCATION_RELEASES) - set(CAPABILITY_RAISED_FLOORS)
+        allowlist
+        - set(LEDGER_ALLOCATION_RELEASES)
+        - set(CAPABILITY_RAISED_FLOORS)
+        - set(UNPUBLISHED_ALLOCATION_FLOORS)
+        - set(STATELESS_CAPABILITY_FLOORS)
     )
     assert not unruled, (
         f"releasable module(s) {unruled} have no floor rule — a module absent "
@@ -298,6 +543,8 @@ def test_every_releasable_module_has_a_floor_rule() -> None:
     sorted(
         {*LEDGER_ALLOCATION_RELEASES.values()}
         | {floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()}
+        | {floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()}
+        | set(STATELESS_CAPABILITY_FLOORS.values())
     ),
 )
 def test_each_allocation_release_is_documented(release: str) -> None:
@@ -319,6 +566,9 @@ def test_no_vendor_module_claims_an_upstream_train_version() -> None:
         *LEDGER_ALLOCATION_RELEASES.values(),
         *(floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()),
         *(allocation for _, allocation in CAPABILITY_RAISED_FLOORS.values()),
+        *(floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()),
+        *(allocation for _, allocation in UNPUBLISHED_ALLOCATION_FLOORS.values()),
+        *STATELESS_CAPABILITY_FLOORS.values(),
     }
     assert floors, "no floors to check; this gate would pass for the wrong reason"
     assert floors & contested == set()
@@ -336,6 +586,14 @@ def test_the_kernel_is_at_least_every_module_floor() -> None:
         # likely to outrun the kernel: they move when a module adopts a NEW
         # kernel feature, not once when its namespace is allocated.
         *(floor for floor, _ in CAPABILITY_RAISED_FLOORS.values()),
+        # These cannot outrun the kernel by construction — an unpublished
+        # allocation rounds UP to a published release, and the kernel is at
+        # least every release it has ever cut — but reading all three maps is
+        # what stops the assertion going quiet if a map is renamed or emptied.
+        *(floor for floor, _ in UNPUBLISHED_ALLOCATION_FLOORS.values()),
+        # Stateless modules still consume kernel capabilities even though no
+        # namespace allocation exists for them.
+        *STATELESS_CAPABILITY_FLOORS.values(),
     }
     for release in floors:
         assert _alpha(declared) >= _alpha(

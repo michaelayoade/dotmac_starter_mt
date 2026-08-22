@@ -14,7 +14,10 @@ Product-first evidence: [`imports-sources.md`](../../docs/inventories/imports-so
   fingerprint, bounded safe error detail, and an opaque result;
 - CSV decoding, alias-based column resolution, auto-mapping and preview;
 - crash-durable resumability through one locked, caller-transaction-owned chunk
-  per call.
+  per call; and
+- a large-CSV lane with streaming bounded partition creation, immutable
+  per-partition file/checksum/range descriptors, expiring atomic worker claims,
+  and a partition completion checkpoint committed with its row outcomes.
 
 ## What it does not own
 
@@ -74,6 +77,28 @@ points then hash the raw bytes they decode. There is no caller-supplied row
 sequence at apply time, so apply cannot mutate from content unrelated to the
 validated file.
 
+## Large CSVs and parallel workers
+
+The original lane remains deliberately simple for ordinary imports. For a
+large CSV, `iter_csv_partitions(...)` first streams and verifies the original
+file, then emits bounded `PartitionPayload` values. The application stores each
+payload through `dotmac-files` and calls `register_partition_plan(...)` with
+the returned immutable file ids, byte sizes and checksums. The module never
+learns a storage path or provider.
+
+Workers call `claim_partition(...)` in a short transaction. A conditional
+`SKIP LOCKED` update returns one opaque lease; an expired lease may be replaced,
+and the old token cannot settle. The worker opens only that partition and calls
+either `validate_claimed_partition(...)` (which has no applier parameter) or
+`apply_claimed_partition(...)`. The engine verifies byte size, SHA-256 and row
+count before any domain call, then commits the bounded row effects, outcomes
+and completion checkpoint together. Promotion clones the same descriptors into
+the apply run, so validated partitions cannot be silently replaced.
+
+The default partition is 200 rows and 8 MiB; both are explicit caller choices.
+The package supplies claims, not a worker-count policy. Deployments can add
+workers without putting scheduling or product vocabulary into this module.
+
 ## Transactions
 
 No function here commits or rolls back. `dotmac_kernel.db` stays the one
@@ -92,7 +117,9 @@ for content owned by `dotmac-files`.
 ## Persistence
 
 One tenant plane, schema `mod_imports`, lineage prefix `im`, kernel floor
-`0.1.0a55`. Both tables carry `tenant_id NOT NULL`, tenant-composite identity
+`0.1.0a56` (the first published release carrying the prerequisite contract).
+Assemblies compose the installed lineage through the public `versions_dir()`
+locator. All three tables carry `tenant_id NOT NULL`, tenant-composite identity
 and FORCEd RLS. No platform plane is declared: the audit found no control-plane
 import capability anywhere in the fleet, and declaring a plane no product uses
 would be speculative.
@@ -104,3 +131,7 @@ layout, but `decode` refuses it. ERP's spreadsheet readers are the source to
 port, and they arrive with ERP's cutover — with the library and the parity tests
 that make them provable — rather than as an untested optional extra shipped
 ahead of any consumer.
+
+Database extraction, PostgreSQL COPY and automatic partition-worker scaling are
+also not in this release. The durable lane is ready for a real ERP pilot; those
+optimisations require their own source evidence and measured cutover.

@@ -6,7 +6,466 @@ public-surface stability policy. Pre-1.0 (`0.x`, incl. this alpha) the surface i
 still settling — a `0.MINOR` bump may carry breaking changes, each called out
 here.
 
-## 0.1.0a70 — UNRELEASED
+## 0.1.0a90 — 2026-08-22
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `4999bc49` by release run
+`32579832544`. Publication makes the machine-credential facility
+installable; it composes or adopts no module.
+
+**Machine credentials** — an `X-Api-Key` principal that is not a person.
+Extracted product-first from `dotmac_sub` and `dotmac_erp`
+(`docs/inventories/machine-credential-sources.md`), which both authenticate
+machines with this header and **disagree about what a credential means**.
+
+### Added
+
+- `dotmac_kernel.machine_auth` — `MachinePrincipal`, `authenticate_machine`,
+  `require_machine_scope`, `hash_machine_key`, `API_KEY_HEADER`,
+  `MACHINE_KEY_SECRET_NAME`, `MachineKeyUnavailableError`.
+- `dotmac_kernel.machine_models.MachineCredential` and migration
+  `0027_machine_credentials`: `tenant_id NOT NULL`, composite uniques, RLS
+  ENABLEd *and* FORCEd with an isolation policy, and the online grants — hard
+  rule 11 in one migration.
+
+### The behaviour this facility refuses, and why
+
+Each refusal is a defect in at least one source, not a preference:
+
+- **Empty scopes authorize NOTHING.** ERP's `has_scope` returns `True` for every
+  scope when the list is empty — its own docstring calls that the grandfathered
+  default. Sub does the opposite. A credential created or migrated without
+  scopes is inert in one product and omnipotent in the other, which is the
+  single strongest argument for one owner. `scopes` is `NOT NULL` with no
+  default, so the row cannot exist without an answer.
+- **No unsalted-SHA-256 fallback.** Sub hashes with HMAC when a secret is
+  configured and plain SHA-256 when it is not, then accepts either form. The
+  comment says production always has the key — but the fallback is a property of
+  the CODE, not the environment. Here a missing key raises
+  `MachineKeyUnavailableError`: a deployment fault reported as one, not as an
+  invalid credential.
+- **A dedicated held key.** Sub derives its HMAC subkey from the
+  connector-credential encryption key, so rotating one invalidates the other.
+  This reads its own secret by name (ADR-0009: held at boot, never dereferenced
+  on the request path).
+- **No write during authentication.** Sub commits `last_used_at` — and an
+  unconditional rehash-on-use — inside a GET. There is no `last_used_at` column
+  here, so the write cannot return.
+- **No human requirement, no roles, no wildcard.** ERP refuses a credential
+  without a `person_id`; a machine is not a person wearing a service label.
+
+### Adoption is credential REISSUANCE, not a hash migration
+
+A stored digest holds neither the raw key nor material to re-key from, so no
+conversion or backfill exists. Both products must reissue. Sub's cutover is a
+migration under that gate — it holds a legacy verifier — and ERP's is
+additionally gated on resolving every active null/empty-scoped key. See the
+kernel dossier's `local_copy_retirement`.
+
+Composes and adopts no module.
+
+## 0.1.0a89 — 2026-08-22
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `17e395d3` by release run
+`32568273236`. Publication makes the provisioning participant contract and
+the four commerce lineage allocations installable; it composes or adopts no
+module.
+
+Completes the product-neutral provisioning participant contract required by
+Fulfillment, and allocates the four remaining commerce lineages. This is a new
+kernel version because a88 is published and immutable. It publishes, composes
+and adopts no module.
+
+### Added
+
+- Manifest-owned `provisioning_participants` declarations on both manifest
+  shapes, giving Fulfillment one open vocabulary without a kernel-owned fixed
+  provider list.
+- Explicit participant and tenant/platform scope identity on
+  `ProvisioningRequest`, plus `ProvisioningOutcomeEnvelope` for typed
+  asynchronous observations.
+- `ProvisioningProvider.compensate` and the closed
+  `CompensationDisposition`/`CompensationResult` response contract. A
+  participant decides whether reversal succeeded, was refused, is unsupported,
+  or requires manual work; callers never invent an inverse operation.
+- Matching deterministic fake/provider conformance coverage in
+  `dotmac_kernel.testing`.
+- `BILLING_MIGRATION_OWNER` (`mod_billing`, prefix `bi`),
+  `COLLECTIONS_MIGRATION_OWNER` (`mod_coll`, `cl`),
+  `ORDERS_MIGRATION_OWNER` (`mod_orders`, `or`) and
+  `SUBSCRIPTIONS_MIGRATION_OWNER` (`mod_subscriptions`, `su`). With `sales`,
+  allocated in a88 by the three-way `sa` arbitration, this completes the
+  sell-to-collect chain so the whole set composes against one ledger and
+  shares one floor. Recovered from a branch that carried 482 files against
+  kernel a75 and was closed rather than rebased; these four rows were its only
+  content main did not already have. Physical lineage identity only — no
+  module is composed, published or adopted by the allocation.
+
+### Changed
+
+- `ProvisioningRequest` now requires `participant_code` and explicit `Scope`.
+  This is an intentional pre-1.0 breaking change: ambient or nullable scope and
+  unowned provider identities are no longer valid inputs.
+
+## 0.1.0a88 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `8673a2d9` by release run
+`32531270821`. Publication makes these physical namespace allocations
+installable; it composes or adopts no module.
+
+Splits canonical fingerprinting out of the persistence-backed idempotency owner,
+allocates the independent tenant Fulfillment lineage, settles a three-way
+contest for one migration prefix, and allocates the six remaining ADR-0040
+capability lineages. This is a new kernel release because a86 is
+already published and immutable.
+
+### Added
+
+- `dotmac_kernel.fingerprints` — a persistence-free module holding
+  `fingerprint_of`. Stateless consumers can now use the canonical digest
+  without importing the ORM models and database-backed idempotency ledger.
+- `FULFILLMENT_MIGRATION_OWNER` — `mod_fulfillment`, revision prefix `fu`,
+  branch label `fulfillment`. This allocates physical lineage identity only;
+  it composes, publishes and adopts no Fulfillment module.
+- `SALES_MIGRATION_OWNER` (`mod_sales`, prefix `sa`),
+  `SUPPORT_ACCESS_MIGRATION_OWNER` (`mod_supportaccess`, prefix `sup`) and
+  `SERVICE_ACCESS_POLICY_MIGRATION_OWNER` (`mod_serviceaccess`, prefix `sap`).
+  Three unmerged candidate trains had each allocated `prefix="sa"`
+  independently, and every one of them was green — no check a branch runs on
+  itself can see a sibling branch, so uniqueness can only be settled in this
+  canonical ledger. Arbitrated while all three are unreleased and a rename is
+  still free: `sales` keeps `sa`, and the two access modules take three-letter
+  prefixes rather than a second two-letter pair, because `sa`/`sp`/`sc` for
+  three neighbouring access concepts is exactly the confusion a permanent
+  database identity must not carry. All three are DORMANT allocations —
+  physical lineage identity only, composing and adopting nothing.
+- The six remaining ADR-0040 capability lineages, allocated together so every
+  implementation branch composes against one ledger: Forms (`fm`,
+  `mod_forms`), Workflow Runtime (`wr`, `mod_workflow`), Platform Health
+  (`ph`, `mod_health`), Remote Access (`ra`, `mod_remoteaccess`), Compliance
+  Reporting (`cr`, `mod_compliance`) and AI Operations (`ao`, `mod_aiops`).
+  Support Access consumes the permanent (`sup`, `mod_supportaccess`) row from
+  the `sa` arbitration above, so the seven-module cohort has one floor. This
+  is namespace identity only: no module is published, adopted or authoritative
+  because of this kernel change.
+
+### Changed
+
+- `dotmac_kernel.idempotency.fingerprint_of` is now a re-export of the
+  persistence-free definition. Existing imports remain supported.
+
+## 0.1.0a87 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a88
+
+Carried the fingerprint seam and the Fulfillment allocation above. Never
+dispatched: the `sa` arbitration landed on `main` before a87 was built, so the
+version bumped to a88 rather than publishing an artifact whose changelog no
+longer described its contents. No kernel artifact was ever built at this
+version, and no consumer can pin it.
+
+## 0.1.0a86 — 2026-08-21
+
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `8b8e3d26` by release run
+`32486232199`. Publication makes the physical namespace allocation
+installable; it composes or adopts no module.
+
+Allocates the tenant first-party web-analytics lineage (ADR-0055). Physical
+namespace identity only; collection policy, origin admission and every
+analytical behaviour stay in the optional module, and the reference assembly
+composes none of it.
+
+Its own number is required because a85 is registry-verified and tagged. The
+a86 kernel is the first release candidate carrying the web-analytics row.
+
+### Added
+
+- `WEB_ANALYTICS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_webanalytics`, revision prefix `wa`, and branch label `web_analytics`.
+
+## 0.1.0a85 — 2026-08-21
+
+Published, registry-verified and tagged from exact protected-main revision
+`b031010` by release run `32462383827`.
+
+Allocates the ERP/Backoffice/general tenant-module cohort. This is physical
+namespace identity only; every business decision remains in its independently
+released module and no product composition or authority cutover is implied.
+
+Carries a84's two rows as well. a84 was authored first but never dispatched:
+a85 reached `main` and was published while a84 was still unreleased, so the
+Referrals and Reseller Management lineages became installable for the first
+time HERE. Their modules floor at a85 for that reason, not at their own
+allocation.
+
+### Added
+
+- Permanent migration owners for Accounting (`ac`), Analytics (`ay`), Banking
+  (`bk`), Documents (`do`), Expenses (`ex`), Finance (`fn`), Inbox (`ib`),
+  Party context (`pt`), Payables (`pa`), Payroll (`py`), Procurement (`pc`),
+  Projects (`pj`), Records (`re`), Surveys (`sv`), Tax (`tx`) and Work Orders
+  (`wo`). Documents does not reuse deployment-control's `dc`; Party does not
+  reuse Payables' `pa`.
+
+## 0.1.0a84 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a85
+
+Allocates the independent tenant Referral and Reseller Management lineages. No
+kernel behavior changes: two ledger rows and nothing else.
+
+Never dispatched. a85 landed on `main` and published first, carrying these two
+rows with it, so no kernel artifact was ever built at this version — the same
+shape as a53..a55, a74..a76, a78..a80 and a82. `dotmac-referrals` and
+`dotmac-reseller-management` therefore floor at `>=0.1.0a85`, the first
+INSTALLABLE kernel carrying these allocations; a floor naming this version
+would be unresolvable
+(`tests/architecture/test_kernel_version_sync.py`'s
+`UNPUBLISHED_ALLOCATION_FLOORS`).
+
+### Added
+
+- `REFERRALS_MIGRATION_OWNER` — `mod_referrals`, revision prefix `rf`, branch
+  label `referrals`. `dotmac-referrals` 0.1.0a1 declares the matching manifest,
+  tenant tables and root lineage in the same change (ADR-0040).
+- `RESELLER_MANAGEMENT_MIGRATION_OWNER` — `mod_reseller`, revision prefix `rm`,
+  branch label `reseller_management`. `dotmac-reseller-management` 0.1.0a1
+  declares the matching manifest, tenant tables and root lineage in the same
+  change (ADR-0040).
+
+## 0.1.0a83 — 2026-08-20
+
+Published, registry-verified and tagged from exact protected-main revision
+`4cfdcd7` by release run `32357917582`.
+
+Allocates the tenant positioning lineage (ADR-0039). Physical namespace
+identity only; every positioning behaviour stays in the optional module, and
+the reference assembly composes none of it.
+
+Its own number rather than a twelfth row in a82: a82 is already on `main` and
+its entry states what it allocated, so growing it would make a published record
+describe content it never carried — even though neither version is tagged yet.
+
+### Added
+
+- `POSITIONING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_pos`,
+  revision prefix `po`, and branch label `positioning`.
+
+## 0.1.0a82 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a83
+
+Allocates the eleven independent network-cohort lineages in one release
+(ADR-0036, ADR-0037, ADR-0038). This is physical namespace identity only; every
+behaviour stays in its own optional module, and no module here is composed by
+the reference assembly.
+
+One release rather than eleven because the allocations have no ordering between
+them: each is a fresh schema, prefix and branch label that collides with nothing
+else in the ledger, and eleven stacked bumps would mint ten version numbers no
+installer could ever resolve — the a74..a76 and a78..a80 history this changelog
+already records.
+
+### Added
+
+- `INVENTORY_MIGRATION_OWNER`: schema `mod_inventory`, prefix `iv`, branch label
+  `inventory`.
+- `ASSETS_MIGRATION_OWNER`: schema `mod_assets`, prefix `as`, branch label
+  `assets`.
+- `IPAM_MIGRATION_OWNER`: schema `mod_ipam`, prefix `ip`, branch label `ipam`.
+- `NETWORK_INVENTORY_MIGRATION_OWNER`: schema `mod_netinv`, prefix `ni`, branch
+  label `network_inventory`.
+- `NETWORK_OBSERVABILITY_MIGRATION_OWNER`: schema `mod_netobs`, prefix `no`,
+  branch label `network_observability`.
+- `NETWORK_TOPOLOGY_MIGRATION_OWNER`: schema `mod_nettop`, prefix `nt`, branch
+  label `network_topology`.
+- `NETWORK_ASSURANCE_MIGRATION_OWNER`: schema `mod_netassure`, prefix `na`,
+  branch label `network_assurance`.
+- `NETWORK_CONTROL_MIGRATION_OWNER`: schema `mod_netctrl`, prefix `nc`, branch
+  label `network_control`.
+- `FIBER_PLANT_MIGRATION_OWNER`: schema `mod_fiber`, prefix `fp`, branch label
+  `fiber_plant`.
+- `NETWORK_ACCESS_MIGRATION_OWNER`: schema `mod_netaccess`, prefix `nac`, branch
+  label `network_access`.
+- `PON_ACCESS_MIGRATION_OWNER`: schema `mod_pon`, prefix `pn`, branch label
+  `pon_access`.
+
+## 0.1.0a81 — 2026-08-20
+
+Published, registry-verified and tagged from exact protected-main revision
+`8f99413` by release run `32346291258`.
+
+Allocates the independent tenant website-composition lineage. This is physical
+namespace identity only; site behavior remains in the optional module.
+
+### Added
+
+- `SITES_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_sites`,
+  revision prefix `si`, and branch label `sites`.
+
+## 0.1.0a80 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a81
+
+Allocates the independent tenant publication-lifecycle lineage. This is
+physical namespace identity only; publication behavior remains in the optional
+module.
+
+### Added
+
+- `PUBLISHING_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_publishing`, revision prefix `pb`, and branch label `publishing`.
+
+## 0.1.0a79 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a81
+
+Allocates the independent tenant editorial-content lineage. This is physical
+namespace identity only; content behavior remains in the optional module.
+
+### Added
+
+- `CONTENT_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema `mod_content`,
+  revision prefix `ct`, and branch label `content`.
+
+## 0.1.0a78 — NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a81
+
+Allocates the immutable tenant-plane database identity for the independently
+installable `dotmac-media-observations` module.
+
+### Added
+
+- `MEDIA_OBSERVATIONS_MIGRATION_OWNER`, owning schema `mod_mediaobs`, migration
+  prefix `mo`, and Alembic branch `media_observations`. The allocation adds no
+  media behavior to the kernel; it only lets the package register its own
+  namespace and lineage without collision.
+
+### Changed
+
+- The supported SQLite unit-test harness now keeps up to ten module namespaces
+  as attached databases and maps only collision-free overflow to SQLite's
+  qualified `main` namespace. This preserves the fast service-logic lane after
+  the module registry crosses SQLite's hard attachment limit; namespace and
+  isolation proofs remain PostgreSQL gates.
+
+## 0.1.0a77 — 2026-08-19
+
+Allocates the independent brand-profile module lineage. No kernel behaviour
+changes: one ledger row and nothing else.
+
+### Added
+
+- `BRAND_PROFILES_MIGRATION_OWNER` — `mod_brand`, prefix `bp`, branch label
+  `brand_profiles`. Genuinely dual-plane with a named assembly on each side
+  today: Sub on the tenant plane (the 897-LOC extraction source) and the vendor
+  control plane on the platform plane, which is the OEM case and the only one
+  needing host bindings. `dotmac-brand-profiles` 0.1.0a1 declares the matching
+  manifest in the same change (ADR-0026 § 8).
+
+## 0.1.0a76 — 2026-08-19
+
+Allocates the independent deployment-control module lineage. No kernel behaviour
+changes: one ledger row and nothing else.
+
+### Added
+
+- `DEPLOYMENT_CONTROL_MIGRATION_OWNER` — `mod_deploy`, prefix `dc`, branch label
+  `deployment_control`. Platform plane only, for a reason close to tautological:
+  a module that decides what a fleet of deployments should run cannot live inside
+  one of those deployments. `dotmac-deployment-control` 0.1.0a1 declares the
+  matching manifest in the same change (ADR-0026 § 8).
+
+## 0.1.0a75 — 2026-08-19
+
+Allocates the independent licensing module lineage. No kernel behaviour changes:
+one ledger row and nothing else.
+
+### Added
+
+- `LICENSING_MIGRATION_OWNER` — `mod_licensing`, prefix `li`, branch label
+  `licensing`. Platform plane only, and for this module the plane is a security
+  boundary rather than an absent consumer: issuance must not live inside the
+  deployment it authorises, and the receiving half already verifies offline
+  through `dotmac_kernel.licensing`. `dotmac-licensing` 0.1.0a1 declares the
+  matching manifest in the same change (ADR-0026 § 8).
+
+## 0.1.0a74 — 2026-08-19
+
+Allocates the independent commercial-agreement module lineage. No kernel
+behaviour changes: this release adds one ledger row and nothing else, which is
+what ADR-0017's moratorium permits — an allocation is physical identity, not a
+facility, and nothing consumes it but the module it names.
+
+### Added
+
+- `COMMERCIAL_AGREEMENTS_MIGRATION_OWNER` — `mod_agreements`, prefix `cg`,
+  branch label `commercial_agreements`. Platform plane only; ADR-0033 § 7
+  derives it from the vendor control plane as the one consumer that exists
+  today. `dotmac-commercial-agreements` 0.1.0a1 declares the matching manifest
+  in the same change, so the row is never a reservation without code behind it
+  (ADR-0026 § 8).
+
+## 0.1.0a73 — 2026-08-19
+
+Makes caller-session kernel services safe for independently assembled products.
+Consent, delivery, idempotency and external-identity operations no longer import
+the eager kernel database owner merely to create a SAVEPOINT, so an adopter can
+provide its own session without constructing a second engine/session runtime.
+
+### Changed
+
+- Moved the savepoint implementation to a private, engine-free transaction
+  mechanic. `dotmac_kernel.db.conflict_savepoint` remains the supported public
+  spelling and is re-exported unchanged; `dotmac_kernel.db` remains the sole
+  kernel session and transaction-boundary authority.
+- Raised `dotmac-campaigns`' kernel floor to this release because its Sub-first
+  adoption consumes consent, idempotency and delivery through Sub's own session.
+- Corrected the historical campaign allocation record: immutable tag a71 does
+  not contain `CAMPAIGNS_MIGRATION_OWNER`; a72 is the first published tag that
+  does, so a72 is the allocation floor beneath this capability raise.
+
+## 0.1.0a72 — 2026-08-19
+
+Allocates the independent campaign and durable-timer module lineages and adds
+the declaration surface the timer output-routing contract requires. These are
+allocations and a vocabulary guard, not second campaign or timer engines in the
+kernel.
+
+### Added
+
+- `DURABLE_TIMERS_MIGRATION_OWNER` in `MIGRATION_OWNER_LEDGER`: schema
+  `mod_timers`, revision prefix `dt`, branch label `durable_timers`. The module
+  owns timer identity, generation and terminal evidence; it consumes the
+  existing `outbox_relay.v1` prerequisite for delivery mechanics.
+- `CAMPAIGNS_MIGRATION_OWNER`: schema `mod_campaigns`, revision prefix `ca`,
+  branch label `campaigns`. Although the a71 changelog prematurely described
+  this row, immutable release-tag inspection confirms a72 first published it.
+- A manifest-declared outbox event-type registry so timer outputs fail closed
+  on an undeclared routing code instead of enqueueing work no consumer owns.
+
+## 0.1.0a71 — 2026-08-18
+
+Allocates the independent tenant-only people lineage, names and proves the
+Party-person catalogue consumed by employment-directory modules, and keeps
+optional-package imports and large test assemblies independent of database
+configuration and SQLite's ten-attachment ceiling.
+
+### Added
+
+- `party_person_catalog.v1`, covering the required `public.parties` and
+  `public.party_persons` columns, keys, relationship, forced tenant RLS,
+  tenant-policy marker, and `app_user` read posture without coupling consumers
+  to unrelated Party extensions.
+- `verify_party_person_catalog`, a live-catalog verifier that refuses a stamped,
+  aliased, unprotected, unusable, or structurally incompatible provider.
+- `PEOPLE_MIGRATION_OWNER`: `pe`, branch `people`, schema `mod_people`.
+
+### Changed
+
+- Defers the canonical conflict-savepoint import in consent and idempotency
+  write paths until execution, so independently installable module contracts
+  can be imported before an assembly configures `DATABASE_URL`.
+- `dotmac_kernel.testing.create_test_engine(tables=...)` can now create an
+  explicit assembly/package metadata slice. This keeps qualified SQLite module
+  schemas while preventing test collection of uncomposed packages from
+  exhausting SQLite's ten attached-database slots.
+- The reference assembly binds the effect to kernel `0003_party_identity`;
+  installable modules continue to name only the effect.
+
+## 0.1.0a70 — 2026-08-18
 
 Removes the tenant-audit actor compatibility derivation after every known
 production caller migrated to the canonical identity pair.

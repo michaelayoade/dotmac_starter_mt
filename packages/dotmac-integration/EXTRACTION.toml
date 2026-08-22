@@ -1,7 +1,7 @@
 schema_version = 1
 package = "dotmac-integration"
 classification = "optional-module"
-status = "adopted"
+status = "audit-complete"
 source_mode = "product-first"
 owner = "External connector control plane"
 # ADR-0024 §§ 6-7. "Independently deployed" is a RUNTIME boundary, not a
@@ -21,7 +21,7 @@ owner = "External connector control plane"
 # ownership, provider-account rate limiting, backoff and idempotency, which is
 # the entire reason the runtime is separate. The same shape
 # dotmac_vendor_control_plane already uses for dotmac-release-catalog.
-contract = "The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, authenticated product-port descriptor snapshots, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, indexed shadow evidence, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state."
+contract = "The generic machinery of running a connector: installations, immutable configuration revisions, capability bindings, authenticated product-port descriptor snapshots, manifest-owned secret binding names and exact egress destinations, secret REFERENCES, inbound receipts and deduplication, outbound delivery with idempotency and retry, polling checkpoints, indexed shadow evidence, health, audit and repair. NOT what a payload means to a product, not a provider's wire format, and not any product's business state."
 
 # PLATFORM-PLANE ONLY (ADR-0023). Declared, not discovered: a connector
 # installation, its config revisions and its delivery evidence are control-plane
@@ -98,8 +98,19 @@ not_ported = ["connectors/*", "*_capability.py", "crm_ticket_readiness.py", "bac
 # Products are deliberately
 # absent from both sets: they consume typed observations over their own ports,
 # never this module, and Sub keeps only its capability handlers after cutover.
-contract_consumers = ["dotmac_integrator"]
-candidate_consumers = []
+# Demoted from `adopted` on 2026-08-22. The dossier claimed a proven consumer
+# while `first_cutover` described the Meta/WhatsApp capability as INTENDED and
+# `shadow_and_drift` described activation in the future tense — "only then is one
+# binding activated". A status ahead of its own prose is the ADR-0031 overclaim,
+# and this module is about to be cited as a governance prerequisite by Vendor
+# ADR-0010 gate 2b, which is exactly when an overclaim does damage.
+#
+# `dotmac_integrator` returns to CANDIDATE. Gate 2b creates the first addressable
+# adoption evidence; a later change promotes this back with that evidence
+# attached, in that order and not before.
+contract_consumers = []
+candidate_consumers = ["dotmac_integrator"]
+adoption_evidence = []
 inventory_evidence = [
   "docs/inventories/integration-platform-sources.md",
   "docs/inventories/external-connector-sources.md",
@@ -165,7 +176,7 @@ payload_retention = "NEW behaviour, not ported: Sub retains inbound payloads ind
 
 local_copy_retirement = "Sub retires the eleven generic engine modules (installations, manifest, registry, inbox, delivery, runtime, runtime_execution, runner_protocol, egress_gateway, egress_policy, external_runner) and its seven integration_* tables once the module is composed and one capability has cut over in shadow. It KEEPS its *_capability.py handlers — what a message or payment means to Sub is product business policy and was never the module's. ERP and CRM have no local copy of this platform to retire; their retirement is of their own direct provider clients, webhooks, credentials, tasks and checkpoints, measured by the external-connector ratchet and lowered in the SAME change as each cutover. CRM's connectors are deleted rather than ported, because that system is being retired and recreating it as a plugin would preserve the architecture being removed."
 
-next_action = "dotmac-integration a9 is published; exact-pin it in dotmac_integrator, and keep both retention sweeps disabled until the DPO-accepted notice/ROPA revision is recorded. Then install the authenticated Sub descriptor in mirror mode, prove zero unexplained drift, and only after Michael names the production target cut over one binding and retire Sub's provider webhook/client/credentials/retry path while lowering the external-connector ratchet in the same change."
+next_action = "Publish dotmac-integration a12, then exact-pin it and every released first-party connector in dotmac_integrator. Replace the assembly's one-binding product-port setting with the module-owned capability-wide reconciliation operation; do not introduce a comma-separated binding list. Configure authenticated product-owned descriptors in mirror mode, prove zero unexplained drift per capability, and only then activate each binding and retire the corresponding product webhook/client/credentials/retry path while lowering the external-connector ratchet in the same change."
 
 # PARITY DISPOSITIONS — one per source suite, and the reason.
 #

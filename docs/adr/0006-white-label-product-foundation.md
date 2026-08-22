@@ -518,6 +518,55 @@ shared. Product-first extraction decides **how** it is implemented once that
 decision is made. It forbids both failure modes: speculative shared code with no
 real consumer, and a second implementation written beside mature product code.
 
+### Decision amendment — 2026-08-18 (vertical replacement cutover)
+
+The product-first amendment says the source product is the first cutover
+consumer. That remains the default for an in-place extraction. It was written
+before an accepted programme had a different, stricter destination: retire a
+legacy product vertically into a clean assembly without first rebuilding the
+legacy product around the target architecture.
+
+For an **accepted vertical replacement**, the replacement assembly may be the
+first runtime consumer when all of the following hold in checked-in evidence:
+
+1. the legacy product is named as the qualifying implementation source and the
+   replacement assembly is named as the destination;
+2. composing the module in the source would require a throwaway rewrite of a
+   lineage, identity or transaction boundary the accepted programme says to
+   retire;
+3. the replacement imports data only through a versioned API/webhook, never the
+   source database, models or filesystem;
+4. the overlap is read-only shadow/reconciliation: the source remains the sole
+   writer until one sealed cutover makes the replacement the sole writer and
+   fails closed the source mutations; and
+5. the source writer, fallback and obsolete tables still have explicit
+   ratchets and retirement gates. Moving the runtime without retiring the old
+   authority earns no adoption evidence.
+
+In that case the source product is the **first authority retired**, while the
+replacement assembly is the first exact-pin runtime consumer. Source code and
+tests remain the mandatory extraction base. The evidence ladder is unchanged:
+one runtime consumer supports `adopted`; `reuse-proven` still requires two
+independent consumers of the same released contract.
+
+The first named use is ERP -> Backoffice, accepted in
+`dotmac_backoffice/docs/adr/0001-why-backoffice-exists-and-why-replacement-is-vertical.md`.
+ERP cannot truthfully compose kernel Party/tenancy without the very aggregate
+redesign that decision rejected. Requiring that detour would improve the
+temporary bridge instead of retiring it. The specific source ruling and
+cutover gates are in
+[`../inventories/people-directory-sources.md`](../inventories/people-directory-sources.md).
+This amendment does not authorize a merge, release, deployment, production
+mutation or destructive retirement.
+
+**Correction — 2026-08-22.** The historical reference above used the working
+name `dotmac_backoffice` for a local composition sketch. It was never a
+separate repository or product. The destination is the commercial Dotmac ERP
+product (`dotmac-erp`), vertically recomposed from Starter modules; the
+historical extraction source is the `dotmac_erp` repository. The vertical
+replacement mechanics remain accepted, but the separate-application identity
+is withdrawn.
+
 ### Live defects found while taking the inventory (owned elsewhere)
 
 F0 is documentation-only and fixed nothing. Three defects surfaced that are

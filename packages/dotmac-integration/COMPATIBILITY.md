@@ -8,13 +8,19 @@ document is the bug.
 
 | | |
 |---|---|
-| Released | `0.1.0a1` through **`0.1.0a9`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2** |
-| Declared | `0.1.0a9`, SPI 1.2 |
+| Released | `0.1.0a1` through **`0.1.0a11`**; a2–a4 implement **SPI 1.1**, a5–a9 implement **SPI 1.2**, a10 implements **SPI 1.3**, and a11 adds executable polling |
+| Declared | `0.1.0a12` adds capability-wide product-port reconciliation without changing SPI 1.3 |
 
 SPI 1.2 is additive. It accepts the same closed `>=1.0,<2.0` ranges and adapts
 SPI 1.1's boolean ingress-verification result to the evidence-free form of the
 new result. That obligation is discharged by tests, not by this sentence — see
 "SPI 1.0 still works" and "Verification evidence" below.
+
+SPI 1.3 is additive at the executable seam and explicit at the deployment
+seam. A current manifest declares named secret bindings and an exact external
+host allowlist; the empty allowlist means deny-all. Pre-1.3 manifests remain
+readable during adoption and keep their digest. A connector whose declared
+minimum is 1.3 cannot omit either runtime declaration.
 
 The `InboundEvent.disposition` field declared for a7 defaults to `deliver`.
 Existing connectors therefore keep their behaviour; connectors may explicitly
@@ -111,6 +117,11 @@ survived a request either.
 `dispatch.invoke` additionally calls `require_mode(plugin, DELIVERY)` before the
 handler lookup, so a binding pointed at a connector that cannot deliver produces
 a stated refusal naming the connector and what it *does* declare.
+
+The POLL mode is executed by `prepare_poll` -> `invoke_poll` ->
+`record_poll_batch`. Provider I/O runs after the prepare unit of work has closed;
+the normalized batch and next cursor then commit together. This is package
+machinery rather than a new SPI shape, so `CURRENT_SPI_VERSION` remains 1.3.
 
 ## The ingress contract
 

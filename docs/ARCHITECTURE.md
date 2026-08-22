@@ -45,14 +45,57 @@ only provider wire translation and I/O. The thin assembly adds no competing
 engine or persistence. Products therefore add no provider client or conditional
 when an external system changes.
 
+Application-to-application synchronization does not pass through provider
+plugins. The stateless `dotmac-app-sync` contract package gives independently
+deployed products one versioned envelope and authenticated hand-off shape while
+leaving the durable outbox, peer authentication, atomic deduplication, local
+observation row, resolver and every consequence with the participating
+products. Capability declarations are destination-owned; adding a flow does not
+add a source/destination branch to the package or make Integrator a domain
+owner.
+
 The first concrete plugin follows that split exactly:
 
 | Contract surface | Owner | Non-owner boundary |
 |---|---|---|
+| Versioned inter-application envelope, authenticated peer/source binding, schema validation, idempotency identity and payload fingerprint | `dotmac-app-sync` | Owns no transport, peer authentication, row, session, application route, domain resolver or consequence; each destination declares the capability schema and implements the atomic receiver |
 | Meta WhatsApp ingress authentication, batch traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-whatsapp` (`meta_whatsapp`, INGRESS-only, `messaging.receive.v1`) | Owns no installation row, retry/checkpoint, destination, subscriber, conversation or product consequence |
-| Connector installation, binding, product-port descriptor projection, materialized secret lifetime, receipt identity, retry/repair, verification evidence and revisioned shadow evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no Meta header, signature, payload or acknowledgement rule; fetches no product descriptor itself, and a destination owns each comparison and returns only closed safe outcomes |
+| Meta Social ingress authentication, Facebook/Instagram message and comment traversal, raw provider identities and acknowledgement bytes | `dotmac-connector-meta-social` (`meta_social`, INGRESS-only, `messaging.receive.v1`) | Owns no Graph delivery, profile lookup, installation row, retry/checkpoint, destination, contact, conversation or product consequence |
+| Flutterwave API v4 exact-byte ingress authentication plus OAuth-authenticated paged charge reconciliation, provider-event identity and exact amount/currency translation | `dotmac-connector-flutterwave` (`flutterwave`, INGRESS+POLL, `payments.settlement.observation.v1`) | Owns no v3 fallback, provider-fee inference, installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence |
+| Paystack ingress authentication plus authenticated paged transaction reconciliation, provider-event identity and exact amount/fee/currency translation | `dotmac-connector-paystack` (`paystack`, INGRESS+POLL, `payments.settlement.observation.v1`) | Owns no installation row, retry/checkpoint, destination, tenant, allocation, coverage, receivable, ledger or product consequence |
+| Mono Financial Data v2 authenticated account-transaction polling, same-origin pagination and provider-neutral transaction translation | `dotmac-connector-mono` (`mono`, POLL-only, `banking.transaction.observation.v1`) | Owns no account-link intent, bank statement, reconciliation, product identity, installation row, retry/checkpoint, ledger or accounting consequence |
+| Connector polling preparation, provider invocation and atomic inbox-plus-checkpoint settlement | `dotmac-integration.polling` | Pins config and cursor before I/O, passes no session to plugins, and advances the checkpoint in the same transaction as the complete received batch; owns no provider schedule or domain consequence |
+| Remita authenticated RRR status polling and provider-neutral response translation | `dotmac-connector-remita` (`remita`, POLL-only, `payments.reference.status.observation.v1`) | Carries provider status verbatim; owns no RRR lifecycle, status mapping, biller decision, source linkage, installation row, retry/checkpoint, ledger, journal or accounting consequence |
+| LinkedIn challenge-response, exact-byte webhook authentication and organization-social/lead notification translation | `dotmac-connector-linkedin` (`linkedin`, INGRESS-only, `social.activity.observation.v1` + `marketing.lead.observation.v1`) | Owns no contact, campaign, qualification, assignment, ticket, publication, destination or product consequence; declares deny-all provider egress |
+| Connector installation, binding, product-port descriptor projection, materialized secret lifetime, receipt identity, retry/repair, verification evidence and revisioned shadow evidence | `dotmac-integration` inside `dotmac_integrator` | Contains no provider header, signature, payload or acknowledgement rule; fetches no product descriptor itself, and a destination owns each comparison and returns only closed safe outcomes |
 | Product-port declaration: capability meaning, local binding identity, delivery/mirror paths, stream scope and activation state | the receiving product (Sub for cutover 1) | The thin assembly authenticates and freezes the declaration; `dotmac-integration.reconcile_product_port_descriptor` is the sole writer of its append-only Integrator projection |
 | Meaning and consequences of a received messaging observation | the receiving product's typed port and local owning service (Sub for cutover 1) | Imports neither the connector nor Integrator persistence |
+
+External advertising and social-media observations use the same application
+boundary with a separate domain owner. The tenant-only
+`dotmac-media-observations` package owns immutable normalized entity,
+hierarchy, declaration and aggregate period-metric facts plus rebuildable
+projections. It imports neither Integration nor a provider package and stores
+only opaque installation and transport-receipt references. Integrator and its
+plugins retain credentials, wire payloads, endpoints, polling/webhooks,
+checkpoints and retry evidence. Provider conversion claims remain explicitly
+`provider_reported`; Lead origin, customer identity, attribution, authoritative
+revenue and business consequences remain outside the module (ADR-0034). The
+package is published and registry-verified at `0.1.0a1` against kernel
+`0.1.0a81`, but no product composes it; Michael's 2026-08-18 adoption pause
+remains active because release is not adoption.
+
+First-party website measurement follows the same application boundary without
+becoming a connector concern (ADR-0055):
+
+| Contract surface | Owner | Non-owner boundary |
+|---|---|---|
+| Property/stream identity, accepted first-party events, property-scoped visitor/session evidence, filter evidence, deterministic aggregates/funnels, retention rebuild and drift repair | each application's installed `dotmac-web-analytics` tenant plane | Contains no website hostname, content, form value, customer identity, provider API, official attribution or dashboard policy |
+| Origin verification and rate limiting for a collection request | the adopting application's thin local or remote collection adapter | Both local and Integrator-delivered commands enter the same versioned analytics service; remote transport is not a bypass |
+| Remote delivery and replay evidence | `dotmac-integration` inside `dotmac_integrator` plus a website connector plugin | Transports a typed observation and records delivery; never classifies, sessionises or attributes it |
+| Website routes/content and form submission | `dotmac-sites` and the adopting product's Forms owner | May emit a declared anonymous event after its own decision; analytics receives no form or customer fields |
+| Provider analytics aggregates | `dotmac-media-observations` through Integrator connectors | Cannot write or masquerade as first-party events |
+| Consent eligibility and official acquisition/commercial consequences | product consent owner; future attribution owner; Sales/Orders/Billing | Analytics records the effective policy evidence and anonymous sequence only |
 
 For ticketing this means separate local installations: Sub owns operational
 customer/service tickets, ERP owns only its internal back-office tickets, and
@@ -62,6 +105,26 @@ dropdown. Correlation-only needs store an opaque Integrator reference on the
 local owning record; a separate locally owned ticket may be created only by the
 local ticket owner. Synchronization never makes either application a writer of
 the other's lifecycle.
+
+ADR-0040 accepts the next Sub vNext parity cohort without claiming it is
+installed today. The product-first inventory and extraction dossiers are
+complete. Forms and Workflow Runtime now have audit-complete implementation
+candidates on the a86 integration branch; publication and adoption remain
+separate gates. The
+accepted owners are `dotmac-referrals`, `dotmac-reseller-management`,
+`dotmac-ai-operations`, `dotmac-remote-access`,
+`dotmac-compliance-reporting`, `dotmac-workflow-runtime`,
+`dotmac-support-access`, `dotmac-platform-health`, and the independently
+qualified `dotmac-forms`. Fleet Control adopts the already implemented
+`dotmac-deployment-control`; there is no `dotmac-fleet-control` owner.
+
+The tenant plane is accepted for Referrals, Reseller Management, AI Operations,
+Remote Access, Compliance Reporting, Workflow Runtime and Forms. Support Access
+and Platform Health are platform-plane capabilities with the Vendor control
+plane as their first candidate assembly. The seven newly constructed owners now
+have manifests, independent lineages, catalogue entries and live isolation
+canaries on this integration branch; this is construction, not composition,
+publication or adoption.
 
 ## Target deployment profiles and commercial authorities (accepted; partially implemented)
 
@@ -118,8 +181,8 @@ quota decisions—not payment providers or raw license payloads.
 The application currently has tenant creation and `Tenant.is_active`/
 `suspended_at`/`deleted_at` fields, but no canonical tenant transition service,
 cross-module lifecycle orchestrator, outbox/inbox, onboarding workflow,
-subscription/billing/rating lifecycle, support-access workflow, or coordinated
-offboarding/purge path. The target uses separate tenant, subscription,
+subscription/billing/rating lifecycle, implemented support-access workflow, or
+coordinated offboarding/purge path. The target uses separate tenant, subscription,
 entitlement, provider-job, domain, and license state machines. Versioned policy
 maps commercial events to restriction/suspension; payment failure never directly
 deletes data.
@@ -276,6 +339,12 @@ workflow — with `.github/release-adapters.json` owning the same question for
 `manifest_attr` or `kernel_floor` for the module lane to assert and so are
 gated, built and verified by `release-adapter.yml` instead (ADR-0006's
 2026-08-14 amendment; the adapter lane lists nothing today).
+The module lane's pre-publish smoke builds the target and kernel wheels plus
+every repository-local distribution named by that module's reviewed
+`wheel_contents.allowed_requires`; this is how the permitted
+`module -> dotmac-ui` direction stays installable without giving the build job a
+registry credential. The post-publish smoke separately installs from the
+registry, so local dependency artifacts cannot substitute for publication.
 `scripts/module_catalog.py` joins those inputs deterministically, and
 `tests/architecture/test_module_catalog.py` plus `make module-catalog-check`
 refuse drift or an undiscoverable new distribution. An application still owns
@@ -432,6 +501,113 @@ packages/dotmac-imports/         optional bulk-import run ledger
                  TESTED HERE, NOT COMPOSED by this reference assembly. The
                  domain owns the field vocabulary, validation and mutation;
                  `dotmac-files` owns the bytes the run reads.
+packages/dotmac-people/          optional tenant employment directory
+  pyproject.toml                 distribution dotmac-people; audit-complete,
+  EXTRACTION.toml                with ERP as the qualifying source and clean
+                                 Backoffice as the first exact-pin consumer
+  src/dotmac_people/             narrow employee lifecycle, organization
+                 catalogues, positions, temporal assignments and date-aware
+                 reporting resolution; manifest plus independent `pe` lineage
+                 in schema `mod_people`. Tenant plane only, forced RLS, and
+                 linked to kernel Party through `party_person_catalog.v1`.
+                 BUILT AND TESTED HERE, NOT COMPOSED by this reference
+                 assembly. No ERP identity, payroll, attendance, finance,
+                 integration, notification or persisted vacancy cache ports.
+packages/dotmac-content/         optional tenant editorial content owner
+  pyproject.toml                 distribution dotmac-content; audit-complete,
+  EXTRACTION.toml                with Mkt as the qualifying source and
+                                 Backoffice as the first candidate cutover
+  src/dotmac_content/            guarded plan/item lifecycle, canonical text,
+                 provider-neutral authored variants, ordered opaque creative
+                 references and immutable ORM-free snapshots; manifest plus
+                 independent `ct` lineage in schema `mod_content`. Tenant
+                 plane only and forced RLS. BUILT AND TESTED HERE, NOT
+                 COMPOSED by this reference assembly. Publishing, outbound
+                 campaigns, stored bytes, authorization, people, tasks and
+                 provider transport remain separate owners.
+packages/dotmac-publishing/      optional tenant publication lifecycle owner
+  pyproject.toml                 distribution dotmac-publishing; audit-complete,
+  EXTRACTION.toml                with Mkt as the qualifying source and
+                                 Backoffice as the first candidate cutover
+  src/dotmac_publishing/         immutable publication snapshots, requested
+                 delivery time, opaque target deliveries, monotonic attempts,
+                 deduplicated observations and derived aggregate state;
+                 manifest plus independent `pb` lineage in schema
+                 `mod_publishing`. Tenant plane only and forced RLS. BUILT AND
+                 TESTED HERE, NOT COMPOSED by this reference assembly.
+                 Content, target-selection policy, durable timer storage,
+                 provider identity, credentials and transport remain separate
+                 owners.
+packages/dotmac-sites/           optional tenant website-composition owner
+  pyproject.toml                 distribution dotmac-sites; audit-complete,
+  EXTRACTION.toml                greenfield after the exact six-repository
+                                 census; Backoffice is candidate cutover 1
+  src/dotmac_sites/              stable site/page identity, append-only page
+                 revisions, immutable composed site revisions, typed
+                 navigation/SEO/redirects and deterministic SiteReleaseV1;
+                 manifest plus independent `si` lineage in schema `mod_sites`.
+                 Tenant plane only and forced RLS. BUILT AND TESTED HERE, NOT
+                 COMPOSED by this reference assembly. Files, forms,
+                 publication intent/outcomes and Integrator hosting transport
+                 remain separate owners.
+packages/dotmac-inventory/       optional tenant stock-ledger owner
+  pyproject.toml                 distribution dotmac-inventory; audit-complete,
+  EXTRACTION.toml                product-first from ERP; ERP is candidate
+                                 cutover 1 (ADR-0036)
+  src/dotmac_inventory/          items, warehouses, immutable movements,
+                 balances, reservations, lot/serial traceability and moving-
+                 average valuation; manifest plus independent `iv` lineage in
+                 schema `mod_inventory`. Tenant plane only and forced RLS.
+                 BUILT AND TESTED HERE, NOT COMPOSED by this reference
+                 assembly. Procurement authorisation, payables, GL posting and
+                 durable-asset lifecycle remain separate owners.
+packages/dotmac-assets/          optional tenant durable-unit owner
+  pyproject.toml                 distribution dotmac-assets; audit-complete,
+  EXTRACTION.toml                product-first from ERP; ERP is candidate
+                                 cutover 1 (ADR-0037)
+  src/dotmac_assets/             durable-unit identity, physical lifecycle,
+                 opaque location, custody/assignment history, maintenance and
+                 disposal with append-only evidence; manifest plus independent
+                 `as` lineage in schema `mod_assets`. Tenant plane only and
+                 forced RLS. BUILT AND TESTED HERE, NOT COMPOSED by this
+                 reference assembly. Capitalization, depreciation, stock,
+                 position observations and product extensions remain separate
+                 owners.
+packages/dotmac-ipam/            network-suite-v1: tenant address-space owner
+packages/dotmac-network-inventory/    network-suite-v1: managed sites, nodes,
+                                 interfaces, ports, VLANs and admission
+packages/dotmac-network-observability/ network-suite-v1: observations,
+                                 measurements, availability and alert evidence
+packages/dotmac-network-topology/     network-suite-v1: declared/observed
+                                 links, paths and reachability projections
+packages/dotmac-network-assurance/    network-suite-v1: incidents, impact,
+                                 maintenance and SLA evidence
+packages/dotmac-network-control/      network-suite-v1: provider-neutral
+                                 commands, dispatch and execution evidence
+packages/dotmac-fiber-plant/     network-suite-v1: outside-plant structures,
+                                 strands, splices, terminations, continuity
+packages/dotmac-network-access/  network-suite-v1: access projections,
+                                 authentication/accounting facts and sessions
+packages/dotmac-pon-access/      network-suite-v1: OLT/ONT commissioning,
+                                 desired state and optical evidence
+                 The nine network-suite-v1 candidates each own one independent
+                 lineage (`ip`, `ni`, `no`, `nt`, `na`, `nc`, `fp`, `nac`,
+                 `pn`) in its own schema, tenant plane only and forced RLS.
+                 They import no sibling module and hold cross-owner references
+                 opaquely. BUILT AND TESTED HERE AS ONE COHORT, NOT COMPOSED
+                 by this reference assembly and not released before Sub's
+                 first-authority cutover (ADR-0038).
+packages/dotmac-positioning/     optional tenant position-evidence owner
+  pyproject.toml                 distribution dotmac-positioning;
+  EXTRACTION.toml                audit-complete, no adopter yet (ADR-0039)
+  src/dotmac_positioning/        provider-neutral position observations,
+                 tracked-unit identity and derived motion/stop facts; manifest
+                 plus independent `po` lineage in schema `mod_pos`. Tenant
+                 plane only and forced RLS. BUILT AND TESTED HERE, NOT COMPOSED
+                 by this reference assembly. Deliberately NOT part of the
+                 network suite: Assets owns a durable unit's AUTHORITATIVE
+                 location, positioning only observes, and the adopting product
+                 keeps every geofence, SLA, dispatch and billing consequence.
 app/                             the reference assembly
   features/
     tenants/       platform-level tenant provisioning (no tenant context)
@@ -455,6 +631,97 @@ templates/       Jinja templates for the admin portal (see "Admin portal" below)
 static/          Tailwind v4 CSS + vendored htmx/Alpine JS for the portal
 ```
 
+### Position evidence stops at the observation (ADR-0039)
+
+`dotmac-positioning` is deliberately NOT part of the network suite, and the
+boundary is the reason it exists as its own owner: an observation is not a
+decision, and a coordinate is not a consequence. Products own consequences.
+
+| Contract surface | Owner | Non-owner boundary |
+|---|---|---|
+| Position observations and projections | `dotmac-positioning` (`mod_pos`, tenant plane only) | Owns no vehicle lifecycle, work-order lifecycle, attendance consequence, provider transport or map presentation |
+| A durable unit's AUTHORITATIVE location | `dotmac-assets` | Reads no observation; positioning never overwrites it — a product asks the asset owner to move it when policy permits |
+| Subject links, applicability, policy and every business consequence — geofence action, SLA, dispatch, billing | the adopting product (Sub is cutover 1, ERP cutover 2) | Imports no positioning persistence; links a local subject to an opaque tracked-unit id |
+| Static plant, GIS and map coordinates | `dotmac-fiber-plant`, `dotmac-network-inventory`, `dotmac-network-topology` | Carrying a coordinate does not make state position evidence; these are fixed infrastructure, not tracked units |
+
+Consent is part of the evidence, not the product: `collection_grants` carries
+purpose, expiry and revocation, so a tracked unit whose grant lapsed stops
+being observable without the product having to remember.
+
+### ERP / Backoffice / general publication-prep ownership map
+
+The following tenant-only packages are as-built in this repository at
+`0.1.0a1`, allocated by published kernel `0.1.0a85`, and deliberately not
+composed or release-allowlisted. Each row names the package's decision owner;
+products retain their current authority until the dossier's sealed cutover and
+writer-retirement gate completes. The cohort validation and adopter dependency
+map is
+[`erp-backoffice-general-publication-readiness.md`](inventories/erp-backoffice-general-publication-readiness.md).
+
+| Package | Sole owned decision/state surface | Qualifying provenance |
+|---|---|---|
+| `dotmac-accounting` | Tenant chart, fiscal periods/dimensions, balanced posting, reversal and immutable ledger evidence | ERP GL behavior and tests |
+| `dotmac-analytics` | Declared aggregate observations and deterministic rebuildable current-point projections | ERP metric storage/computers; fleet projection requirements |
+| `dotmac-banking` | Bank-account masters, statement/cash observations, matching decisions and reconciliation evidence | ERP banking behavior |
+| `dotmac-documents` | Controlled document identity, immutable exact-content versions, lifecycle, collaboration and acknowledgements | ERP handbook base plus Sub immutable quote delta |
+| `dotmac-expenses` | Requests, claims, receipt meaning, policy evaluation, lifecycle and reimbursement eligibility | ERP expenses behavior |
+| `dotmac-finance` | Fixed-asset accounting books, valuations and immutable balanced consequences | ERP fixed-assets behavior |
+| `dotmac-inbox` | Conversation/message identity and lifecycle, ordering/threading and per-operator read cursors | Sub Team Inbox behavior |
+| `dotmac-party` | Party business capacities, capacity relationships, memberships, reachability evidence and external-reference provenance | Sub Party-context behavior; kernel Party retains identity |
+| `dotmac-payables` | Supplier invoices/credits, recognized liabilities and payment-obligation lifecycle | ERP AP behavior |
+| `dotmac-payroll` | Component policy, immutable structures, calculation evidence and employee/external liabilities | ERP payroll behavior |
+| `dotmac-procurement` | Requisitions, sourcing, supplier offers, awards and purchase commitments | ERP procurement behavior |
+| `dotmac-projects` | Project/task identity and lifecycle, hierarchy, dependencies, templates, schedule constraints and assignments | Sub project/task behavior |
+| `dotmac-records` | Record declarations, retention schedules/triggers, legal holds, preservation/custody and disposition authority | Greenfield after the exact fleet inventory |
+| `dotmac-surveys` | Survey definitions/invitations, response evidence, answer validation and rebuildable feedback aggregates | Sub communications-surveys behavior |
+| `dotmac-tax` | Tenant tax policy, determinations, statutory report snapshots, filing obligations and return lifecycle | ERP tax behavior; Sub supplies billing facts only |
+| `dotmac-work-orders` | Physical-work execution lifecycle and evidence | Sub internal-crew WorkOrder behavior |
+
+Every persisted class in this cohort has an explicit owner. Table names below
+are relative to the package's declared `mod_*` schema; every adopter owns its
+local copy and no cross-application or sibling-module foreign key is implied.
+
+| Package | Persisted model classes | Owned tables | Decision source |
+|---|---|---|---|
+| `dotmac-accounting` | `AccountCategory`, `Account`, `FiscalYear`, `FiscalPeriod`, `AccountingDimension`, `AccountingDimensionValue`, `JournalEntry`, `JournalLine`, `JournalLineDimension`, `PostedLedgerLine`, `PostedLedgerDimension`, `PeriodEvent` | `account_categories`, `accounts`, `fiscal_years`, `fiscal_periods`, `accounting_dimensions`, `accounting_dimension_values`, `journal_entries`, `journal_lines`, `journal_line_dimensions`, `posted_ledger_lines`, `posted_ledger_dimensions`, `period_events` | ERP product-first; ADR-0041 |
+| `dotmac-analytics` | `MetricCatalogEntry`, `MetricIngestReceipt`, `MetricObservation`, `MetricPoint`, `MetricProjectionRebuild` | `metric_catalog_entries`, `metric_ingest_receipts`, `metric_observations`, `metric_points`, `metric_projection_rebuilds` | ERP product-first; ADR-0043 |
+| `dotmac-banking` | `BankInstitution`, `BankAccount`, `BankStatement`, `BankStatementLine`, `CashAccountObservation`, `MatchPolicy`, `MatchDecision`, `MatchAllocation`, `Reconciliation` | `bank_institutions`, `bank_accounts`, `bank_statements`, `bank_statement_lines`, `cash_account_observations`, `match_policies`, `match_decisions`, `match_allocations`, `reconciliations` | ERP product-first; ADR-0044 |
+| `dotmac-documents` | `DocumentLibrary`, `DocumentTypeVersion`, `Document`, `DocumentVersion`, `DocumentRendition`, `DocumentClassification`, `DocumentRelation`, `DocumentCheckout`, `DocumentAnnotation`, `DocumentAccessGrant`, `DocumentAcknowledgement`, `DocumentEvent` | `document_libraries`, `document_type_versions`, `documents`, `document_versions`, `document_renditions`, `document_classifications`, `document_relations`, `document_checkouts`, `document_annotations`, `document_access_grants`, `document_acknowledgements`, `document_events` | ERP base plus Sub delta; ADR-0049 |
+| `dotmac-expenses` | `ExpenseCategory`, `ExpensePolicy`, `ExpensePolicyRule`, `ExpenseRequest`, `ExpenseRequestLine`, `ExpenseClaim`, `ExpenseClaimLine`, `ExpenseReceipt`, `ExpensePolicyEvaluation`, `ExpenseLifecycleEvent` | `expense_categories`, `expense_policies`, `expense_policy_rules`, `expense_requests`, `expense_request_lines`, `expense_claims`, `expense_claim_lines`, `expense_receipts`, `expense_policy_evaluations`, `expense_lifecycle_events` | ERP product-first; ADR-0047 |
+| `dotmac-finance` | `AssetBook`, `DepreciationRun`, `DepreciationLine`, `AccountingEvent`, `AccountingConsequence`, `AccountingConsequenceLine` | `asset_books`, `depreciation_runs`, `depreciation_lines`, `accounting_events`, `accounting_consequences`, `accounting_consequence_lines` | ERP product-first; ADR-0048 |
+| `dotmac-inbox` | `Conversation`, `Message`, `ConversationReadState` | `conversations`, `messages`, `conversation_read_states` | Sub product-first; ADR-0052 |
+| `dotmac-party` | `PartyRole`, `PartyRelationship`, `PartyMembership`, `PartyContactPoint`, `PartyExternalReference` | `party_roles`, `party_relationships`, `party_memberships`, `party_contact_points`, `party_external_references` | Sub product-first; kernel Party retains identity; ADR-0019 |
+| `dotmac-payables` | `SupplierInvoice`, `SupplierInvoiceLine`, `CreditNote`, `CreditNoteLine`, `PaymentObligation`, `LiabilityEvent`, `CreditApplication`, `SettlementObservation`, `AccountingReceipt` | `supplier_invoices`, `supplier_invoice_lines`, `credit_notes`, `credit_note_lines`, `payment_obligations`, `liability_events`, `credit_applications`, `settlement_observations`, `accounting_receipts` | ERP product-first; ADR-0042 |
+| `dotmac-payroll` | `PayComponent`, `PayStructure`, `PayStructureRevision`, `PayStructureRule`, `PayRuleBasis`, `EmployeePayAssignment`, `PayrollRun`, `PayrollCalculation`, `PayrollCalculationLine`, `PayrollLiability`, `PayrollLiabilitySettlement` | `pay_components`, `pay_structures`, `pay_structure_revisions`, `pay_structure_rules`, `pay_rule_bases`, `employee_pay_assignments`, `payroll_runs`, `payroll_calculations`, `payroll_calculation_lines`, `payroll_liabilities`, `payroll_liability_settlements` | ERP product-first; ADR-0046 |
+| `dotmac-procurement` | `PurchaseRequisition`, `PurchaseRequisitionLine`, `SourcingEvent`, `SourcingEventLine`, `SourcingInvitation`, `BidSubmission`, `BidLine`, `BidEvaluation`, `PurchaseOrder`, `PurchaseOrderLine`, `ReceiptObservationRecord`, `ProcurementEvidence` | `purchase_requisitions`, `purchase_requisition_lines`, `sourcing_events`, `sourcing_event_lines`, `sourcing_invitations`, `bid_submissions`, `bid_lines`, `bid_evaluations`, `purchase_orders`, `purchase_order_lines`, `receipt_observations`, `procurement_evidence` | ERP product-first; ADR-0050 |
+| `dotmac-projects` | `Project`, `ProjectTemplate`, `ProjectTemplateTask`, `ProjectTemplateTaskDependency`, `ProjectTask`, `ProjectTaskDependency`, `ProjectTaskAssignee` | `projects`, `project_templates`, `project_template_tasks`, `project_template_task_dependencies`, `project_tasks`, `project_task_dependencies`, `project_task_assignees` | Sub product-first; ADR-0051 |
+| `dotmac-records` | `RetentionScheduleVersion`, `RecordSeriesVersion`, `Record`, `RecordTriggerObservation`, `LegalHoldCase`, `LegalHoldTarget`, `DispositionBatch`, `DispositionItem`, `CustodyTransfer`, `PreservationCheck`, `RecordEvent` | `retention_schedule_versions`, `record_series_versions`, `records`, `record_trigger_observations`, `legal_hold_cases`, `legal_hold_targets`, `disposition_batches`, `disposition_items`, `custody_transfers`, `preservation_checks`, `record_events` | Greenfield after exact fleet inventory; ADR-0049 |
+| `dotmac-surveys` | `Survey`, `SurveyInvitation`, `SurveyResponse` | `surveys`, `survey_invitations`, `survey_responses` | Sub product-first; ADR-0053 |
+| `dotmac-tax` | `TaxAuthority`, `TaxJurisdiction`, `TaxCode`, `TaxRule`, `TaxRuleBand`, `TaxDetermination`, `TaxDeterminationLine`, `StatutoryReportDefinition`, `StatutoryReportBox`, `TaxFilingObligation`, `StatutoryReport`, `StatutoryReportValue`, `TaxReturn`, `TaxReturnEvent` | `tax_authorities`, `tax_jurisdictions`, `tax_codes`, `tax_rules`, `tax_rule_bands`, `tax_determinations`, `tax_determination_lines`, `statutory_report_definitions`, `statutory_report_boxes`, `tax_filing_obligations`, `statutory_reports`, `statutory_report_values`, `tax_returns`, `tax_return_events` | ERP product-first; ADR-0045 |
+| `dotmac-work-orders` | `WorkOrder`, `WorkOrderAssignment`, `WorkOrderEvent`, `WorkOrderWorkLog`, `WorkOrderNote`, `WorkOrderEvidence` | `work_orders`, `work_order_assignments`, `work_order_events`, `work_order_worklogs`, `work_order_notes`, `work_order_evidence` | Sub product-first; ADR-0054 |
+
+Canonical writers are equally explicit. These services accept the caller's
+session, mutate and flush; they do not commit or roll back. Product adapters
+authorize and translate typed facts but never maintain a parallel writer.
+
+| State surface | Canonical writer and non-owner boundary |
+|---|---|
+| Accounting chart, periods, dimensions, journals and ledger evidence | `dotmac_accounting.service`; producers submit typed facts, while Approvals, Numbering and each subledger retain their separate decisions. |
+| Analytical declaration snapshots, receipts, observations and winning points | `dotmac_analytics.service.record_batch`; `rebuild_projection` is the sole repair writer for `metric_points`; domain owners retain calculations. |
+| Banking masters, observations, match allocations and reconciliations | `dotmac_banking.service`; Integrator owns provider transport and Accounting owns cash-ledger projection. |
+| Controlled document identity, exact versions and document lifecycle | `dotmac_documents.service`; Files owns bytes, Approvals owns verdicts and Durable Timers owns wake-up identity. |
+| Expense requests, claims, receipts, policy evidence and eligibility | `dotmac_expenses.service`; Party owns identity, Approvals owns quorum, Files owns bytes and Finance owns payable/payment state. |
+| Fixed-asset books, valuation decisions and balanced consequences | `dotmac_finance.service`; the physical Assets owner and the Accounting projection remain separate typed seams. |
+| Conversations, messages and read cursors | `dotmac_inbox.service`; products own subject/workforce links and consequences, while Integrator owns transport evidence. |
+| Party capacities, relationships, memberships, contact evidence and external references | `dotmac_party.service`; kernel Party remains the identity owner and authorization consumes facts without treating them as grants. |
+| Supplier documents, credits, liabilities and obligations | `dotmac_payables.service`; Procurement, suppliers, Approvals, Tax, Accounting and Treasury remain independent owners. |
+| Payroll components, structures, calculations, liabilities and settlement coverage | `dotmac_payroll.service`; People, Tax, Banking and Accounting are ports, not imported models or alternate writers. |
+| Requisitions, sourcing, bids, awards, commitments and receipt projection | `dotmac_procurement.service`; Approvals decides quorum, Inventory owns stock/receipts and Payables consumes approved commitment facts. |
+| Project/task/template/dependency/assignment structure and lifecycle | `dotmac_projects.service`; products own project subjects plus finance, workforce, work-order and customer consequences. |
+| Record declarations, schedules, holds, preservation, custody and disposition | `dotmac_records.service`; source domains retain meaning, Files performs physical deletion, Approvals decides verdicts and Timers schedules review. |
+| Survey definitions, invitations, responses and aggregates | `dotmac_surveys.service`; products own eligibility, delivery and every subject consequence. |
+| Tax policy, determinations, report snapshots, obligations and returns | `dotmac_tax.service`; products own taxable source facts, Integrator owns authority transport and Accounting owns postings. |
+| Physical-work execution rows and evidence | `dotmac_work_orders.service`; products own subjects, workforce eligibility, inventory, topology and downstream consequences. |
 Core never imports `app/features` (import-linter contract). Features never
 import each other (import-linter contract). Cross-feature references are
 FK/UUID columns, never a Python import — e.g. `rbac`'s `PartyRoleGrant` refers
@@ -531,15 +798,20 @@ in `CLAUDE.md`):
   cannot smuggle a `tenant_id IS NULL`/other-tenant write past the policy.
 
 **Resolution order** (`dotmac_kernel.settings_resolver.resolve_with_source`,
-`resolve_value` is a thin wrapper that drops the `source`): tenant row (if
-`tenant_id` is not `None`) → platform row (`tenant_id IS NULL`) → the
-`SettingSpec`'s own `default`. A stored value that fails coercion to the
-spec's `value_type`, or violates `allowed`/`min_value`/`max_value`, degrades
-all the way to the spec default (not to "ignore this row") — a corrupted
-row can never break every caller. `source` (`"tenant" | "platform" |
-"default"`) tells the settings admin API whether to mask a secret's value
-(masked whenever a real row exists; never for the built-in default — there's
-nothing to hide there).
+`resolve_value` is a thin wrapper that drops the `source`): the declared scope
+chain, most specific row first (tenant row if `tenant_id` is not `None` →
+platform row, `tenant_id IS NULL`) → the assembly's **profile default**
+(`ProductAssemblySpec.setting_defaults`, keyed `"<domain>/<key>"`, ADR-0013) →
+the `SettingSpec`'s own `default`. The environment is not in this list and is
+not a source at all — ADR-0011; `env_var` is a bootstrap that produces a row
+before anything resolves. A stored value that fails coercion to the spec's
+`value_type`, or violates `allowed`/`min_value`/`max_value`, degrades all the
+way to the spec default (not to "ignore this row", and *not* to the profile
+default either) — a corrupted row can never break every caller. `source` is the
+level that actually answered: the scope kind (`"tenant"`, `"platform"`, …),
+`"profile"`, or `"default"`. It tells the settings admin API whether to mask a
+secret's value (masked whenever a real row exists; never for the built-in
+default — there's nothing to hide there).
 
 Finer levels than `tenant` are possible — a spec resolves through the
 declared scope chain (`dotmac_kernel.setting_scopes`), most specific first,
@@ -880,10 +1152,15 @@ Tokens are named by ROLE (`--dmui-surface-primary`,
 because Tailwind v4's `@theme` emits unprefixed `--color-*`/`--font-*` into the
 same `:root`. Dark values are emitted under both `.dark` (what this portal's
 Alpine store already toggles) and `[data-dmui-theme="dark"]`. The published
-component slice currently contains `empty_state`; every emitted `.dmui-*`
-class is derived from its typed component contract. ADR-0006 § 5 still forbids
-adding a component because markup merely looks similar, and a guard fails the
-build if a selector appears without a declaration. Full contract:
+component surface contains the reuse-proven `empty_state` and the
+audit-complete, deliberately unadopted `map_frame`; every emitted `.dmui-*`
+class is derived from its typed component contract. `map_frame` owns only an
+accessible canvas frame and generic ready/loading/empty/error presentation.
+Provider runtime, tiles, viewport, endpoints, polling, layers, fallback lists
+and domain vocabulary remain host-owned, as recorded in
+`docs/inventories/map-ui-sources.md`. ADR-0006 § 5 still forbids adding a
+component because markup merely looks similar, and a guard fails the build if a
+selector appears without a declaration. Full contract:
 `packages/dotmac-ui/COMPATIBILITY.md`.
 
 The first product-facing cutover is the shared document canvas, tenant login,
@@ -1265,8 +1542,54 @@ made concrete — every model has exactly one declared owner.
 | `PlatformTicketComment` | `mod_tkt.platform_ticket_comments` | `dotmac-ticketing` optional module | Platform-plane comment trail owned with its vendor-support ticket; no cross-plane or cross-application FK. |
 | `TenantStoredFile` | `mod_files.stored_files` | `dotmac-files` optional module | Tenant plane: product-first port of Sub's provider/staged lifecycle, ERP's document/image policy coverage and CRM's content-spoofing canaries; forced RLS and required `TenantScope` (ADR-0022/0023; [`files-sources.md`](inventories/files-sources.md)). The a3 lineage supports explicit TENANT and TENANT+PLATFORM installations; ERP then Academy are the first tenant cutovers, and ERP E8 plus the deferred six-module cohort still gate source-product retirement. |
 | `PlatformStoredFile` | `mod_files.platform_stored_files` | `dotmac-files` optional module | Platform plane over the same persistence-free physical engine: no tenant column or RLS, platform grants, and `app_user` revoked. Vendor CP is candidate cutover 3 through a licensing-owned exact-bundle relation; no product tenant is created and no consumer is claimed yet (ADR-0023). |
-| `ImportRun` | `mod_imports.import_runs` | `dotmac-imports` optional module | Tenant plane: product-first port of Sub's run lifecycle and one-shot dry-run→apply promotion, joined to ERP's decoding/alias/preview mechanism; forced RLS and a tenant-composite identity neither source had (ADR-0025; [`imports-sources.md`](inventories/imports-sources.md)). The input is an opaque `dotmac-files` id plus its SHA-256, not an inline payload. Validation and apply independently hash the raw bytes, and each locked call advances one resumable durable checkpoint. ERP, then Sub, then CRM are the candidate cutovers; ERP E8 still gates source-product retirement. |
+| `ImportRun` | `mod_imports.import_runs` | `dotmac-imports` optional module | Tenant plane: product-first port of Sub's run lifecycle and one-shot dry-run→apply promotion, joined to ERP's decoding/alias/preview mechanism; forced RLS and a tenant-composite identity neither source had (ADR-0025; [`imports-sources.md`](inventories/imports-sources.md)). The input is an opaque `dotmac-files` id plus its SHA-256, not an inline payload. Validation and apply independently verify immutable bytes and advance either the ordinary run checkpoint or the bounded partition ledger. ERP then Sub are the candidate cutovers; CRM is inventory evidence only and is not revived. ERP E8 still gates source-product retirement. |
 | `ImportRunRow` | `mod_imports.import_run_rows` | `dotmac-imports` optional module | One minimised outcome per input line — `ok | error | skipped`, a canonical row fingerprint, bounded typed safe error detail, and the domain applier's opaque result. Mapped row values and raw exception text are not retained. Carries NO foreign key into a domain table: Sub's shared row table welded `payment_id` into the ledger, and the reference runs the other way here (ADR-0025 § 3). |
+| `ImportPartition` | `mod_imports.import_partitions` | `dotmac-imports` optional module | One immutable `dotmac-files` partition identity, contiguous source-row range, byte size and SHA-256 plus an expiring opaque worker claim and completion checkpoint. A worker verifies the entire bounded artifact before any domain call; a stale token cannot settle, and promotion clones the exact validated plan. It stores no row values and has no cross-module FK. |
+| `ContentPlan` | `mod_content.content_plans` | `dotmac-content` optional module | Tenant editorial planning identity, text, guarded lifecycle and optional date range, product-first from Mkt `Campaign` and deliberately renamed to keep outbound campaign execution with `dotmac-campaigns`. Backoffice owns actor authorization; `created_by_ref` is opaque ([content dossier](inventories/content-extraction-dossier.md)). |
+| `ContentItem` / `ContentVariant` | `mod_content.content_items`, `content_variants` | `dotmac-content` optional module | Canonical title/body, editorial `draft`/`ready`/`archived` state, calendar placement and open provider-neutral authored variants. Publication requests, targets and outcomes are not content state and move through immutable `ContentSnapshotV1` values to the publishing owner. |
+| `ContentPlanCreative` / `ContentItemCreative` | `mod_content.content_plan_creatives`, `content_item_creatives` | `dotmac-content` optional module | Ordered role/caption/alt metadata around opaque `file_ref` UUIDs. `dotmac-files` owns stored bytes and lifecycle; no sibling import or foreign key crosses that ownership boundary. |
+| `PublicationRelease` | `mod_publishing.publication_releases` | `dotmac-publishing` optional module | One tenant publication intent with an immutable, digested snapshot, requested delivery time and actor/source provenance held as opaque references. Editorial content and site revisions remain with their source owners; Backoffice owns authorization and target-selection policy ([publishing dossier](inventories/publishing-extraction-dossier.md)). |
+| `PublicationDelivery` | `mod_publishing.publication_deliveries` | `dotmac-publishing` optional module | One selected opaque target per release and its normalized local delivery state. A target reference identifies an Integrator binding without importing its registry or storing provider, credential, endpoint or channel vocabulary. |
+| `PublicationAttempt` / `PublicationObservation` | `mod_publishing.publication_attempts`, `publication_observations` | `dotmac-publishing` optional module | Monotonic attempt evidence joined to one transactional outbox intent, plus immutable receipt-deduplicated normalized outcomes. Integrator owns connector execution, raw transport evidence, retry/checkpoints and remote systems; publishing derives explicit partial, published, failed or cancelled aggregate state from local observations. |
+| `Site` / `Page` | `mod_sites.sites`, `pages` | `dotmac-sites` optional module | Tenant site and stable page identity. Site archive is terminal; Backoffice owns actor authorization. Landing routes and product templates are consumers or separate application presentation, not competing site owners ([sites dossier](inventories/sites-extraction-dossier.md)). |
+| `PageRevision` | `mod_sites.page_revisions` | `dotmac-sites` optional module | Append-only page title/body, SEO and opaque ordered file/form references. Files and forms retain their independent lifecycles and no sibling-module foreign key or import crosses the boundary. |
+| `SiteRevision` / `SiteRevisionPage` | `mod_sites.site_revisions`, `site_revision_pages` | `dotmac-sites` optional module | Immutable complete local website snapshot plus exact page-revision membership, routes, navigation, redirects and one guarded ready revision. `SiteReleaseV1` is usable locally; publishing owns later remote intent/outcomes and Integrator owns hosting transport (ADR-0035). |
+| `NodeDefinition` | `mod_mediaobs.node_definitions` | `dotmac-media-observations` optional module | Tenant-scoped versioned external-node vocabulary, product-first from Mkt's hierarchy shape but open to connector declarations rather than a provider enum (ADR-0034). |
+| `MetricDefinition` | `mod_mediaobs.metric_definitions` | `dotmac-media-observations` optional module | Tenant-scoped versioned metric code with explicit value type, unit, semantic and `provider_reported` origin. |
+| `ObservationEnvelope` | `mod_mediaobs.observations` | `dotmac-media-observations` optional module | Append-only domain identity, normalized fingerprint, source instant, first receipt instant, normalization revision and optional restatement link. Identity is global across fact kinds within its tenant/installation/source scope. |
+| `ObservationReceipt` | `mod_mediaobs.observation_receipts` | `dotmac-media-observations` optional module | Append-only opaque transport-receipt provenance with its distinct receipt instant; reusing one receipt identity with a changed instant or observation is a conflict. The module never dereferences or replaces Integrator evidence. |
+| `EntityFact` | `mod_mediaobs.entity_observations` | `dotmac-media-observations` optional module | Append-only provider-reported entity name/state/disposition and aggregate properties. Exact Decimal configuration values use a private type-preserving JSON encoding and are restored on public reads. Archive/deletion is observed state, not destructive local deletion. |
+| `HierarchyFact` | `mod_mediaobs.hierarchy_observations` | `dotmac-media-observations` optional module | Append-only reported parent edge. Missing parents and cycles remain visible drift rather than silently re-rooting the child. |
+| `MetricPeriod` | `mod_mediaobs.metric_periods` | `dotmac-media-observations` optional module | Canonical append-only half-open period, non-overlapping for one installation/source/account/entity/versioned metric series. |
+| `MetricFact` | `mod_mediaobs.metric_observations` | `dotmac-media-observations` optional module | Append-only typed provider claim. Counts remain integer; exact money retains decimal amount, currency, minor-unit scale and integer minor units; conversion claims are never authoritative attribution or revenue. |
+| `CurrentEntity` | `mod_mediaobs.current_entities` | `dotmac-media-observations` optional module | Disposable deterministic effective-entity projection rebuilt from immutable source time/restatement ordering. |
+| `CurrentHierarchy` | `mod_mediaobs.current_hierarchy` | `dotmac-media-observations` optional module | Disposable effective-edge projection with explicit missing-child, missing-parent or cycle drift code. |
+| `CurrentMetric` | `mod_mediaobs.current_metrics` | `dotmac-media-observations` optional module | Disposable effective metric-period pointer; the full value and provenance remain in immutable rows. |
+| `ReconciliationEvidence` | `mod_mediaobs.reconciliation_evidence` | `dotmac-media-observations` optional module | Append-only preview/repair evidence recording actor, reason, drift count and before/expected digests. |
+| `Campaign` / `CampaignRevision` / `CampaignStep` | `mod_campaigns.campaigns`, `campaign_revisions`, `campaign_steps` | `dotmac-campaigns` optional module | Tenant-only provider-neutral campaign identity and its immutable active execution plan. Product audience, financial and sender business rules are typed inputs; Template Studio and Durable Timers remain assembly-bound owners (ADR-0032; [`campaigns-sources.md`](inventories/campaigns-sources.md)). |
+| `CampaignAudience` / `CampaignRecipient` / `CampaignConsentReceipt` | `mod_campaigns.campaign_audiences`, `campaign_recipients`, `campaign_consent_receipts` | `dotmac-campaigns` optional module | Immutable source-versioned audience and delivery snapshots plus observations of the kernel consent owner's decision at audience, delayed-step and final-delivery gates. They do not become Party/customer or consent-policy records. PII carries an explicit deadline and can only move to the database-enforced scrubbed form after sending begins. |
+| `CampaignRecipientStep` / `CampaignDeliveryIntent` | `mod_campaigns.campaign_recipient_steps`, `campaign_delivery_intents` | `dotmac-campaigns` optional module | One unique recipient/step progression fact and one provider-neutral intent. The package emits deterministic timer identities through a port and writes the kernel outbox atomically; it owns no scheduler, relay, provider credentials, I/O or retry. |
+| `CampaignObservation` / `CampaignResponse` | `mod_campaigns.campaign_observations`, `campaign_responses` | `dotmac-campaigns` optional module | Append-only deduplicated delivery/open/click/reply observations and response/conversion-correlation facts. Delivery projection is precedence-checked; the assembly asks Sales about a Lead and Inbox remains the message/conversation owner. |
+| `CampaignUnsubscribeRequest` / `CampaignCounter` | `mod_campaigns.campaign_unsubscribe_requests`, `campaign_counters` | `dotmac-campaigns` optional module | Request evidence around a kernel-consent write, plus rebuildable aggregate projection. The counter is never authoritative and the drift/rebuild service derives it from recipient facts. |
+| `Employee` | `mod_people.employees` | `dotmac-people` optional module | Product-first port of ERP's narrow employment relationship: one kernel Party person per tenant, stable code, lifecycle state/dates, and optional catalogue references. Personal identity, auth, reporting caches, compensation, payroll, attendance, finance and integrations are excluded ([`people-directory-sources.md`](inventories/people-directory-sources.md)). |
+| `Department` | `mod_people.departments` | `dotmac-people` optional module | Tenant department identity and hierarchy. ERP's competing `head_id` employee pointer and cost-centre FK do not port; department head is derived through one declared head position and its dated incumbent. |
+| `Designation` | `mod_people.designations` | `dotmac-people` optional module | Tenant job-title catalogue. ERP's NCC reporting category remains with its regulatory consumer rather than widening the directory contract. |
+| `EmploymentType` | `mod_people.employment_types` | `dotmac-people` optional module | Tenant employment-arrangement catalogue with no payroll or product-integration fields. |
+| `Position` | `mod_people.positions` | `dotmac-people` optional module | Canonical reporting hierarchy and vacancy-routing policy. Vacancy is derived from dated assignments; ERP's persisted `is_vacant` cache is deliberately not ported. |
+| `PositionAssignment` | `mod_people.position_assignments` | `dotmac-people` optional module | Historical PRIMARY/ACTING/INTERIM occupancy. Service checks preserve ERP behavior and a PostgreSQL trigger serializes and rejects all overlapping primary intervals, including the finite intervals ERP's open-ended partial indexes missed. |
+| `ReferralProgramme` / `ReferralProgrammeVersion` | `mod_referrals.referral_programmes`, `referral_programme_versions` | `dotmac-referrals` optional module | Tenant referral policy identity and immutable active-policy snapshot, product-first from Sub. Party, Customer, Sales and Billing remain opaque collaborators (ADR-0040). |
+| `ReferralCode` / `Referral` / `ReferralConversion` | `mod_referrals.referral_codes`, `referrals`, `referral_conversions` | `dotmac-referrals` optional module | Finite invitation identity, idempotent source attribution and evidence-bound conversion. The conversion writes a provider-neutral reward request to the kernel outbox; it never creates a lead/customer or applies a credit. |
+| `ResellerAccount` / `ResellerAuthorityRevision` | `mod_reseller.reseller_accounts`, `reseller_authority_revisions` | `dotmac-reseller-management` optional module | Product-first from Sub: tenant reseller identity, cycle-safe hierarchy, active/suspended/retired lifecycle and immutable least-privilege delegated authority. Party roles are opaque references; Commercial Agreements and Entitlement Allocation remain independent owners (ADR-0040). |
+| `ResellerMemberBinding` / `ResellerCustomerAccountBinding` | `mod_reseller.reseller_member_bindings`, `reseller_customer_account_bindings` | `dotmac-reseller-management` optional module | Tenant-scoped bindings to opaque member and customer-account identities. They authorize no login and copy no Party or Customer state; commissions, payouts, invoices and customer lifecycle do not enter this namespace. |
+| `Form` / `FormVersion` / `FormSection` / `FormField` / `FormFieldOption` | `mod_forms.forms`, `form_versions`, `form_sections`, `form_fields`, `form_field_options` | `dotmac-forms` optional module | Product-first port of ERP's seven-table reusable form definition owner. Published versions freeze an exact digest; subject meaning and file bytes remain opaque external references (ADR-0040). |
+| `FormSubmission` / `FormAnswer` | `mod_forms.form_submissions`, `form_answers` | `dotmac-forms` optional module | One idempotent submission against an exact published version plus immutable typed value, display and field-definition snapshots. The module validates capture but decides no subject consequence. |
+| `WorkflowExecution` / `WorkflowCheckpoint` / `WorkflowRepair` | `mod_workflow.workflow_executions`, `workflow_checkpoints`, `workflow_repairs` | `dotmac-workflow-runtime` optional module | Product-first runtime-only port from ERP: ordered finite claims, bounded retry and evidence-bound repair over opaque definition/subject/output references. Assemblies execute every external/domain effect (ADR-0040). |
+| `HealthComponent` / `HealthObservation` / `HealthProjection` | `mod_health.health_components`, `health_observations`, `health_projections` | `dotmac-platform-health` optional module | Platform-only provider-neutral component policy, immutable bounded health evidence and a disposable deterministic latest-state projection. Fresh/stale/missing is derived at read time; no health fact mutates deployment state (ADR-0040). |
+| `SupportAccessRequest` / `SupportAccessGrant` / `SupportAccessEvent` | `mod_supportaccess.support_access_requests`, `support_access_grants`, `support_access_events` | `dotmac-support-access` optional module | Platform-only purpose/case-bound request and exact Approval evidence, credential-free finite descriptor, revocation/expiry state and append-only workflow evidence. Kernel/adopter enforcement remains independent (ADR-0040). |
+| `RemoteAccessRequest` / `RemoteAccessGrant` / `RemoteAccessObservation` | `mod_remoteaccess.remote_access_requests`, `remote_access_grants`, `remote_access_observations` | `dotmac-remote-access` optional module | Tenant purpose/opaque-target/least-privilege request, exact Approval binding, finite grant and immutable execution outcome. Network Control executes only the provider-neutral intent and remains the device desired-state owner (ADR-0040). |
+| `ReportingObligation` / `ClassificationRevision` / `EvidencePack` / `EvidenceSection` | `mod_compliance.reporting_obligations`, `classification_revisions`, `evidence_packs`, `evidence_sections` | `dotmac-compliance-reporting` optional module | Product-first from Sub's NCC pack: immutable section vocabulary and exact period snapshot with explicit missing evidence. Source domains remain authoritative and a missing source never fabricates a value (ADR-0040). |
+| `FilingSubmission` / `RegulatorAcknowledgement` | `mod_compliance.filing_submissions`, `regulator_acknowledgements` | `dotmac-compliance-reporting` optional module | Submission is bound to the exact pack digest; regulator acceptance/rejection is immutable evidence. Rendering, scheduling and transport remain separate owners. |
+| `AIPolicy` / `AIPolicyVersion` / `AIOperation` / `AIExecutionAttempt` / `AIInsight` | `mod_aiops.ai_policies`, `ai_policy_versions`, `ai_operations`, `ai_execution_attempts`, `ai_insights` | `dotmac-ai-operations` optional module | Product-first from Sub: immutable allowed-operation/input-contract policy, provider-neutral intents, opaque provider/model/request observation strings and advisory insights. Integrator owns provider I/O; products alone own prompts and consequences (ADR-0040). |
 
 `Party.custom_fields` and `DomainSetting`'s split-policy shape are
 columns/behavior on the rows above, not separate tables, so they don't get
@@ -1285,6 +1608,8 @@ write:
 | Tenants | `app.features.tenants.service.provision_tenant` (platform-only, control-plane security Task 2 — one transaction creating tenant + owner party/person/credential + `admin` role grant + two audit events; no update/delete service yet) |
 | Platform admins | `scripts/create_platform_admin.py::upsert_admin` (CLI-only, platform/migration DB credentials — the same trust boundary as migrations; deliberately NO HTTP write path, see ADR-0004) |
 | Platform sessions | `dotmac_kernel.platform_auth.login` (issues, via `POST /platform/auth/login`) **and** `logout` (revokes, via `POST /platform/auth/logout`) |
+| Platform runtime-health evidence and projections | `dotmac_platform_health.service.record_observation` is the sole immutable fact writer; `register_component` owns bounded freshness policy; `rebuild_projections` is the sole repair writer and `summarize_health` derives explicit fresh/stale/missing state. Observability owns raw telemetry, Ticketing owns incidents and Deployment Control alone owns desired-state mutation. |
+| Temporary support-access requests and finite grants | `dotmac_support_access.service.create_request`, `admit_request`, `revoke_grant` and `expire_grants` own the platform workflow. Approval is accepted only as exact-content evidence; the returned descriptor contains no credential and the adopter/kernel remains the enforcement owner. There is no renewal path. |
 | Tenant domains | none — no write path exists yet (rows would be inserted by a future custom-domain feature) |
 | Parties (person/org identity + profile) | **Dual writer**, see below: `app.features.parties.service.create_person_party` / `create_organization_party` / `update_person_party` / `update_organization_party` (the `/parties` API + `/admin/parties/{id}/edit` web flow), **and** `app.features.auth.service.register` (the `/auth/register` flow) |
 | `Party.display_name` projection | owner: parties+auth services via `core/identity` helpers (recompute-on-write) — `app.features.parties.service.create_person_party`/`update_person_party` and `app.features.auth.service.register` all call `dotmac_kernel.identity.person_display_name`; `update_organization_party`/`create_organization_party` reassign `legal_name` directly (no helper needed — `legal_name` IS the display name). Recomputed on every create AND update, never write-once again (Task 5 closed the SOT gap; see below). Repair: re-save (call the relevant update function — it recomputes from the current subtype fields, no separate repair script needed) |
@@ -1296,17 +1621,32 @@ write:
 | Audit events | `dotmac_kernel.audit.write_audit_event` — the only function that constructs an `AuditEvent`. It enforces two distinct contracts before anything reaches the session: the open ACTION VOCABULARY is declared by installed modules through `AuditActionRegistry`, while the actor is the closed kernel-owned `(actor_type, actor_id)` identity pair (`system` may omit an id; `user`/`service`/`api_key` may not). Both members are explicit at every applicable caller; `actor_party_id` is optional accountability enrichment and never supplies the pair, while `actor_label` is a display snapshot. A production-source AST census covers all 20 writers across the assembly and shipped packages. `dotmac_workspace` PR #10 retired the final known external fallback callers before kernel a69 removed the derivation. `occurred_at` is domain time (database `now()` by default, caller-supplied for reconstruction), distinct from server-assigned persistence `created_at`. Tenant audit actor columns have no FK so attribution survives deletion. |
 | Platform audit events | `dotmac_kernel.audit.write_platform_audit_event` is the sole constructor/writer. Kernel owns the storage contract as `platform_audit_log.v1`; migration `0026_platform_audit_log` makes online history append-only, and the live verifier proves shape, FK/index, no RLS, tenant-role isolation, and `platform_api` `SELECT`+`INSERT` only. Consumer declarations and DDL-free verification revisions follow only after kernel a68 is published, so their declared floor is resolvable. Current limitation: deleting a `PlatformAdmin` nulls actor attribution, so immutable actor snapshotting remains a separate unresolved hardening slice. |
 | Integrator shadow-comparison evidence | `dotmac_integration.shadow.record_shadow_observation` is the sole writer; it appends and flushes a closed, privacy-safe outcome keyed by the module receipt UUID and explicit comparison revision. `due_shadow_receipt_ids` and `shadow_report` are the only scheduling/report readers. The destination product owns the comparison and its domain reads; the thin `dotmac_integrator` assembly owns only transaction boundaries and transport. This high-volume worker state is not projected from the kernel operator-audit ledger. |
+| External media observation facts and projections | `dotmac_media_observations.service` is the only package writer: declaration and `record_*` functions append normalized facts/receipts/restatements; `_refresh_projections` and `reconcile_projections` alone replace disposable current rows. A connector emits typed commands but never writes these tables. No product composes the module while adoption is paused (ADR-0034). |
 | Communication suppressions | `dotmac_kernel.consent.suppress`, `unsuppress`, and `unsuppress_marketing`; delivery never writes the table directly — a suppressing provider receipt delegates to `consent.suppress` in the same transaction |
 | Communication delivery receipts | `dotmac_kernel.delivery.record_receipt` — the only constructor/writer; it preserves each provider status transition, deduplicates repeated callbacks, and delegates suppressing consequences to the consent owner |
 | Domain settings rows | `dotmac_kernel.settings_resolver.upsert_by_key` (tenant writes, via `settings/service.py::update_setting` — called by the JSON `PUT /settings/{domain}/{key}` API, the generic web editor `POST /admin/settings/{domain}/{key}/edit`, **and** the friendly branding editor `POST /admin/settings/branding`, all three ending in the same function and the same `settings.update` audit event) and `ensure_by_key` (platform-default seeding only, via `settings/seed.py::seed_platform_defaults`, idempotent — never overwrites an existing row) |
 | Notification channel-policy setting | Same canonical `DomainSetting` writers as above; `dotmac_kernel.channel_policy.resolve_channels` is the typed reader and the legacy per-event shadow setting is not supported |
 | `ui_branding` setting specifically | same writer as above (`update_setting`, domain=`branding`, key=`ui_branding`) — no separate write path; read by `dotmac_kernel.branding.load_branding`, whose resolved colour fields are projected by `app.features.presentation.service.project_brand_stylesheet` through `dotmac_ui.render_brand_css`. Template Studio is not an owner or writer |
 | Runtime brand stylesheet projection | `app.features.presentation.service.project_brand_stylesheet` is the sole composer: kernel-resolved brand data in, public `dotmac_ui` generator out. `web.py` only guards scope and applies response policy; templates only link the route. No stored CSS, parallel renderer, or Template Studio writer exists |
+| Reusable map-frame presentation | `dotmac_ui.components.MAP_FRAME` owns only the inert canvas/state markup, token-native CSS and accessibility contract. A composing product owns the state transition and every provider, tile, viewport, endpoint, poll, location datum, layer, popup, control, fallback and domain decision. The contract is audit-complete with zero product adopters; no product-local owner is retired yet. |
 | Custom field definitions | `app.features.custom_fields.service.create_field` / `update_field` / `deactivate_field` (soft-delete only — no hard delete); each has a JSON API route (`custom_fields/router.py`) and an `/admin/custom-fields` web route (`custom_fields/web.py`) calling the same function |
 | Custom field values | `app.features.custom_fields.service.set_values` (the only writer of any entity's `custom_fields` JSONB column) — called by the JSON `PUT /custom-fields/{entity_type}/{entity_id}/values` API **and** the web values-panel (`POST /admin/custom-fields/party/{party_id}/values-panel`, see the composition pattern above) |
 | Ticket lifecycle rows | none in this reference assembly — it composes `mod_tkt` only for migration/catalog proof and has no ticket surface. A real adopter's local ticket service is the sole writer. Independently owned tickets stay in their owning application/Integrator evidence; correlation alone uses an opaque reference rather than a local projection (ADR-0024). |
 | Stored-file metadata and physical state | `dotmac_files.service.stage_file` / `request_deletion`, then the explicit target→external-action→record-result phases (`deletion_target` → `delete_object` → `finalize_purge`; `reconciliation_target` → `observe_object` → `record_presence`). DB phases filter explicit `TenantScope` and flush without commit/rollback; provider phases accept no `Session`, so no network call or download stream holds a DB transaction. The owner covers only provider/byte state. Domain attachment relations, read authorization, retention permission, document meaning, and import outcomes remain with the domain that references the opaque file UUID (ADR-0022). |
+| First-party website observations and analytical projections | `dotmac_web_analytics.service.record_event` is the sole raw-observation writer; `record_classification` appends filter evidence; `dotmac_web_analytics.projections.rebuild_projections` is the sole writer of visitor/session/route/source/device/event/funnel projections; `dotmac_web_analytics.retention` deletes through the offline retention/privacy path and rebuilds before the transaction can complete. Property/origin/event/privacy/session/retention policy comes from each adopter. Websites, forms, campaigns, provider observations, customer identity, attribution and revenue remain with their named owners (ADR-0055). |
 | Import run and row outcomes | `dotmac_imports.service` — `create_dry_run`, `validate_next_chunk` (which takes no applier and therefore cannot mutate a domain), `promote` (digest-verified, uniquely constrained so a validated run applies once), `apply_next_chunk`, `mark_failed`. A chunk call locks the run, hashes and decodes the recorded bytes, resumes after the committed checkpoint, and returns without committing; `dotmac_kernel.db` remains the one transaction authority. Completed re-delivery is a no-op. Expected domain refusals are typed `RowRejected` outcomes; unexpected exceptions roll back the attempted chunk and escape. The importing domain remains the sole writer of its own rows through the `RowValidator`/`RowApplier` ports, and owns any reversal of what an import created (ADR-0025). |
+| Large-import partition plan and worker checkpoint | `dotmac_imports.partitioning` — two-pass verified CSV partition generation, immutable descriptor registration, atomic expiring claims, structurally separate validation/apply entry points and same-transaction row-outcome plus partition settlement. `dotmac-files` owns every original/derived byte; products decide worker count and retain all field/domain meaning. |
+| Editorial plans, content items, variants and creative relations | `dotmac_content.service` — plan/item create, get, list, count and guarded update; variant creation; plan/item creative attachment; immutable snapshot construction. Every write requires explicit `TenantScope`, filters the tenant in the service, mutates and flushes the caller's session, and never commits or rolls back. Backoffice authorizes actors, `dotmac-files` owns bytes, publishing owns releases, `dotmac-campaigns` owns outbound progression, and Integrator owns provider transport; none is a parallel content writer. |
+| Publication releases, deliveries, attempts and normalized observations | `dotmac_publishing.service` — idempotent immutable request creation and typed timer scheduling; stale-safe due dispatch; one outbox intent per target attempt; receipt-deduplicated observation recording; explicit partial/all-failed reconciliation; failed-target retry and pre-dispatch cancellation. Every write requires explicit `TenantScope`, filters the tenant in the service, mutates and flushes the caller's session, and never commits or rolls back. An assembly supplies timer storage, Backoffice owns authorization/target policy, content/sites own editable sources, kernel owns idempotency/outbox, and Integrator owns bindings, providers, credentials and transport; none is a parallel publication writer. |
+| Outbound campaign identity and recipient progression | `dotmac_campaigns.service` — `create_campaign`/`revise_campaign`, `ingest_audience`, `schedule_campaign`, `accept_due_work`, `record_observation`, pause/resume/cancel/complete, `authorize_delivery`, `request_unsubscribe`, counter rebuild and publication/privacy repair. Every path receives and flushes the caller session. Kernel consent decides eligibility, kernel idempotency owns replay, kernel outbox owns publication, Durable Timers owns due-work mechanics, and product adapters supply audience/render/sender/Sales facts; none is a parallel campaigns writer (ADR-0032). |
+| Referral programmes, codes, attribution and conversions | `dotmac_referrals.service` — `create_programme`, `issue_code`, `capture_referral`, and `record_conversion`. Every call receives an explicit tenant scope and caller session; conversion evidence and its reward-request outbox fact flush atomically. Party, Customer, Lead and Billing mutations remain outside the module (ADR-0040). |
+| Reseller account identity, hierarchy, delegated authority, bindings and lifecycle | `dotmac_reseller_management.service` — `create_account`, `set_parent`, `publish_authority`, `bind_member`, `bind_customer_account`, and `transition_account`. The owner receives an explicit tenant scope and caller session, rejects hierarchy cycles and authority broader than the parent revision, and flushes provider-neutral status facts through the kernel outbox. Party, Customer, Commercial Agreements, Entitlement Allocation, authentication, commissions, payouts and invoices remain outside the module (ADR-0040). |
+| Reusable form definitions, versions, fields/options, submissions and answer snapshots | `dotmac_forms.service` — `create_form`, `create_draft_version`, `add_section`, `add_field`, `add_option`, `publish_version`, and `submit_form`. Published definitions are digest-frozen; stable submission keys conflict on different content. Subject lifecycle, file bytes, rendering and consequences remain outside the module (ADR-0040). |
+| User-authored workflow execution, checkpoint claims/results and repair evidence | `dotmac_workflow_runtime.service` — `start_execution`, `claim_checkpoint`, `settle_checkpoint`, and `record_repair`. Checkpoints advance strictly in order under finite leases and bounded attempts; a terminal failure resumes only from explicit repair evidence. Definition authoring, timers, transport and every domain/provider effect remain assembly-owned (ADR-0040). |
+| Remote-access requests, grants and observations | `dotmac_remote_access.service.create_request`, `admit_request`, `revoke_grant`, `expire_grants` and `record_observation`. Exact Approval evidence gates one finite grant; activation/revocation are provider-neutral intents. Network Control/Integrator execute and observe them without becoming grant writers. |
+| Regulatory classification, packs and filing state | `dotmac_compliance_reporting.service.create_obligation`, `publish_classification`, `assemble_pack`, `submit_pack` and `acknowledge_submission`. Pack digests bind classification, period and every present/missing section; source owners retain their facts and the module never queries them directly. |
+| AI intake policy, operation evidence and advisory insights | `dotmac_ai_operations.service.create_policy`, `publish_policy_version`, `activate_policy_version`, `start_operation`, `record_attempt`, `create_insight` and `acknowledge_insight`. Integrator plugins own provider I/O, while products own prompts, domain context and any action recorded only as opaque evidence. |
+| Durable timer generations, cancellation and acceptance/rejection evidence | `dotmac_durable_timers.service` is the sole lifecycle writer on both declared planes: `schedule_timer`, `cancel_timer`, `accept_trigger`, `current_timer`, and `purge_history`. Identity-level PostgreSQL advisory locks serialize even the first schedule; cancellation names the observed generation and refuses a newer current generation; trigger acceptance re-derives current state and records stale evidence with observed/current generations and the opaque source version. The package exports typed ports, never ORM models. A schedule resolves the consuming module's manifest-declared outbox event type, calls the kernel outbox writer in the same transaction and sets `available_at=due_at`; `dotmac_kernel.messaging.relay` remains the sole owner of claim, lease, retry and dead-letter behavior. Business deadline policy and the effect after an accepted trigger remain with the adopting product. This reference assembly builds and proves the optional package but does not compose its `dt` lineage. |
 | Display formats (timezone/date_format/datetime_format) | owner: `settings` (display domain) — same `update_setting`/`upsert_by_key` write path as every other setting, via the generic web editor and the JSON `PUT /settings/display/{key}` API; no dedicated write path. Consumers: the `local_datetime`/`local_date` Jinja filters ONLY (`dotmac_kernel.templating`) — no service reads these specs directly |
 
 ### Known dual-writer: Parties (auth register vs. parties service)
@@ -1542,7 +1882,7 @@ inert fields would be exactly that. Its `settings` field is present only as
 
 ## Manifest declaration catalogues
 
-Five vocabularies now work this way, and **ADR-0008 makes the shape the standard**:
+Six vocabularies now work this way, and **ADR-0008 makes the shape the standard**:
 a kernel-level vocabulary whose members belong to modules is DECLARED on module
 manifests and validated by a registry — never enumerated by the kernel as an enum
 or a fixed list, and never pinned by a CHECK constraint on the backing column.
@@ -1554,20 +1894,22 @@ consumer" rule.
 | `FeatureManifest`/`ModuleManifest.permissions` (`PermissionSpec`: `code`, `description`, `default_roles`) | `dotmac_kernel.permissions.PermissionCatalogue` | `dotmac_kernel.deps.require_permission(code)` — resolves the spec and requires the actor to hold one of its `default_roles`, 403 otherwise | at BOOT: `create_app` walks every mounted route's stamped code and raises `UndeclaredPermissionError` |
 | `...capabilities` (`CapabilitySpec`) | `dotmac_kernel.capabilities.CapabilityCatalogue` | `dotmac_kernel.deps.require_capability` | at the request (`UndeclaredCapabilityError`) |
 | `...audit_actions` (bare codes) | `dotmac_kernel.audit_actions.AuditActionRegistry` | `dotmac_kernel.audit.write_audit_event` | at the WRITE, before anything is added to the session (`UndeclaredAuditActionError`) |
+| `...outbox_event_types` (bare codes) | `dotmac_kernel.outbox_event_types.OutboxEventTypeRegistry` | `dotmac_durable_timers.schedule_timer` | before scheduling takes a lock or writes a timer/outbox row (`UndeclaredOutboxEventTypeError`) |
 | `...feature_flags` (`FeatureFlagSpec`) | `dotmac_kernel.flags.FlagCatalogue` | `dotmac_kernel.flags.resolve_flag` | at resolution (`UndeclaredFlagError`) |
 | `...setting_domains` (bare codes) | `dotmac_kernel.setting_domains.SettingDomainRegistry` | `dotmac_kernel.settings_resolver.upsert_by_key`/`ensure_by_key`, and the settings admin API's path-to-domain lookup | at the WRITE (`UndeclaredSettingDomainError`); an unknown domain in a URL is a 404 |
 
-Both are siblings of `CapabilityCatalogue` (WS1) in shape and posture, and gate
+They are siblings of `CapabilityCatalogue` (WS1) in shape and posture, and gate
 different questions — capability: "is this TENANT entitled?"; permission: "does
 this ACTOR hold it?". A code has exactly one owning module; two declarations of
 the same code raise on catalogue construction. Both catalogues are installed
 process-wide by `create_app` from the INSTALLED module set (not the enabled
 subset — disabling a module must not turn a real code into an undeclared one),
 the same pattern `install_surface_globals` uses. Permissions default to an EMPTY
-catalogue so a missing authorization installer denies safely. Audit actions and setting
-domains distinguish NOT INSTALLED from INSTALLED-EMPTY: the former raises
-`AuditActionsNotInstalledError` / `SettingDomainsNotInstalledError`, while the
-latter rejects every action or domain as undeclared. The asymmetry is about what
+catalogue so a missing authorization installer denies safely. Audit actions,
+outbox event types and setting domains distinguish NOT INSTALLED from
+INSTALLED-EMPTY: the former raises `AuditActionsNotInstalledError` /
+`OutboxEventTypesNotInstalledError` / `SettingDomainsNotInstalledError`, while
+the latter rejects every member as undeclared. The asymmetry is about what
 each default DOES — an uninstalled permission catalogue denies, the safe answer
 for an authorization check; an uninstalled write-path registry would reject
 writes inside the caller's transaction and turn a wiring mistake into a failed
@@ -1818,6 +2160,14 @@ There is exactly ONE transaction authority in this codebase:
   savepoint section below), and never constructs a session of its own.
 - **Expected conflicts use `conflict_savepoint`** — roll back the SAVEPOINT,
   not the transaction (next section).
+- **Caller-session services do not enter the engine owner.** Kernel domain
+  services such as consent, delivery, idempotency and external identity accept
+  the installing assembly's `Session`. Their savepoint mechanic lives in the
+  private, engine-free `dotmac_kernel._transactions`; `dotmac_kernel.db`
+  re-exports `conflict_savepoint` as the supported public spelling. This is an
+  implementation seam, not a second boundary or transaction authority: it
+  constructs no engine/session and never commits or rolls back the caller's
+  outer transaction (ADR-0024 amendment, 2026-08-19).
 - **No route, task, or service constructs an ad hoc session.** The old
   `dotmac_kernel/unit_of_work.py` (`UnitOfWork`, `ConcurrencyConflict`) was a
   second, zero-consumer transaction authority — DELETED under the stronger
@@ -1854,8 +2204,9 @@ under `FORCE ROW LEVEL SECURITY` that fails closed: either an
 result set (500s or blank re-renders, invisible on SQLite since it can't
 enforce RLS at all — this is why the canary requires Postgres).
 
-`dotmac_kernel.db.conflict_savepoint(db)` is the fix, a context manager around
-`Session.begin_nested()` (a `SAVEPOINT` scoped INSIDE the outer
+`dotmac_kernel.db.conflict_savepoint(db)` is the supported public spelling for
+the fix, a context manager around `Session.begin_nested()` (a `SAVEPOINT`
+scoped INSIDE the outer
 transaction): on clean exit it commits the SAVEPOINT (a no-op release, not
 the outer `COMMIT`); on any exception it rolls back ONLY the SAVEPOINT —
 leaving the outer transaction and its `SET LOCAL` fully intact — then
@@ -1889,6 +2240,13 @@ list still populated; edit form re-renders with the field error) rather
 than the pre-fix 500/empty-render. This canary was RED against pre-2b.1
 `main` by construction (the bug is invisible on SQLite, where these tests
 cannot even run).
+
+`tests/architecture/test_kernel_caller_session_independence.py` separately
+guards application composition: it rejects even a deferred
+`dotmac_kernel.db` import from caller-session services and runs consent,
+idempotency and delivery with a valid caller-owned session while the kernel
+`DATABASE_URL` is deliberately unparsable. This proves a service invocation
+cannot accidentally construct a second configured runtime.
 
 ## External-identity login: the decision and the session are one locked step (kernel `0.1.0a64`)
 

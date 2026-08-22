@@ -1,9 +1,14 @@
 # ADR-0011: Settings resolution reads rows and defaults, nothing else
 
-- **Status:** Accepted (2026-08-08). The behaviour has shipped since `0.1.0a19`;
-  this ADR makes it a property rather than a habit.
+- **Status:** Accepted (2026-08-08), amended 2026-08-20 (see "Amendment").
+  The behaviour has shipped since `0.1.0a19`; this ADR makes it a property
+  rather than a habit. The central decision is unchanged and the ADR is not
+  superseded: the environment bootstraps authoritative rows and never
+  participates in runtime resolution.
 - **Scope:** Fleet-wide.
-- **Relates to:** ADR-0008 (declaration registries), ADR-0009 (secrets are held)
+- **Relates to:** ADR-0008 (declaration registries), ADR-0009 (secrets are
+  held), ADR-0013 (the platform declares deployment facts — added the profile
+  default this ADR's precedence block now names)
 
 ## Context
 
@@ -35,14 +40,17 @@ spec's `default`.
 `seed_settings_from_env`, which runs once at startup, creates the platform row
 when none exists, and never overwrites one that does.
 
-Precedence, stated once:
+Precedence, stated once (corrected 2026-08-20 for ADR-0013):
 
 ```
-scope chain (most specific row first) -> spec default
+scope chain (most specific row first) -> assembly profile default -> spec fallback
 ```
 
 The environment does not appear, because it is not a source. It is a loader that
 produces a row, and a row is indistinguishable from any other once written.
+ADR-0013 later inserted the deployment's declared answer between the rows and
+the module's fallback; it did not give the environment a rank, and nothing here
+depends on which of the two non-row levels answers.
 
 ## Why not a per-product knob
 
@@ -85,12 +93,38 @@ that the knob is read — which is not the property anyone cares about.
   bulk paths, asserts a stored row wins, asserts the **spec default** wins over
   the environment, and asserts the environment reaches a value only by seeding.
   Includes a sensitivity proof that the patch fires.
-- `tests/architecture/test_settings_env_is_bootstrap_only.py` — no function in
-  the resolver touches the environment except `seed_settings_from_env`, which is
-  a named, single-entry allowlist. It also asserts the bootstrap *still* reads
-  it: an allowlist that stops describing reality would mean `env_var` had
-  quietly become inert and every spec declaring one was lying. Includes a
-  sensitivity proof against a planted read.
+- `tests/architecture/test_settings_env_is_bootstrap_only.py` — an AST sweep of
+  the whole settings surface (every kernel `setting*.py` plus the assembly's
+  settings feature; `test_the_swept_surface_is_the_real_one` fails if a module
+  appears on the path and not in the sweep). It resolves aliases and attribute
+  chains rather than matching source text, and visits sync definitions, async
+  definitions, class bodies and module scope. Two allowlisted readers, each with
+  its reason: `seed_settings_from_env` (this ADR's bootstrap) and
+  `_keyring_from_env` (ADR-0009 key material, which is not a setting value —
+  `settings_crypto` is swept rather than excluded so the allowance is a named
+  line rather than an unwatched module). It asserts each allowlisted reader
+  *still* reads the environment: an allowlist that stops describing reality
+  would mean `env_var` had quietly become inert, or the env keyring silently
+  dead. Ten sensitivity proofs, one per way the previous substring scan could be
+  fooled — including the false-positive direction, since a detector that flags
+  docstring prose gets its allowlist padded until it means nothing.
+- `packages/dotmac-kernel/src/dotmac_kernel/app_factory.py` —
+  `_required_setting_errors` excuses only connection-level failure
+  (`OperationalError`, `InterfaceError`, pool `TimeoutError`). Every other
+  exception is reported as a startup error, which the lifespan turns into a
+  refusal to start in production. `tests/unit/test_required_setting_startup_check.py`
+  drives both branches and proves the report never renders a bound parameter —
+  a `StatementError` stringifies with the failing SQL and its parameters, and a
+  settings seed's parameters can be a secret's value.
+- `tests/unit/test_settings_bootstrap_provenance.py` — a row the bootstrap
+  creates records `BOOTSTRAP_PROVENANCE` and the variable NAME in
+  `change_reason`, with `changed_by_party_id` and the request fields NULL
+  (a bootstrap has no person and no request; filling either would make the row
+  lie). It also pins the half that could quietly undo the secret rule: a
+  secret's value reaches neither the value columns nor `change_reason`, because
+  a free-text field beside a deliberately-nulled one is where that leak
+  reappears. Reseeding appends no second row, and a later operator change stays
+  distinguishable from the bootstrap.
 
 Neither is sufficient alone, for the reason ADR-0009 gives: the runtime proof
 catches any spelling but only on paths a test drives; the static check covers
@@ -101,3 +135,103 @@ every path but only the spellings it knows.
 None. No consumer is affected: the behaviour shipped in `0.1.0a19` and no
 product had adopted kernel settings at that point — `dotmac_erp` pins `a13` and
 `dotmac_sub` imports none. This ADR adds documentation and two tests.
+
+## Amendment — 2026-08-20
+
+Four corrections. The central decision is unchanged; each of these is either a
+statement this ADR made that has since stopped being true, or a gap between
+what it claims and what actually holds it up.
+
+### 1. The precedence block was stale
+
+ADR-0013 inserted the assembly profile default between the scope chain and the
+module's fallback. The block above now reads:
+
+```
+scope chain -> assembly profile default -> spec fallback
+```
+
+`docs/ARCHITECTURE.md` carried the same stale order and is corrected in the same
+change. `source` gained a `"profile"` value with ADR-0013 and the architecture
+document had never listed it.
+
+**An invalid stored row degrades to the SPEC fallback, not the profile
+default.** `_finish` takes `spec.default` directly when
+coercion/`allowed`/range/`validator` rejects a row
+(`packages/dotmac-kernel/src/dotmac_kernel/settings_resolver.py`), and reports
+`source="default"`. This is recorded here as current behaviour, deliberately
+and without blessing it: ADR-0013 says a profile default "loses to every stored
+row and wins over the module's fallback", and a row that fails its spec is
+arguably not a stored row at all — so the deployment's declared answer is
+bypassed in precisely the case it was declared for. **This amendment does not
+settle it.** Whoever changes it owns a third decision and should record it here.
+
+### 2. The static guard was narrower than the rule it claims to hold
+
+`tests/architecture/test_settings_env_is_bootstrap_only.py` is the only thing
+covering paths no test drives, and three specific evasions get past it:
+
+- **One file.** It scans `settings_resolver.py` alone. A helper in any other
+  module — `settings_cache`, `setting_scopes`, an assembly-side reader — is
+  invisible to it, and delegation is the obvious shape a reintroduced env read
+  would take.
+- **Substring matching on source segments.** It looks for `"environ"` /
+  `"getenv"` in each function's source text, so `from os import environ as _e`
+  at module scope followed by `_e["X"]` inside the function matches nothing.
+  Mapping access through an alias defeats it entirely.
+- **`ast.FunctionDef` only.** `ast.AsyncFunctionDef` is a separate node type and
+  is never visited, so an `async def` on the resolution path is unscanned.
+
+The replacement is a syntax-aware sweep over the whole settings-resolution
+surface rather than one file, resolving aliases and attribute chains instead of
+matching text, and visiting sync and async definitions alike. Its sensitivity
+proof must plant one case per evasion above — a passing suite has to mean the
+rule holds, not that the detector never looked.
+
+The runtime half stays as it is and stays necessary: the two cover different
+halves of the same rule, for the reason the Enforcement section already gives.
+
+### 3. Startup fails open on configuration defects
+
+`_required_setting_errors` in
+`packages/dotmac-kernel/src/dotmac_kernel/app_factory.py` wraps the seed and
+`validate_required_settings` in `except Exception`, logs a warning, and returns
+no errors. Its docstring justifies exactly one case — an unreachable store —
+but the handler catches every case: a keyring/crypto failure, a missing column,
+a permission error, an integrity violation, a defect in the seed itself. Each of
+those is a configuration defect, and each currently skips required-setting
+validation and lets production start.
+
+The handler narrows to genuine database unavailability. A configuration defect
+fails production startup. Liveness and readiness during real database outages
+are a separate concern and stay separate: `/health` is DB-free by design and
+must not acquire a dependency on this path.
+
+### 4. "Once at startup" means idempotently, on every process start
+
+The Decision says `seed_settings_from_env` "runs once at startup". That reads as
+once per deployment. It is once per application-process start, every time, and
+it is safe because it creates a row only when none exists. The operational
+consequences follow from that and were never written down:
+
+- **Changing the variable later changes nothing.** The row already exists, so
+  the seed skips it. The environment does not update, rotate, or correct a
+  setting after first creation, and no restart will make it.
+- **After first creation, the settings owner is the only way in.** Operators
+  change the value through the settings API or admin surface. Editing the unit
+  file and restarting is a no-op that looks like an action.
+- **Restoring a deployment needs more than the database.** Reproducing resolved
+  values requires the same release and the same assembly profile (the profile
+  default is code, not a row) and, for secrets, the encryption keys held under
+  ADR-0009. A database backup alone is not sufficient.
+- **Bootstrap history records provenance, never the value.** A seeded row's
+  history entry names the canonical system actor and the variable NAME it came
+  from. It must never record the variable's value — ADR-0009's rule that a
+  secret is held and never copied applies to the audit trail too.
+
+### Landing
+
+Two slices. This amendment and the `docs/ARCHITECTURE.md` correction are the
+first; the guard replacement and startup hardening are the second, because they
+change behaviour and need their own tests. Bootstrap history provenance may
+travel with the second slice or follow it.

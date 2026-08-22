@@ -16,11 +16,15 @@ from __future__ import annotations
 
 from dotmac_kernel.providers.provisioning import (
     ApplyResult,
+    CompensationDisposition,
+    CompensationResult,
     ObserveResult,
     PlanResult,
     ProvisioningApplyError,
     ProvisioningCancelled,
     ProvisioningError,
+    ProvisioningOutcomeClass,
+    ProvisioningOutcomeEnvelope,
     ProvisioningPlanError,
     ProvisioningProvider,
     ProvisioningRequest,
@@ -33,6 +37,8 @@ from dotmac_kernel.providers.provisioning import (
 
 __all__ = [
     "ApplyResult",
+    "CompensationDisposition",
+    "CompensationResult",
     "ObserveResult",
     "PlanResult",
     "ProvisioningApplyError",
@@ -40,6 +46,8 @@ __all__ = [
     "ProvisioningError",
     "ProvisioningPlanError",
     "ProvisioningProvider",
+    "ProvisioningOutcomeClass",
+    "ProvisioningOutcomeEnvelope",
     "ProvisioningRequest",
     "ProvisioningRetryableError",
     "ProvisioningStatus",

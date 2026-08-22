@@ -99,6 +99,16 @@ from dotmac_kernel.flags import (
     install_flags,
 )
 from dotmac_kernel.identity import normalize_email, person_display_name
+from dotmac_kernel.machine_auth import (
+    API_KEY_HEADER,
+    MACHINE_KEY_SECRET_NAME,
+    MachineKeyUnavailableError,
+    MachinePrincipal,
+    authenticate_machine,
+    hash_machine_key,
+    require_machine_scope,
+)
+from dotmac_kernel.machine_models import MachineCredential
 from dotmac_kernel.models import (
     AuthSession,
     Base,
@@ -140,9 +150,12 @@ from dotmac_kernel.money import (
     currency,
 )
 from dotmac_kernel.namespaces import (
+    DURABLE_TIMERS_MIGRATION_OWNER,
     HOST_SCHEMA,
     MAX_REVISION_ID_LENGTH,
+    MEDIA_OBSERVATIONS_MIGRATION_OWNER,
     MIGRATION_OWNER_LEDGER,
+    PEOPLE_MIGRATION_OWNER,
     DuplicateBranchLabelError,
     DuplicateMigrationPrefixError,
     DuplicateSchemaError,
@@ -160,6 +173,14 @@ from dotmac_kernel.namespaces import (
     qualified,
     revision_id,
     schema_table_args,
+)
+from dotmac_kernel.outbox_event_types import (
+    DuplicateOutboxEventTypeError,
+    OutboxEventTypeRegistry,
+    OutboxEventTypesNotInstalledError,
+    UndeclaredOutboxEventTypeError,
+    active_outbox_event_types,
+    install_outbox_event_types,
 )
 from dotmac_kernel.permissions import (
     DuplicatePermissionError,
@@ -198,7 +219,7 @@ from dotmac_kernel.settings_resolver import (
     resolve_value,
 )
 
-__version__ = "0.1.0a70"
+__version__ = "0.1.0a90"
 
 # ── Supported public submodules ─────────────────────────────────────────────
 # The exhaustive list of kernel modules a consumer (assembly) may import from.
@@ -259,6 +280,7 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
         "dotmac_kernel.modules",
         "dotmac_kernel.money",
         "dotmac_kernel.namespaces",
+        "dotmac_kernel.outbox_event_types",
         "dotmac_kernel.permissions",
         "dotmac_kernel.planes",
         "dotmac_kernel.platform_auth",
@@ -290,11 +312,14 @@ SUPPORTED_MODULES: frozenset[str] = frozenset(
 
 # ── Deliberately-internal modules ───────────────────────────────────────────
 # Present in the package but NOT part of the public surface — a consumer must
-# not import from these. `display` is consumed only within the kernel (by
-# `templating` / `web_deps`); the `settings_resolver` write helpers are the
-# `settings_admin` narrow surface, not general API (see that module).
+# not import from these. `_transactions` is the engine-free savepoint mechanic
+# for caller-session kernel services; its public spelling remains
+# `dotmac_kernel.db.conflict_savepoint`. `display` is consumed only within the
+# kernel (by `templating` / `web_deps`); the `settings_resolver` write helpers
+# are the `settings_admin` narrow surface, not general API (see that module).
 INTERNAL_MODULES: frozenset[str] = frozenset(
     {
+        "dotmac_kernel._transactions",
         "dotmac_kernel.display",
     }
 )
@@ -363,10 +388,13 @@ __all__ = [
     "UnknownModuleError",
     # database namespaces + migration lineage identity (ADR-0006 D1)
     "HOST_SCHEMA",
+    "DURABLE_TIMERS_MIGRATION_OWNER",
     "MAX_REVISION_ID_LENGTH",
+    "MEDIA_OBSERVATIONS_MIGRATION_OWNER",
     "MIGRATION_OWNER_LEDGER",
     "MigrationOwner",
     "NamespaceRegistry",
+    "PEOPLE_MIGRATION_OWNER",
     "module_schema",
     "qualified",
     "schema_table_args",
@@ -419,6 +447,13 @@ __all__ = [
     "UndeclaredAuditActionError",
     "install_audit_actions",
     "active_audit_actions",
+    # outbox event-type registry
+    "DuplicateOutboxEventTypeError",
+    "OutboxEventTypeRegistry",
+    "OutboxEventTypesNotInstalledError",
+    "UndeclaredOutboxEventTypeError",
+    "active_outbox_event_types",
+    "install_outbox_event_types",
     # deployment-profile registry (WS1)
     "DeploymentProfileSpec",
     "DeploymentProfileRegistry",
@@ -448,6 +483,14 @@ __all__ = [
     "PartyRoleGrant",
     "AuthSession",
     "ExternalIdentityBinding",
+    "require_machine_scope",
+    "hash_machine_key",
+    "authenticate_machine",
+    "MachinePrincipal",
+    "MachineKeyUnavailableError",
+    "MachineCredential",
+    "MACHINE_KEY_SECRET_NAME",
+    "API_KEY_HEADER",
     "UserCredential",
     "PlatformAdmin",
     "PlatformSession",

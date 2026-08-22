@@ -505,6 +505,77 @@ trio = ["trio (>=0.30)"]
 wmi = ["wmi (>=1.5.1) ; platform_system == \"Windows\""]
 
 [[package]]
+name = "dotmac-accounting"
+version = "0.1.0a1"
+description = "Tenant chart, fiscal-period and immutable balanced-ledger authority"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-accounting"
+
+[[package]]
+name = "dotmac-ai-operations"
+version = "0.1.0a1"
+description = "Provider-neutral tenant AI policy, execution evidence and advisory insights"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-ai-operations"
+
+[[package]]
+name = "dotmac-analytics"
+version = "0.1.0a1"
+description = "Declared aggregate metric evidence and rebuildable tenant analytics projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-analytics"
+
+[[package]]
+name = "dotmac-app-sync"
+version = "0.1.0a1"
+description = "Provider-neutral contracts for independent Dotmac applications"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+jsonschema = ">=4.23,<5.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-app-sync"
+
+[[package]]
 name = "dotmac-application-directory"
 version = "0.1.0a3"
 description = "DotMac Application Directory — a tenant's connected-application portfolio: bindings, descriptors, lifecycle and reconciliation state. Inventory, never authorization (ADR-0021)"
@@ -541,6 +612,24 @@ type = "directory"
 url = "packages/dotmac-approvals"
 
 [[package]]
+name = "dotmac-assets"
+version = "0.1.0a1"
+description = "Dotmac Assets — tenant-scoped durable asset identity, custody, assignment, maintenance, lifecycle, and disposal"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-assets"
+
+[[package]]
 name = "dotmac-auth-oidc"
 version = "0.1.0a1"
 description = "DotMac OIDC relying-party client — discovery, JWKS, Authorization Code + PKCE, single-use server-side state, and ID-token validation. Returns a verified external subject and nothing else."
@@ -559,8 +648,205 @@ type = "directory"
 url = "packages/dotmac-auth-oidc"
 
 [[package]]
-name = "dotmac-connector-whatsapp"
+name = "dotmac-banking"
 version = "0.1.0a1"
+description = "Composable bank-account, statement, matching, reconciliation and cash-observation owner"
+optional = false
+python-versions = ">=3.12,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-banking"
+
+[[package]]
+name = "dotmac-brand-profiles"
+version = "0.1.0a1"
+description = "DotMac Brand Profiles — the data that makes one released artifact appear as different brands: identity, colours, file references, host bindings and per-field precedence with locking (ADR-0033 § 2)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+dotmac-ui = ">=0.1.0a7"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-brand-profiles"
+
+[[package]]
+name = "dotmac-campaigns"
+version = "0.1.0a1"
+description = "Provider-neutral outbound campaign lifecycle, immutable audiences and ordered recipient progression"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a73"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-campaigns"
+
+[[package]]
+name = "dotmac-commercial-agreements"
+version = "0.1.0a1"
+description = "DotMac Commercial Agreements — the durable commercial agreement between the platform operator and a counterparty, its immutable accepted snapshot, its evidence-bound lifecycle and its append-only history (ADR-0033 § 1)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-commercial-agreements"
+
+[[package]]
+name = "dotmac-compliance-reporting"
+version = "0.1.0a1"
+description = "Tenant regulatory evidence packs and filing lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-compliance-reporting"
+
+[[package]]
+name = "dotmac-connector-flutterwave"
+version = "0.1.0a2"
+description = "Flutterwave API v4 settlement ingress and reconciliation connector"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a11"
+httpx = ">=0.27,<1.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-flutterwave"
+
+[[package]]
+name = "dotmac-connector-linkedin"
+version = "0.1.0a1"
+description = "Dotmac Integrator connector for LinkedIn webhook observations"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a11"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-linkedin"
+
+[[package]]
+name = "dotmac-connector-meta-social"
+version = "0.1.0a1"
+description = "Ingress-only Facebook and Instagram connector for Dotmac Integrator"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a10"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-meta-social"
+
+[[package]]
+name = "dotmac-connector-mono"
+version = "0.1.0a1"
+description = "Dotmac Integrator connector for Mono Financial Data v2"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a11"
+httpx = ">=0.27,<1.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-mono"
+
+[[package]]
+name = "dotmac-connector-paystack"
+version = "0.1.0a2"
+description = "Paystack settlement ingress and reconciliation connector"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a11"
+httpx = ">=0.27,<1.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-paystack"
+
+[[package]]
+name = "dotmac-connector-remita"
+version = "0.1.0a1"
+description = "Dotmac Integrator connector for Remita RRR status observations"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["dev"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-integration = ">=0.1.0a11"
+httpx = ">=0.27,<1.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-connector-remita"
+
+[[package]]
+name = "dotmac-connector-whatsapp"
+version = "0.1.0a2"
 description = "Ingress-only Meta WhatsApp Cloud API connector for Dotmac Integrator"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -569,11 +855,100 @@ files = []
 develop = true
 
 [package.dependencies]
-dotmac-integration = ">=0.1.0a5"
+dotmac-integration = ">=0.1.0a10"
 
 [package.source]
 type = "directory"
 url = "packages/dotmac-connector-whatsapp"
+
+[[package]]
+name = "dotmac-content"
+version = "0.1.0a1"
+description = "Tenant editorial plans, canonical content, variants, and creative references"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a81"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-content"
+
+[[package]]
+name = "dotmac-deployment-control"
+version = "0.1.0a2"
+description = "DotMac Deployment Control — desired deployment intent, immutable plans, approval-gated rollouts, authenticated target acknowledgements and drift reconciliation for licensed deployments (ADR-0033 § 3)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-deployment-control"
+
+[[package]]
+name = "dotmac-document-rendering"
+version = "0.1.0a1"
+description = "Deterministic issued-document projection and rendering from immutable facts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-document-rendering"
+
+[[package]]
+name = "dotmac-documents"
+version = "0.1.0a1"
+description = "Controlled document identity, immutable versions and document-scoped lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-documents"
+
+[[package]]
+name = "dotmac-durable-timers"
+version = "0.1.0a1"
+description = "DotMac dual-plane durable timer identity and generation lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a72"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-durable-timers"
 
 [[package]]
 name = "dotmac-entitlement-allocation"
@@ -594,6 +969,42 @@ type = "directory"
 url = "packages/dotmac-entitlement-allocation"
 
 [[package]]
+name = "dotmac-expenses"
+version = "0.1.0a1"
+description = "Tenant expense requests, claims, receipt evidence, policy evaluation and reimbursement eligibility"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-expenses"
+
+[[package]]
+name = "dotmac-fiber-plant"
+version = "0.1.0a1"
+description = "Tenant outside-plant structure, strand, splice, termination and continuity owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-fiber-plant"
+
+[[package]]
 name = "dotmac-files"
 version = "0.1.0a3"
 description = "DotMac dual-plane stored-object lifecycle and validation"
@@ -610,6 +1021,60 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-files"
+
+[[package]]
+name = "dotmac-finance"
+version = "0.1.0a1"
+description = "Tenant fixed-asset books, depreciation and immutable accounting consequences"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-finance"
+
+[[package]]
+name = "dotmac-forms"
+version = "0.1.0a1"
+description = "Tenant form definitions, immutable versions and validated submission evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-forms"
+
+[[package]]
+name = "dotmac-fulfillment"
+version = "0.1.0a1"
+description = "DotMac tenant-scoped fulfillment saga, participant attempt, outcome, compensation, and convergence ownership"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a89"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-fulfillment"
 
 [[package]]
 name = "dotmac-imports"
@@ -630,8 +1095,26 @@ type = "directory"
 url = "packages/dotmac-imports"
 
 [[package]]
+name = "dotmac-inbox"
+version = "0.1.0a1"
+description = "Dotmac Inbox — tenant-scoped conversation, message, lifecycle, threading, and read-state ownership"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-inbox"
+
+[[package]]
 name = "dotmac-integration"
-version = "0.1.0a9"
+version = "0.1.0a12"
 description = "DotMac Integration — the external connector control plane: installations, immutable configuration revisions, capability bindings, secret references and a versioned connector SPI (ADR-0024)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -649,8 +1132,44 @@ type = "directory"
 url = "packages/dotmac-integration"
 
 [[package]]
+name = "dotmac-inventory"
+version = "0.1.0a1"
+description = "Dotmac Inventory — tenant-local stock ledger, reservations, traceability, and valuation"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-inventory"
+
+[[package]]
+name = "dotmac-ipam"
+version = "0.1.0a1"
+description = "Tenant IP address-space, allocation, assignment, utilization and repair owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-ipam"
+
+[[package]]
 name = "dotmac-kernel"
-version = "0.1.0a70"
+version = "0.1.0a90"
 description = "DotMac platform kernel — multi-tenant FastAPI foundation (config, RLS db, identity/tenancy models, security, platform auth, middleware, settings, features registry, audit)"
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -676,6 +1195,150 @@ type = "directory"
 url = "packages/dotmac-kernel"
 
 [[package]]
+name = "dotmac-licensing"
+version = "0.1.0a1"
+description = "DotMac Licensing — the issuer half of WS8: signed, versioned, revocable software-use authority derived from an active agreement's allocated entitlement (ADR-0033 § 2)"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a77"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-licensing"
+
+[[package]]
+name = "dotmac-media-observations"
+version = "0.1.0a1"
+description = "Provider-neutral immutable external media observations and rebuildable projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a81"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-media-observations"
+
+[[package]]
+name = "dotmac-network-access"
+version = "0.1.0a1"
+description = "Tenant provider-neutral access projection, authentication/accounting fact and session owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-network-access"
+
+[[package]]
+name = "dotmac-network-assurance"
+version = "0.1.0a1"
+description = "Tenant network incident, impact, maintenance and SLA-evidence owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-network-assurance"
+
+[[package]]
+name = "dotmac-network-control"
+version = "0.1.0a1"
+description = "Tenant provider-neutral network command, dispatch, execution-evidence and recovery owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-network-control"
+
+[[package]]
+name = "dotmac-network-inventory"
+version = "0.1.0a1"
+description = "Tenant managed-site, node, interface, port, VLAN and admission owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-network-inventory"
+
+[[package]]
+name = "dotmac-network-observability"
+version = "0.1.0a1"
+description = "Tenant network observation, measurement, availability, alert-evidence and health-projection owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-network-observability"
+
+[[package]]
+name = "dotmac-network-topology"
+version = "0.1.0a1"
+description = "Tenant declared/observed link, path, reachability and topology-projection owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-network-topology"
+
+[[package]]
 name = "dotmac-numbering"
 version = "0.1.0a2"
 description = "DotMac dual-plane document-series allocation with immutable receipts"
@@ -694,6 +1357,222 @@ type = "directory"
 url = "packages/dotmac-numbering"
 
 [[package]]
+name = "dotmac-party"
+version = "0.1.0a1"
+description = "Tenant Party roles, relationships, memberships, and reachability evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-party"
+
+[[package]]
+name = "dotmac-payables"
+version = "0.1.0a1"
+description = "Tenant supplier-liability and payment-obligation authority"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-payables"
+
+[[package]]
+name = "dotmac-payroll"
+version = "0.1.0a1"
+description = "Composable data-driven payroll-calculation and employee-liability owner"
+optional = false
+python-versions = ">=3.12,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-payroll"
+
+[[package]]
+name = "dotmac-people"
+version = "0.1.0a1"
+description = "Tenant employment directory, positions, and temporal reporting resolution"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a71"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-people"
+
+[[package]]
+name = "dotmac-platform-health"
+version = "0.1.0a1"
+description = "Platform runtime-health observations, freshness projections and summaries"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-platform-health"
+
+[[package]]
+name = "dotmac-pon-access"
+version = "0.1.0a1"
+description = "Tenant provider-neutral OLT, ONT, PON commissioning, desired-state and reconciliation owner"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-pon-access"
+
+[[package]]
+name = "dotmac-positioning"
+version = "0.1.0a1"
+description = "Product-neutral tracked-unit position evidence, projections, grants, retention, and geofence facts"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-positioning"
+
+[[package]]
+name = "dotmac-procurement"
+version = "0.1.0a1"
+description = "Tenant requisition, sourcing, award, and purchase-commitment decisions"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-procurement"
+
+[[package]]
+name = "dotmac-projects"
+version = "0.1.0a1"
+description = "Dotmac Projects — tenant-scoped project, task, template, dependency, scheduling, and assignment ownership"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-projects"
+
+[[package]]
+name = "dotmac-publishing"
+version = "0.1.0a1"
+description = "Tenant publication requests, target attempts, and reconciled outcomes"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a81"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-publishing"
+
+[[package]]
+name = "dotmac-records"
+version = "0.1.0a1"
+description = "Declared-record retention, holds, preservation and disposition authority"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-records"
+
+[[package]]
+name = "dotmac-referrals"
+version = "0.1.0a1"
+description = "Tenant referral programmes, attribution, conversion and reward-request evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-referrals"
+
+[[package]]
 name = "dotmac-release-catalog"
 version = "0.1.0a4"
 description = "DotMac Release Catalogue — immutable, digest-addressed published artifacts and the attestations that vouch for them (ADR-0006 M3)"
@@ -710,6 +1589,114 @@ sqlalchemy = "^2.0"
 [package.source]
 type = "directory"
 url = "packages/dotmac-release-catalog"
+
+[[package]]
+name = "dotmac-remote-access"
+version = "0.1.0a1"
+description = "Tenant approval-bound finite remote-access grants and evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-remote-access"
+
+[[package]]
+name = "dotmac-reseller-management"
+version = "0.1.0a1"
+description = "Tenant reseller identity, hierarchy, delegated authority and lifecycle"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-reseller-management"
+
+[[package]]
+name = "dotmac-sites"
+version = "0.1.0a1"
+description = "Tenant sites, immutable page revisions, and local release snapshots"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a81"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-sites"
+
+[[package]]
+name = "dotmac-support-access"
+version = "0.1.0a1"
+description = "Purpose-bound temporary platform support access workflow"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-support-access"
+
+[[package]]
+name = "dotmac-surveys"
+version = "0.1.0a1"
+description = "Dotmac Surveys — tenant-scoped feedback definitions, invitations, responses, and aggregate evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-surveys"
+
+[[package]]
+name = "dotmac-tax"
+version = "0.1.0a1"
+description = "Composable tax determination, statutory reporting and return-lifecycle owner"
+optional = false
+python-versions = ">=3.12,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-tax"
 
 [[package]]
 name = "dotmac-template-studio"
@@ -763,6 +1750,61 @@ develop = true
 [package.source]
 type = "directory"
 url = "packages/dotmac-ui"
+
+[[package]]
+name = "dotmac-web-analytics"
+version = "0.1.0a1"
+description = "Privacy-first first-party website observations and deterministic analytical projections"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a86"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-web-analytics"
+
+[[package]]
+name = "dotmac-work-orders"
+version = "0.1.0a1"
+description = "DotMac Work Orders — tenant-scoped physical work execution, assignment, evidence and work logs"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a85"
+pydantic = "^2.9"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-work-orders"
+
+[[package]]
+name = "dotmac-workflow-runtime"
+version = "0.1.0a1"
+description = "Tenant user-authored resumable workflow execution and repair evidence"
+optional = false
+python-versions = ">=3.11,<3.14"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+dotmac-kernel = ">=0.1.0a88"
+sqlalchemy = "^2.0"
+
+[package.source]
+type = "directory"
+url = "packages/dotmac-workflow-runtime"
 
 [[package]]
 name = "email-validator"
@@ -2926,4 +3968,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "d0019ca0b487fac0194b87d8d2224207442f79853b5250a6e0ae3d47eafbe285"
+content-hash = "8694aa1fb210c321eb9a008832af855bd877c2fd3324d8aab6cc4b73130de6bd"

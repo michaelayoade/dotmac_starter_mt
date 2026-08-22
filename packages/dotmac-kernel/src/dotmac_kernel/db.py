@@ -23,6 +23,7 @@ from fastapi import Request
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.config import settings
 
 __all__ = [
@@ -295,56 +296,3 @@ def tenant_session_by_slug(slug: str) -> Generator[tuple[Session, Any], None, No
             db.rollback()
         finally:
             db.close()
-
-
-@contextmanager
-def conflict_savepoint(db: Session) -> Generator[None, None, None]:
-    """Run an expected-conflict mutation inside a SAVEPOINT (F3 fix).
-
-    `get_db` owns the request's outer transaction and issues `SET LOCAL
-    app.current_tenant` on it for RLS (see module docstring). The previous
-    convention at every conflict site — `try: db.flush() except
-    IntegrityError: db.rollback(); raise ConflictError(...)` — called a bare
-    `db.rollback()`, which rolls back that ENTIRE outer transaction,
-    discarding the `SET LOCAL` along with it. Any DB access the caller's
-    `except ConflictError` handler performed afterwards (a web handler
-    re-rendering a form from an already-loaded ORM object, or re-querying a
-    list) then ran with no tenant context — under FORCE ROW LEVEL SECURITY
-    that fails closed: either an `ObjectDeletedError` re-loading an expired
-    attribute, or a silently empty result set. See
-    `tests/test_conflict_rls_context.py` for the canaries and
-    `.superpowers/sdd/task-2-report.md` for the captured pre-fix behavior.
-
-    `db.begin_nested()` issues a `SAVEPOINT` scoped INSIDE the outer
-    transaction. Used as a context manager, it commits the SAVEPOINT (a
-    no-op release, not the outer COMMIT) if the block exits cleanly, or
-    rolls back ONLY the SAVEPOINT — leaving the outer transaction and its
-    `SET LOCAL` fully intact — if any exception propagates, then re-raises
-    it unchanged (SQLAlchemy's `SessionTransaction.__exit__` never
-    swallows).
-
-    IMPORTANT — the mutation (`db.add(...)`, or setting attributes on an
-    already-loaded object) must happen INSIDE the `with` block, never
-    before it: entering a nested transaction
-    (`Session.begin_nested()`/`_take_snapshot`) auto-flushes any
-    already-pending/dirty objects on the session BEFORE the SAVEPOINT is
-    actually established. `db.add(row)` (or a mutation) issued before
-    `conflict_savepoint` would let THAT auto-flush emit the conflicting
-    statement with no savepoint yet in place to protect the outer
-    transaction — reintroducing the exact bug this helper exists to fix.
-    Every conflict site follows this shape:
-
-        try:
-            with conflict_savepoint(db):
-                db.add(row)
-                db.flush()
-        except IntegrityError as exc:
-            raise ConflictError("...") from exc
-
-    A feature service must never call `db.rollback()` directly — that is
-    the hard rule this helper exists to make easy to follow (see CLAUDE.md's
-    "Hard rules" section and `tests/architecture/
-    test_no_feature_rollback.py`, the enforcement test).
-    """
-    with db.begin_nested():
-        yield

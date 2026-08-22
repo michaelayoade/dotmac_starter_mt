@@ -1,5 +1,19 @@
 # Payment connector sources — where transport ends and meaning begins
 
+## Correction recorded 2026-08-20
+
+The inventory's finding that Sub hardcodes `Decimal(100)` is accurate, but its
+generic conclusion was too broad for Paystack. Paystack's published wire
+contract represents every supported currency as an integer multiplied by 100,
+including XOF. The Paystack adapter therefore owns a fixed ×100 conversion as
+provider protocol; a generic payment engine must not. This does not permit the
+separate `default_currency` fallback found below: every emitted money value
+still requires an authenticated-event currency and refuses a missing value.
+
+The product-first Paystack package and its current exact source revisions are
+recorded in `packages/dotmac-connector-paystack/EXTRACTION.toml`; the historical
+measurements below remain unchanged.
+
 **As of:** 2026-08-14
 **starter:** working tree on `docs/whatsapp-connector-extraction-dossier`
 (`b55c9a5`), carrying the uncommitted ADR-0020 2026-08-14 amendment

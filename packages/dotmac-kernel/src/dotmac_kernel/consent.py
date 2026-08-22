@@ -59,6 +59,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.consent_models import (
     REASON_UNSUBSCRIBE,
     SCOPE_ALL,
@@ -67,7 +68,6 @@ from dotmac_kernel.consent_models import (
     SUPPRESSION_SCOPES,
     CommunicationSuppression,
 )
-from dotmac_kernel.db import conflict_savepoint
 
 _DIGITS = re.compile(r"\D+")
 

@@ -30,7 +30,7 @@ from dotmac_imports.contracts import (
     UnmappedRequiredField,
     normalize_column,
 )
-from dotmac_imports.models import ImportRun, ImportRunRow
+from dotmac_imports.models import ImportPartition, ImportRun, ImportRunRow
 from dotmac_imports.service import (
     apply_next_chunk,
     create_dry_run,
@@ -97,6 +97,7 @@ def db() -> Iterator[Session]:
 
     ImportRun.__table__.create(engine)
     ImportRunRow.__table__.create(engine)
+    ImportPartition.__table__.create(engine)
     _DOMAIN.create(engine)
     with Session(engine) as session:
         yield session

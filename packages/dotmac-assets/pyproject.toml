@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "dotmac-assets"
+version = "0.1.0a1"
+description = "Dotmac Assets — tenant-scoped durable asset identity, custody, assignment, maintenance, lifecycle, and disposal"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_assets", from = "src" }]
+include = [
+    { path = "src/dotmac_assets/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/dotmac_assets/migrations/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

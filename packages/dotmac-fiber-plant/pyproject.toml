@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "dotmac-fiber-plant"
+version = "0.1.0a1"
+description = "Tenant outside-plant structure, strand, splice, termination and continuity owner"
+authors = ["DotMac"]
+readme = "README.md"
+packages = [{ include = "dotmac_fiber_plant", from = "src" }]
+include = [{ path = "src/dotmac_fiber_plant/py.typed", format = ["sdist", "wheel"] }, { path = "src/dotmac_fiber_plant/migrations/**/*", format = ["sdist", "wheel"] }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+dotmac-kernel = ">=0.1.0a83"
+sqlalchemy = "^2.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

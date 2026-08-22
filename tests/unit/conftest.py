@@ -44,7 +44,11 @@ from dotmac_kernel.features import load_manifests
 from dotmac_kernel.flag_models import install_flag_cache
 from dotmac_kernel.flags import FlagCatalogue, install_flags
 from dotmac_kernel.messaging import models as messaging_models  # noqa: F401
-from dotmac_kernel.models import Party, PartyPerson, PartyType, Tenant
+from dotmac_kernel.models import Base, Party, PartyPerson, PartyType, Tenant
+from dotmac_kernel.outbox_event_types import (
+    OutboxEventTypeRegistry,
+    install_outbox_event_types,
+)
 from dotmac_kernel.permissions import PermissionCatalogue, install_permissions
 from dotmac_kernel.setting_domains import (
     SettingDomainRegistry,
@@ -71,6 +75,23 @@ from app.features import FEATURE_MODULES
 # dotmac_kernel.models in control-plane security Task 2).
 from app.features.custom_fields import models as custom_fields  # noqa: F401
 from app.features.licensing import models as licensing_models  # noqa: F401
+
+# Test collection imports models from every package whose independent contract
+# is inspected in this repository. That does not compose those packages into
+# the reference assembly. The shared fixture needs every host/public table
+# collection discovers, plus the two module schemas whose service tests
+# deliberately consume this fixture. Independent packages build their own
+# narrow engines. This semantic selection neither invents composition nor
+# crosses SQLite's ten-attachment cap as the package inventory grows.
+_SHARED_TEST_SCHEMAS = {"mod_appdir", "mod_tstudio"}
+
+
+def _unit_tables():
+    return tuple(
+        table
+        for table in Base.metadata.tables.values()
+        if table.schema is None or table.schema in _SHARED_TEST_SCHEMAS
+    )
 
 
 def _all_manifests():
@@ -100,6 +121,7 @@ def _default_declaration_catalogues():
     manifests = _all_manifests()
     install_permissions(PermissionCatalogue.from_manifests(manifests))
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
+    install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
     # Capabilities too (step 4). Re-installed per test for the same reason:
     # a test that installs a narrower probe catalogue must not leave it
     # behind for the next one.
@@ -161,11 +183,11 @@ def _reference_template_composition():
 
 @pytest.fixture(scope="session")
 def unit_engine():
-    # The kit's create_test_engine() builds the in-memory SQLite engine and
-    # runs create_all over the (now fully imported) Base.metadata — same engine
-    # this conftest used to hand-build, including the check_same_thread=False
-    # relaxation TestClient needs. See dotmac_kernel.testing.harness.
-    engine = create_test_engine()
+    # The kit's create_test_engine() builds the in-memory SQLite engine over the
+    # explicit shared-test surface above — same engine this conftest used to
+    # hand-build, including the check_same_thread=False relaxation TestClient
+    # needs. See dotmac_kernel.testing.harness.
+    engine = create_test_engine(tables=_unit_tables())
     yield engine
     engine.dispose()
 

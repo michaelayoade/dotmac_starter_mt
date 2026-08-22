@@ -1,0 +1,108 @@
+schema_version = 1
+as_of = "2026-08-19"
+target_package = "dotmac-publishing"
+first_adopter = "dotmac-erp"
+source_repository = "dotmac_mkt"
+source_revision = "7f14ee598ceefed7ac3ba0963e5a36f5c4c5082d"
+status_vocabulary = ["not-started", "shadowing", "cut-over", "retired"]
+rule = "A row reaches retired only when the named old writer is deleted or made structurally unreachable and its two-directional ratchet is lowered in the same change. A flag leaving both paths callable is not retirement."
+
+[[writer]]
+id = "PUB-R1"
+source_paths = ["app/models/post.py"]
+source_behavior = "Stores planned/published status, requested and actual delivery times, and one coarse external post id on the mutable editorial Post row."
+target_owner = "dotmac-publishing publication_releases; dotmac-content for editorial fields"
+disposition = "split"
+shadow_proof = "Every Post is totally classified. Publication fields map to one digest-addressed release or an explicit non-publication disposition, while editorial text/state maps through the content ledger."
+ratchet = "Count writes to Post.status/scheduled_at/published_at/external_post_id separately from editorial writes; lower each publishing field to zero only after its release projection is authoritative."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R2"
+source_paths = ["app/models/post_delivery.py"]
+source_behavior = "Stores one mutable delivery row per channel, including provider, content override, latest status, external id and latest error."
+target_owner = "dotmac-publishing deliveries/attempts/observations; Integrator for provider binding and raw transport"
+disposition = "split-and-replace"
+shadow_proof = "One target delivery per classified source row, exact content-variant disposition, ordered attempt/outcome history and remote-reference parity; provider fields have an Integrator disposition."
+ratchet = "Count PostDelivery construction and status/error/external-id mutation; target zero after mod_publishing shadow and connector cutover."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R3"
+source_paths = ["app/services/post_service.py:replace_deliveries", "app/services/post_service.py:reschedule"]
+source_behavior = "Replaces target rows and mutates the mixed Post schedule from editable content state."
+target_owner = "dotmac-publishing request/revision service"
+disposition = "replace"
+shadow_proof = "Target selection and desired time produce an immutable request/revision without mutating an already-dispatched snapshot; duplicate targets are refused."
+ratchet = "Count calls to replace_deliveries/reschedule from publication entry points and direct writes to delivery target/schedule fields."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R4"
+source_paths = ["app/services/publishing_service.py:publishability_issues"]
+source_behavior = "Combines local content/target checks with provider connection, provider allowlist and Instagram media-format decisions."
+target_owner = "dotmac-publishing for generic snapshot/target validity; Integrator connector for provider capability and wire constraints"
+disposition = "split"
+shadow_proof = "Generic malformed requests fail locally; each provider-specific source case is accepted/refused by the bound connector conformance suite with no provider vocabulary in publishing."
+ratchet = "Count provider names, channel connection reads and MIME/provider branches in publication domain code; target zero."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R5"
+source_paths = ["app/services/publishing_service.py:publish"]
+source_behavior = "Calls provider adapters inside the transaction, overwrites delivery rows and treats any success as globally published."
+target_owner = "dotmac-publishing transactional attempt/outbox writer and outcome reconciler; Integrator transport"
+disposition = "replace"
+shadow_proof = "One outbox command per attempt, no provider I/O in the transaction, all outcomes retained, and aggregate state matches the explicit partial/all-success/all-failure matrix."
+ratchet = "Count direct adapter publish calls and Post/PostDelivery outcome writes outside the new owner; include a planted-call sensitivity proof."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R6"
+source_paths = ["app/tasks/publish_scheduled.py", "app/services/publishing_service.py:publish_due_posts"]
+source_behavior = "Polls due Posts every 60 seconds, constructs SessionLocal and commits/rolls back a multi-post batch."
+target_owner = "dotmac-publishing due-wake service through a typed timer port; kernel transaction authority"
+disposition = "replace"
+shadow_proof = "Every scheduled release has one replace-by-generation timer; stale wakes refuse dispatch; independent failures cannot roll back another release."
+ratchet = "Count poller registrations, due-table scans and SessionLocal/sessionmaker calls in publishing task families; target zero."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R7"
+source_paths = ["app/services/publishing_service.py:update_published_post"]
+source_behavior = "Calls a provider update then mutates the original Post and Delivery content/external reference in place."
+target_owner = "dotmac-publishing immutable release revision and update intent; Integrator transport"
+disposition = "replace-with-revision"
+shadow_proof = "Each accepted edit retains the prior snapshot/outcome, links a new release revision, and correlates the provider update observation without changing historical evidence."
+ratchet = "Count direct update_post adapter calls and mutations of published source content; target zero."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R8"
+source_paths = ["app/services/publishing_service.py:delete_published_post"]
+source_behavior = "Calls provider delete and then hard-deletes the local Post plus cascading delivery evidence."
+target_owner = "dotmac-publishing withdrawal intent and retained observation history; dotmac-content archival for editorial source"
+disposition = "replace-with-withdrawal"
+shadow_proof = "Remote removal is represented by a new attempt/outcome while the release snapshot and earlier evidence remain addressable; editorial deletion is separately classified."
+ratchet = "Count direct delete_post adapter calls and hard deletes of published Posts/Deliveries; target zero."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R9"
+source_paths = ["app/models/channel.py", "app/services/channel_service.py", "app/services/credential_service.py", "app/adapters"]
+source_behavior = "Owns provider enum, encrypted credentials, account identifiers, provider SDK clients and remote connection state in Mkt."
+target_owner = "dotmac-integration installation/binding engine and independently released connector plugins"
+disposition = "move-outside-module"
+shadow_proof = "Every selected target resolves through one active compatible Integrator binding; connector health and receipt evidence are visible before Mkt credentials/adapters retire."
+ratchet = "Count provider SDK imports, credentials, OAuth material and provider conditionals in Backoffice/Mkt publication paths; target zero."
+status = "not-started"
+
+[[writer]]
+id = "PUB-R10"
+source_paths = ["app/web/campaigns.py:publish_post_now", "app/web/campaigns.py:update_post", "app/web/campaigns.py:delete_post"]
+source_behavior = "Web adapters query mixed models, decide authorization, invoke provider-coupled services, and commit or roll back."
+target_owner = "Thin Backoffice adapters over dotmac-content and dotmac-publishing owners; kernel transaction authority"
+disposition = "replace-adapters"
+shadow_proof = "Guarded route tests preserve allowed/denied cohorts and request semantics while services prove all decisions without direct adapter queries, provider calls, commit or rollback."
+ratchet = "Count direct Post/PostDelivery/Channel queries, provider service calls and db.commit/db.rollback in migrated publication entry points."
+status = "not-started"

@@ -9,6 +9,8 @@ rejections live in `test_migration_gate.py`; this file is the declaration side.
 from __future__ import annotations
 
 import dataclasses
+import tomllib
+from pathlib import Path
 
 import pytest
 from dotmac_kernel.features import FeatureManifest, load_manifests
@@ -41,6 +43,12 @@ from dotmac_kernel.namespaces import (
 )
 
 from app.features import FEATURE_MODULES
+from scripts.check_allocation_serialized import (
+    EXEMPT_CLASSIFICATIONS,
+    GATED_CLASSIFICATIONS,
+    GateError,
+    declared_allocation,
+)
 
 
 def _module(
@@ -189,6 +197,54 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
     # first enabling owner of the Cloud commerce programme, and dual-plane for
     # the same reason approvals is: a tenant allocates its own document series
     # and the control plane allocates vendor-side series no tenant may read.
+    # `people` is the eleventh: a tenant-only employment directory that links
+    # to, and never duplicates, the kernel Party-person catalogue.
+    # `campaigns` (ADR-0032) is the twelfth and tenant-only because the source
+    # audit found no real named platform consumer.
+    # `durable_timers` is the thirteenth and reuses the kernel outbox relay rather
+    # than adding another due-work engine. `commercial_agreements` (ADR-0033) is
+    # the fourteenth: platform-only, because the vendor control plane is the one
+    # consumer that exists today and no tenant data plane holds a vendor<->operator
+    # agreement. `licensing` (ADR-0033 § 2) is the fifteenth, and its plane is a
+    # SECURITY boundary rather than an absent consumer — issuance must not live
+    # inside the deployment it authorises, and the receiving half already verifies
+    # offline through `dotmac_kernel.licensing`. `deployment_control`
+    # (ADR-0033 § 3) is the sixteenth, platform-only for a reason close to
+    # tautological: a module that decides what a FLEET should run cannot live
+    # inside one of the deployments it decides about. `brand_profiles`
+    # (ADR-0033 § 2) is the seventeenth and genuinely dual-plane: Sub brands
+    # its own portals and the vendor brands deployments it ships, and the
+    # second needs a HOST binding because a profile must be selectable before
+    # any tenant is resolved. `media_observations`, `content`, `publishing` and
+    # `sites` are the eighteenth through twenty-first allocations. They remain
+    # tenant-only and keep observations, editorial state, release intent and
+    # local website composition as four independent owners.
+    # `inventory` and `assets` are the twenty-second and twenty-third: the
+    # tenant stock ledger (ADR-0036) and the tenant durable-unit lifecycle
+    # (ADR-0037), deliberately separate because a part in stock and a
+    # commissioned unit have different lifecycles and different writers.
+    # The nine network-suite-v1 allocations (ADR-0038) are the twenty-fourth
+    # through thirty-second. They are minted together because their first
+    # adoption is one Sub-first cohort, but each owns an independent lineage —
+    # a suite is a release cohort, not a shared namespace.
+    # `positioning` is the thirty-third: provider-neutral position observations
+    # and nothing that follows from them (ADR-0039). It is NOT part of the
+    # network cohort above — Assets keeps a durable unit's authoritative
+    # location, so the two are separate owners rather than one.
+    # `referrals` is the thirty-fourth and tenant-only: a tenant programme owns
+    # attribution and conversion evidence while rewards leave through the
+    # outbox for the product that owns fulfilment.
+    # `reseller_management` is the thirty-fifth and tenant-only: Sub's reseller
+    # hierarchy and delegated-authority lifecycle move here while Party,
+    # Customer, commissions and payouts keep their own owners.
+    # The consolidated ERP/Backoffice/general cohort is the thirty-sixth
+    # through fifty-first allocations:
+    # sixteen independently releasable tenant owners sharing one allocation
+    # release, with Documents and Party deliberately avoiding the already-owned
+    # `dc` and `pa` prefixes.
+    # `web_analytics` is the fifty-second: privacy-minimised first-party
+    # observations and deterministic projections (ADR-0055). Property, origin,
+    # consent and consequence policy remains with each adopting product.
     # None of these allocations installs behaviour in the kernel.
     assert {owner.owner for owner in modules} == {
         "template_studio",
@@ -201,7 +257,219 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "imports",
         "integration",
         "approvals",
+        "people",
+        "campaigns",
+        "durable_timers",
+        "commercial_agreements",
+        "licensing",
+        "deployment_control",
+        "brand_profiles",
+        "media_observations",
+        "content",
+        "publishing",
+        "sites",
+        "inventory",
+        "assets",
+        "ipam",
+        "network_inventory",
+        "network_observability",
+        "network_topology",
+        "network_assurance",
+        "network_control",
+        "fiber_plant",
+        "network_access",
+        "pon_access",
+        "positioning",
+        "referrals",
+        "reseller_management",
+        "accounting",
+        "analytics",
+        "banking",
+        "documents",
+        "expenses",
+        "finance",
+        "inbox",
+        "party",
+        "payables",
+        "payroll",
+        "procurement",
+        "projects",
+        "records",
+        "surveys",
+        "tax",
+        "work_orders",
+        "web_analytics",
+        "fulfillment",
+        # The `sa` arbitration: three unmerged candidate trains had each
+        # allocated `prefix="sa"` independently, none able to see the others.
+        # These three rows are DORMANT (no package on main declares them) and
+        # exist to settle the prefix in the canonical ledger before any train
+        # merges, while all three are unreleased and a rename is free.
+        "sales",
+        "support_access",
+        "service_access_policy",
+        # The ADR-0040 composable-unit cohort. Support Access already has its
+        # row from the `sa` arbitration above; these six complete the seven, so
+        # the whole cohort composes against one ledger and shares one floor.
+        # Allocation only — no module is published, adopted or authoritative
+        # because of this.
+        "forms",
+        "workflow_runtime",
+        "platform_health",
+        "remote_access",
+        "compliance_reporting",
+        "ai_operations",
+        # The commerce chain: sell -> order -> subscribe -> bill -> collect.
+        # `sales` already holds `sa` from the arbitration above.
+        "billing",
+        "collections",
+        "orders",
+        "subscriptions",
     }
+
+
+def test_the_shipped_ledger_itself_composes() -> None:
+    """A direct assertion on the shipped constant, not an incidental one.
+
+    `NamespaceRegistry.from_manifests` already defaults `ledger` to
+    `MIGRATION_OWNER_LEDGER`, and many suites call it that way, so the shipped
+    ledger was ALREADY validated as a side effect of unrelated tests. This adds
+    no new coverage of a single tree; it makes the property explicit and
+    attributable, so a duplicate reports as "the shipped ledger collides"
+    rather than as a puzzling failure inside an isolation test that has nothing
+    to do with allocation.
+
+    What no in-tree check can do is see another branch — which is the whole
+    reason the `sa` collision survived. That is the job of serialized
+    allocation, not of this test.
+    """
+    registry = NamespaceRegistry.from_manifests([], ledger=MIGRATION_OWNER_LEDGER)
+
+    assert registry is not None
+    prefixes = [owner.prefix for owner in MIGRATION_OWNER_LEDGER]
+    assert len(prefixes) == len(set(prefixes)), "two owners claim one prefix"
+    labels = [owner.branch_label for owner in MIGRATION_OWNER_LEDGER]
+    assert len(labels) == len(set(labels)), "two owners claim one branch label"
+    schemas = [o.db_schema for o in MIGRATION_OWNER_LEDGER if o.db_schema is not None]
+    assert len(schemas) == len(set(schemas)), "two owners claim one schema"
+
+
+def test_the_three_way_sa_arbitration_holds() -> None:
+    """`sales` keeps `sa`; the two access modules are separated permanently.
+
+    Named rather than folded into the set-equality pin above because the point
+    is not that three rows exist — it is that these three specific owners hold
+    three DIFFERENT prefixes, which is exactly what a rebase could quietly undo
+    by resurrecting one train's original `sa`.
+    """
+    allocated = {o.owner: o.prefix for o in MIGRATION_OWNER_LEDGER}
+
+    assert allocated["sales"] == "sa"
+    assert allocated["support_access"] == "sup"
+    assert allocated["service_access_policy"] == "sap"
+
+
+def test_every_module_packages_full_allocation_matches_the_ledger() -> None:
+    """Current-tree integrity: declaration and ledger agree, in every field.
+
+    This is NOT the serialization gate, and naming it as one was wrong. It sees
+    only the tree it runs in, so two parallel branches can each add a colliding
+    allocation together with its migrations and both pass. Serialization is a
+    merge-base question: `scripts/check_allocation_serialized.py`, proven in
+    `tests/architecture/test_allocation_serialized_gate.py`.
+
+    What this establishes is that nothing in THIS tree drifted: a stateful
+    module's `short_code`, `migration_prefix` and `migration_branch` must match
+    its ledger row's `db_schema`, `prefix` and `branch_label` — the complete
+    allocation, not just the prefix. Comparing only code and prefix would miss
+    a module that quietly re-pointed its schema or branch label, which are
+    equally load-bearing and equally immutable.
+
+    Which packages are gated comes from each dossier's `classification` — the
+    same source of truth the merge-base gate uses, and the same parser — rather
+    than from a directory name or from "does it have a manifest", both of which
+    fail open.
+    """
+    ledger = {owner.owner: owner for owner in MIGRATION_OWNER_LEDGER}
+    by_label = {owner.branch_label: owner for owner in MIGRATION_OWNER_LEDGER}
+    packages = Path(__file__).resolve().parents[2] / "packages"
+
+    problems: list[str] = []
+    stateful = 0
+    for package in sorted(entry for entry in packages.iterdir() if entry.is_dir()):
+        dossier = package / "EXTRACTION.toml"
+        if not dossier.exists():
+            problems.append(f"{package.name}: no EXTRACTION.toml to classify it")
+            continue
+        classification = tomllib.loads(dossier.read_text()).get("classification")
+        if classification in EXEMPT_CLASSIFICATIONS:
+            continue
+        if classification not in GATED_CLASSIFICATIONS:
+            problems.append(
+                f"{package.name}: unknown classification {classification!r}"
+            )
+            continue
+
+        manifests = sorted(package.glob("src/*/manifest.py"))
+        revisions = [
+            path
+            for path in package.glob("src/*/migrations/versions/*.py")
+            if path.name != "__init__.py"
+        ]
+        if len(manifests) > 1:
+            problems.append(f"{package.name}: {len(manifests)} manifests")
+            continue
+        if not manifests:
+            # A dossier-only stub with no source yet is a legitimate state; a
+            # package owning a lineage without declaring an owner is not.
+            if revisions:
+                problems.append(
+                    f"{package.name}: {len(revisions)} migration(s) but no manifest"
+                )
+            continue
+
+        try:
+            declared = declared_allocation(manifests[0].read_text(), str(manifests[0]))
+        except GateError as exc:
+            problems.append(f"{package.name}: {exc}")
+            continue
+
+        if declared["short_code"] is None and declared["migration_prefix"] is None:
+            if revisions:
+                problems.append(
+                    f"{package.name}: stateless manifest owning "
+                    f"{len(revisions)} migration(s)"
+                )
+            continue
+
+        stateful += 1
+        # Resolve by `code`, then `migration_branch` against `branch_label`.
+        # The branch label is the immutable lineage identity, so a module whose
+        # code was renamed after allocation still resolves to the row it owns
+        # rather than looking unallocated and inviting a duplicate row.
+        owner = ledger.get(str(declared["code"])) or by_label.get(
+            str(declared["migration_branch"])
+        )
+        if owner is None:
+            problems.append(
+                f"{package.name}: neither code {declared['code']!r} nor "
+                f"migration_branch {declared['migration_branch']!r} is allocated"
+            )
+            continue
+        expected = (
+            module_schema(str(declared["short_code"])),
+            declared["migration_prefix"],
+            declared["migration_branch"],
+        )
+        actual = (owner.db_schema, owner.prefix, owner.branch_label)
+        if expected != actual:
+            problems.append(
+                f"{declared['code']!r}: declares (schema, prefix, branch) "
+                f"{expected!r} but the ledger granted {actual!r}"
+            )
+
+    assert stateful, "found no stateful module packages — the scan is broken"
+    assert not problems, "; ".join(problems)
 
 
 # ── The two planes (ADR-0023) ───────────────────────────────────────────────
@@ -279,8 +547,14 @@ def test_the_registry_also_refuses_a_table_smuggled_into_both_planes() -> None:
 
 
 def test_an_unallocated_module_cannot_own_a_namespace() -> None:
+    # An explicitly fictional code, not the shared `_module()` default. That
+    # default is `billing`, which meant "unallocated" only until Billing was
+    # actually allocated — at which point this test would have handed the
+    # registry an ALLOCATED module and stopped proving anything.
     with pytest.raises(UnallocatedNamespaceError) as exc:
-        NamespaceRegistry.from_manifests([_module()])
+        NamespaceRegistry.from_manifests(
+            [_module(code="never_allocated", short_code="neverallocated", prefix="zz")]
+        )
     assert "MIGRATION_OWNER_LEDGER" in str(exc.value)
 
 

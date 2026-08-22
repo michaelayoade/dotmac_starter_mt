@@ -131,12 +131,14 @@ from dotmac_integration.destination_binding import (
     ProductPortDescriptorInvalid,
     ProductPortDescriptorSnapshot,
     UntrustedDestination,
+    capability_bindings_for,
     corroborate,
     destination_client,
     establish_destination,
     install_destination_profiles,
     product_port_descriptor_digest,
     reconcile_product_port_descriptor,
+    reconcile_product_port_descriptor_for_capability,
     require_corroborated,
     require_profile,
     resolve_destination,
@@ -247,6 +249,22 @@ from dotmac_integration.operations import (
     replay_receipt,
 )
 from dotmac_integration.policy import DEFAULT_POLICY, ExecutionPolicy
+from dotmac_integration.polling import (
+    CursorInvalid,
+    PollBatch,
+    PollConnectorRaised,
+    PollContractError,
+    PollError,
+    PollHandlerUnavailable,
+    PollResult,
+    PollSecretsUnavailable,
+    PollUnavailable,
+    PreparedPoll,
+    invoke_poll,
+    poll_once,
+    prepare_poll,
+    record_poll_batch,
+)
 from dotmac_integration.receipt_delivery import (
     DeliveryError,
     DeliveryReport,
@@ -300,6 +318,12 @@ from dotmac_integration.retry import (
     next_state,
     retry_delay_seconds,
 )
+from dotmac_integration.runtime_policy import (
+    ConnectorRuntimePolicy,
+    RuntimeBoundaryMissing,
+    RuntimePolicy,
+    derive_runtime_policy,
+)
 from dotmac_integration.secret_refs import (
     SECRET_REFERENCE_SCHEMES,
     SecretValueError,
@@ -338,6 +362,7 @@ from dotmac_integration.spi import (
     DeliveryPlugin,
     Diagnostic,
     DispatchRequest,
+    EgressDeclaration,
     InboundDisposition,
     InboundEvent,
     IngressHandler,
@@ -350,6 +375,7 @@ from dotmac_integration.spi import (
     ModeNotDeclaredError,
     PollHandler,
     PollPlugin,
+    SecretBindingDeclaration,
     SpiIncompatibleError,
     SpiRange,
     SpiVersion,
@@ -359,7 +385,7 @@ from dotmac_integration.spi import (
     verify_plugin_modes,
 )
 
-__version__ = "0.1.0a9"
+__version__ = "0.1.0a12"
 
 __all__ = [
     # ── Ingress: the endpoint lifecycle and the three-phase engine ──────────
@@ -430,6 +456,7 @@ __all__ = [
     "OrphanCapabilityError",
     "UnknownCapabilityError",
     "UntrustedDestination",
+    "capability_bindings_for",
     "capability_registry",
     "contract_from_declaration",
     "corroborate",
@@ -438,6 +465,7 @@ __all__ = [
     "install_destination_profiles",
     "product_port_descriptor_digest",
     "reconcile_product_port_descriptor",
+    "reconcile_product_port_descriptor_for_capability",
     "require_corroborated",
     "require_declared_for_binding",
     "require_governable",
@@ -562,6 +590,20 @@ __all__ = [
     "claim_receipt",
     "claim_delivery",
     "advance_checkpoint",
+    "CursorInvalid",
+    "PollBatch",
+    "PollConnectorRaised",
+    "PollContractError",
+    "PollError",
+    "PollHandlerUnavailable",
+    "PollResult",
+    "PollSecretsUnavailable",
+    "PollUnavailable",
+    "PreparedPoll",
+    "invoke_poll",
+    "poll_once",
+    "prepare_poll",
+    "record_poll_batch",
     "ProviderEventIdentityCollision",
     "PollingCheckpoint",
     "OutcomeStatus",
@@ -587,9 +629,14 @@ __all__ = [
     "ConnectorInstallation",
     "ConnectorManifest",
     "ConnectorRegistry",
+    "ConnectorRuntimePolicy",
     "DuplicateConnectorError",
+    "EgressDeclaration",
     "InvalidManifestError",
     "NoEnabledBindingError",
+    "RuntimeBoundaryMissing",
+    "RuntimePolicy",
+    "SecretBindingDeclaration",
     "SecretValueError",
     "SelectionError",
     "SpiIncompatibleError",
@@ -598,6 +645,7 @@ __all__ = [
     "__version__",
     "check_activation",
     "discover",
+    "derive_runtime_policy",
     "module",
     "require_activatable",
     "resolve_binding",
