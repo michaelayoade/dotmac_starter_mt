@@ -601,12 +601,55 @@ class TestTheExtractionDossierIsHonest:
             for path in dossier["source_paths"]  # type: ignore[union-attr]
         )
 
-    def test_it_claims_no_adoption_it_does_not_have(
+    def test_its_status_matches_the_evidence_it_holds(
         self, dossier: dict[str, object]
     ) -> None:
-        assert dossier["status"] == "audit-complete"
-        assert dossier["adoption_evidence"] == []
-        assert dossier["contract_consumers"] == []
+        """The defect ADR-0031 seals against, checked in BOTH directions.
+
+        This used to assert `status == "audit-complete"` with empty evidence.
+        That was true when written and became false the moment the vendor
+        control plane ran the module in production — so the guard failed on the
+        change that made the dossier HONEST rather than on one that made it
+        dishonest.
+
+        A literal pinned the state of the world at authoring time. What the test
+        NAME claims is a consistency property between two fields, and that
+        survives the transition whichever way they move. `adopted` without
+        evidence is the overclaim ADR-0031 seals against; evidence without
+        `adopted` is the same defect pointing the other way, and it is the one
+        that had set in here.
+
+        Scoped to THIS dossier deliberately. It is not asserted repo-wide,
+        because it does not hold repo-wide today — see the PR description.
+        """
+        status = dossier["status"]
+        evidence = dossier["adoption_evidence"]
+        consumers = dossier["contract_consumers"]
+        assert isinstance(evidence, list)
+        assert isinstance(consumers, list)
+
+        if status == "audit-complete":
+            assert evidence == [], "audit-complete cannot carry adoption evidence"
+            assert consumers == [], "audit-complete cannot name a proven consumer"
+        else:
+            assert status in {"adopted", "reuse-proven"}, status
+            assert evidence, "an adopted dossier must cite what it ran"
+            assert consumers, "an adopted dossier must name who ran it"
+
+    def test_adoption_evidence_is_addressable_after_the_fact(
+        self, dossier: dict[str, object]
+    ) -> None:
+        """Evidence is cited by immutable reference, or it is an assertion.
+
+        Each ref names its producing repository and an identity that can be
+        re-read later — a commit, a deploy run, an image digest, a revision, a
+        live schema. "It deployed fine" is not one of those.
+        """
+        for ref in dossier["adoption_evidence"]:  # type: ignore[union-attr]
+            assert ":" in str(ref), ref
+            repository, _, identity = str(ref).partition(":")
+            assert repository, ref
+            assert identity.strip(), ref
 
     def test_it_records_the_byte_for_byte_migration_constraint(
         self, dossier: dict[str, object]
