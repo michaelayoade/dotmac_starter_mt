@@ -5,7 +5,7 @@ status = "audit-complete"
 source_mode = "product-first"
 owner = "Tenant employment directory, positions, temporal assignments, and date-aware reporting resolution"
 contract = "Link a kernel Party person to one tenant employment relationship; own employee code and lifecycle state/dates, departments, designations, employment types, positions, temporal occupancy, and derived manager/direct-report/approval resolution. NOT personal identity, authentication, RBAC, attendance, leave, scheduling, discipline, performance, training, compensation, payroll, banking, tax, GL dimensions, physical locations, files, notifications, or external provisioning."
-source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_backoffice", "dotmac_starter_mt"]
+source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_starter_mt"]
 source_paths = [
   "dotmac_erp:app/models/people/hr/employee.py",
   "dotmac_erp:app/models/people/hr/department.py",

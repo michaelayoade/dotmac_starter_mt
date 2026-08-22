@@ -5,7 +5,7 @@ status = "audit-complete"
 source_mode = "product-first"
 owner = "Tenant supplier invoice, credit-note, liability and payment-obligation lifecycle"
 contract = "Create, submit, approve and void draft supplier invoices/credit notes from opaque supplier/procurement evidence; recognize approved liabilities/credits; materialize due-date obligations; apply supplier credit without double-recognizing it; accept deduplicated external settlement observations; produce typed balanced accounting consequences and record immutable accounting receipts. NOT supplier identity/compliance/bank details, procurement commitments/receipts, tax policy, inventory valuation, approval decisions, numbering, journal posting, bank/payment execution, provider I/O or retry."
-source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_vendor_control_plane", "dotmac_academy_app", "dotmac_workspace", "dotmac_backoffice", "dotmac_starter_mt"]
+source_repositories = ["dotmac_erp", "dotmac_sub", "dotmac_crm", "dotmac_vendor_control_plane", "dotmac_academy_app", "dotmac_workspace", "dotmac_starter_mt"]
 source_revisions = [
   "dotmac_erp:4aab56812d6fb243c814ada15c13fabea6234da8",
   "dotmac_sub:feea715927942d77acf5f214d7960ea01a905b24",
@@ -13,7 +13,6 @@ source_revisions = [
   "dotmac_vendor_control_plane:2c4d88ab877aeae1c8d5aef0637bc013edf07aa9",
   "dotmac_academy_app:a5e25e4e829350e503e66a03d73739529ba7da7f",
   "dotmac_workspace:a158846c97e39b007724584244cb1ed4f9e6e58f",
-  "dotmac_backoffice:fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d",
   "dotmac_starter_mt:f7d69f7d3db6a36dcccaa847dff7a37e9c3cd685",
 ]
 source_paths = [

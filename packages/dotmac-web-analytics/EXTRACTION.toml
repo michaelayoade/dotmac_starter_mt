@@ -10,7 +10,6 @@ source_repositories = [
   "dotmac_sub",
   "dotmac_crm",
   "dotmac_erp",
-  "dotmac_backoffice",
   "dotmac_integrator",
   "dotmac_academy_app",
   "dotmac_starter_mt",

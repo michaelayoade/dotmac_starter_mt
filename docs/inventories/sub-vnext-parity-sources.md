@@ -19,11 +19,10 @@ no source and no completion credit.
 | `dotmac_vendor_control_plane` | fetched `origin/main` | `2c4d88ab877aeae1c8d5aef0637bc013edf07aa9` | Existing Deployment Control consumer target and health/support design references; no implemented support/health owner. |
 | `dotmac_workspace` | fetched `origin/main` | `a158846c97e39b007724584244cb1ed4f9e6e58f` | No competing capability owner. |
 | `dotmac_academy_app` | fetched `origin/main` | `a5e25e4e829350e503e66a03d73739529ba7da7f` | No competing capability owner. |
-| `dotmac_backoffice` | local `main` (repository has no `origin`) | `a66faff36a19ca8127838235f7b51dab07ba4371` | Supplemental negative scan only; not cited as remote authority. |
 
-The Backoffice fetch failure is evidence, not hidden: `git fetch origin main`
-failed because that checkout has no `origin`. None of the decisions below
-depends on it.
+The discarded local ERP composition sketch was not an independent repository.
+Its negative scan is therefore omitted rather than misreported as fleet
+coverage; none of the decisions below depended on it.
 
 "Production source" below means a mounted/migrated product implementation on a
 default remote branch with non-test callers and parity tests. This inventory

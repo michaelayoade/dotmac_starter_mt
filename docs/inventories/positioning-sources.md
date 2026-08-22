@@ -50,7 +50,6 @@ popup/actions.
 | `dotmac_erp` | Mature vehicle/driver/assignment/reservation/fuel/maintenance/incident lifecycle; attendance circle/polygon geofence; vehicle GPS placeholder columns | No writer for vehicle current location and no focused geometry proof; attendance tests mock the geofence validator | Concrete second candidate consumer and requirement input; not source of the observation engine |
 | `dotmac_workspace` | No position observation, tracker or map capability found | None | No source behavior |
 | `dotmac_vendor_control_plane` | Deployment “fleet” concerns software desired/applied state, not physical location | None for physical positioning | Out of scope; name collision explicitly rejected |
-| `dotmac_backoffice` | No qualifying position behavior found | None | No source behavior |
 | `dotmac_integrator` | Thin runtime assembly; no local provider-independent physical-position owner | Connector/runtime contracts only | Future transport assembly for external telematics, never the position-row writer |
 
 ## Sub — qualifying implementation
