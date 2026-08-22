@@ -75,6 +75,14 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_admin_shell_tokens.py",
   "dotmac_sub:tests/architecture/test_dotmac_ui_adoption.py",
 ]
+# Addressable form of the reuse the prose already claims. The slice states
+# these consumers serve the packaged asset from their default branches; a
+# reader could not check that without the refs.
+adoption_evidence = [
+  "dotmac_sub:default-branch:packaged-asset-composition",
+  "dotmac_sub:test:tests/architecture/test_dotmac_ui_adoption.py",
+  "dotmac_academy_app:default-branch:packaged-asset-composition",
+]
 contract_consumers = ["dotmac_sub", "dotmac_academy_app"]
 reference_consumers = ["dotmac_starter_mt"]
 candidate_consumers = ["dotmac_erp", "dotmac_crm"]
@@ -101,6 +109,15 @@ preserved_tests = [
 # recorded separately as reference proof and deliberately does not count:
 # consumption by the assembly that OWNS the package proves the wiring, not that
 # anyone independent chose the contract.
+# Both cutovers are already named by commit in the package-level
+# `first_cutover`; recorded here so the SLICE that claims reuse carries its own
+# evidence rather than borrowing the headline's prose.
+adoption_evidence = [
+  "dotmac_erp:main@462b6fa",
+  "dotmac_sub:main@73c35f4",
+  "dotmac_erp:test:tests/architecture/test_dotmac_ui_adoption.py",
+  "dotmac_sub:test:tests/architecture/test_dotmac_ui_adoption.py",
+]
 contract_consumers = ["dotmac_erp", "dotmac_sub"]
 reference_consumers = ["dotmac_starter_mt"]
 # Candidates are future demand, not products already counted above. CRM is

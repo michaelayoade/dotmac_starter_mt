@@ -58,6 +58,17 @@ preserved_tests = [
   "dotmac_starter_mt:tests/architecture/test_auth_oidc_public_surface.py",
 ]
 
+# Adoption is real and was always documented in `first_cutover`; what was
+# missing is the ADDRESSABLE form of it. Prose a reader must trust is not
+# evidence a reader can check, which is the whole distinction ADR-0031 draws.
+adoption_evidence = [
+  "dotmac_workspace:pull/2",
+  "dotmac_workspace:main@ef38693",
+  "dotmac_starter_mt:main@93aecc800be5258bebe7e3cb3ef68097b0a8a113",
+  "dotmac_workspace:local-copy-retired:identity/oidc.py",
+  "dotmac_workspace:test:tests/db/test_state_store_atomicity.py",
+]
+
 contract_consumers = ["dotmac_workspace"]
 candidate_consumers = ["dotmac_workspace", "dotmac_erp"]
 
