@@ -319,6 +319,12 @@ def test_the_shipped_ledger_is_the_host_owners_plus_allocated_modules() -> None:
         "remote_access",
         "compliance_reporting",
         "ai_operations",
+        # The commerce chain: sell -> order -> subscribe -> bill -> collect.
+        # `sales` already holds `sa` from the arbitration above.
+        "billing",
+        "collections",
+        "orders",
+        "subscriptions",
     }
 
 
@@ -541,8 +547,14 @@ def test_the_registry_also_refuses_a_table_smuggled_into_both_planes() -> None:
 
 
 def test_an_unallocated_module_cannot_own_a_namespace() -> None:
+    # An explicitly fictional code, not the shared `_module()` default. That
+    # default is `billing`, which meant "unallocated" only until Billing was
+    # actually allocated — at which point this test would have handed the
+    # registry an ALLOCATED module and stopped proving anything.
     with pytest.raises(UnallocatedNamespaceError) as exc:
-        NamespaceRegistry.from_manifests([_module()])
+        NamespaceRegistry.from_manifests(
+            [_module(code="never_allocated", short_code="neverallocated", prefix="zz")]
+        )
     assert "MIGRATION_OWNER_LEDGER" in str(exc.value)
 
 

@@ -59,6 +59,20 @@ BILLING_MANIFEST = ModuleManifest(
     tables=("invoices",),
 )
 
+# A module the ledger will never carry. `billing` used to serve this purpose
+# and stopped the moment Billing was actually allocated: the unallocated-owner
+# test then handed the gate a module that WAS allocated, so it no longer
+# exercised the fault it exists to prove. A fixture that doubles as a plausible
+# domain name has an expiry date, so this one is unmistakably fictional.
+NEVER_ALLOCATED_MANIFEST = ModuleManifest(
+    code="never_allocated",
+    version="1.0.0",
+    short_code="neverallocated",
+    migration_prefix="zz",
+    migration_branch="never_allocated",
+    tables=("invoices",),
+)
+
 
 def _write(
     location: Path,
@@ -240,9 +254,16 @@ def test_the_gate_reports_a_namespace_fault_instead_of_raising(
 ) -> None:
     """`run_gate` never raises for a composition problem — an operator should
     see every fault in one CI run, not one per run."""
-    location = tmp_path / "billing"
-    _billing_root(location)
-    report = run_gate([BILLING_MANIFEST], [location])  # unallocated in the ledger
+    location = tmp_path / "never_allocated"
+    _write(
+        location,
+        "zz_0001_invoices",
+        revision="zz_0001_invoices",
+        down_revision=None,
+        branch_labels=("never_allocated",),
+        body='    op.create_table("invoices", schema="mod_neverallocated")',
+    )
+    report = run_gate([NEVER_ALLOCATED_MANIFEST], [location])  # never in the ledger
     assert not report.ok
     assert "namespace composition:" in _messages(report)
     assert "MIGRATION_OWNER_LEDGER" in _messages(report)

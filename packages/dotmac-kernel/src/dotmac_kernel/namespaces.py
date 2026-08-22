@@ -1133,6 +1133,47 @@ AI_OPERATIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
     db_schema=module_schema("aiops"),
 )
 
+# The cohort-2/cohort-5 commerce lineages. `sales` already holds `sa` from the
+# three-way arbitration above; these four complete the sell-to-collect chain so
+# the whole set composes against one ledger and shares one floor. Allocated
+# together, and allocated BEFORE their source lands, because uniqueness is
+# decided here and no branch can see a sibling branch's claim.
+#
+# Recovered from `agent/network-suite-reconciled`, which was closed rather than
+# rebased: it carried 482 files against kernel a75 while main was at a88, and
+# the network suite it was named for had already landed independently. These
+# four rows and `sales` were its only unallocated content.
+BILLING_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="billing",
+    prefix="bi",
+    branch_label="billing",
+    db_schema=module_schema("billing"),
+)
+
+# `coll` rather than `collections`: the schema is the permanent database
+# identity and shorter reads better in a catalog dump, while the branch label
+# stays the full word.
+COLLECTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="collections",
+    prefix="cl",
+    branch_label="collections",
+    db_schema=module_schema("coll"),
+)
+
+ORDERS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="orders",
+    prefix="or",
+    branch_label="orders",
+    db_schema=module_schema("orders"),
+)
+
+SUBSCRIPTIONS_MIGRATION_OWNER: Final[MigrationOwner] = MigrationOwner(
+    owner="subscriptions",
+    prefix="su",
+    branch_label="subscriptions",
+    db_schema=module_schema("subscriptions"),
+)
+
 MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     *HOST_MIGRATION_OWNERS,
     TEMPLATE_STUDIO_MIGRATION_OWNER,
@@ -1197,6 +1238,10 @@ MIGRATION_OWNER_LEDGER: Final[tuple[MigrationOwner, ...]] = (
     REMOTE_ACCESS_MIGRATION_OWNER,
     COMPLIANCE_REPORTING_MIGRATION_OWNER,
     AI_OPERATIONS_MIGRATION_OWNER,
+    BILLING_MIGRATION_OWNER,
+    COLLECTIONS_MIGRATION_OWNER,
+    ORDERS_MIGRATION_OWNER,
+    SUBSCRIPTIONS_MIGRATION_OWNER,
 )
 
 
@@ -1555,6 +1600,10 @@ __all__ = [
     "REMOTE_ACCESS_MIGRATION_OWNER",
     "COMPLIANCE_REPORTING_MIGRATION_OWNER",
     "AI_OPERATIONS_MIGRATION_OWNER",
+    "BILLING_MIGRATION_OWNER",
+    "COLLECTIONS_MIGRATION_OWNER",
+    "ORDERS_MIGRATION_OWNER",
+    "SUBSCRIPTIONS_MIGRATION_OWNER",
     "TICKETING_MIGRATION_OWNER",
     "RELEASE_CATALOG_MIGRATION_OWNER",
     "ENTITLEMENT_ALLOCATION_MIGRATION_OWNER",
