@@ -99,7 +99,7 @@ def test_positioning_dossier_is_product_first_and_claims_no_adoption() -> None:
     assert dossier["source_mode"] == "product-first"
     assert dossier["status"] == "audit-complete"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_erp", "dotmac-isp"]
+    assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_erp"]
     assert {"dotmac_sub", "dotmac_crm", "dotmac_erp"}.issubset(
         dossier["source_repositories"]
     )

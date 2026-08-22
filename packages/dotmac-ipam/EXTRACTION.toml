@@ -23,7 +23,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_network_suite_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub", "dotmac-isp"]
+candidate_consumers = ["dotmac_sub"]
 inventory_evidence = [
   "docs/inventories/network-module-sources.md",
   "docs/inventories/network-module-dispositions.toml",

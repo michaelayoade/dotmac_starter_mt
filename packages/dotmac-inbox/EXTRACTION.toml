@@ -44,7 +44,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_inbox_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub", "dotmac_erp", "dotmac-isp"]
+candidate_consumers = ["dotmac_sub", "dotmac_erp"]
 composition_boundary = "ADR-0024: every adopter installs its own ib lineage and owns only its local conversation rows. The receiving product accepts a typed, provider-neutral Integrator port and asks dotmac-inbox to record domain consequences; dotmac-integration retains connector installations, bindings, inbox/outbox receipts, retries, checkpoints, raw provider evidence, and repair. A message stores only opaque transport correlation references. Product-owned tables link subscribers, customers, tickets, leads, teams, assignments, files, and delivery outcomes; the module imports neither the assembly nor another module."
 inventory_evidence = [
   "docs/inventories/inbox-sources.md",
