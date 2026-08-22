@@ -128,6 +128,39 @@ DISTRIBUTIONS: dict[str, Path] = {
     "dotmac-files": (
         REPO_ROOT / "packages/dotmac-files/src/dotmac_files/migrations/versions"
     ),
+    "dotmac-forms": (
+        REPO_ROOT / "packages/dotmac-forms/src/dotmac_forms" / "migrations/versions"
+    ),
+    "dotmac-workflow-runtime": (
+        REPO_ROOT
+        / "packages/dotmac-workflow-runtime/src/dotmac_workflow_runtime"
+        / "migrations/versions"
+    ),
+    "dotmac-platform-health": (
+        REPO_ROOT
+        / "packages/dotmac-platform-health/src/dotmac_platform_health"
+        / "migrations/versions"
+    ),
+    "dotmac-support-access": (
+        REPO_ROOT
+        / "packages/dotmac-support-access/src/dotmac_support_access"
+        / "migrations/versions"
+    ),
+    "dotmac-remote-access": (
+        REPO_ROOT
+        / "packages/dotmac-remote-access/src/dotmac_remote_access"
+        / "migrations/versions"
+    ),
+    "dotmac-compliance-reporting": (
+        REPO_ROOT
+        / "packages/dotmac-compliance-reporting/src/dotmac_compliance_reporting"
+        / "migrations/versions"
+    ),
+    "dotmac-ai-operations": (
+        REPO_ROOT
+        / "packages/dotmac-ai-operations/src/dotmac_ai_operations"
+        / "migrations/versions"
+    ),
 }
 
 #: The glob that enumerates one distribution's lineage on disk. Derived from
@@ -138,6 +171,13 @@ LINEAGE_GLOBS: dict[str, str] = {
     "dotmac-integration": "ig_*.py",
     "dotmac-entitlement-allocation": "ea_*.py",
     "dotmac-files": "fi_*.py",
+    "dotmac-forms": "fm_*.py",
+    "dotmac-workflow-runtime": "wr_*.py",
+    "dotmac-platform-health": "ph_*.py",
+    "dotmac-support-access": "sup_*.py",
+    "dotmac-remote-access": "ra_*.py",
+    "dotmac-compliance-reporting": "cr_*.py",
+    "dotmac-ai-operations": "ao_*.py",
 }
 
 TAG_PREFIXES: dict[str, str] = {
@@ -656,6 +696,77 @@ RELEASED_TAGS: dict[str, tuple[str, str, dict[str, str]]] = {
             ),
         },
     ),
+    # ── the ADR-0040 composable-unit cohort ─────────────────────────────────
+    #
+    # Seven modules published in one serial series on 2026-08-22, each from the
+    # same protected-main revision, each composition-checked against every
+    # sibling already published and kernel 0.1.0a88. Enrolled here at their
+    # FIRST release rather than after an in-place edit forced the issue, which
+    # is the only cheap moment to do it: one migration, one digest, no history
+    # to reconstruct and no divergence to grandfather.
+    "dotmac-forms-v0.1.0a1": (
+        "dotmac-forms",
+        "8f52abc",
+        {
+            "fm_0001_forms.py": (
+                "0778d4f950acf049851c6876dcd5d34bb6ef23f37a4dcc35c6af38af3e6b8267"
+            ),
+        },
+    ),
+    "dotmac-workflow-runtime-v0.1.0a1": (
+        "dotmac-workflow-runtime",
+        "8f52abc",
+        {
+            "wr_0001_runtime.py": (
+                "f959ef451f951e8c1bf314f8e1e4438731685f5aaf040c8a01bae4da3bb8311f"
+            ),
+        },
+    ),
+    "dotmac-platform-health-v0.1.0a1": (
+        "dotmac-platform-health",
+        "8f52abc",
+        {
+            "ph_0001_platform_health.py": (
+                "ed2be6b9a295f0e5a25f45c8d32e4168a33a25ecc4a59a69b0633606c1d52b9e"
+            ),
+        },
+    ),
+    "dotmac-support-access-v0.1.0a1": (
+        "dotmac-support-access",
+        "8f52abc",
+        {
+            "sup_0001_support_access.py": (
+                "22b75f92e04756cf05bffce76e303b06a7afbb3170b527f180477657351890a9"
+            ),
+        },
+    ),
+    "dotmac-remote-access-v0.1.0a1": (
+        "dotmac-remote-access",
+        "8f52abc",
+        {
+            "ra_0001_remote_access.py": (
+                "8958e4cb85ac62a1c923a62b7a4b4b25691e32a085dc81639f5f642b283f377a"
+            ),
+        },
+    ),
+    "dotmac-compliance-reporting-v0.1.0a1": (
+        "dotmac-compliance-reporting",
+        "8f52abc",
+        {
+            "cr_0001_compliance_reporting.py": (
+                "82e16095b9ae50f397010657755fb95b18444052aca9222490f0c2dd6a7fcf31"
+            ),
+        },
+    ),
+    "dotmac-ai-operations-v0.1.0a1": (
+        "dotmac-ai-operations",
+        "8f52abc",
+        {
+            "ao_0001_ai_operations.py": (
+                "211d35dfd814d6c93a5e984053c60a1a2444c176b5aa8d08066261f9cfd96538"
+            ),
+        },
+    ),
 }
 
 
@@ -722,6 +833,13 @@ UNRELEASED: dict[str, frozenset[str]] = {
     "dotmac-integration": frozenset(),
     "dotmac-entitlement-allocation": frozenset(),
     "dotmac-files": frozenset(),
+    "dotmac-forms": frozenset(),
+    "dotmac-workflow-runtime": frozenset(),
+    "dotmac-platform-health": frozenset(),
+    "dotmac-support-access": frozenset(),
+    "dotmac-remote-access": frozenset(),
+    "dotmac-compliance-reporting": frozenset(),
+    "dotmac-ai-operations": frozenset(),
 }
 
 
