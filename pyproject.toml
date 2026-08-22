@@ -200,6 +200,7 @@ dotmac-web-analytics = { path = "packages/dotmac-web-analytics", develop = true 
 # Stateless semantic projection and rendering for immutable issued-document
 # facts. It is installed for verification here, but not composed or releasable.
 dotmac-document-rendering = { path = "packages/dotmac-document-rendering", develop = true }
+dotmac-fulfillment = { path = "packages/dotmac-fulfillment", develop = true }
 fastapi = "^0.115"
 uvicorn = {extras = ["standard"], version = "^0.30"}
 gunicorn = "^22.0"
@@ -346,6 +347,7 @@ module = [
     "dotmac_document_rendering.*",
     "dotmac_forms.*",
     "dotmac_workflow_runtime.*",
+    "dotmac_fulfillment.*",
     "dotmac_release_catalog.*",
     "dotmac_auth_oidc.*",
     "dotmac_connector_whatsapp.*",
@@ -466,6 +468,7 @@ root_packages = [
     "dotmac_document_rendering",
     "dotmac_forms",
     "dotmac_workflow_runtime",
+    "dotmac_fulfillment",
 ]
 
 [[tool.importlinter.contracts]]
@@ -589,6 +592,7 @@ source_modules = [
     "dotmac_document_rendering",
     "dotmac_forms",
     "dotmac_workflow_runtime",
+    "dotmac_fulfillment",
 ]
 forbidden_modules = ["app"]
 
@@ -711,6 +715,7 @@ modules = [
     "dotmac_document_rendering",
     "dotmac_forms",
     "dotmac_workflow_runtime",
+    "dotmac_fulfillment",
 ]
 
 # The OIDC client is a PROTOCOL package: it speaks to an identity provider and
@@ -811,6 +816,7 @@ forbidden_modules = [
     "dotmac_remote_access",
     "dotmac_compliance_reporting",
     "dotmac_ai_operations",
+    "dotmac_fulfillment",
     "dotmac_auth_oidc",
 ]
 

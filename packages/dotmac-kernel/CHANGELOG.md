@@ -66,6 +66,11 @@ else changed.
 
 ## 0.1.0a90 — 2026-08-22
 
+Published, installed back from the private index, conformance-checked and
+tagged from exact protected-main revision `4999bc49` by release run
+`32579832544`. Publication makes the machine-credential facility
+installable; it composes or adopts no module.
+
 **Machine credentials** — an `X-Api-Key` principal that is not a person.
 Extracted product-first from `dotmac_sub` and `dotmac_erp`
 (`docs/inventories/machine-credential-sources.md`), which both authenticate
