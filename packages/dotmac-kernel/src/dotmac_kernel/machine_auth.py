@@ -62,7 +62,6 @@ from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dotmac_kernel.db import get_db
 from dotmac_kernel.exceptions import ForbiddenError, UnauthorizedError
 from dotmac_kernel.machine_models import MachineCredential
 from dotmac_kernel.secret_sources import get_secret
@@ -180,6 +179,12 @@ def require_machine_scope(scope: str):
     """
     if not scope or scope.strip() != scope:
         raise ValueError(f"scope {scope!r} must be a non-empty, trimmed key")
+
+    # Imported HERE, not at module scope. `dotmac_kernel.db` builds the engine
+    # on import, so a top-level import would make `import dotmac_kernel` require
+    # a DATABASE_URL — which the floor probe exercises precisely to stop that.
+    # `deps.py` and `app_factory.py` defer the same import for the same reason.
+    from dotmac_kernel.db import get_db
 
     def dependency(request: Request, db: Session = Depends(get_db)) -> MachinePrincipal:
         raw_key = request.headers.get(API_KEY_HEADER)
