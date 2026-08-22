@@ -462,6 +462,31 @@ specifics) points here and must never fork these rules.
     costing a wasted build every time.
     (`scripts/assert_current_main.sh`)
 
+33. **A writer claim is TYPED, and the prose channel only shrinks.**
+    `[[product_writers]]` in a dossier states, per product, whether it is the
+    `qualifying_source`, a `legacy_writer` that must stop, a `no_writer`, or
+    `inventory_only` — with an immutable revision and evidence paths. Governance
+    cites these across the repository boundary, and two rationales were once
+    contradicted by the dossiers they described because the cited claim was
+    prose.
+
+    The block may be ABSENT, deliberately: silence must stay distinguishable
+    from a claim of absence, so a consumer that cannot find its row fails as
+    UNKNOWN. That makes #354 migration support, not enforcement — which is what
+    this rule adds. `product-writer-baseline.json` freezes the prose-only
+    dossier/product pairs (303 across 86 dossiers at the freeze; one dossier
+    fully typed) as a TWO-DIRECTIONAL ratchet: it may not grow, and it may not
+    shrink without being regenerated in the same change. A dossier absent from
+    the baseline must be complete, which is what stops the debt growing with
+    the package count.
+
+    Retire a pair by READING the source product and recording what you found.
+    Never by inferring a state from the prose already there — a scanner
+    guessing `no_writer` from a sentence manufactures the false confidence this
+    exists to remove.
+    (`scripts/product_writer_sweep.py`; `make product-writer-check`;
+    `tests/architecture/test_product_writer_ratchet.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,
