@@ -116,6 +116,15 @@ that the knob is read — which is not the property anyone cares about.
   drives both branches and proves the report never renders a bound parameter —
   a `StatementError` stringifies with the failing SQL and its parameters, and a
   settings seed's parameters can be a secret's value.
+- `tests/unit/test_settings_bootstrap_provenance.py` — a row the bootstrap
+  creates records `BOOTSTRAP_PROVENANCE` and the variable NAME in
+  `change_reason`, with `changed_by_party_id` and the request fields NULL
+  (a bootstrap has no person and no request; filling either would make the row
+  lie). It also pins the half that could quietly undo the secret rule: a
+  secret's value reaches neither the value columns nor `change_reason`, because
+  a free-text field beside a deliberately-nulled one is where that leak
+  reappears. Reseeding appends no second row, and a later operator change stays
+  distinguishable from the bootstrap.
 
 Neither is sufficient alone, for the reason ADR-0009 gives: the runtime proof
 catches any spelling but only on paths a test drives; the static check covers
