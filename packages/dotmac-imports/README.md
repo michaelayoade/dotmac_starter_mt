@@ -86,14 +86,25 @@ payload through `dotmac-files` and calls `register_partition_plan(...)` with
 the returned immutable file ids, byte sizes and checksums. The module never
 learns a storage path or provider.
 
-Workers call `claim_partition(...)` in a short transaction. A conditional
-`SKIP LOCKED` update returns one opaque lease; an expired lease may be replaced,
-and the old token cannot settle. The worker opens only that partition and calls
-either `validate_claimed_partition(...)` (which has no applier parameter) or
-`apply_claimed_partition(...)`. The engine verifies byte size, SHA-256 and row
-count before any domain call, then commits the bounded row effects, outcomes
-and completion checkpoint together. Promotion clones the same descriptors into
-the apply run, so validated partitions cannot be silently replaced.
+Workers use three phases. `claim_partition(...)` runs in one short transaction;
+a conditional `SKIP LOCKED` update returns one opaque lease, then the caller
+commits. `read_claimed_partition(...)` accepts no session and verifies/decodes
+only that bounded object outside every database transaction. Finally either
+`validate_claimed_partition(...)` (which has no applier or storage opener) or
+`apply_claimed_partition(...)` locks and settles the prepared rows. An expired
+lease may be replaced and the old prepared value cannot settle. Row effects,
+outcomes and the completion checkpoint commit together. Promotion clones the
+same descriptors into the apply run, so validated partitions cannot be silently
+replaced.
+
+A validator may raise the typed `RowSkipped` outcome for a valid row that needs
+no write, such as an adopter's explicit duplicate policy. The ledger retains a
+bounded safe reason, promotion remains possible, and the applier is not called.
+That is distinct from `RowRejected`, which is an apply-time domain error.
+
+`get_run_outcomes(...)` returns an ordered, immutable projection of row number,
+fingerprint and verdict for parity checks. Imported values, domain result
+payloads and live ORM rows are deliberately absent from that surface.
 
 The default partition is 200 rows and 8 MiB; both are explicit caller choices.
 The package supplies claims, not a worker-count policy. Deployments can add

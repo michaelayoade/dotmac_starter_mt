@@ -147,6 +147,20 @@ class RowRejected(ImportsError):
         super().__init__(f"{self.issue.code}: {self.issue.message}")
 
 
+class RowSkipped(ImportsError):
+    """A deliberate, persistence-safe non-write outcome.
+
+    A product uses this for a row that is valid but already satisfied, such as
+    ERP's ``skip_duplicates`` import policy.  It is distinct from
+    :class:`RowRejected`: skipped rows do not block promotion and an apply run
+    must not invoke its domain writer for them.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        self.issue = ImportIssue(code, message)
+        super().__init__(f"{self.issue.code}: {self.issue.message}")
+
+
 def normalize_column(column: str) -> str:
     """The comparison form of a source column heading.
 
@@ -322,6 +336,22 @@ class RunProgress:
         return self.status in {RunStatus.DRY_RUN_READY, RunStatus.COMPLETED}
 
 
+@dataclass(frozen=True, slots=True)
+class ImportRowOutcome:
+    """Persistence-safe row verdict returned to an adopting product.
+
+    The projection deliberately omits imported values and domain result data.
+    A product can compare dry-run verdicts row for row without retaining a
+    second copy of the source or carrying live ORM rows beyond a transaction.
+    """
+
+    row_number: int
+    row_fingerprint_sha256: str
+    status: RowStatus
+    error_code: str | None
+    error_message: str | None
+
+
 @runtime_checkable
 class RowValidator(Protocol):
     """The domain's answer to "is this row acceptable?".
@@ -355,6 +385,7 @@ __all__ = [
     "FieldSet",
     "FieldSpec",
     "ImportRunNotFound",
+    "ImportRowOutcome",
     "ImportIssue",
     "ImportsError",
     "InvalidRunState",
@@ -363,6 +394,7 @@ __all__ = [
     "PromotionRefused",
     "RowApplier",
     "RowRejected",
+    "RowSkipped",
     "RowStatus",
     "RowValidator",
     "RunProgress",

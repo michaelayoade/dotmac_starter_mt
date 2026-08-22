@@ -138,6 +138,32 @@ def test_processing_entry_points_take_verified_bytes_not_free_form_rows() -> Non
         assert "rows" not in parameters
 
 
+def test_partition_io_and_database_settlement_are_separate_entry_points() -> None:
+    """A provider read may block or fail and must not run while a claim row is
+    locked. The read phase therefore cannot accept a session, and the two
+    settlement phases cannot accept an opener."""
+    source = PARTITIONING.read_text(encoding="utf-8")
+    read_parameters = _parameter_names(_function(source, "read_claimed_partition"))
+    assert "db" not in read_parameters
+    assert "open_partition" in read_parameters
+
+    for name in ("validate_claimed_partition", "apply_claimed_partition"):
+        parameters = _parameter_names(_function(source, name))
+        assert "db" in parameters
+        assert "prepared" in parameters
+        assert "open_partition" not in parameters
+
+
+def test_the_partition_phase_guard_rejects_the_old_lock_then_read_shape() -> None:
+    old_shape = """
+def validate_claimed_partition(db, claim, *, open_partition, validator):
+    return settle(db, open_partition(claim.file_id), validator)
+"""
+    function = _function(old_shape, "validate_claimed_partition")
+    parameters = _parameter_names(function)
+    assert "db" in parameters and "open_partition" in parameters
+
+
 # ── the ledger carries no domain identity ───────────────────────────────────
 
 

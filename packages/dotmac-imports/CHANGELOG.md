@@ -12,6 +12,12 @@ revision (ADR-0006 D1 amendment).
   bounded validation/apply entry points, and completion checkpoints settled
   with row outcomes. `dotmac-files` still owns every byte and product code still
   owns validation and mutation.
+- Reads and verifies claimed partition bytes between the claim and settlement
+  transactions, so storage I/O never holds a database lock. Settlement refuses
+  an expired or replaced claim and rechecks its immutable source identity.
+- Adds typed `RowSkipped` outcomes for valid rows that need no domain write and
+  a tenant-scoped `get_run_outcomes` projection for row-for-row adopter parity;
+  the projection exposes no imported values, domain result payloads or ORM rows.
 - Exposes the installed Alembic lineage through the fleet-standard public
   `versions_dir()` locator. This completes composition readiness without
   publishing or selecting an adopter; a2 remains intentionally unreleased
