@@ -22,7 +22,7 @@ def test_the_extraction_dossier_names_the_erp_source_and_unproven_reuse() -> Non
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == ["dotmac_erp", "dotmac-isp"]
+    assert dossier["candidate_consumers"] == ["dotmac_erp", "dotmac_sub"]
     assert set(dossier["source_repositories"]) >= {
         "dotmac_erp",
         "dotmac_sub",

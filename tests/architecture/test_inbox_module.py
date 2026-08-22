@@ -395,4 +395,4 @@ def test_the_dossier_records_product_first_candidate_status() -> None:
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_erp", "dotmac-isp"]
+    assert dossier["candidate_consumers"] == ["dotmac_sub", "dotmac_erp"]

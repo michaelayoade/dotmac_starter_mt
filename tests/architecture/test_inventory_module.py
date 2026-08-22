@@ -170,4 +170,4 @@ def test_distribution_manifest_and_dossier_versions_agree() -> None:
     assert dossier["status"] == "audit-complete"
     assert dossier["source_mode"] == "product-first"
     assert dossier["contract_consumers"] == []
-    assert dossier["candidate_consumers"] == ["dotmac_erp", "dotmac_sub", "dotmac-isp"]
+    assert dossier["candidate_consumers"] == ["dotmac_erp", "dotmac_sub"]
