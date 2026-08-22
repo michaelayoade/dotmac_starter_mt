@@ -366,6 +366,19 @@ retired prefix is never reused.
 | `collections` | `mod_coll` | `cl` | `collections` |
 | `orders` | `mod_orders` | `or` | `orders` |
 | `subscriptions` | `mod_subscriptions` | `su` | `subscriptions` |
+| `customers` | `mod_customers` | `cu` | `customers` |
+| `service_catalog` | `mod_svc_cat` | `sc` | `service_catalog` |
+| `qualification` | `mod_qual` | `qu` | `qualification` |
+| `services` | `mod_services` | `se` | `services` |
+| `usage` | `mod_usage` | `us` | `usage` |
+| `usage_rating` | `mod_usage_rate` | `ur` | `usage_rating` |
+| `inbox_operations` | `mod_inbox_ops` | `io` | `inbox_operations` |
+| `workforce` | `mod_workforce` | `wf` | `workforce` |
+| `fx_policy` | `mod_fx_policy` | `fx` | `fx_policy` |
+| `service_orders` | `mod_serviceorders` | `so` | `service_orders` |
+| `payments` | `mod_payments` | `pm` | `payments` |
+| `service_changes` | `mod_servicechanges` | `sch` | `service_changes` |
+| `operational_escalations` | `mod_escalations` | `oe` | `operational_escalations` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
