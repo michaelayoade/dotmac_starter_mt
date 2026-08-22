@@ -55,7 +55,6 @@ restack, PR and release evidence is recorded below.
 | `dotmac_sub` | `510b80ca7fab4f54a57f261872f94b5e972c8eb6` (`origin/main`) | Authoritative immutable Lead origin and sales-to-service lifecycle boundary. |
 | `dotmac_erp` | `dd6416cd981ffdf48564e2770b87d3cd7201186c` (`origin/main`) | Required fleet sweep found no advertising/social hierarchy or media-performance owner. |
 | `dotmac_integrator` | `e7ec250be9c681883f3acab8a8a19614fec30d29` (`origin/main`) | Thin assembly of released `dotmac-integration`; transport authority, not media-domain authority. |
-| `dotmac_backoffice` | `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d` (local clean branch) | Tenant-plane candidate assembly with no modules, remote, image, database or deployment. Adoption paused. |
 
 The Mkt audit and source refresh used fresh clean detached clones under
 `/private/tmp`. Dirty local product worktrees were not evidence and were not

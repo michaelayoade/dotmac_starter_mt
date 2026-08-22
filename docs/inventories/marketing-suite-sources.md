@@ -24,7 +24,6 @@ implementations at these exact revisions:
 | `dotmac_sub` | `510b80ca7fab4f54a57f261872f94b5e972c8eb6` | Mandatory campaign, consent and suppression behavior |
 | `dotmac_erp` | `dd6416cd981ffdf48564e2770b87d3cd7201186c` | Generic versioned form engine and submission behavior |
 | `dotmac_crm` | `60daaa2dd305696636632f48505ab784110a55d2` | Competing campaign implementation and negative site/analytics census |
-| `dotmac_backoffice` | `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d` | First-adopter census; no existing marketing owner found |
 
 The `dotmac_mkt` remote was verified directly on 2026-08-18. The current pin is
 one commit after the original `1a185b47164e34601769c84976e95578996c4523`

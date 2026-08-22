@@ -13,7 +13,6 @@
 | `dotmac_erp` | `0f4b1698ddbf27a04f4562ecdaf8b93f19c3debf` | qualifying HR handbook/version/acknowledgement source; fragmented generated, employee, fleet, discipline and finance attachments | no record declaration, file plan, schedule versions, holds or disposition owner |
 | `dotmac_sub` | `91c1ec477b3af37931424bced856a16bbc2c6d3f` | qualifying immutable quote snapshot/content-addressed export delta; mutable LegalDocument anti-source | cleanup TTLs only; no records authority |
 | `dotmac_crm` | `c64b5aa0f7902b52e7ef73cf26f3f88687ed849d` | mutable LegalDocument copy and domain attachments; requirement/retirement input only | no records authority |
-| `dotmac_backoffice` | `fcdd8270262dea2a78d0d4d8c4116c1e8b7b3b2d` | no implementation | no implementation |
 | `dotmac-academy` | `71b87b2abfb1dc5c1db540faca257004a8c2bf9c` | course/manual content, not controlled-document runtime; the local partial clone lacked one promised blob, but the tracked path census exposed no runtime package/model candidate | no implementation |
 | `dotmac_academy_app` | `40423a07a4eaa6172a36997f3276cb7a79dda343` | generated certificates/reports are domain outputs, not a controlled-document owner | no implementation |
 | `dotmac_workspace` | `c72fe304d3c8b2a2741d111379e4c4ab0af5da57` | no implementation | no implementation |

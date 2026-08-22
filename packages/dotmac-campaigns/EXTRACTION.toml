@@ -10,7 +10,6 @@ source_repositories = [
   "dotmac_sub",
   "dotmac_crm",
   "dotmac_mkt",
-  "dotmac_backoffice",
   "dotmac_starter_mt",
 ]
 source_paths = [

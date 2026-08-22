@@ -8,7 +8,6 @@ contract = "Tenant-scoped editorial plans, canonical content items, provider-neu
 source_repositories = [
   "dotmac_mkt",
   "dotmac_starter_mt",
-  "dotmac_backoffice",
   "dotmac_sub",
   "dotmac_erp",
   "dotmac_crm",
