@@ -11,11 +11,18 @@ include = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
-# a87 extracted fingerprint_of into `dotmac_kernel.fingerprints`, a
-# persistence-free public module. Importing the historical `idempotency`
-# spelling instead would initialize the database-backed ledger and violate this
-# module's stateless boundary, so a87 is the earliest kernel that can carry it.
-dotmac-kernel = ">=0.1.0a87"
+# `dotmac_kernel.fingerprints` is a persistence-free public module holding
+# `fingerprint_of`. Importing the historical `idempotency` spelling instead
+# would initialize the database-backed ledger and violate this module's
+# stateless boundary, so that seam sets the floor.
+#
+# The seam entered kernel SOURCE at a87, but a87 was never dispatched — its
+# changelog records it as NOT PUBLISHED SEPARATELY; INCLUDED IN 0.1.0a88, and
+# no `dotmac-kernel-v0.1.0a87` tag exists. a88 is therefore the earliest
+# INSTALLABLE kernel carrying it, which is what a floor has to name: as
+# `.github/release-modules.json` puts it, "a floor naming an unpublished
+# version cannot be resolved by an installer, so it is not a floor at all".
+dotmac-kernel = ">=0.1.0a88"
 
 [build-system]
 requires = ["poetry-core"]
