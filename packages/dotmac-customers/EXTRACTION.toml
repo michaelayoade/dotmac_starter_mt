@@ -12,11 +12,14 @@ source_paths = [
   "dotmac_sub:app/services/customer_context.py",
   "dotmac_sub:app/services/subscriber.py",
   "dotmac_sub:app/services/customer_portal_contacts.py",
+  "dotmac_sub:app/services/account_deletion.py",
+  "dotmac_sub:app/services/web_system_restore_tool.py",
 ]
 preserved_tests = [
   "dotmac_sub:tests/test_customer_context.py",
   "dotmac_sub:tests/test_subscriber_party_binding.py",
   "dotmac_sub:tests/test_subscriber_profile_cleanup.py",
+  "dotmac_sub:tests/test_account_deletion.py",
   "dotmac_starter_mt:tests/unit/test_customers_service.py",
   "dotmac_starter_mt:tests/architecture/test_customers_module.py",
   "dotmac_starter_mt:tests/test_customers_isolation.py",
@@ -28,4 +31,4 @@ inventory_evidence = ["docs/inventories/isp-essential-domain-sources.md"]
 first_cutover = "Sub remains the sole writer until an authorized backfill, read-only shadow, reconciliation gate, and sealed writer cutover move customer account/profile authority to this module."
 shadow_and_drift = "Reconcile account number, lifecycle, display/profile fields, and Party-reference membership in both directions. Shadow reads never write either owner."
 local_copy_retirement = "After cutover, a two-directional ratchet reduces Sub customer account/profile writers and fallback readers to zero; Party identity and reachability remain with their existing owners."
-next_action = "Compose exact releases in Sub, implement the versioned backfill/shadow adapter, and request cutover only after drift is zero."
+next_action = "LIFECYCLE GAP CLOSED IN EVIDENCE, NOT YET IN CODE (measured at dotmac_sub@883a0ff1a). The contract claims account lifecycle and every previously cited source and test covered only identity, profile and Party binding. The implementation is app/services/account_deletion.py (the request) and app/services/web_system_restore_tool.py (execution, retention window, restore, purge), neither registry-declared, both storing state in the schemaless subscribers.metadata column. TWO deletion lineages record the same event with no rule about which wins \u2014 account_deletion_requested_at/_reason versus recovery_deleted_at/_by \u2014 and Customers owns the account, so that rule belongs here. PARITY IS ABSENT: tests/test_account_deletion.py has two tests, both on the request; nothing calls mark_subscriber_deleted, restore_subscriber, purge_expired_from_recovery_queue or build_restore_preview, and nothing exercises their three admin routes. Write characterization tests against current behaviour FIRST because the path is destructive and terminal, pinning three known defects (asymmetric restore; blanket reactivation resurrecting invoices the cascade never touched; a missing snapshot silently forcing every service order to draft) and fixing them as separately visible changes. NOT Customers: the nine-owner deactivation cascade is assembly coordination and retention/hold/purge authority is dotmac-records. Then compose exact releases in Sub, implement the versioned backfill/shadow adapter, and request cutover only after drift is zero."

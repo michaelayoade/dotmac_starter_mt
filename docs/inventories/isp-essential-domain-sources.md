@@ -26,12 +26,61 @@ account identity/profile plus explicit Party-role references.
 
 - Source: `app/models/subscriber.py`, `app/models/customer_identity.py`,
   `app/services/customer_context.py`, `app/services/subscriber.py`,
-  `app/services/customer_portal_contacts.py`.
+  `app/services/customer_portal_contacts.py`,
+  `app/services/account_deletion.py`,
+  `app/services/web_system_restore_tool.py`.
 - Preserve: `tests/test_customer_context.py`,
   `tests/test_subscriber_party_binding.py`,
-  `tests/test_subscriber_profile_cleanup.py`.
+  `tests/test_subscriber_profile_cleanup.py`,
+  `tests/test_account_deletion.py`.
 - Exclude: Party identity/reachability, credentials, reseller policy, billing,
   tax, portal session state, network configuration and subscriptions.
+
+### The lifecycle half of the contract had no evidence
+
+Added 2026-08-22, measured at `dotmac_sub@883a0ff1a`. The contract says *"Own
+customer account numbers, **account lifecycle**, display/profile attributes"*,
+and until now every cited source and preserved test covered identity, profile
+and Party binding. None covered the lifecycle — close, restore, recovery — which
+is the half this module is being adopted for first.
+
+The implementation is two modules. `account_deletion.py` holds the customer's
+deletion **request** (`request_deletion`, the only function).
+`web_system_restore_tool.py` holds deletion **execution**, the retention window,
+restore and purge. Neither is registry-declared, and both write their state into
+`subscribers.metadata`, a JSONB column with no schema.
+
+**Two deletion lineages record the same event.** `account_deletion` writes
+`account_deletion_requested_at` / `_reason`; the restore tool writes
+`recovery_deleted_at` / `_by`. There is no relationship between them and no rule
+about which wins. Customers owns the account, so Customers is where that rule
+has to live.
+
+**There is almost no parity baseline.** `tests/test_account_deletion.py` has two
+tests, both on `request_deletion` — the intent record, not the execution.
+Nothing anywhere calls `mark_subscriber_deleted`, `restore_subscriber`,
+`purge_expired_from_recovery_queue` or `build_restore_preview`, and nothing
+exercises their three admin routes; the restore tool appears in the test tree
+only in architecture baselines and as a named exception in three boundary tests.
+Characterization tests must be written against current behaviour before the
+lifecycle moves, because the path is destructive and terminal.
+
+**Three defects are pinned as current behaviour**, to be fixed as deliberate,
+separately visible changes rather than smuggled into the extraction:
+
+1. Restore is asymmetric — three resource classes restore from a snapshot, six
+   by blanket reactivation.
+2. Blanket reactivation resurrects rows the cascade never touched: the cascade
+   deactivates only *active* invoices and counts them, but restore sets
+   `is_active = True` on every inactive invoice, so one voided months earlier
+   for a business reason comes back. Payments likewise.
+3. A missing or malformed recovery snapshot silently forces every service order
+   on the account to `draft`, with no error raised.
+
+- **Not Customers**: the nine-owner deactivation cascade is assembly
+  coordination, and retention/hold/purge authority belongs to `dotmac-records` —
+  see `subscriber-account-disposition-sources.md`, which records that Sub's
+  "purge" destroys nothing at all.
 
 ## 2. Service Catalog — Sub first
 
