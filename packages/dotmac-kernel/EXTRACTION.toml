@@ -37,7 +37,6 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_consent.py",
   "dotmac_starter_mt:tests/unit/test_delivery.py",
   "dotmac_starter_mt:tests/unit/test_delivery_providers.py",
-  "dotmac_starter_mt:tests/unit/test_machine_credentials.py",
   "dotmac_starter_mt:tests/unit/test_channel_policy.py",
   "dotmac_starter_mt:tests/test_consent_isolation.py",
   "dotmac_starter_mt:tests/test_delivery_isolation.py",
