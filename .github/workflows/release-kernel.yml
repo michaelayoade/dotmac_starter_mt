@@ -143,6 +143,7 @@ jobs:
     environment: registry-release    # reuse the scoped token; still Michael-gated
     permissions:
       contents: write                # create the post-verification tag
+      pull-requests: write           # open the post-release record (below)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -183,3 +184,19 @@ jobs:
           git tag -a "${TAG}" -m "dotmac-kernel ${{ inputs.version }} (verified on the Forgejo registry)" "${GITHUB_SHA}"
           git push origin "${TAG}"
           echo "tagged ${TAG} on ${GITHUB_SHA}"
+
+      # The tag makes the publication-ledger row false THE MOMENT it lands, and
+      # five gates fail from that instant until the record is written. Leaving
+      # that to memory put `main` red four times in two days, so the record PR
+      # is opened HERE rather than remembered. `if: always()` is deliberate:
+      # the tag is pushed by the step above, so a later failure must not leave
+      # a tag with no record — the exact state this exists to prevent.
+      - name: Open the post-release record
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/open_release_record_pr.sh \
+            --distribution dotmac-kernel \
+            --version "${{ inputs.version }}" \
+            --tag "dotmac-kernel-v${{ inputs.version }}"
