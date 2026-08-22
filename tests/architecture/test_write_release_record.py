@@ -23,6 +23,7 @@ has to reproduce it exactly.
 from __future__ import annotations
 
 import ast
+import difflib
 import importlib.util
 import json
 import re
@@ -131,13 +132,23 @@ def test_removing_a_row_touches_only_that_row() -> None:
     assert set(json.loads(before)["unpublished"]) - {victim} == set(
         parsed["unpublished"]
     )
-    # Byte-level: the ONLY lines that disappear are the five the row occupies,
-    # and every other line survives verbatim. Comparing the surviving text to
-    # the original with the row's span excised is what makes "only that row"
-    # a checked claim rather than a hopeful one.
-    assert len(before.splitlines()) - len(after.splitlines()) == 5
-    surviving = [line for line in before.splitlines() if line in after.splitlines()]
-    assert surviving == after.splitlines()
+    # Byte-level: exactly ONE contiguous deletion of the five lines a row
+    # occupies, and no other edit anywhere in the file.
+    #
+    # Expressed as a diff rather than by filtering, because the obvious filter
+    # is wrong in a way that looks right: a row's closing `},` and its
+    # `"state"` line recur in every other row, so "keep the lines of `before`
+    # that appear in `after`" keeps those duplicates and the comparison
+    # inflates. The shape of the edit is the claim, so the diff is what states
+    # it.
+    diff = difflib.SequenceMatcher(
+        None, before.splitlines(), after.splitlines(), autojunk=False
+    )
+    edits = [op for op in diff.get_opcodes() if op[0] != "equal"]
+    assert len(edits) == 1, f"expected one edit, got {edits}"
+    tag, start, end, _, _ = edits[0]
+    assert tag == "delete", f"expected a deletion, got {tag!r}"
+    assert end - start == 5, f"a ledger row is five lines; removed {end - start}"
 
 
 def test_removing_the_last_row_leaves_valid_json() -> None:
