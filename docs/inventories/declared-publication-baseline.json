@@ -10,7 +10,7 @@
     "`test_module_version_sync.py` proves a module's three version surfaces",
     "AGREE. It cannot prove the agreed version EXISTS. `dotmac-integration`",
     "reads 0.1.0a2 on all three surfaces and the version-identity guard passes,",
-    "while the newest tag is dotmac-integration-v0.1.0a1 \u2014 internal consistency",
+    "while the newest tag is dotmac-integration-v0.1.0a1 — internal consistency",
     "and publication are different questions, and only the first one had a",
     "guard. A consumer reading the repository, the changelog or",
     "docs/MODULE_CATALOG.md and pinning ==0.1.0a2 gets a resolver error.",
@@ -29,10 +29,10 @@
     "was that the allowlist row was the wrong half, and it was removed rather",
     "than the module published. Two states this file must keep distinct:",
     "",
-    "  * INTENDED \u2014 the distribution is meant to be unpublished right now",
+    "  * INTENDED — the distribution is meant to be unpublished right now",
     "    (`dotmac-auth-oidc`, `dotmac-imports`). The row records the decision so",
     "    the next reader does not undo it by dispatching a release.",
-    "  * OUTSTANDING \u2014 a version is genuinely owed to consumers. The row",
+    "  * OUTSTANDING — a version is genuinely owed to consumers. The row",
     "    records evidence a decision still needs. Two worked examples have now",
     "    passed through and been removed on release: `dotmac-integration`",
     "    0.1.0a2 (released as a3) and `dotmac-kernel` 0.1.0a67. A row that",
@@ -44,7 +44,7 @@
     "",
     "## Two directions, both failures",
     "",
-    "A distribution entering this state without a row fails \u2014 that is a version",
+    "A distribution entering this state without a row fails — that is a version",
     "silently promised to consumers. A row whose distribution has since been",
     "published ALSO fails and must be removed in the same change as the release,",
     "because a ledger that only grows stops describing anything (ADR-0018).",
@@ -54,11 +54,11 @@
     "The release workflows write a tag only after `verify-registry` has",
     "installed the exact published version from the private index and registered",
     "its manifest, so a tag is this repository's own assertion that a version is",
-    "installable \u2014 stronger than 'an upload succeeded'. The index is not queried",
+    "installable — stronger than 'an upload succeeded'. The index is not queried",
     "directly: that needs an authenticated URL, which makes the check",
     "un-runnable at PR time and offline, and a gate that cannot run is not a",
     "gate. The stated cost is that a publication whose tag step failed reads",
-    "here as unpublished \u2014 which is exactly the state",
+    "here as unpublished — which is exactly the state",
     "`recover-module-release.yml` exists to repair, so reporting it is correct."
   ],
   "unpublished": {
@@ -72,14 +72,9 @@
       "reason": "INTENDED UNTIL THE BILLING DOCUMENT CUTOVER. This stateless package is built and gate-proven here but deliberately NOT release-allowlisted. Its kernel floor was corrected from an unpublished a87 to the published a88 in the #337 follow-up, so the floor resolves and the kernel is not what holds this row open; its EXTRACTION.toml withholds publication until Vendor Control Plane's Billing fact producer, the dotmac-files storage binding and the assembly-owned idempotent reconciler are ready in one cutover slice. No product is claimed as a consumer and no old writer is retired. Remove this row only in the reviewed publication and adoption sequence for the package itself; never by editing the declared version or floor down.",
       "state": "never-published"
     },
-    "dotmac-fulfillment": {
-      "declared": "0.1.0a1",
-      "reason": "INTENDED UNTIL THE FIRST PARTICIPANT ADAPTER. This package owns the fulfillment saga \u2014 runs, steps, participant attempts, outcome receipts, compensation and convergence \u2014 as a tenant-only module with FORCEd RLS and append-only evidence, built and gate-proven here. Its floor is kernel 0.1.0a89: a86 minted the mod_fulfillment lineage, but the package also consumes the typed provisioning participant, scoped request, asynchronous outcome envelope and participant-decided compensation contract that land in a89, and the highest consumed capability wins. a89 is published, registry-verified and tagged, so unlike the earlier a86 reading this floor is one an installer can resolve. THE KERNEL IS THEREFORE NO LONGER WHAT HOLDS THIS ROW OPEN. What holds it open is adoption: it is deliberately NOT release-allowlisted until the released dotmac-durable-timers dependency is composed and the first Dotmac Cloud participant adapter exists. Package supply alone is not adoption, and publishing before a named participant would put an installable saga owner beside products that still drive their own \u2014 the failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records that first participant; never by editing the declared version down.",
-      "state": "never-published"
-    },
     "dotmac-imports": {
       "declared": "0.1.0a2",
-      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag \u2014 the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release \u2014 unreleased is the decision.",
+      "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
       "state": "never-published"
     },
     "dotmac-integration": {
@@ -89,11 +84,17 @@
     },
     "dotmac-kernel": {
       "declared": "0.1.0a91",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a91 allocates fourteen module lineages and installs no behaviour: the ten ADR-0055 ISP essential owners, whose rows were authored against an isolated a85 that only ever existed on their own branch, and the four customer-journey owners from the 2026-08-22 audit of Sub PR #2624 (service_orders/so, payments/pm, service_changes/sch, operational_escalations/oe). Every published a85..a90 artifact carries none of the fourteen, so a91 is the first kernel that can register any of them and is their floor. a90 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a91 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything."
+      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a91 allocates fourteen module lineages and installs no behaviour: the ten ADR-0055 ISP essential owners, whose rows were authored against an isolated a85 that only ever existed on their own branch, and the four customer-journey owners from the 2026-08-22 audit of Sub PR #2624 (service_orders/so, payments/pm, service_changes/sch, operational_escalations/oe). Every published a85..a90 artifact carries none of the fourteen, so a91 is the first kernel that can register any of them and is their floor. a90 is published and immutable, so new ledger rows need a new version. Remove this row after release-kernel registry verification writes the a91 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything.",
+      "state": "never-published"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
-      "reason": "Not in any release lane \u2014 absent from release-modules.json and release-adapters.json alike \u2014 so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "reason": "Not in any release lane — absent from release-modules.json and release-adapters.json alike — so no workflow can publish it and no consumer can pin it. It is the still-unlisted stand-in the allowlist gate's own sensitivity proof uses (`test_an_unallowlisted_package_cannot_be_resolved`), which makes unpublished the consistent state rather than an oversight. It is recorded rather than exempted because 0.2.0a3 is the third declared version of a package that has never had a first release.",
+      "state": "never-published"
+    },
+    "dotmac-fulfillment": {
+      "declared": "0.1.0a1",
+      "reason": "INTENDED UNTIL THE FIRST PARTICIPANT ADAPTER. This package owns the fulfillment saga \u2014 runs, steps, participant attempts, outcome receipts, compensation and convergence \u2014 as a tenant-only module with FORCEd RLS and append-only evidence, built and gate-proven here. Its floor is kernel 0.1.0a89: a86 minted the mod_fulfillment lineage, but the package also consumes the typed provisioning participant, scoped request, asynchronous outcome envelope and participant-decided compensation contract that land in a89, and the highest consumed capability wins. a89 is published, registry-verified and tagged, so unlike the earlier a86 reading this floor is one an installer can resolve. THE KERNEL IS THEREFORE NO LONGER WHAT HOLDS THIS ROW OPEN. What holds it open is adoption: it is deliberately NOT release-allowlisted until the released dotmac-durable-timers dependency is composed and the first Dotmac Cloud participant adapter exists. Package supply alone is not adoption, and publishing before a named participant would put an installable saga owner beside products that still drive their own \u2014 the failure the imports row above was ruled on. Remove this row only in the release change that adds the allowlist entry and records that first participant; never by editing the declared version down.",
       "state": "never-published"
     }
   }
