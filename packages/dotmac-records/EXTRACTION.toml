@@ -55,3 +55,19 @@ first_cutover = "ERP is the first declaration candidate because its HR and finan
 shadow_and_drift = "ERP replays exact declarations and domain trigger events into a consequence-free shadow; compare source/file/schedule snapshots, calculated dates, active-hold sets and eligibility fingerprints. Destructive execution stays disabled. The last full-column comparison, ADR-0031 authority switch and locks over every legacy retention writer occur together; after cutover, drift repair replays authoritative observations into Records rather than writing parallel state."
 local_copy_retirement = "For each adopted ERP domain, remove local retention/hold/disposition columns, jobs and deletion decisions after the sealed switch and rollback window; the domain keeps attachment/business meaning and a Records deletion gate. A two-directional caller/table ratchet reaches zero. Sub repeats per domain. Files never gains a retention fallback and Records never writes source-domain lifecycle."
 next_action = "Sub's account-disposition inventory is DONE (docs/inventories/subscriber-account-disposition-sources.md, measured at dotmac_sub@883a0ff1a): retention is one unversioned integer setting with no record series, schedule version, trigger observation, legal hold, approval or disposition evidence, and `purge_expired_from_recovery_queue` DESTROYS NOTHING \u2014 it stamps a flag whose only effect is that restore then refuses, while the code's own docstring and comment claim a personal-data purge that exists nowhere. Adoption therefore implements destruction rather than replacing it, and needs characterization tests first because no test exercises the deletion, restore or purge paths at all. Complete exact-commit Observer validation, then write ERP's retention/deletion writer inventory and cutover plan. Keep kernel a84 and Records a1 unpublished until package, lineage and adopter gates are green; keep destructive execution disabled until one sealed product cutover."
+
+# Typed product claims. Only Sub is declared, because Sub is the only product
+# whose retention/deletion writers have actually been inventoried — see
+# docs/inventories/subscriber-account-disposition-sources.md. The other
+# repositories in `source_repositories` were read while inventorying and no
+# claim is made about them: a consumer that needs one must fail as UNKNOWN
+# rather than read silence as "no writer".
+[[product_writers]]
+product = "dotmac_sub"
+writer_state = "legacy_writer"
+retirement_required = true
+revision = "883a0ff1aff89e3ea5e241897a4b965527e9bce1"
+evidence_paths = [
+  "app/services/account_deletion.py",
+  "app/services/web_system_restore_tool.py",
+]
