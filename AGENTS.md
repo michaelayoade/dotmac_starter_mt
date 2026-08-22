@@ -391,6 +391,37 @@ specifics) points here and must never fork these rules.
     `tests/architecture/test_poetry_toolchain_contract.py`;
     `tests/architecture/test_lockfile_path_packages.py`)
 
+30. **A repository-local claim comes from repository-local facts; a release,
+    registry or production-adoption claim needs an authoritative external
+    oracle.** Accepted fleet-wide as `dotmac_governance` ADR 0013 (merge
+    `2d711cd594979ba0bc368382b7f5ea69bf21eaa4`, effective 2026-08-22). A
+    version existing in `pyproject.toml`, on `main`, or in a CHANGELOG is not
+    evidence that it is published, installable or pinnable. Four typed oracles,
+    each carrying immutable coordinates: `release_run` (the run that published →
+    installed back from the private index → registered → tagged), `peeled_tag`
+    (the tag's PEELED commit, never the annotated tag object's SHA),
+    `deployment_run` (run, commit, image digest, explicitly named target) and
+    `adoption_evidence` (dossier repository, exact commit, path, field). A
+    branch name, "current `main`", "latest", an unpeeled tag, a run without its
+    id, or an image by tag rather than digest are not coordinates. A positive
+    oracle-backed claim is permanent; an ABSENCE is a moment, so record it
+    either as an as-of observation with a NAMED refresh owner, or replace it
+    with a repository-local positive fact — prefer the second.
+    **Enforcement is deliberately narrow.** It is automated only where a
+    machine-readable contract already carries a declared oracle: every declared
+    distribution is measured against its real tag, and a declared-unpublished
+    one must carry a recorded reason that is removed in the SAME change as its
+    release. Everywhere else this is stated review discipline, NOT a guard —
+    ADR 0013 rejects a generic prose scanner, which cannot separate a claim
+    from a description of one and would flag its own incident recital. Saying
+    so is the point: an unmonitored region is honest, an implied guard is not
+    (ADR-0018). The known-bad case any future automation must fail on is
+    `AWAITING_RELEASE_TAG` in `dotmac_vendor_control_plane`, which was NAMED
+    for a release tag, read only `pyproject.toml`, and stayed green after the
+    tag was published.
+    (`scripts/declared_publication_sweep.py`;
+    `tests/architecture/test_declared_publication.py`)
+
 ## Everything by config — no hardcoding
 
 Env-specific values are overridable variables with documented defaults,

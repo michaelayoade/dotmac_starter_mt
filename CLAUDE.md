@@ -489,6 +489,14 @@ point, never duplicate. If a rule here and `AGENTS.md` ever disagree,
     released but installed locally per app, never shared persistence; shared
     behavior has no product/provider switches (ADR-0024; `AGENTS.md` rule
     **28**).
+26. A repository-local claim is derived from repository-local facts; a release,
+    registry or production-adoption claim requires an authoritative external
+    oracle carrying immutable coordinates — `release_run`, `peeled_tag` (the
+    PEELED commit), `deployment_run` or `adoption_evidence`. A version present
+    in `pyproject.toml` or on `main` is not evidence it is published or
+    pinnable. Automated only where a machine-readable contract already declares
+    an oracle; stated review discipline elsewhere, never an implied guard
+    (Governance ADR 0013, accepted 2026-08-22; `AGENTS.md` rule **30**).
 
 Process: a new feature starts with its package, manifest, registry entry,
 import-linter contract, and cross-tenant isolation test.
