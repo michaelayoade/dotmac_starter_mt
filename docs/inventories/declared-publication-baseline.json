@@ -77,9 +77,10 @@
       "reason": "RULED AND RESOLVED 2026-08-15: intended state, not a defect. The sweep first reported this as an anomaly because the module sat in .github/release-modules.json with no dotmac-imports-v tag in any version. The anomaly was the ALLOWLIST ROW, not the missing tag — the package's own EXTRACTION.toml next_action says to keep it audit-complete and unreleased until a real first adopter is ready, and to publish the exact kernel/imports releases just in time for that cutover. Michael ruled: remove the row, do NOT publish. The row is gone from release-modules.json, release-module.yml and recover-module-release.yml; the package keeps its declared 0.1.0a2, its catalogue entry, its kernel floor and its dossier. It is re-added with ERP's adoption proof (cutover 1, gated behind the E8 Organization-to-Tenant and composed-lineage decision). DO NOT 'fix' this by dispatching a release — unreleased is the decision.",
       "state": "never-published"
     },
-    "dotmac-kernel": {
-      "declared": "0.1.0a90",
-      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. a90 adds the machine-credential facility (dotmac_kernel.machine_auth + machine_models, migration 0027_machine_credential), extracted product-first from Sub and ERP under hard rule 24; the inventory is docs/inventories/machine-credential-sources.md. a89 is published and immutable, so the new surface needs a new version. Remove this row after release-kernel registry verification writes the a90 tag - in the SAME change as the release, because a ledger that only ever grows stops describing anything."
+    "dotmac-integration": {
+      "declared": "0.1.0a12",
+      "reason": "AUTHORIZED RELEASE CANDIDATE - NOT to be repaired by editing the version down. Version a12 adds the module-owned capability-wide product-port reconciliation required before one thin Integrator runtime can safely compose multiple independently installed connectors implementing the same capability. Remove this row only after release-module registry verification writes the a12 tag. The Integrator assembly pin follows that release; product adoption and authority transfer remain separately gated by shadow/cutover evidence.",
+      "state": "declared-newer-than-published"
     },
     "dotmac-template-studio": {
       "declared": "0.2.0a3",
