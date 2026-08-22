@@ -1,6 +1,6 @@
 # Machine credentials — ERP and Sub, inventoried before the kernel facility
 
-**Dated 2026-08-22.** Product-first inventory (ADR-0006 amendment, hard rule 22)
+**Dated 2026-08-22.** Product-first inventory (ADR-0006 amendment, hard rule 24)
 for a proposed `dotmac-kernel` machine-authentication facility. Two products
 already authenticate machines with an `X-Api-Key` header, and they disagree
 about what the credential means. That disagreement is the argument for one
@@ -129,10 +129,47 @@ Directed 2026-08-22, and recorded here so the release can be checked against it:
 Canary coverage owed: wrong tenant, revoked, expired, unknown and unscoped
 credentials, plus secret-leakage and transaction-boundary tests.
 
-## Retirement
+## Adoption is REISSUANCE, not a hash migration
 
-Neither product retires on the kernel release. Each is an independent adoption
-with its own migration of stored hashes, and ERP's additionally has to decide
-what happens to keys whose empty scope list currently means "everything" — a
-data question, not a code one, and the reason its cutover is the more careful of
-the two.
+Correcting an earlier draft of this section, which said each product would
+migrate its stored hashes. **It cannot.**
+
+A stored digest — Sub's HMAC or either product's SHA-256 — contains neither the
+raw key nor any material from which the new dedicated-key HMAC could be
+computed. That is the property the hashing exists for. There is no conversion,
+no dual-read window that eventually rewrites rows, and no backfill: every
+credential in both products must be **reissued**.
+
+That changes the shape of both cutovers from a migration into a credential
+rotation with an operator on the other end of it, and it is why neither product
+retires on the kernel release.
+
+### Sub
+
+Compatible authorization semantics — scope-exact, no admin shortcut — so nothing
+about its access model has to change. It still needs full reissuance, because
+its verification key is derived from the connector-credential encryption key and
+the kernel's is a dedicated held secret. The two cannot agree on a digest, so
+existing rows cannot authenticate against the new facility whatever else is
+true.
+
+### ERP
+
+The more careful cutover, and the steps are not optional:
+
+1. **Inventory every active null/empty-scoped key by IDENTIFIER only** — never a
+   secret value, and never a digest that could be replayed against a weak hash.
+2. **Assign each an owner and explicit minimum scopes.** An empty list is not a
+   fact about the key; it is the absence of one, and somebody has to supply it.
+3. **Revoke unused keys; reissue retained ones** into the kernel facility.
+4. **Treat every unresolved active key as a CUTOVER BLOCKER.** Not a warning,
+   not a follow-up: a key nobody can account for is exactly the credential the
+   empty-scope default made dangerous.
+5. **Never translate an empty scope list into a wildcard or "all current
+   permissions."** That would carry ERP's defect through the extraction wearing
+   a kernel badge — and it is the tempting shortcut precisely because it makes
+   the migration look clean.
+6. **Run a bounded old/new verification transition with a CHECKED retirement
+   deadline.** The legacy verifier stays in ERP for that window and never enters
+   the kernel; the kernel has one scheme and no fallback, which is the whole
+   point of extracting it.
