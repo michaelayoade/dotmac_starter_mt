@@ -360,6 +360,10 @@ retired prefix is never reused.
 | `remote_access` | `mod_remoteaccess` | `ra` | `remote_access` |
 | `compliance_reporting` | `mod_compliance` | `cr` | `compliance_reporting` |
 | `ai_operations` | `mod_aiops` | `ao` | `ai_operations` |
+| `billing` | `mod_billing` | `bi` | `billing` |
+| `collections` | `mod_coll` | `cl` | `collections` |
+| `orders` | `mod_orders` | `or` | `orders` |
+| `subscriptions` | `mod_subscriptions` | `su` | `subscriptions` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
