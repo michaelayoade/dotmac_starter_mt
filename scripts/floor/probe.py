@@ -16,7 +16,6 @@ where it has behaviour, exercised.
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from uuid import UUID
 
 import dotmac_kernel
 from dotmac_kernel import (
@@ -49,7 +48,6 @@ from dotmac_kernel import (
     revision_id,
     schema_table_args,
 )
-from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.licensing import (
     UNKNOWN_DIGEST,
     LicenceKey,
@@ -206,14 +204,7 @@ assert converted.currency == eur, converted
 # Provisioning contract + its fake, incl. the reusable contract suite
 fake = FakeProvisioningProvider()
 assert isinstance(fake, ProvisioningProvider)
-plan = fake.plan(
-    ProvisioningRequest(
-        participant_code="floor.fake",
-        scope=TenantScope(UUID(int=1)),
-        intent_id="i1",
-        spec={"nodes": 1},
-    )
-)
+plan = fake.plan(ProvisioningRequest(intent_id="i1", spec={"nodes": 1}))
 assert plan.plan_hash
 check_provisioning_provider_contract(FakeProvisioningProvider)
 

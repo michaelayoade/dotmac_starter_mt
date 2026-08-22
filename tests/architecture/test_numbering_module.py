@@ -11,14 +11,11 @@ one at file and line in ERP or Sub.
 from __future__ import annotations
 
 import ast
-import importlib.util
 import inspect
 import json
 import tomllib
 from pathlib import Path
-from types import ModuleType
 
-import pytest
 from dotmac_kernel.namespaces import MIGRATION_OWNER_LEDGER, NUMBERING_MIGRATION_OWNER
 from dotmac_numbering import models, service
 from dotmac_numbering.manifest import module
@@ -33,16 +30,6 @@ def _module_source() -> str:
     return "\n".join(
         path.read_text(encoding="utf-8") for path in sorted(MODULE_ROOT.rglob("*.py"))
     )
-
-
-def _migration_module() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "numbering_migration_under_test", MIGRATION
-    )
-    assert spec is not None and spec.loader is not None
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
-    return migration
 
 
 def test_manifest_matches_the_immutable_namespace_allocation() -> None:
@@ -284,17 +271,6 @@ def test_the_freeze_is_also_a_database_trigger() -> None:
     assert "BEFORE UPDATE ON mod_numbering.platform_number_series" in migration
     # start_value is a prospective seed, so the trigger must not freeze it.
     assert "start_value" not in migration.split("_IDENTITY_COLUMNS")[1].split(")")[0]
-
-
-def test_freeze_sql_rejects_identifiers_outside_the_declared_planes() -> None:
-    migration = _migration_module()
-    with pytest.raises(ValueError, match="declared plane"):
-        migration._freeze_function_sql(
-            "mod_numbering.hostile",
-            "series_counters; DROP TABLE tenants",
-            "allocation_receipts",
-            "tenant",
-        )
 
 
 def test_the_migration_mirrors_the_critical_validation_in_check_constraints() -> None:

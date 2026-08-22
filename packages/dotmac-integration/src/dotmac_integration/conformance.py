@@ -45,7 +45,6 @@ from dotmac_integration.spi import (
     ConnectorPlugin,
     Diagnostic,
     DispatchRequest,
-    EgressDeclaration,
     InboundEvent,
     IngressHandler,
     IngressRequest,
@@ -91,8 +90,6 @@ def fake_manifest(
         capabilities=tuple(
             CapabilityDeclaration(capability_id=c) for c in capabilities
         ),
-        secret_bindings=(),
-        egress=EgressDeclaration(),
     )
 
 
@@ -199,11 +196,6 @@ class FakePlugin:
     #: Every cursor `poll` was handed, so a test can assert the checkpoint the
     #: module kept is the one the handler saw.
     cursors_seen: list[str | None] = field(default_factory=list)
-    #: Make the poll call raise without monkeypatching the frozen contract.
-    poll_raises: BaseException | None = None
-    #: Return a list rather than the required ``(tuple[InboundEvent], cursor)``
-    #: pair, proving the engine validates the whole return shape before write.
-    poll_contract_broken: bool = False
 
     # ── wrong-shape knobs: the sensitivity proofs for the handler check ──────
     #: Hand back the INGRESS handler from the DELIVERY factory. Not callable, so
@@ -274,10 +266,6 @@ class FakePlugin:
                 fake.cursors_seen.append(cursor)
                 fake.configs_seen.append(config)
                 fake.secrets_seen.append(secrets)
-                if fake.poll_raises is not None:
-                    raise fake.poll_raises
-                if fake.poll_contract_broken:
-                    return list(fake.inbound)  # type: ignore[return-value]
                 return fake.inbound, fake.next_cursor
 
         return _Poll()

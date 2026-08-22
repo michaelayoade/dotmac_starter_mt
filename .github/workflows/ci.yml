@@ -60,47 +60,6 @@ jobs:
       - run: poetry install
       - run: make ${{ matrix.target }}
 
-  allocation-gate:
-    runs-on: ubuntu-latest
-    # ADR-0006 D1, the SERIALIZATION half. `migration-gate` in the `quality`
-    # matrix proves one composed tree is coherent; it cannot prove anything
-    # about a tree it has never seen. Three unmerged trains each allocated
-    # `prefix="sa"` and every one of them was green, because no check a branch
-    # runs on itself can see a sibling branch.
-    #
-    # This job is the only one that compares against what is already MERGED: if
-    # a branch changes a module's source, that module's ledger row must already
-    # exist at the merge base. So an allocation must land on its own first,
-    # where a duplicate is a conflict in one file rather than a surprise at
-    # merge with a reviewed lineage to rename.
-    #
-    # Deliberately NOT in the `quality` matrix: that list must equal `make
-    # check`'s prerequisites exactly (`test_ci_runs_canonical_check.py`), and
-    # `check` must stay runnable offline, while this needs the base branch.
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # MERGE-BASE EVIDENCE. A shallow checkout has no merge base with the
-          # target branch, and the gate exits 2 rather than reporting a pass it
-          # cannot justify — so this line is what makes the job meaningful.
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      # No Poetry install: the gate reads git, TOML and the syntax tree only.
-      #
-      # The base SHA, never the base REF. A branch ref moves, so gating
-      # against it makes the answer depend on when the job ran: a module could
-      # pass because somebody else's allocation landed on the base branch after
-      # this PR was opened. base.sha is the immutable commit the PR targets.
-      #
-      # Passed through `env:` and quoted rather than interpolated into the
-      # script line, so the value can never be parsed as shell.
-      - env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python scripts/check_allocation_serialized.py --base "$BASE_SHA"
-
   unit:
     runs-on: ubuntu-latest
     steps:

@@ -48,7 +48,6 @@ def test_no_kernel_model_is_named_partyrole() -> None:
         m.class_.__name__
         for m in Base.registry.mappers
         if m.class_.__name__ == RESERVED_MODEL
-        and m.class_.__module__.startswith("dotmac_kernel.")
     )
     assert not offenders, (
         f"`{RESERVED_MODEL}` is reserved for the Party archetype's business "

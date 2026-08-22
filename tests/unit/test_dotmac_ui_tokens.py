@@ -64,7 +64,6 @@ def test_every_category_the_contract_promises_is_populated() -> None:
         "focus",
         "breakpoint",
         "motion",
-        "component",
     ):
         assert dotmac_ui.tokens_in(category), f"category {category} is empty"
 

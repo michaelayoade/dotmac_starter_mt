@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import ast
 import tomllib
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -165,12 +164,6 @@ def _required_slice_names(directory_name: str) -> set[str]:
     # the dossier says about it.
     if dotmac_ui.PUBLISHED_COMPONENT_CLASSES:
         required.add("components")
-    # MAP_FRAME is its own evidence slice: the empty-state component already
-    # has two released consumers while this contract intentionally has none.
-    # Treating both as one row would let the mature component hide the new
-    # contract's weaker evidence level.
-    if dotmac_ui.MAP_FRAME in dotmac_ui.COMPONENTS:
-        required.add("map-frame")
     return required
 
 
@@ -318,47 +311,6 @@ def _load_toml(path: Path) -> dict[str, Any]:
     return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
-#: States that assert a product RAN the module. `audit-complete` does not.
-RAN_IN_A_PRODUCT = frozenset({"adopted", "reuse-proven"})
-
-
-def _adoption_evidence_problems(
-    status: str, dossier: Mapping[str, object]
-) -> list[str]:
-    """`adopted` must cite what ran, by a reference re-readable afterwards.
-
-    The consumer ratchet above already refuses claiming more or less adoption
-    than the consumer COUNT proves. It says nothing about whether the claim is
-    checkable, and that gap is how two dossiers came to carry `adopted` with no
-    `adoption_evidence` key at all — a true statement about the fleet that a
-    reader has no way to verify, which ADR-0031 treats as the same class of
-    defect as an untrue one.
-
-    A reference must name its producing repository and an identity that can be
-    re-read later: a commit, a pull request, a deploy run, an image digest, a
-    revision, a live schema. "It deployed fine" is not one of those, and neither
-    is a bare branch name — see `dotmac_governance` ADR 0013, which this mirrors
-    for the one artefact this repository owns.
-    """
-    if status not in RAN_IN_A_PRODUCT:
-        return []
-    evidence = dossier.get("adoption_evidence")
-    if evidence is None:
-        return [f"{status} carries no adoption_evidence key at all"]
-    if not isinstance(evidence, list) or not evidence:
-        return [f"{status} must cite the adoption evidence it claims"]
-    problems: list[str] = []
-    for ref in evidence:
-        text = str(ref)
-        repository, separator, identity = text.partition(":")
-        if not separator or not repository.strip() or not identity.strip():
-            problems.append(
-                f"adoption evidence {text!r} is not addressable: expected "
-                "<repository>:<re-readable identity>"
-            )
-    return problems
-
-
 def _validate_dossier(
     dossier: dict[str, Any],
     *,
@@ -504,18 +456,6 @@ def _validate_dossier(
                 problems.append(f"duplicate slice name {name!r}")
             seen_names.add(name)
 
-        # A slice that claims a product RAN it owes the same addressable
-        # evidence the package level owes. Checking only the headline would miss
-        # exactly this shape: `dotmac-ui` derives its headline from the WEAKEST
-        # slice, so two `reuse-proven` slices sat behind an `audit-complete`
-        # package status where no package-level rule could see them.
-        entry_status = entry.get("status")
-        if isinstance(entry_status, str):
-            problems.extend(
-                f"{label}: {problem}"
-                for problem in _adoption_evidence_problems(entry_status, entry)
-            )
-
         entry_consumers = entry.get("contract_consumers")
         if not isinstance(entry_consumers, list) or not all(
             isinstance(c, str) for c in entry_consumers
@@ -652,7 +592,6 @@ def _validate_dossier(
                 f"status is {status} with {consumer_count} contract consumer(s); "
                 f"that evidence level is exactly {required}"
             )
-        problems.extend(_adoption_evidence_problems(status, dossier))
     elif status != expected_debt:
         problems.append(
             "only the exact PRE_RULE_DEBT map may carry an unresolved or "
@@ -678,30 +617,6 @@ def test_every_shared_distribution_has_a_valid_extraction_dossier() -> None:
             distribution_name=distribution_name,
             package_dir=package_dir,
         )
-
-
-def test_adopted_without_evidence_is_rejected() -> None:
-    """SENSITIVITY for the rule above, both halves."""
-    assert _adoption_evidence_problems("adopted", {}) == [
-        "adopted carries no adoption_evidence key at all"
-    ]
-    assert _adoption_evidence_problems("adopted", {"adoption_evidence": []}) == [
-        "adopted must cite the adoption evidence it claims"
-    ]
-    assert _adoption_evidence_problems(
-        "adopted", {"adoption_evidence": ["it deployed fine"]}
-    ) == [
-        "adoption evidence 'it deployed fine' is not addressable: expected "
-        "<repository>:<re-readable identity>"
-    ]
-    assert (
-        _adoption_evidence_problems(
-            "adopted", {"adoption_evidence": ["dotmac_workspace:main@ef38693"]}
-        )
-        == []
-    )
-    # `audit-complete` asserts no run, so it is not asked to prove one.
-    assert _adoption_evidence_problems("audit-complete", {}) == []
 
 
 def test_missing_product_test_proof_is_rejected() -> None:
@@ -804,10 +719,6 @@ def test_one_consumer_is_enough_to_be_a_shared_module() -> None:
             "status": "adopted",
             "candidate_consumers": ["dotmac_vendor_control_plane"],
             "contract_consumers": ["dotmac_vendor_control_plane"],
-            # `adopted` now owes addressable evidence. The fixture supplies it
-            # rather than being exempted: a synthetic dossier that could skip
-            # the rule would stop exercising the gate it exists to exercise.
-            "adoption_evidence": ["dotmac_vendor_control_plane:main@0000000"],
         }
     )
 
@@ -859,7 +770,6 @@ def test_an_adopted_module_needs_no_invented_future_candidate() -> None:
     dossier.update(
         {
             "status": "adopted",
-            "adoption_evidence": ["dotmac_vendor_control_plane:main@0000000"],
             "contract_consumers": ["dotmac_vendor_control_plane"],
             "candidate_consumers": [],
         }
@@ -977,27 +887,6 @@ def test_deleting_a_slice_cannot_restore_a_stronger_headline() -> None:
 
     dossier = _ui_dossier()
     dossier["slices"] = [s for s in dossier["slices"] if s["name"] != "components"]
-    dossier["status"] = "reuse-proven"
-
-    with pytest.raises(ExtractionDossierError, match="no slice"):
-        _validate_ui(dossier)
-
-
-def test_deleting_the_map_frame_slice_cannot_overstate_the_package() -> None:
-    """Sensitivity proof for the new audit-complete contract.
-
-    Without a live-surface binding, deleting only the weakest row and changing
-    the headline back to reuse-proven would validate, even though MAP_FRAME is
-    still published by the package.
-    """
-    import dotmac_ui
-
-    assert dotmac_ui.MAP_FRAME in dotmac_ui.COMPONENTS
-
-    dossier = _ui_dossier()
-    dossier["slices"] = [
-        entry for entry in dossier["slices"] if entry["name"] != "map-frame"
-    ]
     dossier["status"] = "reuse-proven"
 
     with pytest.raises(ExtractionDossierError, match="no slice"):

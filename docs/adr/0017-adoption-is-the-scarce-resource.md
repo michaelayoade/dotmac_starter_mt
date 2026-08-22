@@ -8,46 +8,6 @@
 **Amends:** the 2026-07-18 adoption plan's treatment of E8 and S7 as one
 parallel workstream.
 
-## Amendment, 2026-08-20: Paystack and Flutterwave connector construction is authorized
-
-Michael explicitly directed construction of the independently released
-Paystack and Flutterwave Integrator plugins. This is an owner-directed,
-provider-specific exception to the earlier payment-receiver moratorium; it is
-not evidence that a product is blocked, not permission to build a second
-integration engine, and not a general exception for an unnamed connector.
-
-The first authorized slice is narrower than a payment integration: Paystack
-INGRESS only, capability `payments.settlement.observation.v1`, exact-byte
-authentication and observation translation, with deny-all provider egress. It
-cannot initiate, refund or reconcile a payment. Publication proves only that an
-independently installable plugin conforms to the published SPI. Sub's current
-receiver remains the sole authority for financial consequences until the
-Integrator exact-pins the plugin and the documented shadow, parity, callback
-move and local-transport retirement complete. ERP follows through its own
-product port and cutover; no connector reads either product database.
-
-Flutterwave remains a separate distribution and evidence trail. This amendment
-does not authorize a provider switch in one plugin, a provider branch in the
-Integrator engine or assembly, product identifiers in provider metadata, or a
-financial lifecycle decision in a connector.
-
-## Amendment, 2026-08-18: Backoffice replacement retires ERP authority first
-
-ADR-0006's 2026-08-18 vertical-replacement amendment resolves how
-product-first applies to the accepted ERP -> Backoffice programme. ERP remains
-the qualifying source and the first **authority retired**; Backoffice is the
-first exact-pin runtime consumer. Merely composing a module in the greenfield
-assembly earns no credit. Evidence moves to `adopted` only when the same sealed
-cutover makes Backoffice the sole writer and fails closed the corresponding ERP
-mutations.
-
-This is narrower than an in-place adoption and is not permission to build a
-parallel ERP. Backfill and shadow input cross only a versioned API/webhook;
-Backoffice never reads ERP's database; ERP stays sole writer until cutover; and
-the ERP writer/fallback/table retirement ratchets remain mandatory. The first
-source ruling under this amendment is
-[`../inventories/people-directory-sources.md`](../inventories/people-directory-sources.md).
-
 ## Amendment, 2026-08-17: P11 is met by Vendor production
 
 Michael accepted the production-lineage evidence recorded below. This

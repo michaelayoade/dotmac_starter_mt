@@ -434,7 +434,7 @@ def test_the_dossier_records_the_production_adopter() -> None:
     )
     assert dossier["status"] == "adopted"
     assert dossier["contract_consumers"] == ["dotmac_vendor_control_plane"]
-    assert dossier["candidate_consumers"] == ["dotmac_erp", "dotmac-isp"]
+    assert dossier["candidate_consumers"] == ["dotmac_erp"]
     evidence = set(dossier["adoption_evidence"])
     assert {
         "dotmac_vendor_control_plane:main@f8f8c3fd636e663e4a17275c19e82fc1667aa52a",

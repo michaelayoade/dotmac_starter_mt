@@ -146,18 +146,3 @@ knows both exist.
 **Leave the conflict and resolve it when the module is built.** Cheap now,
 expensive later: the first implementer would read whichever ADR they found first,
 and a wrong choice would be discovered after there were rows in a table.
-
-## Amendment — 2026-08-20: temporary support access is a separate owner
-
-[ADR-0034](0034-sub-vnext-parity-capabilities-have-narrow-independent-owners.md)
-does not change this ADR's ownership of standing cross-application grant sets.
-It distinguishes a narrower lifecycle that this ADR did not model:
-case/incident-bound support access with an explicit purpose, finite expiry,
-least-privilege scope and mandatory revocation. `dotmac-support-access` owns
-that temporary request/grant lifecycle. Approvals still owns only the approval
-decision, and kernel facilities still enforce the admitted grant and record
-immutable audit evidence.
-
-The temporary owner cannot issue or renew a Workspace application-role grant
-set, cannot maintain standing credentials, and cannot treat break-glass as an
-unbounded bypass. Those remain decisive boundaries between the two modules.

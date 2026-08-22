@@ -162,27 +162,13 @@ def test_an_allowlisted_module_that_has_never_been_published_is_recorded() -> No
     """An allowlist row means the workflow MAY publish; it is not proof that it
     did. Any distribution in both states at once must be in the ledger.
 
-    NO LONGER VACUOUS, as of the ADR-0033 cohort (2026-08-20). It was, and the
-    docstring said so rather than the test being deleted: the one module in both
-    states, `dotmac-imports`, had its ALLOWLIST ROW removed (see the test below),
-    emptying the intersection. Four modules now occupy it deliberately —
-    dotmac-commercial-agreements, dotmac-licensing, dotmac-deployment-control
-    and dotmac-brand-profiles — because `dotmac_vendor_control_plane` cannot pin
-    an unpublished module, so the allowlist row has to precede the release that
-    precedes the adoption. That is the state this rule exists to police rather
-    than forbid: each of the four carries a ledger row saying when its row goes.
-
-    The distinction from `dotmac-imports` is the whole point and is not a
-    precedent being softened. Imports had NO adopter and its own dossier said to
-    stay unreleased, so an allowlist row asserted something untrue. These four
-    have a named adopter, a dated cutover and a release that is the next step in
-    it.
-
-    Deliberately NOT asserting the intersection is non-empty. Releasing the
-    cohort empties it again and that is the desired end state, so a
-    non-vacuity assertion here would fail on success — the guard's job is to
-    catch a module entering this state unrecorded, not to require that one
-    always be in it.
+    Currently vacuous — deliberately, and it says so rather than being deleted.
+    The one module that was in both states, `dotmac-imports`, had its ALLOWLIST
+    ROW removed (see the test below), so the intersection is now empty. Keeping
+    the rule is what stops the next module from quietly entering that state; the
+    non-vacuity of the guard as a whole is carried by
+    `test_every_unpublished_declaration_is_recorded_with_a_reason` and the
+    planted-violation proofs below.
     """
     sweep, survey = _survey()
     allowlist = json.loads(

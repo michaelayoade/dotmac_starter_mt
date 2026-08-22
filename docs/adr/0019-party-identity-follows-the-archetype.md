@@ -10,47 +10,6 @@ Party while authorization binds to a PartyRole
 **Does not own:** any product's role vocabulary (ADR-0008 governs that), the
 merge/deduplication policy, or the schedule on which a product adopts this
 
-## Amendment — 2026-08-19: implement the optional Party context, keep adoption gated
-
-Michael directed implementation of the recommendation to finish the Party
-capability rather than create generic customer or contact modules. Section 6's
-stop rule now distinguishes **implementation evidence** from **adoption**:
-
-- an unreleased `audit-complete` `dotmac-party` candidate may be implemented
-  product-first from Sub, with its namespace, lineage, dossier, parity tests,
-  tenant/RLS canaries and retirement gates in the same change;
-- it may not be released, composed, called adopted, receive a production
-  backfill, or displace a writer until Sub's reviewed backfill, reader cutovers,
-  parity proof and sealed writer retirement satisfy the original gate; and
-- kernel `Party`/`PartyPerson`/`PartyOrganization` remain the identity root.
-  The optional module owns only business capacities, capacity relationships,
-  organization memberships, reachability evidence and import provenance.
-
-This amendment also resolves §5d's structural deviation for the reusable
-contract: `PartyRelationship` links **PartyRole to PartyRole**, not bare Party
-to Party. A relationship therefore distinguishes Acme-as-customer from
-Acme-as-vendor. A contact is still not a second identity: the person is a Party,
-their declared contact capacity is a PartyRole, and `contact_for` relates that
-capacity to the exact customer/subscriber/vendor capacity. Membership remains a
-separate Person-Party to Organization-Party context and is the only one of the
-two facts that may carry bounded `access_scope`; neither grants permission by
-itself.
-
-Role, relationship, membership and contact-channel codes are open declaration
-registries and plain database strings. The closed lifecycle states remain
-module-owned. This is the implementation decision; no product cutover is
-authorized by it.
-
-The registry declaration is semantic, not just a list of labels:
-relationship types name their allowed subject/object role types, and
-membership types name the permitted `access_scope` keys. An undeclared
-endpoint or scope fails closed. The current reference assembly retains kernel
-`Party.email` as its single email/login authority; this uncomposed candidate
-changes none of those readers or writers. An adopter's later cutover makes
-`PartyContactPoint` the shared-reachability owner while the unique login locator
-stays separate. Shared email and phone values never identify or merge Parties
-by themselves.
-
 ## Context
 
 Dotmac has re-litigated the same modelling question once per table.

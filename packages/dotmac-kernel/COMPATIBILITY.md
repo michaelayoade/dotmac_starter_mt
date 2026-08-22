@@ -90,9 +90,7 @@ and may change or disappear without a deprecation cycle**.
    eager DB session owner and engine live here (not at the top level). Route
    guards in `dotmac_kernel.deps` are safe to import before database
    configuration: `get_db` and `get_platform_db` defer entry into the owner
-   until FastAPI resolves the dependency for a request. Kernel services that
-   receive a caller-owned `Session` remain import- and invocation-safe: they do
-   not enter that eager owner merely to open a SAVEPOINT.
+   until FastAPI resolves the dependency for a request.
 
 ### Supported modules and their public names
 
@@ -102,7 +100,6 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.assembly` | `ProductAssemblySpec`, `ProductSecurityPolicy`, `ModulePlaneSelection`, `StartupCheck`, `StartupHook` |
 | `dotmac_kernel.audit` | `ACTOR_TYPES`, `AuditEvent`, `MissingAuditActorError`, `UnknownAuditActorTypeError`, `resolve_audit_actor`, `write_audit_event`, `PlatformAuditEvent`, `write_platform_audit_event` |
 | `dotmac_kernel.audit_actions` | `AuditActionRegistry`, `AuditActionsNotInstalledError`, `DuplicateAuditActionError`, `UndeclaredAuditActionError`, `install_audit_actions`, `active_audit_actions` (audit-action registry; also top-level — see "Manifest declaration catalogues" below) |
-| `dotmac_kernel.outbox_event_types` | `OutboxEventTypeRegistry`, `OutboxEventTypesNotInstalledError`, `DuplicateOutboxEventTypeError`, `UndeclaredOutboxEventTypeError`, `install_outbox_event_types`, `active_outbox_event_types` (outbox routing vocabulary; also top-level) |
 | `dotmac_kernel.branding` | `get_brand`, `get_request_branding`, `load_branding`, `reset_brand_cache`, `RETIRED_BRAND_KEYS`, `reject_retired_brand_keys` (`sanitize_branding_css` was REMOVED in 0.1.0a47 — see CHANGELOG) |
 | `dotmac_kernel.capabilities` | `CapabilityCatalogue`, `DuplicateCapabilityError`, `UndeclaredCapabilityError` (WS1 capability catalogue; also top-level) |
 | `dotmac_kernel.channel_policy` | `CHANNEL_POLICY_KEY`, `ChannelPolicyError`, `make_spec`, `resolve_channels`, `validate_policy_document` |
@@ -134,8 +131,7 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.messaging.worker` | `DeliveryTransport`, `LoggingTransport`, `run_once`, `run_forever` (WS3 relay polling worker; receives session factories, never builds engines; run via `scripts/run_relay.py`) |
 | `dotmac_kernel.messaging.platform_worker` | `PlatformDeliveryTransport`, `LoggingPlatformTransport`, `run_once`, `run_forever` (platform relay worker; dispatcher claims/settles, delivery on a separate `platform_api` session with no tenant context; run via `scripts/run_platform_relay.py`) |
 | `dotmac_kernel.messaging.models` | `OutboxEvent`, `PlatformOutboxEvent`, `OutboxStatus` |
-| `dotmac_kernel.fingerprints` | `fingerprint_of` (canonical payload digest, no persistence — import this rather than `idempotency` when you only need identity) |
-| `dotmac_kernel.idempotency` | `execute_once`, `execute_once_platform`, `fingerprint_of` (re-export of `fingerprints`), `purge_expired`, `IdempotentOutcome`, `IdempotencyConflict`, `Operation`, `MAX_KEY_LENGTH`, `MAX_SCOPE_LENGTH` (see "At-most-once execution" below) |
+| `dotmac_kernel.idempotency` | `execute_once`, `execute_once_platform`, `fingerprint_of`, `purge_expired`, `IdempotentOutcome`, `IdempotencyConflict`, `Operation`, `MAX_KEY_LENGTH`, `MAX_SCOPE_LENGTH` (see "At-most-once execution" below) |
 | `dotmac_kernel.idempotency_models` | `IdempotencyRecord`, `PlatformIdempotencyRecord`, `IdempotencyStatus`, `INBOX_SCOPE` |
 | `dotmac_kernel.middleware.csrf` | `CSRFMiddleware` |
 | `dotmac_kernel.middleware.observability` | `ObservabilityMiddleware` |
@@ -145,13 +141,13 @@ and may change or disappear without a deprecation cycle**.
 | `dotmac_kernel.migrations` | `versions_dir` (the kernel base Alembic revisions, for a consuming assembly's `version_locations`) |
 | `dotmac_kernel.migrations.gate` | `run_gate`, `GateReport`, `RevisionRecord`, `scan_location`, `scan_revision_file`, `version_locations_from_ini`, `SCHEMA_QUALIFIED_OPS` (the composed migration gate — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.migrations.catalog` | `audit_snapshot`, `audit_live_schemas`, `audited_schemas`, `fetch_snapshot`, `catalog_queries`, `SchemaSnapshot`, `TableFacts`, `PolicyFacts`, `ForeignKeyFacts`, `TENANT_COLUMN`, `DEFAULT_APP_ROLE`, `DEFAULT_PLATFORM_ROLE`, `TABLE_PRIVILEGES` (the post-migration live-catalog contract, both planes — see the same section) |
-| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_party_person_catalog`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
-| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `PARTY_PERSON_CATALOG_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.migrations.verify` | `require_prerequisites`, `verify_tenant_scope_catalog`, `verify_module_database_roles`, `verify_idempotency_ledger`, `verify_outbox_relay`, `register_verifier`, `registered_verifiers`, `PrerequisiteNotSatisfiedError`, `PrerequisiteVerifierMissingError` (a requiring migration proves its prerequisites against the live catalog before any DDL — see "Logical migration prerequisites" below) |
+| `dotmac_kernel.prerequisites` | `PrerequisiteSpec`, `PrerequisiteBinding`, `TENANT_SCOPE_CATALOG_V1`, `MODULE_DATABASE_ROLES_V1`, `IDEMPOTENCY_LEDGER_V1`, `OUTBOX_RELAY_V1`, `KERNEL_PREREQUISITES`, `register_prerequisites`, `registered_prerequisites`, `prerequisite`, `validate_prerequisites`, `validate_prerequisite_name`, `validate_revision_reference`, `install_prerequisite_bindings`, `installed_bindings`, `binding_for`, `binding_map`, `resolve_depends_on`, `PrerequisiteError` + its subclasses (`InvalidPrerequisiteNameError`, `UnknownPrerequisiteError`, `DuplicatePrerequisiteError`, `UnboundPrerequisiteError`, `DuplicateBindingError`, `InvalidRevisionReferenceError`) (ADR-0006 D1 amendment — see "Logical migration prerequisites" below) |
 | `dotmac_kernel.models` | `Base`, `TimestampMixin`, `uuid_pk`, `Tenant`, `TenantDomain`, `Party`, `PartyType`, `PartyPerson`, `PartyOrganization`, `Role`, `PartyRole`, `AuthSession`, `UserCredential` |
 | `dotmac_kernel.models_platform` | `PlatformAdmin`, `PlatformSession`, `PlatformAuditEvent` |
 | `dotmac_kernel.modules` | `ModuleManifest`, `ModuleRegistry`, `ModuleInventoryEntry`, `AnyManifest`, `KERNEL_MODULE_CONTRACT_VERSION`, `SUPPORTED_MODULE_CONTRACT_VERSIONS`, `UNVERSIONED`, `ModuleRegistryError` + its subclasses (`DuplicateModuleError`, `ModuleContractVersionError`, `MissingModuleDependencyError`, `ModuleDependencyCycleError`), `UnknownModuleError` (module manifest + registry; also top-level — see "Module manifest and registry" below) |
 | `dotmac_kernel.money` | `Money`, `Currency`, `currency`, `ExchangeRate`, `MoneyError`, `CurrencyMismatchError`, `Amountable`, `DEFAULT_ROUNDING` (exact money + FX value objects; also top-level) |
-| `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `MEDIA_OBSERVATIONS_MIGRATION_OWNER`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
+| `dotmac_kernel.namespaces` | `MigrationOwner`, `NamespaceRegistry`, `MIGRATION_OWNER_LEDGER`, `KERNEL_MIGRATION_OWNER`, `ASSEMBLY_MIGRATION_OWNER`, `HOST_MIGRATION_OWNERS`, `HOST_SCHEMA`, `MODULE_SCHEMA_PREFIX`, `RESERVED_SCHEMAS`, `MAX_REVISION_ID_LENGTH`, `MAX_IDENTIFIER_LENGTH`, `MAX_MIGRATION_PREFIX_LENGTH`, `REVISION_SEQUENCE_DIGITS`, `module_schema`, `qualified`, `schema_table_args`, `revision_id`, `revision_id_pattern`, `validate_schema`, `validate_short_code`, `validate_migration_prefix`, `validate_branch_label`, `NamespaceError` + its subclasses (`InvalidSchemaError`, `InvalidMigrationPrefixError`, `InvalidRevisionIdError`, `DuplicateSchemaError`, `DuplicateMigrationPrefixError`, `DuplicateBranchLabelError`, `DuplicateTableOwnerError`, `UnallocatedNamespaceError`, `NamespaceAllocationError`, `HostSchemaClaimError`) (ADR-0006 D1; most also top-level — see "Database namespaces and migration lineage" below) |
 | `dotmac_kernel.profiles` | `DeploymentProfileSpec`, `DeploymentProfileRegistry`, `ProfileValidationReport`, `DuplicateProfileError`, `UnknownProfileError` (WS1 deployment-profile registry; also top-level) |
 | `dotmac_kernel.permissions` | `PermissionSpec`, `PermissionCatalogue`, `DuplicatePermissionError`, `UndeclaredPermissionError`, `install_permissions`, `active_permissions` (permission catalogue; also top-level — see "Manifest declaration catalogues" below) |
 | `dotmac_kernel.planes` | `ModulePlane`, `ModulePlaneSelection`, `ModulePlaneSelectionError`, `install_module_plane_selections`, `installed_module_plane_selections`, `selected_module_planes`, `supported_plane_sets`, `validate_module_plane_selections` (explicit per-module persistence-plane composition; ADR-0028) |
@@ -184,7 +180,7 @@ it never grants entitlement and it never deploys anything.
 
 - **`ModuleManifest`** (frozen) — `code`, `version`, `contract_version`,
   `dependencies`, `api_routers`, `web_routers`, `nav`, `capabilities`,
-  `permissions`, `audit_actions`, `outbox_event_types`, `feature_flags`, `setting_domains`,
+  `permissions`, `audit_actions`, `feature_flags`, `setting_domains`,
   `short_code`, `migration_prefix`,
   `migration_branch`, `tables`, `platform_tables`, `core`, `enabled_by_default`,
   `seed`. `code`
@@ -292,7 +288,7 @@ allocated owner is not installed, then refuses a stateful module absent from it
 label (`NamespaceAllocationError`). Changing a row is therefore a visible
 kernel diff plus a release.
 
-**Allocated module namespaces**, as of `0.1.0a88`. Each row is permanent: a
+**Allocated module namespaces**, as of `0.1.0a54`. Each row is permanent: a
 namespace that moves is a data-loss event, so an entry is never repointed and a
 retired prefix is never reused.
 
@@ -305,61 +301,6 @@ retired prefix is never reused.
 | `application_directory` | `mod_appdir` | `ad` | `application_directory` |
 | `files` | `mod_files` | `fi` | `files` |
 | `imports` | `mod_imports` | `im` | `imports` |
-| `integration` | `mod_intg` | `ig` | `integration` |
-| `approvals` | `mod_approvals` | `ap` | `approvals` |
-| `numbering` | `mod_numbering` | `nu` | `numbering` |
-| `people` | `mod_people` | `pe` | `people` |
-| `campaigns` | `mod_campaigns` | `ca` | `campaigns` |
-| `durable_timers` | `mod_timers` | `dt` | `durable_timers` |
-| `commercial_agreements` | `mod_agreements` | `cg` | `commercial_agreements` |
-| `licensing` | `mod_licensing` | `li` | `licensing` |
-| `deployment_control` | `mod_deploy` | `dc` | `deployment_control` |
-| `brand_profiles` | `mod_brand` | `bp` | `brand_profiles` |
-| `media_observations` | `mod_mediaobs` | `mo` | `media_observations` |
-| `content` | `mod_content` | `ct` | `content` |
-| `publishing` | `mod_publishing` | `pb` | `publishing` |
-| `sites` | `mod_sites` | `si` | `sites` |
-| `inventory` | `mod_inventory` | `iv` | `inventory` |
-| `assets` | `mod_assets` | `as` | `assets` |
-| `ipam` | `mod_ipam` | `ip` | `ipam` |
-| `network_inventory` | `mod_netinv` | `ni` | `network_inventory` |
-| `network_observability` | `mod_netobs` | `no` | `network_observability` |
-| `network_topology` | `mod_nettop` | `nt` | `network_topology` |
-| `network_assurance` | `mod_netassure` | `na` | `network_assurance` |
-| `network_control` | `mod_netctrl` | `nc` | `network_control` |
-| `fiber_plant` | `mod_fiber` | `fp` | `fiber_plant` |
-| `network_access` | `mod_netaccess` | `nac` | `network_access` |
-| `pon_access` | `mod_pon` | `pn` | `pon_access` |
-| `positioning` | `mod_pos` | `po` | `positioning` |
-| `referrals` | `mod_referrals` | `rf` | `referrals` |
-| `reseller_management` | `mod_reseller` | `rm` | `reseller_management` |
-| `accounting` | `mod_accounting` | `ac` | `accounting` |
-| `analytics` | `mod_analytics` | `ay` | `analytics` |
-| `banking` | `mod_banking` | `bk` | `banking` |
-| `documents` | `mod_documents` | `do` | `documents` |
-| `expenses` | `mod_expenses` | `ex` | `expenses` |
-| `finance` | `mod_finance` | `fn` | `finance` |
-| `inbox` | `mod_inbox` | `ib` | `inbox` |
-| `party` | `mod_party` | `pt` | `party` |
-| `payables` | `mod_payables` | `pa` | `payables` |
-| `payroll` | `mod_payroll` | `py` | `payroll` |
-| `procurement` | `mod_procurement` | `pc` | `procurement` |
-| `projects` | `mod_projects` | `pj` | `projects` |
-| `records` | `mod_records` | `re` | `records` |
-| `surveys` | `mod_surveys` | `sv` | `surveys` |
-| `tax` | `mod_tax` | `tx` | `tax` |
-| `work_orders` | `mod_workorders` | `wo` | `work_orders` |
-| `web_analytics` | `mod_webanalytics` | `wa` | `web_analytics` |
-| `fulfillment` | `mod_fulfillment` | `fu` | `fulfillment` |
-| `sales` | `mod_sales` | `sa` | `sales` |
-| `support_access` | `mod_supportaccess` | `sup` | `support_access` |
-| `service_access_policy` | `mod_serviceaccess` | `sap` | `service_access_policy` |
-| `forms` | `mod_forms` | `fm` | `forms` |
-| `workflow_runtime` | `mod_workflow` | `wr` | `workflow_runtime` |
-| `platform_health` | `mod_health` | `ph` | `platform_health` |
-| `remote_access` | `mod_remoteaccess` | `ra` | `remote_access` |
-| `compliance_reporting` | `mod_compliance` | `cr` | `compliance_reporting` |
-| `ai_operations` | `mod_aiops` | `ao` | `ai_operations` |
 
 Adding a row is an allocation, not a facility — it adds no kernel behaviour and
 nothing consumes it but the module it names. That distinction is what makes an
@@ -413,8 +354,7 @@ aliased provider fails there, because stamping writes no columns.
 
 The vocabulary is an open **registry, never an enum** (ADR-0008): the kernel
 ships `tenant_scope_catalog.v1`, `module_database_roles.v1`,
-`party_person_catalog.v1`, `idempotency_ledger.v1`, `outbox_relay.v1` and
-`platform_audit_log.v1`; a product adds its own with
+`idempotency_ledger.v1` and `outbox_relay.v1`; a product adds its own with
 `register_prerequisites()`, and `register_verifier()` for the proof — an effect
 that cannot be proven must not be silently assumed. A changed contract is a new
 `.vN`, never a redefinition, because every existing binding was accepted against
@@ -485,7 +425,7 @@ revision ids are already recorded in live `alembic_version` rows, so
 exempts them from the strict id and `schema=` rules. Their tables legitimately
 live in `public`. Every installable module gets the strict rules.
 
-### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`, `dotmac_kernel.outbox_event_types`, `dotmac_kernel.setting_domains`)
+### Manifest declaration catalogues (`dotmac_kernel.permissions`, `dotmac_kernel.audit_actions`, `dotmac_kernel.setting_domains`)
 
 Siblings of `dotmac_kernel.capabilities.CapabilityCatalogue` and
 `dotmac_kernel.flags.FlagCatalogue` — same shape, same fail-closed posture, same
@@ -510,10 +450,6 @@ constraint on the backing column. If you are adding a sixth, copy
   free-text-no-longer `audit_events.action` vocabulary:
   `DuplicateAuditActionError` on two owners, `require(action)` raising
   `UndeclaredAuditActionError`, plus `is_declared`/`owner`/`actions`.
-- **`OutboxEventTypeRegistry.from_manifests(manifests)`** — the same for durable
-  routing codes. The consuming module declares the code; producers call
-  `require(event_type)` before enqueueing so a typo cannot create an event no
-  installed consumer owns. The outbox column remains plain text.
 - **`SettingDomainRegistry.from_manifests(manifests)`** — the same again, for
   `domain_settings.domain`: `DuplicateSettingDomainError`, `require(domain)`
   returning a `SettingDomain` or raising `UndeclaredSettingDomainError`, plus
@@ -524,14 +460,13 @@ constraint on the backing column. If you are adding a sixth, copy
   domains are bound as class attributes (`SettingDomain.branding`); a product
   constructs its own (`SettingDomain("payroll")`).
 - **Process-active install.** `install_permissions` / `install_audit_actions` /
-  `install_outbox_event_types` / `install_setting_domains` set the process-active
-  catalogue and registries; `active_permissions` / `active_audit_actions` /
-  `active_outbox_event_types` / `active_setting_domains` read
+  `install_setting_domains` set the process-active catalogue and registries;
+  `active_permissions` / `active_audit_actions` / `active_setting_domains` read
   them. `create_app` installs all of them from the INSTALLED module set before
   mounting anything. Permissions default to EMPTY so an uninstalled
-  authorization catalogue denies safely. Audit actions, outbox event types and setting domains
+  authorization catalogue denies safely. Audit actions and setting domains
   distinguish NOT INSTALLED (`AuditActionsNotInstalledError` /
-  `OutboxEventTypesNotInstalledError` / `SettingDomainsNotInstalledError`) from INSTALLED-EMPTY (every write is
+  `SettingDomainsNotInstalledError`) from INSTALLED-EMPTY (every write is
   undeclared) — an uninstalled write-path registry would otherwise reject writes
   inside the caller's transaction and turn a wiring mistake into a failed
   business operation. A consumer that builds an app by hand (a test mounting a
@@ -576,10 +511,6 @@ constraint on the backing column. If you are adding a sixth, copy
   the session, so a rejected write leaves no partial state. Platform actions
   are owned by the installable control-plane modules that call the writer and
   are declared through their `ModuleManifest.audit_actions` entries.
-- `dotmac_durable_timers.schedule_timer` validates its output routing code
-  against `active_outbox_event_types()` before it takes a lock or adds rows.
-  Timer mechanics therefore remain provider-neutral while the consuming
-  module remains the sole owner of whether an event type exists.
 
 #### Audit actor and time contract
 
@@ -716,21 +647,17 @@ submodule (`from dotmac_kernel.providers.provisioning import
 ProvisioningProvider`); `dotmac_kernel.providers` re-exports the same names.
 
 - **Protocol** — `ProvisioningProvider` (`typing.Protocol`, `runtime_checkable`)
-  with five methods, all keyed on opaque identifiers:
+  with four methods, all keyed on opaque identifiers:
   - `plan(request: ProvisioningRequest) -> PlanResult` — read-only; diff the
     opaque desired-state `spec` and return ordered steps + a stable `plan_hash`.
   - `apply(request: ProvisioningRequest) -> ApplyResult` — execute the plan;
     idempotent by `operation_id`; may return a partial result.
   - `observe(operation_id: str) -> ObserveResult` — read-only status snapshot.
   - `cancel(operation_id: str) -> ObserveResult` — cooperative cancellation.
-  - `compensate(operation_id: str, reason: str) -> CompensationResult` — ask
-    the participant to reverse a settled effect; it may refuse, report that the
-    effect is not reversible, or require manual work.
-- **Input** — `ProvisioningRequest(participant_code, scope, intent_id, spec,
-  operation_id=None)`: a manifest-owned open participant code, explicit
-  `TenantScope`/`PlatformScope`, opaque intent id, opaque product-neutral
-  desired-state `spec` (`Mapping[str, object]`, never interpreted by the
-  kernel), and the optional idempotency/resume key.
+- **Input** — `ProvisioningRequest(intent_id, spec, operation_id=None)`: an
+  opaque intent id, an opaque product-neutral desired-state `spec`
+  (`Mapping[str, object]`, never interpreted by the kernel), and the optional
+  idempotency/resume key.
 - **Result types (frozen)** — `PlanResult` (`intent_id`, `plan_hash`, `steps`),
   `ApplyResult` (`intent_id`, `operation_id`, `plan_hash`, `status`, `steps`),
   `ObserveResult` (`intent_id`, `operation_id`, `status`, `steps`, `plan_hash`).
@@ -740,15 +667,6 @@ ProvisioningProvider`); `dotmac_kernel.providers` re-exports the same names.
   `PlanResult.is_noop`; `ApplyResult.{is_terminal, is_partial, succeeded,
   outstanding_steps}`; `ObserveResult.{is_terminal, outstanding_steps}`;
   `ProvisioningStep.is_settled`.
-- **Asynchronous result** — `ProvisioningOutcomeEnvelope` is the typed push
-  counterpart to `observe`: it repeats participant, scope, intent and operation
-  identity, carries a timezone-aware occurrence time, and classifies the fact
-  as succeeded, retryable, reconciliation-required or terminal. A transport
-  adapter translates the wire message; it never writes a consumer's tables.
-- **Compensation result** — `CompensationResult` carries the same observed
-  snapshot plus a disposition of succeeded, refused, not-supported or
-  manual-required. Compensation is an explicit participant decision, never a
-  guessed inverse operation.
 - **Error hierarchy (stable API)** — `ProvisioningError` base with a
   machine-readable `retryable` class attribute (unknown errors fail closed as
   terminal). `ProvisioningRetryableError` (`retryable = True`) means the same
@@ -778,14 +696,10 @@ document's SemVer policy (its HTTP helper needs the `testing` extra:
 fakes work without it). The package re-exports everything from three submodules:
 
 - **`harness`** — the in-memory-SQLite + savepoint-isolation wiring:
-  - `create_test_engine(*, tables=...) -> Engine` — a fresh in-memory SQLite
-    engine with the selected `Base.metadata` tables created. The **assembly
-    must import its own feature models first** so `Base.metadata` is populated;
-    a large shared test process should pass its exact table slice so unrelated
-    independently installable packages do not consume SQLite's ten schema
-    attachments. Omitting `tables` retains the all-imported-tables behavior.
-    SQLite has no RLS, so this is for service-logic/unit tests; tenancy is
-    proven separately on Postgres.
+  - `create_test_engine() -> Engine` — a fresh in-memory SQLite engine with
+    `Base.metadata` created. The **assembly must import its own feature models
+    first** so `Base.metadata` is fully populated (SQLite has no RLS — this is
+    for service-logic/unit tests; tenancy is proven separately on Postgres).
   - `isolated_session(engine)` — a context-managed session wrapped in an outer
     transaction + restarting SAVEPOINT, so a test rolls back even if service
     code commits.
@@ -871,10 +785,7 @@ the same reason as `messaging`.
   operation reached through a second surface must land in the same ledger. An
   open string, not an enum (ADR-0008's registry principle).
 - **`fingerprint`** — `fingerprint_of(payload)` gives a stable SHA256 (sorted
-  keys, compact separators, `model_dump` honoured, `str` fallback). It is
-  DEFINED in `dotmac_kernel.fingerprints` and re-exported here; a caller that
-  wants only the digest should import it from there and not pull in this
-  module's ORM models. A key reused
+  keys, compact separators, `model_dump` honoured, `str` fallback). A key reused
   with a DIFFERENT fingerprint raises `IdempotencyConflict` (a `ConflictError` →
   409). `None` on either side means the caller asserts the key alone identifies
   the request, and the call replays.
@@ -1062,10 +973,6 @@ moving a caller from the first to the second is one identifier.
 
 ## Internal modules and names (do not import)
 
-- `dotmac_kernel._transactions` — private, engine-free savepoint mechanics for
-  kernel-owned services. Consumers use the supported
-  `dotmac_kernel.db.conflict_savepoint` spelling; the private location does not
-  create another session or transaction authority.
 - `dotmac_kernel.display` — consumed only within the kernel (by `templating` /
   `web_deps`). Display formatting reaches templates through the registered Jinja
   filters, not a consumer import.

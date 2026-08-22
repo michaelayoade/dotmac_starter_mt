@@ -20,10 +20,10 @@ The governing evidence is:
 | Gate | State |
 |---|---|
 | exact coordinates named | done: `dotmac-connector-whatsapp`, `dotmac_connector_whatsapp`, `meta_whatsapp`, `messaging.receive.v1` |
-| executable ingress SPI | done: SPI 1.3, released in `dotmac-integration 0.1.0a10`; a2 declares exact secret bindings and explicit deny-all egress |
+| executable ingress SPI | done: SPI 1.2, released in `dotmac-integration 0.1.0a5` |
 | implementation authorization | done: Michael directed the first Meta/WhatsApp connector and later directed completion without further decision prompts |
 | secret materialization owner | done: `dotmac-integration` owns secret-reference resolution; the connector receives material and never dereferences a store |
-| release eligibility | done: a1 was rebuilt, inspected, installed from the private index, conformance-checked and tagged by release run `32015394987` on exact main SHA `2b6b046`; a2 repeated that proof for SPI 1.3 in release run `32236093441` and is tagged from exact main SHA `fb9aea0` |
+| release eligibility | done: `0.1.0a1` was rebuilt, inspected, installed from the private index, conformance-checked and tagged by release run `32015394987` on exact main SHA `2b6b046` |
 | provider operation / adoption | not claimed: requires an exact Integrator pin and Sub shadow/cutover |
 
 ADR-0030's original §6 prohibition is retained as history. Its dated amendment
@@ -40,12 +40,6 @@ The connector owns only the provider protocol edge:
 - stable raw provider identities, or item-derived identities when none exist;
 - typed message, media, location, status, error and malformed observations;
 - the provider acknowledgement body and media type.
-
-The a2 manifest also owns the runtime declaration for that edge. It names
-`webhook_signing_secret`, optional `webhook_signing_previous_secret`, and
-`webhook_verify_token` as the only material the executable handler may read,
-and declares an empty external-host set. Empty means deny all: this ingress-only
-slice verifies and normalizes bytes but never calls the provider.
 
 It owns no database, sessions, installation state, retry, dead letter,
 checkpoint, HTTP status, provider schedule, product identity, subscriber,
@@ -97,7 +91,7 @@ domain state.
 Publication is only a supply-chain fact. The first cutover is complete only
 when all of the following hold:
 
-1. `dotmac_integrator` exact-pins `dotmac-integration 0.1.0a10` and the released
+1. `dotmac_integrator` exact-pins `dotmac-integration 0.1.0a5` and the released
    connector, discovers it at boot, and exposes the provider-neutral routes.
 2. The assembly records matched-secret-position evidence without learning a
    provider scheme and delivers location/media through Sub's typed port.

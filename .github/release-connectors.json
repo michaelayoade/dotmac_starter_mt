@@ -96,9 +96,9 @@
     "     rule for kernels: 'A floor naming an unpublished version cannot be",
     "     resolved by an installer, so it is not a floor at all.' Here it is",
     "     enforced rather than only written down: `resolve` refuses an",
-    "     `integration_floor` with no release tag. This bites on every SPI bump:",
-    "     the current connector may floor at registry-verified integration a10,",
-    "     while a merely declared future release remains inadmissible.",
+    "     `integration_floor` with no release tag. This bites TODAY —",
+    "     `dotmac-integration` declares 0.1.0a2 and has published 0.1.0a1, so a",
+    "     connector may currently floor at a1 or wait, and may not floor at a2.",
     "  5. NO SECRET SHAPE, no persistence, and no private retry/checkpoint",
     "     engine. A connector holds a reference to credential material (ADR-0024",
     "     section 7); it never holds the value, it declares no tables, and it does",
@@ -130,7 +130,7 @@
     "",
     "The Meta/WhatsApp ingress connector is listed with its implementation,",
     "prebuilt conformance corpus, installed-wheel SPI proof and published",
-    "dotmac-integration 0.1.0a10 floor. This is the rule ADR-0026 section 8 set",
+    "dotmac-integration 0.1.0a5 floor. This is the rule ADR-0026 section 8 set",
     "for release eligibility: the entry lands WITH the proof, never ahead of it.",
     "",
     "THIS OBJECT IS THE LOCK. `.github/workflows/release-connector.yml` exists",
@@ -162,223 +162,10 @@
     "package_dir_prefix": "packages/dotmac-connector-"
   },
   "connectors": {
-    "dotmac-connector-flutterwave": {
-      "$comment": [
-        "Flutterwave API v4 authentication, settlement ingress and paged",
-        "charge reconciliation. It implements",
-        "payments.settlement.observation.v1 through SPI 1.3, owns no rows",
-        "and imports no product. Sub is the first shadow/cutover target;",
-        "publication alone does not move financial authority.",
-        "",
-        "This release accepts only v4 authentication and exact declared v4",
-        "hosts. It has no v3 fallback and does not invent a provider fee."
-      ],
-      "package_dir": "packages/dotmac-connector-flutterwave",
-      "import_name": "dotmac_connector_flutterwave",
-      "plugin_attr": "PLUGIN",
-      "connector_key": "flutterwave",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a11",
-      "tag_prefix": "dotmac-connector-flutterwave-v",
-      "wheel_contents": {
-        "required": [
-          "dotmac_connector_flutterwave/__init__.py",
-          "dotmac_connector_flutterwave/plugin.py",
-          "dotmac_connector_flutterwave/polling.py",
-          "dotmac_connector_flutterwave/py.typed"
-        ],
-        "forbidden_prefixes": [
-          "app/",
-          "tests/",
-          "alembic/",
-          "scripts/"
-        ],
-        "allowed_requires": [
-          "dotmac-integration",
-          "httpx",
-          "python"
-        ]
-      }
-    },
-    "dotmac-connector-mono": {
-      "$comment": [
-        "Mono Financial Data v2 account-transaction polling and neutral",
-        "observation translation. It implements",
-        "banking.transaction.observation.v1 through SPI 1.3, owns no rows",
-        "and imports no product. ERP is the first shadow/cutover target;",
-        "publication alone does not move statement or reconciliation authority.",
-        "",
-        "The connector accepts only the declared api.withmono.com egress,",
-        "persists only an opaque Integrator-owned cursor and refuses pagination",
-        "that changes origin or account. Amounts remain exact provider integers",
-        "in their lowest denomination; ERP decides every accounting consequence."
-      ],
-      "package_dir": "packages/dotmac-connector-mono",
-      "import_name": "dotmac_connector_mono",
-      "plugin_attr": "PLUGIN",
-      "connector_key": "mono",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a11",
-      "tag_prefix": "dotmac-connector-mono-v",
-      "wheel_contents": {
-        "required": [
-          "dotmac_connector_mono/__init__.py",
-          "dotmac_connector_mono/plugin.py",
-          "dotmac_connector_mono/py.typed"
-        ],
-        "forbidden_prefixes": [
-          "app/",
-          "tests/",
-          "alembic/",
-          "scripts/"
-        ],
-        "allowed_requires": [
-          "dotmac-integration",
-          "httpx",
-          "python"
-        ]
-      }
-    },
-    "dotmac-connector-meta-social": {
-      "$comment": [
-        "Ingress-only Meta Social translation and authentication for Facebook",
-        "Messenger, Instagram DMs, Facebook comments and Instagram comments.",
-        "It implements messaging.receive.v1 through SPI 1.3, owns no rows and",
-        "imports no product. Sub is the first shadow/cutover target; publication",
-        "alone does not make it a contract consumer.",
-        "",
-        "This first release declares deny-all egress. Outbound Graph delivery",
-        "is a later messaging.send.v1 capability slice with its own contract."
-      ],
-      "package_dir": "packages/dotmac-connector-meta-social",
-      "import_name": "dotmac_connector_meta_social",
-      "plugin_attr": "PLUGIN",
-      "connector_key": "meta_social",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a10",
-      "tag_prefix": "dotmac-connector-meta-social-v",
-      "wheel_contents": {
-        "required": [
-          "dotmac_connector_meta_social/__init__.py",
-          "dotmac_connector_meta_social/plugin.py",
-          "dotmac_connector_meta_social/py.typed"
-        ],
-        "forbidden_prefixes": [
-          "app/",
-          "tests/",
-          "alembic/",
-          "scripts/"
-        ],
-        "allowed_requires": [
-          "dotmac-integration",
-          "python"
-        ]
-      }
-    },
-    "dotmac-connector-linkedin": {
-      "$comment": [
-        "LinkedIn ingress challenge, exact-byte authentication and neutral",
-        "organization-social plus Lead Sync translation. It implements two",
-        "observation capabilities through SPI 1.3, owns no rows, declares",
-        "deny-all egress and imports no product."
-      ],
-      "package_dir": "packages/dotmac-connector-linkedin",
-      "import_name": "dotmac_connector_linkedin",
-      "plugin_attr": "PLUGIN",
-      "connector_key": "linkedin",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a11",
-      "tag_prefix": "dotmac-connector-linkedin-v",
-      "wheel_contents": {
-        "required": [
-          "dotmac_connector_linkedin/__init__.py",
-          "dotmac_connector_linkedin/plugin.py",
-          "dotmac_connector_linkedin/py.typed"
-        ],
-        "forbidden_prefixes": ["app/", "tests/", "alembic/", "scripts/"],
-        "allowed_requires": ["dotmac-integration", "python"]
-      }
-    },
-    "dotmac-connector-paystack": {
-      "$comment": [
-        "Paystack authentication, settlement ingress and paged transaction",
-        "reconciliation. It implements payments.settlement.observation.v1",
-        "through SPI 1.3, owns no rows and imports no product. Sub is the",
-        "first shadow/cutover target; publication alone does not make it a",
-        "contract consumer or move financial authority.",
-        "",
-        "This release adds only read-side provider I/O. Payment intent and",
-        "refund commands remain separate money-moving capability slices."
-      ],
-      "package_dir": "packages/dotmac-connector-paystack",
-      "import_name": "dotmac_connector_paystack",
-      "plugin_attr": "PLUGIN",
-      "connector_key": "paystack",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a11",
-      "tag_prefix": "dotmac-connector-paystack-v",
-      "wheel_contents": {
-        "required": [
-          "dotmac_connector_paystack/__init__.py",
-          "dotmac_connector_paystack/plugin.py",
-          "dotmac_connector_paystack/polling.py",
-          "dotmac_connector_paystack/py.typed"
-        ],
-        "forbidden_prefixes": [
-          "app/",
-          "tests/",
-          "alembic/",
-          "scripts/"
-        ],
-        "allowed_requires": [
-          "dotmac-integration",
-          "httpx",
-          "python"
-        ]
-      }
-    },
-    "dotmac-connector-remita": {
-      "$comment": [
-        "Remita RRR status polling and neutral observation translation. It",
-        "implements payments.reference.status.observation.v1 through SPI 1.3,",
-        "owns no rows and imports no product. ERP is the first shadow/cutover",
-        "target; publication alone does not move RRR or accounting authority.",
-        "",
-        "The connector carries provider status tokens verbatim and declares",
-        "only the provider's fixed demo/live hosts. RRR issuance is not",
-        "pretended to be fire-and-forget delivery: it remains outside this",
-        "release until a durable command-response seam can preserve its reply."
-      ],
-      "package_dir": "packages/dotmac-connector-remita",
-      "import_name": "dotmac_connector_remita",
-      "plugin_attr": "PLUGIN",
-      "connector_key": "remita",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a11",
-      "tag_prefix": "dotmac-connector-remita-v",
-      "wheel_contents": {
-        "required": [
-          "dotmac_connector_remita/__init__.py",
-          "dotmac_connector_remita/plugin.py",
-          "dotmac_connector_remita/py.typed"
-        ],
-        "forbidden_prefixes": [
-          "app/",
-          "tests/",
-          "alembic/",
-          "scripts/"
-        ],
-        "allowed_requires": [
-          "dotmac-integration",
-          "httpx",
-          "python"
-        ]
-      }
-    },
     "dotmac-connector-whatsapp": {
       "$comment": [
         "Ingress-only Meta WhatsApp Cloud API translation and authentication.",
-        "It implements messaging.receive.v1 through SPI 1.3, owns no rows and",
+        "It implements messaging.receive.v1 through SPI 1.2, owns no rows and",
         "imports no product. Sub is the first shadow/cutover target; publication",
         "alone does not make it a contract consumer.",
         "",
@@ -390,8 +177,8 @@
       "import_name": "dotmac_connector_whatsapp",
       "plugin_attr": "PLUGIN",
       "connector_key": "meta_whatsapp",
-      "spi_range": ">=1.3,<2.0",
-      "integration_floor": "0.1.0a10",
+      "spi_range": ">=1.2,<2.0",
+      "integration_floor": "0.1.0a5",
       "tag_prefix": "dotmac-connector-whatsapp-v",
       "wheel_contents": {
         "required": [

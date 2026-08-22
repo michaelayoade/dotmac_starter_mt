@@ -284,32 +284,12 @@ PLATFORM_AUDIT_LOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
     ),
 )
 
-#: The narrow identity surface a tenant employment directory may reference.
-#: `dotmac-people` does not own a second person record: its employee row points
-#: at the kernel Party and requires the person subtype to exist.  This effect is
-#: separate from the tenant catalogue because an assembly may supply tenancy
-#: without adopting the kernel identity estate (ERP already does exactly that).
-PARTY_PERSON_CATALOG_V1: Final[PrerequisiteSpec] = PrerequisiteSpec(
-    name="party_person_catalog.v1",
-    summary=(
-        "public.parties with id, tenant_id, party_type, display_name and "
-        "is_active, a composite unique identity on (tenant_id, id), and "
-        "public.party_persons with its party_id primary key and cascading "
-        "foreign key to public.parties.id. party_type admits person, both "
-        "tables have forced row-level security tied to the tenant catalogue, "
-        "and app_user can SELECT both. Supplies identity references and the "
-        "person profile; it does not supply employment state, authentication "
-        "or RBAC."
-    ),
-)
-
 KERNEL_PREREQUISITES: Final[tuple[PrerequisiteSpec, ...]] = (
     TENANT_SCOPE_CATALOG_V1,
     MODULE_DATABASE_ROLES_V1,
     IDEMPOTENCY_LEDGER_V1,
     OUTBOX_RELAY_V1,
     PLATFORM_AUDIT_LOG_V1,
-    PARTY_PERSON_CATALOG_V1,
 )
 
 
@@ -597,7 +577,6 @@ __all__ = [
     "IDEMPOTENCY_LEDGER_V1",
     "MODULE_DATABASE_ROLES_V1",
     "OUTBOX_RELAY_V1",
-    "PARTY_PERSON_CATALOG_V1",
     "PLATFORM_AUDIT_LOG_V1",
     "TENANT_SCOPE_CATALOG_V1",
     "DuplicateBindingError",

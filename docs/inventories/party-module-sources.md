@@ -4,18 +4,6 @@
 **Starter:** `c8237bd` · **Sub:** `9f6f9f36b` (`dev`) · **ERP:** `d8e5bcc0` ·
 **CRM:** `c64b5aa0` (last commit 2026-07-10)
 
-> **Disposition update — 2026-08-19.** ADR-0019 superseded this audit's
-> recommended name: kernel RBAC is `party_role_grants`, and `party_roles` is
-> reserved for business capacities. Michael then directed an unreleased,
-> audit-complete implementation. `packages/dotmac-party` now owns the five
-> extension tables in `mod_party`; kernel `parties` and its subtype tables stay
-> the identity owner. The four vocabularies are open declaration registries,
-> every module table carries direct tenant identity and forced RLS, and the
-> recorded relationship deviation is resolved as PartyRole-to-PartyRole.
-> Sub's backfill/reader/writer cutovers remain binding: the package is neither
-> released nor adopted, and the historical findings below remain the source
-> evidence rather than a claim about current package state.
-
 This is an ADR-0006 § "product-first extraction" dossier for one candidate: a
 composable, reusable **party identity module** for the starter. It answers the
 qualification questions in
@@ -253,12 +241,6 @@ If this proceeds, the contract to name first — per the qualification procedure
 > **`dotmac-party`** owns the answer to "who is this, what are they to us, how
 > do we reach them, and how do they relate to each other" for a tenant. It owns
 > no commercial, billing, network, or authorization decision.
-
-The implemented candidate narrows that historical proposal at the identity
-seam: kernel `Party` remains the fleet identity root. `dotmac-party` consumes
-`party_person_catalog.v1` and owns the five business-context extensions only.
-This avoids moving credentials, sessions, audit actors and every existing
-Party FK merely to make the optional context installable.
 
 **In** — the five facts Sub separated, each with one writer:
 

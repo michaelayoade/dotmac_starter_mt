@@ -1,1 +1,0 @@
-"""Managed-records Alembic revisions."""

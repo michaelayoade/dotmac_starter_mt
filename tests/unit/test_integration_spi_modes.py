@@ -868,9 +868,9 @@ def test_the_spi_range_check_is_live_for_the_fixture() -> None:
     nothing being checked.
     """
     assert SpiRange.parse(">=1.0,<2.0").admits(CURRENT_SPI_VERSION)
-    assert CURRENT_SPI_VERSION == SpiVersion(1, 3)
+    assert CURRENT_SPI_VERSION == SpiVersion(1, 2)
     with pytest.raises(SpiIncompatibleError, match="running module implements"):
-        discover(points=[_point(_Spi10DeliveryConnector(spi_range=">=1.0,<1.3"))])
+        discover(points=[_point(_Spi10DeliveryConnector(spi_range=">=1.0,<1.2"))])
 
 
 def test_verification_result_refuses_contradictory_or_unsafe_positions() -> None:

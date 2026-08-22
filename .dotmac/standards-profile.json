@@ -1,5 +1,5 @@
 {
-  "schema_version": 9,
+  "schema_version": 5,
   "profile_id": "dotmac-starter-engineering-standards",
   "repository": {
     "canonical_url": "https://github.com/michaelayoade/dotmac_starter_mt",
@@ -8,7 +8,7 @@
   "governance_model": {
     "kind": "pinned",
     "canonical_url": "https://github.com/michaelayoade/dotmac_governance",
-    "revision": "e0f636c3f5adea77da136f75f49c2349fbf9eeaa",
+    "revision": "fbd47b8965002943bd5799992f4b29b04e361582",
     "source": "docs/adr/0006-cross-repository-engineering-conformance.md",
     "status": "accepted"
   },
@@ -203,16 +203,5 @@
         "expected_import_count": 1
       }
     ]
-  },
-  "external_connector_surface": {
-    "baselines": {
-      "outbound_transport": 0,
-      "webhook_surface": 0,
-      "provider_credential": 0,
-      "connector_task": 0,
-      "sync_checkpoint": 1,
-      "delivery_retry": 0
-    },
-    "conserved_exclusions": []
   }
 }

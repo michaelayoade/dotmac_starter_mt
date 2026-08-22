@@ -44,7 +44,6 @@ IMPORTS_VERSIONS = (
 )
 _RUNS = "mod_imports.import_runs"
 _ROWS = "mod_imports.import_run_rows"
-_PARTITIONS = "mod_imports.import_partitions"
 _DIGEST = "a" * 64
 _ROW_FINGERPRINT = "b" * 64
 
@@ -147,23 +146,6 @@ def _insert_run(conn, tenant_id: uuid.UUID) -> uuid.UUID:  # type: ignore[no-unt
             "fingerprint": _ROW_FINGERPRINT,
         },
     )
-    conn.execute(
-        text(
-            "INSERT INTO mod_imports.import_partitions ("
-            "id, tenant_id, run_id, ordinal, start_row, row_count, "
-            "partition_file_id, partition_checksum_sha256, byte_size, status"
-            ") VALUES ("
-            ":id, :tenant, :run, 0, 0, 1, :file, :digest, 64, 'completed'"
-            ")"
-        ),
-        {
-            "id": uuid.uuid4(),
-            "tenant": tenant_id,
-            "run": run_id,
-            "file": uuid.uuid4(),
-            "digest": _DIGEST,
-        },
-    )
     return run_id
 
 
@@ -188,11 +170,7 @@ def _seed_two_tenants(admin_url: str) -> tuple[uuid.UUID, uuid.UUID]:
 
 @pytest.mark.parametrize(
     ("schema_table", "table"),
-    (
-        (_RUNS, "import_runs"),
-        (_ROWS, "import_run_rows"),
-        (_PARTITIONS, "import_partitions"),
-    ),
+    ((_RUNS, "import_runs"), (_ROWS, "import_run_rows")),
 )
 def test_rls_is_enabled_forced_and_has_the_tenant_policy(
     migrated_scratch: tuple[str, str], schema_table: str, table: str
@@ -263,14 +241,8 @@ def test_online_role_sees_only_the_bound_tenants_runs(
                     text("SELECT tenant_id FROM mod_imports.import_run_rows")
                 ).scalars()
             )
-            partitions = list(
-                conn.execute(
-                    text("SELECT tenant_id FROM mod_imports.import_partitions")
-                ).scalars()
-            )
             assert runs == [tenant_a]
             assert rows == [tenant_a]
-            assert partitions == [tenant_a]
             assert tenant_b not in runs
     finally:
         engine.dispose()
@@ -310,83 +282,6 @@ def test_online_role_cannot_create_a_run_for_another_tenant(
             with pytest.raises(DBAPIError):
                 _insert_run(conn, tenant_b)
     finally:
-        engine.dispose()
-
-
-def test_two_workers_claim_different_partitions_without_waiting(
-    migrated_scratch: tuple[str, str],
-) -> None:
-    """The second worker skips the first worker's uncommitted row lock."""
-    from dotmac_imports.partitioning import claim_partition
-
-    admin_url, app_user_url = migrated_scratch
-    tenant_id = uuid.uuid4()
-    admin = create_engine(admin_url)
-    try:
-        with admin.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO public.tenants (id, slug, name) "
-                    "VALUES (:id, 'claim-canary', 'Claim Canary')"
-                ),
-                {"id": tenant_id},
-            )
-            run_id = _insert_run(conn, tenant_id)
-            conn.execute(
-                text(
-                    "UPDATE mod_imports.import_partitions SET status = 'pending' "
-                    "WHERE tenant_id = :tenant AND run_id = :run"
-                ),
-                {"tenant": tenant_id, "run": run_id},
-            )
-            conn.execute(
-                text(
-                    "INSERT INTO mod_imports.import_partitions ("
-                    "id, tenant_id, run_id, ordinal, start_row, row_count, "
-                    "partition_file_id, partition_checksum_sha256, byte_size, status"
-                    ") VALUES ("
-                    ":id, :tenant, :run, 1, 1, 1, :file, :digest, 64, 'pending'"
-                    ")"
-                ),
-                {
-                    "id": uuid.uuid4(),
-                    "tenant": tenant_id,
-                    "run": run_id,
-                    "file": uuid.uuid4(),
-                    "digest": _DIGEST,
-                },
-            )
-    finally:
-        admin.dispose()
-
-    engine = create_engine(app_user_url)
-    first_connection = engine.connect()
-    second_connection = engine.connect()
-    first_transaction = first_connection.begin()
-    second_transaction = second_connection.begin()
-    try:
-        first_connection.execute(
-            text("SELECT set_config('app.current_tenant', :tenant, true)"),
-            {"tenant": str(tenant_id)},
-        )
-        second_connection.execute(
-            text("SELECT set_config('app.current_tenant', :tenant, true)"),
-            {"tenant": str(tenant_id)},
-        )
-        with Session(first_connection) as first_session:
-            first = claim_partition(first_session, tenant_id=tenant_id, run_id=run_id)
-            with Session(second_connection) as second_session:
-                second = claim_partition(
-                    second_session, tenant_id=tenant_id, run_id=run_id
-                )
-                assert first is not None and second is not None
-                assert {first.ordinal, second.ordinal} == {0, 1}
-                assert first.partition_id != second.partition_id
-    finally:
-        second_transaction.rollback()
-        first_transaction.rollback()
-        second_connection.close()
-        first_connection.close()
         engine.dispose()
 
 

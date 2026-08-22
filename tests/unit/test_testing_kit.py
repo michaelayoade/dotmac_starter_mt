@@ -8,13 +8,9 @@ provisioning-provider contract driven against `FakeProvisioningProvider`.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
 
 import pytest
-import sqlalchemy as sa
 from dotmac_kernel import ProductAssemblySpec, create_app
-from dotmac_kernel.cache import TenantScope
-from dotmac_kernel.models import Base
 from dotmac_kernel.providers.provisioning import (
     ProvisioningProvider,
     ProvisioningRequest,
@@ -33,51 +29,12 @@ from dotmac_kernel.testing import (
 )
 
 
-def _public_tables():
-    """Kernel/host tables needed by the generic harness examples."""
-    return tuple(table for table in Base.metadata.tables.values() if not table.schema)
-
-
 # ── harness ──────────────────────────────────────────────────────────────────
-def test_engine_scales_past_sqlites_ten_attached_namespace_limit() -> None:
-    """The fast lane remains usable as the module registry grows past ten.
-
-    This is an end-to-end sensitivity canary: the former attach-every-schema
-    harness raises ``sqlite3.OperationalError: too many attached databases``
-    with this exact metadata shape.
-    """
-    existing = {table.schema for table in Base.metadata.tables.values() if table.schema}
-    probe_tables = [
-        sa.Table(
-            f"namespace_capacity_probe_{index}",
-            Base.metadata,
-            sa.Column("id", sa.Integer, primary_key=True),
-            schema=f"mod_capacityprobe{index}",
-        )
-        for index in range(max(0, 11 - len(existing)))
-    ]
-    try:
-        schemas = {
-            table.schema for table in Base.metadata.tables.values() if table.schema
-        }
-        assert len(schemas) > 10
-        engine = create_test_engine()
-        try:
-            with engine.connect() as connection:
-                for table in probe_tables:
-                    assert connection.execute(sa.select(table)).all() == []
-        finally:
-            engine.dispose()
-    finally:
-        for table in reversed(probe_tables):
-            Base.metadata.remove(table)
-
-
 def test_assembly_test_client_boots_and_serves_health() -> None:
     """The kit boots a real create_app assembly and overrides its DB deps onto
     an isolated session — the same path a consumer's integration-ish unit test
     takes."""
-    engine = create_test_engine(tables=_public_tables())
+    engine = create_test_engine()
     try:
         with isolated_session(engine) as session:
             app = create_app(ProductAssemblySpec(name="kit-test", modules=()))
@@ -94,7 +51,7 @@ def test_assembly_test_client_boots_and_serves_health() -> None:
 def test_isolated_session_rolls_back_between_uses() -> None:
     from dotmac_kernel.models import Tenant
 
-    engine = create_test_engine(tables=_public_tables())
+    engine = create_test_engine()
     try:
         with isolated_session(engine) as session:
             session.add(Tenant(slug="acme", name="Acme"))
@@ -107,21 +64,6 @@ def test_isolated_session_rolls_back_between_uses() -> None:
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────
-def test_harness_can_select_the_exact_tables_owned_by_its_test_assembly() -> None:
-    """Unrelated package imports must not exhaust SQLite's attachment limit."""
-
-    engine = create_test_engine(tables=_public_tables())
-    try:
-        with engine.connect() as connection:
-            attached = {
-                row[1]
-                for row in connection.exec_driver_sql("PRAGMA database_list").all()
-            }
-        assert not {name for name in attached if name.startswith("mod_")}
-    finally:
-        engine.dispose()
-
-
 def test_fake_clock_is_deterministic_and_advanceable() -> None:
     clock = FakeClock()
     start = clock.now()
@@ -164,55 +106,28 @@ def test_fake_provisioning_provider_satisfies_the_contract() -> None:
 def test_fake_provisioning_records_calls_and_conforms_to_protocol() -> None:
     provider = FakeProvisioningProvider()
     assert isinstance(provider, ProvisioningProvider)
-    req = ProvisioningRequest(
-        participant_code="fake",
-        scope=TenantScope(UUID(int=1)),
-        intent_id="i-9",
-        spec={"n": 1},
-    )
+    req = ProvisioningRequest(intent_id="i-9", spec={"n": 1})
     provider.plan(req)
     op = provider.apply(req).operation_id
     provider.observe(op)
     provider.cancel(op)
-    provider.compensate(op, "test reversal")
-    assert [c[0] for c in provider.calls] == [
-        "plan",
-        "apply",
-        "observe",
-        "cancel",
-        "compensate",
-        "observe",
-    ]
+    assert [c[0] for c in provider.calls] == ["plan", "apply", "observe", "cancel"]
 
 
 def test_fake_provisioning_partial_then_resume() -> None:
     provider = FakeProvisioningProvider(partial_first_apply=True)
-    req = ProvisioningRequest(
-        participant_code="fake",
-        scope=TenantScope(UUID(int=1)),
-        intent_id="i-1",
-        spec={"n": 1},
-    )
+    req = ProvisioningRequest(intent_id="i-1", spec={"n": 1})
     first = provider.apply(req)
     assert first.status is ProvisioningStatus.PARTIAL
     resume = ProvisioningRequest(
-        participant_code=req.participant_code,
-        scope=req.scope,
-        intent_id="i-1",
-        spec={"n": 1},
-        operation_id=first.operation_id,
+        intent_id="i-1", spec={"n": 1}, operation_id=first.operation_id
     )
     assert provider.apply(resume).status is ProvisioningStatus.SUCCEEDED
 
 
 def test_fake_provisioning_cancel_is_terminal_and_idempotent() -> None:
     provider = FakeProvisioningProvider()
-    req = ProvisioningRequest(
-        participant_code="fake",
-        scope=TenantScope(UUID(int=1)),
-        intent_id="i-1",
-        spec={"n": 1},
-    )
+    req = ProvisioningRequest(intent_id="i-1", spec={"n": 1})
     op = provider.apply(req).operation_id
     assert provider.cancel(op).status is ProvisioningStatus.CANCELLED
     # A re-apply after cancel is a no-op that stays CANCELLED (terminal).

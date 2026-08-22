@@ -49,10 +49,6 @@ from dotmac_kernel.middleware.rate_limit import RateLimitMiddleware
 from dotmac_kernel.middleware.security_headers import SecurityHeadersMiddleware
 from dotmac_kernel.middleware.tenant import TenantResolverMiddleware
 from dotmac_kernel.modules import AnyManifest, ModuleRegistry
-from dotmac_kernel.outbox_event_types import (
-    OutboxEventTypeRegistry,
-    install_outbox_event_types,
-)
 from dotmac_kernel.permissions import (
     PERMISSION_CODE_ATTR,
     PermissionCatalogue,
@@ -148,24 +144,6 @@ def _tenancy_errors() -> list[str]:
     ]
 
 
-def _defect_summary(exc: BaseException) -> str:
-    """Describe a startup defect without rendering any stored value.
-
-    A SQLAlchemy `StatementError` stringifies as the message PLUS the failing
-    SQL and its bound parameters. During `seed_settings_from_env` those
-    parameters can be a secret setting's value, so the class names are all this
-    is allowed to say — ADR-0009 logs names, never values. Everything else
-    (`KeyringError` and friends) already names variables and key ids rather
-    than key material, so its message is safe to carry.
-    """
-    from sqlalchemy.exc import StatementError
-
-    if isinstance(exc, StatementError):
-        origin = type(exc.orig).__name__ if exc.orig is not None else "unknown"
-        return f"{type(exc).__name__} ({origin})"
-    return f"{type(exc).__name__}: {exc}"
-
-
 def _required_setting_errors() -> list[str]:
     """Required-setting failures, or an empty list when the store is unreachable.
 
@@ -174,29 +152,12 @@ def _required_setting_errors() -> list[str]:
     importable without a database (the same reason those APIs are submodule-only
     in the public surface).
 
-    Two failure modes, deliberately not conflated (ADR-0011, amended
-    2026-08-20):
-
-    **The store is unreachable** — connection refused, bad host, pool timeout.
-    That yields NO errors rather than a false one: reading an unreachable
-    database says nothing about whether a setting is configured, and reporting
-    "not configured" for a connection failure would be fatal in production for
-    the wrong reason. `validate_settings` already covers a missing
-    `DATABASE_URL` itself, and `/health` stays DB-free by design, so liveness
-    during a real outage is not this function's problem.
-
-    **Anything else is a configuration defect** — a keyring/crypto failure, a
-    missing column, a permission error, an integrity violation, a defect in the
-    seed itself. Each of those used to be swallowed by one `except Exception`
-    and logged as a warning, so a deployment whose encryption keys were
-    unreadable started in production with required-setting validation silently
-    skipped. A defect is now reported as an error, which the lifespan turns
-    into a refusal to start in production and a warning elsewhere — the same
-    treatment every other startup check gets.
+    A store this cannot reach yields NO errors rather than a false one. Reading
+    an unreachable database says nothing about whether a setting is configured,
+    and reporting "not configured" for a connection failure would be fatal in
+    production for the wrong reason — `validate_settings` already covers a
+    missing `DATABASE_URL` itself, and `/health` stays DB-free by design.
     """
-    from sqlalchemy.exc import InterfaceError, OperationalError
-    from sqlalchemy.exc import TimeoutError as SQLTimeoutError
-
     from dotmac_kernel.db import platform_session
     from dotmac_kernel.settings_resolver import (
         seed_settings_from_env,
@@ -212,19 +173,9 @@ def _required_setting_errors() -> list[str]:
             seed_settings_from_env(db)
             db.commit()
             return validate_required_settings(db)
-    except (OperationalError, InterfaceError, SQLTimeoutError) as exc:
-        # Unreachable store only: connection-level failures and pool timeouts.
-        # A missing table, a denied privilege or a constraint violation are
-        # ProgrammingError/IntegrityError and fall through to the branch below.
-        logger.warning("Required-setting validation skipped: %s", _defect_summary(exc))
+    except Exception as exc:  # unreachable store: see docstring
+        logger.warning("Required-setting validation skipped: %s", exc)
         return []
-    except Exception as exc:
-        logger.error("Required-setting validation failed: %s", _defect_summary(exc))
-        return [
-            "required-setting validation could not run: "
-            f"{_defect_summary(exc)}. This is a configuration defect, not an "
-            "unreachable database — fix it rather than restarting."
-        ]
 
 
 def _effective_route_contexts(app: FastAPI):
@@ -427,7 +378,6 @@ def create_app(spec: ProductAssemblySpec) -> FastAPI:
     permission_catalogue = PermissionCatalogue.from_manifests(manifests)
     install_permissions(permission_catalogue)
     install_audit_actions(AuditActionRegistry.from_manifests(manifests))
-    install_outbox_event_types(OutboxEventTypeRegistry.from_manifests(manifests))
     # Capabilities join them (step 4). Same installed-not-enabled rule, and the
     # same reason it matters more here: a tenant's entitlement GRANT references a
     # capability code and outlives any deployment's enabled set, so a disabled

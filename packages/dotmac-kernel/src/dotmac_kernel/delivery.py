@@ -60,12 +60,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotmac_kernel import consent
-from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.consent_models import (
     REASON_BOUNCE,
     REASON_COMPLAINT,
     SCOPE_ALL,
 )
+from dotmac_kernel.db import conflict_savepoint
 from dotmac_kernel.delivery_models import (
     DELIVERY_BOUNCED,
     DELIVERY_STATUSES,

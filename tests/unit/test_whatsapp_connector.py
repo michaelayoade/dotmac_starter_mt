@@ -10,26 +10,24 @@ from pathlib import Path
 import pytest
 from dotmac_connector_whatsapp import MANIFEST, PLUGIN, __version__
 from dotmac_integration.conformance import assert_plugin_conforms
-from dotmac_integration.discovery import ConnectorRegistry
-from dotmac_integration.runtime_policy import derive_runtime_policy
 from dotmac_integration.spi import (
-    EgressDeclaration,
     IngressRequest,
     InvalidManifestError,
-    SecretBindingDeclaration,
     VerificationResult,
 )
-from jsonschema import Draft202012Validator
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "meta_whatsapp"
 CORPUS = json.loads((FIXTURE_ROOT / "manifest.json").read_text(encoding="utf-8"))
 SIGNATURES = json.loads((FIXTURE_ROOT / "signatures.json").read_text(encoding="utf-8"))
 KEYS = CORPUS["signing_keys"]
-CONFIG: dict[str, object] = {}
+CONFIG: dict[str, object] = {
+    "signing_slots": ["current", "previous"],
+    "handshake_slot": "handshake",
+}
 MATERIAL = {
-    "webhook_signing_secret": KEYS["primary"],
-    "webhook_signing_previous_secret": KEYS["previous"],
-    "webhook_verify_token": CORPUS["handshake"]["query"]["hub.verify_token"],
+    "current": KEYS["primary"],
+    "previous": KEYS["previous"],
+    "handshake": CORPUS["handshake"]["query"]["hub.verify_token"],
 }
 
 
@@ -51,105 +49,10 @@ def _delivery_request(relative: str, key: str = "primary") -> IngressRequest:
 
 
 def test_the_distribution_and_plugin_satisfy_the_released_spi() -> None:
-    assert __version__ == "0.1.0a2"
+    assert __version__ == "0.1.0a1"
     assert MANIFEST.version == __version__
-    assert str(MANIFEST.spi_range) == ">=1.3,<2.0"
+    assert str(MANIFEST.spi_range) == ">=1.2,<2.0"
     assert_plugin_conforms(PLUGIN)
-
-
-def test_the_current_manifest_is_the_complete_runtime_policy() -> None:
-    assert MANIFEST.secret_bindings == (
-        SecretBindingDeclaration(
-            name="webhook_signing_secret",
-            description="Primary exact-byte webhook signature key.",
-        ),
-        SecretBindingDeclaration(
-            name="webhook_signing_previous_secret",
-            required=False,
-            description="Previous webhook signature key during a bounded rotation.",
-        ),
-        SecretBindingDeclaration(
-            name="webhook_verify_token",
-            description="Subscription challenge comparison token.",
-        ),
-    )
-    assert MANIFEST.egress == EgressDeclaration()
-    assert MANIFEST.capabilities[0].config_schema == {
-        "type": "object",
-        "additionalProperties": False,
-    }
-    schema = Draft202012Validator(MANIFEST.capabilities[0].config_schema)
-    assert not tuple(schema.iter_errors(CONFIG))
-    assert tuple(
-        schema.iter_errors(
-            {
-                "signing_slots": ["operator_alias"],
-                "handshake_slot": "another_alias",
-            }
-        )
-    )
-
-    policy = derive_runtime_policy(ConnectorRegistry((PLUGIN,)))
-
-    assert policy.egress_hosts == ()
-    assert policy.secret_bindings == (
-        ("meta_whatsapp", "webhook_signing_previous_secret", False),
-        ("meta_whatsapp", "webhook_signing_secret", True),
-        ("meta_whatsapp", "webhook_verify_token", True),
-    )
-
-
-def test_the_published_a1_contract_remains_an_exact_historical_manifest() -> None:
-    assert len(PLUGIN.historical_manifests) == 1
-    historical = PLUGIN.historical_manifests[0]
-    assert historical.connector_key == "meta_whatsapp"
-    assert historical.version == "0.1.0a1"
-    assert str(historical.spi_range) == ">=1.2,<2.0"
-    assert historical.declares_runtime_boundaries is False
-    assert historical.capabilities[0].config_schema == {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["signing_slots", "handshake_slot"],
-        "properties": {
-            "signing_slots": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": True,
-                "items": {"type": "string", "minLength": 1, "maxLength": 80},
-            },
-            "handshake_slot": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 80,
-            },
-        },
-    }
-    assert (
-        historical.digest
-        == "235fdb90fdc4ea0cfd6327c3c9a68c6c1df8387535620fea23d6a632b9c36978"
-    )
-
-    legacy_config: dict[str, object] = {
-        "signing_slots": ["current", "previous"],
-        "handshake_slot": "handshake",
-    }
-    legacy_material = {
-        "current": KEYS["primary"],
-        "previous": KEYS["previous"],
-        "handshake": CORPUS["handshake"]["query"]["hub.verify_token"],
-    }
-    assert (
-        PLUGIN.validate_connection(config=legacy_config, secrets=legacy_material) == ()
-    )
-    assert (
-        _handler()
-        .verify(
-            _delivery_request("bodies/01_text_message.json"),
-            config=legacy_config,
-            secrets=legacy_material,
-        )
-        .accepted
-    )
 
 
 def test_connection_validation_requires_resolved_material_without_naming_it() -> None:
@@ -160,13 +63,6 @@ def test_connection_validation_requires_resolved_material_without_naming_it() ->
     assert all("handshake" not in item.detail for item in refused)
 
     assert PLUGIN.validate_connection(config=CONFIG, secrets=MATERIAL) == ()
-
-    without_previous = {
-        name: value
-        for name, value in MATERIAL.items()
-        if name != "webhook_signing_previous_secret"
-    }
-    assert PLUGIN.validate_connection(config=CONFIG, secrets=without_previous) == ()
 
 
 def test_the_handshake_echoes_only_after_constant_time_token_comparison(

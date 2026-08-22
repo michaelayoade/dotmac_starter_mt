@@ -15,22 +15,15 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 from collections.abc import Mapping
-from datetime import UTC, datetime
-from uuid import UUID
 
 import pytest
-from dotmac_kernel.cache import TenantScope
 from dotmac_kernel.providers.provisioning import (
     ApplyResult,
-    CompensationDisposition,
-    CompensationResult,
     ObserveResult,
     PlanResult,
     ProvisioningApplyError,
     ProvisioningCancelled,
     ProvisioningError,
-    ProvisioningOutcomeClass,
-    ProvisioningOutcomeEnvelope,
     ProvisioningPlanError,
     ProvisioningProvider,
     ProvisioningRequest,
@@ -152,13 +145,6 @@ class _FakeProvisioner:
             )
         return result
 
-    def compensate(self, operation_id: str, reason: str) -> CompensationResult:
-        return CompensationResult(
-            operation_id=operation_id,
-            disposition=CompensationDisposition.SUCCEEDED,
-            snapshot=self.observe(operation_id),
-        )
-
 
 # ── Protocol / type conformance ─────────────────────────────────────────────
 
@@ -173,7 +159,7 @@ def test_missing_method_fails_the_protocol_check() -> None:
         def plan(self, request: ProvisioningRequest) -> PlanResult:  # pragma: no cover
             ...
 
-        # no apply/observe/cancel/compensate
+        # no apply/observe/cancel
 
     assert not isinstance(_Incomplete(), ProvisioningProvider)
 
@@ -182,14 +168,7 @@ def test_static_type_binding_accepts_the_fake() -> None:
     # A `ProvisioningProvider`-typed slot binds the fake — the structural
     # (mypy-checked) conformance the seam exists for.
     provider: ProvisioningProvider = _FakeProvisioner()
-    result = provider.plan(
-        ProvisioningRequest(
-            participant_code="fake",
-            scope=TenantScope(UUID(int=1)),
-            intent_id="i",
-            spec={"steps": ["a"]},
-        )
-    )
+    result = provider.plan(ProvisioningRequest(intent_id="i", spec={"steps": ["a"]}))
     assert isinstance(result, PlanResult)
 
 
@@ -216,52 +195,6 @@ def test_result_types_are_frozen(instance: object) -> None:
     field_name = dataclasses.fields(instance)[0].name
     with pytest.raises(dataclasses.FrozenInstanceError):
         setattr(instance, field_name, "mutated")
-
-
-def test_request_refuses_blank_participant_and_intent_identity() -> None:
-    scope = TenantScope(UUID(int=1))
-    with pytest.raises(ValueError, match="participant_code"):
-        ProvisioningRequest(participant_code=" ", scope=scope, intent_id="intent")
-    with pytest.raises(ValueError, match="intent_id"):
-        ProvisioningRequest(participant_code="participant", scope=scope, intent_id=" ")
-
-
-def test_async_outcome_requires_complete_identity_and_aware_time() -> None:
-    scope = TenantScope(UUID(int=1))
-    with pytest.raises(ValueError, match="occurred_at"):
-        ProvisioningOutcomeEnvelope(
-            outcome_id="outcome-1",
-            participant_code="participant",
-            scope=scope,
-            intent_id="intent-1",
-            operation_id="operation-1",
-            classification=ProvisioningOutcomeClass.SUCCEEDED,
-            occurred_at=datetime(2026, 8, 22),
-        )
-
-    envelope = ProvisioningOutcomeEnvelope(
-        outcome_id="outcome-1",
-        participant_code="participant",
-        scope=scope,
-        intent_id="intent-1",
-        operation_id="operation-1",
-        classification=ProvisioningOutcomeClass.SUCCEEDED,
-        occurred_at=datetime(2026, 8, 22, tzinfo=UTC),
-    )
-    assert envelope.scope == scope
-
-
-def test_compensation_result_refuses_a_mismatched_snapshot() -> None:
-    with pytest.raises(ValueError, match="operation_id must match"):
-        CompensationResult(
-            operation_id="operation-1",
-            disposition=CompensationDisposition.SUCCEEDED,
-            snapshot=ObserveResult(
-                intent_id="intent-1",
-                operation_id="operation-2",
-                status=ProvisioningStatus.SUCCEEDED,
-            ),
-        )
 
 
 def test_result_types_carry_idempotency_and_resumption_fields() -> None:
@@ -345,11 +278,7 @@ def test_isinstance_and_retryable_attr_agree() -> None:
 def test_apply_converges_and_is_idempotent_when_terminal() -> None:
     provider = _FakeProvisioner()
     request = ProvisioningRequest(
-        participant_code="fake",
-        scope=TenantScope(UUID(int=1)),
-        intent_id="tenant-x",
-        spec={"steps": ["dns", "tls"]},
-        operation_id="op-1",
+        intent_id="tenant-x", spec={"steps": ["dns", "tls"]}, operation_id="op-1"
     )
     first = provider.apply(request)
     assert first.succeeded and first.is_terminal
@@ -360,12 +289,7 @@ def test_apply_converges_and_is_idempotent_when_terminal() -> None:
 
 def test_derived_operation_id_is_stable() -> None:
     provider = _FakeProvisioner()
-    request = ProvisioningRequest(
-        participant_code="fake",
-        scope=TenantScope(UUID(int=1)),
-        intent_id="tenant-y",
-        spec={"steps": ["a"]},
-    )
+    request = ProvisioningRequest(intent_id="tenant-y", spec={"steps": ["a"]})
     first = provider.apply(request)
     # No operation_id supplied → derived stably; re-apply keys to same op (no-op).
     second = provider.apply(request)
@@ -376,8 +300,6 @@ def test_derived_operation_id_is_stable() -> None:
 def test_partial_apply_then_resume_reconciles_outstanding() -> None:
     provider = _FakeProvisioner()
     request = ProvisioningRequest(
-        participant_code="fake",
-        scope=TenantScope(UUID(int=1)),
         intent_id="tenant-z",
         spec={"steps": ["a", "b", "c"], "converge": 1},
         operation_id="op-partial",
@@ -392,8 +314,6 @@ def test_partial_apply_then_resume_reconciles_outstanding() -> None:
     # Resume: same operation_id, now allowed to converge everything.
     resumed = provider.apply(
         ProvisioningRequest(
-            participant_code=request.participant_code,
-            scope=request.scope,
             intent_id="tenant-z",
             spec={"steps": ["a", "b", "c"], "converge": "all"},
             operation_id="op-partial",
@@ -407,8 +327,6 @@ def test_partial_apply_then_resume_reconciles_outstanding() -> None:
 def test_cooperative_cancel_settles_a_partial_op_to_cancelled() -> None:
     provider = _FakeProvisioner()
     request = ProvisioningRequest(
-        participant_code="fake",
-        scope=TenantScope(UUID(int=1)),
         intent_id="tenant-c",
         spec={"steps": ["a", "b"], "converge": 1},
         operation_id="op-cancel",
@@ -430,8 +348,6 @@ def test_apply_of_a_precancelled_operation_raises_cancelled() -> None:
     provider = _FakeProvisioner()
     provider.cancel("op-precancel")
     request = ProvisioningRequest(
-        participant_code="fake",
-        scope=TenantScope(UUID(int=1)),
         intent_id="tenant-c",
         spec={"steps": ["a"]},
         operation_id="op-precancel",
@@ -443,14 +359,7 @@ def test_apply_of_a_precancelled_operation_raises_cancelled() -> None:
 def test_plan_raises_terminal_error_on_bad_spec() -> None:
     provider = _FakeProvisioner()
     with pytest.raises(ProvisioningPlanError) as excinfo:
-        provider.plan(
-            ProvisioningRequest(
-                participant_code="fake",
-                scope=TenantScope(UUID(int=1)),
-                intent_id="i",
-                spec={"bad": True},
-            )
-        )
+        provider.plan(ProvisioningRequest(intent_id="i", spec={"bad": True}))
     assert excinfo.value.retryable is False
 
 

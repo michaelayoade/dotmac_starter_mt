@@ -1,8 +1,8 @@
 {
   "duplicate_tables": {
-    "duplicated_tables": 130,
-    "duplicates_with_a_direct_import_edge": 101,
-    "duplicates_without_any_direct_import_edge": 29,
+    "duplicated_tables": 125,
+    "duplicates_with_a_direct_import_edge": 97,
+    "duplicates_without_any_direct_import_edge": 28,
     "triage_queue": [
       "availability_blocks",
       "buildout_milestones",
@@ -29,7 +29,6 @@
       "skills",
       "sla_targets",
       "technician_skills",
-      "usage_records",
       "vendor_users",
       "wireless_masts",
       "work_links"
@@ -38,7 +37,6 @@
   "fact_text_authority": {
     "dotmac_crm": null,
     "dotmac_erp": "app/services/sot_relationships.py",
-    "dotmac_mkt": null,
     "dotmac_sub": "app/services/sot_registry/domains"
   },
   "products": {
@@ -631,66 +629,14 @@
         "workflow_task"
       ]
     },
-    "dotmac_mkt": {
-      "declared_facts": 0,
-      "declares_ownership": false,
-      "domains": 0,
-      "services": 0,
-      "tables": 39,
-      "tables_duplicated_elsewhere": 18,
-      "tables_exclusive_to_this_product": 21,
-      "tables_with_a_direct_import_edge": 0,
-      "tables_without_a_direct_import_edge": 39,
-      "tables_without_an_edge": [
-        "ad_campaigns",
-        "ad_groups",
-        "ad_metrics",
-        "ads",
-        "api_keys",
-        "assets",
-        "audit_events",
-        "campaigns",
-        "channel_metrics",
-        "channels",
-        "coupons",
-        "customers",
-        "discounts",
-        "domain_settings",
-        "entitlements",
-        "file_uploads",
-        "invoice_items",
-        "invoices",
-        "mfa_methods",
-        "notifications",
-        "payment_intents",
-        "payment_methods",
-        "people",
-        "permissions",
-        "person_roles",
-        "post_deliveries",
-        "posts",
-        "prices",
-        "products",
-        "role_permissions",
-        "roles",
-        "scheduled_tasks",
-        "sessions",
-        "subscription_items",
-        "subscriptions",
-        "tasks",
-        "usage_records",
-        "user_credentials",
-        "webhook_events"
-      ]
-    },
     "dotmac_sub": {
       "declared_facts": 1392,
       "declares_ownership": true,
       "domains": 30,
       "services": 426,
       "tables": 576,
-      "tables_duplicated_elsewhere": 128,
-      "tables_exclusive_to_this_product": 448,
+      "tables_duplicated_elsewhere": 123,
+      "tables_exclusive_to_this_product": 453,
       "tables_with_a_direct_import_edge": 428,
       "tables_without_a_direct_import_edge": 148,
       "tables_without_an_edge": [
@@ -848,19 +794,18 @@
   "products_measured": [
     "dotmac_crm",
     "dotmac_erp",
-    "dotmac_mkt",
     "dotmac_sub"
   ],
   "provenance": {
     "detector": "scripts/fleet_fact_registry.py",
-    "detector_schema_version": 2,
+    "detector_schema_version": 1,
     "does_not_prove": [
       "that a table without an edge has no owner",
       "that a table with an edge is owned, rather than read, by that service",
       "that any particular declared fact corresponds to any particular table",
       "that a duplicated table's underlying fact is or is not declared"
     ],
-    "measured_at": "2026-08-18",
+    "measured_at": "2026-08-12",
     "method": "direct-import reachability heuristic",
     "normalization": [
       "tables: `__tablename__` string literals assigned in a class body (AST, not grep)",
@@ -877,7 +822,6 @@
     "revisions": {
       "dotmac_crm": "c64b5aa0f790",
       "dotmac_erp": "0f4b1698ddbf",
-      "dotmac_mkt": "1a185b47164e",
       "dotmac_sub": "9f6f9f36b47a"
     }
   }

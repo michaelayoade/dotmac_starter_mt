@@ -60,7 +60,7 @@ deprecation cycle**.
 | `dotmac_ui.theme` | `bootstrap_script`, `set_theme_script`, `THEME_STORAGE_KEY`, `THEME_VALUES`, `DEFAULT_THEME` (pre-paint theme selection; returns source, not a `<script>` tag, so the host owns the CSP nonce) |
 | `dotmac_ui.assets` | `static_dir`, `stylesheet_path`, `stylesheet_url`, `manifest_path`, `asset_manifest`, `asset_digest`, `STYLESHEET_RELPATH`, `MANIFEST_RELPATH`, `ASSET_NAMESPACE`, `DIGEST_LENGTH` |
 | `dotmac_ui.a11y` | `ACCESSIBILITY_TARGET`, `TEXT_CONTRAST_MINIMUM`, `NON_TEXT_CONTRAST_MINIMUM`, `ContrastRequirement`, `ContrastFailure`, `CONTRAST_REQUIREMENTS`, `check_contrast`, `token_contrast`, `contrast_ratio`, `relative_luminance` |
-| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `COMPONENTS`, `EMPTY_STATE`, `MAP_FRAME`, `component_classes` |
+| `dotmac_ui.components` | `template_dir`, `TEMPLATE_NAMESPACE`, `ComponentContract`, `COMPONENTS`, `EMPTY_STATE`, `component_classes` |
 
 The whole of that surface is also re-exported at the top level, and there is no
 DB-touching subset to keep out of it: `import dotmac_ui` has no side effect
@@ -191,7 +191,7 @@ of the role words used here.
 deliberately **not** adopted; `test_no_token_is_named_by_value` makes that a
 build failure rather than a review habit.
 
-**Six additions**, each answering a measured inventory or real cutover gap —
+**Five additions**, each answering a measured inventory or real cutover gap —
 not taste:
 
 1. **`action-<intent>-{default,hover,pressed,disabled,on}`.** Sub has *no*
@@ -210,11 +210,6 @@ not taste:
    scrim was the first real consumer. It is deliberately an opaque role whose
    consuming scrim supplies opacity; action, status and neutral-ramp tokens do
    not mean "separate a temporary layer from page content".
-6. **`map-frame-min-block-size`.** The audited map surfaces need a usable
-   initial canvas but disagree on product viewport formulas and fixed heights.
-   The component therefore owns one role-named default (`24rem`) that a host
-   may re-declare in the composing surface; it does not publish a viewport,
-   coordinate or device-specific breakpoint rule.
 
 **The `--dmui-` prefix is load-bearing, not decoration.** Tailwind v4's `@theme`
 emits `--color-*`, `--font-*`, and `--spacing-*` into the consumer's own `:root`,
@@ -224,10 +219,10 @@ stylesheet loaded last would win.
 
 ### Categories
 
-192 tokens in 14 categories: `color` (77 — brand, accent, and five semantic ramps
+191 tokens in 13 categories: `color` (77 — brand, accent, and five semantic ramps
 at 11 steps each), `typography` (22), `action` (20), `status` (20), `space` (9),
 `radius` (7), `motion` (7), `breakpoint` (6), `surface` (6), `text` (5), `shadow`
-(5), `border` (4), `focus` (3), `component` (1).
+(5), `border` (4), `focus` (3).
 
 ### The channel form
 
@@ -317,7 +312,6 @@ with none of the kernel's globals or filters installed.
 | Template | Macro | Parameters | Classes |
 |---|---|---|---|
 | `dotmac_ui/components/empty_state.html` | `empty_state` | `title`, `message`, `action_label`, `action_url` | `dmui-empty-state`, `dmui-empty-state__visual`, `dmui-empty-state__icon`, `dmui-empty-state__title`, `dmui-empty-state__message`, `dmui-empty-state__action`, `dmui-empty-state__action-icon` |
-| `dotmac_ui/components/map_frame.html` | `map_frame` | `canvas_id`, `label`, `state`, `status_title`, `status_message` | `dmui-map-frame`, `dmui-map-frame--ready`, `dmui-map-frame--loading`, `dmui-map-frame--empty`, `dmui-map-frame--error`, `dmui-map-frame__canvas`, `dmui-map-frame__state`, `dmui-map-frame__state-panel`, `dmui-map-frame__state-indicator`, `dmui-map-frame__state-title`, `dmui-map-frame__state-message`, `dmui-map-frame__live` |
 
 `empty_state` renders the "nothing to show here" panel for a list, table body or
 card. In a table the **caller** owns the row and the `colspan`; the component
@@ -336,25 +330,6 @@ while it cuts callers onto this contract.
 prevents attribute breakout, but this presentation component does not decide a
 product's allowed URL schemes or authorization policy; callers must not pass an
 untrusted URL.
-
-`map_frame` renders the portable boundary shared by an operational live map,
-movement playback and a geofence editor: an accessible host-named canvas plus
-generic `ready`, `loading`, `empty` and `error` presentation. `canvas_id` is
-optional and defaults to no id, so rendering two frames cannot silently create
-duplicate ids; `label` defaults to `"Map"`. An unknown `state` fails closed to
-`error`. State title and message are caller-owned and autoescaped. The visible
-state panel is hidden from accessibility APIs because the same message is
-announced once through the component's polite, atomic live region.
-
-The template is deliberately not a map engine. It imports no JavaScript and
-contains no provider, tile source, coordinates, endpoint, polling cadence,
-location schema, marker, trail, polygon, popup, legend or product vocabulary.
-After initial render, the host updates the state modifier class, `aria-busy`,
-visible copy and live-region copy as one operation. The host also owns sizing
-policy by overriding `--dmui-map-frame-min-block-size` in its surface scope.
-The source audit and adoption gate are
-`docs/inventories/map-ui-sources.md`; this contract is audit-complete and has no
-product adopter yet.
 
 ## Accessibility contract
 

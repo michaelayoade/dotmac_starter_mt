@@ -138,11 +138,10 @@ configured for something else entirely.
 
 ## Transactions and audit
 
-Every function here mutates and flushes; none commits. The caller's assembly
-owns its session boundary, while `dotmac_kernel.db` remains the kernel's public
-transaction authority (hard rule 8). Expected conflicts use the kernel-private,
-engine-free savepoint mechanic so importing or calling this service never
-constructs a second database runtime.
+Every function here mutates and flushes; none commits. `dotmac_kernel.db` keeps
+transaction authority (hard rule 8) — and is imported INSIDE the function that
+needs it, because importing it builds the engine and this module is reachable
+from `import dotmac_kernel`.
 
 No audit event is written here, deliberately. `write_audit_event` validates its
 action against the declaring module's manifest, and this kernel module has no
@@ -163,7 +162,6 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from dotmac_kernel._transactions import conflict_savepoint
 from dotmac_kernel.exceptions import ConflictError, NotFoundError
 from dotmac_kernel.models import (
     AuthSession,
@@ -459,6 +457,15 @@ def bind_external_identity(
     # only buy a SPECIFIC message naming which of the two rules was broken, and
     # they cannot tell them apart once the race is lost. Hence the generic
     # message here — it must not claim to know which constraint fired.
+    # Imported HERE, not at module scope. `dotmac_kernel.db` builds the engine
+    # from `settings.database_url` at import time, so a module-level import
+    # would make `import dotmac_kernel` itself require a database URL — this
+    # module is re-exported from the package root. `errors.py` imports
+    # `WebAuthRedirect` function-locally for exactly this reason, and CI's
+    # kernel-floor probe (`import dotmac_kernel` in a clean venv) is what
+    # catches it.
+    from dotmac_kernel.db import conflict_savepoint
+
     try:
         with conflict_savepoint(db):
             binding = ExternalIdentityBinding(

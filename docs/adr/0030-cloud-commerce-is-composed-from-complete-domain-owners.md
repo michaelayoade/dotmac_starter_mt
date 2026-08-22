@@ -552,24 +552,6 @@ verification evidence; and the release lane refuses an unpublished Integration
 floor. The package, fixture conformance, allowlist row and installed-wheel proof
 land together so authorization cannot outrun evidence.
 
-#### Amendment 2026-08-19 — the authorized connector declares its runtime boundary
-
-The exact WhatsApp authorization above advances from its historical a1
-contract to `dotmac-connector-whatsapp 0.1.0a2`, targeting SPI
-`>=1.3,<2.0` with published `dotmac-integration 0.1.0a10` as its floor. This is
-not a second provider or a wider capability authorization. It makes the already
-authorized ingress edge enforceable by declaring three exact logical secret
-bindings—primary signing, optional previous signing during rotation, and
-subscription verification—and an explicit empty provider-egress set.
-
-Operator-chosen secret aliases are not a current contract. If a plugin reads a
-name absent from its manifest, an assembly cannot derive a least-privilege
-OpenBao policy from the installed package and the declaration is only prose.
-The published a1 manifest and digest remain historical inside the a2
-distribution for bounded adoption; current a2 configuration uses only the
-manifest-owned names. The connector still performs no provider call, and Sub
-still owns every messaging consequence.
-
 #### The Integrator secret resolver is completion work
 
 The audit found that the Integrator assembly has no secret resolver, so no

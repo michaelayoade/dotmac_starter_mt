@@ -9,24 +9,6 @@ called out here.
 
 ## Unreleased
 
-### Added
-
-- `map_frame`, a provider-neutral inert Jinja component for an accessible map
-  canvas and generic ready/loading/empty/error presentation. It accepts only a
-  canvas id, accessible label and caller-owned state copy; provider runtime,
-  tiles, coordinates, endpoints, polling, layers and domain vocabularies remain
-  in the host.
-- `map-frame-min-block-size`, the role-named, scoped override seam replacing
-  product-specific fixed map heights in a future adoption. The compiled default
-  is `24rem`; no viewport, device or geographic assumption enters the package.
-
-### Evidence
-
-- The map-frame slice is `audit-complete`, not adopted. Sub live-map/playback,
-  CRM degraded/list behavior and ERP geofence editing are inventoried in
-  `docs/inventories/map-ui-sources.md`; no product is modified or counted as a
-  consumer in this change.
-
 ## 0.1.0a7 — 2026-08-13
 
 One additive token and a pre-release component-contract repair;

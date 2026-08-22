@@ -16,11 +16,9 @@ from dotmac_integration.spi import (
     ConnectorManifest,
     ConnectorMode,
     Diagnostic,
-    EgressDeclaration,
     InboundEvent,
     IngressHandler,
     IngressRequest,
-    SecretBindingDeclaration,
     SpiRange,
     VerificationResult,
 )
@@ -29,11 +27,8 @@ CONNECTOR_KEY: Final = "meta_whatsapp"
 CAPABILITY_ID: Final = "messaging.receive.v1"
 PROVIDER: Final = "meta_cloud_api"
 CHANNEL: Final = "whatsapp"
-VERSION: Final = "0.1.0a2"
+VERSION: Final = "0.1.0a1"
 SIGNATURE_HEADER: Final = "x-hub-signature-256"
-WEBHOOK_SIGNING_SECRET: Final = "webhook_signing_secret"
-WEBHOOK_SIGNING_PREVIOUS_SECRET: Final = "webhook_signing_previous_secret"
-WEBHOOK_VERIFY_TOKEN: Final = "webhook_verify_token"  # nosec B105
 SIGNATURE_RE: Final[re.Pattern[str]] = re.compile(r"sha256=[0-9a-f]{64}")
 SUPPORTED_MESSAGE_TYPES: Final[frozenset[str]] = frozenset(
     {"text", "image", "document", "audio", "video", "sticker", "location"}
@@ -45,7 +40,7 @@ ACKNOWLEDGEMENT: Final = Acknowledgement(
     body=b'{"status":"ok"}', media_type="application/json"
 )
 
-LEGACY_CONFIG_SCHEMA: Final[dict[str, object]] = {
+CONFIG_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["signing_slots", "handshake_slot"],
@@ -60,54 +55,16 @@ LEGACY_CONFIG_SCHEMA: Final[dict[str, object]] = {
     },
 }
 
-# SPI 1.3 makes the logical secret names part of the installed package contract.
-# A current installation therefore has no operator-chosen slot aliases: its
-# configuration is empty and its references are keyed by the declarations
-# below. The a1 schema remains in HISTORICAL_MANIFEST so a persisted a1 digest
-# can still be identified and deliberately adopted.
-CONFIG_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-}
-
-HISTORICAL_MANIFEST: Final = ConnectorManifest(
-    connector_key=CONNECTOR_KEY,
-    version="0.1.0a1",
-    spi_range=SpiRange.parse(">=1.2,<2.0"),
-    capabilities=(
-        CapabilityDeclaration(
-            capability_id=CAPABILITY_ID,
-            config_schema=LEGACY_CONFIG_SCHEMA,
-        ),
-    ),
-)
-
 MANIFEST: Final = ConnectorManifest(
     connector_key=CONNECTOR_KEY,
     version=VERSION,
-    spi_range=SpiRange.parse(">=1.3,<2.0"),
+    spi_range=SpiRange.parse(">=1.2,<2.0"),
     capabilities=(
         CapabilityDeclaration(
             capability_id=CAPABILITY_ID,
             config_schema=CONFIG_SCHEMA,
         ),
     ),
-    secret_bindings=(
-        SecretBindingDeclaration(
-            name=WEBHOOK_SIGNING_SECRET,
-            description="Primary exact-byte webhook signature key.",
-        ),
-        SecretBindingDeclaration(
-            name=WEBHOOK_SIGNING_PREVIOUS_SECRET,
-            required=False,
-            description="Previous webhook signature key during a bounded rotation.",
-        ),
-        SecretBindingDeclaration(
-            name=WEBHOOK_VERIFY_TOKEN,
-            description="Subscription challenge comparison token.",
-        ),
-    ),
-    egress=EgressDeclaration(),
 )
 
 
@@ -116,8 +73,6 @@ class PayloadInvalid(ValueError):
 
 
 def _slot_names(config: Mapping[str, object]) -> tuple[str, ...] | None:
-    if "signing_slots" not in config and "handshake_slot" not in config:
-        return (WEBHOOK_SIGNING_SECRET, WEBHOOK_SIGNING_PREVIOUS_SECRET)
     raw = config.get("signing_slots")
     if not isinstance(raw, list | tuple) or not raw:
         return None
@@ -128,8 +83,6 @@ def _slot_names(config: Mapping[str, object]) -> tuple[str, ...] | None:
 
 
 def _handshake_slot(config: Mapping[str, object]) -> str | None:
-    if "signing_slots" not in config and "handshake_slot" not in config:
-        return WEBHOOK_VERIFY_TOKEN
     raw = config.get("handshake_slot")
     return raw if isinstance(raw, str) and 0 < len(raw) <= 80 else None
 
@@ -690,7 +643,7 @@ class WhatsAppConnector:
 
     @property
     def historical_manifests(self) -> tuple[ConnectorManifest, ...]:
-        return (HISTORICAL_MANIFEST,)
+        return ()
 
     @property
     def modes(self) -> frozenset[ConnectorMode]:
@@ -709,12 +662,7 @@ class WhatsAppConnector:
             return (Diagnostic(ok=False, code="signing_slots_invalid"),)
         if handshake is None:
             return (Diagnostic(ok=False, code="handshake_slot_invalid"),)
-        if "signing_slots" in config or "handshake_slot" in config:
-            # Published a1 treated every configured slot as required. Keep that
-            # executable behaviour while a persisted a1 manifest is adopted.
-            required = (*slots, handshake)
-        else:
-            required = (WEBHOOK_SIGNING_SECRET, WEBHOOK_VERIFY_TOKEN)
+        required = (*slots, handshake)
         if any(_material(secrets, slot) is None for slot in required):
             return (Diagnostic(ok=False, code="required_material_unavailable"),)
         return ()

@@ -149,10 +149,3 @@ Hard rule 9 (no service `rollback`): the race is handled by
 `conflict_savepoint`. Hard rule 11 (tenant tables): `tenant_id NOT NULL`,
 composite unique, RLS in the same migration. Hard rule 12: `scope` is a
 caller-declared string, not an enum — ADR-0008's registry principle.
-
-**Compliance amendment — 2026-08-19.** `execute_once` and
-`execute_once_platform` operate exclusively on the application-owned `Session`
-they receive. Their savepoint comes from the kernel-private, engine-free
-transaction mechanic; they do not import the eager `dotmac_kernel.db` runtime.
-That module remains the one public transaction authority and re-exports the
-same `conflict_savepoint` API (ADR-0024 caller-owned-runtime amendment).

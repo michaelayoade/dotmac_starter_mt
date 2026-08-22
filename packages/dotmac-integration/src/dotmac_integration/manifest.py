@@ -36,22 +36,19 @@ from dotmac_kernel.prerequisites import (
     PLATFORM_AUDIT_LOG_V1,
 )
 
-from dotmac_integration.models import PLATFORM_TABLES
+from dotmac_integration.models import PLATFORM_TABLES, TENANT_TABLES
 from dotmac_integration.retention import RETENTION_PLATFORM_TABLES
 from dotmac_integration.shadow import SHADOW_PLATFORM_TABLES
 
 module = ModuleManifest(
     code="integration",
-    version="0.1.0a11",
+    version="0.1.0a9",
     core=False,
     # ── D1 database identity ────────────────────────────────────────────────
     short_code="intg",
     migration_prefix="ig",
     migration_branch="integration",
-    # Literal rather than an imported empty constant: the stdlib-only catalogue
-    # generator must be able to prove this plane is absent without importing
-    # SQLAlchemy or constructing the manifest.
-    tables=(),
+    tables=TENANT_TABLES,
     # COMPOSED from the areas that own the tables, not one hand-maintained
     # list. `models.PLATFORM_TABLES` is the control-plane and execution
     # machinery; `retention.RETENTION_PLATFORM_TABLES` is the legal-hold

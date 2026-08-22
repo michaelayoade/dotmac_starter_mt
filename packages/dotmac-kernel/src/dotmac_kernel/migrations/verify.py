@@ -48,7 +48,6 @@ from dotmac_kernel.prerequisites import (
     IDEMPOTENCY_LEDGER_V1,
     MODULE_DATABASE_ROLES_V1,
     OUTBOX_RELAY_V1,
-    PARTY_PERSON_CATALOG_V1,
     PLATFORM_AUDIT_LOG_V1,
     TENANT_SCOPE_CATALOG_V1,
     binding_for,
@@ -285,191 +284,6 @@ def verify_tenant_scope_catalog(bind: Connection) -> None:
     ).all()
     if len(rls) != 2 or any(row[1] or row[2] for row in rls):
         _fail(name, "the tenant catalogue must not carry RLS")
-
-
-# ── party_person_catalog.v1 ─────────────────────────────────────────────────
-
-_PARTY_PERSON_REQUIRED_COLUMNS: Final[dict[str, dict[str, _ColumnContract]]] = {
-    "parties": {
-        "id": (sa.Uuid, False, None, None, False),
-        "tenant_id": (sa.Uuid, False, None, None, False),
-        "party_type": (sa.String, False, 20, None, False),
-        "display_name": (sa.String, False, 200, None, False),
-        "is_active": (sa.Boolean, False, None, None, True),
-    },
-    "party_persons": {
-        "party_id": (sa.Uuid, False, None, None, False),
-        "first_name": (sa.String, False, 100, None, False),
-        "last_name": (sa.String, False, 100, None, False),
-    },
-}
-
-
-def _assert_required_columns(
-    bind: Connection,
-    prerequisite_name: str,
-    table: str,
-    contracts: dict[str, _ColumnContract],
-) -> None:
-    """Prove a minimal reusable surface without forbidding provider additions."""
-    inspector = sa.inspect(bind)
-    columns = {
-        column["name"]: column
-        for column in inspector.get_columns(table, schema=HOST_SCHEMA)
-    }
-    missing = sorted(set(contracts) - set(columns))
-    if missing:
-        _fail(
-            prerequisite_name,
-            f"{HOST_SCHEMA}.{table} is missing required columns {missing!r}",
-        )
-    for column_name, (
-        expected,
-        nullable,
-        length,
-        timezone,
-        needs_default,
-    ) in contracts.items():
-        column = columns[column_name]
-        actual = column["type"]
-        if not isinstance(actual, expected):
-            _fail(
-                prerequisite_name,
-                f"{HOST_SCHEMA}.{table}.{column_name} is {actual!s}, expected "
-                f"{expected.__name__}",
-            )
-        if bool(column["nullable"]) is not nullable:
-            _fail(
-                prerequisite_name,
-                f"{HOST_SCHEMA}.{table}.{column_name} nullable="
-                f"{column['nullable']!r}, expected {nullable!r}",
-            )
-        if length is not None and getattr(actual, "length", None) != length:
-            _fail(
-                prerequisite_name,
-                f"{HOST_SCHEMA}.{table}.{column_name} length="
-                f"{getattr(actual, 'length', None)!r}, expected {length}",
-            )
-        if (
-            timezone is not None
-            and bool(getattr(actual, "timezone", False)) is not timezone
-        ):
-            _fail(
-                prerequisite_name,
-                f"{HOST_SCHEMA}.{table}.{column_name} timezone="
-                f"{getattr(actual, 'timezone', None)!r}, expected {timezone!r}",
-            )
-        if needs_default and column.get("default") is None:
-            _fail(
-                prerequisite_name,
-                f"{HOST_SCHEMA}.{table}.{column_name} has no server default",
-            )
-
-
-def verify_party_person_catalog(bind: Connection) -> None:
-    """Prove the narrow person identity surface consumed by dotmac-people."""
-    name = PARTY_PERSON_CATALOG_V1.name
-    inspector = sa.inspect(bind)
-    for table, columns in _PARTY_PERSON_REQUIRED_COLUMNS.items():
-        if not inspector.has_table(table, schema=HOST_SCHEMA):
-            _fail(name, f"{HOST_SCHEMA}.{table} does not exist")
-        _assert_required_columns(bind, name, table, columns)
-
-    parties_pk = tuple(
-        inspector.get_pk_constraint("parties", schema=HOST_SCHEMA).get(
-            "constrained_columns"
-        )
-        or ()
-    )
-    persons_pk = tuple(
-        inspector.get_pk_constraint("party_persons", schema=HOST_SCHEMA).get(
-            "constrained_columns"
-        )
-        or ()
-    )
-    if parties_pk != ("id",):
-        _fail(name, f"public.parties primary key is {parties_pk!r}, expected ('id',)")
-    if persons_pk != ("party_id",):
-        _fail(
-            name,
-            "public.party_persons primary key is "
-            f"{persons_pk!r}, expected ('party_id',)",
-        )
-
-    party_uniques = {
-        tuple(constraint.get("column_names") or ())
-        for constraint in inspector.get_unique_constraints(
-            "parties", schema=HOST_SCHEMA
-        )
-    }
-    if ("tenant_id", "id") not in party_uniques:
-        _fail(name, "public.parties lacks unique (tenant_id, id)")
-
-    person_fks = inspector.get_foreign_keys("party_persons", schema=HOST_SCHEMA)
-    cascading = [
-        fk
-        for fk in person_fks
-        if fk.get("constrained_columns") == ["party_id"]
-        and fk.get("referred_schema") in (None, HOST_SCHEMA)
-        and fk.get("referred_table") == "parties"
-        and fk.get("referred_columns") == ["id"]
-        and str((fk.get("options") or {}).get("ondelete", "")).upper() == "CASCADE"
-    ]
-    if len(cascading) != 1:
-        _fail(
-            name,
-            "public.party_persons.party_id must reference public.parties.id "
-            "ON DELETE CASCADE exactly once",
-        )
-
-    checks = " ".join(
-        str(constraint.get("sqltext", "")).lower()
-        for constraint in inspector.get_check_constraints("parties", schema=HOST_SCHEMA)
-    )
-    if "party_type" not in checks or "person" not in checks:
-        _fail(name, "public.parties does not constrain party_type to admit person")
-
-    if bind.dialect.name != "postgresql":
-        return
-
-    for table in ("parties", "party_persons"):
-        enabled, forced = bind.execute(
-            sa.text(
-                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
-                "WHERE oid = CAST(:table_name AS regclass)"
-            ),
-            {"table_name": f"{HOST_SCHEMA}.{table}"},
-        ).one()
-        if not bool(enabled) or not bool(forced):
-            _fail(
-                name,
-                f"public.{table} must have row-level security ENABLEd and FORCEd",
-            )
-        policies = bind.execute(
-            sa.text(
-                "SELECT qual, with_check FROM pg_policies "
-                "WHERE schemaname = :schema AND tablename = :table"
-            ),
-            {"schema": HOST_SCHEMA, "table": table},
-        ).all()
-        normalized = " ".join(
-            " ".join(f"{qual or ''} {check or ''}".lower().split())
-            for qual, check in policies
-        )
-        if "app_current_tenant_id" not in normalized:
-            _fail(
-                name,
-                f"public.{table} has no policy tied to app_current_tenant_id()",
-            )
-        may_select = bind.scalar(
-            sa.text(
-                "SELECT has_table_privilege("
-                "'app_user', CAST(:table_name AS text), 'SELECT')"
-            ),
-            {"table_name": f"{HOST_SCHEMA}.{table}"},
-        )
-        if not bool(may_select):
-            _fail(name, f"app_user cannot SELECT public.{table}")
 
 
 # ── module_database_roles.v1 ────────────────────────────────────────────────
@@ -1282,7 +1096,6 @@ _VERIFIERS: dict[str, Verifier] = {
     IDEMPOTENCY_LEDGER_V1.name: verify_idempotency_ledger,
     OUTBOX_RELAY_V1.name: verify_outbox_relay,
     PLATFORM_AUDIT_LOG_V1.name: verify_platform_audit_log,
-    PARTY_PERSON_CATALOG_V1.name: verify_party_person_catalog,
 }
 
 
@@ -1371,6 +1184,5 @@ __all__ = [
     "verify_module_database_roles",
     "verify_outbox_relay",
     "verify_platform_audit_log",
-    "verify_party_person_catalog",
     "verify_tenant_scope_catalog",
 ]

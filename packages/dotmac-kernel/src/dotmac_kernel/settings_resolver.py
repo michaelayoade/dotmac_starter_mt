@@ -33,7 +33,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
-from typing import Any, Final, Generic, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -100,31 +100,6 @@ class SettingChangeContext:
     ip_address: str | None = None
     user_agent: str | None = None
     request_id: str | None = None
-
-
-#: The actor string recorded on a row `seed_settings_from_env` creates.
-#:
-#: `changed_by_party_id` stays NULL: no person did this, and
-#: `SettingChangeContext` is right that recording no actor is better than
-#: inventing one. But "no actor" is not the same as "no provenance" — a row
-#: that appeared on a boot with nothing explaining it is indistinguishable
-#: from one an operator typed, which is the question the history table exists
-#: to answer. This is a stable, greppable prefix rather than prose so an
-#: operator can find every env-seeded row.
-BOOTSTRAP_PROVENANCE: Final = "system:settings-env-bootstrap"
-
-
-def bootstrap_change_context(env_var: str) -> SettingChangeContext:
-    """Provenance for a bootstrap-created row: the system and the variable NAME.
-
-    The variable's VALUE never appears here. That is not merely convention: for
-    a secret spec `DomainSettingHistory` already writes NULL value columns and
-    records `secret_changed` instead, precisely so a rotated credential does not
-    outlive its rotation in the history table — and a reason string carrying the
-    value would walk straight around that. ADR-0009's "a secret is held, never
-    copied" applies to the audit trail too.
-    """
-    return SettingChangeContext(reason=f"{BOOTSTRAP_PROVENANCE} env_var={env_var}")
 
 
 @dataclass(frozen=True)
@@ -940,14 +915,7 @@ def seed_settings_from_env(db: Session) -> int:
         if _select_row(db, spec.domain, spec.key, platform) is not None:
             continue
         try:
-            ensure_by_key(
-                db,
-                spec.domain,
-                spec.key,
-                raw,
-                scope=platform,
-                changed_by=bootstrap_change_context(spec.env_var),
-            )
+            ensure_by_key(db, spec.domain, spec.key, raw, scope=platform)
         except (BadRequestError, ValueError) as exc:
             # A bad variable must not stop the boot, and must not be silent.
             logger.error(
@@ -1447,13 +1415,11 @@ def ensure_by_key(
 
 
 __all__ = [
-    "BOOTSTRAP_PROVENANCE",
     "SETTING_CHANGED_EVENT",
     "SettingChangeContext",
     "SettingSpec",
     "StoredSetting",
     "active_setting_defaults",
-    "bootstrap_change_context",
     "clear_by_key",
     "install_setting_defaults",
     "missing_required_settings",

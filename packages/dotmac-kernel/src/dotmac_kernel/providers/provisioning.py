@@ -29,10 +29,6 @@ Lifecycle (each step product-neutral, keyed only on opaque identifiers):
    signal the operation to stop and return a snapshot. The operation settles to
    ``CANCELLED`` (confirm via ``observe``); an in-flight ``apply`` may raise
    ``ProvisioningCancelled``.
-5. ``compensate(operation_id, reason) -> CompensationResult`` — ask the
-   participant to reverse one settled effect. The participant revalidates its
-   own state and may answer ``not_supported`` or ``manual_required``; the
-   caller never guesses an inverse operation.
 
 Semantics, encoded in the types:
 
@@ -64,11 +60,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 from typing import Protocol, runtime_checkable
-
-from dotmac_kernel.cache import Scope
 
 # ── Status vocabularies ─────────────────────────────────────────────────────
 
@@ -98,24 +91,6 @@ class StepStatus(str, Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     CANCELLED = "cancelled"
-
-
-class ProvisioningOutcomeClass(str, Enum):
-    """Business interpretation of an asynchronous participant outcome."""
-
-    SUCCEEDED = "succeeded"
-    RETRYABLE = "retryable"
-    RECONCILIATION_REQUIRED = "reconciliation_required"
-    TERMINAL = "terminal"
-
-
-class CompensationDisposition(str, Enum):
-    """A participant's decision about an explicit compensation request."""
-
-    SUCCEEDED = "succeeded"
-    REFUSED = "refused"
-    NOT_SUPPORTED = "not_supported"
-    MANUAL_REQUIRED = "manual_required"
 
 
 _TERMINAL_STATUSES = frozenset(
@@ -158,8 +133,6 @@ class ProvisioningStep:
 class ProvisioningRequest:
     """The opaque, product-neutral input to ``plan``/``apply``.
 
-    - ``participant_code`` — the manifest-declared owner being addressed.
-    - ``scope`` — explicit tenant or platform scope; never ambient/nullable.
     - ``intent_id`` — the caller's stable identity for *what* is being
       provisioned (an opaque token; not a cloud/fleet identifier).
     - ``spec`` — the opaque desired-state description. The kernel never
@@ -170,17 +143,9 @@ class ProvisioningRequest:
       stable id from ``(intent_id, plan_hash)``.
     """
 
-    participant_code: str
-    scope: Scope
     intent_id: str
     spec: Mapping[str, object] = field(default_factory=dict)
     operation_id: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.participant_code.strip():
-            raise ValueError("participant_code must not be blank")
-        if not self.intent_id.strip():
-            raise ValueError("intent_id must not be blank")
 
 
 @dataclass(frozen=True)
@@ -259,57 +224,6 @@ class ObserveResult:
         return tuple(step for step in self.steps if not step.is_settled)
 
 
-@dataclass(frozen=True)
-class ProvisioningOutcomeEnvelope:
-    """Typed push counterpart to ``observe`` for long-running participants.
-
-    Transport adapters translate a provider callback into this value. They do
-    not write a consumer's tables. ``operation_id`` is the same stable identity
-    used by ``apply`` and ``observe``; scope and participant identity remain
-    explicit so no callback can fall into an ambient tenant or provider bucket.
-    """
-
-    outcome_id: str
-    participant_code: str
-    scope: Scope
-    intent_id: str
-    operation_id: str
-    classification: ProvisioningOutcomeClass
-    occurred_at: datetime
-    status: ProvisioningStatus | None = None
-    steps: tuple[ProvisioningStep, ...] = ()
-    error_class: str | None = None
-    reason_code: str | None = None
-    detail: Mapping[str, object] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        for name in ("outcome_id", "participant_code", "intent_id", "operation_id"):
-            if not getattr(self, name).strip():
-                raise ValueError(f"{name} must not be blank")
-        if self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None:
-            raise ValueError("occurred_at must be timezone-aware")
-
-
-@dataclass(frozen=True)
-class CompensationResult:
-    """Receiptable participant answer to an explicit compensation request."""
-
-    operation_id: str
-    disposition: CompensationDisposition
-    snapshot: ObserveResult
-    reason_code: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.operation_id.strip():
-            raise ValueError("operation_id must not be blank")
-        if self.snapshot.operation_id != self.operation_id:
-            raise ValueError("compensation snapshot operation_id must match")
-
-    @property
-    def succeeded(self) -> bool:
-        return self.disposition is CompensationDisposition.SUCCEEDED
-
-
 # ── Error hierarchy (STABLE API — documented, not ad-hoc) ───────────────────
 
 
@@ -367,7 +281,7 @@ class ProvisioningCancelled(ProvisioningError):
 class ProvisioningProvider(Protocol):
     """The product-neutral provisioning seam.
 
-    A concrete provider (kept OUTSIDE the kernel) implements these five methods.
+    A concrete provider (kept OUTSIDE the kernel) implements these four methods.
     Consumers depend on this Protocol, never on a concrete class. See the module
     docstring for the full lifecycle and the cancellation / retry / idempotency
     / partial-result semantics; each method's contract is below.
@@ -417,16 +331,6 @@ class ProvisioningProvider(Protocol):
         current snapshot."""
         ...
 
-    def compensate(self, operation_id: str, reason: str) -> CompensationResult:
-        """Ask this participant to compensate a settled operation.
-
-        Compensation is explicit, idempotent by ``operation_id``, and decided
-        by the participant that owns the effect. ``cancel`` only stops work in
-        flight; this method addresses an already-settled effect. A participant
-        may legitimately return ``NOT_SUPPORTED`` or ``MANUAL_REQUIRED``.
-        """
-        ...
-
 
 __all__ = [
     # protocol
@@ -438,13 +342,9 @@ __all__ = [
     "PlanResult",
     "ApplyResult",
     "ObserveResult",
-    "ProvisioningOutcomeEnvelope",
-    "CompensationResult",
     # status vocabularies
     "ProvisioningStatus",
     "StepStatus",
-    "ProvisioningOutcomeClass",
-    "CompensationDisposition",
     # error hierarchy
     "ProvisioningError",
     "ProvisioningRetryableError",

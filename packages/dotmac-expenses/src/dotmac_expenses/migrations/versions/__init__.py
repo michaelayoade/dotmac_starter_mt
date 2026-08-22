@@ -1,1 +1,0 @@
-"""Expenses migration revisions."""

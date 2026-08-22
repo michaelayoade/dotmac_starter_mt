@@ -1,4 +1,4 @@
-"""Measure fact-level ownership across ERP, CRM, Sub and Mkt.
+"""Measure fact-level ownership across ERP, CRM and Sub.
 
 The decomposition matrix answers "which capability family is duplicated". This
 answers the finer question the programme frame actually gates module assignment
@@ -8,7 +8,7 @@ too?**
 Sub already did this work for itself — `app/services/sot_registry/` declares
 services, the facts each `owns`, and the module that implements them, validated
 by Sub's own registry tests. ERP has a smaller `sot_relationships.py` of the
-same shape. CRM and Mkt have neither.
+same shape. CRM has neither.
 
 So this script EXTRACTS declarations; it does not author them.
 
@@ -62,7 +62,7 @@ REGISTRY = PROJECT_ROOT / "docs" / "inventories" / "fleet-fact-registry.json"
 
 # Bump when the detector's semantics change, so a stored artifact cannot be
 # compared against numbers that were produced a different way.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 1
 
 NORMALIZATION_RULES = (
     "tables: `__tablename__` string literals assigned in a class body (AST, not grep)",
@@ -90,7 +90,6 @@ DECLARATION_SOURCES: dict[str, tuple[str, ...]] = {
     "dotmac_sub": ("app/services/sot_registry/domains",),
     "dotmac_erp": ("app/services/sot_relationships.py",),
     "dotmac_crm": (),
-    "dotmac_mkt": (),
 }
 
 
@@ -439,7 +438,7 @@ def main() -> int:
     if not args.check:
         return 0
     if absent:
-        print("\nRatchet abstains: the registry covers all four source applications.")
+        print("\nRatchet abstains: the registry covers all three source monoliths.")
         return 2
     failures = _ratchet(measured, json.loads(REGISTRY.read_text()))
     for failure in failures:
