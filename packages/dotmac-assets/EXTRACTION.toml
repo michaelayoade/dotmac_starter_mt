@@ -50,7 +50,7 @@ preserved_tests = [
 ]
 
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac-isp"]
+candidate_consumers = ["dotmac_erp", "dotmac_sub"]
 
 authority_boundary = "ADR-0037. dotmac-assets owns individual durable asset identity, physical lifecycle, opaque current location, custody/assignment history, maintenance lifecycle, disposal state and append-only evidence. ERP's finance owner keeps capitalization, depreciation, impairment, revaluation, gain/loss and journal posting. Inventory keeps parts, stock and procurement. dotmac-positioning keeps provider-neutral position observations; the adopting product owns the asset-to-tracked-unit link and asks the asset owner to change authoritative location when policy permits. Product extensions keep vehicle registration/specification, odometer, fuel, incidents, reservations, documents and driver/department policy. Actors, custodians and locations are opaque local UUIDs without product foreign keys."
 

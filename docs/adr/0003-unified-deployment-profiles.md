@@ -28,6 +28,51 @@
 >   consumes it and never defines a local replacement.
 > See the plan's "Ownership rulings" section for the full text.
 
+> **Amendment 2026-08-22 (SUPERSEDES the 2026-08-21 amendment below: Sub is converted in
+> place, not replaced).** Governance ADR 0012 gained a conversion amendment, merged at the
+> immutable Governance revision `ea0c1226e55a3e74ac738889f63005735201badc`
+> ([ADR 0012](https://github.com/michaelayoade/dotmac_governance/blob/ea0c1226e55a3e74ac738889f63005735201badc/docs/adr/0012-dotmac-isp-replacement-programme.md),
+> [`programmes/dotmac-isp-replacement.json`](https://github.com/michaelayoade/dotmac_governance/blob/ea0c1226e55a3e74ac738889f63005735201badc/programmes/dotmac-isp-replacement.json)).
+> The operative phrase is **"retire legacy Sub implementations, not Dotmac Sub."**
+> - **Dotmac Sub is not being retired.** It remains the ISP product, runtime, API identity,
+>   hostname and customer-facing application. It BECOMES the thin assembly: pinning
+>   `dotmac-kernel`, `dotmac-ui` and released domain modules, with its existing routes, UI and
+>   integrations reduced to thin adapters and each domain switching authority INTERNALLY from
+>   legacy Sub code to its module. Customers and mobile clients keep the same endpoints.
+> - **The round trip is worth naming.** This ADR's original sentence — "the ISP path adapts the
+>   existing `dotmac_sub` rather than starting another ISP rewrite" — was overturned by the
+>   2026-08-21 amendment below and is now **correct again**, with one refinement it did not
+>   originally carry: *adapts* means converting Sub into a thin assembly over released modules,
+>   not keeping the monolith and patching it. The 2026-08-21 amendment is left standing as
+>   written; it is the record of a direction that was accepted and then corrected, and editing
+>   it away would falsify when each was believed.
+> - **Five requirements are removed outright**, not deferred: no separate ISP production host,
+>   no second production database, no mobile API-base repoint, no cross-database sealing
+>   protocol, and no external Sub-to-ISP synchronisation layer. The
+>   `https://github.com/michaelayoade/dotmac-isp` walking skeleton is FROZEN and holds no
+>   programme control.
+> - **Authority is now `asm-dotmac-sub-legacy-domains` → `asm-dotmac-sub-composed`**, database
+>   boundary `shared-in-process`: one database, isolation by module schema (`mod_<code>`), one
+>   authority per fact. This is NOT two writers. Every single-authority clause in the 2026-08-21
+>   amendment survives and applies per domain rather than per assembly, and ADR-0024's rule that
+>   an application owns rows only in its own database is untouched — there is now one
+>   application.
+> - **Four controls superseded, three added.** `ctl-isp-002` (target host, database, deployment
+>   owner) has no premise left; `ctl-isp-005`, `ctl-isp-007` and `ctl-isp-008` are replaced by
+>   `ctl-isp-010` (module lineages compose into Sub's own database, rehearsed on a
+>   production-shaped copy), `ctl-isp-011` (in-process shadow: module path and legacy path agree
+>   on one database) and `ctl-isp-012` (one in-place authority switch per domain, one writer,
+>   configuration rollback). `ctl-isp-009` — displaced writers ratchet to zero — is unchanged and
+>   becomes the programme's centre of gravity rather than its last step.
+> - **`dec-isp-002` is superseded, not answered.** It asked which host runs the independent ISP
+>   runtime. Host procurement is no longer a programme gate.
+> - **What survives untouched.** Product-first extraction from Sub's proven implementation and
+>   tests (ADR-0006's extraction amendment; `AGENTS.md` rule 22), the thin-assembly shape, the
+>   writer censuses and one-writer enforcement, and the eight cohorts — which order which
+>   domains switch authority, and never depended on where the code ran.
+> - **This amendment moves nothing.** It records an accepted direction. It advances no authority
+>   state, opens no cohort and verifies no control.
+
 > **Amendment 2026-08-21 (the ISP path is a controlled replacement programme, not an in-place
 > adaptation of `dotmac_sub`).** Governance ADR 0012 — *The Dotmac ISP replacement is one
 > controlled programme* — was accepted on 2026-08-20 and merged at the immutable Governance

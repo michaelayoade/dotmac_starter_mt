@@ -10,13 +10,20 @@ Sources read at `dotmac_sub@5c56b64a2` and `dotmac_erp@0f4b1698`.
 
 ## Why a kernel facility rather than a third local one
 
-`dotmac-isp` needs to serve an authenticated destination descriptor to the
+`dotmac_sub` needs to serve an authenticated destination descriptor to the
 Integrator (ADR-0010 gate 2b). The kernel offers `require_tenant`,
 `require_user_auth`, `require_role` and `require_platform_admin` — all
-human/tenant-actor auth — and ISP runs with `platform_surface_enabled=False`,
-so the platform-admin guard is not even available to it.
+human/tenant-actor auth — and Sub composes no platform plane, so the
+platform-admin guard is not available to it either.
 
-Writing a third implementation in ISP would make three fleet mechanisms for one
+> Corrected 2026-08-22. This section named `dotmac-isp`, a separate assembly
+> that was going to replace Sub. Governance ADR 0012's conversion amendment
+> ended that: Sub is not retired, it becomes the thin assembly in place. The
+> demand is unchanged — it was always Sub's — and the argument below is
+> stronger for it, because Sub is one of the two products that already carries
+> a local implementation.
+
+Writing a third implementation would make three fleet mechanisms for one
 capability, and the two that exist already demonstrate how that ends: they have
 diverged on the single most security-relevant question in the design.
 

@@ -49,7 +49,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_positioning_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub", "dotmac_erp", "dotmac-isp"]
+candidate_consumers = ["dotmac_sub", "dotmac_erp"]
 inventory_evidence = [
   "docs/inventories/positioning-sources.md",
   "docs/inventories/fleet-decomposition-matrix.md",

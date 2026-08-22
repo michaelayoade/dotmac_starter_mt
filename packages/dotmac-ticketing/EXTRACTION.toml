@@ -51,7 +51,7 @@ contract_consumers = []
 # no ticket capability at all, so composing the module there would retire no
 # local owner and prove no contract. It must not be added here later without a
 # decision that says why an installation counts as adoption.
-candidate_consumers = ["dotmac_erp", "dotmac_vendor_control_plane", "dotmac_sub", "dotmac-isp"]
+candidate_consumers = ["dotmac_erp", "dotmac_vendor_control_plane", "dotmac_sub"]
 authority_boundary = "ADR-0024: each adopter installs its own lineage and owns only local workflow rows. Sub owns operational customer/subscriber/service tickets; ERP may migrate only classified internal back-office/project/employee-support tickets; Vendor CP owns vendor-support tickets. ERPNext/CRM-sourced ticket rows are archived and retired from ERP's operational schema; correlation-only expense links become opaque Integrator references and do not enter dotmac-ticketing. External connectors live in the independently deployed Integrator, never as provider branches in dotmac-ticketing or direct provider clients in ERP."
 inventory_evidence = [
   "docs/inventories/ticket-sources.md",

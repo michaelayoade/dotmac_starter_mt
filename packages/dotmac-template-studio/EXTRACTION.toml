@@ -36,7 +36,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/unit/test_template_studio_renderer.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_erp", "dotmac_sub", "dotmac-isp"]
+candidate_consumers = ["dotmac_erp", "dotmac_sub"]
 inventory_evidence = [
   "docs/inventories/module-extraction-sources.md",
   "docs/inventories/template-studio-source-audit.md",

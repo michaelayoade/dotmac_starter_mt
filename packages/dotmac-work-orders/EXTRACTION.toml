@@ -42,7 +42,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_work_orders_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub", "dotmac-isp"]
+candidate_consumers = ["dotmac_sub"]
 authority_boundary = "Sub remains the application owner of operational customer, subscriber, project, ticket, workforce, dispatch-policy, topology and official-timeline decisions. The module owns only the local physical execution aggregate and durable facts. CRM is a retiring duplicate and never a co-owner. InstallationProject remains Sub's vendor-commercial wrapper until the internal-crew/vendor execution split is explicitly resolved; this extraction does not silently turn vendor projects into work orders."
 inventory_evidence = [
   "docs/inventories/work-orders-sources.md",

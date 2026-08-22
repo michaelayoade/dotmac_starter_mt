@@ -32,7 +32,7 @@ preserved_tests = [
   "dotmac_starter_mt:tests/test_party_module_isolation.py",
 ]
 contract_consumers = []
-candidate_consumers = ["dotmac_sub", "dotmac-erp", "dotmac-isp"]
+candidate_consumers = ["dotmac_sub", "dotmac-erp"]
 composition_boundary = "Each application owns its own runtime, database, migration, sessions, authorization and local Party rows. An adopter pins one exact release, binds party_person_catalog.v1 to its local kernel Party provider, declares its open Party vocabularies, and runs the pt lineage in its own tenant database. Applications synchronize only typed observations/correlations through versioned APIs or webhooks; installing the same package never creates a shared customer directory."
 inventory_evidence = ["docs/inventories/party-module-sources.md"]
 first_cutover = "Sub remains the qualifying source and first cutover. Before composition it must complete the reviewed Party backfill and the reader cutovers currently marked pending in PARTY_ROLE_RELATIONSHIP_SOT.md. Shadow compares roles, role relationships, memberships, contact points, consent/verification, and external references. One sealed switch makes the released module the sole writer and retires app.services.party for the transferred facts; kernel Party identity and product account writers remain."
