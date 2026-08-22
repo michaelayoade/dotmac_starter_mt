@@ -3,7 +3,7 @@
 ## 0.1 contract
 
 - Python: `>=3.11,<3.14`.
-- Kernel: `>=0.1.0a87`, for the persistence-free canonical `fingerprint_of`
+- Kernel: `>=0.1.0a88`, for the persistence-free canonical `fingerprint_of`
   surface and typed tenant/platform scope values.
 - Accepted input: `InvoiceDocumentFactV1.contract_version == 1`.
 - Semantic output: `DocumentProjectionV1.projection_contract_version == 1`.
