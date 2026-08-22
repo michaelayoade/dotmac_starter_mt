@@ -60,10 +60,24 @@ class MachineCredential(Base, TimestampMixin):
             ondelete="CASCADE",
             name="fk_machine_credentials_tenant",
         ),
-        # The hash is globally unique: a raw key must resolve to at most one
-        # credential regardless of tenant, or the same secret could be minted
-        # twice and RLS would decide which one answered.
-        UniqueConstraint("key_hash", name="uq_machine_credentials_key_hash"),
+        # Composite with `tenant_id`, and the earlier global-unique version of
+        # this constraint was WRONG. The argument for global was "one raw key
+        # must resolve to at most one credential, or RLS silently decides which
+        # answered". That premise is false: the tenant is established BEFORE
+        # this lookup, so RLS leaves exactly one visible candidate and the
+        # resolution is unambiguous either way.
+        #
+        # What global uniqueness DID do is leak. Two tenants issuing the same
+        # raw key — operator copy-paste, not a hash collision — would give the
+        # second an inexplicable constraint violation about a row it cannot
+        # see, which is both a denial and a disclosure that a key exists
+        # elsewhere. `tests/test_rls_catalog.py` names exactly that.
+        #
+        # Composite is also the stronger isolation: a key minted for one tenant
+        # cannot authenticate in another, because the row is invisible there.
+        UniqueConstraint(
+            "tenant_id", "key_hash", name="uq_machine_credentials_tenant_key_hash"
+        ),
         UniqueConstraint(
             "tenant_id", "label", name="uq_machine_credentials_tenant_label"
         ),

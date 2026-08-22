@@ -30,9 +30,14 @@ sake:
    means two different things depending on how the row was made. A machine
    principal has neither.
 
-`key_hash` is globally unique rather than unique per tenant: one raw key must
-resolve to at most one credential, or the same secret could be minted in two
-tenants and RLS would silently decide which one answered.
+`key_hash` is unique WITH `tenant_id`, not globally. An earlier draft made it
+global on the reasoning that one raw key must resolve to at most one credential
+— but the tenant is established before the lookup, so RLS already leaves exactly
+one visible candidate. What a global constraint added was a leak: two tenants
+issuing the same raw key would give the second a constraint violation about a
+row it cannot see, which is a denial and a disclosure at once. The composite is
+also stronger isolation, because a key minted for one tenant cannot authenticate
+in another.
 
 Revision ID: 0027_machine_credentials
 Revises: 0026_platform_audit_log
@@ -84,7 +89,9 @@ def upgrade() -> None:
             ondelete="CASCADE",
             name="fk_machine_credentials_tenant",
         ),
-        sa.UniqueConstraint("key_hash", name="uq_machine_credentials_key_hash"),
+        sa.UniqueConstraint(
+            "tenant_id", "key_hash", name="uq_machine_credentials_tenant_key_hash"
+        ),
         sa.UniqueConstraint(
             "tenant_id", "label", name="uq_machine_credentials_tenant_label"
         ),
