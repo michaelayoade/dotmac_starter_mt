@@ -804,6 +804,10 @@ def test_one_consumer_is_enough_to_be_a_shared_module() -> None:
             "status": "adopted",
             "candidate_consumers": ["dotmac_vendor_control_plane"],
             "contract_consumers": ["dotmac_vendor_control_plane"],
+            # `adopted` now owes addressable evidence. The fixture supplies it
+            # rather than being exempted: a synthetic dossier that could skip
+            # the rule would stop exercising the gate it exists to exercise.
+            "adoption_evidence": ["dotmac_vendor_control_plane:main@0000000"],
         }
     )
 
@@ -855,6 +859,7 @@ def test_an_adopted_module_needs_no_invented_future_candidate() -> None:
     dossier.update(
         {
             "status": "adopted",
+            "adoption_evidence": ["dotmac_vendor_control_plane:main@0000000"],
             "contract_consumers": ["dotmac_vendor_control_plane"],
             "candidate_consumers": [],
         }
