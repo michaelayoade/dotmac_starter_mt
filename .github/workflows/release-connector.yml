@@ -229,6 +229,7 @@ jobs:
     environment: registry-release
     permissions:
       contents: write                # create the post-verification tag
+      pull-requests: write           # open the post-release record (below)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -281,3 +282,22 @@ jobs:
             "${GITHUB_SHA}"
           git push origin "${TAG}"
           echo "tagged ${TAG} on ${GITHUB_SHA}"
+
+      # The tag makes the publication-ledger row false THE MOMENT it lands, and
+      # any released migration becomes bytes that must not change. Five gates
+      # fail from that instant until the record is written. Leaving that to
+      # memory put `main` red four times in two days, so the record PR is
+      # opened HERE rather than remembered. `if: always()` is deliberate: the
+      # tag is pushed by the step above, so a later failure must not leave a
+      # tag with no record — the exact state this exists to prevent.
+      - name: Open the post-release record
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/open_release_record_pr.sh \
+            --distribution "${{ inputs.connector }}" \
+            --version "${{ inputs.version }}" \
+            --tag "${{ needs.build.outputs.tag }}" \
+            --package-dir "${{ needs.build.outputs.package_dir }}"
+
